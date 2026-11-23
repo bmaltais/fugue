@@ -201,6 +201,7 @@ Item {
         objectName: "canvasTaskShimmer"
         anchors.fill: parent
         visible: bar.busy && bar.selection !== null
+        opacity: bar.actions !== null && bar.actions.liveFrame !== "" ? 0.5 : 1 // dimmed while a frame shows in the selection
         readonly property rect b: bar.selectionBox
         property real offset: 0
         NumberAnimation on offset {

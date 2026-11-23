@@ -221,7 +221,15 @@ optional `run` field (the run id). It is in the tree hash, as `time` already is,
 - the bar shows "Generating… 45%" from the Sampler's `node.progress`;
 - with several runs queued it shows "2 of 3".
 
-Later, `node.preview` thumbnails, which `RunService` already sends, can be drawn inside the selection.
+**Live frame in the selection (built).** While a run goes, `CanvasActions` keeps the newest `node.preview` thumbnail of the
+active run (`liveFrame`) with two rectangles in canvas pixels, made when the run starts from the bound Region's selection,
+padding and feather: `liveBox`, the padded context box the Region cut (the frame is a model-size picture of it, so it is
+drawn stretched onto that box), and `liveClip`, the selection inside it. `CanvasLiveFill.qml` draws it above the picture,
+under the region frame, clipped to the selection, with the shimmer dimmed to half. The rule for which node: the newest
+preview of the run wins (in practice the Sampler's step frames, the only node of an action that previews while it runs; a
+Sampler inside a group needs no path rule). Other runs' events are ignored. At a good end the frame fades over 200 ms
+(the layer is already on the canvas); a cancel or an error removes it at once. It uses the Sampler preview setting
+(`step_preview`): when it is Off no event comes and only the shimmer shows.
 
 **Cancel.** Generate becomes **Cancel** while this bar's runs are waiting or active. Escape also cancels while the
 view has the focus, as `run.cancel` does. Cancel ends all the runs this press started, waiting ones first. A cancelled
@@ -498,4 +506,4 @@ Sizes: S is a day or less, M a few days, L a week or more.
 | 8 | Upscale to a new canvas (Canvas New sink) | S–M | 1 |
 | 9 | Authoring: **Make action…** (proposed block), action inputs editor, Expose to task bar, the package's **Add to actions** | M | 2 |
 | 10 | `fugue canvas act` for scripts and agents | S | 1 |
-| later | Live preview in the selection (`node.preview`), Select subject as a selection, sharing actions over the mesh (#203) | | |
+| later | ~~Live preview in the selection (`node.preview`)~~ built (item 2 of the live preview), Select subject as a selection, sharing actions over the mesh (#203) | | |

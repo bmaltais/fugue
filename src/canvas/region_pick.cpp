@@ -58,6 +58,10 @@ crop::Rect context(const crop::Rect &rect, int padding, const crop::Size &canvas
     return rectOf(nodes::paddedBox(boxOf(rect), nodes::paddingFor(padding, feather), canvas.width, canvas.height));
 }
 
+crop::Rect contextOf(int x, int y, int width, int height, int padding, int canvasWidth, int canvasHeight, int feather) {
+    return context({x, y, width, height}, padding, {canvasWidth, canvasHeight}, feather);
+}
+
 crop::Size modelSize(const crop::Rect &rect, const Settings &settings, const crop::Size &canvas) {
     const nodes::CropSize size = nodes::regionSize(boxOf(context(rect, settings.padding, canvas, settings.feather)), settings.scale,
                                                    settings.capMegapixels, settings.multiple, settings.targetMegapixels);

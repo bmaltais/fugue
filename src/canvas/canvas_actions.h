@@ -73,6 +73,14 @@ class CanvasActions : public QObject {
     Q_PROPERTY(QString errorAction READ errorAction NOTIFY stateChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY stateChanged)
     Q_PROPERTY(QString lastRun READ lastRun NOTIFY stateChanged)
+    // The live step frame of the run being drawn (docs/canvas-actions-design.md, "Live preview in the selection"): the
+    // newest node.preview picture of the active run ("" before the first and after the run), `liveBox` the padded context
+    // box it is a picture of and `liveClip` the part of it inside the selection, both {x, y, width, height} in canvas
+    // pixels (the canvas `canvas`). `liveFade` says the run ended well, so the frame fades into the new layer; else it goes at once.
+    Q_PROPERTY(QString liveFrame READ liveFrame NOTIFY liveChanged)
+    Q_PROPERTY(QVariantMap liveBox READ liveBox NOTIFY liveChanged)
+    Q_PROPERTY(QVariantMap liveClip READ liveClip NOTIFY liveChanged)
+    Q_PROPERTY(bool liveFade READ liveFade NOTIFY liveChanged)
     // A download of an action's models is under way, and its line ("flux-2-klein-4b-Q8_0.gguf, 1 of 3 · 1.2 of 8.9 GB").
     Q_PROPERTY(bool downloading READ downloading NOTIFY downloadsChanged)
     Q_PROPERTY(QString downloadText READ downloadText NOTIFY downloadsChanged)
@@ -101,6 +109,10 @@ public:
     QString errorAction() const { return m_errorAction; }
     QString notice() const { return m_notice; }
     QString lastRun() const { return m_lastRun; }
+    QString liveFrame() const { return m_liveFrame; }
+    QVariantMap liveBox() const { return m_liveBox; }
+    QVariantMap liveClip() const { return m_liveClip; }
+    bool liveFade() const { return m_liveFade; }
     bool downloading() const;
     QString downloadText() const;
 
@@ -141,6 +153,7 @@ signals:
     void actionsChanged();
     void stateChanged();
     void progressChanged();
+    void liveChanged();
     void downloadsChanged();
     void historyChanged();
     // A run of a Generate ended: "ok", "failed" or "cancelled".
@@ -187,6 +200,15 @@ private:
     QString m_actionName;
     qreal m_progress = -1;
     QString m_error, m_errorCode, m_errorAction, m_notice, m_lastRun;
+    // Per run, where its pictures go: the context box and the selection inside it (canvas pixels), made when it starts.
+    struct LiveRect {
+        QVariantMap box, clip;
+    };
+    QHash<QString, LiveRect> m_liveRects;
+    QString m_liveFrame;
+    QVariantMap m_liveBox, m_liveClip;
+    bool m_liveFade = false;
+    void clearLive(bool fade);
     QHash<QString, QList<WriteResult>> m_writes; // per run, its Writes' landed revisions
     QHash<QString, Errors> m_nodeErrors;         // per run, its node errors so far
 };

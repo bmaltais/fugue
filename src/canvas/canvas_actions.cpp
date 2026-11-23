@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include "canvas/mask_layer.h"
+#include "canvas/region_pick.h"
 #include "engine/atomic_file.h"
 #include "engine/canvas_handle.h"
 #include "engine/canvas_router.h"
@@ -427,6 +428,20 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     run.workflow = chosen->file;
     const QString started = m_service->start(run);
     m_runs << started;
+    if (binding.rect) {
+        // Where a step picture of this run goes: the Region's context box (the selection grown by padding, raised for the
+        // feather, kept in the canvas), and the selection inside it.
+        const Node &regionNode = bound.value().graph.nodes[chosen->graph.region];
+        const auto literal = [&](const char *name) { return regionNode.inputs.value(QLatin1String(name)).literal().toInt(); };
+        const int width = bounds && grown ? grown->width : shown->width, height = bounds && grown ? grown->height : shown->height;
+        const canvas::RouteRect &sel = *binding.rect;
+        const auto box = region::contextOf(sel.x, sel.y, sel.width, sel.height, literal("padding"), width, height, literal("feather"));
+        const int left = std::max(box.x, sel.x), top = std::max(box.y, sel.y);
+        const int right = std::min(box.x + box.width, sel.x + sel.width), bottom = std::min(box.y + box.height, sel.y + sel.height);
+        const auto map = [](int x, int y, int w, int h) { return QVariantMap{{"x", x}, {"y", y}, {"width", w}, {"height", h}}; };
+        if (right > left && bottom > top)
+            m_liveRects.insert(started, LiveRect{map(box.x, box.y, box.width, box.height), map(left, top, right - left, bottom - top)});
+    }
     m_canvas = canvasId;
     m_action = id;
     m_progress = -1;
@@ -476,6 +491,18 @@ void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
     } else if (kind == QLatin1String("node.progress")) {
         m_progress = std::clamp(event.value("value").toDouble(), 0.0, 1.0);
         emit progressChanged();
+    } else if (kind == QLatin1String("node.preview")) {
+        // The newest picture of any node of this run wins (in practice the Sampler's step frames, the only node that previews
+        // while it runs). Nothing shows when the Sampler preview setting is Off: no event comes, the shimmer stays.
+        const QString url = event.value("thumbnails").toObject().value("preview").toObject().value("url").toString();
+        const auto rects = m_liveRects.constFind(run);
+        if (!url.isEmpty() && rects != m_liveRects.cend() && run == m_active) {
+            m_liveFrame = url;
+            m_liveBox = rects->box;
+            m_liveClip = rects->clip;
+            m_liveFade = false;
+            emit liveChanged();
+        }
     } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
         const Entry *chosen = entry(m_action);
         if (chosen && chosen->graph.writes.contains(node)) {
@@ -492,8 +519,20 @@ void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
     }
 }
 
+void CanvasActions::clearLive(bool fade) {
+    if (m_liveFrame.isEmpty())
+        return;
+    m_liveFrame.clear();
+    m_liveBox.clear();
+    m_liveClip.clear();
+    m_liveFade = fade;
+    emit liveChanged();
+}
+
 void CanvasActions::endRun(const QString &run, const QString &status, const Errors &errors) {
     m_runs.removeAll(run);
+    m_liveRects.remove(run);
+    clearLive(status == QLatin1String("ok")); // the layer is already on the canvas: the frame fades; else it goes at once
     if (m_active == run) {
         m_active.clear();
         m_progress = -1;
