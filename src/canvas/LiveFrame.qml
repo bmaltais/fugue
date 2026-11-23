@@ -10,31 +10,36 @@ import Fugue
 Item {
     id: live
     objectName: "liveFrame"
-    required property string liveFrame
-    required property real liveAspect
-    required property real posX
-    required property real posY
-    required property real nodeWidth
-    required property real nodeHeight
+    required property var source // the node's row (FugueCanvas.qml's Instantiator): liveFrame, liveAspect, posX, posY, nodeWidth, nodeHeight
     required property CanvasLook look
+    signal gone
 
+    readonly property string liveFrame: source.liveFrame
     property string frame
     property real aspect: 1
     onLiveFrameChanged: {
         if (liveFrame !== "") {
             frame = liveFrame
-            aspect = liveAspect
+            aspect = source.liveAspect
         }
     }
-    Component.onCompleted: if (liveFrame !== "") { frame = liveFrame; aspect = liveAspect }
+    Component.onCompleted: {
+        if (liveFrame !== "") {
+            frame = liveFrame
+            aspect = source.liveAspect
+        }
+    }
+    // Made when a frame comes, gone once it has faded: a node without a frame has no item at all.
+    onActiveChanged: if (!active && opacity === 0) gone()
+    onOpacityChanged: if (!active && opacity === 0) gone()
 
     readonly property bool active: liveFrame !== ""
     readonly property real gap: Math.round(look.unit)
     // The card's rule for a picture: 0.5 to 1 of its width.
-    x: posX
-    y: posY + nodeHeight + gap
-    width: nodeWidth
-    height: Math.round(nodeWidth * Math.min(Math.max(aspect, 0.5), 1))
+    x: source.posX
+    y: source.posY + source.nodeHeight + gap
+    width: source.nodeWidth
+    height: Math.round(width * Math.min(Math.max(aspect, 0.5), 1))
     z: 1000000
     opacity: active ? 1 : 0
     visible: active || opacity > 0
