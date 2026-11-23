@@ -32,12 +32,12 @@ namespace fugue::canvas {
 // one revision. MergeDown (the layer at the position goes into the one under it) and Flatten (every visible layer
 // becomes one, `layers` empty) read and write pixels, so applyLayerEdit refuses them: applyPixelEdit
 // (engine/canvas_layer_merge.h) does them, and CanvasStore::editLayers calls the right one.
-enum class LayerOp { Visible, Opacity, Blend, Rename, Remove, Move, Duplicate, MaskEnabled, RemoveMask, SetMask, New, Group, Ungroup, MergeDown, Flatten, Properties };
+enum class LayerOp { Visible, Opacity, Blend, Rename, Remove, Move, Duplicate, MaskEnabled, RemoveMask, SetMask, New, Group, Ungroup, MergeDown, Flatten, Properties, Lock };
 
 struct LayerEdit {
     LayerOp op = LayerOp::Visible;
     std::vector<int> layers; // positions, bottom first; at least one, each once
-    bool flag = false;       // Visible, MaskEnabled: the new value
+    bool flag = false;       // Visible, MaskEnabled, Lock: the new value
     double number = 1;       // Opacity: 0 to 1
     QString text;            // Rename: the new name; Blend: a blend id (mask::blendId: "normal", "multiply", ...)
     int to = 0;              // Move: the position the lowest of the moved layers ends at (the others stay above it, in order)
@@ -45,12 +45,16 @@ struct LayerEdit {
     std::vector<LayerEdit> steps; // Properties: the edits it is made of, in order
 };
 
+// A locked layer (#226) refuses what changes its pixels or its mask, takes it out of the stack or merges it: Remove, RemoveMask, SetMask,
+// Ungroup of a locked group, a transform (canvas_transform.h) and a merge. The error says which layer and how to unlock it.
+Error lockedError(const LayerRecord &layer, const QString &what);
+
 // Whether an edit has to read and write pixels (MergeDown, Flatten) rather than only move layer records.
 bool layerOpNeedsPixels(LayerOp op);
 
 // The producer's suffix of an edit: "visible", "opacity", "blend", "rename", "delete", "move",
 // "duplicate", "mask-enabled", "mask-delete", "mask-set", "new", "group", "ungroup", "merge-down", "flatten",
-// "properties" (the window writes `canvas-view:<name>`).
+// "properties", "lock" (the window writes `canvas-view:<name>`).
 QString layerOpName(LayerOp op);
 // The op a name names (the command line's words, above); false for another.
 bool layerOpFromName(const QString &name, LayerOp *op);

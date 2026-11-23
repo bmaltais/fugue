@@ -188,6 +188,7 @@ struct LayerSpec {
     QString raw;         // fugue:raw, the layer's own pixels when `src` has its mask baked in
     QString mask;        // fugue:mask, the layer mask's gray PNG
     bool maskEnabled = true;
+    bool locked = false;
     QString producer, created;
 };
 
@@ -273,6 +274,7 @@ Result<Stack> parseStack(const QByteArray &xml) {
             layer.raw = a.value(QLatin1String(fugueNamespace), "raw").toString();
             layer.mask = a.value(QLatin1String(fugueNamespace), "mask").toString();
             layer.maskEnabled = a.value(QLatin1String(fugueNamespace), "mask-enabled").toString() != QLatin1String("false");
+            layer.locked = a.value(QLatin1String(fugueNamespace), "locked").toString() == QLatin1String("true");
             layer.producer = a.value(QLatin1String(fugueNamespace), "producer").toString().left(kMaxName);
             layer.created = a.value(QLatin1String(fugueNamespace), "created").toString().left(64);
             if ((!layer.raw.isEmpty() && !knownName(layer.raw)) || (!layer.mask.isEmpty() && !knownName(layer.mask)))
@@ -371,6 +373,8 @@ Result<QByteArray> paintToOra(const PaintDocument &document) {
             writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("mask"), QString::fromLatin1(maskOf[size_t(position)]));
             writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("mask-enabled"), info.maskEnabled ? QStringLiteral("true") : QStringLiteral("false"));
         }
+        if (info.locked)
+            writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("locked"), QStringLiteral("true"));
         if (!info.producer.isEmpty())
             writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("producer"), info.producer);
         if (!info.created.isEmpty())
@@ -435,6 +439,7 @@ Result<PaintDocument> paintFromOra(const QByteArray &bytes) {
         info.opacity = layer.opacity;
         info.compositeOp = layer.compositeOp;
         info.maskEnabled = layer.maskEnabled;
+        info.locked = layer.locked;
         info.producer = layer.producer;
         info.created = layer.created;
         std::optional<MaskPaint> mask;

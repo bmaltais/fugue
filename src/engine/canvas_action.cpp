@@ -313,6 +313,8 @@ Result<Document> bindAction(const Document &document, const Action &action, cons
         setLiteral(region, QStringLiteral("selection"), binding.selection);
     else
         region.inputs.remove(QStringLiteral("selection"));
+    if (!binding.layer.isEmpty()) // else the workflow's own Layer stays (an action may read one layer by design)
+        setLiteral(region, QStringLiteral("layer"), binding.layer);
     if (binding.padding)
         setLiteral(region, QStringLiteral("padding"), *binding.padding);
     if (binding.scale)

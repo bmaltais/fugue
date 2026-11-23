@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QUrl>
+#include <QSet>
 #include <QLocale>
 #include <QPointer>
 #include <QUndoStack>
@@ -279,6 +280,8 @@ QString CanvasViewModel::stepName(const QString &revisionId) {
                     continue;
                 if (a.visible != b.visible)
                     name = b.visible ? tr("Shown: %1").arg(b.name) : tr("Hidden: %1").arg(b.name);
+                else if (a.locked != b.locked)
+                    name = b.locked ? tr("Locked: %1").arg(b.name) : tr("Unlocked: %1").arg(b.name);
                 else if (a.opacity != b.opacity)
                     name = tr("Opacity %1%: %2").arg(qRound(b.opacity * 100)).arg(b.name);
                 else if (a.compositeOp != b.compositeOp)
@@ -608,6 +611,7 @@ void CanvasViewModel::rebuildLayers() {
                                             {"compositeOp", layer.compositeOp.isEmpty() ? QStringLiteral("svg:src-over") : layer.compositeOp},
                                             {"hasMask", layer.hasMask},
                                             {"maskEnabled", layer.maskEnabled},
+                                            {"locked", layer.locked},
                                             {"producer", layer.producer},
                                             {"from", fromText(layer.producer)},
                                             {"created", layer.created},
@@ -628,6 +632,11 @@ void CanvasViewModel::rebuildLayers() {
         m_selected = m_keepSelection;
     else if (canvasId() != m_layersCanvas)
         m_selected.clear();
+    // The layer a Generate reads: kept while the shown revision has a paint layer of that name, and never across canvases.
+    if (canvasId() != m_layersCanvas || std::none_of(m_layers.cbegin(), m_layers.cend(), [this](const QVariant &row) {
+            return row.toMap().value("name").toString() == m_regionLayer && row.toMap().value("kind").toString() == QLatin1String("paint");
+        }))
+        m_regionLayer.clear();
     m_selected.removeIf([count](int p) { return p < 0 || p >= count; });
     if (m_selected.isEmpty() && count > 0 && !m_editing)
         m_selected = {count - 1}; // as in Photoshop, a layer is always the current one: the top, to start
@@ -677,6 +686,41 @@ void CanvasViewModel::setSolo(int position) {
     updateSoloPicture();
     emit layersChanged();
     emit pictureChanged();
+}
+
+bool CanvasViewModel::setRegionLayer(int position) {
+    QString want;
+    if (position >= 0) {
+        QString problem = tr("There is no such layer.");
+        QSet<QString> above; // top first: the first layer of a name is the one Region reads
+        for (const QVariant &value : std::as_const(m_layers)) {
+            const QVariantMap row = value.toMap();
+            const QString name = row.value("name").toString();
+            if (row.value("position").toInt() == position) {
+                if (row.value("kind").toString() != QLatin1String("paint"))
+                    problem = tr("Only a paint layer can be read by Generate, not a group, a mask or a picture layer.");
+                else if (above.contains(name))
+                    problem = tr("A layer above has the same name: rename one, so Generate reads this layer.");
+                else {
+                    problem.clear();
+                    want = name;
+                }
+                break;
+            }
+            above.insert(name);
+        }
+        if (!problem.isEmpty()) {
+            fail({makeError(QStringLiteral("input_invalid"), problem)});
+            return false;
+        }
+        if (want == m_regionLayer)
+            want.clear(); // the same layer again: back to the whole picture
+    }
+    if (want == m_regionLayer)
+        return true;
+    m_regionLayer = want;
+    emit layersChanged();
+    return true;
 }
 
 void CanvasViewModel::updateSoloPicture() {
@@ -999,6 +1043,21 @@ bool CanvasViewModel::setVisible(const QVariantList &positions, bool visible) {
     return applyEdit(edit, m_selected);
 }
 
+bool CanvasViewModel::setLocked(const QVariantList &positions, bool locked) {
+    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Lock, positionsOf(positions));
+    edit.flag = locked;
+    return applyEdit(edit, m_selected);
+}
+
+bool CanvasViewModel::toggleLocked(const QVariantList &positions) {
+    const QList<int> chosen = positionsOf(positions);
+    bool anyOpen = false;
+    for (const QVariant &row : std::as_const(m_layers))
+        if (chosen.contains(row.toMap().value("position").toInt()) && !row.toMap().value("locked").toBool())
+            anyOpen = true;
+    return setLocked(positions, anyOpen);
+}
+
 bool CanvasViewModel::toggleVisible(const QVariantList &positions) {
     const QList<int> chosen = positionsOf(positions);
     bool anyShown = false;
@@ -1274,9 +1333,20 @@ bool CanvasViewModel::loadMask(int position) {
     return true;
 }
 
+bool CanvasViewModel::lockedAt(int position) const {
+    for (const QVariant &row : std::as_const(m_layers))
+        if (row.toMap().value("position").toInt() == position)
+            return row.toMap().value("locked").toBool();
+    return false;
+}
+
 bool CanvasViewModel::targetMask(int position) {
     if (!layersEditable())
         return false;
+    if (lockedAt(position)) { // the store refuses the paint when it lands; say so now, before the strokes
+        fail({makeError(QStringLiteral("input_invalid"), tr("The layer is locked: unlock it to paint its mask."))});
+        return false;
+    }
     if (position == m_maskTarget && m_maskOf == revisionB())
         return true;
     commitMask();
@@ -1353,6 +1423,10 @@ bool CanvasViewModel::commitMask(const QString &what) {
 bool CanvasViewModel::addMask(int position) {
     if (!layersEditable() || position < 0 || position >= int(m_layers.size()))
         return false;
+    if (lockedAt(position)) {
+        fail({makeError(QStringLiteral("input_invalid"), tr("The layer is locked: unlock it to add a mask."))});
+        return false;
+    }
     for (const QVariant &row : std::as_const(m_layers)) {
         const QVariantMap layer = row.toMap();
         if (layer.value("position").toInt() != position)

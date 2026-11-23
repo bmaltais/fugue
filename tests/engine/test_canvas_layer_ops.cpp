@@ -531,6 +531,67 @@ private slots:
         QCOMPARE(s.info(made.id)->head, off.revision.id);
     }
 
+    // #226: a locked layer keeps its pixels and its mask, and cannot be deleted, merged or ungrouped; the rest stays open.
+    void aLockedLayerRefusesWhatWouldChangeItsPixelsOrLeaveTheStack() {
+        const Tree locked = applyLayerEdit(sampleTree(), [] { LayerEdit e = edit(LayerOp::Lock, {1}); e.flag = true; return e; }()).value();
+        QVERIFY(locked.layers[1].locked);
+        QVERIFY(!sampleTree().layers[1].locked);
+        const auto refused = applyLayerEdit(locked, edit(LayerOp::Remove, {0, 1}));
+        QVERIFY(!refused);
+        QVERIFY(refused.errors().first().message.contains("locked"));
+        QVERIFY(!applyLayerEdit(locked, edit(LayerOp::RemoveMask, {1})).ok());
+        LayerEdit setMask = edit(LayerOp::SetMask, {1});
+        QVERIFY(!applyLayerEdit(locked, setMask).ok());
+        const auto read = [](const QString &, int, int, int) { return Result<MaskPaint>(MaskPaint(1, 1, 4)); };
+        QVERIFY(!applyPixelEdit(locked, edit(LayerOp::MergeDown, {2}), read, {}).ok()); // the one under it is locked
+        QVERIFY(!applyPixelEdit(locked, edit(LayerOp::MergeDown, {1}), read, {}).ok());
+        QVERIFY(!applyPixelEdit(locked, edit(LayerOp::Flatten, {}), read, {}).ok());
+        // Not pixels: showing, opacity, blend, a name, moving, duplicating, the mask's switch and unlocking.
+        QVERIFY(applyLayerEdit(locked, edit(LayerOp::Visible, {1})).ok());
+        LayerEdit opacity = edit(LayerOp::Opacity, {1});
+        opacity.number = 0.5;
+        QVERIFY(applyLayerEdit(locked, opacity).ok());
+        LayerEdit rename = edit(LayerOp::Rename, {1});
+        rename.text = QStringLiteral("Sky");
+        QVERIFY(applyLayerEdit(locked, rename).ok());
+        QVERIFY(applyLayerEdit(locked, edit(LayerOp::MaskEnabled, {1})).ok());
+        LayerEdit move = edit(LayerOp::Move, {1});
+        move.to = 0;
+        QVERIFY(applyLayerEdit(locked, move).ok());
+        QVERIFY(applyLayerEdit(locked, edit(LayerOp::Duplicate, {1})).value().layers[2].locked);
+        LayerEdit unlock = edit(LayerOp::Lock, {1});
+        unlock.flag = false;
+        const Tree open = applyLayerEdit(locked, unlock).value();
+        QVERIFY(applyLayerEdit(open, edit(LayerOp::Remove, {1})).ok());
+    }
+
+    void aLockIsPartOfTheRevisionAndCostsNoHashForUnlockedTrees() {
+        const QJsonObject plain = treeToJson(sampleTree());
+        QVERIFY(!QJsonDocument(plain).toJson().contains("locked"));
+        Tree locked = sampleTree();
+        locked.layers[0].locked = true;
+        const QJsonObject json = treeToJson(locked);
+        QVERIFY(QJsonDocument(json).toJson().contains("locked"));
+        QCOMPARE(treeFromJson(json).value().layers, locked.layers);
+        QVERIFY(!(treeFromJson(json).value().layers == sampleTree().layers));
+    }
+
+    void aLockIsOneUndoableRevisionAndTheStoreRefusesATransformOfALockedLayer() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("lock", sample(), "test").value();
+        LayerEdit lock = edit(LayerOp::Lock, {1});
+        lock.flag = true;
+        const Commit c = s.editLayers(made.id, made.head, lock, "canvas-view:lock").value();
+        QVERIFY(c.move.moved);
+        QVERIFY(s.loadTree(made.id, c.revision.id)->layers[1].locked);
+        QVERIFY(s.load(made.id, c.revision.id)->layer(1).locked); // the document carries it (an .ora keeps it)
+        const auto gone = s.editLayers(made.id, c.revision.id, edit(LayerOp::Remove, {1}), "canvas-view:delete");
+        QVERIFY(!gone);
+        QCOMPARE(s.info(made.id)->head, c.revision.id);
+        QVERIFY(s.undo(made.id, c.revision.id)->moved);
+        QVERIFY(!s.loadTree(made.id, s.info(made.id)->head)->layers[1].locked);
+    }
+
     // #274: a resize keeps a group (its children and its own mask are moved like any layer) and the picture it shows.
     void resizeKeepsAGroupAndThePictureItShows() {
         CanvasStore s = store();

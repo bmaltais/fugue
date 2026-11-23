@@ -133,6 +133,8 @@ QJsonObject layerToJson(const LayerRecord &layer) {
     }
     if (!layer.compositeOp.isEmpty())
         item.insert("blend", layer.compositeOp);
+    if (layer.locked)
+        item.insert("locked", true);
     if (layer.source)
         item.insert("source", sourceToJson(*layer.source));
     if (layer.hasMask) {
@@ -196,6 +198,11 @@ Result<LayerRecord> layerFromJson(const QJsonObject &item, int width, int height
             return corrupt(QStringLiteral("a layer's mask is not well formed"));
         layer.hasMask = true;
         layer.maskEnabled = mask.value("enabled").toBool();
+    }
+    if (item.contains("locked")) {
+        if (!item.value("locked").isBool())
+            return corrupt(QStringLiteral("a layer's lock is not well formed"));
+        layer.locked = item.value("locked").toBool();
     }
     if (item.contains("source")) {
         if (layer.group || layer.kind != LayerKind::Paint)
@@ -277,6 +284,7 @@ Result<Tree> treeOf(const PaintDocument &document, const TileSink &consume) {
         layer.visible = info.visible;
         layer.opacity = info.opacity;
         layer.compositeOp = info.compositeOp;
+        layer.locked = info.locked;
         layer.producer = info.producer;
         layer.created = info.created;
         if (const MaskPaint *mask = document.maskPixels(info.id)) {
@@ -1299,6 +1307,7 @@ Result<PaintDocument> documentOf(const Tree &stored, const std::function<Result<
         info.opacity = layer.opacity;
         info.compositeOp = layer.compositeOp;
         info.maskEnabled = layer.maskEnabled;
+        info.locked = layer.locked;
         info.producer = layer.producer;
         info.created = layer.created;
         std::optional<MaskPaint> mask;

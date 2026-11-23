@@ -1589,5 +1589,21 @@
   "Type what to put in the pictures, then Run.": "Type what to put in the pictures, then Run.",
   "Waiting": "Waiting",
   "WebP": "WebP",
-  "What to put in each picture": "What to put in each picture"
+  "What to put in each picture": "What to put in each picture",
+  "Unlock": "Unlock",
+  "Lock": "Lock",
+  "Generate reads the whole picture": "Generate reads the whole picture",
+  "Generate reads this layer only": "Generate reads this layer only",
+  "Locked: it cannot be deleted, merged, transformed or have its mask changed. Click to unlock (%1)": "Locked: it cannot be deleted, merged, transformed or have its mask changed. Click to unlock (%1)",
+  "Lock the layer so it cannot be deleted, merged, transformed or have its mask changed (%1)": "Lock the layer so it cannot be deleted, merged, transformed or have its mask changed (%1)",
+  "Generate reads %1 only": "Generate reads %1 only",
+  "Generate reads the whole picture again": "Generate reads the whole picture again",
+  "Locked: %1": "Locked: %1",
+  "Unlocked: %1": "Unlocked: %1",
+  "The layer is locked: unlock it to paint its mask.": "The layer is locked: unlock it to paint its mask.",
+  "The layer is locked: unlock it to add a mask.": "The layer is locked: unlock it to add a mask.",
+  "Only a paint layer can be read by Generate, not a group, a mask or a picture layer.": "Only a paint layer can be read by Generate, not a group, a mask or a picture layer.",
+  "A layer above has the same name: rename one, so Generate reads this layer.": "A layer above has the same name: rename one, so Generate reads this layer.",
+  "Lock or unlock the selected layers": "Lock or unlock the selected layers",
+  "Generate reads this layer only, or the whole picture again": "Generate reads this layer only, or the whole picture again"
 }

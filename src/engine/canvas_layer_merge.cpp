@@ -35,6 +35,8 @@ Result<Tree> mergeDown(const Tree &tree, int upper, const TileReader &read, cons
     for (const LayerRecord *layer : {&bottom, &top}) {
         if (layer->kind != mask::LayerKind::Paint)
             return invalid(QStringLiteral("%1 is a %2 layer: only paint layers and groups merge.").arg(layer->name, layer->kind == mask::LayerKind::Mask ? QStringLiteral("mask") : QStringLiteral("picture")));
+        if (layer->locked)
+            return lockedError(*layer, QStringLiteral("it cannot be merged"));
         if (!layer->visible)
             return invalid(QStringLiteral("%1 is hidden: show it, or delete it, before merging.").arg(layer->name));
         if (layer->hasMask && !layer->maskEnabled)
@@ -62,6 +64,9 @@ Result<Tree> mergeDown(const Tree &tree, int upper, const TileReader &read, cons
 }
 
 Result<Tree> flatten(const Tree &tree, const TileReader &read, const TileSink &consume) {
+    for (const LayerRecord &layer : tree.layers)
+        if (layer.locked)
+            return lockedError(layer, QStringLiteral("it cannot be flattened"));
     for (const LayerRecord &layer : tree.layers)
         if (layer.kind == mask::LayerKind::Picture)
             return invalid(QStringLiteral("%1 is a picture layer: a picture is a node's input and cannot be flattened into the canvas.").arg(layer.name));

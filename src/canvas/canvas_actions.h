@@ -106,7 +106,7 @@ public:
 
     // Generate. `request`: {action ("auto" or an id), canvas, revision (the full hash shown), prompt, rect {x, y, width,
     // height} (canvas pixels; with `selection` the selection's bounds), selection (a stored selection's hash), seed (a
-    // number: fixed; none: random)}. {ok, run, action, reason}: `reason` (also `error`) says in words why nothing started.
+    // number: fixed; none: random), layer (the name of one layer Canvas Region reads instead of the whole picture, #226)}. {ok, run, action, reason}: `reason` (also `error`) says in words why nothing started.
     Q_INVOKABLE QVariantMap generate(const QVariantMap &request);
     // Ends this bar's runs, the waiting ones first.
     Q_INVOKABLE void cancel();

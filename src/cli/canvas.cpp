@@ -77,6 +77,8 @@ QJsonObject layerJson(const canvas::LayerRecord &layer, int position) {
             children.append(child.name);
         out.insert(QStringLiteral("children"), children);
     }
+    if (layer.locked)
+        out.insert(QStringLiteral("locked"), true);
     if (layer.hasMask)
         out.insert(QStringLiteral("mask"), QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", int(layer.maskTiles.size())}});
     if (!layer.producer.isEmpty())
@@ -92,6 +94,8 @@ QString layerLine(const canvas::LayerRecord &layer, int position) {
                        .arg(layer.opacity).arg(layer.tileCount());
     if (!layer.compositeOp.isEmpty())
         line += QStringLiteral(", blend %1").arg(blendText(layer.compositeOp));
+    if (layer.locked)
+        line += QStringLiteral(", locked");
     if (layer.hasMask)
         line += layer.maskEnabled ? QStringLiteral(", layer mask") : QStringLiteral(", layer mask off");
     if (!layer.producer.isEmpty())
@@ -719,8 +723,14 @@ Reply canvasLayer(const Command &command, Context &) {
                 add(canvas::LayerOp::MaskEnabled).flag = v.value();
             }
         }
+        if (command.has("lock")) {
+            const Result<bool> v = onOff("lock", command.value("lock"), QStringLiteral("true"), QStringLiteral("false"));
+            if (!v)
+                return Reply::failure(v.errors());
+            add(canvas::LayerOp::Lock).flag = v.value();
+        }
         if (edits.empty())
-            return Reply::failure(usageError(QStringLiteral("layer set needs --visible, --opacity, --blend or --mask.")));
+            return Reply::failure(usageError(QStringLiteral("layer set needs --visible, --opacity, --blend, --mask or --lock.")));
     } else if (action == QLatin1String("rename")) {
         add(canvas::LayerOp::Rename).text = rest.at(1);
     } else if (action == QLatin1String("new")) {

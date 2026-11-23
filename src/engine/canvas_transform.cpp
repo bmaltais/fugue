@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "engine/canvas_layer_ops.h"
 #include "engine/paint_file.h"
 
 namespace fugue::canvas {
@@ -428,6 +429,8 @@ Result<Tree> transformedTree(const Tree &tree, int position, const LayerTransfor
     const LayerRecord &layer = tree.layers[size_t(position)];
     if (layer.group)
         return invalid(QStringLiteral("%1 is a group: transform its layers one by one, or merge the group into one layer first.").arg(layer.name));
+    if (layer.locked)
+        return lockedError(layer, QStringLiteral("it cannot be moved or transformed"));
     if (layer.kind != mask::LayerKind::Paint)
         return invalid(QStringLiteral("%1 is a %2 layer: only a paint layer can be moved or transformed.").arg(layer.name, layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : QStringLiteral("picture")));
     if (const QString why = transformProblem(requested); !why.isEmpty())

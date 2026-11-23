@@ -529,6 +529,24 @@ private slots:
         QCOMPARE(fugue({"canvas", "layer", "rm", id, "0", "--name", "x", "--json"}).errorCode(), QString("usage"));
     }
 
+    // #226: a locked layer is listed as locked and refuses a delete until it is unlocked.
+    void aLockedLayerRefusesADeleteUntilItIsUnlocked() {
+        const Outcome imported = fugue({"canvas", "import", oraFile("lock.ora"), "--json"});
+        QVERIFY2(imported.exitCode == 0, imported.out + imported.err);
+        const QString id = imported.data().value("canvas").toString();
+        const Outcome locked = fugue({"canvas", "layer", "set", id, "Paint", "--lock", "true", "--json"});
+        QVERIFY2(locked.exitCode == 0, locked.out + locked.err);
+        const QJsonArray listed = fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray();
+        QVERIFY(listed.at(1).toObject().value("locked").toBool());
+        QVERIFY(!listed.at(0).toObject().contains("locked"));
+        const Outcome refused = fugue({"canvas", "layer", "rm", id, "Paint", "--json"});
+        QCOMPARE(refused.errorCode(), QString("input_invalid"));
+        QVERIFY(refused.out.contains("locked"));
+        QCOMPARE(fugue({"canvas", "layer", "set", id, "Paint", "--lock", "false", "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "layer", "rm", id, "Paint", "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "layer", "set", id, "Mask", "--lock", "maybe", "--json"}).errorCode(), QString("usage"));
+    }
+
     // Layer edits from the command line (#226): each is one revision of the head, named by position or name.
     void layersAreListedEditedAndUndone() {
         const QString source = oraFile("in.ora"); // Paint (0), Mask (1)
