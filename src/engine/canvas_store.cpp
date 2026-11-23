@@ -395,6 +395,14 @@ Result<QString> CanvasStore::storeTreeRecord(const Tree &tree) {
             return Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth),
                                              QStringLiteral("Ungroup one of the outer groups first.")));
     const QJsonObject json = treeToJson(tree);
+    // The caps treeFromJson enforces on reading: a tree past them would be stored and then read back as canvas_corrupt.
+    int layerTotal = 0, tileTotal = 0;
+    if (!withinCaps(json.value("layers").toArray(), 0, &layerTotal, &tileTotal))
+        return Result<QString>(makeError(QStringLiteral("input_invalid"),
+                                         layerTotal > maxTreeLayers ? QStringLiteral("The canvas would have more than %1 layers (groups' layers included), which is the most it can hold.").arg(maxTreeLayers)
+                                         : tileTotal > maxTreeTiles ? QStringLiteral("The canvas would have more than %1 tiles, which is the most it can hold.").arg(maxTreeTiles)
+                                                                    : QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth),
+                                         QStringLiteral("Delete or merge layers, or make the canvas smaller.")));
     const QString hash = canonicalHash(json);
     if (hash.isEmpty())
         return corrupt(QStringLiteral("a tree has no canonical form"));
@@ -858,7 +866,7 @@ Result<std::vector<Candidate>> CanvasStore::candidates(const QString &canvasId, 
         if (history->contains(id))
             continue;
         const QString state = resolution(canvasId, id);
-        if (state == QLatin1String("accepted") || state == QLatin1String("undone") || (state == QLatin1String("dropped") && !withDropped))
+        if (state == QLatin1String("accepted") || state == QLatin1String("undone") || state == QLatin1String("lost") || (state == QLatin1String("dropped") && !withDropped))
             continue;
         const Result<Revision> record = revision(canvasId, id);
         if (!record)
@@ -942,8 +950,10 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
     }
     if (done.moved) {
         const Errors marked = replaceFile(resolvedPath(canvasId, revisionId), QStringLiteral("accepted %1\n").arg(done.head.id).toLatin1(), QStringLiteral("a canvas resolution"));
+        // The head has moved: the layer landed, and the revision is in the head's history, which hides it from the candidates anyway.
+        // Failing here would make a caller run again and duplicate the layer, so the failure is only noted.
         if (hasErrors(marked))
-            return Result<Accepted>(marked);
+            done.note = QStringLiteral("The layer was placed, but its acceptance could not be recorded: %1").arg(marked.first().message);
     }
     return done;
 }
@@ -1038,8 +1048,8 @@ Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &b
     const Result<HeadMove> moved = moveHead(canvasId, base, added->id);
     if (!moved)
         return Result<Commit>(moved.errors());
-    if (!moved->moved) // lost a race with a run: not a candidate for anyone to review, an edit that did not happen
-        (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("undone\n"), QStringLiteral("a canvas resolution"));
+    if (!moved->moved) // lost a race with a run: not a candidate to review and not a redo target, an edit that did not happen
+        (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("lost\n"), QStringLiteral("a canvas resolution"));
     return Commit{added.value(), moved.value()};
 }
 

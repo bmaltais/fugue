@@ -584,6 +584,25 @@ private slots:
         QCOMPARE(small.width, 10);
     }
 
+    // #274: the next "Fill n" counts the layers inside groups too.
+    void theNextFillNameCountsLayersInsideGroups() {
+        Bench bench;
+        const QString id = makeCanvas();
+        canvas::LayerEdit rename;
+        rename.op = canvas::LayerOp::Rename;
+        rename.layers = {0};
+        rename.text = "Fill 7";
+        QVERIFY(CanvasStore::forSession().editLayers(id, headOf(id), rename, "x")->move.moved);
+        canvas::LayerEdit group;
+        group.op = canvas::LayerOp::Group;
+        group.layers = {0};
+        QVERIFY(CanvasStore::forSession().editLayers(id, headOf(id), group, "x")->move.moved);
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
+        const Result<Values> w = writeGreen(bench, r);
+        QVERIFY2(w.ok(), qPrintable(w.errors().value(0).message));
+        QCOMPARE(CanvasStore::forSession().loadTree(id, headOf(id))->layers.back().name, QString("Fill 8"));
+    }
+
     // #239: candidate review is not a user concept: an old workflow's saved candidate=true is ignored, and the layer lands on the head.
     void aSavedCandidateOnIsIgnoredAndTheLayerLandsOnTheHead() {
         Registry registry;

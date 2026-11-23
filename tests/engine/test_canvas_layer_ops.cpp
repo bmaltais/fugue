@@ -615,6 +615,53 @@ private slots:
         QCOMPARE(placed.layers[0].name, QString("Renamed"));
         QCOMPARE(placed.layers.back().name, QString("Fill 3"));
     }
+
+    // #274: a revision marked lost (it lost a race to move the head) is neither a candidate nor a redo target.
+    void aLostRevisionIsNeitherACandidateNorARedoTarget() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("l", sample(), "test").value();
+        const Commit r1 = s.editLayers(made.id, made.head, edit(LayerOp::Visible, {0}), "x").value();
+        // What commitTree leaves behind when it loses the race: a revision of `made.head`, marked lost.
+        const Revision lost = s.addRevision(made.id, s.load(made.id, made.head).value(), made.head, "x").value();
+        QDir().mkpath(m_dir.path() + "/canvases/" + made.id + "/resolved");
+        QFile marker(m_dir.path() + "/canvases/" + made.id + "/resolved/" + lost.id.mid(7));
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.write("lost\n");
+        marker.close();
+        QVERIFY(s.candidates(made.id).value().empty());
+        QVERIFY(s.undo(made.id, r1.revision.id)->moved);
+        QCOMPARE(s.redoTarget(made.id).value(), r1.revision.id); // not the lost one, whatever its time
+    }
+
+    // #274: a tree past the layer cap is refused when it is written, not stored to read back as corrupt.
+    void aWriteIntoAFullCanvasIsRefusedInPlainWords() {
+        CanvasStore s = store();
+        PaintDocument d(8, 8);
+        for (int i = 0; i < maxTreeLayers; ++i)
+            d.loadLayer(LayerKind::Paint, QString("L%1").arg(i), true, 1, solid(8, 8, {1, 2, 3, 255}));
+        const CanvasInfo made = s.create("full", d, "test").value();
+        LayerRecord one;
+        one.name = "one more";
+        const auto added = s.addLayerRevision(made.id, made.head, one, "x");
+        QVERIFY(!added);
+        QCOMPARE(added.errors().first().code, QString("input_invalid"));
+        QVERIFY(added.errors().first().message.contains("512"));
+        QVERIFY(s.loadTree(made.id, made.head)); // still reads
+    }
+
+    // #274: when the head has moved but the acceptance mark cannot be written, accept still succeeds (a rerun would duplicate the layer).
+    void anAcceptWhoseMarkCannotBeWrittenStillSucceedsWithANote() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("m", sample(), "test").value();
+        PaintDocument fill = s.load(made.id, made.head).value();
+        fill.loadLayer(LayerKind::Paint, "Fill 3", true, 1, solid(300, 300, {1, 2, 3, 255}));
+        const Revision candidate = s.addRevision(made.id, fill, made.head, "canvas-write:w").value();
+        QVERIFY(QDir().mkpath(m_dir.path() + "/canvases/" + made.id + "/resolved/" + candidate.id.mid(7))); // a folder where the file goes
+        const Accepted accepted = s.accept(made.id, candidate.id).value();
+        QVERIFY(accepted.moved);
+        QVERIFY(!accepted.note.isEmpty());
+        QCOMPARE(s.info(made.id)->head, candidate.id);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCanvasLayerOps)

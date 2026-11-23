@@ -107,14 +107,19 @@ QString promptName(const QString &prompt) {
 }
 
 // "Fill n": one more than the largest n of a layer named "Fill n" ("Fill" alone is 1).
-QString nextFillName(const canvas::Tree &tree) {
+void highestFill(const std::vector<canvas::LayerRecord> &layers, int *highest) {
     static const QRegularExpression pattern(QStringLiteral("^Fill(?: ([0-9]{1,6}))?$"));
-    int highest = 0;
-    for (const canvas::LayerRecord &layer : tree.layers) {
+    for (const canvas::LayerRecord &layer : layers) {
         const QRegularExpressionMatch match = pattern.match(layer.name);
         if (match.hasMatch())
-            highest = std::max(highest, match.captured(1).isEmpty() ? 1 : match.captured(1).toInt());
+            *highest = std::max(*highest, match.captured(1).isEmpty() ? 1 : match.captured(1).toInt());
+        highestFill(layer.children, highest); // a layer inside a group counts too
     }
+}
+
+QString nextFillName(const canvas::Tree &tree) {
+    int highest = 0;
+    highestFill(tree.layers, &highest);
     return QStringLiteral("Fill %1").arg(highest + 1);
 }
 

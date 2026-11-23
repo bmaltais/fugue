@@ -138,6 +138,7 @@ struct Accepted {
     bool rebased = false;
     bool moved = false; // false: the head moved meanwhile and nothing was changed; ask again
     QString current;   // the head when !moved
+    QString note;      // set when the head moved but the acceptance mark could not be written (the layer is placed; do not run again)
 };
 
 // A revision with its tree, as a canvas made elsewhere carries it (importCanvas).
