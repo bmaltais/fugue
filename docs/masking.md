@@ -111,13 +111,14 @@ picture around it. (The inpaint template is the other way: there the reference h
 These work with Fugue's helper:
 
 - **Models made for inpainting**, which take the mask themselves: FLUX.1 Fill dev, SDXL Inpaint,
-  SD 1.5 and 2 Inpaint, and Flex.2. The helper runs them, but Load Models cannot load them yet:
-  it has one text encoder input, and FLUX.1 needs CLIP-L and T5, SD and SDXL CLIP (gap G2 in
+  SD 1.5 and 2 Inpaint, and Flex.2. Load Models loads FLUX.1 Fill
+  (its T5 in Text encoder, CLIP-L in CLIP-L). SD and SDXL inpaint models are not loadable by it yet
+  (gap G2 in
   [inpaint-outpaint-research.md](inpaint-outpaint-research.md#7-gaps-in-fugue-proposed-issues-not-filed)).
 - **Any other picture model**, where the mask holds the rest of the picture in place at every
   step: FLUX.2 Klein 4B and 9B (the templates use 9B, checked at 4 steps on an RTX 3090: the masked
   part is redrawn and the rest is the picture's own), Qwen-Image Edit, FLUX.1 Kontext, FLUX.1
-  dev, Z-Image, SDXL and SD 1.5 (the FLUX.1, SDXL and SD 1.5 ones are not loadable by Load Models
+  dev, Z-Image, SDXL and SD 1.5 (the SDXL and SD 1.5 ones are not loadable by Load Models
   yet, as above). Which to use for each canvas action, and why, is in
   [inpaint-outpaint-research.md](inpaint-outpaint-research.md).
 

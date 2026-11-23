@@ -753,7 +753,7 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     for (const Model &model : m_diskModels.value(modelsKey(node, input)))
         paths << model.path;
     using Rule = Fit (*)(const ModelShape &, const ModelShape &);
-    const Rule rule = part == kTextEncoder ? Rule(loadableTextEncoderFits)
+    const Rule rule = part == kTextEncoder ? (input == QLatin1String("clip_l") ? Rule(loadableClipFits) : Rule(loadableTextEncoderFits))
                       : part == kVae        ? Rule(vaeFits)
                       : part == kLora       ? Rule([](const ModelShape &model, const ModelShape &lora) { return loraFits(model, lora); })
                                             : nullptr;

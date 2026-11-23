@@ -640,6 +640,64 @@ private slots:
         QCOMPARE(context.value("vae_path").toString(), Bench::modelPath("vae/wan_2.1_vae.safetensors"));
     }
 
+    // FLUX.1 Fill (#241): T5 as t5xxl_path and CLIP-L as clip_l_path.
+    QJsonObject flux1(Bench &bench, const QString &clip) {
+        const QByteArray t5 = safetensors({{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                           {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}});
+        const QByteArray flux = safetensors({{"txt_in.weight", QJsonArray{3072, 4096}},
+                                             {"vector_in.in_layer.weight", QJsonArray{3072, 768}},
+                                             {"img_in.weight", QJsonArray{3072, 384}}});
+        QJsonObject parts{{"diffusion_model", bench.model("fugue/diffusion-model", "diffusion_models/flux1-fill.safetensors", flux)},
+                          {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/t5xxl.safetensors", t5)},
+                          {"vae", bench.model("fugue/vae", "vae/ae.safetensors",
+                                              safetensors({{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}}))}};
+        if (!clip.isEmpty())
+            parts.insert("clip_l", bench.model("fugue/text-encoder", "text_encoders/" + clip + ".safetensors",
+                                               safetensors({{"text_model.embeddings.token_embedding.weight",
+                                                             QJsonArray{49408, clip == "clip_g" ? 1280 : 768}}})));
+        return bench.loaded(parts);
+    }
+
+    void loadModelsTakesFlux1sT5AndClipL() {
+        Bench bench;
+        const QJsonObject model = flux1(bench, "clip_l");
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject context = request->params.value("context").toObject();
+        QCOMPARE(context.value("t5xxl_path").toString(), Bench::modelPath("text_encoders/t5xxl.safetensors"));
+        QCOMPARE(context.value("clip_l_path").toString(), Bench::modelPath("text_encoders/clip_l.safetensors"));
+        QVERIFY(!context.contains("llm_path"));
+    }
+
+    void flux1WithoutClipLOrWithAWideOneIsModelMismatchOnTheClipInput() {
+        Bench bench;
+        const Result<JobRequest> none = bench.request(kTextEncode, {{"model", Value(flux1(bench, {}))}, {"prompt", Value("a fox")}});
+        QVERIFY(!none);
+        QCOMPARE(none.error().code, QStringLiteral("model_mismatch"));
+        QCOMPARE(none.error().input, QStringLiteral("model"));
+        QVERIFY(none.error().message.contains("CLIP-L"));
+        const Result<JobRequest> wide = bench.request(kTextEncode, {{"model", Value(flux1(bench, "clip_g"))}, {"prompt", Value("a fox")}});
+        QVERIFY(!wide);
+        QVERIFY(wide.error().message.contains("1280 wide"));
+    }
+
+    void aT5ForAnLlmModelSaysWhatTheModelReadsNotThatLoadModelsTakesIt() {
+        Bench bench;
+        const QJsonObject parts{
+            {"diffusion_model", bench.model("fugue/diffusion-model", "diffusion_models/z.safetensors",
+                                            safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}},
+                                                         {"x_embedder.weight", QJsonArray{3840, 64}}}))},
+            {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/t5.safetensors",
+                                         safetensors({{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                                      {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}}))},
+            {"vae", bench.model("fugue/vae", "vae/flux2-vae.safetensors", safetensors({{"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}}))}};
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        QVERIFY(!request);
+        QVERIFY2(!request.error().message.contains("takes a language model or a T5"), qPrintable(request.error().message));
+        QVERIFY2(request.error().message.contains("the model reads a language model"), qPrintable(request.error().message));
+    }
+
     void aPairedHostGetsWansT5AsT5Too() {
         Bench bench;
         const QJsonObject model = bench.loaded(bench.wan());
