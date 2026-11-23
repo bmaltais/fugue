@@ -21,6 +21,9 @@ permissions:
 env:
   QT_VERSION: 6.11.2
   AQTINSTALL_VERSION: 3.3.0
+  # Fugue needs libvips 8.15 or newer (VImage::clamp, VIPS_FOREIGN_KEEP_*); Ubuntu 22.04 has 8.12.
+  LIBVIPS_VERSION: 8.18.7
+  LIBVIPS_SHA256: 5baaead3b0bb20ffdb9e9ff09aa9fda08620923df77b63b436654cb5e0b3bf94
 
 jobs:
   build:
@@ -50,11 +53,13 @@ jobs:
         # the libraries Qt's own plugins need at bundle time; linuxdeploy copies what it finds from here.
         run: |
           apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config ccache curl file \
-            patchelf python3-pip desktop-file-utils libvips-dev libarchive-dev libvulkan-dev zlib1g-dev \
+            patchelf python3-pip desktop-file-utils libarchive-dev libvulkan-dev zlib1g-dev \
             libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libdbus-1-3 \
             libglib2.0-0 libwayland-dev libpulse-mainloop-glib0 libasound2 \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 \
-            libxcb-xkb1 libxcb-xinerama0 libxcb-randr0 libxcb-sync1 libxcb-xfixes0 libxcb-glx0
+            libxcb-xkb1 libxcb-xinerama0 libxcb-randr0 libxcb-sync1 libxcb-xfixes0 libxcb-glx0 \
+            meson xz-utils libglib2.0-dev libexpat1-dev libjpeg-dev libpng-dev libwebp-dev libtiff-dev \
+            libheif-dev libexif-dev liblcms2-dev
 
       - name: Cache Qt
         id: qt-cache
@@ -70,6 +75,28 @@ jobs:
           pip3 install "aqtinstall==$AQTINSTALL_VERSION"
           python3 -m aqt install-qt linux desktop "$QT_VERSION" linux_gcc_64 -m qtmultimedia qtimageformats qtshadertools --outputdir qt
 
+      - name: Cache libvips
+        id: vips-cache
+        uses: actions/cache@v6
+        with:
+          path: vips-prefix
+          key: libvips-${{ env.LIBVIPS_VERSION }}-ubuntu22.04-v1
+
+      - name: Build libvips ${{ env.LIBVIPS_VERSION }}
+        # Only the formats Fugue reads and writes (JPEG, PNG, WebP, TIFF, HEIF/AVIF, GIF) and their colour and metadata
+        # support; no modules, GUI, introspection, docs or tests. It is installed under vips-prefix and bundled from there.
+        if: steps.vips-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o vips.tar.xz "https://github.com/libvips/libvips/releases/download/v$LIBVIPS_VERSION/vips-$LIBVIPS_VERSION.tar.xz"
+          echo "$LIBVIPS_SHA256  vips.tar.xz" | sha256sum -c -
+          mkdir vips-src && tar -xf vips.tar.xz -C vips-src --strip-components=1
+          meson setup vips-build vips-src --prefix="$GITHUB_WORKSPACE/vips-prefix" --libdir=lib --buildtype=release \
+            -Dauto_features=disabled -Dcplusplus=true -Dmodules=disabled -Dintrospection=disabled -Ddocs=false \
+            -Dcpp-docs=false -Dexamples=false -Dvapi=false -Ddeprecated=false \
+            -Djpeg=enabled -Dpng=enabled -Dwebp=enabled -Dtiff=enabled -Dheif=enabled -Dexif=enabled -Dlcms=enabled \
+            -Dzlib=enabled -Dnsgif=true -Dppm=true -Danalyze=false -Dradiance=false
+          ninja -C vips-build install
+
       - name: Restore the compiler cache
         uses: actions/cache@v6
         with:
@@ -81,6 +108,9 @@ jobs:
         run: packaging/appimage/test-apprun.sh
 
       - name: Build the AppImage
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/vips-prefix/lib/pkgconfig
+          LD_LIBRARY_PATH: ${{ github.workspace }}/vips-prefix/lib
         run: |
           QT_ROOT="$GITHUB_WORKSPACE/qt/$QT_VERSION/gcc_64" packaging/appimage/build-appimage.sh --out dist
           cp packaging/appimage/smoke-test.sh dist/ # the smoke jobs have no checkout

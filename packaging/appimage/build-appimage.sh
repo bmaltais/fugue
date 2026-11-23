@@ -5,7 +5,7 @@
 #
 # QT_ROOT is a Qt 6.11 (or newer) with qtmultimedia, qtimageformats and qtshadertools; the workflow
 # (.github/workflows/appimage.yml) installs it with aqtinstall in an Ubuntu 22.04 container, the oldest glibc
-# that Qt 6.11 supports. Needs cmake, ninja or make, a C++17 compiler, libvips and libarchive headers, the Vulkan
+# that Qt 6.11 supports. Needs cmake, ninja or make, a C++17 compiler, libvips 8.15+ (found by pkg-config) and libarchive headers, the Vulkan
 # loader headers, zlib and patchelf; curl and sha256sum for the tools below.
 #
 # Third-party tools are downloaded once into $WORK/tools and checked against the sha256 below. Set
@@ -77,6 +77,12 @@ fi
 file=Fugue-$version-$arch.AppImage
 say "building $file with Qt $("$qt/bin/qmake" -query QT_VERSION)"
 
+# The app needs libvips 8.15 or newer (VImage::clamp, VIPS_FOREIGN_KEEP_*). Ubuntu 22.04's is 8.12, so the workflow
+# builds one and puts it first on PKG_CONFIG_PATH and LD_LIBRARY_PATH; stop here if an older one would be bundled.
+pkg-config --atleast-version=8.15 vips-cpp || die "libvips 8.15 or newer is needed, found $(pkg-config --modversion vips-cpp 2>&1): see the libvips step of the workflow"
+vips_lib=$(pkg-config --variable=libdir vips-cpp)
+say "libvips $(pkg-config --modversion vips-cpp) from $vips_lib"
+
 # --- build the app and install it into the AppDir -------------------------------------------------------------
 appdir=$work/AppDir
 rm -rf "$appdir" "$work/build"
@@ -144,6 +150,9 @@ need '*/share/applications/fugue.desktop'
 ((! missing)) || die "the bundle is incomplete"
 if readelf -d "$appdir/usr/bin/fugue" | grep -q 'RUNPATH\|RPATH'; then :; else die "usr/bin/fugue has no RUNPATH: the bundled libraries would not be found"; fi
 if readelf -d "$appdir/usr/bin/fugue" | grep -E 'RUNPATH|RPATH' | grep -q "$qt"; then die "usr/bin/fugue still points at the build's Qt"; fi
+# the bundled libvips is the one the build used, not a system copy of another version
+bundled=$(find "$appdir/usr/lib" -name 'libvips.so.42.*' -print -quit)
+[[ -n $bundled && $(basename "$(readlink -f "$vips_lib"/libvips.so.42)") == "$(basename "$bundled")" ]] || die "the AppDir's libvips is not the one the app was built with ($vips_lib)"
 desktop-file-validate "$appdir/usr/share/applications/fugue.desktop" 2>/dev/null || say "desktop-file-validate is not installed or complains: not fatal"
 
 # --- pack ------------------------------------------------------------------------------------------------------------
