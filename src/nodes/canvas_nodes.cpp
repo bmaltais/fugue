@@ -531,11 +531,12 @@ public:
                                   QStringLiteral("The picture is %1 x %2, which is too big for a canvas. %3").arg(picture->width).arg(picture->height).arg(why),
                                   QStringLiteral("Choose a smaller scale."));
         const mask::MaskPaint layer = pixelsToLayer(picture.value());
-        const Result<mask::PaintDocument> document = mask::canvasFromPixels(picture->width, picture->height, layer.pixels(), QStringLiteral("Layer 1"));
+        QString base = context.input(QStringLiteral("name")).text().trimmed().left(120);
+        // The one layer is named as the canvas is asked to be (not "Layer 1"), without the number a taken name gets; no name: Layer 1.
+        const Result<mask::PaintDocument> document = mask::canvasFromPixels(picture->width, picture->height, layer.pixels(), base.isEmpty() ? QStringLiteral("Layer 1") : base.left(64));
         if (!document)
             return Result<Values>(document.errors());
         CanvasStore store = CanvasStore::forSession();
-        QString base = context.input(QStringLiteral("name")).text().trimmed().left(120);
         if (base.isEmpty())
             base = QStringLiteral("Untitled");
         QSet<QString> taken;

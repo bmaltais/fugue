@@ -207,6 +207,20 @@ Result<RouteRect> expandedBounds(const QVariantMap &expand, int width, int heigh
     return to;
 }
 
+bool takeBackGrowth(const ActPlan &plan) {
+    if (!plan.grew || plan.growRevision.isEmpty())
+        return false;
+    CanvasStore store = CanvasStore::forSession();
+    // undo() is a compare-and-swap on the head: it moves only when the head is still the growth revision.
+    const Result<HeadMove> undone = store.undo(plan.canvas, plan.growRevision);
+    return undone && undone->moved;
+}
+
+QString growthTakenBack(const QString &actionName, bool cancelled) {
+    return cancelled ? QCoreApplication::translate("CanvasActions", "The canvas is back to its size: %1 was cancelled.").arg(actionName)
+                     : QCoreApplication::translate("CanvasActions", "The canvas is back to its size: %1 did not finish.").arg(actionName);
+}
+
 Result<ActPlan> planAct(const ActionEntry &entry, const ActRequest &request) {
     if (const std::optional<Error> why = notRunnable(entry))
         return *why;
@@ -321,12 +335,16 @@ Result<ActPlan> planAct(const ActionEntry &entry, const ActRequest &request) {
         binding.suffix = total > 1 ? QCoreApplication::translate("CanvasActions", "(%1 of %2)").arg(n + 1).arg(total) : QString();
         binding.hidden = n > 0;
         Result<Document> bound = bindAction(entry.document, action, entry.graph, binding);
-        if (!bound)
+        if (!bound) {
+            takeBackGrowth(plan); // nothing was queued: the strip the canvas grew by would stay empty
             return bound.errors();
+        }
         for (const NodeSet &set : request.nodeSets) {
             const auto node = bound->graph.nodes.find(set.node);
-            if (node == bound->graph.nodes.end())
+            if (node == bound->graph.nodes.end()) {
+                takeBackGrowth(plan);
                 return refused(QStringLiteral("%1 has no node %2.").arg(action.name, set.node));
+            }
             node->inputs.insert(set.input, InputValue::fromJson(set.value));
         }
         plan.runs << bound.value();

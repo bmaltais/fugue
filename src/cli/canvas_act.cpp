@@ -21,7 +21,9 @@
 #include "engine/file_hashes.h"
 #include "engine/mask_paint.h"
 #include "engine/model_library.h"
+#include "engine/model_offers.h"
 #include "engine/queue.h"
+#include "engine/registry.h"
 #include "engine/templates.h"
 
 namespace fugue::cli {
@@ -55,6 +57,62 @@ const ActionEntry *find(const QList<ActionEntry> &entries, const QString &id) {
 QList<MissingModel> missingModels(const Document &document, Context &context) {
     FileHashes hashes(FileHashes::defaultPath());
     return ModelLibrary::current(&context.registry).missing(document.models(), hashes);
+}
+
+// The resource type a block input's targets take (the handle each holds in the action's workflow, else the port's declared type), or
+// nothing when it is not a model input.
+std::optional<PortType> resourceTypeOf(const ActionEntry &e, const canvas::ActionInput &input, const Registry &registry) {
+    for (const PortRef &target : input.targets) {
+        const auto node = e.document.graph.nodes.constFind(target.node);
+        if (node == e.document.graph.nodes.cend())
+            continue;
+        const InputValue held = node->inputs.value(target.port);
+        if (held.kind() == InputValue::Kind::Resource)
+            if (const std::optional<PortType> type = PortType::parse(held.handle().value(QStringLiteral("resource")).toString()))
+                return type;
+        if (const NodeType *type = registry.nodeType(node->type))
+            if (const InputSpec *spec = type->input(target.port); spec && registry.portKind(spec->type.type) == PortKind::Resource)
+                return spec->type.type;
+    }
+    return std::nullopt;
+}
+
+// A model picked by its file name, as the task bar's picker does: the model files of `type` (the model folders, as `fugue model list`
+// shows them) whose name is `word` or whose file name is, hashed once (the hash is remembered, so the next run is quick). The handle
+// the file's content names, or a plain error that lists the names there are.
+Result<QJsonObject> modelByName(const PortType &type, const QString &word, Context &context) {
+    FileHashes hashes(FileHashes::defaultPath());
+    const ModelLibrary library = ModelLibrary::current(&context.registry);
+    const QList<ModelFile> files = library.list(type);
+    const auto same = [&](const ModelFile &file, Qt::CaseSensitivity sensitivity) {
+        return file.name.compare(word, sensitivity) == 0 || QFileInfo(file.path).fileName().compare(word, sensitivity) == 0;
+    };
+    QList<ModelFile> found;
+    for (const Qt::CaseSensitivity sensitivity : {Qt::CaseSensitive, Qt::CaseInsensitive}) {
+        for (const ModelFile &file : files)
+            if (same(file, sensitivity))
+                found << file;
+        if (!found.isEmpty())
+            break;
+    }
+    if (found.size() > 1) {
+        Error error = usageProblem(QStringLiteral("%1 names %2 model files; give the name with its folder.").arg(word).arg(found.size()));
+        for (const ModelFile &file : std::as_const(found))
+            error.valid.append(file.name);
+        return Result<QJsonObject>(error);
+    }
+    if (found.isEmpty()) {
+        Error error = usageProblem(QStringLiteral("There is no %1 model file named \"%2\" in the model folders.").arg(type.toString(), word),
+                                   QStringLiteral("`fugue model list --type %1` lists them; a full resource handle also works.").arg(type.toString()));
+        for (const ModelFile &file : files)
+            error.valid.append(file.name);
+        return Result<QJsonObject>(error);
+    }
+    const QString hash = hashes.hash(found.first().path);
+    if (hash.isEmpty())
+        return Result<QJsonObject>(makeError(QStringLiteral("media_unreadable"), QStringLiteral("%1 could not be read.").arg(found.first().path)));
+    hashes.save();
+    return diskHandle(type.toString(), found.first().name, hash);
 }
 
 QString nameOf(const ActionEntry &e) { return e.action ? e.action->name : e.id; }
@@ -319,6 +377,13 @@ Reply canvasAct(const Command &command, Context &context) {
                 return Reply::failure(error);
             }
             request.values.insert(key, *word);
+        } else if (const std::optional<PortType> model = resourceTypeOf(*chosen, *input, context.registry);
+                   model && !literalOf(raw).isObject()) {
+            // A model input: its file name (the way the bar's picker names it), unless a whole resource handle was given.
+            const Result<QJsonObject> handle = modelByName(*model, raw, context);
+            if (!handle)
+                return Reply::failure(handle.errors());
+            request.values.insert(key, handle.value());
         } else {
             request.values.insert(key, literalOf(raw));
         }
@@ -351,6 +416,7 @@ Reply canvasAct(const Command &command, Context &context) {
         if (!folder) {
             for (const RunFolder &started : std::as_const(runs))
                 cancelBound(started, context);
+            canvas::takeBackGrowth(plan.value());
             return Reply::failure(folder.errors());
         }
         runs.append(folder.value());
@@ -427,6 +493,11 @@ Reply canvasAct(const Command &command, Context &context) {
             cancelBound(runs.at(rest), context);
         break;
     }
+    // An Expand that was cancelled or failed after the canvas grew: the empty strip is taken back when nothing else changed the canvas
+    // (#310; the growth stays in the history, Redo brings it back).
+    QString growthNotice;
+    if (status != QLatin1String("ok") && canvas::takeBackGrowth(plan.value()))
+        growthNotice = canvas::growthTakenBack(action.name, status == QLatin1String("cancelled"));
     // A Write that came from the cache lands nothing: its revision goes on the head again (design decision 5).
     QString notice;
     for (const Written &write : std::as_const(writes))
@@ -463,6 +534,8 @@ Reply canvasAct(const Command &command, Context &context) {
         data.insert("notice", notice);
     if (status != QLatin1String("ok")) {
         failure.message += QStringLiteral(" (%1 of %2 run(s) finished.)").arg(finished).arg(runs.size());
+        if (!growthNotice.isEmpty())
+            failure.message += QLatin1Char(' ') + growthNotice;
         return Reply::failure(failure);
     }
     QStringList names;

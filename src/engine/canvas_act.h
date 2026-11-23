@@ -11,6 +11,7 @@
 //     (one revision, with the new area pre-filled), the router's padding and scale, the layer role's layer, the prompt, the
 //     seeds of Count N (variations 2 to N hidden, "(n of N)" after the layer's name), and the bound copy of the workflow of
 //     each run.
+// An Expand that ends cancelled or failed has its growth taken back (takeBackGrowth).
 // Errors are coded: `mask_empty`, `canvas_head_moved`, `action_invalid`, `pack_missing`, `model_missing` (from the caller's
 // check) and `act_refused` for the rest (a word the person fixes: select an area, type a prompt, pick a side).
 
@@ -135,5 +136,14 @@ struct ActPlan {
 inline constexpr int maxActVariations = 4;
 
 Result<ActPlan> planAct(const ActionEntry &entry, const ActRequest &request);
+
+// Expand grew the canvas before its runs; a run that was cancelled or failed leaves the empty strip (#310, design: Expand). Takes
+// the growth back when nothing else has changed the canvas since: the head is still `plan.growRevision`, so it moves back to the
+// revision before it, as the bar's Undo does (the growth revision stays in the history, and Redo can bring it back). Nothing when
+// the plan did not grow, or the head moved meanwhile (a Count N variation landed, a person edited): that canvas is left alone.
+// True when the head was moved back.
+bool takeBackGrowth(const ActPlan &plan);
+// The line that says so: "The canvas is back to its size: Expand was cancelled." / "... did not finish."
+QString growthTakenBack(const QString &actionName, bool cancelled);
 
 } // namespace fugue::canvas

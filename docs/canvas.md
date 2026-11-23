@@ -58,8 +58,8 @@ the window, see below):
   Crop to Mask does, so a small selection reaches the model's size (the Cap still brings it down). Padding is held at
   Feather + 16 or more (the node warns `padding_raised`) because Canvas Write's blend stops at the region's box; Feather softens the mask's edge outward. Its Revision is `head` unless you
   give a hash.
-- **Canvas New** (`fugue/canvas-new`) makes a new canvas from a picture: one layer, Layer 1, at the picture's own size, named
-  by **Canvas name** (a taken name gets a number). Every run makes another canvas (the node is not cached: it is a sink that
+- **Canvas New** (`fugue/canvas-new`) makes a new canvas from a picture: one layer at the picture's own size, named
+  by **Canvas name** (a taken name gets a number; the layer keeps the plain name, `Upscaled`, and is `Layer 1` only when the name is empty). Every run makes another canvas (the node is not cached: it is a sink that
   changes the store), and it never reads or changes the canvas the picture came from. Outputs: `canvas` (the new canvas's
   handle) and `id`. A picture over the canvas limit (16384 px a side, 67 megapixels) is `canvas_too_big`, writing nothing.
 - **Canvas Write** puts a picture on the canvas as a new layer, blended in through a layer mask
@@ -230,7 +230,8 @@ per picture (one JSON event per line with `--json`). Its exit code is 1 when any
 code binds the canvas, the head, the selection (`--rect x,y,w,h`, or `--selection mask.png`, white is selected, kept by content in
 the store as the lasso's is), the prompt and seed, the layer an action works on (`--layer`), Count (`--count 3`: three layers, the
 first visible, the others hidden), Expand (`--expand right --percent 25`: the canvas grows by one revision, then the strip is written)
-and any Advanced input (`--set steps=8`, `--set strength=Light`). Without `--wait` the runs are queued and the command returns; with
+and any Advanced input (`--set steps=8`, `--set strength=Light`, `--set model=RealESRGAN_x4plus.safetensors`: a model by its file name, found in the
+model folders and hashed once like the picker's pick, or a whole resource handle; a name no folder has is a plain `usage` error listing the names). Without `--wait` the runs are queued and the command returns; with
 `--wait` it blocks, prints progress on stderr (Ctrl+C cancels the runs), and says the new head and the new layers (or, for Upscale,
 the new canvas). A missing model or pack is refused before anything changes, saying what to fetch. `fugue canvas actions` lists the
 actions and what each needs. This is the way for a script or an agent to run the whole bar path, headless, on the GPU or on a
@@ -507,7 +508,9 @@ model, FLUX.2 Klein 4B Q8, 4 steps, as Generative fill):
   side). Generate first grows the canvas (one step in History, Undo takes it back; the new area is pre-filled from the edge
   pixels as a layer called "Expanded area") and then fills the new strip plus 32 px of the old picture, with 256 px of the
   picture beside it in view. One side per run; the prompt is optional (a description of the whole scene helps). If the run
-  fails or is cancelled the canvas stays grown: Undo.
+  fails or is cancelled the growth is taken back (the head moves back to the revision before it, as Undo does, and the bar says
+  "The canvas is back to its size: Expand was cancelled."; Redo brings the growth back). When the canvas changed meanwhile (a
+  variation of Count landed, you edited it) it is left as it is. `fugue canvas act` does the same and says so in its error.
 
 - **Upscale** makes the whole picture (every visible layer, flattened, as it looks now) 2 or 4 times bigger and puts it on
   a **new canvas** named Upscaled (Upscaled 2 and so on when taken), which then opens; the canvas you came from is not
@@ -516,7 +519,7 @@ model, FLUX.2 Klein 4B Q8, 4 steps, as Generative fill):
   the upscale model (Real-ESRGAN x4plus, a 67 MB download the bar offers). The model always works at its own factor; a
   2x result is its 4x result scaled down, which keeps it sharp. **Upscale (no model)** is plain Lanczos resampling: it
   adds no detail, needs nothing to download and no GPU. A result over 16384 px a side or 67 megapixels is refused in
-  words and no canvas is made: choose 2x. The result has one layer, Layer 1: the layers of the source are flattened.
+  words and no canvas is made: choose 2x. The result has one layer, named Upscaled: the layers of the source are flattened.
   The new canvas comes from **Canvas New** (below), a sink node any workflow can use.
 
 ### Advanced and Count

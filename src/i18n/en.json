@@ -1533,6 +1533,8 @@
   "Sinks and inputs only": "Sinks and inputs only",
   "Smart": "Smart",
   "The canvas changed size while this ran, so nothing was written. Run again.": "The canvas changed size while this ran, so nothing was written. Run again.",
+  "The canvas is back to its size: %1 was cancelled.": "The canvas is back to its size: %1 was cancelled.",
+  "The canvas is back to its size: %1 did not finish.": "The canvas is back to its size: %1 did not finish.",
   "Show every revision, the ones kept apart too": "Show every revision, the ones kept apart too",
   "Blend mode": "Blend mode",
   "Combine": "Combine",

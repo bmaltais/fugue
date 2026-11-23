@@ -863,6 +863,7 @@ private slots:
         QCOMPARE(tree->width, 800);
         QCOMPARE(tree->height, 600);
         QCOMPARE(int(tree->layers.size()), 1); // one layer holding the picture whole, one revision
+        QCOMPARE(tree->layers.front().name, base); // named for the canvas's name, not "Layer 1" (#311)
         QCOMPARE(pixel(id, info->head, 799, 599, 1), 255);
         QCOMPARE(pixel(id, info->head, 10, 10, 0), 0);
         QCOMPARE(headOf(source), before); // the source canvas is as it was
@@ -871,6 +872,9 @@ private slots:
         QVERIFY2(second.ok(), qPrintable(codeOf(second)));
         QVERIFY(second->value("id").text() != id);
         QCOMPARE(CanvasStore::forSession().info(second->value("id").text())->name, base + QStringLiteral(" 2"));
+        // The layer takes the name asked for, without the number a taken canvas name got.
+        const auto secondTree = CanvasStore::forSession().loadTree(second->value("id").text(), CanvasStore::forSession().info(second->value("id").text())->head);
+        QCOMPARE(secondTree->layers.front().name, base);
         QVERIFY(!registryNode(bench, "fugue/canvas-new").deterministic);
     }
 
