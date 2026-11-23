@@ -10,8 +10,10 @@
 #include <QtTest>
 
 #include "canvas/canvas_view_model.h"
+#include "canvas/mask_layer.h"
 #include "canvas/picture_import.h"
 #include "engine/canvas_store.h"
+#include "workflow/image_inputs.h"
 
 using namespace fugue;
 using namespace fugue::mask;
@@ -92,6 +94,50 @@ private slots:
         model.selectNone();
         QVERIFY(model.pasteLayer());
         QCOMPARE(names(model.layers()).first(), QStringLiteral("Pasted 1"));
+    }
+
+    // #327: Copy, Copy Merged and Copy selection as mask put a picture on the clipboard (the Graph's Ctrl+V takes it as a Load Image) and
+    // store nothing.
+    void copyPutsTheSelectedPixelsOnTheClipboardAndStoresNothing() {
+        CanvasViewModel model;
+        open(model);
+        MaskLayer selection;
+        selection.setImageSize({200, 100});
+        selection.fillRect(20, 10, 50, 30, false);
+        const int before = revisionCount();
+        const auto clipboardImage = [] { return QGuiApplication::clipboard()->image(); };
+        QVERIFY(model.copyPicture(QStringLiteral("layer"), &selection, 1)); // Top, red
+        QTRY_VERIFY(QGuiApplication::clipboard()->mimeData()->hasImage());
+        QVERIFY(clipboardHasImage(*QGuiApplication::clipboard()->mimeData()));
+        QImage copy = clipboardImage().convertToFormat(QImage::Format_RGBA8888);
+        QCOMPARE(copy.size(), QSize(50, 30));
+        QCOMPARE(copy.pixelColor(0, 0), QColor(200, 60, 30, 255));
+        selection.clear();
+        selection.fillRect(0, 0, 10, 10, false); // the layer under: Base is blue, Top hides it only in the merged copy
+        QVERIFY(model.copyPicture(QStringLiteral("layer"), &selection, 0));
+        QCOMPARE(clipboardImage().convertToFormat(QImage::Format_RGBA8888).pixelColor(0, 0), QColor(30, 60, 200, 255));
+        QVERIFY(model.copyPicture(QStringLiteral("merged"), &selection, 0));
+        QCOMPARE(clipboardImage().convertToFormat(QImage::Format_RGBA8888).pixelColor(0, 0), QColor(200, 60, 30, 255));
+        QVERIFY(model.copyPicture(QStringLiteral("mask"), &selection, 0));
+        const QImage gray = clipboardImage();
+        QCOMPARE(gray.size(), QSize(200, 100)); // the canvas's size, so it lines up as a mask
+        QCOMPARE(gray.pixelColor(5, 5).red(), 255);
+        QCOMPARE(gray.pixelColor(50, 50).red(), 0);
+        QCOMPARE(revisionCount(), before);
+    }
+
+    void copyWithNothingToCopySaysWhyAndLeavesTheClipboard() {
+        CanvasViewModel model;
+        open(model);
+        QGuiApplication::clipboard()->setText("keep me");
+        MaskLayer none;
+        QVERIFY(!model.copyPicture(QStringLiteral("layer"), &none, -1)); // no layer picked
+        QVERIFY(model.error().contains("layer"));
+        QVERIFY(!model.copyPicture(QStringLiteral("layer"), nullptr, 0, 300, 0, 10, 10)); // a rectangle off the canvas
+        QVERIFY(!model.copyPicture(QStringLiteral("mask"), &none, 0, 300, 0, 10, 10));
+        QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("keep me"));
+        QVERIFY(model.copyPicture(QStringLiteral("layer"), &none, 0)); // nothing selected is the whole layer, as Photoshop
+        QCOMPARE(QGuiApplication::clipboard()->image().size(), QSize(200, 100));
     }
 
     void withNoPictureOnTheClipboardNothingChangesAndItSaysWhy() {

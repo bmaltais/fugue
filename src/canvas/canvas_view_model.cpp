@@ -15,8 +15,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "canvas/picture_import.h"
+#include "engine/canvas_copy.h"
 #include "canvas/region_pick.h"
 #include "canvas/snap.h"
 
@@ -1116,6 +1118,72 @@ bool CanvasViewModel::pasteLayer(double cx, double cy) {
         return false;
     }
     return placePicture(picture.pixels, cx, cy, {});
+}
+
+bool CanvasViewModel::copyPicture(const QString &what, MaskLayer *selection, int position, double x, double y, double width, double height) {
+    if (revisionB().isEmpty())
+        return false;
+    commitMask(); // a layer-mask stroke not stored yet is part of what is copied
+    const Result<mask::PaintDocument> document = store().load(canvasId(), revisionB());
+    if (!document) {
+        fail(document.errors());
+        return false;
+    }
+    const bool asMask = what == QLatin1String("mask");
+    const bool painted = selection && !selection->isEmpty() && selection->imageSize() == QSize(document->width(), document->height());
+    const canvas::CopyArea area{painted ? &selection->paint() : nullptr,
+                                width > 0 && height > 0 ? mask::IRect{int(std::floor(x)), int(std::floor(y)), int(std::ceil(width)), int(std::ceil(height))}
+                                                        : mask::IRect{}};
+    QImage image;
+    QString named;
+    if (asMask) {
+        const Result<mask::MaskPaint> picture = canvas::areaAsMask(document->width(), document->height(), area);
+        if (!picture) {
+            fail(picture.errors());
+            return false;
+        }
+        QImage gray(picture->width(), picture->height(), QImage::Format_RGB888); // opaque, so every node and app reads it as a picture
+        for (int row = 0; row < gray.height(); ++row) {
+            uchar *out = gray.scanLine(row);
+            for (int column = 0; column < gray.width(); ++column)
+                out[column * 3] = out[column * 3 + 1] = out[column * 3 + 2] = picture->at(column, row);
+        }
+        image = gray;
+        named = tr("Copied the selection as a mask (%1 × %2)").arg(image.width()).arg(image.height());
+    } else {
+        const bool merged = what == QLatin1String("merged");
+        if (!merged && (position < 0 || position >= m_outline.topCount())) {
+            fail({makeError(QStringLiteral("input_invalid"), tr("Pick a layer to copy."), tr("Copy Merged copies every shown layer."))});
+            return false;
+        }
+        const Result<mask::MaskPaint> source = merged ? Result<mask::MaskPaint>(document->flatten()) : canvas::layerPixels(document.value(), position);
+        if (!source) {
+            fail(source.errors());
+            return false;
+        }
+        const Result<canvas::CopiedPicture> copy = canvas::copyArea(source.value(), area);
+        if (!copy) {
+            fail(copy.errors());
+            return false;
+        }
+        const mask::MaskPaint &pixels = copy->pixels;
+        image = QImage(pixels.width(), pixels.height(), QImage::Format_RGBA8888);
+        for (int row = 0; row < image.height(); ++row)
+            std::memcpy(image.scanLine(row), pixels.pixels().data() + size_t(row) * size_t(pixels.width()) * 4, size_t(pixels.width()) * 4);
+        named = (merged ? tr("Copied merged (%1 × %2)") : tr("Copied (%1 × %2)")).arg(image.width()).arg(image.height());
+    }
+    QClipboard *board = QGuiApplication::instance() ? QGuiApplication::clipboard() : nullptr;
+    if (!board) {
+        fail({makeError(QStringLiteral("input_invalid"), tr("There is no clipboard to copy to."))});
+        return false;
+    }
+    board->setImage(image);
+    if (!error().isEmpty()) {
+        m_error.clear();
+        emit errorChanged();
+    }
+    showNotice(named);
+    return true;
 }
 
 bool CanvasViewModel::isPictureFile(const QString &pathOrUrl) const { return fugue::isPictureFile(pathOrUrl); }

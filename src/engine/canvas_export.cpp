@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "engine/atomic_file.h"
+#include "engine/canvas_copy.h"
 #include "engine/new_canvas.h"
 #include "engine/paint_file.h"
 #include "engine/psd_file.h"
@@ -165,15 +166,7 @@ Result<LayerFiles> exportLayers(const mask::PaintDocument &document, const Layer
         const mask::MaskPaint *pixels = document.pixels(info.id);
         if (!pixels)
             continue;
-        mask::MaskPaint picture = *pixels;
-        const mask::MaskPaint *layerMask = options.applyMasks && info.hasMask && info.maskEnabled ? document.maskPixels(info.id) : nullptr;
-        if (layerMask) {
-            std::vector<uint8_t> bytes = picture.pixels();
-            const std::vector<uint8_t> &m = layerMask->pixels();
-            for (size_t p = 0; p < m.size() && p * 4 + 3 < bytes.size(); ++p)
-                bytes[p * 4 + 3] = uint8_t((bytes[p * 4 + 3] * m[p] + 127) / 255);
-            picture = mask::MaskPaint(picture.width(), picture.height(), bytes, 4);
-        }
+        const mask::MaskPaint picture = options.applyMasks ? maskedPixels(document, info, *pixels) : *pixels;
         const Result<QByteArray> encoded = encode(picture, format, options.quality, options.lossless);
         if (!encoded)
             return encoded.errors();

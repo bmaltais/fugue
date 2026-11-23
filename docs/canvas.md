@@ -402,7 +402,7 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
   area shows no canvas).
-- **Edit**: Paste as new layer, Paste as new canvas and Free transform (below), and Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
+- **Edit**: Copy, Copy merged and Copy selection as mask, Paste as new layer, Paste as new canvas and Free transform (below), and Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
 - **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
   Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
@@ -424,6 +424,17 @@ canvas: they are kept in `guides.json` in the canvas's folder, not in a revision
 back; Duplicate canvas copies them), and a damaged file reads as no guides. Guides, grid and rulers are shown only for one
 picture, not while comparing. A press within 6 pixels of a guide with the Rectangle region or Hand tool takes the guide, not
 the frame.
+
+**Copy a selection (#327).** Edit > **Copy** (Ctrl+C while the Canvas view is the one in use; the Graph's Ctrl+C still copies nodes) puts
+the selected pixels of the current layer on the system clipboard as a picture, as Photoshop's Copy: the picture is cut to the selection's
+bounds and the selection is its alpha (a lasso gives a cut-out, a feathered edge fades out, the layer's own transparency stays, its layer
+mask is applied, its opacity and blend mode are not). **Copy merged** (Ctrl+Shift+C) does the same with every shown layer flattened. The
+selection is the painted one (lasso, Quick Mask, selection from a layer), else the rectangle, else the whole canvas: with nothing selected
+Copy takes the whole layer. **Copy selection as mask** (Edit menu, no key) puts the selection itself on the clipboard as a gray picture
+of the canvas's size, white where it is selected, so it lines up with the canvas when used as a mask. Nothing is stored in the canvas
+and no undo step is made; a notice under the picture names what was copied, and a refusal (no layer picked, a mask layer, a selection
+that holds nothing) says why. What was copied pastes anywhere: Ctrl+V in the Graph makes a **Load Image** node holding it (its Image
+output is the picture, and its Mask output is the picture's transparent part; for a copied mask, wire its Image output to Image to Mask), Ctrl+V in the Canvas view makes it a new layer, and other programs take it as a PNG.
 
 **Paste and place a picture (#236).** Edit > **Paste as new layer** (Ctrl+V while the Canvas view is the one in use: the pointer is
 over it or it has the focus, as for every key of the view; the Graph's Ctrl+V still pastes nodes) puts the clipboard's picture on the
