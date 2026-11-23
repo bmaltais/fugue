@@ -183,7 +183,7 @@ private slots:
         const QString only = makePng(dir.filePath("alone.png"));
         makeRun("20261121-143000-000-iiii", "/w/i.fugue", {{"save", {{"a", image(only)}}}});
         makeRun("20261121-143001-000-iiii", "/w/i.fugue", {{"save", {{"a", image(only)}}}});
-        MediaLibrary library(root(), dir.filePath("thumbs"));
+        MediaLibrary library(root(), dir.filePath("thumbs"), dir.filePath("media.json"));
         const QVariantList rows = library.resultsOfRun("20261121-143000-000-iiii");
         QCOMPARE(rows.size(), 1);
         QCOMPARE(rows[0].toMap().value("run").toString(), QString("20261121-143000-000-iiii"));
@@ -307,7 +307,7 @@ private slots:
         QCOMPARE(QDir(cache).entryList(QDir::Files).size(), 2);
         // The library gives a video and a sound an image:// source too.
         makeRun("20261125-100000-000-vvvv", "/w/v.fugue", {{"save", {{"v", image(clip, "video")}, {"s", image(tone, "audio")}}}});
-        MediaLibrary library(root(), cache);
+        MediaLibrary library(root(), cache, dir.filePath("media.json"));
         const QVariantList rows = library.resultsOfRun("20261125-100000-000-vvvv");
         QCOMPARE(rows.size(), 2);
         for (const QVariant &row : rows)
@@ -336,7 +336,7 @@ private slots:
     void theLibraryHandsTheBrowserRowsTokensAndDetails() {
         const QString shot = makePng(dir.filePath("lib.png"), 10, 10);
         makeRun("20261124-100000-000-gggg", "/w/g.fugue", {{"save", {{"a", image(shot)}}}});
-        MediaLibrary library(root(), dir.filePath("thumbs"));
+        MediaLibrary library(root(), dir.filePath("thumbs"), dir.filePath("media.json"));
         const QVariantList rows = library.resultsOf("/w/g.fugue");
         QCOMPARE(rows.size(), 1);
         const QVariantMap row = rows[0].toMap();

@@ -14,8 +14,10 @@ import "../media"
 // A switch at the top changes the view from the files to the results (#133): the images, videos and
 // sounds the current workflow's runs made, in a MediaBrowser. The caller supplies `results` when
 // `resultsRequested` says the view needs them (it was opened, the workflow changed, or the caller
-// knows a run ended), `details` of the browser's current item when `resultChosen` says it changed,
-// and does what `resultAction` asks.
+// knows a run ended), `details` of the browser's current item (and `resultCaps`: what that file can be
+// used for, {workflow, loadImage}) when `resultChosen` says it changed, and does what `resultAction`
+// asks (open, folder, copy, favorite, send, workflow, rerun, delete). `onlyFavorites` narrows the list
+// (the host does it; `favoritesToggled` says the button was pressed).
 //
 //   Up and Down move along the rows, Enter does a row's action, Delete or Ctrl+W closes an open
 //   workflow, Escape closes the panel
@@ -28,6 +30,8 @@ Item {
     property string view: "files" // "files" or "results"
     property var results: []
     property var resultDetails: []
+    property var resultCaps: ({})
+    property bool onlyFavorites: false
     property string resultsMode: "grid"
     // A run id: the results of that one run alone (the run queue's finished rows open the view on
     // one run), "" for every run of the current workflow. A change of workflow clears it.
@@ -45,6 +49,7 @@ Item {
     signal resultsRequested
     signal resultChosen(var item)
     signal resultAction(string action, var item)
+    signal favoritesToggled
 
     readonly property real u: look.unit
     property alias rowList: list
@@ -100,11 +105,12 @@ Item {
     }
 
     // Files or results: two buttons, one chunk, the same height as the browser's.
-    Row {
+    Flow {
         id: viewSwitch
         objectName: "workflowsViewSwitch"
         x: root.u
         y: root.u
+        width: parent.width - 2 * root.u
         spacing: root.u
         ViewButton {
             objectName: "workflowsView-files"
@@ -137,6 +143,17 @@ Item {
             visible: root.view === "results" && root.resultsRun !== ""
             onTapped: root.resultsRun = ""
         }
+        ViewButton {
+            objectName: "workflowsResultsFavorites"
+            look: root.look
+            text: qsTr("Favorites")
+            tip: qsTr("Show only the results marked as favorites")
+            checkable: true
+            current: root.onlyFavorites
+            accented: false
+            visible: root.view === "results"
+            onTapped: root.favoritesToggled()
+        }
     }
     // Made only while the results are shown (the item budget).
     Loader {
@@ -149,9 +166,22 @@ Item {
             items: root.results
             details: root.resultDetails
             mode: root.resultsMode
-            actions: [{id: "open", label: qsTr("Open")}, {id: "folder", label: qsTr("Show folder")},
-                      {id: "copy", label: qsTr("Copy path")}]
-            emptyText: root.resultsRun !== "" ? qsTr("This run made no images, videos or sounds.")
+            actions: [
+                {id: "favorite", label: qsTr("Favorite"), tip: qsTr("Mark or unmark this result (F)"), current: currentItem?.favorite === true},
+                {id: "open", label: qsTr("Open")},
+                {id: "rerun", label: qsTr("Re-run"), enabled: root.resultCaps.workflow === true,
+                 tip: qsTr("Open the workflow this file was made with, as it was, and run it")},
+                {id: "workflow", label: qsTr("Open workflow"), enabled: root.resultCaps.workflow === true,
+                 tip: qsTr("Open the workflow this file was made with, as a new tab")},
+                {id: "send", label: qsTr("Send to Load Image"), enabled: root.resultCaps.loadImage === true,
+                 tip: qsTr("Put this picture in a Load Image node of the current workflow")},
+                {id: "folder", label: qsTr("Show folder")},
+                {id: "copy", label: qsTr("Copy path")},
+                {id: "delete", label: qsTr("Move to trash"), danger: true, tip: qsTr("Move this file to the trash (Delete)"),
+                 confirm: qsTr("Move %1 to the trash?")}
+            ]
+            emptyText: root.onlyFavorites ? qsTr("No favorites here yet: press F on a result to mark it.")
+                     : root.resultsRun !== "" ? qsTr("This run made no images, videos or sounds.")
                      : root.workflowPath === "" ? qsTr("Save the workflow, then run it: its results show here.")
                                                 : qsTr("Run this workflow: its images, videos and sounds show here.")
             onModeChanged: root.resultsMode = mode

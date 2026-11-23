@@ -13,13 +13,22 @@ import "../canvas"
 // Input:  look; items, a list of rows {url, kind ("image"|"video"|"audio"), title, thumb (an
 //         image source for the grid, or ""), group (a heading for the rows that follow, or "")};
 //         details, a list of {label, value} for the current item (the host fills it when
-//         `currentItem` changes); actions, a list of {id, label}; emptyText; mode.
+//         `currentItem` changes); actions, a list of {id, label, tip, enabled (default true), current
+//         (a toggle that is on), danger, confirm (a question, %1 being the item's title: the action
+//         is asked for only after the person says yes)}; emptyText; mode. An item may carry
+//         `favorite` (a star on its cell) and `width` and `height` (the picture's pixel size, which
+//         turns on zoom and compare).
 // Output: currentIndex and currentItem; mode ("grid", "filmstrip", "single"); signals
 //         actionRequested(id, item), activated(item) (Enter or a double click on an item: the
 //         browser has gone to single), closeRequested (Escape in a grid or a filmstrip).
+// Zoom:   in the large view of an image the wheel zooms about the pointer, a drag pans, + and - zoom,
+//         0 fits and 1 shows the pixels as they are (buttons Fit and 100% do the same).
+// Compare: C (or the Compare button) pins the current image as A, then the next image chosen is B and
+//         the two are compared in one frame (CompareView's modes); C again leaves it. The pairing is
+//         the browser's alone (a list of the host's may change under it, which ends the compare).
 // Keys:   Left and Right step (Up and Down move a row in the grid), Home and End, Enter opens the
 //         current item large, Escape goes back to the grid (then asks to close), I shows or hides
-//         the details. In a video's or sound's player, Left and Right seek once the player has the
+//         the details, F and Delete ask for the actions with those ids (favorite, delete). In a video's or sound's player, Left and Right seek once the player has the
 //         focus (a click on it); Escape or a click outside gives the focus back.
 // Cost:   the grid and the filmstrip are lists, so only the cells in view exist; the large item and
 //         its player exist only outside the grid.
@@ -33,8 +42,16 @@ FocusScope {
     property string mode: "grid"
     property int currentIndex: -1
     property bool showInfo: true
+    // The index of the image pinned as A of a compare, or -1; the action asked for and not yet confirmed.
+    property int compareIndex: -1
+    property var pending: null
+    property string compareMode: "slider"
 
     readonly property var currentItem: currentIndex >= 0 && currentIndex < items.length ? items[currentIndex] : null
+    readonly property bool isImage: currentItem?.kind === "image"
+    readonly property bool comparing: compareIndex >= 0 && compareIndex !== currentIndex && mode !== "grid"
+                                      && isImage && items[compareIndex]?.kind === "image"
+    readonly property int imageCount: items.filter(i => i.kind === "image").length
     readonly property real u: look.unit
     readonly property real cell: 24 * u // 96px
     readonly property real strip: 18 * u
@@ -110,11 +127,47 @@ FocusScope {
         activated(currentItem)
     }
     function act(id) {
-        if (currentItem)
+        const action = actions.find(a => a.id === id)
+        if (!currentItem || !action || action.enabled === false)
+            return
+        if (action.confirm)
+            pending = action
+        else
             actionRequested(id, currentItem)
     }
+    function confirmPending() {
+        const action = pending
+        pending = null
+        root.forceActiveFocus()
+        if (action && currentItem)
+            actionRequested(action.id, currentItem)
+    }
+    function toggleCompare() {
+        if (compareIndex >= 0) {
+            compareIndex = -1
+            return
+        }
+        if (!isImage)
+            return
+        compareIndex = currentIndex
+        if (mode === "grid")
+            setMode("filmstrip")
+    }
+    function zoomKey(key) {
+        if (mode === "grid" || !large.zoomable)
+            return false
+        if (key === Qt.Key_Plus || key === Qt.Key_Equal) large.zoomBy(1.25)
+        else if (key === Qt.Key_Minus) large.zoomBy(0.8)
+        else if (key === Qt.Key_0) large.fit()
+        else if (key === Qt.Key_1) large.actualSize()
+        else return false
+        return true
+    }
 
+    onCurrentIndexChanged: pending = null
     onItemsChanged: {
+        compareIndex = -1
+        pending = null
         if (items.length === 0)
             currentIndex = -1
         else if (currentIndex < 0)
@@ -131,7 +184,8 @@ FocusScope {
     Keys.onShortcutOverride: event => {
         if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)))
             event.accepted = [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown,
-                              Qt.Key_Home, Qt.Key_End, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape, Qt.Key_I].includes(event.key)
+                              Qt.Key_Home, Qt.Key_End, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape, Qt.Key_I, Qt.Key_F, Qt.Key_C, Qt.Key_Delete,
+                              Qt.Key_Plus, Qt.Key_Minus, Qt.Key_Equal, Qt.Key_0, Qt.Key_1].includes(event.key)
     }
     Keys.onPressed: event => {
         if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
@@ -147,11 +201,16 @@ FocusScope {
         case Qt.Key_End: select(items.length - 1); break
         case Qt.Key_Return: case Qt.Key_Enter: open(); break
         case Qt.Key_Escape:
-            if (mode === "single") setMode(browseMode)
+            if (pending) pending = null
+            else if (compareIndex >= 0) compareIndex = -1
+            else if (mode === "single") setMode(browseMode)
             else closeRequested()
             break
         case Qt.Key_I: showInfo = !showInfo; break
-        default: used = false
+        case Qt.Key_F: act("favorite"); break
+        case Qt.Key_Delete: act("delete"); break
+        case Qt.Key_C: toggleCompare(); break
+        default: used = zoomKey(event.key)
         }
         event.accepted = used
     }
@@ -194,6 +253,52 @@ FocusScope {
             visible: root.mode !== "grid"
             onTapped: root.showInfo = !root.showInfo
         }
+        ViewButton {
+            objectName: "mediaFit"
+            look: root.look
+            text: qsTr("Fit")
+            tip: qsTr("Fit the picture in the view (0)")
+            visible: root.mode !== "grid" && large.zoomable
+            onTapped: large.fit()
+        }
+        ViewButton {
+            objectName: "mediaActualSize"
+            look: root.look
+            text: qsTr("100%")
+            tip: qsTr("One picture pixel to one screen pixel (1)")
+            visible: root.mode !== "grid" && large.zoomable
+            onTapped: large.actualSize()
+        }
+        ViewButton {
+            objectName: "mediaCompare"
+            look: root.look
+            text: qsTr("Compare")
+            tip: root.compareIndex >= 0 ? qsTr("Leave the compare (C)") : qsTr("Pin this picture, then choose a second one to compare with (C)")
+            checkable: true
+            current: root.compareIndex >= 0
+            visible: root.imageCount > 1
+            enabled: root.compareIndex >= 0 || root.isImage
+            onTapped: root.toggleCompare()
+        }
+        CompareModeButtons {
+            objectName: "mediaCompareModes"
+            look: root.look
+            prefix: "mediaCompareMode-"
+            mode: root.compareMode
+            hasDifference: false
+            accented: false
+            visible: root.comparing
+            onPicked: picked => root.compareMode = picked
+        }
+        Text {
+            objectName: "mediaCompareHint"
+            visible: root.compareIndex >= 0 && !root.comparing
+            height: 7 * root.u
+            verticalAlignment: Text.AlignVCenter
+            text: qsTr("Choose a second picture to compare")
+            color: root.look.label
+            font.pixelSize: root.look.labelSize
+        }
         Text {
             objectName: "mediaCount"
             height: 7 * root.u
@@ -209,7 +314,7 @@ FocusScope {
     Flow {
         id: foot
         objectName: "mediaActions"
-        visible: root.actions.length > 0
+        visible: root.actions.length > 0 && root.pending === null
         x: root.u
         width: parent.width - 2 * root.u
         y: parent.height - (visible ? height : 0) - root.u
@@ -222,9 +327,47 @@ FocusScope {
                 objectName: "mediaAction-" + modelData.id
                 look: root.look
                 text: modelData.label
-                enabled: root.currentItem !== null
-                onTapped: root.act(actionButton.modelData.id)
+                tip: modelData.tip ?? ""
+                danger: modelData.danger === true
+                checkable: modelData.current !== undefined
+                current: modelData.current === true
+                accented: false
+                enabled: root.currentItem !== null && modelData.enabled !== false
+                onTapped: { root.act(actionButton.modelData.id); root.forceActiveFocus() }
             }
+        }
+    }
+    // The question that stands in the actions' place before one that cannot be undone.
+    Flow {
+        id: confirmBar
+        objectName: "mediaConfirm"
+        visible: root.pending !== null
+        x: root.u
+        width: parent.width - 2 * root.u
+        y: parent.height - (visible ? height : 0) - root.u
+        spacing: root.u
+        Text {
+            width: Math.min(implicitWidth, confirmBar.width)
+            height: 7 * root.u
+            verticalAlignment: Text.AlignVCenter
+            text: (root.pending?.confirm ?? "").replace("%1", root.currentItem?.title ?? "")
+            textFormat: Text.PlainText
+            elide: Text.ElideMiddle
+            color: root.look.text
+            font.pixelSize: root.look.labelSize
+        }
+        ViewButton {
+            objectName: "mediaConfirmYes"
+            look: root.look
+            text: root.pending?.label ?? ""
+            danger: true
+            onTapped: root.confirmPending()
+        }
+        ViewButton {
+            objectName: "mediaConfirmNo"
+            look: root.look
+            text: qsTr("Cancel")
+            onTapped: { root.pending = null; root.forceActiveFocus() }
         }
     }
 
@@ -233,7 +376,7 @@ FocusScope {
         x: root.u
         y: bar.y + bar.height + root.u
         width: parent.width - 2 * root.u
-        height: foot.y - y - (foot.visible ? root.u : 0)
+        height: (confirmBar.visible ? confirmBar.y : foot.y) - y - (foot.visible || confirmBar.visible ? root.u : 0)
 
         Text {
             visible: root.items.length === 0
@@ -303,6 +446,8 @@ FocusScope {
             height: parent.height - (filmstripLoader.active ? root.strip + root.u : 0) - infoBox.reserved
             look: root.look
             item: root.mode === "grid" ? null : root.currentItem
+            compareWith: root.comparing ? root.items[root.compareIndex] : null
+            compareMode: root.compareMode
             onPressed: root.forceActiveFocus()
         }
         Loader {

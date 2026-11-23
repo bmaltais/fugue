@@ -613,6 +613,16 @@ bool ImageInputs::pasteInto(const QString &node) {
     return take(files, node, pastePoint(), files.size() == 1 ? storeClipboardMask(*data) : QString());
 }
 
+bool ImageInputs::sendFile(const QString &path) {
+    QString node;
+    replacing(node);
+    const bool taken = take(storeFiles({path}), node, pastePoint());
+    if (taken)
+        emit message(node.isEmpty() ? tr("Made a Load Image node of %1.").arg(QFileInfo(path).fileName())
+                                    : tr("Put %1 into the selected Load Image node.").arg(QFileInfo(path).fileName()));
+    return taken;
+}
+
 bool ImageInputs::dropFiles(const QStringList &paths, QPointF at, const QString &onNode) {
     return take(storeFiles(paths), imageInput(onNode).isEmpty() ? QString() : onNode, at);
 }

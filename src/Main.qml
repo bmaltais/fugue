@@ -639,6 +639,13 @@ ApplicationWindow {
                     App.recentFiles.forget(path)
             }
             onCloseRequested: App.sidePanels.tab = ""
+            // What the browser remembers: the view, the mode and the favorites filter (media_state.h).
+            view: App.mediaLibrary.resultsView
+            resultsMode: App.mediaLibrary.resultsMode
+            onlyFavorites: App.mediaLibrary.onlyFavorites
+            onViewChanged: App.mediaLibrary.resultsView = view
+            onResultsModeChanged: App.mediaLibrary.resultsMode = resultsMode
+            onFavoritesToggled: App.mediaLibrary.onlyFavorites = !App.mediaLibrary.onlyFavorites
             // Made for a run's results (the queue's row asked): it opens on that run.
             Component.onCompleted: {
                 if (win.pendingResultsRun !== "") {
@@ -651,19 +658,35 @@ ApplicationWindow {
             function refreshResults() {
                 const rows = workflowsPanel.resultsRun !== "" ? App.mediaLibrary.resultsOfRun(workflowsPanel.resultsRun)
                                                               : App.mediaLibrary.resultsOf(workflowsPanel.workflowPath)
-                if (JSON.stringify(rows.map(r => r.path)) !== JSON.stringify(workflowsPanel.results.map(r => r.path)))
+                const key = list => JSON.stringify(list.map(r => [r.path, r.favorite]))
+                if (key(rows) !== key(workflowsPanel.results))
                     workflowsPanel.results = rows
             }
             onResultsRequested: refreshResults()
-            onResultChosen: item => workflowsPanel.resultDetails = App.mediaLibrary.detailsOf(item.path, item.run, item.node)
+            onResultChosen: item => {
+                workflowsPanel.resultDetails = App.mediaLibrary.detailsOf(item.path, item.run, item.node)
+                workflowsPanel.resultCaps = App.mediaLibrary.capabilitiesOf(item.path)
+            }
             onResultAction: (action, item) => {
                 if (action === "open") App.mediaLibrary.openFile(item.path)
                 else if (action === "folder") App.mediaLibrary.openFolder(item.path)
                 else if (action === "copy") App.mediaLibrary.copyPath(item.path)
+                else if (action === "favorite") App.mediaLibrary.toggleFavorite(item.path)
+                else if (action === "send") App.workflows.sendImage(item.path)
+                else if (action === "workflow") App.workflows.openPath(item.path)
+                else if (action === "rerun") {
+                    if (App.workflows.openPath(item.path))
+                        App.commands.trigger("run.start")
+                }
+                else if (action === "delete") App.mediaLibrary.trash(item.path)
             }
             Connections {
                 target: App.runQueue
                 function onChanged() { if (workflowsPanel.view === "results") Qt.callLater(workflowsPanel.refreshResults) }
+            }
+            Connections {
+                target: App.mediaLibrary
+                function onResultsChanged() { if (workflowsPanel.view === "results") Qt.callLater(workflowsPanel.refreshResults) }
             }
         }
     }
