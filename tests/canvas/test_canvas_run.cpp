@@ -492,6 +492,14 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // The live-frame overlays showing (visible) under an item.
+    static int overlays(QQuickItem *from) {
+        int n = from->objectName() == "liveFrame" && from->isVisible() ? 1 : 0;
+        for (QQuickItem *child : from->childItems())
+            n += overlays(child);
+        return n;
+    }
+
     // A Sampler makes a latent, not a picture, yet its step previews (node.preview) show on its card while
     // it runs, at the top level and inside a group, and the group's own card shows its inside's preview.
     void aSamplersStepPreviewShowsOnItsCardAlsoInsideAGroup() {
@@ -516,6 +524,7 @@ private slots:
         const auto shown = [&](const QString &node) { return r.role(node, NodeList::Thumbnail).toString().startsWith("file://"); };
         preview("top");
         QTRY_VERIFY(shown("top"));
+        QCOMPARE(overlays(r.app.window->contentItem()), 0); // the card has the slot: no overlay
         preview("grp/inner");
         QTRY_VERIFY(shown("grp"));
         QVERIFY(r.app.model.groups()->enterGroup("grp"));
@@ -526,7 +535,8 @@ private slots:
     }
 
     // The live frame shows even where the picture mode hides the node's picture (a Sampler in Sinks
-    // mode, or inside a group), and goes when the node ends; the node's own Hide picture wins.
+    // mode, or inside a group) as an overlay beside the card, never in it (the card's size does not
+    // change), and fades out when the node ends; the node's own Hide picture wins.
     void aLiveFrameShowsInSinksModeUntilTheNodeEnds() {
         RunApp r(R"({
           "fugue": 1,
@@ -543,6 +553,8 @@ private slots:
         QVERIFY(QImage(64, 32, QImage::Format_RGB32).save(file));
         const QString run = r.runs->start();
         QVERIFY(!run.isEmpty());
+        // The events are the test's, checked at once: the real run fails soon (no model) and would end them.
+        const qreal bare = r.role("top", NodeList::Height).toReal();
         const auto shown = [&](const QString &node) { return r.role(node, NodeList::Thumbnail).toString().startsWith("file://"); };
         const auto event = [&](const char *kind, const QString &node, bool frame) {
             QJsonObject e{{"event", kind}, {"node", node}};
@@ -555,16 +567,14 @@ private slots:
             event("node.running", node, false);
             event("node.preview", node, true);
         }
-        const qreal bare = r.role("top", NodeList::Height).toReal();
-        QTRY_VERIFY(shown("top"));
-        QTRY_VERIFY(shown("grp"));
-        QVERIFY(r.role("top", NodeList::Height).toReal() > 0);
-        QVERIFY(!shown("hid"));
+        QCOMPARE(overlays(r.app.window->contentItem()), 2); // top and grp, not hid
+        QVERIFY(!shown("top"));
+        QVERIFY(!shown("grp"));
+        QCOMPARE(r.role("top", NodeList::Height).toReal(), bare);
         for (const QString node : {"top", "hid", "grp/inner"})
             event("node.done", node, false);
-        QTRY_VERIFY(!shown("top"));
-        QTRY_VERIFY(!shown("grp"));
-        QVERIFY(r.role("top", NodeList::Height).toReal() <= bare);
+        QTRY_COMPARE(overlays(r.app.window->contentItem()), 0);
+        QCOMPARE(r.role("top", NodeList::Height).toReal(), bare);
     }
 
     // The service makes a thumbnail for a live frame of a node whose picture is hidden (the key of the live

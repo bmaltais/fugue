@@ -103,6 +103,8 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case ThumbnailFile: return run.thumbnailFile;
     case ThumbnailText: return run.thumbnailText;
     case ThumbnailDim: return run.thumbnailDim;
+    case LiveFrame: return run.liveFrame;
+    case LiveAspect: return run.liveAspect;
     case Compare: return run.compare;
     case Media: return run.media;
     case CompareView: return m_canvas->isCompare(row.id) ? QVariant(m_canvas->compareView(row.id)) : QVariant(QVariantMap());
@@ -119,7 +121,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"},
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
-            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
+            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}, {LiveFrame, "liveFrame"}, {LiveAspect, "liveAspect"},
             {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
             {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}, {Stack, "stack"},
             {ErrorDetail, "errorDetail"}, {ErrorPack, "errorPack"}};
@@ -1723,6 +1725,8 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnailSize = state.value("thumbnailSize").toSizeF();
     run.thumbnailText = state.value("thumbnailText").toString();
     run.thumbnailDim = state.value("thumbnailDim").toBool();
+    run.liveFrame = state.value("liveFrame").toString();
+    run.liveAspect = state.value("liveAspect", 1).toReal();
     run.compare = state.value("compare").toMap();
     run.media = state.value("media").toMap();
     run.values = state.value("values").toMap();
@@ -1735,7 +1739,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
                                 || before.thumbnailAspect != run.thumbnailAspect;
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
-                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim,
+                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim, NodeList::LiveFrame, NodeList::LiveAspect,
                  NodeList::Compare, NodeList::Media, NodeList::Outputs, NodeList::Notice, NodeList::ErrorDetail, NodeList::ErrorPack});
     if (previewChanged)
         emit previewSizeChanged(node);

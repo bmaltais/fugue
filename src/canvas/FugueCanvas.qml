@@ -981,6 +981,14 @@ FocusScope {
             }
         }
 
+        // The live frame of a running node whose picture is hidden: beside its card, over the others.
+        Repeater {
+            model: canvas.model.nodes
+            delegate: LiveFrame {
+                look: canvas.look
+            }
+        }
+
         // Zoomed out, frame titles sit above the nodes on their frame's fill, so the frames
         // read as the map; at least 10 px on screen.
         Repeater {

@@ -368,11 +368,13 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     const NodeInfo info = m_nodeInfo.value(node);
     const Picture cropped = info.followsInput() ? cropSource(tab, node) : Picture{};
     // A node whose picture the mode hides still shows the live frame of its running step (or of a
-    // running node inside a group), unless its own override hides it; the slot goes when the run ends.
+    // running node inside a group), unless its own override hides it. The frame is an overlay beside
+    // the card, never a slot in it: a live frame never changes the layout.
     const bool liveHidden = !info.picture && !info.hideOverride && view.live && !view.thumbnail.isEmpty()
                             && view.thumbnailWidth > 0 && view.thumbnailHeight > 0 && aggregate(view) == QLatin1String("running");
     if (liveHidden) {
-        image(view.thumbnail, view.thumbnailWidth, view.thumbnailHeight, {});
+        state.insert("liveFrame", view.thumbnail);
+        state.insert("liveAspect", qreal(view.thumbnailHeight) / view.thumbnailWidth);
     } else if (!info.picture) {
         // Hidden (#263): no slot, so the node is as short as its rows.
     } else if (info.followsInput()) {
