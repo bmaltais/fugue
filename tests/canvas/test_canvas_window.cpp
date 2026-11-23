@@ -238,7 +238,9 @@ private slots:
         // hang. CPU time is the whole process's, the render and loader threads too, so it runs
         // above the wall clock (about 77 ms against 60 on 2026-11-19); 150 leaves room for a
         // slower machine and still catches a window that does real work before its first frame.
-        QVERIFY2(app.openedCpuMs < 150, qPrintable(QString::number(app.openedCpuMs)));
+        // 2026-11-23: a loaded CI runner measured 157 and a busy dev machine 126 against 70 idle,
+        // so the limit is 300: still far under a window that does real work (seconds).
+        QVERIFY2(app.openedCpuMs < 300, qPrintable(QString::number(app.openedCpuMs)));
         QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
     }
 
