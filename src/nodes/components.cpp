@@ -89,7 +89,7 @@ QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resou
 // (engine/model_shape.h): said here, before the helper fails to load them with less to say.
 // The inputs a mismatch of each part is blamed on.
 struct PartInputs {
-    QString diffusionModel, textEncoder, vae, lora, highNoise;
+    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL;
 };
 
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
@@ -102,9 +102,10 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
     const QList<std::pair<QString, QString>> parts{{QStringLiteral("diffusion_model_path"), inputs.diffusionModel},
                                                    {encoderKey, inputs.textEncoder},
                                                    {QStringLiteral("vae_path"), inputs.vae},
-                                                   {QStringLiteral("high_noise_diffusion_model_path"), inputs.highNoise}};
+                                                   {QStringLiteral("high_noise_diffusion_model_path"), inputs.highNoise},
+                                                   {QStringLiteral("clip_l_path"), inputs.clipL}};
     const QStringList partNames{QStringLiteral("base"), QStringLiteral("text_encoder"), QStringLiteral("vae"),
-                                QStringLiteral("high_noise")};
+                                QStringLiteral("high_noise"), QStringLiteral("clip_l")};
     for (qsizetype i = 0; i < parts.size(); ++i) {
         if (!paths.contains(parts.at(i).first))
             continue;
@@ -137,8 +138,13 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
     const std::optional<ModelShape> encoder = shapes.of(paths.value(encoderKey).toString());
     if (encoder && loadableTextEncoderFits(*diffusion, *encoder) == Fit::DoesNotFit) {
         const TextKind is = encoder->textKind.value_or(TextKind::Llm);
-        const QString why = is != TextKind::Llm
-                                ? QStringLiteral("it is %1, and Load Models takes a language model or a T5 encoder.").arg(kind(is))
+        const TextKind reads = diffusion->textKind.value_or(TextKind::Llm);
+        const QString why = is == TextKind::Clip
+                                ? QStringLiteral("it is %1, which goes in the CLIP-L input; this one takes %2.").arg(kind(is), kind(reads))
+                            : is == TextKind::T5 && reads == TextKind::T5 && !loadsT5(*diffusion)
+                                ? QStringLiteral("it is %1, and Load Models loads the T5 of FLUX.1 and Wan only.").arg(kind(is))
+                            : is == TextKind::T5 && reads != TextKind::T5
+                                ? QStringLiteral("it is %1, and the model reads %2.").arg(kind(is), kind(reads))
                             : is != diffusion->textKind.value_or(TextKind::Llm)
                                 ? QStringLiteral("it is %1, and the model reads %2.")
                                       .arg(kind(is), kind(diffusion->textKind.value_or(TextKind::Llm)))
@@ -147,6 +153,25 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                       .arg(diffusion->textWidth.value_or(0));
         return mismatch(inputs.textEncoder, QStringLiteral("The text encoder %1 does not fit %2: %3").arg(name("text_encoder"), name("base"), why),
                         QStringLiteral("Pick another in Load Models: its list shows the text encoders that fit first."));
+    }
+    // FLUX.1 reads a CLIP-L beside its T5; a model that reads none is given none.
+    const bool hasClip = paths.contains(QStringLiteral("clip_l_path")) && !paths.value(QStringLiteral("clip_l_path")).toString().isEmpty();
+    if (diffusion->clipWidth && diffusion->textKind == TextKind::T5 && !hasClip && !inputs.clipL.isEmpty())
+        return mismatch(inputs.clipL, QStringLiteral("%1 reads a CLIP-L text encoder too, and none is set.").arg(name("base")),
+                        QStringLiteral("Pick the CLIP-L encoder (clip_l) in Load Models."));
+    if (hasClip) {
+        const std::optional<ModelShape> clip = shapes.of(paths.value(QStringLiteral("clip_l_path")).toString());
+        if (clip && loadableClipFits(*diffusion, *clip) == Fit::DoesNotFit) {
+            const QString why = clip->textKind.value_or(TextKind::Clip) != TextKind::Clip
+                                    ? QStringLiteral("it is %1, not a CLIP encoder.").arg(kind(clip->textKind.value_or(TextKind::Llm)))
+                                : !diffusion->clipWidth
+                                    ? QStringLiteral("the model reads no CLIP encoder.")
+                                    : QStringLiteral("it is %1 wide, and the model reads %2.")
+                                          .arg(clip->hiddenSize.value_or(0))
+                                          .arg(*diffusion->clipWidth);
+            return mismatch(inputs.clipL, QStringLiteral("The CLIP encoder %1 does not fit %2: %3").arg(name("clip_l"), name("base"), why),
+                            QStringLiteral("Pick another in Load Models: its list shows the CLIP encoders that fit first."));
+        }
     }
     const std::optional<ModelShape> vae = shapes.of(paths.value(QStringLiteral("vae_path")).toString());
     if (vae && vaeFits(*diffusion, *vae) == Fit::DoesNotFit) {
@@ -239,6 +264,8 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         const QJsonObject encoder = derived.value(QStringLiteral("text_encoder")).toObject();
         files.context.insert(textEncoderKey(encoder, library, *context.hashes), path(encoder));
     }
+    if (derived.contains(QStringLiteral("clip_l")))
+        files.context.insert(QStringLiteral("clip_l_path"), path(derived.value(QStringLiteral("clip_l"))));
     if (derived.contains(QStringLiteral("vae")))
         files.context.insert(QStringLiteral("vae_path"), path(derived.value(QStringLiteral("vae"))));
     for (const QJsonValue &step : derived.value(QStringLiteral("apply")).toArray()) {
@@ -250,7 +277,7 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         return *missing;
     if (!shares)
         return files;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}}, files.loras))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input}, files.loras))
         return *mismatch;
     return files;
 }
@@ -563,11 +590,13 @@ public:
         paths.insert(encoderKeyOf(encoder), encoder);
         if (hasHighNoise(context))
             paths.insert(QStringLiteral("high_noise_diffusion_model_path"), path("high_noise_diffusion_model"));
+        if (hasClipL(context))
+            paths.insert(QStringLiteral("clip_l_path"), path("clip_l"));
         // Blamed on the part that does not fit, where its picker is.
         if (const std::optional<Error> mismatch = partsMismatch(
                 derived(context), paths,
                 {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString(),
-                 QStringLiteral("high_noise_diffusion_model")}))
+                 QStringLiteral("high_noise_diffusion_model"), QStringLiteral("clip_l")}))
             return {*mismatch};
         return {};
     }
@@ -580,10 +609,13 @@ private:
     static bool hasHighNoise(const NodeContext &context) {
         return !context.input(QStringLiteral("high_noise_diffusion_model")).isEmpty();
     }
+    static bool hasClipL(const NodeContext &context) { return !context.input(QStringLiteral("clip_l")).isEmpty(); }
     static QJsonObject derived(const NodeContext &context) {
         QJsonObject parts{{"base", context.input(QStringLiteral("diffusion_model")).json()},
                           {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
                           {"vae", context.input(QStringLiteral("vae")).json()}};
+        if (hasClipL(context))
+            parts.insert(QStringLiteral("clip_l"), context.input(QStringLiteral("clip_l")).json());
         if (hasHighNoise(context))
             parts.insert(QStringLiteral("high_noise"), context.input(QStringLiteral("high_noise_diffusion_model")).json());
         return parts;

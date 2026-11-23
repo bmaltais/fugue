@@ -275,20 +275,6 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === 0
-                        title: qsTr("Show new candidates")
-                        key: "canvas_show_new_results"
-                        origin: panel.model.origins["canvas_show_new_results"] ?? ""
-                        onUseDefaultRequested: panel.apply(panel.model.useDefault("canvas_show_new_results"))
-                        note: qsTr("When a run adds a candidate to the canvas a Canvas view is looking at, show it over the head with Accept and Drop. A view on another revision, with Compare on or in the middle of dragging a region is never moved. Off keeps the view where it is.")
-                        SettingsParts.Toggle {
-                            objectName: "canvasShowNewResults"
-                            text: on ? qsTr("On") : qsTr("Off")
-                            on: panel.model.canvasShowNewResults
-                            onToggled: value => panel.apply(panel.model.set("canvas_show_new_results", value))
-                        }
-                    }
-                    SettingsParts.Setting {
-                        visible: panel.page === 0
                         title: qsTr("Language")
                         key: "language"
                         origin: panel.model.origins["language"] ?? ""

@@ -310,9 +310,9 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // A pending candidate shown: the panel says so and offers Go to Head, Accept and Drop (Accept not in the accent: the
-    // view's bar has the one primary); once accepted, its layers can be changed.
-    void aCandidateShownOffersItsDecisionInThePanel() {
+    // #239: a revision kept apart (made by the command line) shown: the panel says it is not the latest and offers only Back
+    // to latest; once there, its layers can be changed. No Accept or Drop.
+    void aCandidateShownOffersOnlyBackToLatest() {
         PaintDocument d(256, 256);
         d.loadLayer(LayerKind::Paint, "Base", true, 1, solid(256, 256, {30, 60, 200, 255}));
         d.loadLayer(LayerKind::Paint, "Candidate fill", true, 1, solid(256, 256, {200, 200, 10, 255}));
@@ -324,11 +324,10 @@ private slots:
         QTRY_COMPARE(model(app)->property("revisionB").toString(), candidate);
         QTRY_VERIFY(find(app.window, "canvasLayersReadOnly"));
         QCOMPARE(find(app.window, "canvasLayersReadOnlyText")->property("text").toString(),
-                 QString("You are looking at a new candidate. Accept or Drop it, or go back to the latest version, to change layers."));
-        QVERIFY(find(app.window, "canvasLayersGoHead") && find(app.window, "canvasLayersDrop"));
-        QVERIFY(!find(app.window, "canvasLayersAccept")->property("marked").toBool()); // one primary: the bar's
-        click(app, "canvasLayersAccept");
-        QTRY_COMPARE(model(app)->property("head").toString(), candidate);
+                 QString("You are looking at an earlier step. Go back to the latest version to change layers."));
+        QVERIFY(find(app.window, "canvasLayersGoHead"));
+        QVERIFY(!find(app.window, "canvasLayersAccept") && !find(app.window, "canvasLayersDrop"));
+        click(app, "canvasLayersGoHead");
         QTRY_VERIFY(!find(app.window, "canvasLayersReadOnly"));
         QTRY_VERIFY(find(app.window, "canvasLayerDelete")->isEnabled());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

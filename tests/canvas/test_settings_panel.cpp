@@ -266,21 +266,6 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // General > Show new candidates (#225): on by default; the switch turns it off and on and the file keeps it.
-    void theCanvasShowNewResultsSwitchPersists() {
-        App app(load(emptyDoc));
-        QVERIFY(app.open());
-        app.commands.trigger("app.settings");
-        QTRY_VERIFY(panelOpen(app.window));
-        QQuickItem *toggle = NEED("canvasShowNewResults");
-        QVERIFY(toggle->property("on").toBool());
-        click(app, toggle);
-        QTRY_VERIFY(!fugue::SettingsModel(app.settings.path()).canvasShowNewResults());
-        click(app, toggle);
-        QTRY_VERIFY(fugue::SettingsModel(app.settings.path()).canvasShowNewResults());
-        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
-    }
-
     // General > Corner radius (#63): fixed at 8 px by default, a step at a time from 0 to 16, or
     // Omarchy's rounding (none here: square); the canvas redraws at once and the file keeps it.
     void theCornerRadiusChangesLiveAndPersists() {

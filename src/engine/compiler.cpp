@@ -801,7 +801,7 @@ void Compiler::checkNode(Scope *scope, const QString &id, Flat &flat, bool face)
         for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
             // A value that came through a group's face and names an input the
             // node lacks is a bad target, already reported on the instance.
-            if (type.input(it.key()) || !it->narrowing.isEmpty())
+            if (type.input(it.key()) || !it->narrowing.isEmpty() || type.retiredInputs.contains(it.key()))
                 continue;
             Error error = nodeError(QStringLiteral("unknown_input"), flat.path, {});
             error.input = it.key();

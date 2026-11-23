@@ -189,16 +189,13 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("embed").literal(), QJsonValue("no-prompts"));
     }
 
-    // Show new candidates (#225): on by default, a preferences key; written like the others.
-    void canvasShowNewResultsIsOnByDefaultAndPersists() {
+    // #239: the retired canvas_show_new_results key in an old file is read without a problem and left in the file.
+    void aRetiredCanvasShowNewResultsKeyIsIgnoredWithoutAProblem() {
+        writeFile(settingsFile(), "{\"canvas_show_new_results\": false, \"restore_tabs\": false}");
         SettingsModel model(settingsFile());
-        QVERIFY(model.canvasShowNewResults());
-        QCOMPARE(model.set("canvas_show_new_results", false), QString());
-        QVERIFY(!model.canvasShowNewResults());
-        QVERIFY(!SettingsModel(settingsFile()).canvasShowNewResults());
-        QVERIFY(!model.set("canvas_show_new_results", "no").isEmpty());
-        QCOMPARE(model.set("canvas_show_new_results", true), QString());
-        QVERIFY(model.canvasShowNewResults());
+        QVERIFY2(model.problems().isEmpty(), qPrintable(model.problems().join('\n')));
+        QVERIFY(!model.restoreTabs());
+        QVERIFY(!model.set("canvas_show_new_results", true).isEmpty()); // no longer a setting
     }
 
     // Node pictures (#263): smart by default, a preference; the default leaves the file.

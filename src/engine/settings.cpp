@@ -22,7 +22,7 @@ const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "pack_paths",    "new_seed",
                         "embed_workflow", "corner_radius",  "hover_magnifier",
-                        "restore_tabs",   "canvas_show_new_results", "picture_mode", "cache_results_gb", "cache_thumbnails_gb", "runs_kept"};
+                        "restore_tabs",   "picture_mode", "cache_results_gb", "cache_thumbnails_gb", "runs_kept"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -97,8 +97,6 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.hoverMagnifier = value.toBool();
     else if (key == QLatin1String("restore_tabs"))
         settings.restoreTabs = value.toBool();
-    else if (key == QLatin1String("canvas_show_new_results"))
-        settings.canvasShowNewResults = value.toBool();
     else if (key == QLatin1String("cache_results_gb"))
         settings.cacheResultsGb = value.toDouble();
     else if (key == QLatin1String("cache_thumbnails_gb"))
@@ -142,7 +140,7 @@ QString settingOriginName(SettingOrigin origin) {
 }
 
 SettingClass settingClass(const QString &key) {
-    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "new_seed", "embed_workflow", "restore_tabs", "canvas_show_new_results", "picture_mode"};
+    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "new_seed", "embed_workflow", "restore_tabs", "picture_mode"};
     if (preferences.contains(key))
         return SettingClass::Preferences;
     if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
@@ -180,8 +178,6 @@ QJsonValue settingDefault(const QString &key) {
     if (key == QLatin1String("hover_magnifier"))
         return false;
     if (key == QLatin1String("restore_tabs"))
-        return true;
-    if (key == QLatin1String("canvas_show_new_results"))
         return true;
     if (key == QLatin1String("cache_results_gb"))
         return 10;
@@ -223,8 +219,6 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return value.isBool() ? QString() : QStringLiteral("hover_magnifier must be true or false.");
     if (key == QLatin1String("restore_tabs"))
         return value.isBool() ? QString() : QStringLiteral("restore_tabs must be true or false.");
-    if (key == QLatin1String("canvas_show_new_results"))
-        return value.isBool() ? QString() : QStringLiteral("canvas_show_new_results must be true or false.");
     if (key == QLatin1String("cache_results_gb") || key == QLatin1String("cache_thumbnails_gb")) {
         if (value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= Settings::maxCacheGb)
             return {};
@@ -411,8 +405,6 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
         return settings.hoverMagnifier;
     if (key == QLatin1String("restore_tabs"))
         return settings.restoreTabs;
-    if (key == QLatin1String("canvas_show_new_results"))
-        return settings.canvasShowNewResults;
     if (key == QLatin1String("cache_results_gb"))
         return settings.cacheResultsGb;
     if (key == QLatin1String("cache_thumbnails_gb"))

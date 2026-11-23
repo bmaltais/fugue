@@ -416,6 +416,7 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
     for (const QString &alias : std::as_const(type.aliases))
         if (!isTypeId(alias))
             r.fail(QStringLiteral("alias \"%1\" is not a node type id.").arg(alias));
+    r.strings(manifest, "retired_inputs", type.retiredInputs, where);
     r.boolean(manifest, "sink", type.sink, where);
     r.boolean(manifest, "deterministic", type.deterministic, where);
     r.string(manifest, "picture", type.picture, where);
@@ -439,7 +440,7 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
         r.fail(QStringLiteral("\"ui\" is reserved and must be absent in this version."));
 
     r.unknownFields(manifest,
-                    {"manifest", "id", "version", "name", "description", "category", "keywords", "aliases",
+                    {"manifest", "id", "version", "name", "description", "category", "keywords", "aliases", "retired_inputs",
                      "sink", "deterministic", "picture", "runtime", "inputs", "outputs", "needs", "capabilities", "ui"},
                     where);
 
@@ -509,6 +510,8 @@ QJsonObject NodeType::toJson() const {
         o.insert("keywords", QJsonArray::fromStringList(keywords));
     if (!aliases.isEmpty())
         o.insert("aliases", QJsonArray::fromStringList(aliases));
+    if (!retiredInputs.isEmpty())
+        o.insert("retired_inputs", QJsonArray::fromStringList(retiredInputs));
     putIfTrue(o, "sink", sink);
     putIf(o, "picture", picture);
     if (!deterministic)

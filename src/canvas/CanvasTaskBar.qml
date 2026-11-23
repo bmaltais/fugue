@@ -21,7 +21,7 @@ Item {
     id: bar
     objectName: "canvasTaskBar"
     required property CanvasLook look
-    // The view's context: the canvas, the revision shown and whether it is the latest (the Head) and not a candidate.
+    // The view's context: the canvas, the revision shown and whether it is the latest (the Head).
     property string canvasId: ""
     property string revision: ""
     property bool onHead: false
@@ -32,8 +32,6 @@ Item {
     property real originX: 0
     property real originY: 0
     property real zoom: 1
-    // Another primary is on screen (the candidate banner's Accept): Generate turns quiet.
-    property bool decisionElsewhere: false
     signal backToLatest()
 
     readonly property real u: look.unit
@@ -325,7 +323,7 @@ Item {
                     objectName: "canvasTaskGenerate"
                     look: bar.look
                     visible: !bar.busy
-                    primary: !bar.decisionElsewhere
+                    primary: true
                     enabled: bar.blocker === ""
                     text: qsTr("Generate")
                     tip: bar.blocker !== "" ? bar.blocker : qsTr("Generate into the selection (Enter)")

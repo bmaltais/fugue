@@ -5,23 +5,16 @@
 // context (the canvas, a follow target) and knows no dialog. It is CanvasHistory (canvas/canvas_history.h: the
 // canvases, revisions, candidates, compare, accept, drop, export) plus what a view of the canvas needs:
 //
-//  - `choices`: the strip of what to look at, the head first, then the candidates waiting for review, then the
-//    few latest revisions; `earlier` is the rest of the history, for a menu. `show(id)` picks one. A candidate
-//    is compared with the HEAD (what accepting it would change), whatever it was made from.
-//  - an overlay: with a candidate chosen, `overlay` puts it over the head picture; off, the head shows alone.
-//    `pictureSource` and `pictureSize` are what the viewer draws, either way.
+//  - `choices`: the head first, then the few latest revisions; `earlier` is the rest of the history, for a menu.
+//    `show(id)` picks one. `pictureSource` and `pictureSize` are what the viewer draws.
 //  - a follow target: `followNode` is a Canvas Region node (read through WidgetEdit, as the region picker does) whose
 //    rectangle `region` describes in canvas pixels, with the padded context box and which revision the node reads;
 //    `useForRegion()` writes the shown revision to the node's `revision` as one undo step. Setting the target
 //    moves the view to the node's canvas.
 //  - auto-refresh: the store's folders are watched, so a head moved by a run, a candidate that arrived or a
 //    canvas made elsewhere shows within a moment; a view on the head moves along with it.
-//  - new results (#225): a candidate that arrives while the view is on the head is shown over it at once (`newResult`
-//    names it, `newResultOthers` counts the ones that came with it or after it, `newResultFrom` says who made it), so a
-//    run's output is seen without a click. Never taken from the person: only a view on the head (or on the result it
-//    showed itself) moves, and not while `viewLocked` (Compare on, a rectangle drag: the host says) or with
-//    `showNewResults` off (settings.json's canvas_show_new_results); a result that came meanwhile is shown when the
-//    lock lifts, if the view is still on the head. The banner's Accept and Drop are accept() and drop().
+//  - a run lands on the head (Canvas Write, #228, #239: candidate review is no part of the product): the view on the head
+//    goes along and `headNotice` says what came, with Undo.
 //  - layers (#226): `layers` are the shown revision's layers, top first, as {position (0 is the bottom), name, kind,
 //    visible, opacity, blend (an id of blendModes, or "" for an op Fugue does not draw), compositeOp, hasMask, maskEnabled,
 //    producer, from (the producer as a person reads it), created, depth (0: groups are later), thumbnail, maskThumbnail
@@ -66,9 +59,6 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(QString followNode READ followNode WRITE setFollowNode NOTIFY followChanged)
     Q_PROPERTY(QVariantList choices READ choices NOTIFY choicesChanged)
     Q_PROPERTY(QVariantList earlier READ earlier NOTIFY choicesChanged)
-    Q_PROPERTY(bool overlay READ overlay WRITE setOverlay NOTIFY pictureChanged)
-    // True when the shown revision is a candidate (open or dropped): the overlay has something to toggle.
-    Q_PROPERTY(bool showsCandidate READ showsCandidate NOTIFY compareChanged)
     Q_PROPERTY(QUrl headSource READ headSource NOTIFY pictureChanged)
     Q_PROPERTY(QUrl pictureSource READ pictureSource NOTIFY pictureChanged)
     Q_PROPERTY(QSize pictureSize READ pictureSize NOTIFY pictureChanged)
@@ -77,21 +67,11 @@ class CanvasViewModel : public CanvasHistory {
     // Head's revisions newest first, each {id, name, time, timeText, kind ("head" or "history"), latest}, `name` a step
     // in words from what changed against its parent ("Layer added: A wooden table", "Opacity 50%: Fill", "Layer
     // deleted: Sketch", "Mask added: Fill", "Painted: Base", "Canvas made"), whoever made it (a run, this view, the
-    // command line). `allSteps` adds the candidates, open and dropped ("Candidate: …", "Dropped: …"), first, for
-    // `Show all revisions`. `pendingCount` counts the open candidates (the "N pending" chip).
+    // command line). `allSteps` adds the candidates the command line made, open and dropped ("Candidate: …", "Dropped: …"),
+    // first, for `Show all revisions` (#239: candidate review is no part of the view; they are only listed).
     Q_PROPERTY(QVariantList steps READ steps NOTIFY choicesChanged)
     Q_PROPERTY(QVariantList allSteps READ allSteps NOTIFY choicesChanged)
-    Q_PROPERTY(int pendingCount READ pendingCount NOTIFY choicesChanged)
     Q_PROPERTY(QVariantMap region READ region NOTIFY regionChanged)
-    // Show a candidate that a run produced as soon as it arrives (the setting; the host binds it). On by default.
-    Q_PROPERTY(bool showNewResults READ showNewResults WRITE setShowNewResults NOTIFY newResultChanged)
-    // True while the view must not move on its own: Compare is on or a rectangle is being dragged. The host binds it.
-    Q_PROPERTY(bool viewLocked READ viewLocked WRITE setViewLocked NOTIFY newResultChanged)
-    // The candidate the view moved to by itself and still shows ("" otherwise), how many more arrived with it, and who
-    // made it: the name of the open document's Canvas Write that wrote it (WidgetEdit::nodeName, its title), else "".
-    Q_PROPERTY(QString newResult READ newResult NOTIFY newResultChanged)
-    Q_PROPERTY(int newResultOthers READ newResultOthers NOTIFY newResultChanged)
-    Q_PROPERTY(QString newResultFrom READ newResultFrom NOTIFY newResultChanged)
     // The Head moved by itself to a run's result while the view was on the Head (a Canvas Write that lands on the Head,
     // the normal flow since #228): the view went along, and this says what came ("Layer Fill 1 added"), for a short
     // notice with Undo; "" otherwise. It ends when anything else is shown (an undo included) or clearHeadNotice().
@@ -125,24 +105,13 @@ public:
     QVariantList earlier() const { return m_earlier; }
     QVariantList steps() const { return m_steps; }
     QVariantList allSteps() const { return m_allSteps; }
-    int pendingCount() const { return m_pending; }
     // The name of the step a revision is (see `steps`); read once per revision (they never change).
     Q_INVOKABLE QString stepName(const QString &revision);
-    bool overlay() const { return m_overlay; }
-    void setOverlay(bool on);
-    bool showsCandidate() const;
     QUrl headSource() const { return m_headSource; }
     QUrl pictureSource() const;
     QSize pictureSize() const;
     QString head() const { return m_head; }
     QVariantMap region() const { return m_region; }
-    bool showNewResults() const { return m_showNew; }
-    void setShowNewResults(bool on);
-    bool viewLocked() const { return m_locked; }
-    void setViewLocked(bool locked);
-    QString newResult() const { return m_newResult; }
-    int newResultOthers() const { return m_newOthers; }
-    QString newResultFrom() const;
     QString headNotice() const { return m_headNotice; }
     Q_INVOKABLE void clearHeadNotice();
     QVariantList layers() const { return m_layers; }
@@ -232,7 +201,6 @@ signals:
     void choicesChanged();
     void pictureChanged();
     void regionChanged();
-    void newResultChanged();
     void headNoticeChanged();
     void layersChanged();
     void maskChanged();
@@ -248,8 +216,6 @@ private:
     void rebuildLayers();
     void updateSoloPicture();
     QList<int> positionsOf(const QVariantList &list) const;
-    void showArrivals();
-    void clearNewResult();
 
     void rebuild();
     void updateRegion();
@@ -257,10 +223,8 @@ private:
 
     WidgetEdit *m_edits = nullptr;
     QString m_follow;
-    bool m_overlay = true;
     QVariantList m_choices, m_earlier;
     QVariantList m_steps, m_allSteps;
-    int m_pending = 0;
     QHash<QString, QString> m_stepNames; // revision id -> its step's name
     QUrl m_headSource;
     QSize m_headSize;
@@ -268,15 +232,8 @@ private:
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
     QMetaObject::Connection m_undoLink;
-    bool m_showNew = true;
-    bool m_locked = false;
-    QStringList m_known;         // the open candidates seen so far on this canvas
-    QString m_knownCanvas;       // the canvas m_known belongs to ("" before the first read)
-    QStringList m_arrived;       // candidates that came and were not shown yet, newest first
-    QString m_newResult;
     QString m_headNotice;
     QString m_noticeHead; // the Head the notice is about
-    int m_newOthers = 0;
     int m_retries = 0;
     QVariantList m_layers;
     QList<int> m_selected;   // positions, in the order picked

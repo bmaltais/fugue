@@ -24,7 +24,7 @@ import "canvasMenu.js" as CanvasMenu
 // its eight handles to resize it, or drag in empty space to draw a new one. The numbers, the padded context box and the
 // size the model gets follow the pointer; the release writes x, y, width and height as ONE undo step (no Apply), Escape
 // during a drag leaves the node as it was. Wheel zoom and the middle button (or Space held) pan and never touch the
-// rectangle. It edits whichever revision is shown, a candidate included; with X, Y, Width or Height linked to another
+// rectangle. It edits whichever revision is shown; with X, Y, Width or Height linked to another
 // node, or while comparing, it is drawn and not edited.
 // Everything it does is CanvasViewModel (canvas/canvas_view_model.h) over CanvasHistory.
 //
@@ -35,18 +35,12 @@ import "canvasMenu.js" as CanvasMenu
 // Simple by default (#228, the owner's decision: Photoshop's History, no strip, no hashes): the canvas, the picture
 // (wheel zoom, Fit, 100%), the Layers panel with Undo and Redo, and **History** (closed at first): the canvas's changes
 // in words, newest first; a click shows that step (read only) and **Back to latest** returns; **Show all revisions**
-// adds the candidates for those who need them. Candidates are rare now (runs land on the latest version): one chip
-// "N pending" opens the newest for Accept or Drop. A candidate shows over the latest version; Show candidate switches it
-// off to see the latest alone. Compare (against the latest for a candidate, else the step before) opens
-// the compare modes of Compare Images (CompareModeButtons.qml). One bar (#228): the canvas and the pending chip, then the
-// tools in chunks (History and Layers, the look, Export, the decision, Drop, Fit and 100%) and the host's `trailing` items
-// last (the dialog's close). A run's layer that lands on the latest version is followed, with a short notice "Layer
-// <name> added" and Undo. A real candidate (a Canvas Write with Keep as candidate on, or one that could not land on a
-// moved latest version) shows at once under a banner over the picture's foot (it never moves the picture): Back to
-// latest, Accept and Drop; the bar's
-// own Accept and Drop hide meanwhile, so one primary is on screen.
-// Keys (docs/ui-ergonomics.md D5, one keymap with the Graph): Home or 0 Fit, 1 100%, + and - zoom, Enter accepts the
-// shown candidate (when the focus is in no field and no button), Escape ends a drag, Space held pans. While it has the
+// adds every revision for those who need them (film teams; the ones the command line made as candidates too).
+// Compare (against the step before) opens the compare modes of Compare Images (CompareModeButtons.qml). One bar (#228):
+// the canvas, then the tools in chunks (History and Layers, the look, Export, Fit and 100%) and the host's `trailing` items
+// last (the dialog's close). A run's layer lands on the latest version and is followed, with a short notice "Layer
+// <name> added" and Undo (#239: there is no candidate review; a run is a layer, delete it or Undo).
+// Keys (docs/ui-ergonomics.md D5, one keymap with the Graph): Home or 0 Fit, 1 100%, + and - zoom, Escape ends a drag, Space held pans. While it has the
 // focus the window's bare Q (quit) does not fire here: it is kept for a quick mask (docs/ui-ergonomics.md References);
 // Ctrl+Q and the close button still quit, and the Graph's keys sleep while a Canvas area is the active one (Workspace).
 // Right to left the bar, the notes and the layers panel mirror with the window; the picture never does.
@@ -138,7 +132,6 @@ Item {
     readonly property var selectionRect: liveRect ?? (regionSet ? canvasData.region : !regionValid && hasFreeRect ? freeRect : null)
     property bool advancedDetails: false
     readonly property bool compareOn: comparing && canvasData.hasParent
-    readonly property bool canDecide: canvasData.kindB === "candidate" || canvasData.kindB === "dropped"
     readonly property bool shownIsHead: canvasData.revisionB !== "" && canvasData.revisionB === canvasData.head
     // The revisions shown, as CanvasHistory names them ({name, tag, kind, ...}; {} before any).
     readonly property var rowB: canvasData.revisions.find(row => row.id === canvasData.revisionB) ?? ({})
@@ -151,25 +144,11 @@ Item {
     function actualSize() { pictureView.actualSize() }
     // Reads the store again now (a host shows it again after it was away).
     function refresh() { canvasData.refresh() }
-    // Enter: Accept, when a candidate is shown and its Accept is on screen (the bar's or the banner's).
-    function acceptShown() {
-        if (!canDecide)
-            return false
-        canvasData.accept(canvasData.revisionB)
-        return true
-    }
-    // What a person calls the revision shown (no hashes, #228): the latest version, a candidate, or the step it is.
+    // What a person calls the revision shown (no hashes, #228): the latest version or the step it is.
     function labelOf(row) {
         if (row.kind === undefined)
             return ""
-        return row.kind === "head" ? qsTr("Latest") : row.kind === "candidate" ? qsTr("Candidate")
-             : row.kind === "dropped" ? qsTr("Dropped candidate") : canvasData.stepName(row.id)
-    }
-    // The pending chip: the newest open candidate, shown for its review (Accept, Drop in the bar).
-    function reviewPending() {
-        const row = canvasData.revisions.find(r => r.kind === "candidate")
-        if (row)
-            canvasData.show(row.id)
+        return row.kind === "head" ? qsTr("Latest") : canvasData.stepName(row.id)
     }
     property bool showHistory: false
 
@@ -328,7 +307,6 @@ Item {
         case "canvas-view.history": return {enabled: has, checkable: true, checked: showHistory}
         case "canvas-view.layers": return {enabled: has, checkable: true, checked: showLayers}
         case "canvas-view.compare": return {enabled: canvasData.hasParent, checkable: true, checked: compareOn}
-        case "canvas-view.show-candidate": return {enabled: canvasData.showsCandidate && !compareOn, checkable: true, checked: canvasData.overlay}
         case "canvas-view.details": return {enabled: has, checkable: true, checked: advancedDetails}
         case "canvas-view.snap": return {enabled: root.tool === "region" && regionEditable && canvasData.region.multiple > 1, checkable: true, checked: snap}
         case "canvas-view.tool-hand": return tool("hand")
@@ -388,7 +366,6 @@ Item {
         case "canvas-view.history": showHistory = !showHistory; break
         case "canvas-view.layers": showLayers = !showLayers; break
         case "canvas-view.compare": comparing = !comparing; break
-        case "canvas-view.show-candidate": canvasData.overlay = !canvasData.overlay; break
         case "canvas-view.details": advancedDetails = !advancedDetails; break
         case "canvas-view.snap": snap = !snap; break
         case "canvas-view.undo":
@@ -437,10 +414,6 @@ Item {
         onCanvasChanged: { root.freeRect = root.noRect; selectionLayer.reset() }
         maskLayer: layerMask
         onFollowChanged: root.freeRect = root.noRect
-        // A run's new candidate is shown at once (settings.json's canvas_show_new_results, live), unless the view is busy:
-        // Compare on, or a rectangle being dragged. Then it waits, and shows when that ends (if still on the Head).
-        showNewResults: App.settings ? App.settings.canvasShowNewResults : true
-        viewLocked: root.compareOn || root.dragging
     }
     // Delayed: following a node moves the view to its canvas, which changes the nodes that read the canvas shown.
     Binding {
@@ -450,9 +423,6 @@ Item {
         delayed: true
     }
     readonly property bool dragging: (regionFrame.item as CropFrame)?.dragging ?? false
-    // The banner of a candidate the view moved to by itself: only while that candidate is the one shown and open.
-    readonly property bool newResultShown: canvasData.newResult !== "" && canvasData.revisionB === canvasData.newResult && canvasData.kindB === "candidate"
-
     Component.onCompleted: {
         // One canvas by default: with none chosen, the newest.
         if (canvasData.canvasId === "" && canvasData.canvases.length > 0)
@@ -632,10 +602,6 @@ Item {
         else if (event.key === Qt.Key_1) actualSize()
         else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) pictureView.zoomAt(pictureView.width / 2, pictureView.height / 2, 1.25)
         else if (event.key === Qt.Key_Minus) pictureView.zoomAt(pictureView.width / 2, pictureView.height / 2, 0.8)
-        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (!acceptShown())
-                return // nothing to accept: the host's (a dialog's confirm)
-        }
         else return
         event.accepted = true
     }
@@ -649,8 +615,8 @@ Item {
         rightPadding: lead && root.mirrored ? 3 * root.u : 0
     }
 
-    // One bar (#228, the owner's decision: no strip of revisions, no hashes): the canvas, the pending candidates when
-    // there are any, the History and Layers panels, then the tools. It wraps when the view is narrow.
+    // One bar (#228, the owner's decision: no strip of revisions, no hashes): the canvas, the History and Layers panels,
+    // then the tools. It wraps when the view is narrow.
     CanvasMenuBar {
         id: menuBar
         look: root.look
@@ -677,20 +643,8 @@ Item {
                 accented: false
                 onTapped: root.chooseCanvas()
             }
-            // Candidates waiting (rare: a Canvas Write with Keep as candidate on, or one that could not land on the
-            // latest version): one chip; nothing when there are none.
-            ViewButton {
-                objectName: "canvasViewPending"
-                look: root.look
-                visible: canvasData.pendingCount > 0
-                text: qsTr("%n pending", "", canvasData.pendingCount)
-                tip: qsTr("Review the candidates waiting: Accept or Drop")
-                accented: false
-                current: root.canDecide
-                onTapped: root.reviewPending()
-            }
         }
-        // How the shown revision is looked at: over the latest version or alone, or against another (the modes).
+        // How the shown revision is looked at: alone, or against another (the modes).
         Chunk {
             visible: canvasData.canvasId !== ""
             CompareModeButtons {
@@ -702,30 +656,6 @@ Item {
                 mode: pictureView.mode
                 hasDifference: canvasData.sourceDifference.toString() !== ""
                 onPicked: picked => pictureView.setView({mode: picked})
-            }
-        }
-        // The decision, hidden while the banner shows its own (one primary on screen, docs/ui-ergonomics.md Primary).
-        Chunk {
-            visible: root.canDecide && !root.newResultShown
-            ViewButton {
-                objectName: "canvasViewAccept"
-                look: root.look
-                primary: true
-                text: qsTr("Accept")
-                tip: qsTr("Make this candidate the latest version of the canvas (Enter)")
-                onTapped: canvasData.accept(canvasData.revisionB)
-            }
-        }
-        // The destructive chunk, apart.
-        Chunk {
-            visible: canvasData.kindB === "candidate" && !root.newResultShown
-            ViewButton {
-                objectName: "canvasViewDrop"
-                look: root.look
-                danger: true
-                text: qsTr("Drop")
-                tip: qsTr("Hide this candidate (it is kept, and Accept still takes it)")
-                onTapped: canvasData.drop(canvasData.revisionB)
             }
         }
         // Fit and 100% at the end, then the host's: as every large view's bar.
@@ -1037,14 +967,14 @@ Item {
         mode: "single"
         showZoom: true
         showSize: false // the status line under the picture says the size and the zoom
-        // Alone, the picture is what the overlay says (a candidate over the Head, the Head, a revision); compared, A and B.
+        // Alone, the picture is the revision shown; compared, A and B.
         // Each named as CanvasHistory names it.
         sourceA: root.compareOn ? canvasData.sourceA : canvasData.pictureSource
         sourceB: canvasData.sourceB
         sourceDifference: canvasData.sourceDifference
         sizeA: root.compareOn ? canvasData.sizeA : canvasData.pictureSize
         sizeB: canvasData.sizeB
-        labelA: root.compareOn ? root.labelOf(root.rowA) : canvasData.showsCandidate && !canvasData.overlay ? qsTr("Latest") : root.labelOf(root.rowB)
+        labelA: root.compareOn ? root.labelOf(root.rowA) : root.labelOf(root.rowB)
         labelB: root.labelOf(root.rowB)
     }
     // History (#228, the owner's decision; Photoshop's History panel is the reference): the canvas's changes in words,
@@ -1085,7 +1015,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     look: root.look
                     text: qsTr("All revisions")
-                    tip: qsTr("Show all revisions: the candidates too, pending and dropped")
+                    tip: qsTr("Show every revision, the ones kept apart too")
                     accented: false
                     checkable: true
                     compact: true
@@ -1183,7 +1113,6 @@ Item {
         look: root.look
         model: canvasData
         ownShortcuts: root.ownShortcuts
-        decisionElsewhere: root.newResultShown
         onMaskTargeted: root.paintTheMask()
     }
     // The masks painted on the picture (#230): the targeted layer mask (its hidden part in red, while Overlay is on) and
@@ -1351,67 +1280,6 @@ Item {
         HoverHandler { cursorShape: Qt.OpenHandCursor }
     }
 
-    // A run made a new candidate and the view moved to it (it shows over the Head): what to do with it, in one place, over
-    // the foot of the picture so the picture does not move under the pointer.
-    Banner {
-        id: banner
-        objectName: "canvasViewNewResult"
-        anchors.left: pictureView.left
-        anchors.right: pictureView.right
-        anchors.bottom: pictureView.bottom
-        anchors.margins: 2 * root.u
-        anchors.bottomMargin: 8 * root.u // the picture's size and zoom notice stays readable under it
-        visible: root.newResultShown
-        look: root.look
-        decision: true
-        Column {
-            width: parent.width
-            spacing: root.u
-            Text {
-                objectName: "canvasViewNewResultText"
-                width: parent.width
-                wrapMode: Text.Wrap
-                color: root.look.text
-                font.pixelSize: root.look.labelSize
-                text: (canvasData.newResultFrom !== "" ? qsTr("A new candidate from %1 is shown over the latest version.").arg(canvasData.newResultFrom)
-                                                         : qsTr("A new candidate is shown over the latest version."))
-                      + (canvasData.newResultOthers > 0 ? " " + qsTr("%n more candidates are pending.", "", canvasData.newResultOthers) : "")
-            }
-            // Back first, the primary, then Drop in a chunk of its own last (docs/ui-ergonomics.md Order and Destructive).
-            Flow {
-                width: parent.width
-                spacing: root.u
-                ViewButton {
-                    objectName: "canvasViewNewBack"
-                    look: root.look
-                    text: qsTr("Back to latest")
-                    tip: qsTr("Show the latest version; the candidate stays pending")
-                    onTapped: canvasData.show(canvasData.head)
-                }
-                Chunk {
-                    ViewButton {
-                        objectName: "canvasViewNewAccept"
-                        look: root.look
-                        primary: true
-                        text: qsTr("Accept")
-                        tip: qsTr("Make this candidate the latest version of the canvas (Enter)")
-                        onTapped: canvasData.accept(canvasData.revisionB)
-                    }
-                }
-                Chunk {
-                    ViewButton {
-                        objectName: "canvasViewNewDrop"
-                        look: root.look
-                        danger: true
-                        text: qsTr("Drop")
-                        tip: qsTr("Hide this candidate (it is kept, and Accept still takes it)")
-                        onTapped: canvasData.drop(canvasData.revisionB)
-                    }
-                }
-            }
-        }
-    }
-
     // A run's layer landed on the Head while the view was on it (the normal flow, #228): the view went along; a short
     // notice says what came, with Undo (the layers panel's: the Head back one step) and a close. No decision to take.
     Banner {
@@ -1422,7 +1290,7 @@ Item {
         anchors.bottom: pictureView.bottom
         anchors.margins: 2 * root.u
         anchors.bottomMargin: 8 * root.u
-        visible: canvasData.headNotice !== "" && !root.newResultShown && pictureView.visible
+        visible: canvasData.headNotice !== "" && pictureView.visible
         look: root.look
         Timer {
             running: headToast.visible
@@ -1479,7 +1347,7 @@ Item {
         visible: shown && pictureView.visible && !root.compareOn
         canvasId: canvasData.canvasId
         revision: canvasData.revisionB
-        onHead: root.shownIsHead && !canvasData.showsCandidate
+        onHead: root.shownIsHead
         rect: root.shownRegion
         quickMask: root.quickMask ? selectionLayer : null
         originX: pictureView.imageX
@@ -1487,7 +1355,6 @@ Item {
         zoom: pictureView.imageScale
         roomX: -pictureView.x
         roomWidth: root.width
-        decisionElsewhere: root.newResultShown
         onBackToLatest: canvasData.show(canvasData.head)
     }
 

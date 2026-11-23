@@ -30,9 +30,6 @@
 // | restore_tabs     | true or false: start with the saved       | true                     |
 // |                  | workflows that were open when the session |                          |
 // |                  | ended (12.10, #212)                        |                          |
-// | canvas_show_new_results | true or false: the Canvas view | true                     |
-// |                  | shows a new candidate as soon as a run   |                          |
-// |                  | makes it (12.16, #225)                    |                          |
 // | cache_results_gb | size limit of the result cache in GB;    | 10                       |
 // |                  | 0: none (10.5, #141)                     |                          |
 // | cache_thumbnails_gb | size limit of the picture previews in | 1                        |
@@ -67,7 +64,6 @@ struct Settings {
     int cornerRadius = 8;
     QString pictureMode = QStringLiteral("smart"); // which nodes show a picture (#263)
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
-    bool canvasShowNewResults = true; // the Canvas view moves to a new candidate at once (#225)
     bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)
     // The cache limits (#141); the cache manager turns them into bytes. 0 is no limit.
     static constexpr double maxCacheGb = 100000;

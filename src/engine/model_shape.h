@@ -67,6 +67,7 @@ struct ModelShape {
     std::optional<int> textWidth;      // a diffusion model's
     std::optional<int> latentChannels; // a diffusion model's or a VAE's
     std::optional<int> hiddenSize;     // a text encoder's
+    std::optional<int> clipWidth;      // a diffusion model's pooled CLIP vector (FLUX.1's vector_in); none when it reads no CLIP
     // A text encoder's kind, or the kind a diffusion model reads.
     std::optional<TextKind> textKind;
     // A VAE's: whether it is a video VAE; a diffusion model's: whether it wants one.
@@ -123,10 +124,15 @@ std::optional<ModelShape> readModelShape(const QString &path);
 enum class Fit { Unknown, Fits, DoesNotFit };
 
 Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
-// textEncoderFits for Load Models, which loads one LLM encoder (`llm_path`, spec 14.3), or Wan's
-// UMT5 (`t5xxl_path`): another T5 or a CLIP encoder does not fit there, whatever its width (FLUX.1
-// and SD3 come later).
+// textEncoderFits for Load Models' text encoder input: one LLM encoder (`llm_path`, spec 14.3), or
+// the T5 of Wan (UMT5) or FLUX.1 (`t5xxl_path`). A CLIP encoder does not fit there (it goes in
+// the CLIP-L input), nor does the T5 of SD3.
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
+// Whether Load Models loads the T5 a diffusion model reads: Wan's and FLUX.1's.
+bool loadsT5(const ModelShape &diffusionModel);
+// textEncoderFits for Load Models' CLIP-L input (`clip_l_path`): a CLIP encoder as wide as the
+// pooled vector the diffusion model reads (FLUX.1's 768). A model that reads no CLIP takes none.
+Fit loadableClipFits(const ModelShape &diffusionModel, const ModelShape &clip);
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae);
 // A LoRA fits a diffusion model when the layers it changes that the model has are as wide in
 // both, and at least one is found; none found tells nothing (another naming, as kohya's SDXL

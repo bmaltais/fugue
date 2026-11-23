@@ -173,7 +173,7 @@ QVariantList canvasView() {
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
                 {command("canvas-view.fit"), command("canvas-view.actual-size"), command("canvas-view.zoom-in"),
                  command("canvas-view.zoom-out"), separator(), command("canvas-view.history"), command("canvas-view.layers"),
-                 command("canvas-view.compare"), command("canvas-view.show-candidate"), command("canvas-view.details"),
+                 command("canvas-view.compare"), command("canvas-view.details"),
                  command("canvas-view.snap"), separator(),
                  submenu(QT_TRANSLATE_NOOP("Menu", "&Tools"),
                          {command("canvas-view.tool-hand"), command("canvas-view.tool-zoom"), command("canvas-view.tool-region"),
