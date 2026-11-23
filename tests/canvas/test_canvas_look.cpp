@@ -20,6 +20,7 @@
 #include <QRadialGradient>
 
 #include "canvas_app.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -494,5 +495,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestCanvasLook)
+FUGUE_TEST_MAIN(TestCanvasLook, QGuiApplication)
 #include "test_canvas_look.moc"

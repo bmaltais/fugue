@@ -25,7 +25,14 @@ else
   # installed fails once it is gone.
   launcher=(-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER=)
 fi
-cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release "${launcher[@]}" >/dev/null
+# A new build folder uses Ninja when it is installed (it schedules the ~190 links and the compiles better than
+# Make, and starts up faster); a folder an earlier run made with Make keeps it, because CMake cannot switch
+# generator in place: delete build/ to move to Ninja. Without ninja nothing changes.
+generator=()
+if [[ ! -f $root/build/CMakeCache.txt ]] && command -v ninja >/dev/null; then
+  generator=(-G Ninja)
+fi
+cmake -S "$root" -B "$root/build" "${generator[@]}" -DCMAKE_BUILD_TYPE=Release "${launcher[@]}" >/dev/null
 # Optional CMake targets: `bin/build fugue` builds only the app (no tests). None builds all.
 targets=()
 if (($#)); then

@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include "../test_shard.h"
 
 using namespace canvas_test;
 
@@ -93,7 +94,7 @@ class TestPacksPage : public QObject {
     Q_OBJECT
 
     QTemporaryDir m_xdg;
-    QString m_source = QDir::tempPath() + "/fugue-packs-page-source"; // lowercase: typed key by key
+    QString m_source = QDir::tempPath() + "/fugue-packs-page-source-" + QString::number(QCoreApplication::applicationPid()); // lowercase: typed key by key
     QString packs() const { return m_xdg.filePath("data/fugue/packs"); }
     QString trustFile() const { return m_xdg.filePath("state/fugue/trust.json"); }
 
@@ -263,5 +264,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestPacksPage)
+FUGUE_TEST_MAIN(TestPacksPage, QGuiApplication)
 #include "test_packs_page.moc"

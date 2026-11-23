@@ -14,6 +14,7 @@
 #include "canvas/mask_layer.h"
 #include "canvas_app.h"
 #include "engine/mask_paint.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using fugue::MaskLayer;
@@ -530,5 +531,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestCanvasMaskEditor)
+FUGUE_TEST_MAIN(TestCanvasMaskEditor, QGuiApplication)
 #include "test_canvas_mask_editor.moc"

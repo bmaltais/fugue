@@ -15,6 +15,7 @@
 #include "engine/canvas_store.h"
 #include "engine/paint_document.h"
 #include "engine/paint_file.h"
+#include "../test_shard.h"
 
 namespace {
 
@@ -684,5 +685,5 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(TestCliCanvas)
+FUGUE_TEST_MAIN(TestCliCanvas, QCoreApplication)
 #include "test_cli_canvas.moc"

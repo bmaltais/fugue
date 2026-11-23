@@ -13,6 +13,7 @@
 #include "canvas_app.h"
 #include "../window_grab.h"
 #include "engine/canvas_store.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using namespace fugue;
@@ -376,5 +377,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestCanvasLayersWindow)
+FUGUE_TEST_MAIN(TestCanvasLayersWindow, QGuiApplication)
 #include "test_canvas_layers_window.moc"

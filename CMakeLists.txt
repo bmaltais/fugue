@@ -9,6 +9,13 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# lld links a 12 MB test executable several times faster than GNU ld; any linker without it keeps the default.
+include(CheckLinkerFlag)
+check_linker_flag(CXX -fuse-ld=lld fugue_linker_has_lld)
+if(fugue_linker_has_lld)
+  add_link_options(-fuse-ld=lld)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
@@ -60,6 +67,21 @@ target_compile_options(fugue_core PUBLIC -Wall -Wextra)
 # The module's qmldir and qmltypes land in build/qml/Fugue, where the qmllint test looks.
 qt_add_qml_module(fugue_core URI Fugue VERSION 1.0 NO_PLUGIN RESOURCE_PREFIX /qt/qml
   OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Fugue)
+
+# The window's own resources (src/resources.qrc: Main.qml, the icons, the strings). The app links them in as
+# objects, so the one binary carries them. The tests that load the real Main.qml link the same file as a shared
+# library instead, made once: with the .qrc added to each of ~120 test executables, one edit of Main.qml
+# recompiled a 1.7 MB qrc_resources.cpp and relinked all of them, and now it rebuilds one small library. The
+# library is kept as a dependency even though no symbol of it is used (its resource registration runs when it
+# loads), hence --no-as-needed.
+add_library(fugue_app_resources OBJECT src/resources.qrc)
+target_link_libraries(fugue_app_resources PRIVATE Qt6::Core)
+add_library(fugue_test_resources SHARED src/resources.qrc)
+target_link_libraries(fugue_test_resources PRIVATE Qt6::Core)
+# A test does not relink when the library is rebuilt: it only holds the resources, and nothing in the test
+# depends on their bytes at link time.
+set(CMAKE_LINK_DEPENDS_NO_SHARED ON)
+set(fugue_test_resources_link -Wl,--push-state,--no-as-needed fugue_test_resources -Wl,--pop-state)
 
 # The bundled canvas actions (#231, docs/canvas-actions-design.md): share/actions/*.fugue compiled in under
 # :/fugue/actions, where CanvasActions lists them. They move to fugue-workflows (category `canvas`) when the
@@ -159,25 +181,56 @@ foreach(definition ${fugue_group_definitions})
 endforeach()
 qt_add_resources(fugue_nodes fugue_node_manifests PREFIX /fugue/nodes FILES ${fugue_node_manifest_files})
 
-add_executable(fugue src/main.cpp src/resources.qrc)
-target_link_libraries(fugue PRIVATE fugue_core fugue_cli fugue_nodes)
+add_executable(fugue src/main.cpp)
+target_link_libraries(fugue PRIVATE fugue_core fugue_cli fugue_nodes fugue_app_resources)
 
-# The tests load the real Main.qml, so they carry the resources too.
+# The tests that take longest are split into shards, each its own ctest entry (`test_x.1of4` ... `test_x.4of4`)
+# running every n-th test function of the same executable (tests/test_shard.h, FUGUE_TEST_MAIN), so a run's
+# wall time is not one long test: `name=count`. A shard count over the number of functions only makes empty shards.
+set(fugue_test_shards
+    test_canvas_view_window=8 test_canvas_run=6 test_cli_canvas=6 test_menus=4 test_settings_panel=4
+    test_side_panels_window=4 test_basic_cli=3 test_canvas_window=3
+    test_chrome_window=3 test_canvas_look=2 test_canvas_widgets=2 test_canvas_editing=2 test_canvas_mask_editor=2 test_packs_page=2 test_omarchy_provider=2 test_projects_window=2 test_area_split_window=2 test_canvas_layers_window=2)
+function(fugue_add_test name)
+  cmake_parse_arguments(ARG "OFFSCREEN" "" "" ${ARGN})
+  set(count 1)
+  foreach(entry ${fugue_test_shards})
+    if(entry MATCHES "^${name}=([0-9]+)$")
+      set(count ${CMAKE_MATCH_1})
+    endif()
+  endforeach()
+  set(names ${name})
+  if(count GREATER 1)
+    set(names)
+    foreach(i RANGE 1 ${count})
+      add_test(NAME ${name}.${i}of${count} COMMAND ${name})
+      set_property(TEST ${name}.${i}of${count} APPEND PROPERTY ENVIRONMENT FUGUE_TEST_SHARD=${i}/${count})
+      list(APPEND names ${name}.${i}of${count})
+    endforeach()
+  else()
+    add_test(NAME ${name} COMMAND ${name})
+  endif()
+  if(ARG_OFFSCREEN)
+    foreach(each ${names})
+      set_property(TEST ${each} APPEND PROPERTY ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+    endforeach()
+  endif()
+endfunction()
+
+# The tests load the real Main.qml, so they link the resources too (fugue_test_resources).
 enable_testing()
-add_executable(fugue_tests tests/fugue_tests.cpp tests/test_environment.cpp src/resources.qrc)
-target_link_libraries(fugue_tests PRIVATE fugue_core Qt6::Test)
-add_test(NAME fugue_tests COMMAND fugue_tests)
-set_tests_properties(fugue_tests PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+add_executable(fugue_tests tests/fugue_tests.cpp tests/test_environment.cpp)
+target_link_libraries(fugue_tests PRIVATE fugue_core ${fugue_test_resources_link} Qt6::Test)
+fugue_add_test(fugue_tests OFFSCREEN)
 
 # Command tests: each tests/commands/<name>.cpp is its own QtTest executable. They load the
 # real Main.qml, so they carry the resources too.
 file(GLOB fugue_commands_tests CONFIGURE_DEPENDS tests/commands/*.cpp)
 foreach(test_source ${fugue_commands_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core Qt6::Test)
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # A stand-in for fugue-helper that speaks its protocol without inference (test_helper_provider).
@@ -202,7 +255,7 @@ foreach(test_source ${fugue_engine_tests})
                              FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>"
                              FUGUE_FAKE_MODULE_PROVIDER="$<TARGET_FILE:fake_module_provider>")
   add_dependencies(${test_name} fake_fugue_helper fake_module_provider)
-  add_test(NAME ${test_name} COMMAND ${test_name})
+  fugue_add_test(${test_name})
 endforeach()
 
 # Node tests: each tests/nodes/<name>.cpp is its own QtTest executable linking the built-in nodes.
@@ -215,7 +268,7 @@ foreach(test_source ${fugue_nodes_tests})
                              FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>"
                              FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_dependencies(${test_name} fugue fake_fugue_helper)
-  add_test(NAME ${test_name} COMMAND ${test_name})
+  fugue_add_test(${test_name})
 endforeach()
 
 # Canvas tests: each tests/canvas/<name>.cpp is its own QtTest executable with the app's
@@ -223,21 +276,19 @@ endforeach()
 file(GLOB fugue_canvas_tests CONFIGURE_DEPENDS tests/canvas/*.cpp)
 foreach(test_source ${fugue_canvas_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # Search tests: each tests/search/<name>.cpp is its own QtTest executable, like the canvas ones.
 file(GLOB fugue_search_tests CONFIGURE_DEPENDS tests/search/*.cpp)
 foreach(test_source ${fugue_search_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # Run tests: each tests/run/<name>.cpp is its own QtTest executable with the app's code (the run
@@ -245,10 +296,9 @@ endforeach()
 file(GLOB fugue_run_tests CONFIGURE_DEPENDS tests/run/*.cpp)
 foreach(test_source ${fugue_run_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # Panel tests: each tests/panels/<name>.cpp is its own QtTest executable (the side panels' state
@@ -256,31 +306,28 @@ endforeach()
 file(GLOB fugue_panels_tests CONFIGURE_DEPENDS tests/panels/*.cpp)
 foreach(test_source ${fugue_panels_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # Workspace tests: the area tree and view registry alone, the area tree drawn, and the window's one area (#217).
 file(GLOB fugue_workspace_tests CONFIGURE_DEPENDS tests/workspace/*.cpp)
 foreach(test_source ${fugue_workspace_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # Media tests: the browser'"'"'s core (results of a workflow, thumbnails) and the browser in the window.
 file(GLOB fugue_media_tests CONFIGURE_DEPENDS tests/media/*.cpp)
 foreach(test_source ${fugue_media_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # A `fugue` run from the build folder finds the bundled templates beside it, as an installed one
@@ -293,11 +340,10 @@ file(CREATE_LINK ${CMAKE_SOURCE_DIR}/templates ${CMAKE_BINARY_DIR}/templates SYM
 file(GLOB fugue_workflow_tests CONFIGURE_DEPENDS tests/workflow/*.cpp)
 foreach(test_source ${fugue_workflow_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test PkgConfig::ARCHIVE) # test_share_package makes zips
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test PkgConfig::ARCHIVE) # test_share_package makes zips
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-  add_test(NAME ${test_name} COMMAND ${test_name})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
 # qmllint over every QML file in src/, with the Fugue module's types and the resource layout
@@ -323,7 +369,7 @@ foreach(test_source ${fugue_cli_tests})
                              FUGUE_FAKE_BINARY="$<TARGET_FILE:fugue_with_fakes>"
                              FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_dependencies(${test_name} fugue fugue_with_fakes)
-  add_test(NAME ${test_name} COMMAND ${test_name})
+  fugue_add_test(${test_name})
 endforeach()
 
 # No test reads or writes the owner's files: every test has a home of its own (HOME, so

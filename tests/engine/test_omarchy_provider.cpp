@@ -18,6 +18,7 @@
 #include "fake_http.h"
 #include "omarchy_fixture.h"
 #include "provider_support.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 using fugue::test::await;
@@ -1814,5 +1815,5 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(TestOmarchyProvider)
+FUGUE_TEST_MAIN(TestOmarchyProvider, QCoreApplication)
 #include "test_omarchy_provider.moc"

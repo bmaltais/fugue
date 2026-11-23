@@ -27,6 +27,7 @@
 #include "../window_grab.h"
 #include "translator.h"
 #include "../cpu_time.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 
@@ -872,5 +873,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestCanvasWindow)
+FUGUE_TEST_MAIN(TestCanvasWindow, QGuiApplication)
 #include "test_canvas_window.moc"

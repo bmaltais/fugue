@@ -19,6 +19,7 @@
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 
@@ -452,5 +453,5 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(TestBasicCli)
+FUGUE_TEST_MAIN(TestBasicCli, QCoreApplication)
 #include "test_basic_cli.moc"

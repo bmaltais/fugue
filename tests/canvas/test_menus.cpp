@@ -19,6 +19,7 @@
 #include "menu/menus.h"
 #include "../scroll_checks.h"
 #include "../window_grab.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -1255,5 +1256,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(MenusTests)
+FUGUE_TEST_MAIN(MenusTests, QGuiApplication)
 #include "test_menus.moc"

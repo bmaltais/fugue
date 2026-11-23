@@ -18,6 +18,7 @@
 #include "../engine/omarchy_fixture.h"
 #include "../scroll_checks.h"
 #include "../window_grab.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -1045,5 +1046,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestCanvasWidgets)
+FUGUE_TEST_MAIN(TestCanvasWidgets, QGuiApplication)
 #include "test_canvas_widgets.moc"

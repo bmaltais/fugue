@@ -1,0 +1,60 @@
+#!/bin/bash
+# Which tests a change needs: `bin/test-select [base]` (default origin/main) reads the files changed since the
+# merge base with HEAD, plus the working tree and untracked files, and prints one line:
+#   full <why>            the whole suite: a shared file changed (build files, resources, core headers, ...)
+#   none <why>            nothing that a test covers (documentation, packaging, ...)
+#   tests <name>...       the test executables to build and run (qmllint is added when a .qml file changed)
+# bin/test --changed uses it. The rules are a heuristic that errs towards running more:
+#   tests/<dir>/<name>.cpp           that test
+#   src/<area>/...                   the tests of tests/<area>/, the tests that #include "<area>/" and, for
+#                                    a .qml file, the tests that name it; the engine and the cli also run the
+#                                    tests that start the built `fugue` (tests/cli, tests/nodes)
+#   anything else under src/, tests/ (shared helpers), build files, templates/, examples/, share/: full
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+base="${1:-origin/main}"
+mergebase="$(git merge-base "$base" HEAD)"
+files="$( { git diff --name-only "$mergebase"; git ls-files -o --exclude-standard; } | sort -u)"
+[[ -n $files ]] || { echo "none no changes since $base"; exit 0; }
+
+declare -A chosen=()
+qml=0
+add_dir() { local f; for f in "$root"/tests/$1/*.cpp; do [[ -f $f ]] && chosen[$(basename "$f" .cpp)]=1; done; return 0; }
+add_including() { # tests whose source mentions the pattern
+  local f
+  while IFS= read -r f; do [[ $f == */*_support/* ]] || chosen[$(basename "$f" .cpp)]=1; done < <(grep -rlE --include='*.cpp' -e "$1" tests || true)
+  return 0
+}
+
+while IFS= read -r file; do
+  case $file in
+    tests/cli_support/*) add_dir cli ;;
+    tests/*_support/*) echo "full a shared test helper changed: $file"; exit 0 ;;
+    tests/*/*.cpp) chosen[$(basename "$file" .cpp)]=1 ;;
+    tests/*) echo "full a shared test file changed: $file"; exit 0 ;;
+    CMakeLists.txt|bin/*|src/resources.qrc|src/Main.qml|src/i18n/*|templates|templates/*|examples/*|share/*|.gitmodules)
+      echo "full shared file changed: $file"; exit 0 ;;
+    src/*/*)
+      area="${file#src/}"; area="${area%%/*}"
+      case $area in
+        canvas|commands|media|menu|nodes|panels|run|search|settings|workflow|workspace|cli|engine) ;;
+        *) echo "full shared source changed: $file"; exit 0 ;;
+      esac
+      if [[ $area == engine && $file == *.h ]]; then echo "full core header changed: $file"; exit 0; fi
+      [[ -d tests/$area ]] && add_dir "$area"
+      stem="$(basename "$file")"; stem="${stem%.*}"
+      add_including "#include \"$area/$stem\\.h\""
+      case $area in engine|cli|nodes) add_dir cli; add_dir nodes ;; esac
+      if [[ $file == *.qml ]]; then
+        qml=1
+        add_including "$(basename "$file" .qml)"
+      fi ;;
+    src/*) echo "full shared source changed: $file"; exit 0 ;;
+    *) ;; # docs, packaging, .github, scripts, helper, README: no test covers them
+  esac
+done <<<"$files"
+
+if ((${#chosen[@]} == 0 && qml == 0)); then echo "none only files no test covers changed since $base"; exit 0; fi
+names=("${!chosen[@]}")
+printf 'tests'; printf ' %s' "${names[@]}" | tr ' ' '\n' | sort | tr '\n' ' '; ((qml)) && printf ' qmllint'; echo
