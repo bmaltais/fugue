@@ -1293,7 +1293,7 @@ Item {
             id: frameHover
             objectName: "canvasViewFrameHover"
             readonly property var frame: regionFrame.item as CropFrame
-            readonly property bool over: hovered && frame !== null && point.position.x >= frame.fx && point.position.x <= frame.fx + frame.fw
+            readonly property bool over: hovered && !!frame && point.position.x >= frame.fx && point.position.x <= frame.fx + frame.fw
                                          && point.position.y >= frame.fy && point.position.y <= frame.fy + frame.fh
             readonly property string text: root.previewReady
                 ? qsTr("Context %1 × %2 (dashed). The model gets %3 × %4%5.")
