@@ -245,6 +245,12 @@ public:
     // the layer has writes nothing (as editLayers). input_invalid for a mask of another size or channels.
     Result<Commit> setLayerMask(const QString &canvasId, const QString &base, int position, const mask::MaskPaint &mask, const QString &producer);
 
+    // A paint layer's pixels replaced (#314; Canvas Write onto a layer): the layer at `position` of `base` (the head, as editLayers) gets
+    // `picture` (four channels, the canvas's size) as its pixels, kept as they are (the layer's mask, name, opacity and blend stay; a placed
+    // or transformed layer's source is dropped, as the pixels are now the layer's own). ONE new revision, producer `producer`; pixels equal
+    // to the layer's write nothing. input_invalid for a locked layer, a group, a picture or mask layer, or a picture of another size.
+    Result<Commit> setLayerPixels(const QString &canvasId, const QString &base, int position, const mask::MaskPaint &picture, const QString &producer);
+
     // A picture placed on the canvas as a new layer (#236; Edit > Paste as new layer, a dropped file): the picture, which may be
     // bigger than the canvas, is kept whole as the layer's original (engine/canvas_layer_source.h) and shown centered on (`cx`, `cy`)
     // canvas pixels, cut at the canvas's edge. The layer goes right above the layer at `above` (a position, bottom first; -1: on

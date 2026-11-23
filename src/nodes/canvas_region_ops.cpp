@@ -94,4 +94,21 @@ PlacedLayer placedLayerWithMask(int canvasWidth, int canvasHeight, const CropBox
     return out;
 }
 
+Pixels layerWithPicture(const Pixels &old, const PlacedLayer &placed) {
+    Pixels out = old;
+    for (int y = 0; y < old.height; ++y)
+        for (int x = 0; x < old.width; ++x) {
+            const float m = std::clamp(placed.mask.at(x, y, 0), 0.0f, 1.0f);
+            if (m <= 0)
+                continue;
+            const float pictureAlpha = std::clamp(placed.layer.at(x, y, 3), 0.0f, 1.0f);
+            const float oldAlpha = old.at(x, y, 3) * (1 - m), newAlpha = pictureAlpha * m;
+            const float alpha = oldAlpha + newAlpha;
+            for (int c = 0; c < 3; ++c)
+                out.at(x, y, c) = alpha <= 0 ? 0.0f : std::clamp((old.at(x, y, c) * oldAlpha + placed.layer.at(x, y, c) * newAlpha) / alpha, 0.0f, 1.0f);
+            out.at(x, y, 3) = std::clamp(alpha, 0.0f, 1.0f);
+        }
+    return out;
+}
+
 } // namespace fugue::nodes

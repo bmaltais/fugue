@@ -1181,6 +1181,30 @@ Result<Commit> CanvasStore::setLayerMask(const QString &canvasId, const QString 
     return commitEdit(canvasId, base, edit, producer, true);
 }
 
+Result<Commit> CanvasStore::setLayerPixels(const QString &canvasId, const QString &base, int position, const MaskPaint &picture, const QString &producer) {
+    if (picture.channels() != 4)
+        return Result<Commit>(makeError(QStringLiteral("input_invalid"), QStringLiteral("A layer's pixels are four channels.")));
+    const TileSink sink = [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); };
+    Result<TileMap> tiles = cutLayer(picture, sink);
+    if (!tiles)
+        return Result<Commit>(tiles.errors());
+    return commitTree(canvasId, base, [&](const Tree &tree) -> Result<Tree> {
+        if (picture.width() != tree.width || picture.height() != tree.height)
+            return makeError(QStringLiteral("input_invalid"), QStringLiteral("The picture is %1 x %2 and the canvas %3 x %4.").arg(picture.width()).arg(picture.height()).arg(tree.width).arg(tree.height));
+        if (position < 0 || position >= int(tree.layers.size()))
+            return makeError(QStringLiteral("input_invalid"), QStringLiteral("There is no layer %1: the revision has %2.").arg(position).arg(tree.layers.size()));
+        Tree out = tree;
+        LayerRecord &layer = out.layers[size_t(position)];
+        if (layer.locked)
+            return lockedError(layer, QStringLiteral("its pixels cannot be painted or replaced"));
+        if (layer.group || layer.kind != mask::LayerKind::Paint)
+            return makeError(QStringLiteral("input_invalid"), QStringLiteral("%1 is not a paint layer: it has no pixels to write.").arg(layer.name));
+        layer.tiles = tiles.value();
+        layer.source.reset();
+        return out;
+    }, producer, true);
+}
+
 QString CanvasStore::selectionPath(const QString &hash) const { return m_root + QStringLiteral("/selections/") + hexOf(hash) + QStringLiteral(".json"); }
 
 Result<QString> CanvasStore::storeSelection(const MaskPaint &selection) {

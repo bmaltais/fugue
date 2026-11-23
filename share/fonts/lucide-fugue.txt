@@ -65,3 +65,5 @@ sparkles e417
 wand-sparkles e35b
 history e1f5
 download e0b6
+lock e10f
+lock-open e110

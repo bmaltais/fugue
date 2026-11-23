@@ -69,7 +69,10 @@ the window, see below):
   named after the prompt that made it (or Fill 1, Fill 2, ... when there is none), unless you give
   it a name. Wire Region's canvas, stitch and your generated picture into it.
   With **Onto** set to a layer's name (Canvas Write 1.6.0) it adds no layer: the **Layer mask** picture becomes that
-  layer's layer mask, one revision Undo takes back. Inside a stitch's box the mask changes only where the selection is; a locked
+  layer's layer mask, one revision Undo takes back. With **Onto the pixels of layer** (1.7.0, advanced) the picture goes into
+  that layer's own pixels instead, inside the stitch's box and blended through the mask, also one revision; if something
+  else changed the canvas meanwhile it is written again onto the new head when that layer is untouched there, otherwise the run
+  says so and writes nothing. Inside a stitch's box the mask changes only where the selection is; a locked
   layer refuses. The task bar's **Remove background** uses it (Remove Background Mask from the pack, then Write onto the current
   layer): the subject stays, the background is hidden by the mask, nothing is deleted.
 

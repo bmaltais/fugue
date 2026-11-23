@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "engine/canvas_handle.h"
+#include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
 #include "engine/canvas_tiles.h"
 #include "engine/clock.h"
@@ -309,6 +310,8 @@ public:
             return Result<Values>(blend.errors());
         // Onto (1.6.0): the picture is a layer mask, not a layer, so there is no image to read.
         const QString onto = context.input(QStringLiteral("onto")).text().trimmed();
+        // Onto the pixels (1.7.0): the picture goes into the named layer's own pixels instead of a new layer.
+        const QString ontoPixels = context.input(QStringLiteral("onto_pixels")).text().trimmed();
         Result<Pixels> redrawn = Pixels();
         if (onto.isEmpty()) {
             redrawn = pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
@@ -351,6 +354,10 @@ public:
                 return Result<Values>(read.errors());
             mask = maskResized(read.value(), width, height);
         }
+        if (!onto.isEmpty() && !ontoPixels.isEmpty())
+            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto_pixels"),
+                                  QStringLiteral("Onto (a layer mask) and Onto the pixels of layer are both set: a write goes to one of them."),
+                                  QStringLiteral("Empty one of the two."));
         if (!onto.isEmpty())
             return writeLayerMask(context, base.value(), baseTree.value(), onto, box, mask);
         if (shape && !shapeFits(*shape, redrawn->width, redrawn->height))
@@ -359,6 +366,9 @@ public:
                                       .arg(redrawn->width).arg(redrawn->height).arg(shape->width).arg(shape->height),
                                   QStringLiteral("Keep the Sampler on the region's latent, so the picture keeps its shape."));
 
+        if (!ontoPixels.isEmpty())
+            return writeLayerPixels(context, base.value(), baseTree.value(), ontoPixels, box,
+                                    placedLayerWithMask(width, height, box, redrawn.value(), mask, blend.value()));
         if (name.isEmpty())
             name = nextFillName(baseTree.value());
         if (const QString suffix = context.input(QStringLiteral("suffix")).text().trimmed(); !suffix.isEmpty())
@@ -447,6 +457,75 @@ public:
         out.insert(QStringLiteral("accepted"), Value(true));
         out.insert(QStringLiteral("head"), Value(moved->head));
         return Result<Values>(out);
+    }
+
+    // Onto the pixels (1.7.0, #314): the picture goes into the pixels of the layer named `name` (the top one of that name that is a paint
+    // layer at the top level), inside the stitch's box and through the blended mask: old*(1-m) + picture*m. ONE revision made from the
+    // one Region read (`setLayerPixels`), Undo takes it back. The picture is composed once, over the layer as it was read.
+    // A head that moved meanwhile is rebased when the layer is untouched there (same name and the very same tiles, found again by
+    // content, so a layer added above or below, a rename elsewhere, a mask edit of another layer do not matter): the revision is made
+    // again from the new head with the same pixels, up to four times (a write that races this one again). When the layer itself changed
+    // (painted, transformed, locked, deleted, the canvas resized) the picture was drawn from pixels that are gone, so nothing is written and
+    // the run says `canvas_head_moved`: a person's edit is never overwritten by a stale result (a new layer, which only adds, is different).
+    Result<Values> writeLayerPixels(const NodeContext &context, const CanvasHandle &base, const canvas::Tree &tree, const QString &name, const CropBox &,
+                                    const PlacedLayer &placed) {
+        const int width = tree.width, height = tree.height;
+        int position = -1;
+        QStringList names;
+        for (int i = int(tree.layers.size()) - 1; i >= 0 && position < 0; --i) {
+            names << tree.layers[size_t(i)].name;
+            if (tree.layers[size_t(i)].name == name && tree.layers[size_t(i)].kind == LayerKind::Paint && !tree.layers[size_t(i)].group)
+                position = i;
+        }
+        if (position < 0)
+            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto_pixels"),
+                                  QStringLiteral("The canvas has no paint layer named \"%1\" at this revision.").arg(name.left(60)),
+                                  QStringLiteral("Its layers are: %1.").arg(names.join(QStringLiteral(", ")).left(300)));
+        CanvasStore store = CanvasStore::forSession();
+        const canvas::LayerRecord &layer = tree.layers[size_t(position)];
+        if (layer.locked) // said before reading a pixel; the store says it again if it got locked since
+            return Result<Values>(canvas::lockedError(layer, QStringLiteral("its pixels cannot be painted or replaced")));
+        const Result<mask::MaskPaint> held = canvas::assembleLayer(width, height, 4, layer.tiles, [&](const canvas::TileKey &key, const QString &hash) {
+            const mask::IRect rect = canvas::tileRect(key, width, height);
+            return store.tilePixels(hash, rect.width, rect.height, 4);
+        });
+        if (!held)
+            return Result<Values>(held.errors());
+        const mask::MaskPaint composed = pixelsToLayer(layerWithPicture(layerToPixels(held.value()), placed));
+        const QString producer = QStringLiteral("canvas-write:") + context.node;
+        const QString here = layer.name;
+        const canvas::TileMap tiles = layer.tiles;
+        QString from = base.revision;
+        int at = position;
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            const Result<canvas::Commit> done = store.setLayerPixels(base.canvas, from, at, composed, producer);
+            if (!done)
+                return Result<Values>(done.errors());
+            if (done->move.moved || done->move.head == from) { // landed, or the same pixels as there already (nothing to write)
+                const QString landed = done->move.moved ? done->revision.id : from;
+                const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {base.canvas, landed});
+                if (!handle)
+                    return Result<Values>(handle.errors());
+                Values out;
+                out.insert(QStringLiteral("canvas"), Value(handle.value()));
+                out.insert(QStringLiteral("accepted"), Value(true));
+                out.insert(QStringLiteral("head"), Value(landed));
+                return Result<Values>(out);
+            }
+            // The head moved: rebase when the layer is just as it was read, found again on the new head.
+            const Result<canvas::Tree> there = store.loadTree(base.canvas, done->move.head);
+            at = -1;
+            if (there && there->width == width && there->height == height)
+                for (int i = int(there->layers.size()) - 1; i >= 0 && at < 0; --i)
+                    if (there->layers[size_t(i)].name == here && there->layers[size_t(i)].tiles == tiles && !there->layers[size_t(i)].group)
+                        at = i;
+            if (at < 0)
+                break;
+            from = done->move.head;
+        }
+        return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
+                                        QStringLiteral("The layer \"%1\" changed while this ran, so the picture was not written onto it.").arg(here.left(60)),
+                                        QStringLiteral("Run again from the canvas as it is now.")));
     }
 
     // Onto (1.6.0): `layer_mask` becomes the layer mask of the layer named `onto`, one revision made from the one Region read.

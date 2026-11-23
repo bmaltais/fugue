@@ -927,6 +927,85 @@ private slots:
         QCOMPARE(maskByte(id, head, 0, 10, 10), 0);     // outside, hidden before and still
     }
 
+    // ---- Write onto a layer's pixels (1.7.0, #314) ----
+
+    Result<Values> greenOnto(Bench &bench, const QString &id, const QString &layer, Values extra = {}, const QString &work = "pixels") {
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)},
+                                                   {"padding", Value(0)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}}, work + "-region");
+        extra.insert("onto_pixels", Value(layer));
+        return writeGreen(bench, r, extra, work);
+    }
+
+    void aWriteOntoALayersPixelsIsOneUndoableRevisionAndAddsNoLayer() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString before = headOf(id);
+        const Result<Values> w = greenOnto(bench, id, "Base");
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        const QString after = headOf(id);
+        QCOMPARE(w->value("head").text(), after);
+        QCOMPARE(CanvasStore::forSession().revision(id, after)->parent, before); // one revision
+        QCOMPARE(int(CanvasStore::forSession().loadTree(id, after)->layers.size()), 1);
+        QCOMPARE(pixel(id, after, 100, 80, 1), 255); // inside the box: green now
+        QCOMPARE(pixel(id, after, 100, 80, 0), 0);
+        QCOMPARE(pixel(id, after, 300, 200, 2), pixel(id, before, 300, 200, 2)); // outside it: the blue block is as it was
+        QCOMPARE(pixel(id, before, 100, 80, 0), 200);   // the revision before is untouched
+        QVERIFY(CanvasStore::forSession().undo(id, after)->moved);
+        QCOMPARE(headOf(id), before);
+    }
+
+    void aWriteOntoPixelsRebasesWhenOnlyOtherLayersMovedTheHead() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)},
+                                                   {"padding", Value(0)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}});
+        canvas::LayerEdit add; // something else lands a new layer on top while the run was going
+        add.op = canvas::LayerOp::New;
+        const auto moved = CanvasStore::forSession().editLayers(id, headOf(id), add, "test");
+        QVERIFY(moved && moved->move.moved);
+        const Result<Values> w = writeGreen(bench, r, {{"onto_pixels", Value("Base")}}, "rebased");
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        const QString head = headOf(id);
+        QCOMPARE(CanvasStore::forSession().revision(id, head)->parent, moved->revision.id); // made from the head as it was then
+        QCOMPARE(int(CanvasStore::forSession().loadTree(id, head)->layers.size()), 2);       // the other layer is kept
+        QCOMPARE(pixel(id, head, 100, 80, 1), 255);
+    }
+
+    void aWriteOntoPixelsWritesNothingWhenTheLayerChangedMeanwhile() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)},
+                                                   {"padding", Value(0)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}});
+        canvas::LayerEdit rename; // the layer the picture was drawn from is not there as it was
+        rename.op = canvas::LayerOp::Rename;
+        rename.layers = {0};
+        rename.text = "Renamed";
+        QVERIFY(CanvasStore::forSession().editLayers(id, headOf(id), rename, "test")->move.moved);
+        const QString head = headOf(id);
+        const Result<Values> w = writeGreen(bench, r, {{"onto_pixels", Value("Base")}}, "stale");
+        QCOMPARE(codeOf(w), QString("canvas_head_moved"));
+        QCOMPARE(headOf(id), head);
+    }
+
+    void aWriteOntoPixelsRefusesALockedMissingOrDoubleTarget() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString before = headOf(id);
+        QCOMPARE(codeOf(greenOnto(bench, id, "Nowhere", {}, "missing")), QString("input_invalid"));
+        QCOMPARE(codeOf(greenOnto(bench, id, "Base", {{"onto", Value("Base")}}, "both")), QString("input_invalid"));
+        QCOMPARE(headOf(id), before);
+        canvas::LayerEdit lock;
+        lock.op = canvas::LayerOp::Lock;
+        lock.layers = {0};
+        lock.flag = true;
+        QVERIFY(CanvasStore::forSession().editLayers(id, before, lock, "test")->move.moved);
+        const QString locked = headOf(id);
+        const Result<Values> w = greenOnto(bench, id, "Base", {}, "locked");
+        QCOMPARE(codeOf(w), QString("input_invalid"));
+        QVERIFY(w.errors().first().message.contains("locked"));
+        QCOMPARE(headOf(id), locked);
+    }
+
     void aPictureOfAnotherShapeIsRefusedAndNothingIsWritten() {
         Bench bench;
         const QString id = makeCanvas();
