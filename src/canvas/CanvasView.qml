@@ -269,6 +269,15 @@ Item {
         exportDialog.selectedFile = StandardPaths.writableLocation(StandardPaths.PicturesLocation) + "/" + canvasData.exportName
         exportDialog.open()
     }
+    // Export with quality and scale… and Export layers as files… (#247, #248): one dialog, made the first time.
+    property var exportDialogBox: null
+    function exportWith(mode) {
+        if (!exportDialogBox)
+            exportDialogBox = exportComponent.createObject(root, { storeRoot: canvasData.storeRoot })
+        const why = exportDialogBox.openFor(canvasData.canvasId, canvasData.revisionB, mode)
+        if (why !== "")
+            canvasData.showError(why)
+    }
     // Close canvas: the host's close (the dialog), or the area shows no canvas.
     function closeCanvas() {
         if (hostCloses)
@@ -285,7 +294,7 @@ Item {
         switch (id) {
         case "canvas-view.new": case "canvas-view.import": return {enabled: true}
         case "canvas-view.open": return {enabled: canvasData.canvases.length > 0}
-        case "canvas-view.export": return {enabled: canvasData.revisionB !== ""}
+        case "canvas-view.export": case "canvas-view.export-options": case "canvas-view.export-layers": return {enabled: canvasData.revisionB !== ""}
         case "canvas-view.rename": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
@@ -348,6 +357,8 @@ Item {
         case "canvas-view.open": chooseCanvas(); break
         case "canvas-view.import": importPicture(); break
         case "canvas-view.export": exportDialogOpen(); break
+        case "canvas-view.export-options": exportWith("picture"); break
+        case "canvas-view.export-layers": exportWith("layers"); break
         case "canvas-view.rename": fileDialogs.askRename(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
@@ -446,6 +457,8 @@ Item {
     }
     Component.onDestruction: {
         exportDialog.close()
+        if (exportDialogBox)
+            exportDialogBox.close()
         if (keysHot)
             App.commands.setContextActive("canvas-view", false)
     }
@@ -460,6 +473,13 @@ Item {
     }
     function importPicture() {
         (pictureDialog.createObject(root) as FilePicker).open()
+    }
+    Component {
+        id: exportComponent
+        CanvasExportDialog {
+            parent: Overlay.overlay
+            onSaved: notice => canvasData.showNotice(notice)
+        }
     }
     Component {
         id: newCanvasComponent

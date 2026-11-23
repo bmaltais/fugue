@@ -131,6 +131,16 @@ bool CanvasHistory::exportPicture(const QString &target) {
     return true;
 }
 
+void CanvasHistory::showNotice(const QString &text) {
+    m_notice = text;
+    emit noticeChanged();
+}
+
+void CanvasHistory::showError(const QString &text) {
+    m_error = text;
+    emit errorChanged();
+}
+
 bool CanvasHistory::renameCanvas(const QString &name) {
     const Result<canvas::CanvasInfo> done = store().rename(m_canvas, name);
     if (!done) {
