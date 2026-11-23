@@ -18,6 +18,7 @@
 #include "engine/canvas_handle.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
+#include "engine/canvas_tiles.h"
 #include "engine/compile_for_run.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
@@ -785,6 +786,96 @@ private slots:
         const Result<Values> missing = bench.region(id, named, "missing");
         QCOMPARE(codeOf(missing), QString("input_invalid"));
         QVERIFY(missing.errors().first().hint.contains("Hidden green"));
+    }
+
+    // ---- Write onto a layer mask (1.6.0, #231 slice 6) ----
+
+    // The whole canvas as the region, and a subject mask the size of the region: white in a square.
+    Result<Values> subjectOnto(Bench &bench, const QString &id, const QString &layer, Values extra = {}, const QString &work = "onto") {
+        const Result<Values> r = bench.region(id, {{"layer", Value(layer)}, {"padding", Value(0)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}});
+        Pixels m(kW, kH, 1);
+        for (int y = 40; y < 130; ++y)
+            for (int x = 50; x < 170; ++x)
+                m.at(x, y, 0) = 1;
+        Result<Values> maskValue = namedOutput(m, "mask");
+        const MediaHandle file = maskValue->value("mask").media().saved(bench.dir.path(), work + "-mask", bench.hashes).value();
+        Values inputs{{"canvas", r->value("canvas")}, {"stitch", r->value("stitch")}, {"layer_mask", Value(file)}, {"onto", Value(layer)}};
+        for (auto it = extra.begin(); it != extra.end(); ++it)
+            inputs.insert(it.key(), it.value());
+        return bench.run("fugue/canvas-write", inputs, work);
+    }
+
+    // The layer mask the revision holds on the layer at `position`, as bytes.
+    int maskByte(const QString &id, const QString &revision, int position, int x, int y) {
+        const auto tree = CanvasStore::forSession().loadTree(id, revision);
+        const auto &layer = tree->layers[size_t(position)];
+        const auto held = canvas::assembleLayer(kW, kH, 1, layer.maskTiles, [&](const canvas::TileKey &key, const QString &hash) {
+            const mask::IRect rect = canvas::tileRect(key, kW, kH);
+            return CanvasStore::forSession().tilePixels(hash, rect.width, rect.height, 1);
+        });
+        return held->at(x, y);
+    }
+
+    void aWriteOntoALayerPutsTheMaskOnTheLayerInOneUndoableRevision() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString before = headOf(id);
+        const Result<Values> w = subjectOnto(bench, id, "Base");
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        const QString after = headOf(id);
+        QVERIFY(after != before);
+        QCOMPARE(w->value("head").text(), after);
+        QCOMPARE(CanvasStore::forSession().revision(id, after)->parent, before); // one revision
+        const auto tree = CanvasStore::forSession().loadTree(id, after);
+        QCOMPARE(int(tree->layers.size()), 1); // no layer was added
+        QVERIFY(tree->layers[0].hasMask);
+        QCOMPARE(maskByte(id, after, 0, 100, 80), 255); // the mask is what was given
+        QCOMPARE(maskByte(id, after, 0, 300, 200), 0);
+        QCOMPARE(pixel(id, after, 300, 200, 3), 0);     // the blue block is hidden by the mask, the red one shows
+        QCOMPARE(pixel(id, after, 100, 80, 0), 200);
+        QCOMPARE(pixel(id, before, 300, 200, 3), 255);  // the revision before is as it was
+        const auto undone = CanvasStore::forSession().undo(id, after); // Undo takes it back, as any layer edit
+        QVERIFY(undone && undone->moved);
+        QCOMPARE(headOf(id), before);
+    }
+
+    void aWriteOntoALockedOrMissingLayerSaysSoAndWritesNothing() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString before = headOf(id);
+        QCOMPARE(codeOf(subjectOnto(bench, id, "Base", {{"onto", Value("Nowhere")}}, "missing")), QString("input_invalid"));
+        canvas::LayerEdit lock;
+        lock.op = canvas::LayerOp::Lock;
+        lock.layers = {0};
+        lock.flag = true;
+        const auto locked = CanvasStore::forSession().editLayers(id, before, lock, "test");
+        QVERIFY(locked && locked->move.moved);
+        const QString lockedHead = headOf(id);
+        const Result<Values> w = subjectOnto(bench, id, "Base", {}, "locked");
+        QCOMPARE(codeOf(w), QString("input_invalid"));
+        QVERIFY(w.errors().first().message.contains("locked"));
+        QCOMPARE(headOf(id), lockedHead);
+    }
+
+    void aWriteOntoNeedsALayerMaskAndKeepsTheOldMaskOutsideTheSelection() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const Result<Values> r = bench.region(id, {{"layer", Value("Base")}});
+        QCOMPARE(codeOf(bench.run("fugue/canvas-write", {{"canvas", r->value("canvas")}, {"onto", Value("Base")}}, "none")), QString("input_missing"));
+        // First the whole layer: everything hidden but the square. Then only a rectangle of the selection is looked at again:
+        // inside it the new mask replaces the old one, outside it the old mask stays.
+        QVERIFY(subjectOnto(bench, id, "Base").ok());
+        const Result<Values> inner = bench.region(id, {{"layer", Value("Base")}, {"x", Value(200)}, {"y", Value(100)}, {"width", Value(150)}, {"height", Value(150)},
+                                                      {"padding", Value(0)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}}, "inner");
+        Pixels all(150, 150, 1, 1.0f); // the subject is all of the 150 x 150 region
+        Result<Values> maskValue = namedOutput(all, "mask");
+        const MediaHandle file = maskValue->value("mask").media().saved(bench.dir.path(), "inner-mask", bench.hashes).value();
+        const Result<Values> w = bench.run("fugue/canvas-write", {{"canvas", inner->value("canvas")}, {"stitch", inner->value("stitch")}, {"layer_mask", Value(file)}, {"onto", Value("Base")}}, "inner-write");
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        const QString head = headOf(id);
+        QCOMPARE(maskByte(id, head, 0, 300, 200), 255); // inside the selection: now shown
+        QCOMPARE(maskByte(id, head, 0, 100, 80), 255);  // outside it: the old square stays
+        QCOMPARE(maskByte(id, head, 0, 10, 10), 0);     // outside, hidden before and still
     }
 
     void aPictureOfAnotherShapeIsRefusedAndNothingIsWritten() {

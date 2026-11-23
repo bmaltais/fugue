@@ -2050,6 +2050,7 @@ Item {
         revision: canvasData.revisionB
         onHead: root.shownIsHead
         regionLayer: canvasData.regionLayer
+        currentLayer: canvasData.currentLayer
         rect: root.shownRegion
         quickMask: root.maskSelected ? selectionLayer : null
         originX: pictureView.imageX

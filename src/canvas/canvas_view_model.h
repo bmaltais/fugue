@@ -86,6 +86,9 @@ class CanvasViewModel : public CanvasHistory {
     // The layer a Generate reads instead of the whole picture (#226, Canvas Region's Layer input): its name, "" for the picture as
     // it looks. Like `solo` a view state, not a revision; it ends with the canvas, or when a revision has no such layer.
     Q_PROPERTY(QString regionLayer READ regionLayer NOTIFY layersChanged)
+    // The name of the current layer for a task bar action that works on one (Remove background, #231): the one selected layer when it
+    // is a paint layer Canvas Region can read by name (no layer above shares its name); "" otherwise.
+    Q_PROPERTY(QString currentLayer READ currentLayer NOTIFY layersChanged)
     // A Move or Free Transform in progress (#236): see the header.
     Q_PROPERTY(bool transforming READ transforming NOTIFY transformChanged)
     Q_PROPERTY(QUrl transformImage READ transformImage NOTIFY transformChanged)
@@ -129,6 +132,7 @@ public:
     int solo() const { return m_solo; }
     void setSolo(int position);
     QString regionLayer() const { return m_regionLayer; }
+    QString currentLayer() const;
     // Reads the layer at `position` in a Generate (the same one again, or -1, goes back to the picture). False, with `error`, for a
     // layer Canvas Region cannot read by name: a group, a mask or picture layer, or one a layer above has the same name as.
     Q_INVOKABLE bool setRegionLayer(int position);

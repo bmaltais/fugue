@@ -553,6 +553,20 @@ QVariantList CanvasViewModel::selection() const {
     return out;
 }
 
+QString CanvasViewModel::currentLayer() const {
+    if (m_selected.size() != 1)
+        return {};
+    QSet<QString> above; // top first: the first layer of a name is the one Region reads
+    for (const QVariant &value : m_layers) {
+        const QVariantMap row = value.toMap();
+        const QString name = row.value("name").toString();
+        if (row.value("position").toInt() == m_selected.first())
+            return row.value("kind").toString() == QLatin1String("paint") && !above.contains(name) ? name : QString();
+        above.insert(name);
+    }
+    return {};
+}
+
 bool CanvasViewModel::layersEditable() const { return !revisionB().isEmpty() && revisionB() == m_head && kindB() == QLatin1String("head"); }
 
 QList<int> CanvasViewModel::positionsOf(const QVariantList &list) const {

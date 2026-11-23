@@ -112,6 +112,27 @@ Result<Shown> shownOf(const QString &canvasId, const QString &ref) {
     return Shown{full.value(), tree->width, tree->height};
 }
 
+// The packs `document` needs that this Fugue lacks, each with where to get it: the pack its template folder carries, else the
+// source its requires.packs entry records. {id, name, source, ref}; source is empty when nothing says.
+QVariantList packNeeds(const Document &document, const QList<CarriedPack> &carried, const Registry &registry) {
+    QVariantList needs;
+    for (const QString &pack : packsNeeded(document, registry)) {
+        const auto folder = std::find_if(carried.cbegin(), carried.cend(), [&](const CarriedPack &c) { return c.id == pack; });
+        const QJsonObject recorded = document.requirements.value(QStringLiteral("packs")).toObject().value(pack).toObject();
+        QString source, ref, name = recorded.value(QStringLiteral("name")).toString();
+        if (folder != carried.cend()) {
+            source = folder->folder;
+            if (!folder->name.isEmpty())
+                name = folder->name;
+        } else if (registry.packVersion(pack).isEmpty()) {
+            source = recorded.value(QStringLiteral("source")).toString();
+            ref = recorded.value(QStringLiteral("ref")).toString();
+        }
+        needs << QVariantMap{{"id", pack}, {"name", packTitle(pack, name)}, {"source", source}, {"ref", ref}};
+    }
+    return needs;
+}
+
 } // namespace
 
 CanvasActions::CanvasActions(RunService *service, const Registry *registry, Workflows *workflows, QObject *parent)
@@ -167,14 +188,15 @@ void CanvasActions::refresh() {
     struct Source {
         QString id, file, title;
         bool library;
+        QList<CarriedPack> carried;
     };
     QList<Source> sources;
     if (m_workflows)
         for (const Template &t : m_workflows->templateList())
-            sources.append({t.id, t.workflow, t.title, true});
+            sources.append({t.id, t.workflow, t.title, true, t.carriedPacks});
     for (const QString &root : std::as_const(m_roots))
         for (const QString &name : QDir(root).entryList({QStringLiteral("*.fugue")}, QDir::Files, QDir::Name))
-            sources.append({QFileInfo(name).completeBaseName(), QDir(root).filePath(name), {}, false});
+            sources.append({QFileInfo(name).completeBaseName(), QDir(root).filePath(name), {}, false, {}});
     QSet<QString> seen;
     for (const Source &source : std::as_const(sources)) {
         if (seen.contains(source.id))
@@ -189,6 +211,8 @@ void CanvasActions::refresh() {
         entry.file = source.file;
         entry.library = source.library;
         entry.document = loaded.value();
+        entry.carried = source.carried;
+        entry.needPacks = packNeeds(entry.document, source.carried, *m_registry);
         const Result<std::optional<canvas::Action>> action = canvas::actionOf(entry.document);
         if (action && !action->has_value())
             continue; // a plain workflow: it never hides an action of the same id
@@ -197,7 +221,18 @@ void CanvasActions::refresh() {
             entry.broken = action.error().code == QLatin1String("unsupported_format_version") ? tr("Needs a newer Fugue.") : action.error().message;
         } else {
             entry.action = **action;
-            const Result<canvas::ActionGraph> graph = canvas::checkAction(**action, entry.document, *m_registry);
+            // The inputs that point into a node of a pack that is not installed wait for the pack: the action is listed with the
+            // offer to install it, not as broken.
+            canvas::Action seen = **action;
+            if (!entry.needPacks.isEmpty())
+                seen.inputs.removeIf([&](const canvas::ActionInput &input) {
+                    return std::any_of(input.targets.cbegin(), input.targets.cend(), [&](const PortRef &target) {
+                        const auto node = entry.document.graph.nodes.constFind(target.node);
+                        return node != entry.document.graph.nodes.cend() && !entry.document.groups.contains(node->type) &&
+                               !m_registry->nodeType(node->type);
+                    });
+                });
+            const Result<canvas::ActionGraph> graph = canvas::checkAction(seen, entry.document, *m_registry);
             if (graph)
                 entry.graph = graph.value();
             else
@@ -231,10 +266,15 @@ void CanvasActions::rebuildList() {
                         {"glyph", e.action && !e.action->glyph.isEmpty() ? e.action->glyph : QStringLiteral("sparkles")},
                         {"selection", e.action ? e.action->selection : QStringLiteral("required")},
                         {"needsPrompt", e.action ? e.action->needsPrompt() : false},
+                        {"hasLayer", e.action ? e.action->input(QStringLiteral("layer")) != nullptr : false},
                         {"hasSeed", e.action ? e.action->input(QStringLiteral("seed")) != nullptr : false},
                         {"hasPrompt", e.action ? e.action->input(QStringLiteral("prompt")) != nullptr : false},
                         {"broken", !e.broken.isEmpty()},
                         {"reason", e.broken},
+                        {"packMissing", !e.needPacks.isEmpty()},
+                        {"packName", e.needPacks.isEmpty() ? QString() : e.needPacks.first().toMap().value("name").toString()},
+                        {"packText", e.needPacks.isEmpty() ? QString() : tr("Needs the %1 pack").arg(e.needPacks.first().toMap().value("name").toString())},
+                        {"packInstallable", !e.needPacks.isEmpty() && !e.needPacks.first().toMap().value("source").toString().isEmpty()},
                         {"missing", 0},
                         {"total", 0},
                         {"download", QString()},
@@ -266,6 +306,8 @@ QString CanvasActions::plainWords(const Error &error, const QString &actionName)
         return tr("No model on this machine can run %1.").arg(actionName);
     if (error.code == QLatin1String("out_of_memory"))
         return tr("Not enough GPU memory. Try a smaller selection.");
+    if (error.code == QLatin1String("input_invalid") && error.message.contains(QLatin1String(" is locked: ")))
+        return tr("The layer is locked, so %1 cannot change its mask. Unlock it in the Layers panel, then try again.").arg(actionName);
     if (error.code == QLatin1String("stitch_mismatch"))
         return tr("The action's workflow returned a picture of another shape.");
     if (error.code == QLatin1String("canvas_conflict") || error.code == QLatin1String("canvas_head_moved"))
@@ -359,6 +401,13 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
         m_errorCode = QStringLiteral("action_invalid");
         return refuse(chosen->broken);
     }
+    // A pack it needs is not installed: the bar offers to install it (installPack asks the person); nothing runs.
+    if (!chosen->needPacks.isEmpty()) {
+        m_errorCode = QStringLiteral("pack_missing");
+        m_errorAction = id;
+        return refuse(tr("%1 needs the %2 pack, which is not installed here. Install it first.")
+                          .arg(m_actionName, chosen->needPacks.first().toMap().value("name").toString()));
+    }
     const canvas::Action &action = *chosen->action;
     // An action on the canvas bounds (Expand) ignores the selection: it grows the canvas by the side and the amount asked for.
     const bool bounds = action.selection == QLatin1String("bounds");
@@ -406,7 +455,17 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     binding.rect = rect;
     binding.selection = bounds ? QString() : selection;
     binding.layer = request.value("layer").toString().trimmed();
-    if (routed.action != canvas::RouteAction::None) {
+    // An action with a layer role works on the current layer (Remove background: its mask): that layer's name goes into every target
+    // of the role (Canvas Region's Layer, Canvas Write's Onto), and Region keeps its own padding and scale: the layer whole, as it is.
+    const bool onLayer = action.input(QStringLiteral("layer")) != nullptr;
+    if (onLayer) {
+        const QString current = request.value("currentLayer").toString().trimmed();
+        if (current.isEmpty())
+            return refuse(tr("Select a layer first: click one in the Layers panel."));
+        binding.layer.clear();
+        binding.values.insert(QStringLiteral("layer"), current);
+    }
+    if (routed.action != canvas::RouteAction::None && !onLayer) {
         binding.padding = routed.padding;
         binding.scale = routed.scale;
     }
@@ -498,6 +557,11 @@ Result<canvas::BatchAction> CanvasActions::batchAction(const QString &id) const 
         return makeError(QStringLiteral("file_not_found"), tr("There is no action %1.").arg(id));
     if (!chosen->broken.isEmpty() || !chosen->action)
         return makeError(QStringLiteral("action_invalid"), chosen->broken);
+    if (!chosen->needPacks.isEmpty())
+        return makeError(QStringLiteral("pack_missing"), tr("%1 needs the %2 pack, which is not installed here.")
+                                                             .arg(chosen->action->name, chosen->needPacks.first().toMap().value("name").toString()));
+    if (chosen->action->input(QStringLiteral("layer")))
+        return makeError(QStringLiteral("action_invalid"), tr("%1 works on a layer of a canvas, so it cannot run over a folder.").arg(chosen->action->name));
     if (chosen->action->selection == QLatin1String("bounds"))
         return makeError(QStringLiteral("action_invalid"), tr("%1 works on a crop frame beyond the canvas, so it cannot run over a folder.").arg(chosen->action->name));
     if (m_workflows && m_workflows->missingModels(chosen->document.models()).value("count").toInt() > 0)
@@ -864,6 +928,20 @@ QVariantMap CanvasActions::storeSelection(MaskLayer *selection) const {
     bounds.insert("ok", true);
     bounds.insert("hash", hash.value());
     return bounds;
+}
+
+bool CanvasActions::installPack(const QString &action) {
+    const Entry *chosen = entry(action);
+    if (!chosen || !m_workflows)
+        return false;
+    for (const QVariant &need : chosen->needPacks) {
+        const QVariantMap pack = need.toMap();
+        if (pack.value("source").toString().isEmpty())
+            continue;
+        m_workflows->requestPackInstall(pack.value("source").toString(), pack.value("ref").toString());
+        return true;
+    }
+    return false;
 }
 
 void CanvasActions::download(const QString &action) {

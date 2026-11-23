@@ -279,6 +279,9 @@ public:
     // Asks for that pack to be installed as the banner's button does (packInstallRequested);
     // false when nothing says where to get it.
     Q_INVOKABLE bool installPackById(const QString &pack);
+    // Asks for the pack at `source` (a folder or a git address, with `ref`) to be installed (packInstallRequested), as the banner's button
+    // does, for a caller that knows where it is (a canvas action's template, #231): the window asks the person before anything installs.
+    void requestPackInstall(const QString &source, const QString &ref) { emit packInstallRequested(source, ref); }
 
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).

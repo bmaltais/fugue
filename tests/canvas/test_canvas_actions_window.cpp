@@ -255,6 +255,45 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // Slice 6: an action on the current layer (a stand-in for Remove background, no pack) runs from the bar with one click, no prompt.
+    void anActionOnTheCurrentLayerRunsInOneClick() {
+        Rig r;
+        r.addTemplate("lib-cut", kCutAction, "Cut");
+        QVERIFY(r.app.open());
+        openDialog(r.app);
+        drawRectangle(r.app);
+        QTRY_VERIFY(taskBar(r.app));
+        chooseAction(r.app, indexOf(r, "lib-cut"));
+        QTRY_VERIFY(find(r.app.window, "canvasTaskGenerate")->isEnabled());
+        QVERIFY(!find(r.app.window, "canvasTaskInstallPack"));
+        click(r.app, "canvasTaskGenerate");
+        QTRY_VERIFY(head() != m_head);
+        const auto tree = store().tree(store().revision(m_canvas, head())->tree);
+        QCOMPARE(int(tree->layers.size()), 1);
+        QVERIFY(tree->layers.front().hasMask);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // The real template, whose pack is not installed here, shows what it needs with Install… and keeps Generate off. Install… asks
+    // the window (Settings > Packs, which asks the person); nothing is installed by the test.
+    void aMissingPackShowsWhatItNeedsAndInstallAsksTheWindow() {
+        Rig r;
+        r.addRepositoryTemplate("remove-background-action");
+        QVERIFY(r.app.open());
+        openDialog(r.app);
+        drawRectangle(r.app);
+        QTRY_VERIFY(taskBar(r.app));
+        chooseAction(r.app, indexOf(r, "remove-background-action"));
+        QTRY_COMPARE(textOf(r.app.window, "canvasTaskStatus"), QStringLiteral("Needs the Remove Background pack"));
+        QQuickItem *generate = find(r.app.window, "canvasTaskGenerate");
+        QVERIFY(!generate->isEnabled());
+        QCOMPARE(generate->property("tip").toString(), QStringLiteral("Install the pack first"));
+        QVERIFY(!find(r.app.window, "canvasTaskDownload")); // the models wait for the pack
+        QSignalSpy asked(&r.app.workflows, &Workflows::packInstallRequested);
+        click(r.app, "canvasTaskInstallPack");
+        QCOMPARE(asked.size(), 1);
+    }
+
     // The same bar in a Canvas area (#217): it works in either host.
     void theBarWorksInACanvasArea() {
         Rig r;

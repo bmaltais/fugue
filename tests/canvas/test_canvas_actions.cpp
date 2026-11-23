@@ -15,6 +15,7 @@
 #include "canvas/mask_layer.h"
 #include "canvas/canvas_model.h"
 #include "canvas/widget_edit.h"
+#include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
 
 using namespace actions_test;
@@ -438,6 +439,73 @@ private slots:
                  QStringLiteral("Select an area first, or type what to change in the whole picture."));
         QCOMPARE(r.jobs().size(), 0);
         QVERIFY(!r.actions->busy());
+    }
+
+    // Slice 6, an action that works on the current layer (a layer role, optional selection, Write onto): here with a built-in stand-in
+    // for the pack's Remove Background Mask (the red channel of the layer as the mask). One press with nothing selected puts a layer
+    // mask on that layer, adds no layer, is one revision Undo takes back, and a locked layer refuses it in words.
+    void anActionOnTheCurrentLayerPutsItsMaskOnItWithNothingSelected() {
+        Rig r;
+        r.addTemplate("lib-cut", kCutAction, "Cut");
+        QCOMPARE(r.row("lib-cut").value("broken").toBool(), false);
+        QCOMPARE(r.row("lib-cut").value("hasLayer").toBool(), true);
+        QCOMPARE(r.row("lib-cut").value("packMissing").toBool(), false);
+        QVariantMap request{{"action", "lib-cut"}, {"canvas", m_canvas}, {"revision", head()}};
+        // No current layer: said in words, nothing queued.
+        QCOMPARE(r.actions->generate(request).value("reason").toString(), QStringLiteral("Select a layer first: click one in the Layers panel."));
+        request.insert("currentLayer", "Base");
+        QVERIFY2(r.actions->generate(request).value("ok").toBool(), qPrintable(r.actions->error()));
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QString());
+        QVERIFY(head() != m_head);
+        QCOMPARE(layers(head()), 1); // no layer was added
+        const auto tree = store().tree(store().revision(m_canvas, head())->tree);
+        QVERIFY(tree->layers.front().hasMask);
+        QCOMPARE(store().revision(m_canvas, head())->parent, m_head); // one revision
+        QVERIFY(store().undo(m_canvas, head())->moved);
+        QCOMPARE(head(), m_head);
+        // A locked layer refuses its mask, and nothing changes.
+        canvas::LayerEdit lock;
+        lock.op = canvas::LayerOp::Lock;
+        lock.layers = {0};
+        lock.flag = true;
+        QVERIFY(store().editLayers(m_canvas, m_head, lock, "test")->move.moved);
+        const QString locked = head();
+        request.insert("revision", locked);
+        QVERIFY(r.actions->generate(request).value("ok").toBool());
+        QTRY_VERIFY(!r.actions->busy());
+        QVERIFY2(r.actions->error().contains("locked"), qPrintable(r.actions->error()));
+        QCOMPARE(head(), locked);
+    }
+
+    // The pack is a hard requirement of Remove background: without it the action is listed with the offer to install it (never
+    // broken, never a crash), Generate says so before anything is queued, and installing asks the window (the person agrees there).
+    // The other actions are not touched.
+    void aMissingPackIsAnOfferToInstallItAndTheOtherActionsStayUsable() {
+        Rig r;
+        r.addRepositoryTemplate("remove-background-action");
+        const QVariantMap row = r.row("remove-background-action");
+        QVERIFY(!row.isEmpty());
+        QCOMPARE(row.value("broken").toBool(), false);
+        QCOMPARE(row.value("packMissing").toBool(), true);
+        QCOMPARE(row.value("packText").toString(), QStringLiteral("Needs the Remove Background pack"));
+        QCOMPARE(row.value("packInstallable").toBool(), true);
+        QCOMPARE(r.row("generative-fill").value("packMissing").toBool(), false);
+        QCOMPARE(r.row("test-fill").value("broken").toBool(), false);
+        const QVariantMap refused = r.actions->generate({{"action", "remove-background-action"}, {"canvas", m_canvas}, {"revision", head()}, {"currentLayer", "Base"}});
+        QVERIFY(!refused.value("ok").toBool());
+        QVERIFY2(refused.value("reason").toString().contains("needs the Remove Background pack"), qPrintable(refused.value("reason").toString()));
+        QCOMPARE(r.actions->errorCode(), QStringLiteral("pack_missing"));
+        QCOMPARE(r.actions->errorAction(), QStringLiteral("remove-background-action"));
+        QVERIFY(!r.actions->busy());
+        QCOMPARE(r.jobs().size(), 0);
+        // Install asks the window with the pack the template carries; nothing is installed here.
+        QSignalSpy asked(&r.app.workflows, &Workflows::packInstallRequested);
+        QVERIFY(r.actions->installPack("remove-background-action"));
+        QCOMPARE(asked.size(), 1);
+        QVERIFY(asked.first().at(0).toString().endsWith("/remove-background-action/packs/io.github.bmaltais.fugue-remove-background"));
+        QVERIFY(!r.actions->installPack("test-fill")); // nothing to install
+        QVERIFY(!r.actions->batchAction("remove-background-action").ok());
     }
 
     // Design decision 5: the same prompt, seed, selection and head after an undo is a cache hit to the end, Write

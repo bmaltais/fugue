@@ -28,6 +28,8 @@ Item {
     property bool onHead: false
     // The layer Generate reads instead of the whole picture ("" for the picture as it looks), set in the Layers panel.
     property string regionLayer: ""
+    // The current layer's name ("" when none, or not one Region can read): the layer an action with a layer role works on.
+    property string currentLayer: ""
     // The rectangle on the picture (canvas pixels; width 0: none), and the Quick Mask selection while Quick Mask is on.
     property var rect: ({x: 0, y: 0, width: 0, height: 0})
     property MaskLayer quickMask: null
@@ -67,6 +69,10 @@ Item {
         return actionRows.find(row => row.id === id) ?? ({})
     }
     readonly property bool missingModels: (current.missing ?? 0) > 0
+    // A pack the action's nodes need is not installed: the bar offers Install… (the window asks before anything installs).
+    readonly property bool missingPack: current.packMissing === true
+    // An action whose selection is optional (Remove background: the layer whole) shows the bar with nothing selected, while it is the chosen one.
+    readonly property bool optionalAction: current.selection === "optional" && chosen !== "auto"
     // An action on the canvas bounds (Expand) grows the canvas by a side and an amount from the bar, not by a selection
     // (design 4): the bar stays up while it is the chosen action, so it can be used with nothing selected.
     readonly property bool boundsAction: current.selection === "bounds"
@@ -80,12 +86,14 @@ Item {
     readonly property string blocker: !onHead ? qsTr("Generate works on the latest version")
                                     : otherBusy ? qsTr("Another canvas is generating")
                                     : current.broken === true ? current.reason
+                                    : missingPack ? qsTr("Install the pack first")
                                     : missingModels ? qsTr("Download the models first")
-                                    : selection === null && !boundsAction ? qsTr("Select an area first")
+                                    : selection === null && !boundsAction && !optionalAction ? qsTr("Select an area first")
+                                    : current.hasLayer === true && currentLayer === "" ? qsTr("Select one layer first")
                                     : current.needsPrompt === true && !hasPrompt ? qsTr("Type what to put in the selection")
                                     : ""
     readonly property bool hasWord: mine && actions !== null && (actions.error !== "" || actions.notice !== "")
-    readonly property bool shown: actions !== null && canvasId !== "" && (selection !== null || busy || hasWord || boundsAction)
+    readonly property bool shown: actions !== null && canvasId !== "" && (selection !== null || busy || hasWord || boundsAction || optionalAction)
     visible: shown
     // Where the bar may go when the picture is too narrow for it (a small area): the host's whole width, in this item's
     // coordinates. Then it docks across the foot of the picture rather than squeezing its controls.
@@ -106,6 +114,8 @@ Item {
         const request = {action: chosen, canvas: canvasId, revision: revision, prompt: promptField.text}
         if (regionLayer !== "")
             request.layer = regionLayer
+        if (currentLayer !== "")
+            request.currentLayer = currentLayer
         if (boundsAction) {
             request.expand = {side: expandSide, percent: expandPercent}
         } else if (usesMask) {
@@ -114,7 +124,7 @@ Item {
                 return
             request.selection = stored.hash
             request.rect = {x: stored.x, y: stored.y, width: stored.width, height: stored.height}
-        } else {
+        } else if (selection !== null) {
             request.rect = selection
         }
         historyStep = -1
@@ -439,6 +449,7 @@ Item {
                                               : bar.hasWord && bar.actions.error !== "" ? bar.actions.error
                                               : bar.hasWord ? bar.actions.notice
                                               : !bar.onHead ? qsTr("Generate works on the latest version.")
+                                              : bar.missingPack ? bar.current.packText
                                               : bar.missingModels ? qsTr("%1 needs %n models, %2.", "", bar.current.missing).arg(bar.current.name).arg(bar.current.size)
                                               : ""
                 readonly property bool isError: !bar.busy && bar.hasWord && bar.actions.error !== ""
@@ -455,10 +466,20 @@ Item {
                     text: statusRow.word
                 }
                 ViewButton {
+                    objectName: "canvasTaskInstallPack"
+                    look: bar.look
+                    compact: true
+                    visible: !bar.busy && bar.missingPack && bar.current.packInstallable === true
+                    glyph: "download"
+                    text: qsTr("Install…")
+                    tip: qsTr("Install the %1 pack: Settings asks first, and the pack is not trusted until you allow it").arg(bar.current.packName ?? "")
+                    onTapped: bar.actions.installPack(bar.current.id)
+                }
+                ViewButton {
                     objectName: "canvasTaskDownload"
                     look: bar.look
                     compact: true
-                    visible: !bar.busy && !(bar.actions && bar.actions.downloading) && bar.missingModels && (bar.current.download ?? "") !== ""
+                    visible: !bar.busy && !(bar.actions && bar.actions.downloading) && !bar.missingPack && bar.missingModels && (bar.current.download ?? "") !== ""
                              && (bar.onHead || bar.hasWord)
                     glyph: "download"
                     text: qsTr("Download")
