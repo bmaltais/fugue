@@ -292,9 +292,10 @@ void CanvasExportModel::start() {
                 job->problem = messageOf(made.errors());
             } else {
                 job->picture = made.value();
+                job->skipped = job->picture.notes.join(QLatin1Char(' ')); // a layered file's own sentences: what it could not keep
                 job->estimate = QStringLiteral("%1 · %2 × %3 px").arg(locale.formattedDataSize(job->picture.bytes.size())).arg(job->picture.width).arg(job->picture.height);
                 // The preview is the encoded picture decoded again (so a JPEG's artifacts show), fitted to a small box.
-                Result<mask::MaskPaint> shown = job->picture.format == QLatin1String("ora") ? Result<mask::MaskPaint>(document->flatten())
+                Result<mask::MaskPaint> shown = job->picture.format == QLatin1String("ora") || job->picture.format == QLatin1String("psd") ? Result<mask::MaskPaint>(document->flatten())
                                                                                               : mask::MaskPaint::fromPicture(job->picture.bytes);
                 if (shown) {
                     mask::MaskPaint small = shown.value();

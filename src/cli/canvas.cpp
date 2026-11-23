@@ -136,7 +136,12 @@ Reply canvasImport(const Command &command, Context &) {
         store.create(command.has("name") ? command.value("name") : QFileInfo(file).completeBaseName(), document.value(), QStringLiteral("import"));
     if (!made)
         return Reply::failure(made.errors());
-    return madeReply(made.value(), QStringLiteral("Imported"), document->width(), document->height());
+    Reply reply = madeReply(made.value(), QStringLiteral("Imported"), document->width(), document->height());
+    // What a .psd could not bring across is one warning each (never silent), printed beside this line and in the JSON `warnings`.
+    reply.errors = document.warnings();
+    if (!reply.errors.isEmpty())
+        reply.text += QStringLiteral(" %1 thing(s) in the file could not be kept as they were: see the warnings.").arg(reply.errors.size());
+    return reply;
 }
 
 // A whole number in a range, or a usage error naming the option.
@@ -156,16 +161,16 @@ Result<canvas::PictureExport> pictureOptions(const Command &command, const QStri
     if (command.has("format")) {
         options.format = canvas::normalFormat(command.value("format"), true);
         if (options.format.isEmpty())
-            return usageError(QStringLiteral("--format is png, jpg, webp or ora."), command.value("format"));
+            return usageError(QStringLiteral("--format is png, jpg, webp, ora or psd."), command.value("format"));
         if (!fromName.isEmpty() && fromName != options.format)
             return usageError(QStringLiteral("The file name ends in .%1 but --format is %2.").arg(suffix, options.format), out);
     } else if (!fromName.isEmpty()) {
         options.format = fromName;
     } else {
-        return usageError(QStringLiteral("The file name ends in .%1; export writes .ora (layers), .png, .jpg or .webp (flattened).").arg(suffix), out);
+        return usageError(QStringLiteral("The file name ends in .%1; export writes .ora or .psd (layers), .png, .jpg or .webp (flattened).").arg(suffix), out);
     }
     if (command.has("quality")) {
-        if (options.format == QLatin1String("png") || options.format == QLatin1String("ora"))
+        if (options.format == QLatin1String("png") || options.format == QLatin1String("ora") || options.format == QLatin1String("psd"))
             return usageError(QStringLiteral("--quality applies to jpg and webp."), options.format);
         const Result<int> quality = wholeOption(command, QStringLiteral("quality"), 1, 100);
         if (!quality)
@@ -266,7 +271,7 @@ Reply canvasExport(const Command &command, Context &) {
     Result<canvas::PictureExport> options = canvas::PictureExport{};
     if (!layers) {
         if (out.isEmpty() && !command.has("format"))
-            return Reply::failure(usageError(QStringLiteral("--estimate with no file needs --format png, jpg, webp or ora.")));
+            return Reply::failure(usageError(QStringLiteral("--estimate with no file needs --format png, jpg, webp, ora or psd.")));
         options = pictureOptions(command, out.isEmpty() ? QStringLiteral(".") + command.value("format") : out);
         if (!options)
             return Reply::failure(options.errors());
@@ -286,6 +291,8 @@ Reply canvasExport(const Command &command, Context &) {
     QJsonObject data{{"canvas", ref.canvas}, {"revision", revision.value()}, {"width", picture->width}, {"height", picture->height}, {"bytes", picture->bytes.size()}};
     if (picture->format != QLatin1String("ora"))
         data.insert(QStringLiteral("format"), picture->format);
+    if (!picture->notes.isEmpty())
+        data.insert(QStringLiteral("notes"), QJsonArray::fromStringList(picture->notes));
     if (!picture->background.isEmpty() && picture->background != QLatin1String("transparent"))
         data.insert(QStringLiteral("background"), picture->background);
     QString text;
@@ -300,6 +307,8 @@ Reply canvasExport(const Command &command, Context &) {
     }
     if (picture->format == QLatin1String("jpg") && picture->background == QLatin1String("white") && !command.has("background"))
         text += QStringLiteral(" JPEG has no transparency: the canvas was flattened onto white.");
+    if (!picture->notes.isEmpty())
+        text += QStringLiteral(" Not in the file: %1").arg(picture->notes.join(QLatin1Char(' ')));
     return Reply::success(data, text);
 }
 

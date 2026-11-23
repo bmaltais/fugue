@@ -128,6 +128,11 @@ private slots:
         QTRY_VERIFY(f.model.canExport());
         f.model.setFormat("ora");
         QVERIFY(!f.model.hasBackground()); // layers kept: nothing is laid under them
+        f.model.setFormat("psd");
+        QVERIFY(!f.model.hasBackground());
+        QCOMPARE(f.model.format(), QString("psd"));
+        QTRY_VERIFY(f.model.canExport());
+        QVERIFY(f.model.estimate().contains("px"));
     }
 
     void writesTheShownPictureAndNeverReplacesAFile() {

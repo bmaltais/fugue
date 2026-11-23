@@ -271,7 +271,7 @@ Question {
         objectName: "newCanvasFileDialog"
         title: qsTr("Make a canvas from a picture") // the same file types as Import picture…
         fileMode: PortalFileDialog.OpenFile
-        nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
+        nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd)"), qsTr("All files (*)")]
         onAccepted: backend.file = fileDialog.selectedFile.toString()
     }
     ColorPickerPopup {

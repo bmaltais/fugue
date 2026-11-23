@@ -460,7 +460,7 @@ Item {
         title: qsTr("Save the revision as a picture")
         fileMode: PortalFileDialog.SaveFile
         defaultSuffix: "png"
-        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
+        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)"), qsTr("Photoshop file (*.psd)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
     }
     CanvasFileDialogs {
@@ -496,10 +496,13 @@ Item {
     Component {
         id: newCanvasComponent
         NewCanvasDialog {
+            id: madeDialog
             parent: Overlay.overlay
             onCreated: id => {
                 root.makeProblem = ""
                 canvasData.useCanvas(id)
+                if (madeDialog.model.importNotes() !== "") // a Photoshop file's layers Fugue could not keep: never silent
+                    canvasData.showNotice(qsTr("Imported, with changes: %1").arg(madeDialog.model.importNotes()))
             }
         }
     }
@@ -510,7 +513,7 @@ Item {
             objectName: "canvasViewImportDialog"
             title: qsTr("Import a picture as a canvas")
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd)"), qsTr("All files (*)")]
             onAccepted: { root.makeProblem = canvasData.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }

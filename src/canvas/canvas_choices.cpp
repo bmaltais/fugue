@@ -174,7 +174,7 @@ QString CanvasChoices::freeName(const QString &base) {
             return name;
 }
 
-QString CanvasChoices::makeFromFile(const QString &path, const QString &name, QString *id) {
+QString CanvasChoices::makeFromFile(const QString &path, const QString &name, QString *id, QStringList *dropped) {
     const QString file = localPath(path);
     const Result<mask::PaintDocument> document = mask::readCanvasFile(file);
     if (!document)
@@ -185,6 +185,9 @@ QString CanvasChoices::makeFromFile(const QString &path, const QString &name, QS
     if (!made)
         return sentence(made.errors());
     *id = made->id;
+    if (dropped)
+        for (const Error &warning : document.warnings())
+            dropped->append(warning.message);
     touched();
     return {};
 }
