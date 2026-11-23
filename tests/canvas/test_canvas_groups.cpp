@@ -310,6 +310,27 @@ private slots:
         QVERIFY(!canvas.document().graph.nodes.value("save").inputs.contains("image"));
     }
 
+    void anUnresolvedAdvancedInputStaysFoldedOnTheFace() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY(canvas.groups()->enterGroup(instance));
+        QVERIFY(canvas.groups()->exposeInput("gen", "steps"));
+        QVERIFY(canvas.groups()->editExposedInput("steps", {{"section", "Advanced"}}));
+        canvas.groups()->leaveGroup();
+        // The pack of the inner node is not installed: the same document on an empty registry.
+        const Registry none;
+        CanvasModel bare(&none);
+        bare.setDocument(canvas.document());
+        const QVariantMap steps = port(bare, instance, "steps");
+        QVERIFY(!steps.isEmpty());
+        QVERIFY(!steps.value("widget").toBool()); // really unresolved
+        QCOMPARE(steps.value("header").toString(), QStringLiteral("Advanced"));
+        QVERIFY(steps.value("hidden").toBool());
+        QCOMPARE(steps.value("folded").toInt(), 1);
+    }
+
     void aGroupMadeInsideAGroupKeepsTheOuterFaceWorking() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));

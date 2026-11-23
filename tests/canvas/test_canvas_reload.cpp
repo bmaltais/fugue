@@ -72,7 +72,7 @@ private slots:
         QVERIFY(app.open());
         app.reloader->setSettleMs(50);
         QVERIFY(role(app.model, "say", NodeList::Missing).toBool());
-        QVERIFY(app.workflows.notice().contains("io.example.tools/say"));
+        QVERIFY2(app.workflows.notice().contains("not installed (Tools)"), qPrintable(app.workflows.notice()));
         const int links = app.model.links()->rowCount();
         fugue::NodeSearch *search = app.model.search();
         search->openAt(0, 0);
@@ -102,7 +102,7 @@ private slots:
         QCOMPARE(app.model.document().graph.nodes.value("say").inputs.value("words").kind(),
                  fugue::InputValue::Kind::Link);
         QCOMPARE(search->count(), 0);
-        QVERIFY(app.workflows.notice().contains("io.example.tools/say")); // missing again
+        QVERIFY2(app.workflows.notice().contains("not installed (Tools)"), qPrintable(app.workflows.notice())); // missing again
 
         // Back at the version the person said "not now" to: not asked again.
         QVERIFY(writeSayPack(fugue::packsDir(), "v1"));

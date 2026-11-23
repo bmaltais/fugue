@@ -550,7 +550,7 @@ private slots:
         QVERIFY(nodeRow(f.canvas, "odd").value("missing").toBool());
         QVERIFY(!nodeRow(f.canvas, "prompt").value("missing").toBool());
         QCOMPARE(f.canvas.links()->rowCount(), 2);
-        QVERIFY(f.workflows->notice().contains("io.example.tools/sharpen"));
+        QVERIFY(f.workflows->notice().contains("not installed (Tools)"));
         QVERIFY(!f.workflows->unsaved()); // opening is not an edit
 
         // Saving loses nothing: inputs, links and the version it was made with.

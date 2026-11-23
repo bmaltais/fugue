@@ -126,6 +126,7 @@ public:
     // before it next uses each, never under a run or a check in flight. The next compile (a run
     // started, a check) takes the new types, and the next run to start runs them, so an updated
     // command node runs its new files. A run already waiting keeps what it was compiled to.
+    // Takes effect when this returns (the count is atomic, not queued behind a start under way, #223).
     void reloadNodeTypes();
 
 signals:

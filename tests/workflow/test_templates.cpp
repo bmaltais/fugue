@@ -354,6 +354,42 @@ private slots:
         QVERIFY(workflows.packNeed("io.example.tools").value("installable").toBool()); // the card keeps it
     }
 
+    // #266: the banner names each missing pack once, by display name, and offers each one.
+    void theBannerNamesAndOffersEachMissingPackOnce() {
+        Fixture f;
+        const auto entry = [](const char *source, const char *name) {
+            return QJsonObject{{"version", "1.0.0"}, {"source", source}, {"name", name}};
+        };
+        makeTemplate(f.bundled.filePath("two"), {{"title", "Two"}},
+                     workflow({{"a", node("io.example.tools/sharpen", {}, "1.0.0")},
+                               {"b", node("io.example.tools/blur", {}, "1.0.0")},
+                               {"c", node("io.example.other-pack/shrink", {}, "1.0.0")}},
+                              QJsonObject{{"packs", QJsonObject{{"io.example.tools", entry("https://example.com/tools", "Sharp Tools")},
+                                                                {"io.example.other-pack", entry("https://example.com/other", "Shrinker")}}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("two"));
+        const QString notice = workflows.notice();
+        QVERIFY2(notice.contains("(Sharp Tools, Shrinker)") || notice.contains("(Shrinker, Sharp Tools)"), qPrintable(notice));
+        QCOMPARE(notice.count("Sharp Tools"), 1);
+        QVERIFY(!notice.contains("io.example"));
+        const QVariantList offers = workflows.packOffers();
+        QCOMPARE(offers.size(), 2);
+        QSet<QString> texts;
+        for (const QVariant &offer : offers)
+            texts << offer.toMap().value("text").toString();
+        QCOMPARE(texts, (QSet<QString>{"Install Sharp Tools…", "Install Shrinker…"}));
+        QSignalSpy install(&workflows, &Workflows::packInstallRequested);
+        QVERIFY(workflows.installPackById("io.example.other-pack"));
+        QCOMPARE(install.first().at(0).toString(), QStringLiteral("https://example.com/other"));
+    }
+
     void theBannerOffersNothingOnceTheCarriedPackIsInstalled() {
         Fixture f;
         makeTemplate(f.bundled.filePath("carrier"), {{"title", "Carrier"}},
