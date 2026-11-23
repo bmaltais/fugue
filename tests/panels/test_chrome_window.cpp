@@ -51,13 +51,6 @@ void pointerTo(App &app, const QPoint &at) {
 }
 void pointerAway(App &app) { pointerTo(app, QPoint(app.window->width() / 2, app.window->height() / 2)); }
 
-QVariantList titles(const QVariantList &menu) {
-    QVariantList names;
-    for (const QVariant &entry : menu)
-        names << entry.toMap().value("title");
-    return names;
-}
-
 } // namespace
 
 class TestChromeWindow : public QObject {
@@ -66,14 +59,18 @@ class TestChromeWindow : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
-    void theViewMenuListsEveryBarWithACheck() {
+    void theWindowMenuListsEveryBarWithACheck() {
         App app(load(small));
         QVERIFY(app.open());
-        const QVariantList view = app.commands.menu("bar").at(2).toMap().value("items").toList();
-        QVERIFY(titles(view).contains(QString("&Bars and panels")));
+        const QVariantMap window = app.commands.menu("bar").at(3).toMap();
+        QCOMPARE(window.value("title").toString(), QString("&Window"));
+        QStringList listed;
+        for (const QVariant &row : window.value("items").toList())
+            listed << row.toMap().value("command").toString();
         for (const char *id : {"view.toggle-menu-bar", "view.toggle-tabs", "view.toggle-run-toolbar", "view.toggle-selection-toolbar",
                                "view.toggle-breadcrumb", "view.toggle-run-status", "view.toggle-zoom-readout"}) {
             QVERIFY2(app.commands.contains(id), id);
+            QVERIFY2(listed.contains(QString::fromLatin1(id)), id);
             QVERIFY2(checked(app, id), id);
         }
         QVERIFY(there(app, "menuBar"));
@@ -116,7 +113,8 @@ private slots:
         // The bar is out of the window, and the canvas took its place: only the edge is left.
         QQuickItem *bar = named(app, "menuBar");
         QVERIFY(!bar || !bar->isVisible() || bar->mapToScene(QPointF(0, bar->height())).y() <= 0);
-        QVERIFY(app.canvas->mapToScene(QPointF(0, 0)).y() < 10);
+        // (the Graph's area header, 28px, stays above it)
+        QVERIFY(app.canvas->mapToScene(QPointF(0, 0)).y() < 40);
         // Checking it again pins it back.
         QVERIFY(app.commands.trigger("view.toggle-menu-bar"));
         QTRY_VERIFY(pinned(app));
@@ -233,7 +231,7 @@ private slots:
         app.canvas->forceActiveFocus();
         QTest::keyClick(app.window, 'R', Qt::AltModifier);
         QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
-        QCOMPARE(named(app, "menuBar")->property("current").toInt(), 4);
+        QCOMPARE(named(app, "menuBar")->property("current").toInt(), 2); // Run
         QTRY_COMPARE(slide(app), 1.0);
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));

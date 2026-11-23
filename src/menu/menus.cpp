@@ -72,14 +72,25 @@ QVariantMap barsMenu() {
     return submenu(QT_TRANSLATE_NOOP("Menu", "&Bars and panels"), windowItems());
 }
 
-// The window's areas (#217, spec 12.16): split, close, the view the active area shows, reset. A submenu at the end
-// of the View menu, after the bars, so the default window's menu reads as before until it is opened.
-QVariantMap areasMenu() {
-    return submenu(QT_TRANSLATE_NOOP("Menu", "&Areas"),
-                   {command("area.split-row"), command("area.split-column"), command("area.close"), separator(),
-                    command("area.view-graph"), command("area.view-canvas"), separator(), command("view.reset-layout")});
+// The window's areas (#217, spec 12.16): split, close, the view the active area shows, reset. The tail of the Window menu
+// (#262), after the bars and panels.
+QVariantList areaItems() {
+    return {command("area.split-row"), command("area.split-column"), command("area.close"), separator(),
+            command("area.view-graph"), command("area.view-canvas"), separator(), command("view.reset-layout")};
 }
 
+// The Window menu (#262, Blender's): the window's own furniture, not a view's. Every bar and panel with a check, focus mode
+// and the way back, then the areas.
+QVariantList windowMenu() {
+    QVariantList items = windowItems();
+    items.append(separator());
+    for (const QVariant &item : areaItems())
+        items.append(item);
+    return items;
+}
+
+// The window bar (#262, Blender's top bar): what is global to the window and its documents. Each view's own menus are in
+// its area's header (graph() and canvasView()).
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
@@ -89,24 +100,33 @@ QVariantList bar() {
                  command("file.close-others"), command("app.quit")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Edit"),
                 {command("edit.undo"), command("edit.redo"), separator(), command("edit.copy"), command("edit.paste"),
-                 command("edit.paste-connected"), command("edit.clone"), command("edit.delete"), separator(),
-                 command("edit.select-all"), command("edit.rename"), colors(), separator(), command("edit.clear"),
-                 separator(), command("cache.clear-previews"), separator(), command("app.settings")}),
-        submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
-                {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
-                 command("view.toggle-links"), separator(), barsMenu(), command("view.focus-mode"), separator(),
-                 areasMenu()}),
-        submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
-                {command("node.search"), separator(), command("node.bypass"), command("node.mute"),
-                 command("node.collapse"), command("node.pin"), align(false), distribute(false),
-                 separator(), command("node.open-image"), command("node.copy-image"), command("node.save-image"), separator(), command("frame.make"),
-                 command("group.make"), command("group.ungroup"), command("group.enter"), command("group.leave"),
-                 command("group.make-unique"), command("group.interface"), command("group.save-to-library"),
-                 command("group.update"), command("node.move-version")}),
+                 separator(), command("edit.clear"), separator(), command("cache.clear-previews"), separator(),
+                 command("app.settings")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Run"), runItems()),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Window"), windowMenu()),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Help"),
                 {command("app.shortcuts"), command("help.docs"), command("help.report-issue"), separator(),
                  command("help.about")}),
+    };
+}
+
+// The Graph view's own menus (#262), in the header of the area that shows it, as Blender's Node Editor has View, Select, Add and
+// Node. Run is not here: it is the window's (Blender's Render menu).
+QVariantList graph() {
+    return {
+        submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
+                {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
+                 command("view.toggle-links")}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Select"), {command("edit.select-all")}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Add"), {command("node.search"), command("edit.paste-connected")}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
+                {command("edit.rename"), colors(), command("edit.clone"), command("edit.delete"), separator(),
+                 command("node.bypass"), command("node.mute"), command("node.collapse"), command("node.pin"), align(false),
+                 distribute(false), separator(), command("node.open-image"), command("node.copy-image"),
+                 command("node.save-image"), separator(), command("frame.make"), command("group.make"),
+                 command("group.ungroup"), command("group.enter"), command("group.leave"), command("group.make-unique"),
+                 command("group.interface"), command("group.save-to-library"), command("group.update"),
+                 command("node.move-version")}),
     };
 }
 
@@ -115,7 +135,7 @@ QVariantList bar() {
 // `planned` placeholders.
 QVariantList canvasView() {
     return {
-        submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Canvas"),
                 {command("canvas-view.new"), command("canvas-view.open"), command("canvas-view.import"), separator(),
                  submenu(QT_TRANSLATE_NOOP("Menu", "&Export"),
                          {command("canvas-view.export"), separator(),
@@ -195,13 +215,15 @@ QVariantList frame() {
 } // namespace
 
 QStringList names() {
-    return {QStringLiteral("bar"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame"),
+    return {QStringLiteral("bar"), QStringLiteral("graph"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame"),
             QStringLiteral("tab"), QStringLiteral("colors"), QStringLiteral("run"), QStringLiteral("canvas-view")};
 }
 
 QVariantList tree(const QString &name) {
     if (name == QLatin1String("bar"))
         return bar();
+    if (name == QLatin1String("graph"))
+        return graph();
     if (name == QLatin1String("canvas"))
         return canvas();
     if (name == QLatin1String("node"))

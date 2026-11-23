@@ -3,9 +3,16 @@
 # tests/workspace/test_area_window.cpp compares the window with this. Changing it means the default window
 # changed: say why in the commit (epic #217: the default window stays as simple as it is).
 # #228: the notices' dismiss buttons draw the Lucide x (a Glyph) in place of Material's text label: two items fewer.
-items 195
+# #262: the Graph's area header sits above the canvas while the window has one area (view-type menu, split and close, and the Graph's own menus View, Select, Add and Node): 50 items more. The window bar has five menus (File, Edit, Run, Window, Help): one title fewer. With more areas the host's headers do this and the one above the canvas goes (test_area_split_window).
+items 245
 ApplicationWindow 1
 ApplicationWindowContentControl 1
+areaClose-1 1
+areaHeader-1 1
+areaMenus-1 1
+areaSplitColumn-1 1
+areaSplitRow-1 1
+areaType-1 1
 autoHide 1
 autoHideBar 1
 autoHideEdge 1
@@ -21,6 +28,13 @@ crumb0 1
 cutHandle 1
 draggedLink 1
 dropChooser 1
+graphHeaderHost 1
+graphMenuBar 1
+graphMenuButton 1
+graphMenuTitle-Add 1
+graphMenuTitle-Node 1
+graphMenuTitle-Select 1
+graphMenuTitle-View 1
 groupNotice 1
 keymapNotice 1
 lens 1
@@ -33,7 +47,6 @@ menuTitle-1 1
 menuTitle-2 1
 menuTitle-3 1
 menuTitle-4 1
-menuTitle-5 1
 newTab 1
 nodes 1
 projectChipLoader 1

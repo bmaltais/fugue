@@ -176,6 +176,22 @@ ApplicationWindow {
                     }
                 }
             }
+            // The Graph's area header while the window has one area (#262): the same bar every area has, with the Graph's own
+            // menus (View, Select, Add, Node). With more areas the host's headers do this and this one goes.
+            Loader {
+                id: graphHeader
+                objectName: "graphHeaderHost"
+                Layout.fillWidth: true
+                Layout.preferredHeight: item ? 7 * App.theme.look.unit : 0
+                Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
+                Layout.rightMargin: win.sidePanelMargin("right")
+                active: !win.areaHost && !win.focusMode && App.workspace !== null
+                sourceComponent: AreaHeader {
+                    areaId: App.workspace.graphArea
+                    viewType: "graph"
+                    leadingClear: Math.max(0, menuBarHost.handleEnd - win.body.x)
+                }
+            }
             FugueCanvas {
                 id: fugueCanvas
                 objectName: "canvas"
@@ -190,7 +206,7 @@ ApplicationWindow {
                 hoverMagnifier: win.appSettingsModel ? win.appSettingsModel.hoverMagnifier : false
                 // The auto-hide menu bar's handle hangs over the canvas's top left (#160); over the top start
                 // area's header while the window has areas.
-                leadingClear: win.areaHost ? 0 : Math.max(0, menuBarHost.handleEnd - x)
+                leadingClear: win.areaHost || graphHeader.active ? 0 : Math.max(0, menuBarHost.handleEnd - x)
                 selectionToolbarShown: win.chromeIsShown("selection-toolbar")
                 breadcrumbShown: win.chromeIsShown("breadcrumb")
                 runPillShown: win.chromeIsShown("run-status")

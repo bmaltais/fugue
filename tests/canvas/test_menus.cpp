@@ -86,7 +86,8 @@ QString currentRow(QQuickWindow *window, const QString &name) {
 
 // No menu is showing.
 bool allClosed(QQuickWindow *window) {
-    return !isOpen(window, "menuDropdown") && !isOpen(window, "menuEverything") && !isOpen(window, "contextMenuPopup");
+    return !isOpen(window, "menuDropdown") && !isOpen(window, "menuEverything") && !isOpen(window, "graphMenuDropdown")
+        && !isOpen(window, "graphMenuEverything") && !isOpen(window, "contextMenuPopup");
 }
 
 // A popup's rectangle in the window: its x, y, width and height in its parent.
@@ -115,6 +116,14 @@ QQuickItem *rowAt(QObject *menu, int index) {
 #define NEED(name) [&] { QQuickItem *found = find(app.window, name); if (!found) qFatal("no visible %s", qPrintable(QString(name))); return found; }()
 
 } // namespace
+
+// A menu of the Graph's area header (#262), opened with the mouse: they have no Alt letter (the window bar owns those).
+void openGraphMenu(App &app, const char *title) {
+    QQuickItem *button = nullptr;
+    QTRY_VERIFY_WITH_TIMEOUT((button = find(app.window, QStringLiteral("graphMenuTitle-") + title)), 5000);
+    QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(button));
+    QTRY_VERIFY(isOpen(app.window, "graphMenuDropdown"));
+}
 
 class MenusTests : public QObject {
     Q_OBJECT
@@ -163,7 +172,7 @@ private slots:
         App app(load(framed));
         QVERIFY(app.open());
         const QVariantList bar = app.commands.menu("bar");
-        QCOMPARE(bar.size(), 6);
+        QCOMPARE(bar.size(), 5);
         for (int i = 0; i < bar.size(); ++i) {
             const QString title = bar[i].toMap().value("title").toString();
             QQuickItem *button = find(app.window, QStringLiteral("menuTitle-%1").arg(i));
@@ -211,8 +220,10 @@ private slots:
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));
         QTest::keyClick(app.window, 'R', Qt::AltModifier);
-        QTRY_COMPARE(NEED("menuBar")->property("current").toInt(), 4);
+        QTRY_COMPARE(NEED("menuBar")->property("current").toInt(), 2);
         QTRY_VERIFY(NEED("menuItem-run.start"));
+        app.key(Qt::Key_Right); // Window, on its first row
+        QTRY_COMPARE(currentRow(app.window, "menuDropdown"), QString("menuItem-view.toggle-menu-bar"));
         app.key(Qt::Key_Right);
         QTRY_COMPARE(currentRow(app.window, "menuDropdown"), QString("menuItem-app.shortcuts"));
         app.key(Qt::Key_Right); // wraps to File
@@ -222,14 +233,10 @@ private slots:
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));
 
-        // Edit > Delete with the keys: Down until it is current, then Enter.
-        QTest::keyClick(app.window, 'E', Qt::AltModifier);
-        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
-        for (int i = 0; i < 12 && currentRow(app.window, "menuDropdown") != "menuItem-edit.delete"; ++i)
-            app.key(Qt::Key_Down);
-        QCOMPARE(currentRow(app.window, "menuDropdown"), QString("menuItem-edit.delete"));
-        app.key(Qt::Key_Return);
-        QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));
+        // Node > Delete in the Graph's header (#262): the mouse presses it.
+        openGraphMenu(app, "Node");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-edit.delete")));
+        QTRY_VERIFY(!isOpen(app.window, "graphMenuDropdown"));
         QCOMPARE(app.model.nodes()->rowCount(), 2);
 
         // Undo is enabled now, and the mouse runs it.
@@ -246,38 +253,38 @@ private slots:
     void itemsShowTheRegistrysState() {
         App app(load(framed));
         QVERIFY(app.open());
+        // The window's Edit: Settings (#51) is on; Undo reads as it does.
         QTest::keyClick(app.window, 'E', Qt::AltModifier);
         QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
-        // Nothing selected: Delete is off. Rename (#55) is not built yet: off, at half opacity.
-        // Settings (#51) is.
-        QVERIFY(!NEED("menuItem-edit.delete")->isEnabled());
-        QQuickItem *rename = find(app.window, "menuItem-edit.rename");
-        QVERIFY(rename && !rename->isEnabled());
-        QVERIFY(rename->opacity() <= 0.5);
         QVERIFY(NEED("menuItem-app.settings")->isEnabled());
         QCOMPARE(NEED("menuItem-edit.undo")->property("text").toString(), QString("Undo"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));
+        // The Graph's Node menu: nothing selected, Delete is off. Rename (#55) is not built yet: off, at half opacity.
+        openGraphMenu(app, "Node");
+        QVERIFY(!NEED("menuItem-edit.delete")->isEnabled());
+        QQuickItem *rename = find(app.window, "menuItem-edit.rename");
+        QVERIFY(rename && !rename->isEnabled());
+        QVERIFY(rename->opacity() <= 0.5);
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!isOpen(app.window, "graphMenuDropdown"));
         // Opened again after a selection, the state is fresh.
         app.model.select({"a"});
-        QTest::keyClick(app.window, 'E', Qt::AltModifier);
-        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        openGraphMenu(app, "Node");
         QVERIFY(NEED("menuItem-edit.delete")->isEnabled());
         app.key(Qt::Key_Escape);
-        QTRY_VERIFY(allClosed(app.window));
+        QTRY_VERIFY(!isOpen(app.window, "graphMenuDropdown"));
 
         // View > Show links is a toggle with the links' state.
-        QTest::keyClick(app.window, 'V', Qt::AltModifier);
-        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        openGraphMenu(app, "View");
         QQuickItem *links = NEED("menuItem-view.toggle-links");
         QVERIFY(links->property("checkable").toBool() && links->property("checked").toBool());
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(links));
         QTRY_VERIFY(app.model.linksHidden());
-        QTest::keyClick(app.window, 'V', Qt::AltModifier);
-        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        openGraphMenu(app, "View");
         QVERIFY(!NEED("menuItem-view.toggle-links")->property("checked").toBool());
         app.key(Qt::Key_Escape);
-        QTRY_VERIFY(allClosed(app.window));
+        QTRY_VERIFY(!isOpen(app.window, "graphMenuDropdown"));
 
         // Help > Documentation opens the docs.
         QTest::keyClick(app.window, 'H', Qt::AltModifier);
@@ -343,10 +350,10 @@ private slots:
         QVERIFY(ids(app.commands.menu("canvas", {})).contains("group.leave"));
         QVERIFY(app.model.groups()->leaveGroup());
 
-        // The menu bar keeps every command, off where it does not apply.
+        // The Graph's header menus keep every command, off where it does not apply.
         app.model.select({"c"});
         bool listed = false;
-        for (const QVariant &top : app.commands.menu("bar"))
+        for (const QVariant &top : app.commands.menu("graph"))
             for (const QVariant &item : top.toMap().value("items").toList())
                 if (item.toMap().value("command") == QLatin1String("group.enter")) {
                     listed = true;
@@ -515,9 +522,9 @@ private slots:
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuEverything"));
         // Alt+letter opens that menu under the button.
-        QTest::keyClick(app.window, 'V', Qt::AltModifier);
+        QTest::keyClick(app.window, 'W', Qt::AltModifier);
         QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
-        QVERIFY(find(app.window, "menuItem-view.fit"));
+        QVERIFY(find(app.window, "menuItem-view.toggle-menu-bar"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));
         // F10 opens the menu button's menu.
@@ -586,9 +593,9 @@ private slots:
         QTRY_VERIFY(popup(app.window, "menuDropdown")->property("opened").toBool());
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-0")));
         QVERIFY(!popup(app.window, "menuDropdown")->property("opened").toBool());
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-2")));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-3")));
         QTRY_VERIFY(popup(app.window, "menuDropdown")->property("opened").toBool());
-        QVERIFY(find(app.window, "menuItem-view.fit"));
+        QVERIFY(find(app.window, "menuItem-view.toggle-menu-bar")); // the Window menu
         // Keys too: Escape, then at once Alt+H opens Help.
         app.key(Qt::Key_Escape);
         QTest::keyClick(app.window, 'H', Qt::AltModifier);
@@ -656,8 +663,8 @@ private slots:
         app.model.undo();
         QCOMPARE(x("a"), 40.0);
 
-        // The Node menu of the bar: Distribute > Vertically spreads a, b and c over their rows.
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-3")));
+        // The Node menu of the Graph's header: Distribute > Vertically spreads a, b and c over their rows.
+        openGraphMenu(app, "Node");
         QTRY_VERIFY(find(app.window, "subMenu-Distribute"));
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Distribute")));
         QTRY_VERIFY(find(app.window, "menuItem-node.distribute-vertical"));
@@ -994,8 +1001,7 @@ private slots:
         QCOMPARE(NEED("menuItem-node.collapse")->property("text").toString(), QString("Expand"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(allClosed(app.window));
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-3")));
-        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        openGraphMenu(app, "Node");
         QCOMPARE(NEED("menuItem-node.bypass")->property("text").toString(), QString("Remove bypass"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(allClosed(app.window));
@@ -1033,8 +1039,7 @@ private slots:
         app.model.select({"c"});
         applyLayoutColor(app.model, "red");
         const QString name = QStringLiteral("%1/%2-r%3").arg(out, theme).arg(radius);
-        QTest::keyClick(app.window, 'E', Qt::AltModifier);
-        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        openGraphMenu(app, "Node");
         QTest::mouseMove(app.window, centerOf(NEED("subMenu-Colors")));
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Colors")));
         QTRY_VERIFY(find(app.window, "menuItem-node.color.red"));
@@ -1170,7 +1175,7 @@ private slots:
         }
         QTRY_VERIFY(allClosed(app.window));
         // A bar menu opened with its key, in a window narrower than the menu.
-        QTest::keyClick(app.window, 'V', Qt::AltModifier);
+        QTest::keyClick(app.window, 'W', Qt::AltModifier);
         QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
         QObject *dropdown = popup(app.window, "menuDropdown");
         QTRY_VERIFY2(insideWindow(app.window, dropdown), qPrintable(rectText(popupRect(dropdown))));

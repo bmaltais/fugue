@@ -526,8 +526,9 @@ QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantM
 }
 
 QVariantList CommandRegistry::menu(const QString &name, const QVariantMap &target) const {
-    // The bar and the Canvas view's own bar show every row, built or not; a context menu leaves out what is not built.
-    return resolve(menus::tree(name), target, name != QLatin1String("bar") && name != QLatin1String("canvas-view"));
+    // The bars (the window's, the Graph's and the Canvas view's, which are in headers) show every row, built or not; a
+    // context menu leaves out what is not built.
+    return resolve(menus::tree(name), target, name != QLatin1String("bar") && name != QLatin1String("graph") && name != QLatin1String("canvas-view"));
 }
 
 } // namespace fugue

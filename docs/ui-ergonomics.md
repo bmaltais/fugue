@@ -652,3 +652,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: click or drag the rail, the wheel over it or over the mute button (5%), Up and Down once the player has the focus (10%); any volume above zero unmutes; the mute tooltip says the percent. It is per player and not kept (no settings store for it yet).
 - Why: the person who plays a result next to others needs it lower (Fitts: the rail is as high as the 28px bar; recognition: the fill shows the level).
 - Rule: Floor (the rail's hit area is the 28px bar's height). Primary (none). Destructive (none). Gaps (unchanged). Posture: pointer, and keys.
+
+### 2026-11-22 the window bar is global, each area's header has its view's menus (#262, slices 1 and 2)
+
+- Control: the window bar (`menuBar`): File, Edit, Run, Window, Help; the Graph's area header (`areaHeader-<id>`, with `areaMenus-<id>` holding `canvasMenuBar` in its `graph` form: titles `canvasMenuTitle-View|Select|Add|Node`, and `canvasMenuButton`, the folded Menu button); `graphHeaderHost`, the same header above the canvas while the window has one area.
+- Old: the bar held every menu (File, Edit, View, Node, Run, Help), the default window had no header, and the Graph's commands were in the window's bar; Bars and panels and Areas were submenus of View.
+- New (Blender's model): the bar is the window's (a Window menu now lists every bar and panel, focus mode and the areas); each area's header is its view-type menu, then its view's own menus (the Graph's View, Select, Add, Node; the Canvas view's Canvas, Edit, Select, Layer and View stay in the view), then split and close at the right. Close is off while there is one area. In a header too narrow for the titles (they need more than the room between the view-type menu and the splits) they fold into one Menu button that opens them as submenus. Pressing along the titles while one is open moves to the next, as in the window bar.
+- Why: recognition over recall (a view's commands sit with that view: Hick); one place per command, so no command at two levels; the default window and a split window have the same chrome (consistency). Header height stays 7u (28px).
+- Rule: Floor (titles are 6u compact buttons in a 7u header). Primary (none). Destructive (none). Gaps (unchanged). Posture: pointer, and the window bar's Alt+letter (E, F, H, R, W).
+- Not done in this change: the workflow tabs still have their own row under the window bar (Blender has them in the bar's row), and the Canvas view's menus are in a row inside the view, not in its area's header.

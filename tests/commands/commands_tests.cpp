@@ -227,7 +227,7 @@ private slots:
         for (const QVariant &menu : bar)
             titles << menu.toMap().value("title").toString();
         walk(bar);
-        QCOMPARE(titles, (QStringList{"&File", "&Edit", "&Select", "&Layer", "&View"}));
+        QCOMPARE(titles, (QStringList{"&Canvas", "&Edit", "&Select", "&Layer", "&View"}));
         QVERIFY(planned.size() >= 10);
         // Every canvas-view command is reachable from the bar.
         for (const QString &id : registry.ids())

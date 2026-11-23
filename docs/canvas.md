@@ -250,12 +250,12 @@ and the size the model gets read right. A replay of the run reads the same selec
 The Canvas view has its own menu bar at the top, in the File > Canvas… dialog and in an area alike (#232). Every option of
 the view is a row of a menu, with its key beside it; what does not apply to the canvas now is greyed.
 
-- **File**: New canvas…, Open canvas… (the picker), Import picture…, **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
+- **Canvas** (it was File; the window's File is the workflows', #262): New canvas…, Open canvas… (the picker), Import picture…, **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
   with layers, by the extension; never replaces a file), Rename canvas…, Duplicate canvas (the whole history, under a new
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
   area shows no canvas).
-- **Edit**: Undo and Redo, as the keys do.
+- **Edit**: Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
 - **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
   Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask

@@ -85,7 +85,7 @@ QQuickItem *menuRow(App &app, const QString &menu, const QString &command) {
 void closeMenu(App &app) {
     for (int i = 0; i < 3; ++i) {
         QQuickItem *title = nullptr;
-        for (const char *name : {"File", "Edit", "Select", "Layer", "View"})
+        for (const char *name : {"Canvas", "Edit", "Select", "Layer", "View"})
             if (QQuickItem *row = find(app.window, QString("canvasMenuTitle-") + name); row && row->property("current").toBool())
                 title = row;
         if (!title)
@@ -195,7 +195,7 @@ private slots:
         QVERIFY(!find(app.window, "canvasViewOverlay")); // it lives in the View menu now
         QVERIFY(!find(app.window, "canvasViewExport")); // and Export in the File menu
         QTRY_VERIFY(find(app.window, "canvasMenuBar"));
-        menuRow(app, "File", "canvas-view.new");
+        menuRow(app, "Canvas", "canvas-view.new");
         click(app, "subMenu-Export"); // the submenu opens
         QQuickItem *exportRow = nullptr;
         QTRY_VERIFY((exportRow = find(app.window, "menuItem-canvas-view.export")));
@@ -905,10 +905,10 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        for (const char *title : {"File", "Edit", "Select", "Layer", "View"})
+        for (const char *title : {"Canvas", "Edit", "Select", "Layer", "View"})
             QTRY_VERIFY2(find(app.window, QString("canvasMenuTitle-") + title), title);
         // A planned feature is a greyed row that is no command: it has no key and pressing it does nothing.
-        QQuickItem *placeholder = menuRow(app, "File", "canvas-view.new"); // opens File
+        QQuickItem *placeholder = menuRow(app, "Canvas", "canvas-view.new"); // opens File
         QVERIFY(placeholder);
         QQuickItem *planned = find(app.window, "menuPlanned-236-Place picture…");
         QVERIFY(planned);
@@ -990,35 +990,35 @@ private slots:
         openDialog(app);
         QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
         // Rename asks for the name.
-        viaMenu(app, "File", "canvas-view.rename");
+        viaMenu(app, "Canvas", "canvas-view.rename");
         QTRY_VERIFY(find(app.window, "canvasRenameField"));
         find(app.window, "canvasRenameField")->setProperty("text", "Poster");
         click(app, "canvasRenameOk");
         QTRY_COMPARE(canvas::CanvasStore::forSession().info(m_canvas)->name, QString("Poster"));
         // Clear asks first (Keep leaves it), then is one step that Undo takes back.
-        viaMenu(app, "File", "canvas-view.clear");
+        viaMenu(app, "Canvas", "canvas-view.clear");
         click(app, "canvasClearKeep");
         QCOMPARE(model(app)->property("revisionB").toString(), m_head);
-        viaMenu(app, "File", "canvas-view.clear");
+        viaMenu(app, "Canvas", "canvas-view.clear");
         click(app, "canvasClearYes");
         QTRY_VERIFY(model(app)->property("revisionB").toString() != m_head);
         QCOMPARE(model(app)->property("layers").toList().size(), 1);
         QVERIFY(QMetaObject::invokeMethod(model(app), "undo"));
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
         // Duplicate shows the copy; Delete asks, removes it and shows the other.
-        viaMenu(app, "File", "canvas-view.duplicate");
+        viaMenu(app, "Canvas", "canvas-view.duplicate");
         QTRY_VERIFY(model(app)->property("canvasId").toString() != m_canvas);
         const QString copy = model(app)->property("canvasId").toString();
         QCOMPARE(canvas::CanvasStore::forSession().info(copy)->name, QString("Poster copy"));
-        viaMenu(app, "File", "canvas-view.delete");
+        viaMenu(app, "Canvas", "canvas-view.delete");
         click(app, "canvasDeleteKeep");
         QVERIFY(canvas::CanvasStore::forSession().info(copy).ok());
-        viaMenu(app, "File", "canvas-view.delete");
+        viaMenu(app, "Canvas", "canvas-view.delete");
         click(app, "canvasDeleteYes");
         QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
         QVERIFY(!canvas::CanvasStore::forSession().info(copy).ok());
         // Close closes the dialog that hosts the view.
-        viaMenu(app, "File", "canvas-view.close");
+        viaMenu(app, "Canvas", "canvas-view.close");
         QTRY_VERIFY(!dialog(app)->property("opened").toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -1134,7 +1134,7 @@ private slots:
         QTRY_VERIFY(find(app.window, "canvasViewClose"));
         const auto x = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).x(); };
         QTRY_VERIFY(x(find(app.window, "canvasViewClose")) < x(find(app.window, "canvasViewFit"))); // once laid out
-        QTRY_VERIFY(x(find(app.window, "canvasMenuTitle-File")) > x(find(app.window, "canvasMenuTitle-View"))); // File at the reading end
+        QTRY_VERIFY(x(find(app.window, "canvasMenuTitle-Canvas")) > x(find(app.window, "canvasMenuTitle-View"))); // File at the reading end
         QQuickItem *picture = find(app.window, "canvasViewViewer");
         QQuickItem *layers = find(app.window, "canvasLayersPanel");
         QVERIFY(layers && x(layers) < x(picture)); // the panel at the reading end, the left

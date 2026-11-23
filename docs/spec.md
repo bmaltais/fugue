@@ -2264,7 +2264,7 @@ and the `?` overlay marks each one.
 | `area.view-graph`, `area.view-canvas` | The active area shows the Graph, a Canvas (12.16) | Ctrl+Alt+G, Ctrl+Alt+C | added |
 | `canvas.new` | New canvas…: the New canvas dialog, anywhere (14.5, #232) | Ctrl+Alt+N (File) | added |
 | `canvas.paste-new` | Paste as new canvas: the clipboard's picture as a canvas, no dialog; off while the clipboard holds no picture (14.5, #232) | none (File) | added |
-| `view.reset-layout` | One area showing the Graph again (12.16) | none (View > Areas) | added |
+| `view.reset-layout` | One area showing the Graph again (12.16) | none (Window menu) | added |
 | `canvas-layers.visible` | Hide or show the selected layers of a Canvas view (14.5, #226) | H, a click on the eye (Alt+click: that layer alone) | added |
 | `canvas-layers.rename` | Rename the layer | F2, double-click its name | added |
 | `canvas-layers.duplicate` | Duplicate the selected layers | Ctrl+D | added |
@@ -2330,6 +2330,13 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
   settings panel and the CLI's listing all read the same registry.
 - Each key has one owner at a time in a given context (canvas, a selected group, a text field,
   a run in progress). Contexts belong to commands, not to the keymap file.
+- **The window's menus and the areas' menus (#262, Blender's model).** The window bar holds what is global: File, Edit (document
+  Undo and Redo, Copy, Paste, Clear, Settings), Run, Window (every bar and panel with a check, focus mode and the way back,
+  then the areas' split, close, view and reset) and Help. Each area has a header with its view-type menu, then its view's own
+  menus, then split and close. The Graph's are View (fit, zoom, links), Select (select all), Add (node search, paste connected)
+  and Node (rename, colors, clone, delete, bypass, mute, collapse, pin, align, distribute, images, frame, groups); the Canvas
+  view's are Canvas, Edit, Select, Layer and View. A command is listed at one level only. The Graph's header is also above the
+  canvas while the window has one area; in a header too narrow for the titles they fold into one Menu button.
 - The menu bar and the context menus list command ids; each item's name, key and enabled
   state come from the registry when the menu opens, and a command not built yet shows as
   unavailable. Alt+letter opens a top menu where 12.4 binds nothing to it.
