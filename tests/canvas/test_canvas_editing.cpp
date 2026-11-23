@@ -387,9 +387,12 @@ private slots:
 
     void editsOnThreeHundredNodesStayQuick() {
         App app(grid(300));
-        QVERIFY(app.open());
-        // CPU time (tests/cpu_time.h), so a busy machine does not count against it.
+        // CPU time (tests/cpu_time.h), so a busy machine does not count against it, and the delete and its undo are
+        // measured against the window's own opening of the same graph in this process: a loaded machine slows both.
         qint64 start = test_support::cpuMs();
+        QVERIFY(app.open());
+        const qint64 opened = test_support::cpuMs() - start;
+        start = test_support::cpuMs();
         app.key(Qt::Key_A, Qt::ControlModifier);
         app.key(Qt::Key_Delete);
         QCOMPARE(app.model.nodes()->rowCount(), 0);
@@ -406,10 +409,12 @@ private slots:
         start = test_support::cpuMs();
         app.key(Qt::Key_Z, Qt::ControlModifier);
         const qint64 moved = test_support::cpuMs() - start;
-        qInfo("302 nodes, CPU time: delete all %lld ms, undo it %lld ms, undo a move %lld ms", deleted, undone, moved);
+        qInfo("302 nodes, CPU time: open %lld ms, delete all %lld ms, undo it %lld ms, undo a move %lld ms", opened, deleted, undone, moved);
         QCOMPARE(app.model.position("n0"), QPointF(0, 0));
-        // Generous bounds for a slow CI machine; a whole-graph rebuild per edit would blow them.
-        QVERIFY2(deleted < 1000 && undone < 1000, qPrintable(QStringLiteral("%1 %2").arg(deleted).arg(undone)));
+        // Undoing the delete makes the graph again, as opening did (about as long, 280 ms against 230 on 2026-11-23); a
+        // whole-graph rebuild per edit would take many times that. The floor is for a window that opened very fast.
+        const qint64 limit = 4 * opened + 300;
+        QVERIFY2(deleted < limit && undone < limit, qPrintable(QStringLiteral("%1 %2, open %3").arg(deleted).arg(undone).arg(opened)));
         QVERIFY2(moved < 200, qPrintable(QString::number(moved)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }

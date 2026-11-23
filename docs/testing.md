@@ -45,4 +45,8 @@ test's own temporary folder), because shards run at the same time.
 4. Prune on sight. Delete a test that duplicates another, can never fail, covers removed behaviour, or is
    flaky and not worth fixing, in the same change, and say so in the PR body.
 5. A flaky test is fixed or deleted, never re-run until it is green.
-6. A change that adds more than about 2 s to the suite says so in its PR body.
+6. Never assert a CPU-time or wall-clock limit on a window: it measures the machine. Count the work (items made), or
+   compare with a measurement of the same process. Click only on a laid-out window (`grabWindow()` runs the polish
+   that moves a list's rows), and wait on state. ctest runs with `QV4_GC_TIMELIMIT=100000` (CMakeLists.txt): Qt's sliced
+   GC under load made a Question read its theme as null in 1 run in 50.
+7. A change that adds more than about 2 s to the suite says so in its PR body.

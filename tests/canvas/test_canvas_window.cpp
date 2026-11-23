@@ -200,22 +200,16 @@ private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
     void opensQuicklyWithThreeHundredNodesAndSixHundredWires() {
-        QSKIP("Bypassed (flaky under load: the CPU-time limit measures the machine, #279)");
         App app(grid(300));
         QCOMPARE(app.model.links()->rowCount(), 600);
         QVERIFY(app.open());
-        // 12.1: up in well under half a second. Offscreen this is the QML and scene graph
-        // work without a GPU; the budget leaves room for a slow CI machine.
+        // 12.1: up in well under half a second. Offscreen this is the QML and scene graph work without a GPU.
         const int items = countItems(app.window->contentItem());
         qInfo("window up with 302 nodes and 600 wires in %lld ms, %lld ms of CPU (objects made in %lld ms); "
               "%d items", app.openedMs, app.openedCpuMs, app.createdMs, items);
-        // 12.1's target is the window itself (opensQuicklyEmpty); a 300-node file gets a
-        // looser bound, so a slow CI machine does not fail it. It is on CPU time: the wall
-        // clock also counts the time other tests take the CPU under ctest -j8, which made it
-        // flaky. The wall clock only catches a hang. CPU time grows under load too (cores
-        // shared with other tests: about 280 ms alone, 643 once under ctest -j8 beside a
-        // build), so the bound is loose; the item count below is the exact check.
-        QVERIFY2(app.openedCpuMs < 1000, qPrintable(QString::number(app.openedCpuMs)));
+        // 12.1's target is the window itself (opensQuicklyEmpty). Not a CPU-time limit: it measured the machine (cold start,
+        // other tests on the cores) and failed under load, so the work is counted below instead; the wall clock only
+        // catches a hang.
         QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
         // What the time grows with, counted, so it can be checked without a clock: 3773 items
         // on 2026-11-20 (the faces and rows of the 44 nodes in view, each with the group card's
@@ -232,18 +226,14 @@ private slots:
     }
 
     void opensQuicklyEmpty() {
-        QSKIP("Bypassed (flaky under load: the CPU-time limit measures the machine, #279)");
+        
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
-        qInfo("empty window up in %lld ms, %lld ms of CPU", app.openedMs, app.openedCpuMs);
-        // On CPU time, as the 302-node test: under ctest -j8 the wall clock also counts the
-        // time other tests take the CPU, which made it flaky. The wall clock only catches a
-        // hang. CPU time is the whole process's, the render and loader threads too, so it runs
-        // above the wall clock (about 77 ms against 60 on 2026-11-19); 150 leaves room for a
-        // slower machine and still catches a window that does real work before its first frame.
-        // 2026-11-23: a loaded CI runner measured 157 and a busy dev machine 126 against 70 idle,
-        // so the limit is 300: still far under a window that does real work (seconds).
-        QVERIFY2(app.openedCpuMs < 300, qPrintable(QString::number(app.openedCpuMs)));
+        // Counted, not timed (a CPU-time limit measured the machine, not the window, #279): a window that does real work
+        // before its first frame makes items: 168 on 2026-11-23. The wall clock only catches a hang.
+        const int items = countItems(app.window->contentItem());
+        qInfo("empty window up in %lld ms, %lld ms of CPU, %d items", app.openedMs, app.openedCpuMs, items);
+        QVERIFY2(items < 200, qPrintable(QString::number(items)));
         QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
     }
 

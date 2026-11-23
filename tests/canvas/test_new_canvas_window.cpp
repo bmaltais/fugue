@@ -230,7 +230,6 @@ private slots:
     }
 
     void pasteAsNewCanvasNeedsAPictureAndAsksNothing() {
-        QSKIP("Bypassed (flaky under load: QML Question theme null, #279)");
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         QVERIFY(!app.commands.isEnabled("canvas.paste-new"));
