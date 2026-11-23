@@ -535,6 +535,14 @@ QStringList ImageInputs::storeClipboard(const QMimeData &data) {
     return {};
 }
 
+QString ImageInputs::storeClipboardMask(const QMimeData &data) {
+    if (!data.hasFormat(QString::fromLatin1(clipboardMaskType)))
+        return {};
+    const Result<QString> stored = storeImage(data.data(QString::fromLatin1(clipboardMaskType)), inputsDir(), FileRoots::forInputs(),
+                                              QStringLiteral("selection-mask"));
+    return stored ? stored.value() : QString();
+}
+
 QStringList ImageInputs::storeFiles(const QStringList &paths) {
     const FileRoots roots = FileRoots::forInputs();
     QStringList stored, failures;
@@ -550,7 +558,7 @@ QStringList ImageInputs::storeFiles(const QStringList &paths) {
     return stored;
 }
 
-bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF at) {
+bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF at, const QString &mask) {
     if (files.isEmpty())
         return false;
     const QString replaceInput = replace.isEmpty() ? QString() : imageInput(replace);
@@ -575,6 +583,8 @@ bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF
             continue;
         Document document = m_canvas->scopeDocument();
         document.graph.nodes[node].inputs.insert(input, InputValue::literal(files.at(i)));
+        if (i == 0 && !mask.isEmpty() && document.graph.nodes.value(node).type == QLatin1String(loadImageType))
+            document.graph.nodes[node].inputs.insert(QStringLiteral("mask"), InputValue::literal(mask));
         m_canvas->commit(document, {});
         nodes.append(node);
     }
@@ -588,7 +598,8 @@ bool ImageInputs::paste(const QMimeData &data) {
         return false;
     QString node;
     replacing(node);
-    take(storeClipboard(data), node, pastePoint());
+    const QStringList files = storeClipboard(data);
+    take(files, node, pastePoint(), files.size() == 1 ? storeClipboardMask(data) : QString());
     return true;
 }
 
@@ -598,7 +609,8 @@ bool ImageInputs::pasteInto(const QString &node) {
         emit message(tr("The clipboard holds no image."));
         return false;
     }
-    return take(storeClipboard(*data), node, pastePoint());
+    const QStringList files = storeClipboard(*data);
+    return take(files, node, pastePoint(), files.size() == 1 ? storeClipboardMask(*data) : QString());
 }
 
 bool ImageInputs::dropFiles(const QStringList &paths, QPointF at, const QString &onNode) {

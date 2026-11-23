@@ -446,6 +446,9 @@ Item {
         case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.paste-layer": case "canvas-view.place-picture": return {enabled: canvasData.layersEditable}
+        case "canvas-view.copy": return {enabled: shows && layersPanel.current !== null && layersPanel.current.kind !== "mask"}
+        case "canvas-view.copy-merged": return {enabled: shows && canvasData.layers.length > 0}
+        case "canvas-view.copy-mask": return {enabled: shows && (maskSelected || rectSelected)}
         case "canvas-view.paste-canvas": return {enabled: true}
         case "canvas-view.flip-horizontal": case "canvas-view.flip-vertical": case "canvas-view.turn-clockwise": case "canvas-view.turn-counterclockwise":
             return {enabled: transformable}
@@ -550,6 +553,9 @@ Item {
         case "canvas-view.turn-clockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, true); break
         case "canvas-view.turn-counterclockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, false); break
         case "canvas-view.paste-layer": pasteLayerOrNodes(); break
+        case "canvas-view.copy": copyPicture("layer"); break
+        case "canvas-view.copy-merged": copyPicture("merged"); break
+        case "canvas-view.copy-mask": copyPicture("mask"); break
         case "canvas-view.paste-canvas": pasteAsNewCanvas(); break
         case "canvas-view.place-picture": placePicture(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
@@ -603,6 +609,8 @@ Item {
                 root.runTool(id)
             else if (id === "canvas-view.paste-layer") // not on the latest version: the key still belongs to the Graph's paste
                 App.commands.trigger("edit.paste")
+            else if (id === "canvas-view.copy") // no layer to copy (a mask layer, none picked): the key still copies nodes
+                App.commands.trigger("edit.copy")
         }
     }
     // Escape clears the selection wherever the focus is, as Ctrl+D does (a key to a focused item would miss it after a click
@@ -743,6 +751,13 @@ Item {
         if (!canvasData.clipboardHasPicture() && App.commands.trigger("edit.paste"))
             return
         pasteLayer()
+    }
+    // Edit > Copy, Copy Merged and Copy selection as mask (#327): the selection is the painted one, else the rectangle, else the whole
+    // canvas (as Photoshop copies a whole layer with nothing selected); the picture goes on the system clipboard.
+    function copyPicture(what) {
+        const r = rectSelected && !maskSelected ? shownRegion : noRect
+        const position = layersPanel.current ? layersPanel.current.position : -1
+        canvasData.copyPicture(what, maskSelected ? selectionLayer : null, position, r.x, r.y, r.width, r.height)
     }
     function pasteLayer() {
         const at = visibleCenter()

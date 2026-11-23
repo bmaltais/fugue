@@ -1669,5 +1669,16 @@
   "The mask of a layer inside a group cannot be painted or selected from yet.": "The mask of a layer inside a group cannot be painted or selected from yet.",
   "This layer is inside a group: moving and transforming work on the layers of the top level for now.": "This layer is inside a group: moving and transforming work on the layers of the top level for now.",
   "%1 changes the layer's own pixels, so it makes one result at a time. Set Count to 1.": "%1 changes the layer's own pixels, so it makes one result at a time. Set Count to 1.",
-  "The canvas has no layer named \"%1\" at this revision.": "The canvas has no layer named \"%1\" at this revision."
+  "The canvas has no layer named \"%1\" at this revision.": "The canvas has no layer named \"%1\" at this revision.",
+  "Copy the selected pixels of the current layer to the clipboard as a picture (the selection is its alpha)": "Copy the selected pixels of the current layer to the clipboard as a picture (the selection is its alpha)",
+  "Copy the selected pixels of every shown layer, flattened, to the clipboard as a picture": "Copy the selected pixels of every shown layer, flattened, to the clipboard as a picture",
+  "Copy the selection to the clipboard as a gray picture of the canvas's size (white is selected), to use as a mask in nodes": "Copy the selection to the clipboard as a gray picture of the canvas's size (white is selected), to use as a mask in nodes",
+  "Copy merged": "Copy merged",
+  "Copy selection as mask": "Copy selection as mask",
+  "Copied the selection as a mask (%1 × %2)": "Copied the selection as a mask (%1 × %2)",
+  "Copied merged (%1 × %2)": "Copied merged (%1 × %2)",
+  "Copied (%1 × %2)": "Copied (%1 × %2)",
+  "Pick a layer to copy.": "Pick a layer to copy.",
+  "Copy Merged copies every shown layer.": "Copy Merged copies every shown layer.",
+  "There is no clipboard to copy to.": "There is no clipboard to copy to."
 }

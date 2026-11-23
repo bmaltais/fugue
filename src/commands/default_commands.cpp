@@ -132,6 +132,11 @@ QList<Row> defaultRows() {
         {"canvas-view.layer-properties", QT_TRANSLATE_NOOP("Command", "Name, opacity, blend mode and layer mask of the selected layer in one dialog"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Layer properties…")},
         // #236: Edit > Paste as new layer (Ctrl+V while the view is the one in use: the Graph's own Ctrl+V pastes nodes), Paste as new
         // canvas, and Canvas > Place picture….
+        // #327: Edit > Copy (Ctrl+C while the Canvas view is the one in use: the Graph's Ctrl+C still copies nodes), Copy Merged and Copy
+        // selection as mask. The clipboard gets a picture the Graph's Ctrl+V turns into a Load Image node.
+        {"canvas-view.copy", QT_TRANSLATE_NOOP("Command", "Copy the selected pixels of the current layer to the clipboard as a picture (the selection is its alpha)"), {"Ctrl+C"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Copy")},
+        {"canvas-view.copy-merged", QT_TRANSLATE_NOOP("Command", "Copy the selected pixels of every shown layer, flattened, to the clipboard as a picture"), {"Ctrl+Shift+C"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Copy merged")},
+        {"canvas-view.copy-mask", QT_TRANSLATE_NOOP("Command", "Copy the selection to the clipboard as a gray picture of the canvas's size (white is selected), to use as a mask in nodes"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Copy selection as mask")},
         {"canvas-view.paste-layer", QT_TRANSLATE_NOOP("Command", "Paste the clipboard's picture as a new layer, centered in the view (one undo step)"), {"Ctrl+V"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new layer")},
         {"canvas-view.paste-canvas", QT_TRANSLATE_NOOP("Command", "Make a new canvas of the clipboard's picture"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new canvas")},
         {"canvas-view.place-picture", QT_TRANSLATE_NOOP("Command", "Place a picture file on the canvas as a new layer (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Place picture…")},

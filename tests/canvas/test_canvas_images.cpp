@@ -148,6 +148,30 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #327: a copy from the Canvas view carries the selection beside the picture; the Load Image made by the paste keeps it as its mask.
+    void aCopiedPictureWithASelectionPastesAsOneLoadImageWithItsMask() {
+        App app(load(oneLoadImage));
+        QVERIFY(app.open());
+        QImage gray(16, 10, QImage::Format_Grayscale8);
+        gray.fill(255);
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        QVERIFY(gray.save(&buffer, "PNG"));
+        auto *data = new QMimeData;
+        data->setImageData(picture(Qt::red));
+        data->setData(QString::fromLatin1(clipboardMaskType), png);
+        putOnClipboard(data);
+        app.key(Qt::Key_V, Qt::ControlModifier);
+        const QStringList images = loadImages(app);
+        QCOMPARE(images.size(), 2);
+        const QString added = images.first() == "src" ? images.last() : images.first();
+        const QString mask = app.model.document().graph.nodes.value(added).inputs.value("mask").literal().toString();
+        QVERIFY(mask.startsWith(inputsDir() + "/selection-mask-"));
+        QCOMPARE(QImage(mask).size(), QSize(16, 10));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void encodedPngAndJpegAreStoredAsTheyCame() {
         App app(load(oneLoadImage));
         QVERIFY(app.open());

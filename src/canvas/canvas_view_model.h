@@ -198,6 +198,13 @@ public:
     Q_INVOKABLE bool pasteLayer(double cx = -1, double cy = -1);
     // Whether the clipboard holds a picture (else Ctrl+V over this view is the Graph's: it pastes nodes).
     Q_INVOKABLE bool clipboardHasPicture() const;
+    // #327, Edit > Copy, Copy Merged and Copy selection as mask: the shown revision's pixels (`what` "layer": the one at `position`, a
+    // top-level layer; "merged": every shown layer flattened; "mask": the selection as a gray picture of the canvas's size) cut to
+    // the selection and put on the system clipboard as a picture (a copy carries the selection as its alpha; engine/canvas_copy.h).
+    // The selection is `selection` (a painted one) when it has pixels, else the rectangle x, y, width, height (width 0: none = the
+    // whole canvas). Nothing is stored. False, with `error` in words, when nothing could be copied; else a notice names what went.
+    Q_INVOKABLE bool copyPicture(const QString &what, fugue::MaskLayer *selection, int position, double x = 0, double y = 0, double width = 0,
+                                 double height = 0);
     Q_INVOKABLE bool placeFile(const QString &pathOrUrl, double cx = -1, double cy = -1);
     // Whether a dragged file is one placeFile reads (a drop takes only pictures; the window's own drop keeps the rest).
     Q_INVOKABLE bool isPictureFile(const QString &pathOrUrl) const;

@@ -867,7 +867,16 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: Edit > Paste as new layer (Ctrl+V), Edit > Paste as new canvas, Canvas > Place picture… and a picture file dropped on the picture. The layer lands above the current one, centered in what the view shows of the canvas (a drop: where it fell), named "Pasted 1"..., selected, ONE undoable step. A problem (no picture on the clipboard, too large, not a picture) is said in the line under the picture and nothing changes.
 - Why: Photoshop's Edit > Paste and File > Place Embedded, Blender's hover rule for keys (one keymap, D5): Ctrl+V pastes nodes in the Graph and a layer in the Canvas view, decided by which of the two the pointer is over or has the focus, as every other key of the view. A drop accepts only picture files, so the window's own drop (a workflow, a Load Image) keeps the rest.
 - Rules met: Floor (rows and the file dialog are the shared ones), Primary (none: no new button), Destructive (none: Undo takes the layer back).
-- Not done: Copy (Edit > Copy is still a greyed row), a paste that follows the pointer, a pasted picture scaled to fit (it keeps its size; the transform below scales it).
+- Not done: a paste that follows the pointer, a pasted picture scaled to fit (it keeps its size; the transform below scales it).
+
+### 2026-11-23 Copy, Copy merged, Copy selection as mask (#327, epic #216)
+
+- Control: `src/canvas/CanvasView.qml` (`copyPicture`, the rows' `menuState`, the `onWindowRequested` fallback); commands `canvas-view.copy` (Ctrl+C), `canvas-view.copy-merged` (Ctrl+Shift+C), `canvas-view.copy-mask` (no key); the Edit menu's three rows (`src/menu/menus.cpp`) in place of the greyed "Copy".
+- Old: Edit > Copy was a greyed "planned" row; nothing of the canvas could be taken out as a picture.
+- New: Edit > Copy, Copy merged and Copy selection as mask. The clipboard gets the selected pixels (cut to the selection's bounds, the selection as alpha) or, for the mask, a gray picture of the canvas's size; a copy from a painted selection also carries the selection, which the Graph's paste keeps as the new Load Image's mask (one Ctrl+C, one Ctrl+V: Image and Mask). No dialog and no undo step (nothing in the canvas changes); the notice line under the picture says "Copied (120 x 80)"; a refusal is the error line under the picture.
+- Why: Photoshop's Edit > Copy and Copy Merged and Blender's hover rule for keys (as Ctrl+V, #236): Ctrl+C copies pixels over the Canvas view and nodes over the Graph; with no layer to copy the key falls back to the Graph's copy. A mask copy is one more row, not a key, since Photoshop has none and it is the rarer use.
+- Rules met: Floor (rows of the shared menu), Primary (none: no new button), Destructive (none: nothing is changed or stored), Learned place (Edit menu, Photoshop's order: Copy, Copy Merged, Paste).
+- Not done: a Copy that follows a floating selection, copying a layer inside a group (Copy merged works), a drag from the picture to the Graph.
 
 ### 2026-11-23 Layer > Transform: flip and quarter turns (#236, epic #216)
 

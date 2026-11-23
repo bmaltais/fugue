@@ -54,6 +54,11 @@ Result<QString> storeImage(const QByteArray &bytes, const QString &folder, const
 // checked before it is read.
 Result<QString> storeImageFile(const QString &path, const QString &folder, const FileRoots &roots);
 
+// A copy from the Canvas view with a selection (#327) puts, beside the picture (its alpha is the selection), the selection itself
+// under this type: a gray PNG of the picture's size, white where it was selected. A paste into a Load Image keeps it as the
+// node's painted `mask`, so the one paste gives the picture and its mask.
+inline constexpr const char *clipboardMaskType = "application/x-fugue-mask";
+
 // The MIME types taken from the clipboard, best first.
 QStringList clipboardImageTypes();
 // Holds the MIME type of the original image when Fugue's Copy Image offers it beside a PNG made
@@ -143,7 +148,10 @@ private:
     QStringList storeFiles(const QStringList &paths);
     // Puts stored files on the canvas as one undo step: the first into `replace` when it is a
     // node, the others (or all) in new Load Image nodes down from `at`.
-    bool take(const QStringList &files, const QString &replace, QPointF at);
+    // `mask`, when not empty, is a file of the inputs folder the first Load Image takes as its painted mask.
+    bool take(const QStringList &files, const QString &replace, QPointF at, const QString &mask = {});
+    // The clipboard's selection mask (clipboardMaskType) stored in the inputs folder; empty when it has none or it is no image.
+    QString storeClipboardMask(const QMimeData &data);
     bool replacing(QString &node) const;
     QPointF pastePoint() const;
 
