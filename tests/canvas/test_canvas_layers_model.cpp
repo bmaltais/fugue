@@ -231,6 +231,45 @@ private slots:
         QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Fill 1", "Base"}));
     }
 
+    void lockingIsOneRevisionAndAProtectedLayerRefusesTheEditsThatWouldChangeIt() {
+        CanvasViewModel model;
+        open(model);
+        QVERIFY(model.setLocked(at({1}), true));
+        QCOMPARE(revisionCount(), 2);
+        QVERIFY(model.layers().at(1).toMap().value("locked").toBool()); // top first: Fill 2, Fill 1, Base
+        QVERIFY(!model.layers().at(0).toMap().value("locked").toBool());
+        QVERIFY(!model.removeLayers(at({1})));
+        QVERIFY(!model.mergeDown(2)); // into the locked one
+        QVERIFY(!model.targetMask(1)); // the brush does not take a locked layer's mask
+        QVERIFY(!model.error().isEmpty());
+        QCOMPARE(revisionCount(), 2);
+        QVERIFY(model.setVisible(at({1}), false)); // showing is not a pixel edit
+        QVERIFY(model.toggleLocked(at({1})));      // all locked: unlocks
+        QVERIFY(!model.layers().at(1).toMap().value("locked").toBool());
+        QVERIFY(model.removeLayers(at({1})));
+    }
+
+    void aGenerateReadsOneNamedPaintLayerAsAViewStateNotARevision() {
+        CanvasViewModel model;
+        open(model);
+        QVERIFY(model.regionLayer().isEmpty());
+        QVERIFY(model.setRegionLayer(1));
+        QCOMPARE(model.regionLayer(), QStringLiteral("Fill 1"));
+        QCOMPARE(revisionCount(), 1);
+        QVERIFY(model.setRegionLayer(1)); // again: the whole picture
+        QVERIFY(model.regionLayer().isEmpty());
+        QVERIFY(model.setRegionLayer(0));
+        QVERIFY(model.rename(0, QStringLiteral("Ground"))); // the name is gone from the new revision: back to the picture
+        QVERIFY(model.regionLayer().isEmpty());
+        QVERIFY(model.setRegionLayer(2));
+        QVERIFY(model.groupLayers(at({0, 1}))); // the layer is still there, in the group's neighbour
+        QCOMPARE(model.regionLayer(), QStringLiteral("Fill 2"));
+        QVERIFY(model.setRegionLayer(-1));
+        QVERIFY(model.regionLayer().isEmpty());
+        QVERIFY(!model.setRegionLayer(0)); // a group
+        QVERIFY(!model.error().isEmpty());
+    }
+
     void mergeDownFlattenGroupAndUngroupAreOneRevisionEach() {
         CanvasViewModel model;
         open(model);

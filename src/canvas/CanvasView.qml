@@ -187,13 +187,13 @@ Item {
     // #252: the rows the layers panel has selected, and whether Merge down has two shown layers that can merge (paint layers or groups).
     readonly property var chosenRows: layersPanel.chosen.map(p => canvasData.layers.find(r => r.position === p)).filter(r => r !== undefined)
     // #236: the current layer can be moved, flipped or turned: a single paint layer (not a group, mask or picture) on the latest version.
-    readonly property bool transformable: canvasData.layersEditable && layersPanel.current !== null && chosenRows.length === 1 && layersPanel.current.kind === "paint"
+    readonly property bool transformable: canvasData.layersEditable && layersPanel.current !== null && chosenRows.length === 1 && layersPanel.current.kind === "paint" && layersPanel.current.locked !== true
     readonly property bool mergeable: {
         const upper = layersPanel.current
         if (!canvasData.layersEditable || upper === null || chosenRows.length !== 1 || upper.position < 1)
             return false
         const lower = canvasData.layers.find(r => r.position === upper.position - 1)
-        const merges = r => r !== undefined && r.visible && r.kind !== "mask" && r.kind !== "picture"
+        const merges = r => r !== undefined && r.visible && !r.locked && r.kind !== "mask" && r.kind !== "picture"
         return merges(upper) && merges(lower)
     }
     readonly property bool paintsMask: !quickMask && canvasData.maskTarget >= 0
@@ -2001,6 +2001,7 @@ Item {
         canvasId: canvasData.canvasId
         revision: canvasData.revisionB
         onHead: root.shownIsHead
+        regionLayer: canvasData.regionLayer
         rect: root.shownRegion
         quickMask: root.quickMask ? selectionLayer : null
         originX: pictureView.imageX

@@ -78,6 +78,9 @@ struct LayerRecord {
     QString compositeOp; // "" is svg:src-over (mask::LayerInfo::compositeOp)
     bool hasMask = false;  // a layer mask: one channel, its own tiles
     bool maskEnabled = true;
+    // Locked (#226): its pixels, its layer mask and its place in the stack are protected (applyLayerEdit refuses a delete, a merge, a
+    // transform or a mask edit of it); showing, opacity, blend, a name and duplicating are not pixels and stay open.
+    bool locked = false;
     TileMap maskTiles;
     QString producer, created; // the layer's origin (mask::LayerInfo)
     // A group (#252): a layer that holds layers, bottom first, and composites them as one (the kind is Paint, `tiles` empty;
@@ -90,7 +93,7 @@ struct LayerRecord {
     int tileCount() const; // its own tiles and its children's
     bool operator==(const LayerRecord &o) const {
         return name == o.name && kind == o.kind && visible == o.visible && opacity == o.opacity && tiles == o.tiles && compositeOp == o.compositeOp &&
-               hasMask == o.hasMask && maskEnabled == o.maskEnabled && maskTiles == o.maskTiles && producer == o.producer && created == o.created &&
+               hasMask == o.hasMask && maskEnabled == o.maskEnabled && locked == o.locked && maskTiles == o.maskTiles && producer == o.producer && created == o.created &&
                group == o.group && children == o.children && source == o.source;
     }
 };

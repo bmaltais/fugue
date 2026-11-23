@@ -70,6 +70,7 @@ struct LayerInfo {
     QString compositeOp;
     bool hasMask = false;     // a layer mask (paint and picture layers only)
     bool maskEnabled = true;  // off: the layer shows as if it had none
+    bool locked = false;      // protected from pixel edits, delete and merge (#226); a revision's property, an .ora keeps it as fugue:locked
     // Where the layer came from (a Canvas Write's "canvas-write:<node>", an edit's producer) and when
     // (ISO 8601 UTC); empty when nobody said. Carried by moves, renames and duplicates.
     QString producer;

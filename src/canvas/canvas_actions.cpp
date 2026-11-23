@@ -340,6 +340,7 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     binding.revision = shown->revision;
     binding.rect = rect;
     binding.selection = selection;
+    binding.layer = request.value("layer").toString().trimmed();
     if (routed.action != canvas::RouteAction::None) {
         binding.padding = routed.padding;
         binding.scale = routed.scale;

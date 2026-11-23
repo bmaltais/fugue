@@ -75,7 +75,7 @@ const char *helpText =
     "  canvas log <id[@rev]> [--limit <n>] | canvas show <id[@rev]>   (the canvas revision store, spec 14.5)\n"
     "  canvas list | canvas candidates <id> [--all] | canvas accept|drop <id[@rev]> | canvas diff <id@rev> [<id@rev>]\n"
     "  canvas layer list <id[@rev]> | canvas layer set <id> <layer>... [--visible true|false] [--opacity 0-1] [--blend <mode>]\n"
-    "      [--mask on|off|delete] | canvas layer rename <id> <layer> <name> | canvas layer rm|dup <id> <layer>...\n"
+    "      [--lock true|false] [--mask on|off|delete] | canvas layer rename <id> <layer> <name> | canvas layer rm|dup <id> <layer>...\n"
     "      | canvas layer move <id> <layer>... --to <position> | canvas undo|redo <id>   (a layer is its position, 0 the bottom, or its name)\n"
     "  canvas resize <id> --to <x>,<y>,<w>,<h> [--fill edge-blur|edge|gray|transparent] [--blur <px>]   (grow, shift or cut the canvas; the rectangle is in the old canvas's pixels)\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"

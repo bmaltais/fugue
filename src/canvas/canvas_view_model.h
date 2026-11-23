@@ -16,7 +16,7 @@
 //  - a run lands on the head (Canvas Write, #228, #239: candidate review is no part of the product): the view on the head
 //    goes along and `headNotice` says what came, with Undo.
 //  - layers (#226): `layers` are the shown revision's layers, top first, as {position (0 is the bottom), name, kind,
-//    visible, opacity, blend (an id of blendModes, or "" for an op Fugue does not draw), compositeOp, hasMask, maskEnabled,
+//    visible, opacity, blend (an id of blendModes, or "" for an op Fugue does not draw), compositeOp, hasMask, maskEnabled, locked,
 //    producer, from (the producer as a person reads it), created, depth (0: a group is one row, its children inside it are not listed; kind "group"), thumbnail, maskThumbnail
 //    (small PNGs of the layer's own pixels and of its mask)}. `selection` is a list of positions (ctrl/shift add, as an
 //    outliner does), kept across an edit. Every edit (setVisible, setOpacity, setBlend, rename, removeLayers, duplicate,
@@ -83,6 +83,9 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY layersChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY layersChanged)
     Q_PROPERTY(int solo READ solo WRITE setSolo NOTIFY layersChanged)
+    // The layer a Generate reads instead of the whole picture (#226, Canvas Region's Layer input): its name, "" for the picture as
+    // it looks. Like `solo` a view state, not a revision; it ends with the canvas, or when a revision has no such layer.
+    Q_PROPERTY(QString regionLayer READ regionLayer NOTIFY layersChanged)
     // A Move or Free Transform in progress (#236): see the header.
     Q_PROPERTY(bool transforming READ transforming NOTIFY transformChanged)
     Q_PROPERTY(QUrl transformImage READ transformImage NOTIFY transformChanged)
@@ -125,6 +128,10 @@ public:
     bool canRedo() const { return m_canRedo && layersEditable(); }
     int solo() const { return m_solo; }
     void setSolo(int position);
+    QString regionLayer() const { return m_regionLayer; }
+    // Reads the layer at `position` in a Generate (the same one again, or -1, goes back to the picture). False, with `error`, for a
+    // layer Canvas Region cannot read by name: a group, a mask or picture layer, or one a layer above has the same name as.
+    Q_INVOKABLE bool setRegionLayer(int position);
     static QVariantList blendModes();
 
     // ---- the layers panel (#226); positions are bottom first, as the store has them ----
@@ -135,6 +142,10 @@ public:
     Q_INVOKABLE bool setVisible(const QVariantList &positions, bool visible);
     // Hides them all when any is shown, else shows them all (the H key).
     Q_INVOKABLE bool toggleVisible(const QVariantList &positions);
+    // Lock (#226): a locked layer refuses a delete, a merge, a transform and a layer-mask edit (the store says so in `error`);
+    // toggleLocked locks them all when any is open, else unlocks them all. Locking is a revision of its own (Undo takes it back).
+    Q_INVOKABLE bool setLocked(const QVariantList &positions, bool locked);
+    Q_INVOKABLE bool toggleLocked(const QVariantList &positions);
     Q_INVOKABLE bool setOpacity(const QVariantList &positions, double opacity);
     Q_INVOKABLE bool setBlend(const QVariantList &positions, const QString &blend);
     Q_INVOKABLE bool rename(int position, const QString &name);
@@ -269,6 +280,7 @@ private:
     // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).
     void syncMask();
     bool loadMask(int position);
+    bool lockedAt(int position) const; // the layer at `position` of the shown revision is locked (#226)
     void rebuildLayers();
     void updateSoloPicture();
     QList<int> positionsOf(const QVariantList &list) const;
@@ -301,6 +313,7 @@ private:
     bool m_canUndo = false;
     bool m_canRedo = false;
     int m_solo = -1;
+    QString m_regionLayer;
     QUrl m_soloSource;
     int m_xPosition = -1;   // the layer being transformed (a position), -1: none
     QUrl m_xImage, m_xBase; // its original, and the canvas without it

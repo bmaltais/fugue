@@ -105,6 +105,7 @@ struct ActionBinding {
     std::optional<int> padding;  // the router's, when it gave one
     std::optional<double> scale;
     QMap<QString, QJsonValue> values; // by ActionInput::key(): the bar's values (prompt, seed, ...)
+    QString layer; // the layer Canvas Region reads by name (#226), or empty: the canvas as it looks (the workflow's own Layer stays)
 };
 
 // The run's copy of the workflow: `document` with the binding put in. An input with no value keeps its block default,
