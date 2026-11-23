@@ -79,6 +79,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"drop", {1, 1, {}, {}, canvasDrop}},
           {"diff", {1, 2, {}, {}, canvasDiff}},
           {"layer", {2, -1, {"to", "visible", "opacity", "blend", "mask"}, {}, canvasLayer}},
+          {"resize", {1, 1, {"to", "fill", "blur"}, {}, canvasResize}},
           {"undo", {1, 1, {}, {}, canvasUndo}},
           {"redo", {1, 1, {}, {}, canvasRedo}}}},
         {"settings", {{"list", {0, 0, {}, {}, settingsList}}}},

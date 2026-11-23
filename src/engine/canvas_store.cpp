@@ -17,6 +17,7 @@
 #include "engine/atomic_file.h"
 #include "engine/canonical.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_resize.h"
 #include "engine/hash.h"
 #include "engine/new_canvas.h"
 #include "engine/paint_file.h"
@@ -428,6 +429,21 @@ Result<Commit> CanvasStore::clear(const QString &canvasId, const QString &expect
     if (!blank)
         return Result<Commit>(blank.errors());
     return commit(canvasId, blank.value(), expected, producer);
+}
+
+Result<Commit> CanvasStore::resize(const QString &canvasId, const QString &expected, const mask::IRect &to, edgefill::Mode fill, int blur, const QString &producer) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<Commit>(canvas.errors());
+    if (canvas->head != expected)
+        return Commit{Revision{}, HeadMove{false, canvas->head}};
+    const Result<PaintDocument> current = load(canvasId, expected);
+    if (!current)
+        return Result<Commit>(current.errors());
+    const Result<PaintDocument> resized = mask::resizedCanvas(current.value(), to, fill, blur);
+    if (!resized)
+        return Result<Commit>(resized.errors());
+    return commit(canvasId, resized.value(), expected, producer);
 }
 
 std::vector<CanvasInfo> CanvasStore::list() const {

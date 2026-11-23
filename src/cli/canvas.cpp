@@ -11,6 +11,7 @@
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_resize.h"
 #include "engine/canvas_store.h"
 #include "engine/new_canvas.h"
 #include "engine/paint_file.h"
@@ -583,6 +584,48 @@ Reply headStep(const Command &command, bool forward) {
 }
 
 } // namespace
+
+// `fugue canvas resize <id> --to x,y,w,h [--fill ...] [--blur n]`: ONE revision, the canvas of the rectangle (#240).
+Reply canvasResize(const Command &command, Context &) {
+    const Ref ref = parseRef(command.positionals.at(0));
+    if (ref.written && ref.revision != QLatin1String("head"))
+        return Reply::failure(usageError(QStringLiteral("A canvas is resized at the head: write the canvas id without @revision.")));
+    static const QRegularExpression pattern(QStringLiteral("^(-?[0-9]{1,6}),(-?[0-9]{1,6}),([0-9]{1,6}),([0-9]{1,6})$"));
+    const QRegularExpressionMatch match = pattern.match(command.value("to"));
+    if (!command.has("to") || !match.hasMatch())
+        return Reply::failure(usageError(QStringLiteral("canvas resize needs --to <x>,<y>,<width>,<height>, the new canvas as a rectangle of the old one (x and y may be negative to grow left or up)."),
+                                         command.value("to")));
+    const mask::IRect to{match.captured(1).toInt(), match.captured(2).toInt(), match.captured(3).toInt(), match.captured(4).toInt()};
+    edgefill::Mode fill = edgefill::Mode::EdgeBlur;
+    if (command.has("fill") && !edgefill::modeFromName(command.value("fill"), &fill))
+        return Reply::failure(usageError(QStringLiteral("--fill is edge-blur, edge, gray or transparent, not %1.").arg(command.value("fill"))));
+    int blur = edgefill::defaultBlur;
+    if (command.has("blur")) {
+        bool ok = false;
+        blur = command.value("blur").toInt(&ok);
+        if (!ok || blur < 0 || blur > 512)
+            return Reply::failure(usageError(QStringLiteral("--blur is a radius in pixels, 0 to 512."), command.value("blur")));
+    }
+    CanvasStore store = CanvasStore::forSession();
+    const Result<canvas::CanvasInfo> info = store.info(ref.canvas);
+    if (!info)
+        return Reply::failure(info.errors());
+    if (info->head.isEmpty())
+        return Reply::failure(makeError(QStringLiteral("canvas_not_found"), QStringLiteral("Canvas %1 has no revision yet.").arg(ref.canvas)));
+    const Result<canvas::Commit> done = store.resize(ref.canvas, info->head, to, fill, blur, QStringLiteral("canvas-cli:resize"));
+    if (!done)
+        return Reply::failure(done.errors());
+    if (!done->move.moved)
+        return Reply::failure(makeError(QStringLiteral("canvas_head_moved"), QStringLiteral("The head of %1 moved while this ran (it is %2 now); nothing was changed.").arg(ref.canvas, done->move.head),
+                                        QStringLiteral("Run it again.")));
+    QJsonObject data = revisionJson(done->revision);
+    data.insert(QStringLiteral("canvas"), ref.canvas);
+    data.insert(QStringLiteral("head"), done->revision.id);
+    data.insert(QStringLiteral("width"), to.width);
+    data.insert(QStringLiteral("height"), to.height);
+    data.insert(QStringLiteral("fill"), QString::fromLatin1(edgefill::modeName(fill)));
+    return Reply::success(data, QStringLiteral("Resized %1 to %2 x %3: new head %4.").arg(ref.canvas).arg(to.width).arg(to.height).arg(done->revision.id));
+}
 
 Reply canvasUndo(const Command &command, Context &) { return headStep(command, false); }
 Reply canvasRedo(const Command &command, Context &) { return headStep(command, true); }

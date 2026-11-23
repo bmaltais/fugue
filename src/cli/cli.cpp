@@ -74,6 +74,7 @@ const char *helpText =
     "  canvas layer list <id[@rev]> | canvas layer set <id> <layer>... [--visible true|false] [--opacity 0-1] [--blend <mode>]\n"
     "      [--mask on|off|delete] | canvas layer rename <id> <layer> <name> | canvas layer rm|dup <id> <layer>...\n"
     "      | canvas layer move <id> <layer>... --to <position> | canvas undo|redo <id>   (a layer is its position, 0 the bottom, or its name)\n"
+    "  canvas resize <id> --to <x>,<y>,<w>,<h> [--fill edge-blur|edge|gray|transparent] [--blur <px>]   (grow, shift or cut the canvas; the rectangle is in the old canvas's pixels)\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
     "  cache status | cache clear [--kind results|thumbnails|runs|all] [--workflow <file>] [--node <id>]\n"
     "      [--older-than <age, 30d>] [--dry-run]\n"

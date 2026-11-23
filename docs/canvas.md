@@ -22,6 +22,7 @@ fugue canvas drop canvas-0123456789ab@sha256:ab12cd34   # hide one (it is kept)
 fugue canvas layer list canvas-0123456789ab        # the layers, top first, with their positions
 fugue canvas layer set canvas-0123456789ab "Fill 1" --blend multiply   # one new revision
 fugue canvas undo canvas-0123456789ab              # back to the revision before; redo goes forward
+fugue canvas resize canvas-0123456789ab --to -256,0,1280,1024   # grow 256 px to the left: one revision, a pre-filled "Expanded area" layer at the bottom
 ```
 
 `<id>@<revision>` names a revision by `head`, its full hash, or the first 8 hex digits or more.
