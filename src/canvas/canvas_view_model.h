@@ -83,6 +83,10 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY layersChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY layersChanged)
     Q_PROPERTY(int solo READ solo WRITE setSolo NOTIFY layersChanged)
+    // A Move or Free Transform in progress (#236): see the header.
+    Q_PROPERTY(bool transforming READ transforming NOTIFY transformChanged)
+    Q_PROPERTY(QUrl transformImage READ transformImage NOTIFY transformChanged)
+    Q_PROPERTY(double transformOpacity READ transformOpacity NOTIFY transformChanged)
     // The mask brush (#230): see the header.
     Q_PROPERTY(fugue::MaskLayer *maskLayer READ maskLayer WRITE setMaskLayer NOTIFY maskChanged)
     Q_PROPERTY(int maskTarget READ maskTarget NOTIFY maskChanged)
@@ -177,6 +181,15 @@ public:
     Q_INVOKABLE bool flipLayer(int position, bool horizontal);
     Q_INVOKABLE bool turnLayer(int position, bool clockwise);
     Q_INVOKABLE bool moveLayerBy(int position, double dx, double dy);
+    // While a layer is dragged or Free Transform is open the picture shows the canvas WITHOUT that layer (`pictureSource`) and the view
+    // draws the layer's original (`transformImage`, at `transformOpacity`) at the placement being made, so nothing is stored until it is
+    // committed (transformLayer). beginTransform makes both pictures (once per revision and layer; false, with `error`, when the layer
+    // cannot be transformed); endTransform drops them. A change of canvas or revision ends it too.
+    Q_INVOKABLE bool beginTransform(int position);
+    Q_INVOKABLE void endTransform();
+    bool transforming() const { return m_xPosition >= 0; }
+    QUrl transformImage() const { return m_xImage; }
+    double transformOpacity() const { return m_xOpacity; }
     // Empties the canvas (File > Clear canvas): ONE new revision of the Head, the same size, one empty layer; Undo takes it
     // back. False when the Head is not what is shown.
     Q_INVOKABLE bool clearCanvas();
@@ -239,6 +252,7 @@ signals:
     void headNoticeChanged();
     void layersChanged();
     void maskChanged();
+    void transformChanged();
 
 private:
     // Stores the edit on the shown head and moves the view to it, with `select` as the selection there.
@@ -286,6 +300,10 @@ private:
     bool m_canRedo = false;
     int m_solo = -1;
     QUrl m_soloSource;
+    int m_xPosition = -1;   // the layer being transformed (a position), -1: none
+    QUrl m_xImage, m_xBase; // its original, and the canvas without it
+    double m_xOpacity = 1;
+    QString m_xOf;          // the revision they were made for
     QPointer<MaskLayer> m_maskLayer;
     int m_maskTarget = -1;
     QString m_maskOf; // the revision whose mask `m_maskLayer` holds

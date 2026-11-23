@@ -321,7 +321,7 @@ bool hasCurrentOriginal(const LayerRecord &layer) {
     return layer.source && layer.source->rendered == renderedKey(layer.tiles, layer.hasMask, layer.maskTiles) && layer.source->hasMask == layer.hasMask;
 }
 
-Result<LayerSource> originalOf(const LayerRecord &layer, int canvasWidth, int canvasHeight, const TileReader &read, const TileSink &consume) {
+Result<LayerContent> contentOf(const LayerRecord &layer, int canvasWidth, int canvasHeight, const TileReader &read) {
     const auto assemble = [&](int channels, const TileMap &tiles) {
         return assembleLayer(canvasWidth, canvasHeight, channels, tiles, [&](const TileKey &key, const QString &hash) {
             const mask::IRect rect = tileRect(key, canvasWidth, canvasHeight);
@@ -330,7 +330,7 @@ Result<LayerSource> originalOf(const LayerRecord &layer, int canvasWidth, int ca
     };
     const Result<mask::MaskPaint> pixels = assemble(4, layer.tiles);
     if (!pixels)
-        return Result<LayerSource>(pixels.errors());
+        return Result<LayerContent>(pixels.errors());
     int x0 = canvasWidth, y0 = canvasHeight, x1 = -1, y1 = -1;
     const std::vector<uint8_t> &px = pixels->pixels();
     for (int y = 0; y < canvasHeight; ++y)
@@ -350,24 +350,38 @@ Result<LayerSource> originalOf(const LayerRecord &layer, int canvasWidth, int ca
                         out.begin() + size_t(y - y0) * size_t(x1 - x0 + 1) * size_t(channels));
         return mask::MaskPaint(x1 - x0 + 1, y1 - y0 + 1, out, channels);
     };
-    LayerSource source;
-    source.width = x1 - x0 + 1;
-    source.height = y1 - y0 + 1;
-    Result<TileMap> tiles = cutLayer(crop(pixels.value(), 4), consume);
-    if (!tiles)
-        return Result<LayerSource>(tiles.errors());
-    source.tiles = std::move(tiles.value());
+    LayerContent content;
+    content.bounds = mask::IRect{x0, y0, x1 - x0 + 1, y1 - y0 + 1};
+    content.pixels = crop(pixels.value(), 4);
     if (layer.hasMask) {
         const Result<mask::MaskPaint> maskPixels = assemble(1, layer.maskTiles);
         if (!maskPixels)
-            return Result<LayerSource>(maskPixels.errors());
-        Result<TileMap> maskTiles = cutLayer(crop(maskPixels.value(), 1), consume);
+            return Result<LayerContent>(maskPixels.errors());
+        content.hasMask = true;
+        content.mask = crop(maskPixels.value(), 1);
+    }
+    return content;
+}
+
+Result<LayerSource> originalOf(const LayerRecord &layer, int canvasWidth, int canvasHeight, const TileReader &read, const TileSink &consume) {
+    const Result<LayerContent> content = contentOf(layer, canvasWidth, canvasHeight, read);
+    if (!content)
+        return Result<LayerSource>(content.errors());
+    LayerSource source;
+    source.width = content->bounds.width;
+    source.height = content->bounds.height;
+    Result<TileMap> tiles = cutLayer(content->pixels, consume);
+    if (!tiles)
+        return Result<LayerSource>(tiles.errors());
+    source.tiles = std::move(tiles.value());
+    if (content->hasMask) {
+        Result<TileMap> maskTiles = cutLayer(content->mask, consume);
         if (!maskTiles)
             return Result<LayerSource>(maskTiles.errors());
         source.hasMask = true;
         source.maskTiles = std::move(maskTiles.value());
     }
-    source.transform = centeredPlacement(source.width, source.height, x0 + source.width / 2.0, y0 + source.height / 2.0);
+    source.transform = centeredPlacement(source.width, source.height, content->bounds.x + source.width / 2.0, content->bounds.y + source.height / 2.0);
     source.rendered = renderedKey(layer.tiles, layer.hasMask, layer.maskTiles);
     return source;
 }

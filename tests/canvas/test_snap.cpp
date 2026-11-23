@@ -95,6 +95,21 @@ private slots:
         const Rect out = snap::snapRect({990, 0, 10, 10}, lines({1005}, {}, 20), Size{1000, 800});
         QVERIFY(out.x + out.width <= 1000);
     }
+
+    // #236: a layer may stick out of the canvas, so its snap is neither clamped nor rounded.
+    void aFloatingRectangleKeepsItsSizeAndMayLeaveTheCanvas() {
+        const Targets t = lines({0, 100}, {}, 6);
+        const crop::RectF off = snap::snapFloating({-3.5, 10, 40, 20}, t, true);
+        QCOMPARE(off.x, 0.0); // its left edge pulled to the line at 0 although the rectangle is not on the canvas
+        QCOMPARE(off.width, 40.0);
+        QCOMPARE(off.y, 10.0); // no horizontal line
+        QCOMPARE(snap::snapFloating({61.2, 0, 40, 20}, t, true).x, 60.0); // the right edge (101.2) to 100: the nearer pull wins
+        QCOMPARE(snap::snapFloating({20.5, 0, 40, 20}, t, true).x, 20.5); // nothing near
+        const crop::RectF edges = snap::snapFloating({-2, 0, 98, 20}, t, false);
+        QCOMPARE(edges.x, 0.0);
+        QCOMPARE(edges.width, 100.0); // the right edge (96) went to 100
+        QCOMPARE(snap::snapFloating({-2, 0, 98, 20}, lines({0, 100}, {}, 0), false).x, -2.0); // lines off
+    }
 };
 
 QTEST_GUILESS_MAIN(TestSnap)

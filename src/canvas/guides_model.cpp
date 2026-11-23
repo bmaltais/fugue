@@ -173,6 +173,12 @@ QVariantMap GuidesModel::snapRect(const QVariantMap &rect, bool keepSize, const 
     return mapOf(snap::snapRect(rectOf(rect), targets(options), {m_size.width(), m_size.height()}, keepSize));
 }
 
+QVariantMap GuidesModel::snapFloating(const QVariantMap &rect, bool keepSize, const QVariantMap &options) const {
+    const crop::RectF snapped = snap::snapFloating({rect.value("x").toDouble(), rect.value("y").toDouble(), rect.value("width").toDouble(), rect.value("height").toDouble()},
+                                                   targets(options), keepSize);
+    return {{"x", snapped.x}, {"y", snapped.y}, {"width", snapped.width}, {"height", snapped.height}};
+}
+
 QVariantMap GuidesModel::snapPoint(const QVariantMap &point, const QVariantMap &options) const {
     const crop::Point snapped = snap::snapPoint({point.value("x").toDouble(), point.value("y").toDouble()}, targets(options));
     return {{"x", snapped.x}, {"y", snapped.y}};

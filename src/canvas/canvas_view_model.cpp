@@ -217,7 +217,15 @@ QString CanvasViewModel::stepName(const QString &revisionId) {
                     break;
                 const canvas::LayerTransform &after = now[i].source->transform;
                 if (!was[i].source || !canvas::hasCurrentOriginal(was[i])) {
-                    how << (after.isPlacement(now[i].source->width, now[i].source->height) ? Moved : Several); // the first one: from the layer's own pixels
+                    // The first one, from the layer's own pixels: what it was before is the original's size at no turn.
+                    if (after.flipX || after.flipY)
+                        how << Flipped;
+                    else if (after.angle != 0)
+                        how << Rotated;
+                    if (after.width != now[i].source->width || after.height != now[i].source->height)
+                        how << Scaled;
+                    if (how.isEmpty())
+                        how << Moved;
                     break;
                 }
                 const canvas::LayerTransform &before = was[i].source->transform;
@@ -317,6 +325,8 @@ void CanvasViewModel::setFollowNode(const QString &node) {
 }
 
 QUrl CanvasViewModel::pictureSource() const {
+    if (m_xPosition >= 0 && !m_xBase.isEmpty() && m_xOf == revisionB())
+        return m_xBase;
     if (m_solo >= 0 && !m_soloSource.isEmpty())
         return m_soloSource;
     return sourceB();
@@ -553,6 +563,7 @@ void CanvasViewModel::rebuildLayers() {
     m_layers.clear();
     m_canUndo = m_canRedo = false;
     if (!sameRevision) {
+        endTransform(); // a transform in progress was of the revision before
         m_solo = -1;
         m_soloSource = QUrl();
     }
@@ -762,6 +773,84 @@ bool CanvasViewModel::applyTransform(int position, const canvas::LayerTransform 
     if (!layersEditable())
         return false;
     return land(store().transformLayer(canvasId(), revisionB(), position, placement, QStringLiteral("canvas-view:transform")), {position});
+}
+
+bool CanvasViewModel::beginTransform(int position) {
+    QString why;
+    const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
+    if (!now) {
+        fail({makeError(QStringLiteral("input_invalid"), why)});
+        return false;
+    }
+    const QString rev = revisionB();
+    if (m_xPosition == position && m_xOf == rev)
+        return true;
+    const canvas::CanvasStore s = store();
+    const Result<canvas::Tree> tree = s.loadTree(canvasId(), rev);
+    if (!tree)
+        return false;
+    const canvas::LayerRecord &layer = tree->layers[size_t(position)];
+    const QString imagePath = m_folder.filePath(QStringLiteral("xf-layer-%1-%2.png").arg(hexOf(rev)).arg(position));
+    const QString basePath = m_folder.filePath(QStringLiteral("xf-base-%1-%2.png").arg(hexOf(rev)).arg(position));
+    const auto write = [](const QString &path, const Result<QByteArray> &png) {
+        QFile file(path);
+        return png && file.open(QIODevice::WriteOnly) && file.write(png.value()) == png->size();
+    };
+    const canvas::TileReader read = [&s](const QString &hash, int w, int h, int c) { return s.tilePixels(hash, w, h, c); };
+    if (!QFile::exists(imagePath)) {
+        // The layer's original: its kept pixels while they are current, else its own pixels cut to their bounds.
+        Result<mask::MaskPaint> pixels = Result<mask::MaskPaint>(makeError(QStringLiteral("internal"), QStringLiteral("no layer")));
+        if (canvas::hasCurrentOriginal(layer)) {
+            const canvas::LayerSource &origin = *layer.source;
+            pixels = canvas::assembleLayer(origin.width, origin.height, 4, origin.tiles, [&](const canvas::TileKey &key, const QString &hash) {
+                const mask::IRect rect = canvas::tileRect(key, origin.width, origin.height);
+                return read(hash, rect.width, rect.height, 4);
+            });
+        } else {
+            Result<canvas::LayerContent> content = canvas::contentOf(layer, tree->width, tree->height, read);
+            if (!content) {
+                fail(content.errors());
+                return false;
+            }
+            pixels = std::move(content->pixels);
+        }
+        if (!pixels || !write(imagePath, pixels->toPng(1))) {
+            fail({makeError(QStringLiteral("internal"), tr("The layer could not be read."))});
+            return false;
+        }
+    }
+    if (!QFile::exists(basePath)) {
+        Result<mask::PaintDocument> document = s.load(canvasId(), rev);
+        if (!document) {
+            fail(document.errors());
+            return false;
+        }
+        for (int i = 0; i < document->layerCount(); ++i)
+            if (i == position)
+                document->setVisible(document->layer(i).id, false);
+        if (!write(basePath, document->flattenToPng())) {
+            fail({makeError(QStringLiteral("internal"), tr("The picture could not be made."))});
+            return false;
+        }
+    }
+    m_xPosition = position;
+    m_xOf = rev;
+    m_xImage = QUrl::fromLocalFile(imagePath);
+    m_xBase = QUrl::fromLocalFile(basePath);
+    m_xOpacity = layer.opacity;
+    emit transformChanged();
+    emit pictureChanged();
+    return true;
+}
+
+void CanvasViewModel::endTransform() {
+    if (m_xPosition < 0)
+        return;
+    m_xPosition = -1;
+    m_xImage = m_xBase = QUrl();
+    m_xOf.clear();
+    emit transformChanged();
+    emit pictureChanged();
 }
 
 bool CanvasViewModel::transformLayer(int position, const QVariantMap &spec) {

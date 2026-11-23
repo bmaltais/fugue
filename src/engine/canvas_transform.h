@@ -58,6 +58,13 @@ bool hasCurrentOriginal(const LayerRecord &layer);
 // A layer with no current original starts from the pixels it shows: the smallest rectangle that holds every pixel that is not
 // transparent (Photoshop's Free Transform box), which becomes its original at the identity placement; its mask is cut to the same
 // rectangle. input_invalid, in words, for a layer with no such pixel. `consume` is told the tiles of the new original (empty: not stored).
+struct LayerContent {
+    mask::MaskPaint pixels{1, 1, 4};
+    mask::MaskPaint mask{1, 1, 1}; // meaningful when `hasMask`
+    bool hasMask = false;
+    mask::IRect bounds;            // where it is on the canvas
+};
+Result<LayerContent> contentOf(const LayerRecord &layer, int canvasWidth, int canvasHeight, const TileReader &read);
 Result<LayerSource> originalOf(const LayerRecord &layer, int canvasWidth, int canvasHeight, const TileReader &read, const TileSink &consume = {});
 Result<CurrentPlacement> currentPlacement(const LayerRecord &layer, int canvasWidth, int canvasHeight, const TileReader &read);
 

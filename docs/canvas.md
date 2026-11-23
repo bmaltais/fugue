@@ -314,7 +314,7 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
   area shows no canvas).
-- **Edit**: Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
+- **Edit**: Paste as new layer, Paste as new canvas and Free transform (below), and Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
 - **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
   Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
@@ -373,6 +373,20 @@ rest; a layer is at most 32768 px a side and 16384 x 16384 px. Each transform is
 given another mask, since its last transform has no current original: its next transform starts from the layer as it is. Growing the canvas
 (Canvas size) moves the original with the layer. The sizes and the placement are kept to a thousandth. Not yet: transforming a group, a mask layer
 or a selection together with a layer, and a command line verb (`fugue canvas layer transform`).
+
+**Move and Free Transform (#236).** The **Move** tool (V, in the tool strip under Zoom) moves the current layer: a drag anywhere on the picture, and the
+layer is drawn at its new place while the canvas under it has the layer left out; when the button is let go it is ONE revision ("Layer moved: Card").
+Shift holds one axis. The arrow keys nudge it one pixel, with Shift ten, each a revision, while the picture has the focus. **Edit > Free transform**
+(Ctrl+T, any tool) opens the layer's box: eight handles (a corner or an edge scales from the opposite one, the box's own edges when it is turned), a drag
+inside moves it, and a drag just outside a corner turns it about its center. **Shift** keeps the proportions (and turns by 15° steps, and moves along one
+axis), **Alt** works from the center, and the size never goes under 1 px or flips (Layer > Transform flips). The options bar has X and Y (the center),
+W and H (with a **Link** toggle that scales the other side along when one is typed), Angle, the resampling (Lanczos, Bicubic, Nearest) and Apply and
+Cancel; the numbers and the drag are the same box. **Enter** or Apply keeps it as ONE revision, **Escape** or Cancel leaves the layer as it was; another
+tool picked, or Apply with nothing changed, writes nothing extra (a box nobody changed makes no revision), and another layer or canvas ends the box.
+**Snapping** uses the view's guides and grid (View > Snap to guides and grid, #253) through the same targets as the Region frame: a move is pulled by the
+nearest of its bounds' edges and middle, a handle drag of an unturned box by the edge it moves; nothing snaps with Shift, Alt or a turned box. The pull
+is not clamped to the canvas (a layer may reach past it; `snap::snapFloating`). Only a paint layer can be moved or transformed: a group, a mask layer
+and a picture layer say so in words and nothing opens. The preview shows the layer without its layer mask and blend; the revision has both.
 
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the

@@ -78,6 +78,8 @@ QList<Row> defaultRows() {
         // The Canvas view's tool strip (#230): its keys while the pointer is over the view or it has the focus (Blender's
         // hover rule); Photoshop's keys (docs/ui-ergonomics.md References). Over the layers panel the panel's own win.
         {"canvas-view.tool-hand", QT_TRANSLATE_NOOP("Command", "Hand: drag the picture to pan"), {"H"}, {"Space held"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Hand")},
+        {"canvas-view.tool-move", QT_TRANSLATE_NOOP("Command", "Move: drag to move the current layer; the arrow keys nudge it 1 px, with Shift 10 px"), {"V"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Move")},
+        {"canvas-view.free-transform", QT_TRANSLATE_NOOP("Command", "Free transform the current layer: scale, turn and move it, then Enter to keep it or Escape to leave it"), {"Ctrl+T"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Free transform")},
         {"canvas-view.tool-zoom", QT_TRANSLATE_NOOP("Command", "Zoom: click to zoom in, Alt+click to zoom out"), {"Z"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Zoom")},
         {"canvas-view.tool-region", QT_TRANSLATE_NOOP("Command", "Rectangle region"), {"M", "R"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rectangle region")},
         {"canvas-view.tool-brush", QT_TRANSLATE_NOOP("Command", "Mask brush"), {"B"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Mask brush")},
