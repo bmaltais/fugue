@@ -76,7 +76,7 @@ private slots:
         const int links = app.model.links()->rowCount();
         fugue::NodeSearch *search = app.model.search();
         search->openAt(0, 0);
-        search->setQuery("say");
+        search->setQuery("io.example.tools/say");
         QCOMPARE(search->count(), 0);
 
         // Copied in from outside the window (`fugue pack add`): the watch sees it.
