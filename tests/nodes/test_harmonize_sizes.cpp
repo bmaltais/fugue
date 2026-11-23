@@ -66,6 +66,12 @@ class TestHarmonizeSizes : public QObject {
         inputs.insert("mask", mask);
         load.insert("inputs", inputs);
         nodes.insert("load", load);
+        // The same logic at a small working size (the template's 1 MP only makes the test slow).
+        QJsonObject work = nodes.value("work").toObject();
+        QJsonObject workInputs = work.value("inputs").toObject();
+        workInputs.insert("megapixels", 0.05);
+        work.insert("inputs", workInputs);
+        nodes.insert("work", work);
         nodes.insert("p_image", QJsonObject{{"type", "fugue/preview"}, {"version", "1.0.0"},
                                             {"inputs", QJsonObject{{"value", QJsonObject{{"from", "seamed.image"}}}}}});
         nodes.insert("p_mask", QJsonObject{{"type", "fugue/preview"}, {"version", "1.0.0"},
@@ -112,7 +118,7 @@ private slots:
         QTest::addColumn<int>("height");
         QTest::addColumn<int>("maskWidth");
         QTest::addColumn<int>("maskHeight");
-        QTest::newRow("portrait 1000x1500 (to 832x1248), a smaller mask") << 1000 << 1500 << 300 << 450;
+        QTest::newRow("portrait 500x750 (to about 192x288), a smaller mask") << 500 << 750 << 150 << 225;
         QTest::newRow("tiny and not a multiple of 8") << 61 << 97 << 61 << 97;
     }
 
@@ -123,7 +129,7 @@ private slots:
         QFETCH(int, maskHeight);
         const QString file = savePng(m_dir.filePath("picture.png"), width, height, 3, 120);
         const QString mask = savePng(m_dir.filePath("mask.png"), maskWidth, maskHeight, 1, 0, std::min(maskWidth, maskHeight) / 6);
-        // The picture that reaches the model is about a megapixel and a multiple of 16, the map as large.
+        // The picture that reaches the model is the working size and a multiple of 16, the map as large.
         for (const char *name : {"harmonize-image"}) {
             QSize picture, map;
             sizesFor(QString::fromLatin1(name), file, mask, picture, map);
