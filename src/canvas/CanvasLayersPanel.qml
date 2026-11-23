@@ -23,9 +23,13 @@ import "widgets"
 // rebindable): H, F2, Ctrl+D, ] and [, X or Delete, Ctrl+Z and Ctrl+Shift+Z. `ownShortcuts` binds them here as well, for a host that is a modal popup (the File > Canvas…
 // dialog), whose window's shortcuts sleep.
 //
-// Rows are 8u (32px) with 24px thumbnails and a 28px eye; every control is 28px. A group (#252) is one row of kind
-// "group" whose thumbnail is its children's composite; its children are not listed (Ungroup takes them out), and a row
-// has `depth`, which indents it, so a nested list can come without a new model.
+// Rows are 8u (32px) with 24px thumbnails and a 28px eye; every control is 28px. A group (#252, #278) is a row of kind
+// "group" whose thumbnail is its children's composite, with an arrow at its left (24px, a click or Left and Right on
+// the list open and close it; Alt+click opens or closes every group). Open, the layers it holds follow it, indented 3u
+// a level (the tree logic is engine/canvas_layer_tree.h; this file only draws its rows). A canvas without a group has no
+// arrow column. A hidden group dims what is inside it and a locked one protects it, the layers' own eye and lock keeping
+// their own state. Every edit works inside a group as at the top level (a Shift or Ctrl pick across groups is changed
+// one group at a time, which the model says in words), and a drag moves layers within their group.
 Rectangle {
     id: root
     objectName: "canvasLayersPanel"
@@ -51,7 +55,10 @@ Rectangle {
         return null
     }
     readonly property bool hot: hover.hovered || list.activeFocus
+    // Whether the canvas has a group: then every row leaves room for the arrows, so the thumbnails line up.
+    readonly property bool nested: rows.some(r => r.kind === "group")
     property int dropGap: -1 // the drop line while a row is dragged: above row `dropGap` of the top-first list
+    property bool dropFits: true // whether the layers dragged can land there (within their group); else the line is dim
     property int renaming: -1 // the position whose name is being typed
 
     width: 56 * u
@@ -73,7 +80,7 @@ Rectangle {
     }
     // Whether the layer and the one under it are shown, unlocked paint layers or groups, which Merge down needs.
     function canMergeDown(row) {
-        const under = rows.find(r => r.position === row.position - 1)
+        const under = row.depth === 0 ? rows.find(r => r.position === row.position - 1 && r.depth === 0) : undefined // the top level only
         const merges = r => r !== undefined && r.visible && !r.locked && r.kind !== "mask" && r.kind !== "picture"
         return merges(row) && merges(under)
     }
@@ -148,10 +155,10 @@ Rectangle {
         const off = !editable
         const entries = [
             {text: row.visible ? qsTr("Hide") : qsTr("Show"), value: "visible", detail: keysOf("canvas-layers.visible"), enabled: !off},
-            {text: model.solo === row.position ? qsTr("Show every layer") : qsTr("Show this layer alone"), value: "solo", detail: qsTr("Alt+click the eye")},
+            {text: model.solo === row.position ? qsTr("Show every layer") : qsTr("Show this layer alone"), value: "solo", detail: qsTr("Alt+click the eye"), enabled: row.depth === 0},
             {text: row.locked ? qsTr("Unlock") : qsTr("Lock"), value: "lock", detail: keysOf("canvas-layers.lock"), enabled: !off},
             {text: model.regionLayer === row.name && row.kind === "paint" ? qsTr("Generate reads the whole picture") : qsTr("Generate reads this layer only"), value: "region", detail: keysOf("canvas-layers.use-in-region"),
-             enabled: !off && sel.length === 1 && row.kind === "paint"},
+             enabled: !off && sel.length === 1 && row.kind === "paint" && row.depth === 0},
             {text: qsTr("Rename…"), value: "rename", detail: keysOf("canvas-layers.rename"), enabled: !off && sel.length === 1},
             {heading: true, enabled: false, text: qsTr("Remove")},
             {text: sel.length > 1 ? qsTr("Delete %n layers", "", sel.length) : qsTr("Delete"), value: "delete", detail: keysOf("canvas-layers.delete"), enabled: !off && !lockedIn(sel)},
@@ -166,18 +173,19 @@ Rectangle {
             {text: qsTr("Merge down"), value: "merge", detail: keysOf("canvas-view.merge-down"), enabled: !off && sel.length === 1 && canMergeDown(row)},
             {text: qsTr("Layer properties…"), value: "properties", enabled: !off && sel.length === 1}
         ]
+        const top = row.depth === 0 // the mask brush, selections and Generate's layer read the top level only for now
         if (row.kind === "paint" || row.hasMask)
             entries.push({heading: true, enabled: false, text: qsTr("Selection")},
-                         {text: qsTr("Selection from layer"), value: "select-layer", enabled: !off && sel.length === 1 && row.kind === "paint"},
-                         {text: qsTr("Selection from layer mask"), value: "select-mask", detail: qsTr("Ctrl+click the mask"), enabled: !off && sel.length === 1 && row.hasMask})
+                         {text: qsTr("Selection from layer"), value: "select-layer", enabled: !off && top && sel.length === 1 && row.kind === "paint"},
+                         {text: qsTr("Selection from layer mask"), value: "select-mask", detail: qsTr("Ctrl+click the mask"), enabled: !off && top && sel.length === 1 && row.hasMask})
         if (row.hasMask)
             entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
                          {text: qsTr("Delete the mask"), value: "mask-delete", enabled: !off && !lockedIn(sel)},
-                         {text: qsTr("Paint the mask"), value: "mask-paint", detail: qsTr("Click the mask"), enabled: !off},
+                         {text: qsTr("Paint the mask"), value: "mask-paint", detail: qsTr("Click the mask"), enabled: !off && top},
                          {text: row.maskEnabled ? qsTr("Turn the mask off") : qsTr("Turn the mask on"), value: "mask", detail: qsTr("Shift+click the mask"), enabled: !off})
         else if (row.kind !== "mask")
             entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
-                         {text: qsTr("Add mask"), value: "mask-add", detail: keysOf("canvas-view.add-mask"), enabled: !off && sel.length === 1})
+                         {text: qsTr("Add mask"), value: "mask-add", detail: keysOf("canvas-view.add-mask"), enabled: !off && top && sel.length === 1})
         openMenu(item, x, y, entries, value => {
             switch (value) {
             case "visible": model.toggleVisible(sel); break
@@ -260,6 +268,13 @@ Rectangle {
                 const at = root.current ? root.rows.findIndex(r => r.position === root.current.position) : -1
                 if (event.key === Qt.Key_Up && at > 0) root.model.selectLayer(root.rows[at - 1].position, event.modifiers & Qt.ShiftModifier ? "range" : "only")
                 else if (event.key === Qt.Key_Down && at >= 0 && at < root.rows.length - 1) root.model.selectLayer(root.rows[at + 1].position, event.modifiers & Qt.ShiftModifier ? "range" : "only")
+                else if (event.key === Qt.Key_Right && at >= 0 && root.rows[at].children > 0 && !root.rows[at].open) root.model.setOpen(root.rows[at].position, true)
+                else if (event.key === Qt.Key_Right && at >= 0 && root.rows[at].open) root.model.selectLayer(root.rows[at + 1].position) // into the group
+                else if (event.key === Qt.Key_Left && at >= 0 && root.rows[at].open) root.model.setOpen(root.rows[at].position, false)
+                else if (event.key === Qt.Key_Left && at >= 0 && root.rows[at].depth > 0) { // out to the group above
+                    for (let i = at - 1; i >= 0; --i)
+                        if (root.rows[i].depth === root.rows[at].depth - 1) { root.model.selectLayer(root.rows[i].position); break }
+                }
                 else return
                 event.accepted = true
             }
@@ -270,6 +285,8 @@ Rectangle {
                 required property int index
                 readonly property int position: modelData.position
                 readonly property bool selected: root.chosen.indexOf(position) >= 0
+                // Where the row's content starts: 1u in, the arrows' column when the canvas has a group, 3u for each group above.
+                readonly property real lead: root.u + (root.nested ? 6 * root.u : 0) + modelData.depth * 3 * root.u
                 objectName: "canvasLayer-" + position
                 width: list.width
                 height: 8 * root.u
@@ -339,21 +356,43 @@ Rectangle {
                         const gap = root.dropGap
                         root.dropGap = -1
                         if (gap >= 0)
-                            root.model.dropAt(root.chosen, gap)
+                            root.model.dropAt(root.chosen, gap) // a line that is no place for them says why (the model's error)
                     }
                     onCentroidChanged: {
                         if (!active)
                             return
                         const y = row.mapToItem(list.contentItem, 0, centroid.position.y).y
                         const step = row.height + list.spacing
-                        root.dropGap = Math.max(0, Math.min(root.rows.length, Math.round(y / step)))
+                        const gap = Math.max(0, Math.min(root.rows.length, Math.round(y / step)))
+                        root.dropGap = gap
+                        root.dropFits = root.model.canDropAt(root.chosen, gap)
                     }
                 }
 
+                // A group's arrow, in the column the canvas leaves for them: opens and closes it (Alt+click: every group).
+                ViewButton {
+                    id: arrow
+                    objectName: "canvasLayerArrow-" + row.position
+                    visible: row.modelData.kind === "group" && row.modelData.children > 0
+                    x: row.lead - 6 * root.u
+                    anchors.verticalCenter: parent.verticalCenter
+                    look: root.look
+                    glyph: row.modelData.open ? "chevron-down" : "chevron-right"
+                    flat: true
+                    compact: true
+                    accented: false
+                    activeFocusOnTab: false
+                    altAction: true
+                    tip: row.modelData.open ? qsTr("Close the group (Left); Alt+click closes every group")
+                                            : qsTr("Open the group to see its %n layers (Right); Alt+click opens every group", "", row.modelData.children)
+                    onTapped: root.model.toggleOpen(row.position)
+                    onAltTapped: root.model.setAllOpen(!row.modelData.open)
+                }
                 Row {
                     anchors.left: parent.left
-                    anchors.leftMargin: root.u + row.modelData.depth * 4 * root.u
+                    anchors.leftMargin: row.lead
                     anchors.verticalCenter: parent.verticalCenter
+                    opacity: row.modelData.shown ? 1 : 0.55
                     spacing: root.u
                     // The layer's own pixels on a checkerboard (its transparency shows).
                     Rectangle {
@@ -384,6 +423,13 @@ Rectangle {
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
                             smooth: true
+                        }
+                        // A group inside a group has no picture of its own: the folder stands for it.
+                        Glyph {
+                            anchors.centerIn: parent
+                            visible: row.modelData.kind === "group" && row.modelData.thumbnail.toString() === ""
+                            look: root.look
+                            name: "folder"
                         }
                     }
                     // The layer mask: a click makes the brush paint it (an accent frame says so, #230), Shift+click turns it
@@ -449,14 +495,14 @@ Rectangle {
                     id: nameText
                     objectName: "canvasLayerName-" + row.position
                     anchors.verticalCenter: parent.verticalCenter
-                    x: (row.modelData.hasMask ? 16 : 9) * root.u + row.modelData.depth * 4 * root.u
+                    x: row.lead + (row.modelData.hasMask ? 15 : 8) * root.u
                     width: lockToggle.x - x - root.u
                     visible: root.renaming !== row.position
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                     text: row.modelData.name
                     color: root.look.text
-                    opacity: row.modelData.visible ? 1 : 0.55
+                    opacity: row.modelData.visible && row.modelData.shown ? 1 : 0.55
                     font.pixelSize: root.look.labelSize
                 }
                 ThemedTextField {
@@ -492,9 +538,10 @@ Rectangle {
                     glyph: "pin"
                     accented: false
                     checkable: true
-                    current: row.modelData.locked === true
-                    opacity: row.modelData.locked === true ? 1 : 0.4
-                    tip: row.modelData.locked === true ? qsTr("Locked: it cannot be deleted, merged, transformed or have its mask changed. Click to unlock (%1)").arg(root.keysOf("canvas-layers.lock"))
+                    current: row.modelData.locked === true || row.modelData.lockedAbove === true
+                    opacity: row.modelData.locked === true ? 1 : row.modelData.lockedAbove === true ? 0.7 : 0.4
+                    tip: row.modelData.lockedAbove === true && row.modelData.locked !== true ? qsTr("Locked by its group: its layers cannot be added, removed or moved while the group is locked. Click to lock this layer too")
+                       : row.modelData.locked === true ? qsTr("Locked: it cannot be deleted, merged, transformed or have its mask changed. Click to unlock (%1)").arg(root.keysOf("canvas-layers.lock"))
                                                        : qsTr("Lock the layer so it cannot be deleted, merged, transformed or have its mask changed (%1)").arg(root.keysOf("canvas-layers.lock"))
                     onTapped: if (root.editable) root.model.setLocked(root.targetsFor(row.position), row.modelData.locked !== true)
                 }
@@ -529,7 +576,7 @@ Rectangle {
                 x: 0
                 width: list.width
                 height: 2
-                color: root.look.accent
+                color: root.dropFits ? root.look.accent : root.look.error
                 y: root.dropGap * (8 * root.u + list.spacing) - list.contentY - 1
                 z: 3
             }

@@ -94,6 +94,8 @@ Result<Tree> flatten(const Tree &tree, const TileReader &read, const TileSink &c
 } // namespace
 
 Result<Tree> applyPixelEdit(const Tree &tree, const LayerEdit &edit, const TileReader &read, const TileSink &consume) {
+    if (!edit.parent.empty())
+        return invalid(QStringLiteral("Merge down and Flatten work on the top level of the layers, not inside a group."), QStringLiteral("Ungroup it first, or merge at the top level."));
     if (edit.op == LayerOp::MergeDown) {
         if (edit.layers.size() != 1)
             return invalid(QStringLiteral("Merge down takes one layer."));

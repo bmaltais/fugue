@@ -17,8 +17,15 @@
 //    goes along and `headNotice` says what came, with Undo.
 //  - layers (#226): `layers` are the shown revision's layers, top first, as {position (0 is the bottom), name, kind,
 //    visible, opacity, blend (an id of blendModes, or "" for an op Fugue does not draw), compositeOp, hasMask, maskEnabled, locked,
-//    producer, from (the producer as a person reads it), created, depth (0: a group is one row, its children inside it are not listed; kind "group"), thumbnail, maskThumbnail
-//    (small PNGs of the layer's own pixels and of its mask)}. `selection` is a list of positions (ctrl/shift add, as an
+//    producer, from (the producer as a person reads it), created, depth (groups above it), children (a group's layer count), open (a group
+//    whose children are listed under it), shown (its eye and every group's above it: a hidden group dims what is inside it), lockedAbove (a
+//    locked group above it), thumbnail, maskThumbnail (small PNGs of the layer's own pixels and of its mask)}. The list is a tree shown as a list
+//    (#278, engine/canvas_layer_tree.h): the groups start closed, `toggleOpen` opens one, the layers inside an open group follow it,
+//    indented by `depth`; `position` is the layer's id there: the position at the top level (0 is the bottom), a number after those inside a
+//    group, the same whether the group is open or not. An edit takes layers of one group (the top level is one), so a Shift or Ctrl pick across
+//    groups is changed one group at a time (`error` says so); the group's own look edits (visible, opacity, blend, lock, rename, mask switch),
+//    delete, duplicate, move, new layer, group and ungroup all work inside a group. Merge down, Flatten, Move, Free Transform, the mask brush and
+//    Generate's layer read the top level only for now. `selection` is a list of positions (ctrl/shift add, as an
 //    outliner does), kept across an edit. Every edit (setVisible, setOpacity, setBlend, rename, removeLayers, duplicate,
 //    moveLayers, raise/lower, setMaskEnabled, removeMask) is CanvasStore::editLayers on the shown revision when it is
 //    the head (`layersEditable`): ONE new revision each, producer `canvas-view:<op>`, the view moving on to it. undo()
@@ -48,6 +55,7 @@
 #include "canvas/mask_layer.h"
 #include "canvas/selection_ants.h" // registers SelectionAnts for QML (the type registration finds a type through a header it includes)
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_layer_tree.h"
 #include "engine/canvas_transform.h"
 #include "canvas/widget_edit.h"
 
@@ -161,7 +169,14 @@ public:
     Q_INVOKABLE bool raise(const QVariantList &positions);
     Q_INVOKABLE bool lower(const QVariantList &positions);
     // The drop of a drag in the top-first list: the line above row `gap` (0 is above the top row, the count below the last).
+    // A layer moves within its group: a line in another group, or inside a sibling, is not a drop (`error` says so; canDropAt asks first).
     Q_INVOKABLE bool dropAt(const QVariantList &positions, int gap);
+    Q_INVOKABLE bool canDropAt(const QVariantList &positions, int gap) const;
+    // Opens or closes a group (the arrow of its row); a closing group takes the selection of the layers it hides. False for a layer that is no
+    // group with layers.
+    Q_INVOKABLE bool setOpen(int position, bool open);
+    Q_INVOKABLE bool toggleOpen(int position);
+    Q_INVOKABLE void setAllOpen(bool open);
     Q_INVOKABLE bool setMaskEnabled(const QVariantList &positions, bool enabled);
     Q_INVOKABLE bool removeMask(const QVariantList &positions);
     // #252, the Layer menu: each is one revision of the head. newLayer puts an empty paint layer above the current one (on top
@@ -277,7 +292,19 @@ signals:
 
 private:
     // Stores the edit on the shown head and moves the view to it, with `select` as the selection there.
+    // `select` are top-level positions in the revision the edit makes; applyEditPaths takes any layers (paths from the top level).
     bool applyEdit(const canvas::LayerEdit &edit, const QList<int> &select);
+    bool applyEditPaths(const canvas::LayerEdit &edit, const QList<canvas::LayerPath> &select);
+    // The edit of these layers (`parent` and their places in it); empty, with `error`, when they are not of one group.
+    canvas::LayerEdit editOf(canvas::LayerOp op, const QList<int> &positions);
+    static QList<canvas::LayerPath> topPaths(const QList<int> &positions);
+    QList<canvas::LayerPath> selectedPaths() const;
+    const canvas::LayerRecord *layerAt(const canvas::LayerPath &path) const;
+    QString thumbnailPath(const QString &revision, int id, bool ofMask) const;
+    void writeThumbnails(const canvas::CanvasStore &store, const QString &revision);
+    void buildRows();
+    // Says why a layer inside a group cannot be taken here yet, when `position` is one.
+    bool insideGroup(int position);
     // A picture placed as a layer (pasteLayer, placeFile).
     bool placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name);
     // The placement of the layer at `position` of the shown revision (an empty `why` when it can be moved).
@@ -285,6 +312,7 @@ private:
     bool applyTransform(int position, const canvas::LayerTransform &placement, const canvas::CurrentPlacement &seen);
     // A stored edit: the view moves on to it (false, with `error`, when it did not land).
     bool land(const Result<canvas::Commit> &done, const QList<int> &select);
+    bool landPaths(const Result<canvas::Commit> &done, const QList<canvas::LayerPath> &select);
     // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).
     void syncMask();
     bool loadMask(int position);
@@ -316,7 +344,9 @@ private:
     int m_anchor = -1;       // the last one picked, for a range
     QString m_layersOf;      // the revision m_layers is of
     QString m_layersCanvas;  // and its canvas
-    QList<int> m_keepSelection; // what an edit selects in the revision it makes
+    QList<canvas::LayerPath> m_keepSelection; // what an edit selects in the revision it makes
+    canvas::Tree m_tree;      // the shown revision's layers (what m_layers' rows read)
+    canvas::LayerOutline m_outline; // the groups and which are open; ids are the rows' `position`
     bool m_editing = false;
     bool m_canUndo = false;
     bool m_canRedo = false;

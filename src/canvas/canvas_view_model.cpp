@@ -557,12 +557,14 @@ QString CanvasViewModel::currentLayer() const {
     if (m_selected.size() != 1)
         return {};
     QSet<QString> above; // top first: the first layer of a name is the one Region reads
-    for (const QVariant &value : m_layers) {
-        const QVariantMap row = value.toMap();
-        const QString name = row.value("name").toString();
-        if (row.value("position").toInt() == m_selected.first())
-            return row.value("kind").toString() == QLatin1String("paint") && !above.contains(name) ? name : QString();
-        above.insert(name);
+    for (const canvas::OutlineRow &row : m_outline.allRows()) { // the top level only: Region reads a layer of the top level by name
+        if (row.depth > 0)
+            continue;
+        if (row.id == m_selected.first()) {
+            const canvas::LayerRecord *layer = layerAt(row.path);
+            return layer && !layer->group && layer->kind == mask::LayerKind::Paint && !above.contains(row.name) ? row.name : QString();
+        }
+        above.insert(row.name);
     }
     return {};
 }
@@ -588,52 +590,14 @@ void CanvasViewModel::rebuildLayers() {
         m_soloSource = QUrl();
     }
     const canvas::CanvasStore s = store();
-    int count = 0;
+    m_tree = canvas::Tree();
     if (!shown.isEmpty()) {
         const Result<canvas::Revision> revision = s.revision(canvasId(), shown);
         const Result<canvas::Tree> tree = revision ? s.tree(revision->tree) : Result<canvas::Tree>(revision.errors());
         if (tree) {
-            count = int(tree->layers.size());
-            // The thumbnails, made once per revision (a revision never changes).
-            const auto thumb = [&](int position, bool ofMask) { return m_folder.filePath(QStringLiteral("t-%1-%2%3.png").arg(hexOf(shown)).arg(position).arg(ofMask ? "m" : "")); };
-            bool missing = false;
-            for (int i = 0; i < count && !missing; ++i)
-                missing = (tree->layers[size_t(i)].kind != mask::LayerKind::Picture && !QFile::exists(thumb(i, false))) ||
-                          (tree->layers[size_t(i)].hasMask && !QFile::exists(thumb(i, true)));
-            if (missing) {
-                const Result<mask::PaintDocument> document = s.load(canvasId(), shown);
-                if (document)
-                    for (int i = 0; i < document->layerCount(); ++i) {
-                        const mask::LayerInfo info = document->layer(i);
-                        if (const mask::MaskPaint *pixels = info.kind != mask::LayerKind::Picture ? document->pixels(info.id) : nullptr)
-                            writeThumbnail(*pixels, thumb(i, false));
-                        if (const mask::MaskPaint *maskPixels = document->maskPixels(info.id))
-                            writeThumbnail(*maskPixels, thumb(i, true));
-                    }
-            }
-            for (int i = count - 1; i >= 0; --i) { // top first
-                const canvas::LayerRecord &layer = tree->layers[size_t(i)];
-                bool known = true;
-                const mask::Blend blend = mask::blendOfOp(layer.compositeOp, &known);
-                const QString kind = layer.group ? QStringLiteral("group") : layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : layer.kind == mask::LayerKind::Picture ? QStringLiteral("picture") : QStringLiteral("paint");
-                m_layers.append(QVariantMap{{"position", i},
-                                            {"name", layer.name},
-                                            {"kind", kind},
-                                            {"visible", layer.visible},
-                                            {"opacity", layer.opacity},
-                                            {"blend", known ? mask::blendId(blend) : QString()},
-                                            {"compositeOp", layer.compositeOp.isEmpty() ? QStringLiteral("svg:src-over") : layer.compositeOp},
-                                            {"hasMask", layer.hasMask},
-                                            {"maskEnabled", layer.maskEnabled},
-                                            {"locked", layer.locked},
-                                            {"producer", layer.producer},
-                                            {"from", fromText(layer.producer)},
-                                            {"created", layer.created},
-                                            {"depth", 0},
-                                            {"children", int(layer.children.size())},
-                                            {"thumbnail", QFile::exists(thumb(i, false)) ? QUrl::fromLocalFile(thumb(i, false)) : QUrl()},
-                                            {"maskThumbnail", layer.hasMask && QFile::exists(thumb(i, true)) ? QUrl::fromLocalFile(thumb(i, true)) : QUrl()}});
-            }
+            m_tree = tree.value();
+            m_outline.setTree(m_tree);
+            writeThumbnails(s, shown);
             if (layersEditable()) {
                 m_canUndo = !revision->parent.isEmpty();
                 const Result<QString> target = s.redoTarget(canvasId());
@@ -641,32 +605,156 @@ void CanvasViewModel::rebuildLayers() {
             }
         }
     }
+    if (m_tree.layers.empty())
+        m_outline.setTree(m_tree);
+    const int count = m_outline.topCount();
+    const int total = int(m_outline.allRows().size());
     // The selection: what an edit chose, else kept on the same revision, else kept where it still fits.
-    if (m_editing)
-        m_selected = m_keepSelection;
-    else if (canvasId() != m_layersCanvas)
+    if (m_editing) {
+        m_selected.clear();
+        for (const canvas::LayerPath &path : std::as_const(m_keepSelection))
+            if (const int id = m_outline.idOf(path); id >= 0 && !m_selected.contains(id))
+                m_selected.append(id);
+    } else if (canvasId() != m_layersCanvas)
         m_selected.clear();
     // The layer a Generate reads: kept while the shown revision has a paint layer of that name, and never across canvases.
-    if (canvasId() != m_layersCanvas || std::none_of(m_layers.cbegin(), m_layers.cend(), [this](const QVariant &row) {
-            return row.toMap().value("name").toString() == m_regionLayer && row.toMap().value("kind").toString() == QLatin1String("paint");
+    if (canvasId() != m_layersCanvas || std::none_of(m_outline.allRows().cbegin(), m_outline.allRows().cend(), [this](const canvas::OutlineRow &row) {
+            const canvas::LayerRecord *layer = layerAt(row.path);
+            return row.name == m_regionLayer && layer && !layer->group && layer->kind == mask::LayerKind::Paint;
         }))
         m_regionLayer.clear();
-    m_selected.removeIf([count](int p) { return p < 0 || p >= count; });
+    m_selected.removeIf([total](int p) { return p < 0 || p >= total; });
     if (m_selected.isEmpty() && count > 0 && !m_editing)
         m_selected = {count - 1}; // as in Photoshop, a layer is always the current one: the top, to start
     m_layersCanvas = canvasId();
-    if (m_anchor >= count)
+    m_layersOf = shown;
+    buildRows(); // fits the selection to the open groups, and the anchor and the solo to the rows there are
+    if (m_anchor >= total)
         m_anchor = -1;
     if (m_solo >= count)
         m_solo = -1;
-    m_layersOf = shown;
     emit layersChanged();
     syncMask();
 }
 
+const canvas::LayerRecord *CanvasViewModel::layerAt(const canvas::LayerPath &path) const {
+    const std::vector<canvas::LayerRecord> *level = &m_tree.layers;
+    const canvas::LayerRecord *found = nullptr;
+    for (int index : path) {
+        if (index < 0 || index >= int(level->size()))
+            return nullptr;
+        found = &(*level)[size_t(index)];
+        level = &found->children;
+    }
+    return found;
+}
+
+QString CanvasViewModel::thumbnailPath(const QString &revision, int id, bool ofMask) const {
+    return m_folder.filePath(QStringLiteral("t-%1-%2%3.png").arg(hexOf(revision)).arg(id).arg(ofMask ? "m" : ""));
+}
+
+// The thumbnails of a revision, made once (a revision never changes): the top level's from the document (a group is its composite),
+// the layers inside a group from their own tiles (a group inside a group has none: the row draws a folder).
+void CanvasViewModel::writeThumbnails(const canvas::CanvasStore &s, const QString &revision) {
+    const int count = m_outline.topCount();
+    bool missing = false;
+    for (int i = 0; i < count && !missing; ++i) {
+        const canvas::LayerRecord &layer = m_tree.layers[size_t(i)];
+        missing = (layer.kind != mask::LayerKind::Picture && !QFile::exists(thumbnailPath(revision, i, false))) || (layer.hasMask && !QFile::exists(thumbnailPath(revision, i, true)));
+    }
+    if (missing) {
+        const Result<mask::PaintDocument> document = s.load(canvasId(), revision);
+        if (document)
+            for (int i = 0; i < document->layerCount(); ++i) {
+                const mask::LayerInfo info = document->layer(i);
+                if (const mask::MaskPaint *pixels = info.kind != mask::LayerKind::Picture ? document->pixels(info.id) : nullptr)
+                    writeThumbnail(*pixels, thumbnailPath(revision, i, false));
+                if (const mask::MaskPaint *maskPixels = document->maskPixels(info.id))
+                    writeThumbnail(*maskPixels, thumbnailPath(revision, i, true));
+            }
+    }
+    const int width = m_tree.width, height = m_tree.height;
+    const auto assemble = [&](const canvas::TileMap &tiles, int channels) {
+        return canvas::assembleLayer(width, height, channels, tiles, [&](const canvas::TileKey &key, const QString &hash) {
+            const mask::IRect rect = canvas::tileRect(key, width, height);
+            return s.tilePixels(hash, rect.width, rect.height, channels);
+        });
+    };
+    for (const canvas::OutlineRow &row : m_outline.allRows()) {
+        const canvas::LayerRecord *layer = row.id >= count ? layerAt(row.path) : nullptr;
+        if (!layer)
+            continue;
+        if (!layer->group && layer->kind != mask::LayerKind::Picture && !QFile::exists(thumbnailPath(revision, row.id, false)))
+            if (const Result<mask::MaskPaint> pixels = assemble(layer->tiles, layer->channels()))
+                writeThumbnail(pixels.value(), thumbnailPath(revision, row.id, false));
+        if (layer->hasMask && !QFile::exists(thumbnailPath(revision, row.id, true)))
+            if (const Result<mask::MaskPaint> pixels = assemble(layer->maskTiles, 1))
+                writeThumbnail(pixels.value(), thumbnailPath(revision, row.id, true));
+    }
+}
+
+// The rows the list shows, top first: the open groups' children right under them.
+void CanvasViewModel::buildRows() {
+    m_layers.clear();
+    const QString shown = revisionB();
+    std::vector<int> fitted = m_outline.fitSelection(std::vector<int>(m_selected.cbegin(), m_selected.cend()));
+    m_selected = QList<int>(fitted.cbegin(), fitted.cend());
+    for (const canvas::OutlineRow &row : m_outline.rows()) {
+        const canvas::LayerRecord *found = layerAt(row.path);
+        if (!found)
+            continue;
+        const canvas::LayerRecord &layer = *found;
+        bool known = true;
+        const mask::Blend blend = mask::blendOfOp(layer.compositeOp, &known);
+        const QString kind = layer.group ? QStringLiteral("group") : layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : layer.kind == mask::LayerKind::Picture ? QStringLiteral("picture") : QStringLiteral("paint");
+        const QString thumb = thumbnailPath(shown, row.id, false), maskThumb = thumbnailPath(shown, row.id, true);
+        m_layers.append(QVariantMap{{"position", row.id},
+                                    {"name", layer.name},
+                                    {"kind", kind},
+                                    {"visible", layer.visible},
+                                    {"shown", row.shown},
+                                    {"opacity", layer.opacity},
+                                    {"blend", known ? mask::blendId(blend) : QString()},
+                                    {"compositeOp", layer.compositeOp.isEmpty() ? QStringLiteral("svg:src-over") : layer.compositeOp},
+                                    {"hasMask", layer.hasMask},
+                                    {"maskEnabled", layer.maskEnabled},
+                                    {"locked", layer.locked},
+                                    {"lockedAbove", row.lockedAbove},
+                                    {"producer", layer.producer},
+                                    {"from", fromText(layer.producer)},
+                                    {"created", layer.created},
+                                    {"depth", row.depth},
+                                    {"children", int(layer.children.size())},
+                                    {"open", row.open},
+                                    {"thumbnail", QFile::exists(thumb) ? QUrl::fromLocalFile(thumb) : QUrl()},
+                                    {"maskThumbnail", layer.hasMask && QFile::exists(maskThumb) ? QUrl::fromLocalFile(maskThumb) : QUrl()}});
+    }
+}
+
+bool CanvasViewModel::setOpen(int position, bool open) {
+    const canvas::OutlineRow *row = m_outline.row(position);
+    if (!row || !m_outline.setOpen(row->path, open))
+        return false;
+    buildRows();
+    if (m_anchor >= 0 && !m_outline.row(m_anchor))
+        m_anchor = -1;
+    emit layersChanged();
+    return true;
+}
+
+bool CanvasViewModel::toggleOpen(int position) {
+    const canvas::OutlineRow *row = m_outline.row(position);
+    return row && setOpen(position, !row->open);
+}
+
+void CanvasViewModel::setAllOpen(bool open) {
+    m_outline.setAllOpen(open);
+    buildRows();
+    emit layersChanged();
+}
+
 void CanvasViewModel::selectLayer(int position, const QString &mode) {
-    int count = int(m_layers.size());
-    if (position < 0 || position >= count)
+    if (!m_outline.row(position))
         return;
     if (m_maskTarget >= 0 && (position != m_maskTarget || mode != QLatin1String("only")))
         untargetMask(); // the brush paints the mask of the one layer it was on
@@ -674,10 +762,10 @@ void CanvasViewModel::selectLayer(int position, const QString &mode) {
         if (!m_selected.removeOne(position))
             m_selected.append(position);
         m_anchor = position;
-    } else if (mode == QLatin1String("range") && m_anchor >= 0) {
+    } else if (const std::vector<int> range = mode == QLatin1String("range") && m_anchor >= 0 ? m_outline.rangeBetween(m_anchor, position) : std::vector<int>(); !range.empty()) {
         m_selected.clear();
-        for (int p = std::min(m_anchor, position); p <= std::max(m_anchor, position); ++p)
-            m_selected.append(p);
+        for (auto it = range.rbegin(); it != range.rend(); ++it) // bottom first, as the positions are
+            m_selected.append(*it);
     } else {
         m_selected = {position};
         m_anchor = position;
@@ -693,7 +781,7 @@ void CanvasViewModel::selectNone() {
 }
 
 void CanvasViewModel::setSolo(int position) {
-    const int want = position >= 0 && position < int(m_layers.size()) && position != m_solo ? position : -1;
+    const int want = position >= 0 && position < m_outline.topCount() && position != m_solo ? position : -1; // a layer of the top level
     if (want == m_solo)
         return;
     m_solo = want;
@@ -707,11 +795,17 @@ bool CanvasViewModel::setRegionLayer(int position) {
     if (position >= 0) {
         QString problem = tr("There is no such layer.");
         QSet<QString> above; // top first: the first layer of a name is the one Region reads
-        for (const QVariant &value : std::as_const(m_layers)) {
-            const QVariantMap row = value.toMap();
-            const QString name = row.value("name").toString();
-            if (row.value("position").toInt() == position) {
-                if (row.value("kind").toString() != QLatin1String("paint"))
+        for (const canvas::OutlineRow &row : m_outline.allRows()) {
+            if (row.depth > 0 && row.id == position) {
+                problem = tr("Generate reads a layer of the top level: take it out of its group first.");
+                break;
+            }
+            if (row.depth > 0)
+                continue;
+            const QString name = row.name;
+            if (row.id == position) {
+                const canvas::LayerRecord *layer = layerAt(row.path);
+                if (!layer || layer->group || layer->kind != mask::LayerKind::Paint)
                     problem = tr("Only a paint layer can be read by Generate, not a group, a mask or a picture layer.");
                 else if (above.contains(name))
                     problem = tr("A layer above has the same name: rename one, so Generate reads this layer.");
@@ -758,14 +852,31 @@ void CanvasViewModel::updateSoloPicture() {
     m_soloSource = QUrl::fromLocalFile(path);
 }
 
-bool CanvasViewModel::applyEdit(const canvas::LayerEdit &edit, const QList<int> &select) {
+QList<canvas::LayerPath> CanvasViewModel::topPaths(const QList<int> &positions) {
+    QList<canvas::LayerPath> out;
+    for (int p : positions)
+        out.append(canvas::LayerPath{p});
+    return out;
+}
+
+QList<canvas::LayerPath> CanvasViewModel::selectedPaths() const {
+    QList<canvas::LayerPath> out;
+    for (int id : m_selected)
+        if (const canvas::LayerPath path = m_outline.pathOf(id); !path.empty())
+            out.append(path);
+    return out;
+}
+
+bool CanvasViewModel::applyEdit(const canvas::LayerEdit &edit, const QList<int> &select) { return applyEditPaths(edit, topPaths(select)); }
+
+bool CanvasViewModel::applyEditPaths(const canvas::LayerEdit &edit, const QList<canvas::LayerPath> &select) {
     const bool namesNoLayer = edit.op == canvas::LayerOp::New || edit.op == canvas::LayerOp::Flatten;
     if (!layersEditable() || (edit.layers.empty() && !namesNoLayer))
         return false;
     commitMask(); // the strokes painted so far are a step of their own, before this one
     if (!layersEditable())
         return false;
-    return land(store().editLayers(canvasId(), revisionB(), edit, QStringLiteral("canvas-view:") + canvas::layerOpName(edit.op)), select);
+    return landPaths(store().editLayers(canvasId(), revisionB(), edit, QStringLiteral("canvas-view:") + canvas::layerOpName(edit.op)), select);
 }
 
 bool CanvasViewModel::placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name) {
@@ -776,8 +887,10 @@ bool CanvasViewModel::placePicture(const mask::MaskPaint &picture, double cx, do
         return false;
     const QSize size = pictureSize();
     // Above the current layer (the last one picked), else on top.
-    const int above = m_selected.isEmpty() ? -1 : m_selected.last();
-    const int next = above < 0 ? int(m_layers.size()) : above + 1;
+    // (a layer inside a group counts as its group: a picture is placed at the top level.)
+    const canvas::LayerPath current = m_selected.isEmpty() ? canvas::LayerPath() : m_outline.pathOf(m_selected.last());
+    const int above = current.empty() ? -1 : current.front();
+    const int next = above < 0 ? m_outline.topCount() : above + 1;
     return land(store().pasteLayer(canvasId(), revisionB(), picture, cx < 0 ? size.width() / 2.0 : cx, cy < 0 ? size.height() / 2.0 : cy, above, name,
                                    QStringLiteral("canvas-view:paste")),
                 {next});
@@ -794,6 +907,10 @@ Result<canvas::CurrentPlacement> CanvasViewModel::placementOf(int position, QStr
     if (!tree) {
         *why = tr("The canvas could not be read.");
         return Result<canvas::CurrentPlacement>(tree.errors());
+    }
+    if (position >= int(tree->layers.size()) && m_outline.row(position)) {
+        *why = tr("This layer is inside a group: moving and transforming work on the layers of the top level for now.");
+        return Result<canvas::CurrentPlacement>(makeError(QStringLiteral("input_invalid"), *why));
     }
     if (position < 0 || position >= int(tree->layers.size())) {
         *why = tr("There is no such layer.");
@@ -1015,7 +1132,9 @@ bool CanvasViewModel::placeFile(const QString &pathOrUrl, double cx, double cy) 
     return placePicture(picture.pixels, cx, cy, QFileInfo(url.isLocalFile() ? url.toLocalFile() : pathOrUrl).completeBaseName());
 }
 
-bool CanvasViewModel::land(const Result<canvas::Commit> &done, const QList<int> &select) {
+bool CanvasViewModel::land(const Result<canvas::Commit> &done, const QList<int> &select) { return landPaths(done, topPaths(select)); }
+
+bool CanvasViewModel::landPaths(const Result<canvas::Commit> &done, const QList<canvas::LayerPath> &select) {
     if (!error().isEmpty()) {
         m_error.clear();
         emit errorChanged();
@@ -1040,27 +1159,47 @@ bool CanvasViewModel::land(const Result<canvas::Commit> &done, const QList<int> 
     return true;
 }
 
-namespace {
-
-canvas::LayerEdit makeEdit(canvas::LayerOp op, const QList<int> &positions) {
+// An edit of layers that sit in one group (the top level is one): `parent` and the places in it. Layers of different groups cannot be
+// edited at once (the edit is empty, and `error` says so), as Photoshop's own commands work on one level of the list.
+canvas::LayerEdit CanvasViewModel::editOf(canvas::LayerOp op, const QList<int> &positions) {
     canvas::LayerEdit edit;
     edit.op = op;
-    edit.layers.assign(positions.begin(), positions.end());
+    canvas::LayerPath parent;
+    std::vector<int> at;
+    if (positions.isEmpty())
+        return edit;
+    if (!m_outline.levelOf(std::vector<int>(positions.cbegin(), positions.cend()), &parent, &at)) {
+        fail({makeError(QStringLiteral("input_invalid"), tr("Pick layers of one group at a time."), tr("Layers inside different groups are changed one group at a time."))});
+        return edit;
+    }
+    edit.parent = parent;
+    edit.layers = at;
     return edit;
+}
+
+namespace {
+
+// A step of Properties: the same edit as editOf makes, for the layer of `path`.
+canvas::LayerEdit stepAt(canvas::LayerOp op, const canvas::LayerPath &path) {
+    canvas::LayerEdit step;
+    step.op = op;
+    step.parent.assign(path.begin(), path.end() - 1);
+    step.layers = {path.back()};
+    return step;
 }
 
 } // namespace
 
 bool CanvasViewModel::setVisible(const QVariantList &positions, bool visible) {
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Visible, positionsOf(positions));
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Visible, positionsOf(positions));
     edit.flag = visible;
-    return applyEdit(edit, m_selected);
+    return applyEditPaths(edit, selectedPaths());
 }
 
 bool CanvasViewModel::setLocked(const QVariantList &positions, bool locked) {
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Lock, positionsOf(positions));
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Lock, positionsOf(positions));
     edit.flag = locked;
-    return applyEdit(edit, m_selected);
+    return applyEditPaths(edit, selectedPaths());
 }
 
 bool CanvasViewModel::toggleLocked(const QVariantList &positions) {
@@ -1082,67 +1221,87 @@ bool CanvasViewModel::toggleVisible(const QVariantList &positions) {
 }
 
 bool CanvasViewModel::setOpacity(const QVariantList &positions, double opacity) {
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Opacity, positionsOf(positions));
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Opacity, positionsOf(positions));
     edit.number = std::clamp(opacity, 0.0, 1.0);
-    return applyEdit(edit, m_selected);
+    return applyEditPaths(edit, selectedPaths());
 }
 
 bool CanvasViewModel::setBlend(const QVariantList &positions, const QString &blend) {
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Blend, positionsOf(positions));
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Blend, positionsOf(positions));
     edit.text = blend;
-    return applyEdit(edit, m_selected);
+    return applyEditPaths(edit, selectedPaths());
 }
 
 bool CanvasViewModel::rename(int position, const QString &name) {
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Rename, {position});
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Rename, {position});
     edit.text = name;
-    return applyEdit(edit, {position});
+    const canvas::LayerPath path = m_outline.pathOf(position);
+    const QString was = m_outline.row(position) ? m_outline.row(position)->name : QString();
+    if (!applyEditPaths(edit, {path}))
+        return false;
+    m_outline.renameOpen(path, was); // an open group stays open under its new name
+    buildRows();
+    emit layersChanged();
+    return true;
 }
 
 bool CanvasViewModel::removeLayers(const QVariantList &positions) {
     const QList<int> chosen = positionsOf(positions);
-    if (chosen.isEmpty())
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Remove, chosen);
+    if (edit.layers.empty())
         return false;
-    // The layer under the lowest one removed is selected next (the bottom one when that was the bottom).
-    const int lowest = *std::min_element(chosen.begin(), chosen.end());
-    const int left = int(m_layers.size()) - int(chosen.size());
-    QList<int> next;
-    if (left > 0)
-        next = {std::clamp(lowest - 1, 0, left - 1)};
-    return applyEdit(makeEdit(canvas::LayerOp::Remove, chosen), next);
+    // The layer under the lowest one removed is selected next (the bottom one when that was the bottom); the group when none is left.
+    const int lowest = *std::min_element(edit.layers.begin(), edit.layers.end());
+    const int left = m_outline.levelSize(edit.parent) - int(chosen.size());
+    QList<canvas::LayerPath> next;
+    if (left > 0) {
+        canvas::LayerPath path = edit.parent;
+        path.push_back(std::clamp(lowest - 1, 0, left - 1));
+        next = {path};
+    } else if (!edit.parent.empty()) {
+        next = {edit.parent};
+    }
+    return applyEditPaths(edit, next);
 }
 
 bool CanvasViewModel::duplicate(const QVariantList &positions) {
-    QList<int> chosen = positionsOf(positions);
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Duplicate, positionsOf(positions));
+    if (edit.layers.empty())
+        return false;
+    std::vector<int> chosen = edit.layers;
     std::sort(chosen.begin(), chosen.end());
-    QList<int> copies; // each copy lands right above its layer, after the copies below it
-    for (int i = 0; i < chosen.size(); ++i)
-        copies.append(chosen[i] + i + 1);
-    return applyEdit(makeEdit(canvas::LayerOp::Duplicate, chosen), copies);
+    QList<canvas::LayerPath> copies; // each copy lands right above its layer, after the copies below it
+    for (size_t i = 0; i < chosen.size(); ++i) {
+        canvas::LayerPath path = edit.parent;
+        path.push_back(chosen[i] + int(i) + 1);
+        copies.append(path);
+    }
+    return applyEditPaths(edit, copies);
 }
 
 bool CanvasViewModel::moveLayers(const QVariantList &positions, int to) {
-    const QList<int> chosen = positionsOf(positions);
-    const int others = int(m_layers.size()) - int(chosen.size());
-    if (chosen.isEmpty() || others < 0)
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Move, positionsOf(positions));
+    const int others = m_outline.levelSize(edit.parent) - int(edit.layers.size());
+    if (edit.layers.empty() || others < 0)
         return false;
-    to = std::clamp(to, 0, others);
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::Move, chosen);
-    edit.to = to;
-    QList<int> block;
-    for (int i = 0; i < chosen.size(); ++i)
-        block.append(to + i);
-    return applyEdit(edit, block);
+    edit.to = std::clamp(to, 0, others);
+    QList<canvas::LayerPath> block;
+    for (size_t i = 0; i < edit.layers.size(); ++i) {
+        canvas::LayerPath path = edit.parent;
+        path.push_back(edit.to + int(i));
+        block.append(path);
+    }
+    return applyEditPaths(edit, block);
 }
 
 namespace {
 
 // How many of the layers that are not chosen lie under the lowest chosen one.
-int othersBelow(const QList<int> &chosen) {
+int othersBelow(const std::vector<int> &chosen) {
     const int lowest = *std::min_element(chosen.begin(), chosen.end());
     int below = 0;
     for (int p = 0; p < lowest; ++p)
-        if (!chosen.contains(p))
+        if (std::find(chosen.begin(), chosen.end(), p) == chosen.end())
             ++below;
     return below;
 }
@@ -1150,111 +1309,129 @@ int othersBelow(const QList<int> &chosen) {
 } // namespace
 
 bool CanvasViewModel::raise(const QVariantList &positions) {
-    const QList<int> chosen = positionsOf(positions);
-    return !chosen.isEmpty() && moveLayers(positions, othersBelow(chosen) + 1);
+    const canvas::LayerEdit edit = editOf(canvas::LayerOp::Move, positionsOf(positions));
+    return !edit.layers.empty() && moveLayers(positions, othersBelow(edit.layers) + 1);
 }
 
 bool CanvasViewModel::lower(const QVariantList &positions) {
-    const QList<int> chosen = positionsOf(positions);
-    return !chosen.isEmpty() && othersBelow(chosen) > 0 && moveLayers(positions, othersBelow(chosen) - 1);
+    const canvas::LayerEdit edit = editOf(canvas::LayerOp::Move, positionsOf(positions));
+    return !edit.layers.empty() && othersBelow(edit.layers) > 0 && moveLayers(positions, othersBelow(edit.layers) - 1);
 }
 
 bool CanvasViewModel::dropAt(const QVariantList &positions, int gap) {
     const QList<int> chosen = positionsOf(positions);
-    const int count = int(m_layers.size());
     if (chosen.isEmpty())
         return false;
-    const int line = count - std::clamp(gap, 0, count); // layers under the line, bottom first
-    int to = 0;
-    for (int p = 0; p < line; ++p)
-        if (!chosen.contains(p))
-            ++to;
-    return moveLayers(positions, to);
+    const canvas::DropPlace place = m_outline.dropAt(std::vector<int>(chosen.cbegin(), chosen.cend()), gap);
+    if (!place.ok) {
+        fail({makeError(QStringLiteral("input_invalid"), place.why)});
+        return false;
+    }
+    return moveLayers(positions, place.to);
+}
+
+bool CanvasViewModel::canDropAt(const QVariantList &positions, int gap) const {
+    const QList<int> chosen = positionsOf(positions);
+    return !chosen.isEmpty() && m_outline.dropAt(std::vector<int>(chosen.cbegin(), chosen.cend()), gap).ok;
 }
 
 bool CanvasViewModel::setMaskEnabled(const QVariantList &positions, bool enabled) {
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::MaskEnabled, positionsOf(positions));
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::MaskEnabled, positionsOf(positions));
     edit.flag = enabled;
-    return applyEdit(edit, m_selected);
+    return applyEditPaths(edit, selectedPaths());
 }
 
-bool CanvasViewModel::removeMask(const QVariantList &positions) { return applyEdit(makeEdit(canvas::LayerOp::RemoveMask, positionsOf(positions)), m_selected); }
+bool CanvasViewModel::removeMask(const QVariantList &positions) { return applyEditPaths(editOf(canvas::LayerOp::RemoveMask, positionsOf(positions)), selectedPaths()); }
 
 bool CanvasViewModel::newLayer() {
-    // Above the current layer; on top when none is current.
-    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::New, {});
-    int at = int(m_layers.size());
-    if (m_selected.size() == 1 && m_selected.first() >= 0 && m_selected.first() < int(m_layers.size())) {
-        edit.layers = {m_selected.first()};
-        at = m_selected.first() + 1;
+    // Above the current layer (in its group); on top when none is current.
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::New, {});
+    canvas::LayerPath at{m_outline.topCount()};
+    if (m_selected.size() == 1 && m_outline.row(m_selected.first())) {
+        const canvas::LayerPath current = m_outline.pathOf(m_selected.first());
+        edit.parent.assign(current.begin(), current.end() - 1);
+        edit.layers = {current.back()};
+        at = current;
+        ++at.back();
     }
-    return applyEdit(edit, {at});
+    return applyEditPaths(edit, {at});
 }
 
 bool CanvasViewModel::mergeDown(int position) {
-    if (position < 1)
-        return false;
-    return applyEdit(makeEdit(canvas::LayerOp::MergeDown, {position}), {position - 1});
+    if (position < 1 || position >= m_outline.topCount())
+        return false; // Merge down reads pixels, which it does for the top level only (a layer inside a group: ungroup it first)
+    return applyEdit(editOf(canvas::LayerOp::MergeDown, {position}), {position - 1});
 }
 
-bool CanvasViewModel::flatten() { return applyEdit(makeEdit(canvas::LayerOp::Flatten, {}), {0}); }
+bool CanvasViewModel::flatten() { return applyEdit(editOf(canvas::LayerOp::Flatten, {}), {0}); }
 
 bool CanvasViewModel::groupLayers(const QVariantList &positions) {
-    QList<int> chosen = positionsOf(positions);
-    if (chosen.isEmpty())
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Group, positionsOf(positions));
+    if (edit.layers.empty())
         return false;
-    std::sort(chosen.begin(), chosen.end());
     // The group lands where the highest chosen layer was, once the others are out of the way.
-    return applyEdit(makeEdit(canvas::LayerOp::Group, chosen), {chosen.last() - int(chosen.size()) + 1});
+    canvas::LayerPath group = edit.parent;
+    group.push_back(*std::max_element(edit.layers.begin(), edit.layers.end()) - int(edit.layers.size()) + 1);
+    return applyEditPaths(edit, {group});
 }
 
 bool CanvasViewModel::ungroup(const QVariantList &positions) {
-    QList<int> chosen = positionsOf(positions);
-    if (chosen.isEmpty())
+    canvas::LayerEdit edit = editOf(canvas::LayerOp::Ungroup, positionsOf(positions));
+    if (edit.layers.empty())
         return false;
+    std::vector<int> chosen = edit.layers;
     std::sort(chosen.begin(), chosen.end());
     // The children take the place of their group: the selection is all of them, counted layer by layer from the bottom.
-    QList<int> children;
+    QList<canvas::LayerPath> children;
     int shift = 0;
-    for (int p = 0; p < int(m_layers.size()); ++p) {
-        const QVariantMap row = m_layers.at(int(m_layers.size()) - 1 - p).toMap();
-        if (chosen.contains(p)) {
-            for (int c = 0; c < row.value("children").toInt(); ++c)
-                children.append(p + shift + c);
-            shift += row.value("children").toInt() - 1;
+    for (int p = 0; p < m_outline.levelSize(edit.parent); ++p) {
+        if (std::find(chosen.begin(), chosen.end(), p) == chosen.end())
+            continue;
+        canvas::LayerPath group = edit.parent;
+        group.push_back(p);
+        const int held = m_outline.levelSize(group);
+        for (int c = 0; c < held; ++c) {
+            canvas::LayerPath child = edit.parent;
+            child.push_back(p + shift + c);
+            children.append(child);
         }
+        shift += held - 1;
     }
-    return applyEdit(makeEdit(canvas::LayerOp::Ungroup, chosen), children);
+    return applyEditPaths(edit, children);
 }
 
 bool CanvasViewModel::setProperties(int position, const QVariantMap &changes) {
-    canvas::LayerEdit batch = makeEdit(canvas::LayerOp::Properties, {});
+    const canvas::LayerPath path = m_outline.pathOf(position);
+    if (path.empty())
+        return false;
+    canvas::LayerEdit batch;
+    batch.op = canvas::LayerOp::Properties;
     batch.layers = {position};
     if (changes.contains("name")) {
-        canvas::LayerEdit step = makeEdit(canvas::LayerOp::Rename, {position});
+        canvas::LayerEdit step = stepAt(canvas::LayerOp::Rename, path);
         step.text = changes.value("name").toString();
         batch.steps.push_back(step);
     }
     if (changes.contains("opacity")) {
-        canvas::LayerEdit step = makeEdit(canvas::LayerOp::Opacity, {position});
+        canvas::LayerEdit step = stepAt(canvas::LayerOp::Opacity, path);
         step.number = std::clamp(changes.value("opacity").toDouble(), 0.0, 1.0);
         batch.steps.push_back(step);
     }
     if (changes.contains("blend")) {
-        canvas::LayerEdit step = makeEdit(canvas::LayerOp::Blend, {position});
+        canvas::LayerEdit step = stepAt(canvas::LayerOp::Blend, path);
         step.text = changes.value("blend").toString();
         batch.steps.push_back(step);
     }
     if (changes.value("removeMask").toBool()) {
-        batch.steps.push_back(makeEdit(canvas::LayerOp::RemoveMask, {position}));
+        batch.steps.push_back(stepAt(canvas::LayerOp::RemoveMask, path));
     } else if (changes.contains("maskEnabled")) {
-        canvas::LayerEdit step = makeEdit(canvas::LayerOp::MaskEnabled, {position});
+        canvas::LayerEdit step = stepAt(canvas::LayerOp::MaskEnabled, path);
         step.flag = changes.value("maskEnabled").toBool();
         batch.steps.push_back(step);
     }
     if (batch.steps.empty())
         return false;
-    return applyEdit(batch, {position});
+    return applyEditPaths(batch, {path});
 }
 
 bool CanvasViewModel::clearCanvas() {
@@ -1275,7 +1452,7 @@ bool CanvasViewModel::undo() {
         refresh();
         return false;
     }
-    m_keepSelection = m_selected;
+    m_keepSelection = selectedPaths();
     m_editing = true;
     m_a.clear();
     m_b.clear();
@@ -1295,7 +1472,7 @@ bool CanvasViewModel::redo() {
         refresh();
         return false;
     }
-    m_keepSelection = m_selected;
+    m_keepSelection = selectedPaths();
     m_editing = true;
     m_a.clear();
     m_b.clear();
@@ -1354,8 +1531,15 @@ bool CanvasViewModel::lockedAt(int position) const {
     return false;
 }
 
+bool CanvasViewModel::insideGroup(int position) {
+    if (position < m_outline.topCount() || !m_outline.row(position))
+        return false;
+    fail({makeError(QStringLiteral("input_invalid"), tr("The mask of a layer inside a group cannot be painted or selected from yet."), tr("Take the layer out of its group (Ungroup) first."))});
+    return true;
+}
+
 bool CanvasViewModel::targetMask(int position) {
-    if (!layersEditable())
+    if (!layersEditable() || insideGroup(position))
         return false;
     if (lockedAt(position)) { // the store refuses the paint when it lands; say so now, before the strokes
         fail({makeError(QStringLiteral("input_invalid"), tr("The layer is locked: unlock it to paint its mask."))});
@@ -1429,13 +1613,13 @@ bool CanvasViewModel::commitMask(const QString &what) {
             done = s.setLayerMask(canvasId(), done->move.head, m_maskTarget, m_maskLayer->paint(), producer);
     }
     if (!done || !done->move.moved)
-        return land(done, m_selected);
+        return landPaths(done, selectedPaths());
     m_maskOf = done->revision.id; // the layer holds this revision's mask already: no read back
     return land(done, {m_maskTarget});
 }
 
 bool CanvasViewModel::addMask(int position) {
-    if (!layersEditable() || position < 0 || position >= int(m_layers.size()))
+    if (!layersEditable() || position < 0 || !m_outline.row(position) || insideGroup(position))
         return false;
     if (lockedAt(position)) {
         fail({makeError(QStringLiteral("input_invalid"), tr("The layer is locked: unlock it to add a mask."))});
@@ -1517,7 +1701,7 @@ QVariantMap CanvasViewModel::useSelection(MaskLayer *selection) {
 }
 
 bool CanvasViewModel::selectFromLayer(int position, bool fromMask, MaskLayer *selection, const QString &how) {
-    if (!selection)
+    if (!selection || insideGroup(position))
         return false;
     const canvas::CanvasStore s = store();
     const Result<canvas::Revision> revision = s.revision(canvasId(), revisionB());

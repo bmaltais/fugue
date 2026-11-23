@@ -297,6 +297,65 @@ private slots:
         QVERIFY(model.error().isEmpty());
     }
 
+    // #278: a group is a row with an arrow; open, its layers follow it indented, and they are edited in place.
+    void aGroupOpensIntoItsLayersWhichAreEditedInPlace() {
+        CanvasViewModel model;
+        open(model);
+        QVERIFY(model.groupLayers(at({1, 2}))); // rows: Group 4 (id 1), Base (0); inside: Fill 1, Fill 2
+        QVERIFY(!model.toggleOpen(0)); // Base is no group
+        QVERIFY(model.toggleOpen(1));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Fill 2", "Fill 1", "Base"}));
+        const QVariantMap fill2 = model.layers().at(1).toMap(), fill1 = model.layers().at(2).toMap();
+        QCOMPARE(fill2.value("depth").toInt(), 1);
+        QCOMPARE(fill2.value("position").toInt(), 2); // ids after the top level's, the same open or closed
+        QVERIFY(QFile::exists(fill1.value("thumbnail").toUrl().toLocalFile()));
+        QVERIFY(QFile::exists(fill1.value("maskThumbnail").toUrl().toLocalFile())); // Fill 1 has a layer mask
+
+        // A layer inside the group is hidden, renamed and duplicated in place; each is one revision; the group stays open.
+        const int revisions = revisionCount();
+        model.selectLayer(2);
+        QVERIFY(model.setVisible(at({2}), false));
+        QVERIFY(!model.layers().at(1).toMap().value("visible").toBool());
+        QCOMPARE(model.selection(), at({2}));
+        QVERIFY(model.rename(2, "Sky"));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Sky", "Fill 1", "Base"}));
+        QVERIFY(model.duplicate(at({2})));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Sky copy", "Sky", "Fill 1", "Base"}));
+        QCOMPARE(model.selection(), at({2})); // the copy is the one selected
+        QCOMPARE(revisionCount(), revisions + 3);
+
+        // Move it down within the group, then delete it: the layer under it is selected.
+        QVERIFY(model.lower(at({2})));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Sky", "Sky copy", "Fill 1", "Base"}));
+        QVERIFY(model.removeLayers(model.selection()));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Sky", "Fill 1", "Base"}));
+
+        // A pick across groups is changed one group at a time, with a word about it.
+        QVERIFY(!model.setOpacity(at({2, 0}), 0.5));
+        QVERIFY(!model.error().isEmpty());
+
+        // A closing group takes the selection of what it hides.
+        model.selectLayer(2);
+        QVERIFY(model.setOpen(1, false));
+        QCOMPARE(model.selection(), at({1}));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Base"}));
+        QCOMPARE(model.layers().first().toMap().value("children").toInt(), 2);
+    }
+
+    void aDropStaysInTheGroupOfTheLayersDragged() {
+        CanvasViewModel model;
+        open(model);
+        QVERIFY(model.groupLayers(at({1, 2})));
+        QVERIFY(model.toggleOpen(1)); // rows: Group 4, Fill 2 (id 2), Fill 1 (id 3), Base
+        QVERIFY(model.canDropAt(at({3}), 1)); // Fill 1 above Fill 2: in the group
+        QVERIFY(!model.canDropAt(at({3}), 0)); // above the group's own row
+        QVERIFY(!model.canDropAt(at({3}), 4)); // under Base: the top level
+        QVERIFY(!model.dropAt(at({3}), 4));
+        QVERIFY(!model.error().isEmpty());
+        QVERIFY(model.dropAt(at({3}), 1));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Fill 1", "Fill 2", "Base"}));
+    }
+
     void thePropertiesDialogIsOneRevision() {
         CanvasViewModel model;
         open(model);

@@ -71,7 +71,77 @@ QString numberedName(const Tree &tree, const QString &stem) {
     return QStringLiteral("%1 %2").arg(stem).arg(n);
 }
 
+namespace {
+
+// Applies an edit to the layers of one level: `base` is how many groups deep that level lies (a Group there nests that much further).
+Result<Tree> applyLevel(const Tree &tree, const LayerEdit &edit, int base);
+
+// What a locked group protects inside it: the stack and the pixels, not the look (showing, opacity, blend, names, the mask switch).
+bool protectedInLockedGroup(LayerOp op) {
+    switch (op) {
+    case LayerOp::Remove:
+    case LayerOp::Move:
+    case LayerOp::Duplicate:
+    case LayerOp::RemoveMask:
+    case LayerOp::SetMask:
+    case LayerOp::New:
+    case LayerOp::Group:
+    case LayerOp::Ungroup:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// An edit of the layers inside the groups named by `edit.parent`: the same edit on the group's children, which are put back.
+Result<Tree> applyInside(const Tree &tree, const LayerEdit &edit) {
+    if (edit.op == LayerOp::Properties)
+        return invalid(QStringLiteral("Layer properties name the group of each step, not their own."));
+    LayerEdit inner = edit;
+    inner.parent.clear();
+    // Walk down: a copy of each group on the way is rewritten with its changed children.
+    std::vector<const LayerRecord *> chain;
+    const std::vector<LayerRecord> *level = &tree.layers;
+    const LayerRecord *lockedGroup = nullptr;
+    for (int index : edit.parent) {
+        if (index < 0 || index >= int(level->size()) || !(*level)[size_t(index)].group)
+            return invalid(QStringLiteral("There is no group at %1.").arg(index), QStringLiteral("`fugue canvas layer list <canvas>` lists the layers."));
+        const LayerRecord &group = (*level)[size_t(index)];
+        if (group.locked && !lockedGroup)
+            lockedGroup = &group;
+        chain.push_back(&group);
+        level = &group.children;
+    }
+    if (lockedGroup && protectedInLockedGroup(edit.op))
+        return lockedError(*lockedGroup, QStringLiteral("what is inside it cannot be added, removed, moved or have its layer mask changed"));
+    Tree sub;
+    sub.width = tree.width;
+    sub.height = tree.height;
+    sub.layers = *level;
+    Result<Tree> changed = applyLevel(sub, inner, int(edit.parent.size()));
+    if (!changed)
+        return changed;
+    Tree out = tree;
+    std::vector<LayerRecord> *at = &out.layers;
+    for (int index : edit.parent) {
+        LayerRecord &group = (*at)[size_t(index)];
+        at = &group.children;
+    }
+    *at = std::move(changed.value().layers);
+    return out;
+}
+
+} // namespace
+
 Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
+    if (!edit.parent.empty())
+        return applyInside(tree, edit);
+    return applyLevel(tree, edit, 0);
+}
+
+namespace {
+
+Result<Tree> applyLevel(const Tree &tree, const LayerEdit &edit, int base) {
     const int count = int(tree.layers.size());
     if (layerOpNeedsPixels(edit.op))
         return invalid(QStringLiteral("Merge down and Flatten read pixels: they go through CanvasStore::editLayers."));
@@ -195,7 +265,7 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
                                    .arg(p).arg(layer.name, layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : QStringLiteral("picture")));
             deepest = std::max(deepest, groupDepth(layer));
         }
-        if (deepest + 1 > maxGroupDepth)
+        if (deepest + 1 + base > maxGroupDepth)
             return invalid(QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth), QStringLiteral("Ungroup one of the groups first."));
         const QString name = edit.text.trimmed().isEmpty() ? numberedName(tree, QStringLiteral("Group")) : edit.text.trimmed();
         if (name.size() > kMaxName)
@@ -259,5 +329,7 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
     }
     return out;
 }
+
+} // namespace
 
 } // namespace fugue::canvas
