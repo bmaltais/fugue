@@ -54,4 +54,10 @@ Pixels fillMasked(const Pixels &image, const Pixels &mask, FillMode mode);
 // image's size; an alpha channel is left alone.
 Pixels overlayMask(const Pixels &image, const Pixels &mask, const std::array<float, 3> &color, float opacity);
 
+// `image` as RGBA with its alpha replaced by alpha x mask: the colors are kept as they are (not
+// multiplied by the mask), so the cutout keeps its edge pixels' own colors. An image without alpha
+// counts as opaque. The mask is stretched to the image's
+// size.
+Pixels maskToAlpha(const Pixels &image, const Pixels &mask);
+
 } // namespace fugue::nodes

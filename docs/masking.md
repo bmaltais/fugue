@@ -17,6 +17,8 @@ You get a mask from:
 - **Pad**: the new border of an outpaint.
 - **Solid Mask**, **Image to Mask**, and the mask nodes that change one: Grow Mask, Feather Mask,
   Threshold Mask, Invert Mask, Combine Masks.
+- **Apply Mask as Alpha** is the other way round: it puts a mask into a picture's alpha channel, so
+  the picture is transparent where the mask is 0 (a cutout). Save it as PNG or WebP to keep it.
 
 <p align="center"><img src="images/inpaint-result.png" alt="Inpaint: the picture with the armchair painted over, the result, and the difference, which shows nothing outside the mask" width="760"></p>
 
@@ -136,9 +138,19 @@ which reads its mask as white or black. Off, gray is rounded to white or black a
 ## Remove a background
 
 The pack **Remove Background** makes the mask for you: it finds the subject of a picture and gives it as a
-mask (white is the subject, soft at its edge). Wire its `mask` to the Inpaint group, Crop to Mask or Composite
-Masked like any other mask; **Invert** gives the background instead, to redraw everything but the subject.
-The node is in the node menu under Image > Mask.
+mask (white is the subject, soft at its edge). It has two parts, both in the node menu under Image > Mask:
+
+- The group **Remove Background**: a picture in, the **cutout** out (the same picture with a transparent
+  background, RGBA) and the **mask**. Save the cutout as PNG or WebP (Save Image keeps the transparency). Its
+  advanced inputs are Threshold (hard edge) and Edge shrink (pixels the edge is pulled inward and softened, to
+  lose a fringe of the old background). Inside it are three plain nodes you can open with Tab: Remove Background
+  Mask, Feather Mask and Apply Mask as Alpha. The template **Remove background** (Load Image, the group, Preview,
+  Save Image) is the quickest start; opening it offers to install the pack.
+- The node **Remove Background Mask**: only the mask. Wire its `mask` to the Inpaint group, Crop to Mask or
+  Composite Masked like any other mask; **Invert** gives the background instead, to redraw everything but the subject.
+
+Without the pack a workflow that uses the group opens, says plainly that the pack is missing and offers to
+install it; nothing runs until it is installed.
 
 It is an optional pack (Fugue's own program links no machine-learning code). Install it from
 Settings > Packs or with `fugue pack add examples/packs/io.github.bmaltais.fugue-remove-background`. The setup

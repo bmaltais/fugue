@@ -1,0 +1,39 @@
+{
+  "manifest": 1,
+  "id": "fugue/mask-to-alpha",
+  "version": "1.0.0",
+  "name": "Apply Mask as Alpha",
+  "description": "Put a mask into an image's alpha channel: white keeps the picture, black makes it transparent, gray is partly see-through. The colors are not changed. An alpha the image already has is multiplied in, so what was transparent stays so. A mask of another size is stretched to the image. Save as PNG or WebP to keep the transparency.",
+  "category": "Image/Mask",
+  "keywords": [
+    "alpha",
+    "transparent",
+    "transparency",
+    "cutout",
+    "background",
+    "matte"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

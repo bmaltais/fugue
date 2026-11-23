@@ -24,6 +24,7 @@
 #include "engine/hash.h"
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
+#include "engine/pack_loader.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
 #include "engine/registry.h"
@@ -909,14 +910,27 @@ private slots:
         QVERIFY(listed.size() >= 9);
 
         for (const Template &t : listed) {
-            QVERIFY2(t.neededPacks.isEmpty(), qPrintable(t.id));
+            // A pack the template needs is one it carries (11.10), so the window can offer it; its
+            // nodes are checked below with the carried packs loaded.
+            Registry withPacks;
+            nodes::addBuiltinNodeTypes(withPacks);
+            for (const QString &needed : t.neededPacks) {
+                bool carried = false;
+                for (const CarriedPack &pack : t.carriedPacks)
+                    carried = carried || pack.id == needed;
+                QVERIFY2(carried, qPrintable(t.id + " needs " + needed + " and does not carry it"));
+            }
+            for (const CarriedPack &pack : t.carriedPacks) {
+                const LoadedPack loaded = loadPack(withPacks, pack.folder);
+                QVERIFY2(loaded.enabled && loaded.disabled.isEmpty(), qPrintable(t.id + ": " + pack.id + " does not load"));
+            }
             QVERIFY2(!t.preview.isEmpty(), qPrintable(t.id));
             for (const QJsonValue model : t.models) {
                 QVERIFY2(model.toObject().value("source").toString().startsWith("https://"), qPrintable(t.id));
                 QVERIFY2(model.toObject().value("size").toDouble() > 0, qPrintable(t.id)); // the Download button's total
             }
             const Document document = Document::loadFile(t.workflow).value();
-            const Compilation compiled = compile(document, f.registry);
+            const Compilation compiled = compile(document, withPacks);
             QVERIFY2(compiled.ok(), qPrintable(t.id + ": " + compiled.error().message));
             QVERIFY2(!hasErrors(compiled.problems()), qPrintable(t.id));
             // A size is always set, by a node, never left to a model's default (#72).

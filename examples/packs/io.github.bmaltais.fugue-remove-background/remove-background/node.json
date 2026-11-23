@@ -1,9 +1,9 @@
 {
   "manifest": 1,
   "id": "io.github.bmaltais.fugue-remove-background/remove-background",
-  "version": "1.0.0",
-  "name": "Remove Background",
-  "description": "Finds the subject of a picture and gives it as a mask (white is the subject, soft at its edge). Wire the mask to Inpaint, Crop to Mask or Composite Masked. Invert gives the background instead. BiRefNet through ONNX Runtime.",
+  "version": "1.0.1",
+  "name": "Remove Background Mask",
+  "description": "Finds the subject of a picture and gives it as a mask (white is the subject, soft at its edge). Wire the mask to Inpaint, Crop to Mask or Composite Masked, or use the group Remove Background for a cutout with a transparent background. Invert gives the background instead. BiRefNet through ONNX Runtime.",
   "category": "Image/Mask",
   "keywords": ["background", "remove", "subject", "cutout", "segment", "salient", "birefnet", "rembg", "matte", "mask"],
   "runtime": {"kind": "command", "entry": "./run.sh", "mode": "persistent", "idle_timeout_s": 60},
