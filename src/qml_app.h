@@ -10,11 +10,13 @@
 
 #include "canvas/active_canvas.h"
 #include "canvas/canvas_actions.h"
+#include "canvas/canvas_batch.h" // a QML type (CanvasBatch, Batch…'s backend): the module registers it from here
 #include "canvas/canvas_history.h" // a QML type (CanvasHistory): the module registers it from here
 #include "canvas/canvas_view_model.h" // a QML type (CanvasViewModel): the module registers it from here
 #include "canvas/canvas_model.h"
 #include "canvas/crop_qml.h" // a QML singleton (CropGeometry): the module registers it from here
 #include "canvas/region_picker.h" // a QML type (RegionPicker): the module registers it from here
+#include "canvas/guides_model.h" // a QML type (GuidesModel): the module registers it from here
 #include "canvas/mask_layer.h" // a QML item (MaskLayer): the module registers it from here
 #include "canvas/paint_layer.h" // a QML item (PaintLayer): likewise
 #include "canvas/float_place_qml.h" // a QML singleton (FloatPlace): the module registers it from here
@@ -69,6 +71,7 @@ struct AppObjects {
     Workspace *workspace = nullptr;       // optional: the window's areas (#217); none: one Graph area, as before
     CanvasActions *canvasActions = nullptr; // optional: the Canvas view's task bar (#231); none: no bar
     ActiveCanvas *activeCanvas = nullptr;   // optional: the canvas last used in a Canvas view (#246); QML reads null
+    CanvasBatch *canvasBatch = nullptr;     // optional: Canvas > Automate > Batch… (#250); QML reads null
 };
 
 class QmlApp : public QObject {
@@ -97,6 +100,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::Workspace *workspace READ workspace CONSTANT)
     Q_PROPERTY(fugue::CanvasActions *canvasActions READ canvasActions CONSTANT)
     Q_PROPERTY(fugue::ActiveCanvas *activeCanvas READ activeCanvas CONSTANT)
+    Q_PROPERTY(fugue::CanvasBatch *canvasBatch READ canvasBatch CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -122,6 +126,7 @@ public:
     Workspace *workspace() const { return m_objects.workspace; }
     CanvasActions *canvasActions() const { return m_objects.canvasActions; }
     ActiveCanvas *activeCanvas() const { return m_objects.activeCanvas; }
+    CanvasBatch *canvasBatch() const { return m_objects.canvasBatch; }
 
 private:
     AppObjects m_objects;

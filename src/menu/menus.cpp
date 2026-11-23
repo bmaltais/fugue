@@ -150,7 +150,7 @@ QVariantList canvasView() {
                           planned(QT_TRANSLATE_NOOP("Menu", "Export PSD…"), 227)}),
                  planned(QT_TRANSLATE_NOOP("Menu", "Place picture…"), 236),
                  command("canvas-view.share"),
-                 planned(QT_TRANSLATE_NOOP("Menu", "Run an action on a folder…"), 250), separator(),
+                 submenu(QT_TRANSLATE_NOOP("Menu", "&Automate"), {command("canvas-view.batch")}), separator(),
                  command("canvas-view.rename"), command("canvas-view.duplicate"),
                  planned(QT_TRANSLATE_NOOP("Menu", "Canvas size…"), 240),
                  planned(QT_TRANSLATE_NOOP("Menu", "Edit in an external editor…"), 215), separator(),
@@ -182,7 +182,10 @@ QVariantList canvasView() {
                          {command("canvas-view.tool-hand"), command("canvas-view.tool-zoom"), command("canvas-view.tool-region"),
                           command("canvas-view.tool-brush"), command("canvas-view.tool-eraser"), command("canvas-view.brush-swap"),
                           command("canvas-view.brush-smaller"), command("canvas-view.brush-larger")}),
-                 separator(), planned(QT_TRANSLATE_NOOP("Menu", "Rulers, grid and guides"), 253)}),
+                 separator(),
+                 // Rulers, grid and guides (#253).
+                 command("canvas-view.rulers"), command("canvas-view.grid"), command("canvas-view.guides"),
+                 command("canvas-view.snap-to"), command("canvas-view.clear-guides")}),
     };
 }
 

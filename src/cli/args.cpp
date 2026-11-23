@@ -71,6 +71,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
          {{"new", {0, 0, {"name", "size", "background"}, {}, canvasNew}},
           {"import", {1, 1, {"name"}, {}, canvasImport}},
           {"export", {1, 2, {"format", "quality", "scale", "size", "width", "height", "background", "prefix"}, {"layers", "history", "estimate", "lossless", "only-visible", "no-masks"}, canvasExport}},
+          {"batch", {3, 3, {"format", "quality", "scale", "size", "width", "height", "background", "prompt", "seed"}, {"lossless", "keep"}, canvasBatch}},
           {"log", {1, 1, {"limit"}, {}, canvasLog}},
           {"show", {1, 1, {}, {}, canvasShow}},
           {"list", {0, 0, {}, {}, canvasList}},

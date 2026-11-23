@@ -4,6 +4,7 @@
 #include <QString>
 
 #include "cli/args.h"
+#include "engine/canvas_export.h"
 #include "engine/error.h"
 #include "engine/node_kernel.h"
 #include "engine/registry.h"
@@ -96,6 +97,10 @@ Reply projectInherits(const Command &command, Context &context);
 Reply canvasNew(const Command &command, Context &context);
 Reply canvasImport(const Command &command, Context &context);
 Reply canvasExport(const Command &command, Context &context);
+Reply canvasBatch(const Command &command, Context &context); // canvas_batch.cpp (#250)
+// The picture options of `canvas export` and `canvas batch` (--format, --quality, --scale, --size, --width, --height,
+// --background, --lossless); `out` is the file named, whose extension gives the format when --format is not given.
+Result<canvas::PictureExport> pictureOptions(const Command &command, const QString &out);
 Reply canvasLog(const Command &command, Context &context);
 Reply canvasShow(const Command &command, Context &context);
 Reply canvasList(const Command &command, Context &context);

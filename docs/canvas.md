@@ -21,6 +21,7 @@ fugue canvas import team.fuguepack                 # a package's canvas, as a ne
 fugue canvas export canvas-0123456789ab out.webp --quality 80 --scale 50%   # lossy WebP at half size
 fugue canvas export canvas-0123456789ab --format jpg --quality 60 --estimate   # the size it would be, nothing written
 fugue canvas export canvas-0123456789ab shots --layers   # one picture per layer into the folder shots
+fugue canvas batch generative-fill photos results --prompt "a red hat"   # an action over every picture of a folder
 fugue canvas list                                  # the canvases, newest first
 fugue canvas candidates canvas-0123456789ab        # revisions nobody points at (scripts)
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
@@ -175,6 +176,22 @@ layer is written as its own pixels: its opacity and blend mode are not applied. 
 dialog says so. If any of the names is taken the whole export is refused before the first file is written. On the command line:
 `fugue canvas export <id> <folder> --layers [--format png|webp] [--only-visible] [--no-masks] [--prefix <text>]`.
 
+**Canvas > Automate > Batch…** (Photoshop's Automate > Batch) runs a canvas action over every picture of a folder. Choose
+the action (one whose models are not on this machine is greyed), type the prompt if it has one, choose the folder of pictures and the
+folder for the results, and a format (PNG, JPEG, WebP or the layers as .ora). **Run** makes each picture a canvas, runs the
+action on all of it (the whole picture is the selection), writes the result to the results folder under the picture's name
+(`harbour.png` becomes `harbour.png` there, or `harbour-2.png` when that name is taken: nothing is replaced) and removes
+the temporary canvas. It runs in the background, one picture at a time, through the same queue as every run, so it waits
+for the GPU and shows in the queue panel. The dialog lists each picture as Waiting, Running, Done, Failed (with the reason)
+or Cancelled, and a progress bar; a picture that fails never stops the others. **Cancel batch** ends the run under way and marks
+the pictures not started as cancelled; **Hide** closes the dialog and leaves the batch running (reopen it to see where it is).
+An action that works on a crop frame beyond the canvas (Expand) cannot be batched.
+
+`fugue canvas batch <action> <in-folder> <out-folder>` is the same without a window: `<action>` is an action file or the id of a
+bundled one, `--prompt <text>`, `--seed <n>` and the picture options of `canvas export` (`--format`, `--quality`, `--scale`,
+`--size`, ...) apply, `--keep` leaves each temporary canvas in the store with the result as its head, and the command prints one line
+per picture (one JSON event per line with `--json`). Its exit code is 1 when any picture failed or was cancelled.
+
 ## Layers
 
 Every run that writes to a canvas lands as a layer, like a layer in Photoshop or Krita, and you can
@@ -304,7 +321,21 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
   and Use selection, **Modify** and **Transform selection** (below).
 - **Layer**: Add layer mask, Invert mask, Mask overlay, Reveal all, Hide all. The layers panel keeps its own rows.
 - **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Advanced details, Snap region, and
-  **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size).
+  **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size); then the rulers, grid and guides below.
+
+**Rulers, grid and guides (#253).** View > Rulers (Ctrl+R) puts a ruler along the top and the left of the picture, in the
+canvas's own pixels; it follows zoom and pan. Drag from a ruler onto the picture to pull out a guide (from the top ruler a
+horizontal one, from the left a vertical one; its position shows in a chip while you drag). Drag a guide to move it; drag it
+back onto a ruler, or off the picture, and let go to remove it (View > Clear guides removes all). View > Guides (Ctrl+;)
+shows or hides them, View > Grid (Ctrl+') shows a grid, and while it is on the options bar has a **Grid** spacing field (the
+default is 64 px; the grid is not drawn, and does not snap, while its lines would be closer than 6 screen pixels).
+View > **Snap to guides and grid** (Shift+Ctrl+;) pulls the Rectangle region's edges (the selection) to a guide or grid
+line that is shown and within 8 screen pixels; a move keeps the rectangle's size and follows the edge nearer a line. It works
+with, and wins over, **Snap to 16** (the node's Multiple of) when a line is close. Guides and the grid's spacing belong to the
+canvas: they are kept in `guides.json` in the canvas's folder, not in a revision (no history step, Undo does not take them
+back; Duplicate canvas copies them), and a damaged file reads as no guides. Guides, grid and rulers are shown only for one
+picture, not while comparing. A press within 6 pixels of a guide with the Rectangle region or Hand tool takes the guide, not
+the frame.
 
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the

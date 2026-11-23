@@ -103,10 +103,25 @@ Item {
     // The rectangle a drag shows now (canvas pixels), null at rest; Snap puts its edges on the node's Multiple of.
     property var liveRect: null
     property bool snap: false
+    // Rulers, Grid, Guides and Snap to them (#253): view options of this window, not part of the canvas. The guides themselves and
+    // the grid's spacing are the canvas's (`guidesData`, a sidecar file in the canvas's folder).
+    property bool showRulers: false
+    property bool showGrid: false
+    property bool showGuides: true
+    property bool snapToLines: true
     property bool panKey: false // Space held: a left drag pans, as the middle button does
     // Why the last New canvas… or Import picture… made nothing (the error line says it).
     property string makeProblem: ""
     readonly property bool regionValid: canvasData.region.valid === true
+    // What the snap pulls to now (GuidesModel.snapRect's options): lines only when they are in view, so nothing hidden pulls.
+    readonly property var snapOptions: ({
+        multiple: root.snap && regionValid ? (canvasData.region.multiple ?? 0) : 0,
+        guides: root.snapToLines && root.showGuides && overlaysShown && guidesData.guides.length > 0,
+        grid: root.snapToLines && root.showGrid && overlaysShown && gridLines.drawn,
+        zoom: pictureView.imageScale})
+    // The overlays (rulers, grid, guides) mean pixels of one picture: not while two are compared or a difference is shown.
+    readonly property bool overlaysShown: pictureView.visible && !compareOn && !pictureView.paired && pictureView.mode !== "difference"
+    readonly property real rulerSize: 5 * u
     readonly property bool regionEditable: regionValid && canvasData.region.editable === true && !compareOn
     // What the rectangle means for the node (the node's own functions): the drag's, or the committed one.
     // The preview needs the picture's size (previewRegion answers nothing before it is read); reading pictureSize here
@@ -140,6 +155,8 @@ Item {
     readonly property string followName: canvasData.followNode === "" ? "" : (canvasData.edits ? canvasData.edits.nodeName(canvasData.followNode) : "")
                                                                              || canvasData.followNode
 
+    // The index in the model's list of a guide row of the view's filtered list (guides off the canvas are not drawn).
+    function guideIndex(row) { return guidesData.guides.findIndex(g => g.axis === row.axis && g.at === row.at) }
     function fit() { pictureView.fit() }
     function actualSize() { pictureView.actualSize() }
     // Reads the store again now (a host shows it again after it was away).
@@ -338,6 +355,7 @@ Item {
         case "canvas-view.new": case "canvas-view.import": return {enabled: true}
         case "canvas-view.open": return {enabled: canvasData.canvases.length > 0}
         case "canvas-view.export": case "canvas-view.export-options": case "canvas-view.export-layers": return {enabled: canvasData.revisionB !== ""}
+        case "canvas-view.batch": return {enabled: App.canvasBatch !== null}
         case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
@@ -370,6 +388,12 @@ Item {
         case "canvas-view.compare": return {enabled: canvasData.hasParent, checkable: true, checked: compareOn}
         case "canvas-view.details": return {enabled: has, checkable: true, checked: advancedDetails}
         case "canvas-view.snap": return {enabled: root.tool === "region" && regionEditable && canvasData.region.multiple > 1, checkable: true, checked: snap}
+        // #253: rulers, grid, guides and snap to them.
+        case "canvas-view.rulers": return {enabled: has, checkable: true, checked: showRulers}
+        case "canvas-view.grid": return {enabled: has, checkable: true, checked: showGrid}
+        case "canvas-view.guides": return {enabled: has, checkable: true, checked: showGuides}
+        case "canvas-view.snap-to": return {enabled: has, checkable: true, checked: snapToLines}
+        case "canvas-view.clear-guides": return {enabled: guidesData.guides.length > 0}
         case "canvas-view.tool-hand": return tool("hand")
         case "canvas-view.tool-zoom": return tool("zoom")
         case "canvas-view.tool-region": return tool("region")
@@ -419,6 +443,7 @@ Item {
         case "canvas-view.export-layers": exportWith("layers"); break
         case "canvas-view.rename": fileDialogs.askRename(); break
         case "canvas-view.share": fileDialogs.askShare(); break
+        case "canvas-view.batch": batchDialog.openDialog(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
@@ -444,6 +469,11 @@ Item {
         case "canvas-view.compare": comparing = !comparing; break
         case "canvas-view.details": advancedDetails = !advancedDetails; break
         case "canvas-view.snap": snap = !snap; break
+        case "canvas-view.rulers": showRulers = !showRulers; break
+        case "canvas-view.grid": showGrid = !showGrid; break
+        case "canvas-view.guides": showGuides = !showGuides; break
+        case "canvas-view.snap-to": snapToLines = !snapToLines; break
+        case "canvas-view.clear-guides": guidesData.clearGuides(); break
         case "canvas-view.undo":
             if (quickMask) selectionLayer.undo()
             else if (paintsMask || canvasData.maskPending) canvasData.undo()
@@ -485,6 +515,14 @@ Item {
         }
     }
 
+    // The canvas's guides and grid spacing (#253): a sidecar file beside the canvas, not a revision, and the snap function.
+    GuidesModel {
+        id: guidesData
+        objectName: "canvasViewGuides"
+        storeRoot: canvasData.storeRoot
+        canvasId: canvasData.canvasId
+        canvasSize: canvasData.pictureSize
+    }
     CanvasViewModel {
         id: canvasData
         onCanvasChanged: { root.freeRect = root.noRect; selectionLayer.reset() }
@@ -527,6 +565,11 @@ Item {
         defaultSuffix: "png"
         nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)"), qsTr("Photoshop file (*.psd)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
+    }
+    // Batch… (#250): a canvas action over a folder of pictures.
+    CanvasBatchDialog {
+        id: batchDialog
+        parent: Overlay.overlay
     }
     CanvasFileDialogs {
         id: fileDialogs
@@ -826,6 +869,24 @@ Item {
             checkable: true
             current: root.snap
             onTapped: root.snap = !root.snap
+        }
+        // The grid's spacing (#253), while the grid is on: the canvas's own (kept beside it).
+        DragNumberField {
+            objectName: "canvasViewGridSpacing"
+            visible: root.showGrid
+            width: 30 * root.u
+            look: root.look
+            label: qsTr("Grid")
+            tip: qsTr("The grid's spacing in canvas pixels (%1)").arg(root.keysOf("canvas-view.grid"))
+            value: guidesData.gridSpacing
+            from: guidesData.minGrid
+            to: 512
+            step: 1
+            snap: 8
+            defaultValue: guidesData.defaultGrid
+            format: v => qsTr("%1 px").arg(Math.round(v))
+            parse: text => Number(String(text).replace("px", "").trim())
+            onCommitted: v => guidesData.setGridSpacing(Math.round(v))
         }
         // Zoom: in or out with a click (Alt does the other).
         Chunk {
@@ -1291,7 +1352,9 @@ Item {
                 draw: true
                 editable: root.tool === "region" && (root.regionValid ? root.regionEditable : !root.compareOn)
                 yieldPress: root.panKey
-                constrain: root.snap && root.regionValid ? ((r, keepSize) => canvasData.snapRegion(r, keepSize)) : null
+                // The one snap function (GuidesModel.snapRect, canvas/snap.h): the node's Multiple of, the guides and the grid.
+                constrain: root.snapOptions.multiple > 1 || root.snapOptions.guides || root.snapOptions.grid
+                           ? ((r, keepSize) => guidesData.snapRect(r, keepSize, root.snapOptions)) : null
                 onPressed: pictureView.forceActiveFocus()
                 onChanging: r => root.liveRect = r
                 onDraggingChanged: if (!dragging) root.liveRect = null
@@ -1346,6 +1409,106 @@ Item {
         ToolTip.text: frameHover.text
     }
 
+
+    // The grid, the guides and the rulers (#253), over the frame: the grid under the guides, the rulers over both. Never mirrored (a
+    // picture is not text). The guides take the pointer only along their own lines, with the hand and the region tools.
+    Item {
+        id: overlays
+        objectName: "canvasViewOverlays"
+        anchors.fill: pictureView
+        LayoutMirroring.enabled: false
+        LayoutMirroring.childrenInherit: true
+        visible: root.overlaysShown
+        readonly property real corner: root.showRulers ? root.rulerSize : 0
+        // Where a guide may stay: on the picture and not under a ruler.
+        readonly property rect keep: Qt.rect(Math.max(corner, pictureView.imageX), Math.max(corner, pictureView.imageY),
+            Math.min(width, pictureView.imageX + canvasData.pictureSize.width * pictureView.imageScale) - Math.max(corner, pictureView.imageX),
+            Math.min(height, pictureView.imageY + canvasData.pictureSize.height * pictureView.imageScale) - Math.max(corner, pictureView.imageY))
+        // The guide a ruler is pulling out: {axis, at, outside}.
+        property var draft: null
+        function pull(axis, x, y) {
+            const at = guideLines.pixelOf(axis, Qt.point(x, y))
+            draft = {axis: axis, at: at, outside: !guideLines.inKeep(Qt.point(x, y))}
+        }
+        function drop(axis, x, y) {
+            const point = Qt.point(x, y)
+            const at = guideLines.pixelOf(axis, point)
+            draft = null
+            if (!guideLines.inKeep(point))
+                return
+            if (guidesData.addGuide(axis, at))
+                root.showGuides = true
+        }
+        GridLines {
+            id: gridLines
+            objectName: "canvasViewGrid"
+            anchors.fill: parent
+            visible: root.showGrid
+            look: root.look
+            imageSize: canvasData.pictureSize
+            originX: pictureView.imageX
+            originY: pictureView.imageY
+            zoom: pictureView.imageScale
+            spacing: guidesData.gridSpacing
+        }
+        GuideLines {
+            id: guideLines
+            objectName: "canvasViewGuideLines"
+            anchors.fill: parent
+            visible: root.showGuides || overlays.draft !== null
+            look: root.look
+            guides: root.showGuides ? guidesData.guides.filter(g => g.at >= 0 && g.at <= (g.axis === "x" ? canvasData.pictureSize.width : canvasData.pictureSize.height)) : []
+            imageSize: canvasData.pictureSize
+            originX: pictureView.imageX
+            originY: pictureView.imageY
+            zoom: pictureView.imageScale
+            draft: overlays.draft
+            keep: overlays.keep
+            active: root.showGuides && (root.tool === "region" || root.tool === "hand") && !root.panKey
+            onGrabbed: pictureView.forceActiveFocus()
+            // The model keeps its guides in the order it lists them, and so does `guides` (filtered, so the index is looked up).
+            onMoved: (index, at) => guidesData.moveGuide(root.guideIndex(guides[index]), at)
+            onRemoveRequested: index => guidesData.removeGuide(root.guideIndex(guides[index]))
+        }
+        Ruler {
+            objectName: "canvasViewRulerTop"
+            visible: root.showRulers
+            look: root.look
+            x: root.rulerSize
+            width: parent.width - root.rulerSize
+            height: root.rulerSize
+            thickness: root.rulerSize
+            origin: pictureView.imageX - root.rulerSize
+            zoom: pictureView.imageScale
+            extent: canvasData.pictureSize.width
+            onDragStarted: (px, py) => overlays.pull("y", px, py)
+            onDragMoved: (px, py) => overlays.pull("y", px, py)
+            onDragEnded: (px, py) => overlays.drop("y", px, py)
+        }
+        Ruler {
+            objectName: "canvasViewRulerLeft"
+            visible: root.showRulers
+            vertical: true
+            look: root.look
+            y: root.rulerSize
+            width: root.rulerSize
+            height: parent.height - root.rulerSize
+            thickness: root.rulerSize
+            origin: pictureView.imageY - root.rulerSize
+            zoom: pictureView.imageScale
+            extent: canvasData.pictureSize.height
+            onDragStarted: (px, py) => overlays.pull("x", px, py)
+            onDragMoved: (px, py) => overlays.pull("x", px, py)
+            onDragEnded: (px, py) => overlays.drop("x", px, py)
+        }
+        // The corner where the rulers meet.
+        Rectangle {
+            visible: root.showRulers
+            width: root.rulerSize
+            height: root.rulerSize
+            color: Qt.alpha(root.look.popup, 0.92)
+        }
+    }
 
     // The pointer of the other tools, over the region's frame (#230): the mask brush (BrushPen, the Mask editor's own),
     // the zoom's click, the hand's cursor (its drag is the viewer's pan: the frame is not edited then).

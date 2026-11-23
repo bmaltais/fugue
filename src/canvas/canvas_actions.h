@@ -41,6 +41,7 @@
 
 #include "canvas/mask_layer.h"
 #include "engine/canvas_action.h"
+#include "engine/canvas_batch.h"
 #include "engine/document.h"
 #include "engine/error.h"
 
@@ -117,6 +118,10 @@ public:
     Q_INVOKABLE void refresh();
     // The action "auto" stands for with this selection and prompt: {action (an id or ""), reason}.
     Q_INVOKABLE QVariantMap route(const QString &canvas, const QString &revision, const QVariantMap &rect, bool hasPrompt) const;
+
+    // The action to run over a folder (canvas/canvas_batch.h, #250): a copy of the listed action `id`, or why it cannot be
+    // batched (it is broken, it needs a crop frame, or its models are not on this machine: the code is then `model_missing`).
+    Result<canvas::BatchAction> batchAction(const QString &id) const;
 
     Q_INVOKABLE QStringList history(const QString &action) const;
     Q_INVOKABLE void clearHistory();
