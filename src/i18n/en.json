@@ -1667,5 +1667,7 @@
   "Pick layers of one group at a time.": "Pick layers of one group at a time.",
   "Take the layer out of its group (Ungroup) first.": "Take the layer out of its group (Ungroup) first.",
   "The mask of a layer inside a group cannot be painted or selected from yet.": "The mask of a layer inside a group cannot be painted or selected from yet.",
-  "This layer is inside a group: moving and transforming work on the layers of the top level for now.": "This layer is inside a group: moving and transforming work on the layers of the top level for now."
+  "This layer is inside a group: moving and transforming work on the layers of the top level for now.": "This layer is inside a group: moving and transforming work on the layers of the top level for now.",
+  "%1 changes the layer's own pixels, so it makes one result at a time. Set Count to 1.": "%1 changes the layer's own pixels, so it makes one result at a time. Set Count to 1.",
+  "The canvas has no layer named \"%1\" at this revision.": "The canvas has no layer named \"%1\" at this revision."
 }
