@@ -73,10 +73,16 @@ struct LayerRecord {
     bool maskEnabled = true;
     TileMap maskTiles;
     QString producer, created; // the layer's origin (mask::LayerInfo)
+    // A group (#252): a layer that holds layers, bottom first, and composites them as one (the kind is Paint, `tiles` empty;
+    // its own opacity, blend and layer mask apply to the composite). Stored as kind "group" with "children".
+    bool group = false;
+    std::vector<LayerRecord> children;
     int channels() const { return kind == mask::LayerKind::Mask ? 1 : 4; }
+    int tileCount() const; // its own tiles and its children's
     bool operator==(const LayerRecord &o) const {
         return name == o.name && kind == o.kind && visible == o.visible && opacity == o.opacity && tiles == o.tiles && compositeOp == o.compositeOp &&
-               hasMask == o.hasMask && maskEnabled == o.maskEnabled && maskTiles == o.maskTiles && producer == o.producer && created == o.created;
+               hasMask == o.hasMask && maskEnabled == o.maskEnabled && maskTiles == o.maskTiles && producer == o.producer && created == o.created &&
+               group == o.group && children == o.children;
     }
 };
 
@@ -246,7 +252,8 @@ private:
     Result<QString> storeTree(const mask::PaintDocument &document);
     Result<QString> storeTreeRecord(const Tree &tree);
     Result<Revision> addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer);
-    // editLayers' body: `edit` on the head `base`, one revision; `newTiles` lets the edit name tiles the base has not (SetMask).
+    // editLayers' body: `change` of the head `base`'s tree, one revision; `newTiles` lets it name tiles the base has not (SetMask, merges).
+    Result<Commit> commitTree(const QString &canvasId, const QString &base, const std::function<Result<Tree>(const Tree &)> &change, const QString &producer, bool newTiles);
     Result<Commit> commitEdit(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer, bool newTiles);
     QString selectionPath(const QString &hash) const;
     Errors storeBlob(const QString &hash, const mask::MaskPaint &tile);

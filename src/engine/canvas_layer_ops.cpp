@@ -20,12 +20,16 @@ constexpr OpName kOps[] = {
     {LayerOp::Visible, "visible"},   {LayerOp::Opacity, "opacity"},        {LayerOp::Blend, "blend"},
     {LayerOp::Rename, "rename"},     {LayerOp::Remove, "delete"},          {LayerOp::Move, "move"},
     {LayerOp::Duplicate, "duplicate"}, {LayerOp::MaskEnabled, "mask-enabled"}, {LayerOp::RemoveMask, "mask-delete"},
-    {LayerOp::SetMask, "mask-set"},
+    {LayerOp::SetMask, "mask-set"},   {LayerOp::New, "new"},               {LayerOp::Group, "group"},
+    {LayerOp::Ungroup, "ungroup"},    {LayerOp::MergeDown, "merge-down"},  {LayerOp::Flatten, "flatten"},
+    {LayerOp::Properties, "properties"},
 };
 
 Error invalid(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("input_invalid"), message, hint); }
 
 } // namespace
+
+bool layerOpNeedsPixels(LayerOp op) { return op == LayerOp::MergeDown || op == LayerOp::Flatten; }
 
 QString layerOpName(LayerOp op) {
     for (const OpName &o : kOps)
@@ -53,8 +57,46 @@ QString duplicateName(const Tree &tree, const QString &name) {
     return out;
 }
 
+QString numberedName(const Tree &tree, const QString &stem) {
+    const auto taken = [&tree](const QString &candidate) {
+        return std::any_of(tree.layers.begin(), tree.layers.end(), [&candidate](const LayerRecord &l) { return l.name == candidate; });
+    };
+    int n = int(tree.layers.size()) + 1;
+    while (taken(QStringLiteral("%1 %2").arg(stem).arg(n)) && n < 100000)
+        ++n;
+    return QStringLiteral("%1 %2").arg(stem).arg(n);
+}
+
 Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
     const int count = int(tree.layers.size());
+    if (layerOpNeedsPixels(edit.op))
+        return invalid(QStringLiteral("Merge down and Flatten read pixels: they go through CanvasStore::editLayers."));
+    if (edit.op == LayerOp::Properties) {
+        if (edit.steps.empty())
+            return invalid(QStringLiteral("Layer properties name nothing to change."));
+        Tree out = tree;
+        for (const LayerEdit &step : edit.steps) {
+            if (step.op == LayerOp::Properties || layerOpNeedsPixels(step.op) || step.op == LayerOp::SetMask)
+                return invalid(QStringLiteral("Layer properties are made of a name, an opacity, a blend and a mask switch."));
+            Result<Tree> next = applyLayerEdit(out, step);
+            if (!next)
+                return next;
+            out = std::move(next.value());
+        }
+        return out;
+    }
+    if (edit.op == LayerOp::New) {
+        if (edit.layers.size() > 1 || (edit.layers.size() == 1 && (edit.layers.front() < 0 || edit.layers.front() >= count)))
+            return invalid(QStringLiteral("A new layer goes above one layer, or on top."));
+        const QString name = edit.text.trimmed().isEmpty() ? numberedName(tree, QStringLiteral("Layer")) : edit.text.trimmed();
+        if (name.size() > kMaxName)
+            return invalid(QStringLiteral("A layer's name is 1 to %1 characters.").arg(kMaxName));
+        Tree out = tree;
+        LayerRecord layer;
+        layer.name = name;
+        out.layers.insert(out.layers.begin() + (edit.layers.empty() ? count : edit.layers.front() + 1), layer);
+        return out;
+    }
     if (edit.layers.empty())
         return invalid(QStringLiteral("No layer is named."));
     std::set<int> chosen;
@@ -131,6 +173,43 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
             }
         }
         break;
+    case LayerOp::Group: {
+        for (int p : chosen)
+            if (tree.layers[size_t(p)].kind == mask::LayerKind::Picture)
+                return invalid(QStringLiteral("Layer %1 (%2) is a picture layer: a picture is a node's input and cannot be grouped.").arg(p).arg(tree.layers[size_t(p)].name));
+        const QString name = edit.text.trimmed().isEmpty() ? numberedName(tree, QStringLiteral("Group")) : edit.text.trimmed();
+        if (name.size() > kMaxName)
+            return invalid(QStringLiteral("A layer's name is 1 to %1 characters.").arg(kMaxName));
+        LayerRecord group;
+        group.name = name;
+        group.group = true;
+        for (int p : chosen)
+            group.children.push_back(tree.layers[size_t(p)]);
+        const int at = *chosen.rbegin(); // the place of the highest chosen layer, once the others are out
+        std::vector<LayerRecord> layers;
+        for (int p = 0; p < count; ++p) {
+            if (p == at)
+                layers.push_back(group);
+            else if (!chosen.count(p))
+                layers.push_back(tree.layers[size_t(p)]);
+        }
+        out.layers = std::move(layers);
+        break;
+    }
+    case LayerOp::Ungroup: {
+        for (int p : chosen)
+            if (!tree.layers[size_t(p)].group)
+                return invalid(QStringLiteral("Layer %1 (%2) is not a group.").arg(p).arg(tree.layers[size_t(p)].name));
+        std::vector<LayerRecord> layers;
+        for (int p = 0; p < count; ++p) {
+            if (chosen.count(p))
+                layers.insert(layers.end(), tree.layers[size_t(p)].children.begin(), tree.layers[size_t(p)].children.end());
+            else
+                layers.push_back(tree.layers[size_t(p)]);
+        }
+        out.layers = std::move(layers);
+        break;
+    }
     case LayerOp::SetMask: {
         if (chosen.size() != 1)
             return invalid(QStringLiteral("A layer mask is set on one layer at a time."));
@@ -145,6 +224,11 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
         layer.maskTiles = edit.maskTiles;
         break;
     }
+    case LayerOp::New:
+    case LayerOp::MergeDown:
+    case LayerOp::Flatten:
+    case LayerOp::Properties:
+        break; // handled above
     }
     return out;
 }
