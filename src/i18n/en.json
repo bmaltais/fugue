@@ -65,7 +65,6 @@
     "one": "%n tile in %1",
     "other": "%n tiles in %1"
   },
-  "&Areas": "&Areas",
   "&Bars and panels": "&Bars and panels",
   ", at the %1 MP cap": ", at the %1 MP cap",
   "[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask layers alone": "[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask layers alone",
@@ -190,6 +189,9 @@
   "Redo (Ctrl+Shift+Z)": "Redo (Ctrl+Shift+Z)",
   "Reset bars and panels": "Reset bars and panels",
   "&Run": "&Run",
+  "&Canvas": "&Canvas",
+  "&Window": "&Window",
+  "&Add": "&Add",
   "Run status": "Run status",
   "Run toolbar": "Run toolbar",
   "Saved in": "Saved in",

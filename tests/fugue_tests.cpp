@@ -435,7 +435,7 @@ private slots:
         auto *canvas = item(window->contentItem(), "canvas");
         QVERIFY(bar && canvas);
         auto *file = item(window->contentItem(), "menuTitle-0");
-        auto *last = item(window->contentItem(), "menuTitle-5");
+        auto *last = item(window->contentItem(), "menuTitle-4");
         QVERIFY(file && last);
         const QPoint inBar = bar->mapToScene(QPointF(bar->width() / 2, bar->height() / 2)).toPoint();
         const QRectF titles = file->mapRectToScene(file->boundingRect()).united(last->mapRectToScene(last->boundingRect()));

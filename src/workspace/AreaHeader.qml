@@ -7,7 +7,9 @@ import "../canvas/widgets"
 
 // The bar at the top of an area while the window has more than one (#217 slice 1, spec 12.16; docs/ui-ergonomics.md):
 // the view-type menu at the start (the view's glyph, its name and a chevron; Blender's editor-type menu), then, at
-// the end, split side by side, split top and bottom and, a chunk of its own, close. The active area's bar has an
+// the end, split side by side, split top and bottom and, a chunk of its own, close. Between them, the view's own menus
+// (#262, as Blender's editor headers: the Graph's View, Select, Add and Node; folded into one Menu button where they
+// do not fit). The window's global menus are the window bar's. The active area's bar has an
 // accent line along its foot and its name in the text color; the others are quieter. AreaNode.qml makes one per
 // area (none while the window has one area: the default window has no header). It reads App.workspace and runs the
 // area commands of the area it heads, which it makes the active one first.
@@ -125,8 +127,26 @@ Rectangle {
         Keys.onSpacePressed: header.openViews()
     }
 
+    // The view's own menus, after the view-type menu, in the room between it and the splits. The Graph's here; the Canvas
+    // view keeps its own bar inside the view (the File > Canvas… dialog has no header).
+    Loader {
+        id: menus
+        objectName: "areaMenus-" + header.areaId
+        active: header.viewType === "graph"
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.left: typeButton.right
+        anchors.leftMargin: header.u
+        sourceComponent: CanvasMenuBar {
+            look: header.look
+            treeName: "graph"
+            idPrefix: "graph"
+            maxWidth: Math.max(0, splits.x - typeButton.x - typeButton.width - 3 * header.u)
+        }
+    }
+
     // Split, split, then close in a chunk of its own (2u from the splits against their 0).
     Row {
+        id: splits
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         anchors.rightMargin: header.endClear
@@ -153,6 +173,7 @@ Rectangle {
             objectName: "areaClose-" + header.areaId
             glyph: "x"
             danger: true
+            enabled: App.workspace !== null && App.workspace.count > 1
             tip: header.tipOf(qsTr("Close area"), "area.close")
             onTapped: header.run("area.close")
         }
