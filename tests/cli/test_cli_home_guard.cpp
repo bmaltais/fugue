@@ -208,8 +208,9 @@ private slots:
             target = QDir::cleanPath(target);
             ++checked;
             // The one deliberate exception: the cross-root GPU lock, a content-free file in the real runtime
-            // folder, where every root meets (spec 1.4.2). It holds nothing and names no root.
-            static const QRegularExpression gpuLock(R"(/fugue-gpu-\d+\.lock$)");
+            // folder, where every root meets (spec 1.4.2), and its `.wait` time stamp, which a run waiting for the GPU
+            // leaves (and drops) so a helper holding it lets go (spec 8.10). Both are content-free and name no root.
+            static const QRegularExpression gpuLock(R"(/fugue-gpu-\d+\.lock(\.wait)?$)");
             const bool allowed = target == root || target.startsWith(root + '/') || target.startsWith("/dev/") || target.startsWith("/proc/")
                                  || gpuLock.match(target).hasMatch();
             if (!allowed)
