@@ -1502,4 +1502,37 @@ QVariantMap CanvasViewModel::useSelection(MaskLayer *selection) {
     return written ? QVariantMap{{"ok", true}, {"hash", hash.value()}} : no(tr("The Canvas Region uses this selection already."));
 }
 
+bool CanvasViewModel::selectFromLayer(int position, bool fromMask, MaskLayer *selection, const QString &how) {
+    if (!selection)
+        return false;
+    const canvas::CanvasStore s = store();
+    const Result<canvas::Revision> revision = s.revision(canvasId(), revisionB());
+    const Result<canvas::Tree> tree = revision ? s.tree(revision->tree) : Result<canvas::Tree>(revision.errors());
+    if (!tree || position < 0 || position >= int(tree->layers.size()))
+        return false;
+    const canvas::LayerRecord &layer = tree->layers[size_t(position)];
+    if (fromMask ? !layer.hasMask : (layer.kind == mask::LayerKind::Mask || layer.tiles.empty())) {
+        showNotice(fromMask ? tr("This layer has no mask.") : tr("Only a paint layer has pixels to select."));
+        return false;
+    }
+    const int width = tree->width, height = tree->height, channels = fromMask ? 1 : 4;
+    const Result<mask::MaskPaint> pixels = canvas::assembleLayer(width, height, channels, fromMask ? layer.maskTiles : layer.tiles,
+                                                                 [&](const canvas::TileKey &key, const QString &hash) {
+        const mask::IRect rect = canvas::tileRect(key, width, height);
+        return s.tilePixels(hash, rect.width, rect.height, channels);
+    });
+    if (!pixels) {
+        fail(pixels.errors());
+        return false;
+    }
+    if (selection->imageSize() != QSize(width, height))
+        selection->setImageSize({width, height});
+    if (fromMask)
+        return selection->combine(pixels.value(), how);
+    std::vector<uint8_t> alpha(size_t(width) * size_t(height));
+    for (size_t i = 0; i < alpha.size(); ++i)
+        alpha[i] = pixels->pixels()[i * 4 + 3];
+    return selection->combine(mask::MaskPaint(width, height, alpha), how);
+}
+
 } // namespace fugue

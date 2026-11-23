@@ -206,6 +206,39 @@ void MaskLayer::fill() {
     changed(true);
 }
 
+bool MaskLayer::combine(const mask::MaskPaint &shape, const QString &how) {
+    const std::vector<uint8_t> &now = m_paint->pixels();
+    if (shape.width() != m_paint->width() || shape.height() != m_paint->height() || shape.channels() != 1)
+        return false;
+    std::vector<uint8_t> next = shape.pixels();
+    if (how == QLatin1String("add"))
+        for (size_t i = 0; i < next.size(); ++i)
+            next[i] = std::max(now[i], next[i]);
+    else if (how == QLatin1String("subtract"))
+        for (size_t i = 0; i < next.size(); ++i)
+            next[i] = std::min(now[i], uint8_t(255 - next[i]));
+    else if (how != QLatin1String("replace"))
+        return false;
+    if (next == now)
+        return false;
+    if (!m_paint->assign(next))
+        return false;
+    changed(true);
+    return true;
+}
+
+bool MaskLayer::selectPolygon(const QVariantList &points, const QString &how) {
+    std::vector<mask::Point> outline;
+    outline.reserve(size_t(points.size()));
+    for (const QVariant &p : points)
+        outline.push_back(pointOf(p));
+    if (outline.size() < 3)
+        return false;
+    mask::MaskPaint shape(m_paint->width(), m_paint->height());
+    shape.fillPolygon(outline);
+    return combine(shape, how);
+}
+
 bool MaskLayer::modify(const QString &kind, int amount) {
     const std::vector<uint8_t> &now = m_paint->pixels();
     const int w = m_paint->width(), h = m_paint->height();

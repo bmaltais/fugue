@@ -89,6 +89,11 @@ public:
     Q_INVOKABLE void endStroke();
     // A lasso: `points` is a list of {x, y} (or QPointF) in picture pixels. A rectangle likewise.
     Q_INVOKABLE void fillPolygon(const QVariantList &points, bool erase);
+    // A lasso selection (#230): the polygon, anti-aliased, replaces the mask ("replace"), is added to it ("add") or taken
+    // from it ("subtract"); one undo step. False when nothing changed (fewer than 3 points, or the same mask).
+    Q_INVOKABLE bool selectPolygon(const QVariantList &points, const QString &how);
+    // The same for a mask of the picture's size (a layer's mask or alpha, #231): replace, add (max) or subtract.
+    bool combine(const mask::MaskPaint &shape, const QString &how);
     Q_INVOKABLE void fillRect(double x, double y, double width, double height, bool erase);
     Q_INVOKABLE void invert();
     Q_INVOKABLE void clear();

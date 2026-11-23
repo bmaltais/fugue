@@ -34,6 +34,9 @@ Rectangle {
     property bool ownShortcuts: false
     // A layer mask became the brush's target (a click on its thumbnail, Add mask): the view takes the brush.
     signal maskTargeted
+    // The selection should come from this layer's mask (or its alpha, `fromMask` false), put in as `how`: replace, add or
+    // subtract (#231). The view owns the selection and answers.
+    signal selectionRequested(int position, bool fromMask, string how)
     // Layer properties… of this layer (the view opens the dialog).
     signal propertiesRequested(int position)
     readonly property real u: look.unit
@@ -163,6 +166,10 @@ Rectangle {
             {text: qsTr("Merge down"), value: "merge", detail: keysOf("canvas-view.merge-down"), enabled: !off && sel.length === 1 && canMergeDown(row)},
             {text: qsTr("Layer properties…"), value: "properties", enabled: !off && sel.length === 1}
         ]
+        if (row.kind === "paint" || row.hasMask)
+            entries.push({heading: true, enabled: false, text: qsTr("Selection")},
+                         {text: qsTr("Selection from layer"), value: "select-layer", enabled: !off && sel.length === 1 && row.kind === "paint"},
+                         {text: qsTr("Selection from layer mask"), value: "select-mask", detail: qsTr("Ctrl+click the mask"), enabled: !off && sel.length === 1 && row.hasMask})
         if (row.hasMask)
             entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
                          {text: qsTr("Delete the mask"), value: "mask-delete", enabled: !off && !lockedIn(sel)},
@@ -191,6 +198,8 @@ Rectangle {
             case "mask-delete": model.removeMask(sel); break
             case "mask-paint": root.paintMask(row.position); break
             case "mask-add": root.addMask(row.position); break
+            case "select-layer": root.selectionRequested(row.position, false, "replace"); break
+            case "select-mask": root.selectionRequested(row.position, true, "replace"); break
             }
         })
     }
@@ -412,14 +421,27 @@ Rectangle {
                             acceptedModifiers: Qt.NoModifier
                             onTapped: root.paintMask(row.position)
                         }
+                        // Ctrl+click: the selection is this mask; with Shift it is added, with Alt taken from (Photoshop's).
+                        TapHandler {
+                            acceptedModifiers: Qt.ControlModifier
+                            onTapped: root.selectionRequested(row.position, true, "replace")
+                        }
+                        TapHandler {
+                            acceptedModifiers: Qt.ControlModifier | Qt.ShiftModifier
+                            onTapped: root.selectionRequested(row.position, true, "add")
+                        }
+                        TapHandler {
+                            acceptedModifiers: Qt.ControlModifier | Qt.AltModifier
+                            onTapped: root.selectionRequested(row.position, true, "subtract")
+                        }
                         Accessible.role: Accessible.Button
                         Accessible.name: qsTr("Layer mask of %1").arg(row.modelData.name)
                         Accessible.checked: targeted
                         ToolTip.visible: maskHover.hovered
                         ToolTip.delay: root.look.tooltipDelay
                         ToolTip.text: maskThumb.targeted ? qsTr("The brush paints this mask: black hides the layer, white shows it. Shift+click turns it off.")
-                                      : row.modelData.maskEnabled ? qsTr("Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off.")
-                                      : qsTr("Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on.")
+                                      : row.modelData.maskEnabled ? qsTr("Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off, Ctrl+click selects it.")
+                                      : qsTr("Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on, Ctrl+click selects it.")
                         HoverHandler { id: maskHover }
                     }
                 }

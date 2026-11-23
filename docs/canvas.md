@@ -296,6 +296,11 @@ pointer is over the view; over the Layers panel the panel's own keys win). The t
 - **Hand** (H, or hold Space with any tool): drag the picture to pan. **Zoom** (Z): click to zoom in, Alt+click to
   zoom out. The wheel zooms and the middle button pans with every tool.
 - **Rectangle region** (M or R), the tool you start with: the region rectangle described above.
+- **Lasso** (L): drag freehand around the area; letting go closes the outline and it becomes the selection (a soft, anti-aliased edge).
+  A new lasso replaces the selection, **Shift** adds to it, **Alt** subtracts; Escape drops a drag; Ctrl+Z takes the step back. It is
+  the same selection Quick Mask paints (below), shown in red, and the task bar's Generate uses it (the Region gets it as its
+  `selection` input and the live frame follows its bounds). Select > Inverse, Deselect and Modify work on it. A rectangle drawn after
+  it replaces it.
 - **Mask brush** (B) and **eraser** (E; X swaps them): paint a layer mask, or the Quick Mask selection. `[` and `]`
   make the brush smaller and larger; Alt+drag on the picture sizes it (left and right) and sets its hardness (up and
   down). Size, Hardness and Opacity are in the bar over the picture.
@@ -316,6 +321,10 @@ red, which no revision keeps (Ctrl+Z undoes a stroke). With a Canvas Region node
 selection as the area to change, as one undo step of the workflow: the next run redraws the painted part, and its
 result lands as a layer. Drawing a rectangle afterwards replaces it. Press Q again to leave Quick Mask; the selection
 stays until you clear it (**Select > Deselect**, Ctrl+D, or Escape) or change canvas.
+
+**A layer as the selection.** Ctrl+click a layer's mask thumbnail in the Layers panel (Ctrl+Shift+click adds, Ctrl+Alt+click
+subtracts), or the layer's row menu: **Selection from layer mask** (the mask as it is) and **Selection from layer** (the layer's
+alpha). It replaces the selection, as a lasso does, and is the same one step of its undo.
 
 Canvas Region's **Selection** input (advanced) is what Use selection writes: the hash of the stored selection. With
 it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame

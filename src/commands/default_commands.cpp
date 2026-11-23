@@ -84,6 +84,7 @@ QList<Row> defaultRows() {
         {"canvas-view.free-transform", QT_TRANSLATE_NOOP("Command", "Free transform the current layer: scale, turn and move it, then Enter to keep it or Escape to leave it"), {"Ctrl+T"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Free transform")},
         {"canvas-view.tool-zoom", QT_TRANSLATE_NOOP("Command", "Zoom: click to zoom in, Alt+click to zoom out"), {"Z"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Zoom")},
         {"canvas-view.tool-region", QT_TRANSLATE_NOOP("Command", "Rectangle region"), {"M", "R"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rectangle region")},
+        {"canvas-view.tool-lasso", QT_TRANSLATE_NOOP("Command", "Lasso: draw a selection freehand; Shift adds, Alt subtracts"), {"L"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Lasso")},
         {"canvas-view.tool-brush", QT_TRANSLATE_NOOP("Command", "Mask brush"), {"B"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Mask brush")},
         {"canvas-view.tool-eraser", QT_TRANSLATE_NOOP("Command", "Mask eraser"), {"E"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Mask eraser")},
         {"canvas-view.brush-swap", QT_TRANSLATE_NOOP("Command", "Swap the mask brush and eraser"), {"X"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Swap brush and eraser")},

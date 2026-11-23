@@ -233,6 +233,9 @@ public:
     // The selection painted in `selection` (a MaskLayer, Quick Mask) for the followed Canvas Region: stored by content and
     // written to its `selection` input with its bounds, one undo step. {ok, hash, reason}: `reason` says in words why not.
     Q_INVOKABLE QVariantMap useSelection(fugue::MaskLayer *selection);
+    // A selection from a layer (#231): its layer mask (`fromMask`) or its alpha, put into `selection` as `how` says ("replace",
+    // "add", "subtract"; MaskLayer::combine), one undo step of the selection. False, with a notice, when the layer has none.
+    Q_INVOKABLE bool selectFromLayer(int position, bool fromMask, fugue::MaskLayer *selection, const QString &how);
 
     // Looks at a revision: the head, a candidate (against the head) or any other (against its parent).
     Q_INVOKABLE void show(const QString &revision);

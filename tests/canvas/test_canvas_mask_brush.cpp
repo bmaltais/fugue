@@ -206,6 +206,51 @@ private slots:
         QCOMPARE(model.maskTarget(), -1);
     }
 
+    void aLassoRasterisesAndCombinesAsOneUndoStepEach() {
+        MaskLayer sel;
+        sel.setImageSize({64, 64});
+        const QVariantList triangle{QPointF(10, 10), QPointF(50, 10), QPointF(10, 50)};
+        QVERIFY(sel.selectPolygon(triangle, "replace"));
+        QCOMPARE(sel.valueAt(15, 15), 255);
+        QCOMPARE(sel.valueAt(45, 45), 0);
+        const int edge = sel.valueAt(29, 30); // the hypotenuse x + y = 60 cuts this pixel in half
+        QVERIFY2(edge > 60 && edge < 200, qPrintable(QString::number(edge)));
+        const auto square = [](double a, double b) { return QVariantList{QPointF(a, a), QPointF(b, a), QPointF(b, b), QPointF(a, b)}; };
+        QVERIFY(sel.selectPolygon(square(40, 60), "add"));
+        QCOMPARE(sel.valueAt(50, 50), 255);
+        QCOMPARE(sel.valueAt(15, 15), 255);
+        QVERIFY(sel.selectPolygon(square(5, 20), "subtract"));
+        QCOMPARE(sel.valueAt(15, 15), 0);
+        QCOMPARE(sel.valueAt(25, 15), 255);
+        sel.undo();
+        QCOMPARE(sel.valueAt(15, 15), 255);
+        QVERIFY(sel.selectPolygon(square(40, 60), "replace")); // a new selection drops the old one
+        QCOMPARE(sel.valueAt(15, 15), 0);
+        QVERIFY(!sel.selectPolygon({QPointF(1, 1), QPointF(5, 5)}, "replace")); // two points are no area
+        // The same polygon makes the same stored selection: content-addressed, so the replay is exact.
+        MaskLayer again;
+        again.setImageSize({64, 64});
+        again.selectPolygon(square(40, 60), "replace");
+        QCOMPARE(store().storeSelection(sel.paint()).value(), store().storeSelection(again.paint()).value());
+    }
+
+    void aSelectionFromALayerIsItsMaskOrItsAlpha() {
+        CanvasViewModel model;
+        MaskLayer layer, sel;
+        open(model, layer);
+        QVERIFY(!model.selectFromLayer(1, true, &sel, "replace")); // no mask yet
+        QVERIFY(model.addMask(1));
+        stroke(layer, 20, 20, 80, 30, true);
+        model.maskPainted();
+        QVERIFY(model.commitMask());
+        QVERIFY(model.selectFromLayer(1, true, &sel, "replace"));
+        QCOMPARE(sel.paint().pixels(), layer.paint().pixels());
+        QVERIFY(model.selectFromLayer(1, false, &sel, "replace")); // Top is opaque all over
+        QCOMPARE(sel.valueAt(25, 25), 255);
+        sel.undo();
+        QCOMPARE(sel.paint().pixels(), layer.paint().pixels());
+    }
+
     void aPaintedSelectionGoesIntoTheFollowedRegionAsOneUndoStep() {
         canvas_test::App app(canvas_test::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {"region": {"type": "fugue/canvas-region", "version": "1.2.0", "inputs": {"canvas": "%1"}}}}, "layout": {"nodes": {"region": {"pos": [20, 20]}}, "view": {"center": [200, 200], "zoom": 1}}})")
                                                    .arg(m_canvas).toUtf8()));

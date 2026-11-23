@@ -173,7 +173,7 @@ Item {
     property bool showHistory: false
 
     // ---- the tool strip and its options (#230) ----
-    property string tool: "region" // hand, zoom, region, brush, eraser
+    property string tool: "region" // hand, zoom, move, region, lasso, brush, eraser
     property bool quickMask: false
     property bool zoomOut: false
     property real brushSize: 64
@@ -183,6 +183,10 @@ Item {
     // Why the last Use selection did nothing (the options bar says it; a stroke clears it).
     property string selectionProblem: ""
     readonly property bool brushing: tool === "brush" || tool === "eraser"
+    // The lasso (#230) draws a selection into the same mask Quick Mask paints: Shift adds, Alt subtracts, else it replaces.
+    readonly property bool lassoing: tool === "lasso"
+    // Ctrl+Z undoes the selection, not the canvas, right after it changed (a lasso, a selection from a layer); a new revision ends it.
+    property bool selectionLast: false
     readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(canvasData.pictureSize.width, canvasData.pictureSize.height)))
     // #252: the rows the layers panel has selected, and whether Merge down has two shown layers that can merge (paint layers or groups).
     readonly property var chosenRows: layersPanel.chosen.map(p => canvasData.layers.find(r => r.position === p)).filter(r => r !== undefined)
@@ -198,7 +202,7 @@ Item {
     }
     readonly property bool paintsMask: !quickMask && canvasData.maskTarget >= 0
     readonly property var maskRow: canvasData.layers.find(r => r.position === canvasData.maskTarget) ?? null
-    readonly property var paintTarget: quickMask ? selectionLayer : paintsMask ? layerMask : null
+    readonly property var paintTarget: quickMask || lassoing ? selectionLayer : paintsMask ? layerMask : null
     readonly property alias layerMaskItem: layerMask
     readonly property alias selectionMask: selectionLayer
     // The view's keys are live (the `canvas-view` context): the pointer is over it, or its picture has the focus.
@@ -308,6 +312,19 @@ Item {
         if (row && canvasData.addMask(row.position))
             paintTheMask()
     }
+    // The selection from a layer's mask or alpha (#231), put in as `how` (replace, add, subtract); a rectangle gives way.
+    function selectFromLayer(position, fromMask, how) {
+        if (canvasData.selectFromLayer(position, fromMask, selectionLayer, how)) {
+            freeRect = noRect
+            selectionProblem = ""
+            selectionLast = true
+        }
+    }
+    // A lasso ended: it is the selection now (a free rectangle gives way) and Ctrl+Z takes it back.
+    function lassoDone() {
+        freeRect = noRect
+        selectionLast = true
+    }
     function useSelection() {
         const answer = canvasData.useSelection(selectionLayer)
         selectionProblem = answer.ok ? "" : answer.reason
@@ -331,6 +348,8 @@ Item {
     // The rectangle (the Region node's, or the free one) has an area; the painted selection has pixels.
     readonly property bool rectSelected: regionValid ? regionSet : hasFreeRect
     readonly property bool maskSelected: !selectionLayer.empty
+    // Undo and Redo go to the selection: Quick Mask is on, the lasso is the tool, or the selection just changed.
+    readonly property bool selectionUndoes: quickMask || ((lassoing || selectionLast) && (selectionLayer.canUndo || selectionLayer.canRedo))
     // What Deselect can clear now: the free rectangle, the node's area (when its numbers are not linked or compared), the painted selection.
     readonly property bool deselectable: (rectSelected && (!regionValid || regionEditable)) || maskSelected
     // Escape clears the selection when nothing else wants it: no drag, no run of the task bar or the Graph.
@@ -431,7 +450,7 @@ Item {
             return {enabled: transformable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
-        case "canvas-view.invert-selection": return {enabled: quickMask}
+        case "canvas-view.invert-selection": return {enabled: quickMask || maskSelected}
         case "canvas-view.selection-expand": case "canvas-view.selection-contract": case "canvas-view.selection-feather":
         case "canvas-view.selection-border": case "canvas-view.selection-smooth": case "canvas-view.selection-transform":
             return {enabled: canModifySelection}
@@ -447,8 +466,8 @@ Item {
         case "canvas-view.ungroup": return {enabled: canvasData.layersEditable && chosenRows.length > 0 && chosenRows.every(r => r.kind === "group")}
         case "canvas-view.merge-down": return {enabled: mergeable}
         case "canvas-view.layer-properties": return {enabled: canvasData.layersEditable && layersPanel.current !== null}
-        case "canvas-view.undo": return {enabled: !quickMask || selectionLayer.canUndo}
-        case "canvas-view.redo": return {enabled: !quickMask || selectionLayer.canRedo}
+        case "canvas-view.undo": return {enabled: !selectionUndoes || selectionLayer.canUndo}
+        case "canvas-view.redo": return {enabled: !selectionUndoes || selectionLayer.canRedo}
         // The keys the view handles by hand are shown as text (they are not bound twice).
         case "canvas-view.fit": return {enabled: shows, keys: ["Home"]}
         case "canvas-view.actual-size": return {enabled: shows, keys: ["1"]}
@@ -470,6 +489,7 @@ Item {
         case "canvas-view.tool-move": return tool("move")
         case "canvas-view.free-transform": return {enabled: freeTransform || (canvasData.layersEditable && layersPanel.current !== null), checkable: true, checked: freeTransform} // a group says why in words when it is asked
         case "canvas-view.tool-region": return tool("region")
+        case "canvas-view.tool-lasso": return tool("lasso")
         case "canvas-view.tool-brush": return {enabled: has, checkable: true, checked: root.tool === "brush"}
         case "canvas-view.tool-eraser": return tool("eraser")
         case "canvas-view.brush-swap": case "canvas-view.brush-smaller": case "canvas-view.brush-larger": return {enabled: brushing}
@@ -495,6 +515,7 @@ Item {
         case "canvas-view.tool-zoom": setTool("zoom"); break
         case "canvas-view.tool-move": setTool("move"); break
         case "canvas-view.free-transform": if (freeTransform) commitTransform(); else startFreeTransform(); break
+        case "canvas-view.tool-lasso": setTool("lasso"); break
         case "canvas-view.tool-region": if (compareOn) pictureView.nextMode(); else setTool("region"); break
         case "canvas-view.tool-brush": setTool("brush"); break
         case "canvas-view.tool-eraser": setTool("eraser"); break
@@ -534,7 +555,7 @@ Item {
         case "canvas-view.close": closeCanvas(); break
         case "canvas-view.select-all": selectAll(); break
         case "canvas-view.deselect": deselect(); break
-        case "canvas-view.invert-selection": if (quickMask) selectionLayer.invert(); break
+        case "canvas-view.invert-selection": if (quickMask || maskSelected) { selectionLayer.invert(); selectionLast = true } break
         case "canvas-view.use-selection": if (quickMask) useSelection(); break
         case "canvas-view.selection-expand": selectionDialogs.askModify("expand"); break
         case "canvas-view.selection-contract": selectionDialogs.askModify("contract"); break
@@ -559,12 +580,12 @@ Item {
         case "canvas-view.snap-to": snapToLines = !snapToLines; break
         case "canvas-view.clear-guides": guidesData.clearGuides(); break
         case "canvas-view.undo":
-            if (quickMask) selectionLayer.undo()
+            if (selectionUndoes) selectionLayer.undo()
             else if (paintsMask || canvasData.maskPending) canvasData.undo()
             else App.commands.trigger("edit.undo")
             break
         case "canvas-view.redo":
-            if (quickMask) selectionLayer.redo()
+            if (selectionUndoes) selectionLayer.redo()
             else if (paintsMask) canvasData.redo()
             else App.commands.trigger("edit.redo")
             break
@@ -587,7 +608,12 @@ Item {
     // elsewhere in the dialog); `escapeDeselects` is false while a drag or a run wants the key.
     Shortcut {
         sequence: "Escape"
-        enabled: root.keysHot && root.escapeDeselects
+        enabled: root.keysHot && root.lassoDragging
+        onActivated: brushPen.cancel()
+    }
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.keysHot && root.escapeDeselects && !root.lassoDragging
         onActivated: root.deselect()
     }
     // In a modal popup (the dialog) the window's shortcuts sleep: the view carries the keys of its own commands.
@@ -611,7 +637,8 @@ Item {
     }
     CanvasViewModel {
         id: canvasData
-        onCanvasChanged: { root.freeRect = root.noRect; selectionLayer.reset() }
+        onCanvasChanged: { root.freeRect = root.noRect; root.selectionLast = false; selectionLayer.reset() }
+        onPictureChanged: root.selectionLast = false
         maskLayer: layerMask
         onFollowChanged: root.freeRect = root.noRect
     }
@@ -623,6 +650,7 @@ Item {
         delayed: true
     }
     readonly property bool dragging: (regionFrame.item as CropFrame)?.dragging ?? false
+    readonly property bool lassoDragging: brushPen.lassoing
     // The Active canvas (#246): the canvas this view shows, once it is used (a press on the picture, the canvas changed, the
     // view opened). A window with no such object (a test's) has none.
     function reportActive() {
@@ -1408,6 +1436,7 @@ Item {
             Item { width: 1; height: 2 * root.u }
             ToolButton { toolName: "region"; command: "canvas-view.tool-region"; glyph: "square-dashed"; name: qsTr("Rectangle region: drag the area a run redraws") }
             Item { width: 1; height: 2 * root.u }
+            ToolButton { toolName: "lasso"; command: "canvas-view.tool-lasso"; glyph: "lasso-select"; name: qsTr("Lasso: draw the area freehand; Shift adds, Alt subtracts") }
             ToolButton { toolName: "brush"; command: "canvas-view.tool-brush"; glyph: "brush"; name: qsTr("Mask brush: paint a layer mask or the Quick Mask") }
             ToolButton { toolName: "eraser"; command: "canvas-view.tool-eraser"; glyph: "eraser"; name: qsTr("Mask eraser (X swaps with the brush)") }
             Item { width: 1; height: 2 * root.u }
@@ -1614,6 +1643,7 @@ Item {
         ownShortcuts: root.ownShortcuts
         onMaskTargeted: root.paintTheMask()
         onPropertiesRequested: position => fileDialogs.askProperties(position)
+        onSelectionRequested: (position, fromMask, how) => root.selectFromLayer(position, fromMask, how)
     }
     // The masks painted on the picture (#230): the targeted layer mask (its hidden part in red, while Overlay is on) and
     // the Quick Mask selection (red where painted). Under the region's frame, over the picture.
@@ -1640,7 +1670,7 @@ Item {
             objectName: "canvasViewSelection"
             anchors.fill: parent
             clip: true
-            visible: root.quickMask
+            visible: root.quickMask || root.maskSelected
             imageSize: canvasData.pictureSize
             originX: pictureView.imageX
             originY: pictureView.imageY
@@ -1697,7 +1727,11 @@ Item {
                 onPressed: pictureView.forceActiveFocus()
                 onChanging: r => root.liveRect = r
                 onDraggingChanged: if (!dragging) root.liveRect = null
-                onCommitted: r => root.regionValid ? canvasData.setRegion(r) : root.placeFree(r)
+                onCommitted: r => {
+                    if (root.maskSelected)
+                        selectionLayer.clear() // a rectangle drawn replaces a painted selection
+                    root.regionValid ? canvasData.setRegion(r) : root.placeFree(r)
+                }
             }
         }
         // The padded box: the region picker's, dashes on a dark halo (ContextBox.qml).
@@ -1856,10 +1890,11 @@ Item {
         anchors.fill: pictureView
         LayoutMirroring.enabled: false
         LayoutMirroring.childrenInherit: true
-        visible: root.brushing && pictureView.visible && !root.compareOn
+        visible: (root.brushing || root.lassoing) && pictureView.visible && !root.compareOn
         look: root.look
         viewer: pictureView
         target: root.paintTarget
+        selects: root.lassoing
         imageSize: canvasData.pictureSize
         tool: root.tool
         brushSize: root.brushSize
@@ -1871,7 +1906,9 @@ Item {
         onResize: (size, hardness) => { root.setSize(size); root.setHardness(hardness) }
         onPainted: {
             root.selectionProblem = ""
-            if (!root.quickMask)
+            if (root.lassoing)
+                root.lassoDone()
+            else if (!root.quickMask)
                 canvasData.maskPainted()
         }
     }
@@ -2014,7 +2051,7 @@ Item {
         onHead: root.shownIsHead
         regionLayer: canvasData.regionLayer
         rect: root.shownRegion
-        quickMask: root.quickMask ? selectionLayer : null
+        quickMask: root.maskSelected ? selectionLayer : null
         originX: pictureView.imageX
         originY: pictureView.imageY
         zoom: pictureView.imageScale

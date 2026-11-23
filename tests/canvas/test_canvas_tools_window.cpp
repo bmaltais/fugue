@@ -253,6 +253,48 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The lasso (#230): L picks it, a freehand drag around the picture's center selects it (the mask Quick Mask paints, no revision),
+    // Shift adds, Alt subtracts, Ctrl+Z takes it back, Escape drops a drag; Select > Inverse and Deselect work on it.
+    void theLassoSelectsFreehandAndTheSelectMenuWorksOnIt() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QVERIFY(find(app.window, "canvasViewTool-lasso")->property("tip").toString().endsWith("(L)"));
+        const QPoint at = hoverPicture(app);
+        key(app, Qt::Key_L);
+        QTRY_COMPARE(view(app)->property("tool").toString(), QString("lasso"));
+        const auto lasso = [&](int half, Qt::KeyboardModifiers mods, QPoint center) {
+            const QPoint corners[] = {{-half, -half}, {half, -half}, {half, half}, {-half, half}};
+            QTest::mousePress(app.window, Qt::LeftButton, mods, center + corners[0]);
+            for (int i = 1; i <= 4; ++i) {
+                const QPoint a = center + corners[i - 1], b = center + corners[i % 4];
+                for (int t = 1; t <= 4; ++t)
+                    QTest::mouseMove(app.window, a + (b - a) * t / 4);
+            }
+            QTest::mouseRelease(app.window, Qt::LeftButton, mods, center + corners[0]);
+        };
+        lasso(20, {}, at);
+        QTRY_COMPARE(selection(app)->valueAt(128, 128), 255);
+        QCOMPARE(revisions(), 1); // a selection is not a revision
+        QVERIFY(view(app)->property("maskSelected").toBool());
+        lasso(8, Qt::AltModifier, at); // Alt takes a hole out of it
+        QTRY_COMPARE(selection(app)->valueAt(128, 128), 0);
+        key(app, Qt::Key_Z, Qt::ControlModifier); // one step back: the selection, not the canvas
+        QTRY_COMPARE(selection(app)->valueAt(128, 128), 255);
+        QCOMPARE(revisions(), 1);
+        QVERIFY(app.commands.trigger("canvas-view.invert-selection"));
+        QTRY_COMPARE(selection(app)->valueAt(128, 128), 0);
+        QVERIFY(app.commands.trigger("canvas-view.deselect"));
+        QTRY_VERIFY(!view(app)->property("maskSelected").toBool());
+        QTest::mousePress(app.window, Qt::LeftButton, {}, at); // Escape drops a drag in progress
+        QTest::mouseMove(app.window, at + QPoint(30, 0));
+        QTest::mouseMove(app.window, at + QPoint(30, 30));
+        key(app, Qt::Key_Escape);
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, at + QPoint(30, 30));
+        QVERIFY(!view(app)->property("maskSelected").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #281: Qt gives a disabled item no hover, so a disabled button's "why is this off" tip never showed. Use selection is
     // off with no Canvas Region node in the graph; resting the pointer on it shows its tip, a click on it does nothing,
     // and leaving it hides the tip.
