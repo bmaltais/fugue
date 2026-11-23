@@ -351,8 +351,13 @@ public:
 
         if (name.isEmpty())
             name = nextFillName(baseTree.value());
+        if (const QString suffix = context.input(QStringLiteral("suffix")).text().trimmed(); !suffix.isEmpty())
+            name += QLatin1Char(' ') + suffix;
         canvas::LayerRecord layer;
         layer.name = name;
+        // Hidden when asked (variations 2 to N of a Generate); a workflow older than 1.5.0 has no input: shown.
+        const QJsonValue visible = context.input(QStringLiteral("visible")).json();
+        layer.visible = !visible.isBool() || visible.toBool();
         layer.producer = QStringLiteral("canvas-write:") + context.node;
         layer.created = isoTime(utcNow());
         // The redrawn picture whole, with the blend as its layer mask (#226), or baked into its alpha as before.

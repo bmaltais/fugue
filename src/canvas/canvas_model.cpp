@@ -923,6 +923,12 @@ const InputSpec *CanvasModel::inputSpec(const QString &node, const QString &inpu
     return nullptr;
 }
 
+QVariantMap CanvasModel::inputPort(const QString &node, const QString &input) const {
+    const int r = rowOf(node);
+    const Port *port = findPort(node, input, false);
+    return r < 0 || !port ? QVariantMap() : portMap(m_rows[size_t(r)], *port);
+}
+
 const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QString &port, bool output) const {
     const int r = rowOf(node);
     if (r < 0)

@@ -437,11 +437,12 @@ the foot of the picture in a small area):
 - the **prompt**: type what should be in the selection and press Enter (Ctrl+Enter is still Run of the Graph). Up and
   Down in an empty field bring back earlier prompts; the clock button lists the last 20;
 - **Generate**, which becomes **Cancel** while it runs (Escape too); a cancelled run adds nothing;
-- `⋯`: **Edit workflow** (opens the chosen action's graph as a new tab of the Graph and shows the Graph; Save asks where,
-  and a bundled action is never written; from the File > Canvas… dialog, which hides the Graph, the dialog closes) and
-  **Clear prompt history…** (it asks first).
+- **Advanced**: a popover with the action's other settings (see below), **Count** and **Edit workflow** (opens the chosen
+  action's graph as a new tab of the Graph and shows the Graph; Save asks where, and a bundled action is never written; from
+  the File > Canvas… dialog, which hides the Graph, the dialog closes);
+- `⋯`: **Clear prompt history…** (it asks first).
 
-While it runs, the selection's outline moves and the bar says "Generating… 45%". With the Sampler preview setting on,
+While it runs, the selection's outline moves and the bar says "Generating… 45%" ("Generating 2 of 3… 45%" with Count 3). With the Sampler preview setting on,
 the sampler's step frames also show inside the selection (clipped to it, over the dimmed outline) and fade into the layer when it lands. The result is a layer on the latest
 version, named from the prompt, with the selection's soft edge as its layer mask; Undo takes it back. Generate works on
 the latest version only: on an older step the bar says so and offers **Back to latest**. When something goes wrong the
@@ -467,7 +468,7 @@ model, FLUX.2 Klein 4B Q8, 4 steps, as Generative fill):
 
 - **Refine** redraws the selection lightly, keeping its shapes and colours (strength 0.7: a noise level, 0.55 polishes,
   0.9 restyles). The prompt is optional: left empty it asks to refine the details. The strength is the action's Advanced
-  input (the Advanced popover comes later; until then it is the workflow's value, which Edit workflow changes).
+  input, offered as **Light** (0.55), **Default** (0.7) or **Restyle** (0.9).
 - **Remove** takes out what is selected and fills it from its surroundings: no prompt, a fixed instruction, the selection
   blurred into the surroundings first and at least 128 px of them in view. For hard removals a LaMa pack
   ([Remove Object](../examples/packs/io.github.bmaltais.fugue-remove-object)) can do that first fill.
@@ -477,6 +478,20 @@ model, FLUX.2 Klein 4B Q8, 4 steps, as Generative fill):
   pixels as a layer called "Expanded area") and then fills the new strip plus 32 px of the old picture, with 256 px of the
   picture beside it in view. One side per run; the prompt is optional (a description of the whole scene helps). If the run
   fails or is cancelled the canvas stays grown: Undo.
+
+### Advanced and Count
+
+**Advanced** (next to `⋯`) opens a popover for the action that is chosen. It lists the inputs the action binds that the bar
+has no field for (Strength, Model, Steps and so on), each drawn as it is in the Graph: the drag number, the model picker with
+its Download rows. An action can also offer a setting as a few words (Refine's Strength); those are buttons. What you set
+stays with the action and the project until **Reset** puts the action's own values back; the action's file is never changed.
+**Count** (1 to 4, for an action with a seed) makes that many layers from one Generate: the same picture and selection, a
+different seed each (a fixed seed counts up). The first layer is shown, the others land hidden, named "<name> (2 of 3)"; show
+one with its eye in the Layers panel. Cancel stops all of them; a run that fails ends the rest. The Region and the text encoding are
+read from the cache after the first run, so only the sampling is repeated. The `‹ 2 of 3 ›` strip is a later step.
+
+An action author puts a word setting in the block with `choices` and `choice_values` (the number each word stands for, for an
+input whose targets take a number) and a `default` that is one of the words; see the [design](canvas-actions-design.md#12-minimal-schema).
 
 ## Sharing a canvas
 

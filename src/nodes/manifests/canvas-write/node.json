@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/canvas-write",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "retired_inputs": ["candidate"],
   "name": "Canvas Write",
   "description": "Put a result on a canvas as a new layer, straight onto the head: a new revision is made from the one Canvas Region read and the head moves to it, so the layer is there to keep, hide or delete (Undo removes it too). When something else moved the head while this ran, the layer is added onto the head as it is now (layers only add), and the node reports the head it landed on. When that is impossible (the canvas changed size while the run was going) the run says so and writes nothing. The picture is resized to the stitch's box and the new layer holds it whole, with a layer mask that blends it in: the mask softened outward by Blend pixels, as Stitch does (turn Bake the blend on to put the blend into the layer's own pixels instead, as before). The layer is named from the prompt that made the picture, else Fill 1, Fill 2 and so on.",
@@ -23,7 +23,11 @@
     {"name": "bake", "type": "boolean", "label": "Bake the blend into the layer", "default": false, "advanced": true,
      "description": "Off: the layer is the redrawn picture whole and the blend is its layer mask, which can be turned off or edited later. On: the blend is put into the layer's pixels and there is no layer mask (the composite is the same)."},
     {"name": "name", "type": "text", "label": "Layer name", "default": "Fill", "widget": "line",
-     "description": "The new layer's name. Fill (the default) or empty names it from the prompt upstream (the Text Encode that made the picture), else Fill 1, Fill 2 and so on."}
+     "description": "The new layer's name. Fill (the default) or empty names it from the prompt upstream (the Text Encode that made the picture), else Fill 1, Fill 2 and so on."},
+    {"name": "visible", "type": "boolean", "label": "Show the layer", "default": true, "advanced": true,
+     "description": "Off: the layer lands hidden (the task bar's variations 2 to N), to be shown by its eye."},
+    {"name": "suffix", "type": "text", "label": "Name suffix", "default": "", "widget": "line", "advanced": true,
+     "description": "Put after the layer's name, with a space (the task bar's \"(2 of 3)\" for variations)."}
   ],
   "outputs": [
     {"name": "canvas", "type": "fugue/canvas", "label": "Canvas", "description": "The revision that holds the new layer."},

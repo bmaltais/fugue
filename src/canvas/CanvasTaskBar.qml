@@ -13,7 +13,8 @@ import "widgets"
 // rectangle on the picture, or a Quick Mask selection while Quick Mask is on), and while its runs go or its last word
 // stands. Simple state, from the start: the action menu (Auto, then the actions; in a narrow area its glyph alone), the
 // prompt (Enter generates; Up and Down in an empty field step through the earlier prompts; the clock opens the last 20),
-// Generate (the one primary; Cancel while this bar's runs wait or go, Escape too), and ⋯ (Edit workflow, Clear prompt history…). Under
+// Generate (the one primary; Cancel while this bar's runs wait or go, Escape too), Advanced (the popover of
+// CanvasTaskAdvanced.qml: the action's other inputs, Count, Edit workflow) and ⋯ (Clear prompt history…). Under
 // them, only when there is something to say: the progress ("Generating… 45%"), what is missing and its Download, the
 // latest version to go back to, or the last error in plain words. While a run goes the selection's outline shimmers
 // (marching dashes in the accent). Everything it does is App.canvasActions (canvas/canvas_actions.h).
@@ -189,10 +190,14 @@ Item {
             workflowOpened()
     }
     function more() {
-        openMenu(moreButton, [{text: qsTr("Edit workflow"), value: "edit", enabled: actions !== null && (current.id ?? "") !== "",
-                               note: qsTr("Open %1 as a workflow in the Graph").arg(current.name ?? "")},
-                              {text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
-                 value => { if (value === "edit") bar.editWorkflow(); else if (value === "clear") clearAsk.open() }, 48, "canvasTaskMoreMenu")
+        openMenu(moreButton, [{text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
+                 value => { if (value === "clear") clearAsk.open() }, 48, "canvasTaskMoreMenu")
+    }
+    function advanced() {
+        if (advancedPopover.opened)
+            advancedPopover.close()
+        else
+            advancedPopover.openFor(advancedButton)
     }
 
     // The shimmer on the selection while it is redrawn: the accent's dashes marching on the dark halo of the frame.
@@ -375,6 +380,18 @@ Item {
                     onTapped: bar.actions.cancel()
                 }
                 ViewButton {
+                    id: advancedButton
+                    objectName: "canvasTaskAdvancedButton"
+                    look: bar.look
+                    glyph: bar.narrow ? "settings" : ""
+                    text: bar.narrow ? "" : qsTr("Advanced")
+                    flat: true
+                    current: advancedPopover.opened
+                    accented: false
+                    tip: qsTr("Advanced: the action's other settings, Count and Edit workflow")
+                    onTapped: bar.advanced()
+                }
+                ViewButton {
                     id: moreButton
                     objectName: "canvasTaskMore"
                     look: bar.look
@@ -413,8 +430,10 @@ Item {
                 objectName: "canvasTaskStatusRow"
                 Layout.fillWidth: true
                 spacing: 2 * bar.u
-                readonly property string word: bar.busy ? (bar.actions.running ? (bar.actions.progress >= 0 ? qsTr("Generating… %1%").arg(Math.round(bar.actions.progress * 100))
-                                                                                                             : qsTr("Generating…"))
+                readonly property string of: bar.busy && bar.actions.runTotal > 1 ? qsTr("%1 of %2").arg(bar.actions.runNumber).arg(bar.actions.runTotal) : ""
+                readonly property string word: bar.busy ? (bar.actions.running ? (bar.actions.progress >= 0 ? (of !== "" ? qsTr("Generating %1… %2%").arg(of).arg(Math.round(bar.actions.progress * 100))
+                                                                                                                       : qsTr("Generating… %1%").arg(Math.round(bar.actions.progress * 100)))
+                                                                                                             : of !== "" ? qsTr("Generating %1…").arg(of) : qsTr("Generating…"))
                                                                                 : qsTr("Waiting for the GPU…"))
                                               : bar.actions && bar.actions.downloading ? qsTr("Downloading %1").arg(bar.actions.downloadText)
                                               : bar.hasWord && bar.actions.error !== "" ? bar.actions.error
@@ -457,6 +476,14 @@ Item {
                 }
             }
         }
+    }
+
+    CanvasTaskAdvanced {
+        id: advancedPopover
+        look: bar.look
+        actions: bar.actions
+        current: bar.current
+        onEditWorkflow: bar.editWorkflow()
     }
 
     // Clear prompt history…: asks first, Keep highlighted (the safe answer, D8).

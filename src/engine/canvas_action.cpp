@@ -103,6 +103,28 @@ ActionInput parseInput(const QJsonValue &json, int index, Errors &errors) {
             errors << invalid(what + QStringLiteral(" has choices that are not a list of words."));
         input.choices = list;
     }
+    if (const QJsonValue values = object.value(QLatin1String("choice_values")); !values.isUndefined()) {
+        QList<double> list;
+        bool numbers = values.isArray();
+        for (const QJsonValue &value : values.toArray()) {
+            numbers = numbers && value.isDouble();
+            list << value.toDouble();
+        }
+        if (!numbers) {
+            errors << invalid(what + QStringLiteral(" has choice_values that are not a list of numbers."));
+        } else if (!input.choices) {
+            errors << invalid(what + QStringLiteral(" has choice_values but no choices to give them to."));
+        } else if (input.choices->size() != list.size()) {
+            errors << invalid(QStringLiteral("%1 has %2 choices but %3 choice_values: each choice needs its number.")
+                                  .arg(what).arg(input.choices->size()).arg(list.size()));
+        } else if (QSet<QString>(input.choices->cbegin(), input.choices->cend()).size() != input.choices->size()) {
+            errors << invalid(what + QStringLiteral(" names a choice twice."));
+        } else {
+            input.choiceValues = list;
+            if (!input.defaultValue.isString() || !input.choices->contains(input.defaultValue.toString()))
+                errors << invalid(what + QStringLiteral(" has choice_values, so its `default` must be one of its choices."));
+        }
+    }
     return input;
 }
 
@@ -277,6 +299,9 @@ Result<ActionGraph> checkAction(const Action &action, const Document &document, 
                 continue;
             }
             seen = spec->type.type;
+            if (input.choiceValues && (spec->type.type.id != QLatin1String("number") || spec->type.list))
+                errors << invalid(QStringLiteral("The %1 has choice_values, but %2 takes %3, not a number.")
+                                      .arg(describe(input), target.toString(), spec->type.toString()));
             if (!input.role.isEmpty()) {
                 const QString want = roleType(input.role);
                 const bool fits = want == QLatin1String("resource") ? registry.portKind(spec->type.type) == PortKind::Resource
@@ -342,6 +367,14 @@ Result<Document> bindAction(const Document &document, const Action &action, cons
             value = input.defaultValue;
         if (value.isUndefined())
             continue; // the workflow's own value
+        if (input.choiceValues) {
+            // A word of the choices stands for its number.
+            const qsizetype at = input.choices->indexOf(value.toString());
+            if (at < 0)
+                return invalid(QStringLiteral("\"%1\" is not one of the choices of the action's %2 (%3).")
+                                   .arg(value.toString(), describe(input), input.choices->join(QStringLiteral(", "))));
+            value = input.choiceValues->at(at);
+        }
         if (value.isDouble() && (input.min || input.max)) {
             double v = value.toDouble();
             if (input.min)
@@ -352,6 +385,13 @@ Result<Document> bindAction(const Document &document, const Action &action, cons
         }
         for (const PortRef &target : input.targets)
             setLiteral(bound.graph.nodes[target.node], target.port, value);
+    }
+    for (const QString &write : graph.writes) {
+        Node &node = bound.graph.nodes[write];
+        if (!binding.suffix.isEmpty())
+            setLiteral(node, QStringLiteral("suffix"), binding.suffix);
+        if (binding.hidden)
+            setLiteral(node, QStringLiteral("visible"), false);
     }
     return bound;
 }

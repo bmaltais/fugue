@@ -28,6 +28,19 @@
 // the person's own and a project's first; nothing else indexes them), then the files compiled into Fugue, which a template
 // of the same id replaces. A plain template is not an action and never hides one.
 //
+// The Advanced popover (slice 4, design 4 and 1.4): advanced(id) lists the inputs the bar has no field of its own for (the
+// strength, the model, steps and the plain inputs; not the prompt, seed or layer) and loads the action's workflow into `form`,
+// a model of its own that no tab shows, so the popover draws each input with the Graph's InputWidget (the model picker with
+// its Download rows, the drag number, the choice) over the same WidgetEdit. An input of the block with `choice_values` is a
+// word of its choices (Refine: Light, Default, Restyle) and is set with setChoice(). What the person changes is remembered per
+// action and per root in canvas-actions.json (state folder, atomic writes, never inherited by a project) and put into every
+// Generate's copy; the file of the action is never written. Count (variations(), 1 to 4) is remembered the same way.
+//
+// Count N (design 5): one Generate is N runs queued one after the other, all reading the head that was shown, with the
+// seeds of one Generate (random each, or fixed s, s+1, ...). Their Region and Text Encode are cache hits. Each lands a layer
+// named "<name> (n of N)"; variations 2 to N land hidden (Canvas Write's `visible` and `suffix`). Cancel ends all of them; a
+// run that fails ends the rest. runNumber and runTotal say which one is going.
+//
 // Prompt history (design 4, decision 8): per action, newest first, at most 200, in the root's state folder
 // (canvas-prompts.json, atomic writes, never inherited by a project); clearHistory() empties it.
 
@@ -43,6 +56,7 @@
 
 #include <optional>
 
+#include "canvas/canvas_model.h"
 #include "canvas/mask_layer.h"
 #include "engine/canvas_action.h"
 #include "engine/canvas_batch.h"
@@ -81,6 +95,11 @@ class CanvasActions : public QObject {
     Q_PROPERTY(QVariantMap liveBox READ liveBox NOTIFY liveChanged)
     Q_PROPERTY(QVariantMap liveClip READ liveClip NOTIFY liveChanged)
     Q_PROPERTY(bool liveFade READ liveFade NOTIFY liveChanged)
+    // Which run of the Generate is going or next ("Generating 2 of 3") and how many it made (1 when Count is 1), 0 when idle.
+    Q_PROPERTY(int runNumber READ runNumber NOTIFY stateChanged)
+    Q_PROPERTY(int runTotal READ runTotal NOTIFY stateChanged)
+    // The model the Advanced popover's InputWidgets edit (see advanced()).
+    Q_PROPERTY(CanvasModel *form READ form CONSTANT)
     // A download of an action's models is under way, and its line ("flux-2-klein-4b-Q8_0.gguf, 1 of 3 · 1.2 of 8.9 GB").
     Q_PROPERTY(bool downloading READ downloading NOTIFY downloadsChanged)
     Q_PROPERTY(QString downloadText READ downloadText NOTIFY downloadsChanged)
@@ -90,12 +109,15 @@ public:
     CanvasActions(RunService *service, const Registry *registry, Workflows *workflows, QObject *parent = nullptr);
 
     static constexpr int historyLimit = 200;
+    static constexpr int maxVariations = 4;
     static QString bundledRoot() { return QStringLiteral(":/fugue/actions"); }
 
     // The folders of action files (*.fugue), in order; an id found twice is the first one's. Default: bundledRoot().
     void setRoots(const QStringList &roots);
     // canvas-prompts.json; default <stateDir>/canvas-prompts.json.
     void setHistoryPath(const QString &path);
+    // canvas-actions.json; default <stateDir>/canvas-actions.json.
+    void setSettingsPath(const QString &path);
 
     QVariantList actions() const { return m_list; }
     bool busy() const { return !m_runs.isEmpty(); }
@@ -109,6 +131,9 @@ public:
     QString errorAction() const { return m_errorAction; }
     QString notice() const { return m_notice; }
     QString lastRun() const { return m_lastRun; }
+    CanvasModel *form() const { return m_form; }
+    int runNumber() const;
+    int runTotal() const { return busy() ? int(m_order.size()) : 0; }
     QString liveFrame() const { return m_liveFrame; }
     QVariantMap liveBox() const { return m_liveBox; }
     QVariantMap liveClip() const { return m_liveClip; }
@@ -120,6 +145,7 @@ public:
     // height} (canvas pixels; with `selection` the selection's bounds), selection (a stored selection's hash), seed (a
     // number: fixed; none: random), layer (the name of one layer Canvas Region reads instead of the whole picture, #226)}. {ok, run, action, reason}: `reason` (also `error`) says in words why nothing started.
     Q_INVOKABLE QVariantMap generate(const QVariantMap &request);
+    // `count` (1 to 4): the runs of this Generate; none: the action's remembered Count. An action with no seed role makes one.
     // Ends this bar's runs, the waiting ones first.
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void clearError();
@@ -142,6 +168,22 @@ public:
     // The action to run over a folder (canvas/canvas_batch.h, #250): a copy of the listed action `id`, or why it cannot be
     // batched (it is broken, it needs a crop frame, or its models are not on this machine: the code is then `model_missing`).
     Result<canvas::BatchAction> batchAction(const QString &id) const;
+
+    // The Advanced popover's rows for an action ("auto" is the one Auto falls back to): [{key, label, kind ("widget": an
+    // InputWidget of `form` at node.input; "choice": a word of `choices`), node, input, choices, value (the word), note}].
+    // Loads `form` with the action's workflow and the remembered values. Empty for an action that is broken or has none.
+    Q_INVOKABLE QVariantList advanced(const QString &id);
+    // The word a choice input stands at: the remembered one, else the block's default; empty for an input that is none.
+    Q_INVOKABLE QString choiceOf(const QString &id, const QString &key) const;
+    // A choice input's word, remembered; the default word forgets it. An unknown word is refused: false.
+    Q_INVOKABLE bool setChoice(const QString &id, const QString &key, const QString &word);
+    // Forgets the remembered Advanced values of the action (not Count); the form reloads.
+    Q_INVOKABLE void resetAdvanced(const QString &id);
+    // Whether the action has remembered Advanced values.
+    Q_INVOKABLE bool hasAdvancedChanges(const QString &id) const;
+    // Count: 1 to 4, remembered per action; 1 for an action with no seed role (the runs would come out the same).
+    Q_INVOKABLE int variations(const QString &id) const;
+    Q_INVOKABLE void setVariations(const QString &id, int count);
 
     Q_INVOKABLE QStringList history(const QString &action) const;
     Q_INVOKABLE void clearHistory();
@@ -183,13 +225,27 @@ private:
     void setError(const QString &line, const QString &code, const QString &action = {});
     QVariantMap refuse(const QString &why);
     void remember(const QString &action, const QString &prompt);
+    QJsonObject readSettings() const;
+    void writeSettings(const QJsonObject &actions);
+    QJsonObject settingsOf(const QString &id) const; // {values, count}
+    void storeSettings(const QString &id, const QJsonObject &entry);
+    QString resolved(const QString &id) const; // "auto" and "" as the action Auto falls back to
+    // The action's workflow with the remembered values put in (a choice input's word stays a word).
+    Document withRemembered(const Entry &entry, const QJsonObject &values) const;
+    void syncForm();
+    // The inputs of the block the popover lists.
+    static bool inPopover(const canvas::ActionInput &input);
     QJsonObject readHistory() const;
 
     RunService *m_service;
     const Registry *m_registry;
     Workflows *m_workflows;
     QStringList m_roots;
-    QString m_historyPath;
+    QString m_historyPath, m_settingsPath;
+    CanvasModel *m_form = nullptr; // the popover's own, owned by this
+    QString m_formAction;
+    bool m_loadingForm = false;
+    QStringList m_order; // the runs of the last Generate, in order
     QList<Entry> m_entries;
     QVariantList m_list;
 

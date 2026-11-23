@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import Fugue
 
 // The live step frame of a canvas action's run, inside the selection (docs/canvas-actions-design.md, "Live preview in the
 // selection"): the Sampler's newest frame is a picture of the padded context box the Region cut, so it is drawn on that

@@ -143,6 +143,22 @@ private slots:
         QTest::newRow("twice") << change([](QJsonObject &b) {
             b.insert("inputs", QJsonArray{QJsonObject{{"role", "seed"}, {"targets", QJsonArray{"a.b"}}}, QJsonObject{{"role", "seed"}, {"targets", QJsonArray{"a.c"}}}});
         }) << "twice";
+        const auto strength = [&](const QJsonObject &fields) {
+            QJsonObject input{{"role", "strength"}, {"targets", QJsonArray{"sample.denoise"}}};
+            for (auto it = fields.begin(); it != fields.end(); ++it)
+                input.insert(it.key(), it.value());
+            return change([&](QJsonObject &b) { b.insert("inputs", QJsonArray{input}); });
+        };
+        const QJsonArray words{"Light", "Default", "Restyle"};
+        QTest::newRow("values without choices") << strength({{"choice_values", QJsonArray{1, 2}}, {"default", "a"}}) << "no choices to give them to";
+        QTest::newRow("values not numbers") << strength({{"choices", words}, {"choice_values", QJsonArray{0.5, "x", 0.9}}, {"default", "Default"}})
+                                            << "not a list of numbers";
+        QTest::newRow("values not a list") << strength({{"choices", words}, {"choice_values", 0.5}, {"default", "Default"}}) << "not a list of numbers";
+        QTest::newRow("too few values") << strength({{"choices", words}, {"choice_values", QJsonArray{0.55, 0.7}}, {"default", "Default"}})
+                                        << "3 choices but 2 choice_values";
+        QTest::newRow("twice choice") << strength({{"choices", QJsonArray{"A", "A"}}, {"choice_values", QJsonArray{1, 2}}, {"default", "A"}}) << "names a choice twice";
+        QTest::newRow("default not a choice") << strength({{"choices", words}, {"choice_values", QJsonArray{0.55, 0.7, 0.9}}, {"default", 0.7}})
+                                              << "`default` must be one of its choices";
         QTest::newRow("selection") << change([](QJsonObject &b) { b.insert("selection", "maybe"); }) << "required, optional or bounds";
     }
     void aMalformedBlockSaysWhatIsWrong() {
@@ -152,6 +168,44 @@ private slots:
         QVERIFY(!parsed);
         QCOMPARE(parsed.error().code, QStringLiteral("action_invalid"));
         QVERIFY2(parsed.error().message.contains(words), qPrintable(parsed.error().message));
+    }
+
+    // choice_values (slice 4): a word of the choices stands for a number; the binding puts the number in the targets.
+    void aChoiceStandsForItsNumber() {
+        const QJsonArray words{"Light", "Default", "Restyle"};
+        QJsonObject workflow = withAction(fillWorkflow(), [&](QJsonObject &a) {
+            a.insert("inputs", QJsonArray{QJsonObject{{"role", "prompt"}, {"targets", QJsonArray{"encode.prompt"}}},
+                                          QJsonObject{{"role", "strength"}, {"targets", QJsonArray{"sample.denoise"}}, {"choices", words},
+                                                      {"choice_values", QJsonArray{0.55, 0.7, 0.9}}, {"default", "Default"}, {"section", "Advanced"}}});
+        });
+        const Document document = load(workflow);
+        const Result<std::optional<Action>> action = actionOf(document);
+        QVERIFY2(action, qPrintable(firstMessage(action.errors())));
+        QCOMPARE(*(*action)->input("strength")->choiceValues, (QList<double>{0.55, 0.7, 0.9}));
+        const Result<ActionGraph> graph = checkAction(**action, document, m_registry);
+        QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
+        const auto denoise = [&](const QJsonValue &word) {
+            QMap<QString, QJsonValue> values{{"prompt", "x"}};
+            if (!word.isUndefined())
+                values.insert("strength", word);
+            const Result<Document> bound = bindAction(document, **action, *graph,
+                                                      ActionBinding{"c1", "sha256:" + QString(64, 'a'), RouteRect{0, 0, 64, 64}, {}, {}, {}, values, {}});
+            return bound ? QString::number(bound->graph.nodes.value("sample").inputs.value("denoise").literal().toDouble()) : firstMessage(bound.errors());
+        };
+        QCOMPARE(denoise(QJsonValue::Undefined), QStringLiteral("0.7")); // the default word
+        QCOMPARE(denoise("Light"), QStringLiteral("0.55"));
+        QCOMPARE(denoise("Restyle"), QStringLiteral("0.9"));
+        QVERIFY2(denoise("Wild").contains("\"Wild\" is not one of the choices"), qPrintable(denoise("Wild")));
+        // A target that is not a number cannot take one.
+        const Document text = load(withAction(fillWorkflow(), [&](QJsonObject &a) {
+            a.insert("inputs", QJsonArray{QJsonObject{{"name", "tone"}, {"targets", QJsonArray{"encode.prompt"}}, {"choices", QJsonArray{"A"}},
+                                                      {"choice_values", QJsonArray{1}}, {"default", "A"}}});
+        }));
+        const Result<std::optional<Action>> textAction = actionOf(text);
+        QVERIFY(textAction);
+        const Result<ActionGraph> textGraph = checkAction(**textAction, text, m_registry);
+        QVERIFY(!textGraph);
+        QVERIFY2(firstMessage(textGraph.errors()).contains("not a number"), qPrintable(firstMessage(textGraph.errors())));
     }
 
     void aLaterFormatNeedsANewerFugue() {
@@ -442,7 +496,14 @@ private slots:
         QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
         QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
         QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), strength);
-        QCOMPARE((*action)->input("strength")->defaultValue.toDouble(), strength);
+        if (const ActionInput *input = (*action)->input("strength"); input && input->choiceValues) {
+            // Refine: Light, Default or Restyle, the Default word standing for the number the file holds.
+            QCOMPARE(*input->choices, (QStringList{"Light", "Default", "Restyle"}));
+            QCOMPARE(*input->choiceValues, (QList<double>{0.55, 0.7, 0.9}));
+            QCOMPARE(input->choiceValues->at(input->choices->indexOf(input->defaultValue.toString())), strength);
+        } else {
+            QCOMPARE(input->defaultValue.toDouble(), strength);
+        }
         QVERIFY(nodes.value("region").inputs.value("canvas").literal().toString().isEmpty());
         for (const bool withPrompt : {false, true}) {
             QMap<QString, QJsonValue> values{{"seed", 7}};

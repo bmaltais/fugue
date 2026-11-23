@@ -43,6 +43,17 @@ inline const QByteArray kTestFill = R"({
   }}
 })";
 
+// Test fill with Advanced inputs (slice 4): a Strength slider (default 0.9), a Style choice that stands for a Guidance
+// number (Light 2, Default 5, Restyle 9), and a plain Steps input.
+inline const QByteArray kTestAdvanced = QByteArray(kTestFill)
+    .replace("Test fill", "Test advanced")
+    .replace(R"({"role": "seed", "targets": ["gen.seed"]}])",
+             R"({"role": "seed", "targets": ["gen.seed"]},
+                {"role": "strength", "targets": ["gen.strength"], "default": 0.9, "min": 0.1, "max": 1, "section": "Advanced"},
+                {"name": "style", "label": "Style", "targets": ["gen.guidance"], "choices": ["Light", "Default", "Restyle"],
+                 "choice_values": [2, 5, 9], "default": "Default", "section": "Advanced"},
+                {"name": "steps", "label": "Steps", "targets": ["gen.steps"], "section": "Advanced"}])");
+
 // Its block names a node the graph lacks.
 inline const QByteArray kBroken = R"({
   "fugue": 1,
@@ -123,6 +134,7 @@ struct Rig {
         actionsDir = root + "/actions";
         QDir().mkpath(actionsDir);
         writeFile(actionsDir + "/test-fill.fugue", kTestFill);
+        writeFile(actionsDir + "/test-advanced.fugue", kTestAdvanced);
         writeFile(actionsDir + "/broken.fugue", kBroken);
         // The template library is the test's own (empty), never the repository's or the owner's.
         templatesDir = root + "/templates";
@@ -131,6 +143,7 @@ struct Rig {
         actions = std::make_unique<CanvasActions>(service.get(), &app.registry, &app.workflows);
         actions->setRoots({CanvasActions::bundledRoot(), actionsDir});
         actions->setHistoryPath(root + "/state/canvas-prompts.json");
+        actions->setSettingsPath(root + "/state/canvas-actions.json");
         app.runs = runs.get();
         app.canvasActions = actions.get();
     }
