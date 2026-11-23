@@ -326,6 +326,36 @@ private slots:
         QVERIFY(notes.first().contains("Folder"));
     }
 
+    void aGroupWithAnAdjustmentLayerInsideIsFlattenedButAPlainOneIsKept() {
+        RawLayer divider;
+        divider.name = "</Layer group>", divider.pixels = false, divider.tags = lsct(3);
+        RawLayer child;
+        child.name = "Child";
+        RawLayer adjust;
+        adjust.name = "Curves", adjust.pixels = false, adjust.tags = block("curv", QByteArray(4, '\0'));
+        RawLayer folder;
+        folder.name = "Folder", folder.pixels = false, folder.tags = lsct(1);
+        const Result<PsdImported> plain = paintFromPsdSettled(rawPsd({divider, child, folder}));
+        QVERIFY(plain);
+        QCOMPARE(plain->layers.size(), size_t(1));
+        QVERIFY(plain->layers[0].group);
+        QCOMPARE(plain->layers[0].children.size(), size_t(1));
+        QVERIFY(plain.warnings().isEmpty());
+        const Result<PsdImported> lossy = paintFromPsdSettled(rawPsd({divider, child, adjust, folder}));
+        QVERIFY(lossy);
+        QCOMPARE(lossy->layers.size(), size_t(1));
+        QVERIFY(!lossy->layers[0].group); // the group lost a layer: flattened, and said
+        QVERIFY(notesOf(lossy.warnings()).join("\n").contains("Folder"));
+        // an unmatched folder or divider is said, never silent
+        const Result<PsdImported> stray = paintFromPsdSettled(rawPsd({child, folder}));
+        QVERIFY(stray);
+        QVERIFY(!stray.warnings().isEmpty());
+        const Result<PsdImported> open = paintFromPsdSettled(rawPsd({divider, child}));
+        QVERIFY(open);
+        QCOMPARE(open->layers.size(), size_t(1));
+        QVERIFY(!open.warnings().isEmpty());
+    }
+
     void whatFugueLacksIsListed() {
         RawLayer adjust;
         adjust.name = "Curves 1", adjust.pixels = false, adjust.tags = block("curv", QByteArray(4, '\0'));

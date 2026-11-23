@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
 
@@ -344,37 +345,62 @@ bool looksLikePsd(QByteArrayView bytes) { return bytes.startsWith("8BPS"); }
 
 // ---- export ------------------------------------------------------------------------------------------------
 Result<PsdExported> paintToPsd(const PaintDocument &document) {
-    const int width = document.width(), height = document.height();
+    PsdImage image;
+    image.width = document.width();
+    image.height = document.height();
+    PsdExported skipped;
+    for (int position = 0; position < document.layerCount(); ++position) {
+        const LayerInfo info = document.layer(position);
+        const MaskPaint *pixels = document.pixels(info.id);
+        if (info.kind == LayerKind::Mask || !pixels) {
+            skipped.notes << QStringLiteral("The mask layer \"%1\" is a selection, not a picture: it is not in the Photoshop file.").arg(info.name);
+            continue;
+        }
+        PsdLayer layer;
+        layer.info = info;
+        layer.pixels = *pixels;
+        if (info.hasMask && document.maskPixels(info.id))
+            layer.mask = *document.maskPixels(info.id);
+        image.layers.push_back(std::move(layer));
+    }
+    image.merged = document.flatten();
+    Result<PsdExported> written = paintToPsd(image);
+    if (!written)
+        return written;
+    PsdExported out = written.value();
+    out.notes = skipped.notes + out.notes;
+    return out;
+}
+
+Result<PsdExported> paintToPsd(const PsdImage &image) {
+    const int width = image.width, height = image.height;
     if (width > psdMaxSide || height > psdMaxSide)
         return makeError(QStringLiteral("input_invalid"),
                          QStringLiteral("A Photoshop file holds at most %1 px a side; this canvas is %2 x %3.").arg(psdMaxSide).arg(width).arg(height),
                          QStringLiteral("Export an .ora or a .png instead, or make the canvas smaller."));
     PsdExported out;
 
-    // The layer records and their channel data, bottom first.
+    // The layer records and their channel data, bottom first. A group is a divider record, its layers, then its folder record.
     QByteArray records, channelData;
     int layerCount = 0;
-    for (int position = 0; position < document.layerCount(); ++position) {
-        const LayerInfo info = document.layer(position);
-        const MaskPaint *pixels = document.pixels(info.id);
-        if (info.kind == LayerKind::Mask || !pixels) {
-            out.notes << QStringLiteral("The mask layer \"%1\" is a selection, not a picture: it is not in the Photoshop file.").arg(info.name);
-            continue;
-        }
-        bool exact = true;
-        const QString key = psdBlendKeyOfOp(info.compositeOp, &exact);
-        if (!exact)
-            out.notes << QStringLiteral("The layer \"%1\" has a blend mode (%2) Photoshop does not know: it is written as Normal.").arg(info.name, info.compositeOp);
-        const MaskPaint *layerMask = info.hasMask ? document.maskPixels(info.id) : nullptr;
-
+    // One record. `pixels` null is a record with no picture (a group's divider or folder): an empty rectangle.
+    const auto addRecord = [&](const QString &name, const QString &key, double opacity, bool visible, const MaskPaint *pixels, const MaskPaint *layerMask, bool maskEnabled, int section) {
         std::vector<std::pair<int, QByteArray>> channels; // id, compression code + data
-        for (const int c : {0, 1, 2, 3})
-            channels.emplace_back(c == 3 ? -1 : c, rlePlane(planeOf(pixels->pixels(), c), width, height, true));
+        if (pixels) {
+            for (const int c : {0, 1, 2, 3})
+                channels.emplace_back(c == 3 ? -1 : c, rlePlane(planeOf(pixels->pixels(), c), width, height, true));
+        } else {
+            for (const int id : {-1, 0, 1, 2}) {
+                QByteArray none;
+                put16(none, 0); // raw, no bytes: the rectangle is empty
+                channels.emplace_back(id, none);
+            }
+        }
         if (layerMask)
             channels.emplace_back(-2, rlePlane(layerMask->pixels(), width, height, true));
 
         QByteArray record;
-        put32(record, 0), put32(record, 0), put32(record, quint32(height)), put32(record, quint32(width)); // top left bottom right
+        put32(record, 0), put32(record, 0), put32(record, pixels ? quint32(height) : 0), put32(record, pixels ? quint32(width) : 0); // top left bottom right
         put16(record, uint(channels.size()));
         for (const auto &[id, data] : channels) {
             put16(record, uint(id & 0xffff));
@@ -383,9 +409,9 @@ Result<PsdExported> paintToPsd(const PaintDocument &document) {
         }
         putKey(record, "8BIM");
         putKey(record, key.toLatin1().constData());
-        put8(record, uint(std::lround(std::clamp(info.opacity, 0.0, 1.0) * 255)));
+        put8(record, uint(std::lround(std::clamp(opacity, 0.0, 1.0) * 255)));
         put8(record, 0); // clipping: base
-        put8(record, info.visible ? 0 : 2); // flags: bit 1 set = hidden
+        put8(record, visible ? 0 : 2); // flags: bit 1 set = hidden
         put8(record, 0);
 
         QByteArray extra;
@@ -393,7 +419,7 @@ Result<PsdExported> paintToPsd(const PaintDocument &document) {
             put32(extra, 20);
             put32(extra, 0), put32(extra, 0), put32(extra, quint32(height)), put32(extra, quint32(width));
             put8(extra, 255);                  // what lies outside the mask's rectangle: shown (it covers the layer)
-            put8(extra, info.maskEnabled ? 0 : 2); // flags: bit 1 = mask disabled
+            put8(extra, maskEnabled ? 0 : 2); // flags: bit 1 = mask disabled
             put16(extra, 0);                   // padding of the 20-byte form
         } else {
             put32(extra, 0);
@@ -403,13 +429,36 @@ Result<PsdExported> paintToPsd(const PaintDocument &document) {
             put16(extra, 0), put16(extra, 0xffff);
             put16(extra, 0), put16(extra, 0xffff);
         }
-        extra += pascalName(info.name);
-        putBlock(extra, "luni", unicodeBlock(info.name));
+        extra += pascalName(name);
+        putBlock(extra, "luni", unicodeBlock(name));
+        if (section >= 0) { // lsct: the section type, then the blend signature and key (the same key as the record: a group composites as one, so Normal unless it has a mode)
+            QByteArray data;
+            put32(data, quint32(section));
+            putKey(data, "8BIM");
+            putKey(data, key.toLatin1().constData());
+            putBlock(extra, "lsct", data);
+        }
         put32(record, quint32(extra.size()));
         record += extra;
         records += record;
         ++layerCount;
-    }
+    };
+    const std::function<void(const std::vector<PsdLayer> &, int)> write = [&](const std::vector<PsdLayer> &layers, int depth) {
+        for (const PsdLayer &layer : layers) {
+            bool exact = true;
+            const QString key = psdBlendKeyOfOp(layer.info.compositeOp, &exact);
+            if (!exact)
+                out.notes << QStringLiteral("The layer \"%1\" has a blend mode (%2) Photoshop does not know: it is written as Normal.").arg(layer.info.name, layer.info.compositeOp);
+            if (!layer.group) {
+                addRecord(layer.info.name, key, layer.info.opacity, layer.info.visible, &layer.pixels, layer.mask ? &*layer.mask : nullptr, layer.info.maskEnabled, -1);
+                continue;
+            }
+            addRecord(QStringLiteral("</Layer group>"), QStringLiteral("norm"), 1.0, true, nullptr, nullptr, true, 3);
+            write(layer.children, depth + 1);
+            addRecord(layer.info.name, key, layer.info.opacity, layer.info.visible, nullptr, layer.mask ? &*layer.mask : nullptr, layer.info.maskEnabled, layer.open ? 1 : 2);
+        }
+    };
+    write(image.layers, 0);
     if (layerCount == 0)
         return makeError(QStringLiteral("input_invalid"), QStringLiteral("There is no layer to write."), QStringLiteral("A mask layer is a selection, not a picture."));
 
@@ -441,7 +490,7 @@ Result<PsdExported> paintToPsd(const PaintDocument &document) {
     // The merged image: the flattened canvas, planes one after the other, one RLE record for all. Photoshop writes a
     // merged image with transparency blended onto white (readers take the white out again using the alpha plane),
     // so the colors are c * a + 255 * (1 - a).
-    MaskPaint flat = document.flatten();
+    MaskPaint flat = image.merged;
     {
         std::vector<uint8_t> matted = flat.pixels();
         for (size_t p = 0; p + 3 < matted.size(); p += 4)
@@ -466,7 +515,7 @@ Result<PsdExported> paintToPsd(const PaintDocument &document) {
 }
 
 // ---- import ------------------------------------------------------------------------------------------------
-Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
+Result<PsdImported> paintFromPsdLayers(const QByteArray &bytes) {
     Reader r(reinterpret_cast<const uint8_t *>(bytes.constData()), bytes.size());
     if (!looksLikePsd(bytes))
         return unreadable(QStringLiteral("it does not begin with 8BPS"));
@@ -681,46 +730,45 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
         }
     }
 
-    // ---- groups: a folder record comes after its layers (the file runs bottom up), so walk top down
-    std::vector<bool> shown(records.size(), true);
-    std::vector<double> through(records.size(), 1.0);
-    {
-        struct Group {
-            bool visible;
-            double opacity;
-        };
-        std::vector<Group> stack;
-        for (size_t k = records.size(); k-- > 0;) {
-            const Record &rec = records[k];
-            if (rec.divider == 1 || rec.divider == 2) {
-                stack.push_back({rec.visible, rec.opacity / 255.0});
-                QString what = QStringLiteral("The group \"%1\" was flattened: its layers are kept in order, with the group's visibility and opacity applied to each.").arg(rec.name);
-                if (rec.hasMask || rec.vectorMask || (rec.blendKey != QLatin1String("pass") && rec.blendKey != QLatin1String("norm")))
-                    what += QStringLiteral(" Its own mask or blend mode was dropped.");
-                dropped << warning(what);
-            } else if (rec.divider == 3) {
-                if (!stack.empty())
-                    stack.pop_back();
-            } else {
-                for (const Group &g : stack) {
-                    shown[k] = shown[k] && g.visible;
-                    through[k] *= g.opacity;
-                }
-            }
-        }
-    }
-
     // ---- the layers
     if (qint64(real) * cw * ch * 4 > paintFileMaxLayerBytes)
         return cannotHold(QStringLiteral("The layers of this Photoshop file hold more pixels than a canvas can keep."), QStringLiteral("Make the picture smaller or merge layers, then save again."));
 
-    PaintDocument document(cw, ch);
+    // A divider opens a level; the folder record that follows its layers closes it into a group (the file runs bottom up).
+    std::vector<std::vector<PsdLayer>> levels(1);
+    std::vector<bool> levelLossy(1, false); // an adjustment layer or clipping was dropped inside the level
+    int kept = 0;
     for (size_t k = 0; k < records.size(); ++k) {
         const Record &rec = records[k];
-        if (rec.divider != 0)
+        if (rec.divider == 3) {
+            levels.emplace_back();
+            levelLossy.push_back(false);
             continue;
+        }
+        if (rec.divider == 1 || rec.divider == 2) {
+            if (levels.size() == 1) {
+                dropped << warning(QStringLiteral("The group \"%1\" has no end in the file: it was ignored.").arg(rec.name));
+                continue;
+            }
+            PsdLayer g;
+            g.group = true;
+            g.open = rec.divider == 1;
+            g.info.kind = LayerKind::Paint;
+            g.info.name = rec.name.left(64);
+            g.info.visible = rec.visible;
+            g.info.opacity = rec.opacity / 255.0;
+            bool known = true;
+            g.info.compositeOp = psdOpOfBlendKey(rec.blendKey, &known);
+            g.lossy = levelLossy.back() || rec.hasMask || rec.vectorMask || (!known && rec.blendKey != QLatin1String("pass"));
+            g.children = std::move(levels.back());
+            levels.pop_back();
+            levelLossy.pop_back();
+            levels.back().push_back(std::move(g));
+            continue;
+        }
         if (rec.adjustment) {
             dropped << warning(QStringLiteral("The adjustment layer \"%1\" was dropped: Fugue has no adjustment layers.").arg(rec.name));
+            levelLossy.back() = true;
             continue;
         }
         const auto planeOfId = [&](int id) -> const std::vector<uint8_t> * {
@@ -752,8 +800,8 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
         LayerInfo li;
         li.kind = LayerKind::Paint;
         li.name = rec.name.left(64);
-        li.visible = rec.visible && shown[k];
-        li.opacity = rec.opacity / 255.0 * through[k];
+        li.visible = rec.visible;
+        li.opacity = rec.opacity / 255.0;
         bool known = true;
         li.compositeOp = psdOpOfBlendKey(rec.blendKey, &known);
         if (!known)
@@ -772,8 +820,10 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
             dropped << warning(QStringLiteral("The layer effects of \"%1\" (shadow, stroke, glow...) were dropped.").arg(rec.name));
         if (rec.vectorMask)
             dropped << warning(QStringLiteral("The vector mask of \"%1\" was dropped.").arg(rec.name));
-        if (rec.clipping)
+        if (rec.clipping) {
             dropped << warning(QStringLiteral("The layer \"%1\" was clipped to the layer below: the clipping was dropped.").arg(rec.name));
+            levelLossy.back() = true;
+        }
 
         // A layer with a vector mask too carries its pixel mask as channel -3 (the "real" user mask): prefer that one.
         const std::vector<uint8_t> *maskPlane = rec.hasRealMask && planeOfId(-3) ? planeOfId(-3) : planeOfId(-2);
@@ -797,11 +847,27 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
             li.hasMask = true;
             li.maskEnabled = !(usesReal ? rec.realMaskDisabled : rec.maskDisabled);
         }
-        document.loadLayer(li, MaskPaint(cw, ch, rgba, 4), layerMask ? &*layerMask : nullptr);
+        PsdLayer leaf;
+        leaf.info = li;
+        leaf.pixels = MaskPaint(cw, ch, rgba, 4);
+        leaf.mask = layerMask;
+        levels.back().push_back(std::move(leaf));
+        ++kept;
     }
+    while (levels.size() > 1) { // groups that were never closed: their layers join the level below
+        dropped << warning(QStringLiteral("A group in the file has no header: its layers were put in the level below."));
+        std::vector<PsdLayer> inner = std::move(levels.back());
+        levels.pop_back();
+        for (PsdLayer &l : inner)
+            levels.back().push_back(std::move(l));
+    }
+    PsdImported imported;
+    imported.width = cw;
+    imported.height = ch;
+    imported.layers = std::move(levels.front());
 
     // ---- no layers (a flat file, or every layer dropped): the merged image is the canvas
-    if (document.layerCount() == 0) {
+    if (kept == 0) {
         const quint32 compression = r.u16();
         const qint64 planeBytes = qint64(cw) * ch;
         if (!r.ok() || (compression != 0 && compression != 1))
@@ -849,12 +915,77 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
                     rgba[p * 4 + c] = uint8_t(std::clamp((rgba[p * 4 + c] * 255 - 255 * (255 - a) + a / 2) / a, 0, 255));
                 }
         }
-        document.loadLayer(LayerKind::Paint, QStringLiteral("Background"), true, 1.0, MaskPaint(cw, ch, rgba, 4));
+        imported.layers.clear(); // groups with nothing in them
+        imported.merged = MaskPaint(cw, ch, rgba, 4);
         if (layerTotal > 0)
             dropped << warning(QStringLiteral("No layer could be kept, so the picture is the file's merged image on one layer."));
     }
+    return Result<PsdImported>(std::move(imported), std::move(dropped));
+}
+
+namespace {
+
+QString groupWarning(const PsdLayer &g, bool mask) {
+    QString what = QStringLiteral("The group \"%1\" was flattened: its layers are kept in order, with the group's visibility and opacity applied to each.").arg(g.info.name);
+    if (mask)
+        what += QStringLiteral(" Its own mask or blend mode was dropped.");
+    return what;
+}
+
+// The layers of `in` with every group flattened into `out` (its visibility and opacity folded into each layer).
+void flattenGroups(const std::vector<PsdLayer> &in, bool visible, double opacity, std::vector<PsdLayer> &out, Errors &warnings, bool keepSimple, int depth) {
+    for (const PsdLayer &l : in) {
+        if (!l.group) {
+            PsdLayer c = l;
+            c.info.visible = l.info.visible && visible;
+            c.info.opacity = l.info.opacity * opacity;
+            out.push_back(std::move(c));
+        } else if (keepSimple && !l.lossy && !l.children.empty() && depth < 8) {
+            PsdLayer c = l;
+            c.children.clear();
+            c.info.visible = l.info.visible && visible;
+            c.info.opacity = l.info.opacity * opacity;
+            flattenGroups(l.children, true, 1.0, c.children, warnings, true, depth + 1);
+            if (c.children.empty()) {
+                warnings << warning(QStringLiteral("The group \"%1\" holds no layer: it was dropped.").arg(l.info.name));
+                continue;
+            }
+            out.push_back(std::move(c));
+        } else {
+            warnings << warning(groupWarning(l, l.lossy || l.mask.has_value() || !l.info.compositeOp.isEmpty()));
+            flattenGroups(l.children, visible && l.info.visible, opacity * l.info.opacity, out, warnings, keepSimple, depth + 1);
+        }
+    }
+}
+
+} // namespace
+
+Result<PsdImported> paintFromPsdSettled(const QByteArray &bytes) {
+    Result<PsdImported> read = paintFromPsdLayers(bytes);
+    if (!read)
+        return read;
+    Errors warnings = read.warnings();
+    PsdImported imported = std::move(read.value());
+    std::vector<PsdLayer> settled;
+    flattenGroups(imported.layers, true, 1.0, settled, warnings, true, 0);
+    imported.layers = std::move(settled);
+    return Result<PsdImported>(std::move(imported), std::move(warnings));
+}
+
+Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
+    Result<PsdImported> read = paintFromPsdLayers(bytes);
+    if (!read)
+        return Result<PaintDocument>(read.errors());
+    Errors warnings = read.warnings();
+    std::vector<PsdLayer> flat;
+    flattenGroups(read->layers, true, 1.0, flat, warnings, false, 0);
+    PaintDocument document(read->width, read->height);
+    for (const PsdLayer &l : flat)
+        document.loadLayer(l.info, l.pixels, l.mask ? &*l.mask : nullptr);
+    if (flat.empty() && read->merged)
+        document.loadLayer(LayerKind::Paint, QStringLiteral("Background"), true, 1.0, *read->merged);
     document.forgetHistory();
-    return Result<PaintDocument>(std::move(document), std::move(dropped));
+    return Result<PaintDocument>(std::move(document), std::move(warnings));
 }
 
 } // namespace fugue::mask

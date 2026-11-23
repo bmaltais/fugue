@@ -208,12 +208,12 @@ of the layer (it moves and is deleted with it) and can be turned off to see the 
 Fugue to read back. A `.psd` does have layer masks, so a Photoshop file keeps the layer's own pixels and its mask apart.
 
 **Photoshop files (.psd, #227).** `fugue canvas export <id> out.psd` (or Photoshop (.psd) in Export with quality and
-scale…) writes every paint and picture layer with its name, visibility, opacity, blend mode and layer mask, its own
+scale…) writes every paint and picture layer and every group (as a layer group) with its name, visibility, opacity, blend mode and layer mask, its own
 pixels unblended, and the merged picture; 8-bit RGB, deterministic, at most 30000 px a side (more is refused in plain
 words). A mask layer is a selection, not a picture, so it is left out and the answer names it. `fugue canvas import
 x.psd` (and Import picture…, New canvas… from a file) reads such a file back and lists, one warning each and never
-silently, what it could not keep: groups (their layers are kept in order with the group's visibility and opacity
-folded in), adjustment layers (dropped), text and smart objects (kept as pixels), layer effects, vector masks and clipping
+silently, what it could not keep: groups that are not plain (a group that holds only layers is a real group again; any other has
+its layers kept in order with its visibility and opacity folded in), adjustment layers (dropped), text and smart objects (kept as pixels), layer effects, vector masks and clipping
 (dropped), blend modes Fugue lacks (shown as Normal; the ones with an OpenRaster name are kept for exporting). It reads
 8-bit RGB only and refuses 16-bit, CMYK, grayscale and `.psb` with the way to convert them. Details, limits and the
 checklist for trying it in real programs: [psd-research.md](psd-research.md).

@@ -53,14 +53,19 @@ merged image data.
    in. (The .ora export bakes the mask into the layer for programs without masks; PSD has real masks.)
 4. **Mask layers** (Fugue's selection-like layers) are **not written**; the export names them (CLI `data.notes`, a line in
    the Export window). Picture layers are written as the picture they show.
-5. **Groups**: this branch's canvas has no groups (PR #273 adds them). On import a PSD group is **flattened**: its layers
-   are kept in order, the group's visibility and opacity are folded into each layer, its own mask and blend mode are
-   dropped, and a warning names it. When #273 lands, export of a group as a PSD layer group is a small addition
-   (`lsct` type 1 plus a divider record `</Layer group>` of type 3); it is not done here so the two changes do not collide.
+5. **Groups** (#252, merged in #273): a canvas group is written as a PSD layer group (a divider record `</Layer group>`, its
+   layers, then the folder record with `lsct` type 1 or 2; the group's own name, visibility, opacity, blend key and layer
+   mask). On import a group is kept as a real group, in ONE revision (`CanvasStore::createWithEdits` applies the Group,
+   Visible, Opacity and Blend edits to the new tree), nested up to 8 deep, when it holds only layers Fugue keeps. A group
+   that lost something (an adjustment layer or a clipped layer inside, its own mask or vector mask, a blend mode Fugue lacks,
+   no layers at all, more than 8 deep) is **flattened** into the level below, with its visibility and opacity folded into
+   each layer and one warning. Pass Through (`pass`) is read as Normal: a Fugue group composites as one, so a pass-through group
+   can look a little different. A resized export (and the document path) flattens groups to one layer each and says so.
 6. **The merged image is matted on white**, as Photoshop writes it: where there is transparency the stored color is
    `c * a + 255 * (1 - a)` and the alpha plane is stored too. Found in psd-tools' source (`_remove_white_background`):
    a reader takes the white out again with the alpha. Written plain, a reader would show dark fringes. The import of a
-   file with no layers undoes the matting. The test allows 2 levels of rounding for pixels at least half opaque.
+   file with no layers undoes the matting, and reads the 4th merged channel as transparency only when the layer count was
+   negative (a flat file's 4th channel may be a saved selection). The test allows 2 levels of rounding for pixels at least half opaque.
 7. **The layer count is stored negative**, as Photoshop does for a file whose merged image has transparency.
 8. **Unicode names** go in both the Pascal name (ASCII, `?` for the rest, 255 bytes) and `luni`.
 9. **Deterministic**: the same document gives the same bytes (no date, no program name, no thumbnail, no unique ids).
@@ -78,7 +83,8 @@ shows "Imported, with changes: ..." as its notice): groups flattened; adjustment
 blnc, blwh, mixr, clrL, phfl, vibA, nvrt, post, thrs, grdm, selc, expA, SoCo, GdFl, PtFl); text and smart objects kept as
 the pixels Photoshop rendered; layer effects (`lfx2`, `lrFX`) dropped; vector masks dropped; clipping dropped; a layer past
 the canvas cut; blend modes not drawn. Not read at all, and not reported because they hold no picture: image resources
-(guides, resolution, ICC profile), the global mask, extra alpha and spot channels, the real user mask (channel -3).
+(guides, resolution, ICC profile), the global mask, extra alpha and spot channels. A layer with a vector mask too has its pixel mask as
+channel -3: that one is used. A mask whose rectangle is relative to the layer is placed from the layer's corner.
 
 ### Untrusted input
 
@@ -86,7 +92,7 @@ A `.psd` is hostile until read. The reader never reads past the bytes it has (ev
 one stops the layer parse); no offset in the file is followed without being inside its parent; counts are capped (56
 channels, 64 layers plus group markers); sizes are capped (canvas: 16384 px a side and 67 MP; a layer's decoded size: 134
 MP); an RLE row is decoded only to the width the header promises and a run that would pass it is an error (so the
-expansion is bounded by the declared size, not by the data); zlib channels are inflated into exactly the promised size.
+expansion is bounded by the declared size, not by the data); zlib channels are inflated with zlib directly into a buffer of exactly the promised size (a stream with more or less is refused, so a zlib bomb costs nothing); a rectangle is checked against the 30000 px limit before anything is allocated and only its part on the canvas is visited; every channel is read once (a duplicate id is refused), only for layers that are kept, and the bytes decoded in all are capped.
 `TestPsdFile` cuts a good file at many points and corrupts 600 copies of it at random (a deterministic fuzz).
 
 ## Tests

@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "engine/new_canvas.h"
+#include "engine/canvas_psd.h"
 #include "engine/paint_file.h"
 
 namespace fugue {
@@ -176,17 +177,14 @@ QString CanvasChoices::freeName(const QString &base) {
 
 QString CanvasChoices::makeFromFile(const QString &path, const QString &name, QString *id, QStringList *dropped) {
     const QString file = localPath(path);
-    const Result<mask::PaintDocument> document = mask::readCanvasFile(file);
-    if (!document)
-        return sentence(document.errors());
     CanvasStore s = store();
     const QString title = name.trimmed().isEmpty() ? QFileInfo(file).completeBaseName() : name.trimmed().left(120);
-    const Result<canvas::CanvasInfo> made = s.create(title.isEmpty() ? QStringLiteral("Untitled") : title, document.value(), QStringLiteral("import"));
+    const Result<canvas::CanvasInfo> made = canvas::createCanvasFromFile(s, title.isEmpty() ? QStringLiteral("Untitled") : title, file, QStringLiteral("import"));
     if (!made)
         return sentence(made.errors());
     *id = made->id;
     if (dropped)
-        for (const Error &warning : document.warnings())
+        for (const Error &warning : made.warnings())
             dropped->append(warning.message);
     touched();
     return {};

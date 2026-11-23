@@ -13,6 +13,7 @@
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
 #include "engine/canvas_package.h"
+#include "engine/canvas_psd.h"
 #include "engine/paint_file.h"
 #include "engine/psd_file.h"
 
@@ -120,7 +121,9 @@ bool CanvasHistory::exportPicture(const QString &target) {
     Result<QByteArray> psdBytes = QByteArray();
     QStringList left; // what a Photoshop file could not keep: said in the notice, never silent
     if (suffix == QLatin1String("psd")) {
-        const Result<mask::PsdExported> psd = mask::paintToPsd(document.value());
+        canvas::PictureExport asPsd;
+        asPsd.format = QStringLiteral("psd");
+        const Result<canvas::ExportedPicture> psd = canvas::exportRevisionAsPsd(store(), m_canvas, m_b, asPsd); // groups stay groups
         psdBytes = psd ? Result<QByteArray>(psd->bytes) : Result<QByteArray>(psd.errors());
         if (psd)
             left = psd->notes;
