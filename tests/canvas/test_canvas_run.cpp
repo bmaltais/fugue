@@ -492,6 +492,39 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // A Sampler makes a latent, not a picture, yet its step previews (node.preview) show on its card while
+    // it runs, at the top level and inside a group, and the group's own card shows its inside's preview.
+    void aSamplersStepPreviewShowsOnItsCardAlsoInsideAGroup() {
+        RunApp r(R"({
+          "fugue": 1,
+          "groups": {"local/s": {"version": "1.0.0", "name": "S", "inputs": [], "outputs": [],
+            "nodes": {"inner": {"type": "fugue/sampler", "version": "1.2.0"}}}},
+          "graph": {"nodes": {"top": {"type": "fugue/sampler", "version": "1.2.0"},
+                              "grp": {"type": "local/s", "version": "1.0.0"}}},
+          "layout": {"nodes": {"top": {"pos": [0, 0]}, "grp": {"pos": [400, 0]}}, "view": {"center": [300, 300], "zoom": 1}}
+        })");
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("step.png");
+        QVERIFY(QImage(64, 32, QImage::Format_RGB32).save(file));
+        const QString run = r.runs->start();
+        QVERIFY(!run.isEmpty());
+        const auto preview = [&](const QString &node) {
+            const QJsonObject thumbnail{{"url", QUrl::fromLocalFile(file).toString()}, {"width", 64}, {"height", 32}, {"source", file}};
+            emit r.service->event(run, {{"event", "node.running"}, {"node", node}});
+            emit r.service->event(run, {{"event", "node.preview"}, {"node", node}, {"thumbnails", QJsonObject{{"preview", thumbnail}}}});
+        };
+        const auto shown = [&](const QString &node) { return r.role(node, NodeList::Thumbnail).toString().startsWith("file://"); };
+        preview("top");
+        QTRY_VERIFY(shown("top"));
+        preview("grp/inner");
+        QTRY_VERIFY(shown("grp"));
+        QVERIFY(r.app.model.groups()->enterGroup("grp"));
+        QTRY_VERIFY(shown("inner"));
+        QQuickItem *card = item(r.app.window->contentItem(), "node-inner");
+        QVERIFY(card);
+        QTRY_VERIFY(item(card, "thumbnail") && item(card, "thumbnail")->property("active").toBool());
+    }
+
     // A node nothing can serve says so before any run, and how to fix it (8.5); a run that
     // reaches it fails with the same words.
     void aNodeNoProviderCanServeShowsWhatIsMissing() {
