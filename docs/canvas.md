@@ -330,6 +330,12 @@ pointer is over the view; over the Layers panel the panel's own keys win). The t
 
 The bar over the picture shows the current tool's settings and what the brush paints.
 
+**A selection limits the mask brush** (as in Photoshop). With a selection active (a lasso, a Quick Mask selection, or a region
+rectangle) the brush, the eraser, Invert, Reveal all and Hide all change the layer mask only inside it; the part outside stays as it
+is. A selection's soft edge (a feathered one) lets that part of a stroke through, so the paint fades out at the edge. A painted
+selection wins over the rectangle. Each stroke group is still one revision. The same clip is in the engine
+(`MaskPaint::setClip`), so every paint path uses it.
+
 **Paint a layer mask.** Select a layer and press **Add mask** (under the Layers list, in the layer's right-click menu,
 or Ctrl+Shift+M): the layer gets a mask that shows it all, and the brush takes it ("Mask of <layer>" in the bar; the
 mask's thumbnail gets a frame). A click on the mask thumbnail of a layer that has one does the same. The brush hides

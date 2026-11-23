@@ -6,6 +6,7 @@
 #include <QtTest>
 
 #include <cmath>
+#include <memory>
 
 #include "engine/mask_paint.h"
 #include "engine/vips.h"
@@ -497,6 +498,34 @@ private slots:
         // No metadata chunks: a gray PNG's header, its data and the end.
         QVERIFY(!a.toPng()->contains("tEXt"));
         QVERIFY(!a.toPng()->contains("tIME"));
+    }
+
+    // #319: a clip (a selection) limits every paint path, and its soft edge weights the change.
+    void aClipLimitsEveryPaintPathAndItsSoftEdgeWeightsThem() {
+        auto clip = std::make_shared<std::vector<uint8_t>>(100 * 100, 0);
+        for (int y = 0; y < 100; ++y)
+            for (int x = 40; x < 100; ++x)
+                (*clip)[size_t(y) * 100 + size_t(x)] = x == 40 ? 128 : 255; // right of x = 40, with a half-weight edge column
+        MaskPaint m(100, 100);
+        QVERIFY(m.setClip(clip));
+        stroke(m, Mode::Paint, brush(30, 1), {{30, 50}, {70, 50}});
+        QCOMPARE(int(m.at(30, 50)), 0);  // outside: untouched
+        QCOMPARE(int(m.at(39, 50)), 0);
+        QVERIFY(m.at(40, 50) > 100 && m.at(40, 50) < 160); // the soft edge lets half through
+        QCOMPARE(int(m.at(60, 50)), 255);
+        m.fillRect(0, 0, 100, 10);
+        QCOMPARE(int(m.at(10, 5)), 0);
+        QCOMPARE(int(m.at(80, 5)), 255);
+        m.clear(); // whole-buffer operations too
+        QCOMPARE(int(m.at(60, 50)), 0);
+        m.invert();
+        QCOMPARE(int(m.at(10, 50)), 0);
+        QCOMPARE(int(m.at(60, 50)), 255);
+        QVERIFY(!m.setClip(std::make_shared<std::vector<uint8_t>>(5))); // a wrong size is refused
+        QVERIFY(m.clipped());
+        m.setClip(nullptr);
+        m.fill();
+        QCOMPARE(int(m.at(10, 50)), 255);
     }
 
     void anEmptyMaskIsAllZeroAfterTheTrip() {

@@ -11,6 +11,8 @@
 // `zoom` (screen pixels per picture pixel), as CropFrame is given them.
 
 #include <QColor>
+#include <QPointer>
+#include <QRectF>
 #include <QQuickItem>
 #include <QSize>
 #include <QString>
@@ -38,6 +40,11 @@ class MaskLayer : public QQuickItem {
     Q_PROPERTY(bool inverted READ inverted WRITE setInverted NOTIFY tintChanged FINAL)
     // The opacity of a stroke, 0 to 1 (1: a stroke sets the mask fully where the brush is hard).
     Q_PROPERTY(qreal brushOpacity READ brushOpacity WRITE setBrushOpacity NOTIFY tintChanged FINAL)
+    // The selection that limits painting here (#319, Photoshop's rule): a painted selection (another MaskLayer: the Quick Mask
+    // one) or, when that has nothing, a rectangle (`clipRect`, picture pixels; empty: none). Read at the start of every stroke,
+    // shape and whole-mask operation, so a selection changed meanwhile is followed; a feathered edge lets part of a stroke through.
+    Q_PROPERTY(fugue::MaskLayer *clipTo READ clipTo WRITE setClipTo NOTIFY clipChanged FINAL)
+    Q_PROPERTY(QRectF clipRect READ clipRect WRITE setClipRect NOTIFY clipChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged FINAL)
     // Nothing painted: every pixel is 0.
@@ -65,6 +72,10 @@ public:
     void setInverted(bool on);
     qreal brushOpacity() const { return m_brushOpacity; }
     void setBrushOpacity(qreal opacity);
+    MaskLayer *clipTo() const { return m_clipTo; }
+    void setClipTo(MaskLayer *selection);
+    QRectF clipRect() const { return m_clipRect; }
+    void setClipRect(const QRectF &rect);
     // The mask itself, for a caller that stores it (the Canvas view's layer mask and selection, #230), and a mask to start
     // from: its size becomes the layer's, and the history starts here (as loadMask).
     const mask::MaskPaint &paint() const { return *m_paint; }
@@ -123,6 +134,7 @@ signals:
     void tintChanged();
     void historyChanged();
     void folderChanged();
+    void clipChanged();
     // The mask changed (a stroke dab, a step, an undo): the editor's readout and tests follow it.
     void edited();
 
@@ -133,6 +145,7 @@ protected:
 private:
     void changed(bool history);
     void markAllDirty();
+    void applyClip(); // the paint's clip from clipTo / clipRect, as they are now
 
     std::unique_ptr<mask::MaskPaint> m_paint;
     qreal m_originX = 0;
@@ -142,6 +155,8 @@ private:
     bool m_maskOnly = false;
     bool m_inverted = false;
     qreal m_brushOpacity = 1;
+    QPointer<MaskLayer> m_clipTo;
+    QRectF m_clipRect;
     QString m_folder;
     QString m_error;
     CellGrid m_cells;

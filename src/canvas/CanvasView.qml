@@ -1678,6 +1678,9 @@ Item {
             inverted: true
             tint: Qt.alpha(root.look.error, 0.5)
             brushOpacity: root.brushOpacity
+            // A selection limits the paint (#319): the painted one, else the rectangle (MaskLayer does the clipping).
+            clipTo: selectionLayer
+            clipRect: root.rectSelected ? Qt.rect(root.shownRegion.x, root.shownRegion.y, root.shownRegion.width, root.shownRegion.height) : Qt.rect(0, 0, 0, 0)
         }
         MaskLayer {
             id: selectionLayer

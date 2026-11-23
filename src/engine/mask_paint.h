@@ -17,6 +17,11 @@
 // One dab lands every max(1, 0.1 x size) pixels along a stroke. Paint sets m = max(m, c x opacity)
 // and erase m = min(m, 1 - c x opacity), so a stroke never builds up over itself.
 //
+// A clip (a selection, #319) limits where the buffer changes, as Photoshop clips painting to the active selection: a
+// one-channel picture of the buffer's size whose value weights every change (255: as is, 0: none, between: a feathered
+// selection's soft edge lets that part of it through). Brush dabs, shapes and the whole-buffer invert, clear and fill all
+// go through it; assign and undo do not (a selection replaces itself, a step is put back whole).
+//
 // Every change is one undo step: a stroke (beginStroke to endStroke) or one shape or whole-mask
 // operation. A step keeps the tiles it changed as they were; undo swaps them with the mask, so redo
 // is the same swap and memory is the area touched, not the picture times the steps. At least
@@ -26,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include <QByteArray>
@@ -91,6 +97,11 @@ public:
     uint8_t at(int x, int y) const { return m_pixels[offset(x, y)]; }
     Rgba rgbaAt(int x, int y) const; // a four-channel buffer's pixel (a mask's value as gray, opaque)
     bool isEmpty() const; // every byte 0: no mask, or a color buffer with no paint (alpha 0 everywhere)
+
+    // The clip described above, or none (nullptr: the default). A wrong size is refused (false) and leaves the clip as it was.
+    // Not part of the history: set it before each stroke or operation.
+    bool setClip(std::shared_ptr<const std::vector<uint8_t>> clip);
+    bool clipped() const { return m_clip != nullptr; }
 
     // A stroke: dabs along the points given until endStroke, which makes it one undo step. The first
     // strokeTo puts a dab on the spot. `pressure` (0 to 1, a tablet's) scales the size.
@@ -202,6 +213,8 @@ private:
     double m_lastPressure = 1;
     double m_carry = 0; // distance walked since the last dab
     IRect m_dirty;
+    std::shared_ptr<const std::vector<uint8_t>> m_clip;
+    void replaceWhole(const std::vector<uint8_t> &target);
 };
 
 } // namespace fugue::mask
