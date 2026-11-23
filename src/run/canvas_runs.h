@@ -214,6 +214,7 @@ private:
     RunService *m_service;
     const Registry *m_registry;
     struct NodeInfo {
+        bool picture = true;      // the node shows its picture now (#263): the mode, its type and its override say so
         bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
         bool savesFile = false;   // Save Image, Save Video, Save Audio: its chip or player names the file it wrote
         bool compares = false;    // Compare Images: its slot is a viewer of A and B (#62)
@@ -225,6 +226,8 @@ private:
         // The slot shows the picture arriving at an input of the node, not its own result.
         bool followsInput() const { return crops || !paintsOver.isEmpty(); }
     };
+    // The nodes of the shown level whose pictures are not made: hidden ones that no shown Crop or Paint Mask follows (#263).
+    QSet<QString> noPictures() const;
     QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow
     QSet<QString> m_rowsMade;            // its nodes whose cards made their rows
     CommandRegistry *m_commands = nullptr;

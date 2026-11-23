@@ -423,6 +423,7 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
     row.color = layout.value("color").toString();
     row.pinned = layout.value("pinned").toBool();
     row.advancedOpen = layout.value("advanced").toBool();
+    row.picture = pictureOverrideFromName(layout.value("picture").toString());
     layOut(row);
     return row;
 }

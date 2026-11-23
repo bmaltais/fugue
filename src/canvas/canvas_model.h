@@ -65,6 +65,7 @@
 #include "canvas/group_edit.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
+#include "engine/node_picture.h"
 #include "engine/node_type.h"
 #include "engine/port_type.h"
 #include "search/node_search.h"
@@ -398,6 +399,25 @@ public:
     // on "random" (randomize) or "fixed" (a random number kept), and an `embed` choice input
     // (Save Image, 11.7) on that choice when the input offers it.
     void setNewNodeOptions(const QString &seed, const QString &embed);
+    // --- node pictures (#263, spec 12.7) ---
+
+    // The picture mode (settings.json's picture_mode, pushed by the settings model): the picture a
+    // node shows depends on it, on the node type's role and on the node's own override.
+    fugue::PictureMode pictureMode() const { return m_pictureMode; }
+    void setPictureMode(fugue::PictureMode mode);
+    // The node's override, layout.nodes.<id>.picture: show, hide or default (no key).
+    fugue::PictureOverride pictureOverride(const QString &node) const;
+    // Whether the node shows its picture now (a hidden one is shorter and its thumbnail is not made).
+    bool showsPicture(const QString &node) const;
+    // Whether the node has a picture to show or hide at all (a number or a text node has none).
+    bool canHavePicture(const QString &node) const;
+    // node.picture-show, -hide and -default: the override of every selected node that can have a
+    // picture. One undo step. `value` is "show", "hide" or "" (default).
+    Q_INVOKABLE void setPictureOverride(const QString &value);
+    // Whether that command would change a selected node: show: one is hidden now; hide: one shows
+    // now; default: one has an override.
+    bool pictureCommandApplies(fugue::PictureOverride value) const;
+
     // Removes the selected nodes and every link into or out of them.
     Q_INVOKABLE void deleteSelection();
     // Bypass or mute (3.5) the selection, `mode` being "bypass" or "mute": every selected
@@ -645,6 +665,7 @@ signals:
     void linkDragChanged();
     void selectionChanged();
     void linksHiddenChanged();
+    void pictureModeChanged();
     // An edit changed the document (not a selection or a viewport change), undo and redo
     // included.
     void edited();
@@ -725,6 +746,7 @@ private:
         QString color;      // layout color
         bool pinned = false;
         bool advancedOpen = false; // layout: the Advanced section shown (layout.nodes.<id>.advanced)
+        fugue::PictureOverride picture = fugue::PictureOverride::Default; // layout.nodes.<id>.picture (#263)
         int groupSize = 0;         // a group instance: its definition's node count, shown on a row of its own
         QRectF thumbnail;   // where the run's thumbnail goes, empty without one
         std::vector<Port> inputs;
@@ -880,4 +902,5 @@ private:
     Snapshot m_editBefore;
     std::optional<QPointF> m_pointer;
     bool m_linksHidden = false;
+    fugue::PictureMode m_pictureMode = fugue::PictureMode::Smart;
 };

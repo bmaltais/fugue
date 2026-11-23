@@ -231,7 +231,7 @@ public:
         }
         folder->queued(request.workflow);
         emit event(id, {{"event", "run.queued"}});
-        Waiting waiting{folder.value(), compilation.value(), {}};
+        Waiting waiting{folder.value(), compilation.value(), {}, request.noPictures};
         waiting.options.workflow = request.workflow;
         waiting.options.document = request.document.toJson();
         waiting.options.roots = m_setup.roots;
@@ -327,6 +327,7 @@ private:
         RunFolder folder;
         CompiledGraph graph;
         RunOptions options;
+        QSet<QString> noPictures; // path ids whose thumbnails are not made (RunRequest::noPictures)
     };
 
     Queue queue() const { return Queue(m_context.queueDir); }
@@ -461,9 +462,10 @@ private:
         m_process->cache.setLimit(CachePolicy::current().resultsBytes);
         m_activeId = id;
         m_activeFolder = waiting.folder;
+        m_activeNoPictures = waiting.noPictures;
         m_cancelAsked = false;
         m_active.reset(new Run(waiting.graph, waiting.folder, m_process->environment, waiting.options));
-        connect(m_active.get(), &Run::emitted, this, [this, id](const QJsonObject &e) { emit event(id, withThumbnails(e)); });
+        connect(m_active.get(), &Run::emitted, this, [this, id](const QJsonObject &e) { emit event(id, withThumbnails(e, m_activeNoPictures)); });
         connect(m_active.get(), &Run::finished, this, [this, id] {
             // A run that ends while the window closes (endActiveRun waits for this) is
             // cleared up there.
@@ -494,9 +496,12 @@ private:
         CacheManager(folders).cleanupLocked(CachePolicy::current());
     }
 
-    QJsonObject withThumbnails(QJsonObject e) {
+    // `skip`: the nodes whose pictures the canvas does not show, which cost no thumbnail (#263).
+    QJsonObject withThumbnails(QJsonObject e, const QSet<QString> &skip = {}) {
         const QString kind = e.value("event").toString();
         QJsonObject thumbnails;
+        if (skip.contains(e.value("node").toString()))
+            return e;
         if (kind == QLatin1String("node.preview")) {
             QJsonObject image = e.value("image").toObject();
             image.insert("type", "image");
@@ -595,6 +600,7 @@ private:
     std::unique_ptr<Run> m_active;
     QString m_activeId;
     std::optional<RunFolder> m_activeFolder;
+    QSet<QString> m_activeNoPictures; // of the run in progress
     bool m_cancelAsked = false;
     struct Parked {
         QString id;

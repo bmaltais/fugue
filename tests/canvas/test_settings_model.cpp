@@ -201,6 +201,18 @@ private slots:
         QVERIFY(model.canvasShowNewResults());
     }
 
+    // Node pictures (#263): smart by default, a preference; the default leaves the file.
+    void thePictureModeIsSmartAndPersists() {
+        SettingsModel model(settingsFile());
+        QCOMPARE(model.pictureMode(), QString("smart"));
+        QCOMPARE(model.set("picture_mode", "all"), QString());
+        QCOMPARE(model.pictureMode(), QString("all"));
+        QCOMPARE(SettingsModel(settingsFile()).pictureMode(), QString("all"));
+        QVERIFY(!model.set("picture_mode", "some").isEmpty());
+        QCOMPARE(model.set("picture_mode", "smart"), QString());
+        QVERIFY(!readJsonObject(settingsFile()).value().contains("picture_mode"));
+    }
+
     // Reopen tabs at start (#212): on by default; off is written (the default is on), on again takes the key out.
     void restoreTabsIsOnByDefaultAndPersists() {
         SettingsModel model;

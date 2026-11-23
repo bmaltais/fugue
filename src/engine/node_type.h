@@ -80,6 +80,9 @@ struct NodeType {
     QStringList keywords;
     QStringList aliases; // old ids this type answers to (3.6)
     bool sink = false;
+    // Whether the node shows a picture (#263): "always", "result" or "never"; empty: by category
+    // (node_picture.h pictureRole). Packs say it for their own types.
+    QString picture;
     bool deterministic = true;
     // The folder holding node.json: set by the pack loader, empty for a type that has none
     // (the built-ins' resources). Not part of the manifest, so toJson() leaves it out.

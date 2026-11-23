@@ -54,6 +54,7 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QVariantMap modelFolderKindsSet READ modelFolderKindsSet NOTIFY changed)
     Q_PROPERTY(QString newSeed READ newSeed NOTIFY changed)
     Q_PROPERTY(QString embedWorkflow READ embedWorkflow NOTIFY changed)
+    Q_PROPERTY(QString pictureMode READ pictureMode NOTIFY changed)
     // The canvas corners (#63): px from 0 to maxCornerRadius, or -1 to follow Omarchy.
     Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY changed)
     Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
@@ -121,6 +122,7 @@ public:
     QStringList packPaths() const { return m_file.settings.packPaths; }
     QString newSeed() const { return m_effective.settings.newSeed; }
     QString embedWorkflow() const { return m_effective.settings.embedWorkflow; }
+    QString pictureMode() const { return m_effective.settings.pictureMode; } // smart, sinks or all (#263)
     int cornerRadius() const { return m_effective.settings.cornerRadius; }
     bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
     bool restoreTabs() const { return m_effective.settings.restoreTabs; }

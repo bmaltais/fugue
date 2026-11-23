@@ -240,6 +240,26 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === 0
+                        title: qsTr("Node pictures")
+                        key: "picture_mode"
+                        origin: panel.model.origins["picture_mode"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("picture_mode"))
+                        note: panel.model.pictureMode === "all"
+                              ? qsTr("Every node that has a picture shows it.")
+                              : panel.model.pictureMode === "sinks"
+                                ? qsTr("Only the nodes that load a file and the ones that end a chain (Preview, Save, Compare) show a picture.")
+                                : qsTr("Nodes that make a picture, load one or end a chain show it; a node that only changes the one before it does not. A node's right-click menu can show or hide its picture.")
+                        Choices {
+                            Layout.fillWidth: true
+                            name: "pictureMode"
+                            current: panel.model.pictureMode
+                            options: [{value: "smart", text: qsTr("Smart")}, {value: "sinks", text: qsTr("Sinks and inputs only")},
+                                      {value: "all", text: qsTr("All")}]
+                            onPicked: value => panel.apply(panel.model.set("picture_mode", value))
+                        }
+                    }
+                    SettingsParts.Setting {
+                        visible: panel.page === 0
                         title: qsTr("Reopen tabs at start")
                         key: "restore_tabs"
                         origin: panel.model.origins["restore_tabs"] ?? ""

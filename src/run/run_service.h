@@ -43,6 +43,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 #include <functional>
@@ -88,6 +89,8 @@ struct RunRequest {
     QString target;   // "run to here": the path id to stop at, or empty
     QString entered;  // the group instance the canvas shows, as a path id: its sinks work (5.5)
     bool first = false; // ahead of the waiting runs ("run first")
+    // Path ids whose pictures this run does not make (#263): the canvas shows none for them.
+    QSet<QString> noPictures;
 };
 
 class RunService : public QObject {
