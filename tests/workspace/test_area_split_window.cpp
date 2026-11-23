@@ -20,6 +20,7 @@
 #include "../window_grab.h"
 #include "engine/canvas_store.h"
 #include "window_items.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using namespace fugue;
@@ -511,5 +512,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestAreaSplitWindow)
+FUGUE_TEST_MAIN(TestAreaSplitWindow, QGuiApplication)
 #include "test_area_split_window.moc"

@@ -12,6 +12,7 @@
 #include <QUndoStack>
 
 #include "canvas_app.h"
+#include "../test_shard.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -475,5 +476,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestCanvasEditing)
+FUGUE_TEST_MAIN(TestCanvasEditing, QGuiApplication)
 #include "test_canvas_editing.moc"

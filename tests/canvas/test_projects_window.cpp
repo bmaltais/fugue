@@ -22,6 +22,7 @@
 #include "engine/settings.h"
 #include "engine/project.h"
 #include "settings/project_model.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using namespace fugue;
@@ -488,5 +489,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestProjectsWindow)
+FUGUE_TEST_MAIN(TestProjectsWindow, QGuiApplication)
 #include "test_projects_window.moc"

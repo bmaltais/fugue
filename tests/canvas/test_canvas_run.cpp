@@ -33,6 +33,7 @@
 #include "../readme_shot.h"
 #include "run/run_queue.h"
 #include "run/run_service.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using pack_fixture::writeSayPack;
@@ -1777,5 +1778,5 @@ echo '{"outputs": {"text": "painted"}}'
     }
 };
 
-QTEST_MAIN(TestCanvasRun)
+FUGUE_TEST_MAIN(TestCanvasRun, QGuiApplication)
 #include "test_canvas_run.moc"

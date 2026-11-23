@@ -13,6 +13,7 @@
 #include "../test_home_guard.h"
 #include "../canvas/canvas_app.h"
 #include "engine/group_library.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using scroll_checks::wheelAt;
@@ -952,5 +953,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestSidePanelsWindow)
+FUGUE_TEST_MAIN(TestSidePanelsWindow, QGuiApplication)
 #include "test_side_panels_window.moc"

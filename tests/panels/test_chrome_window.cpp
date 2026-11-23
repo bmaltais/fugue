@@ -7,6 +7,7 @@
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 
@@ -366,5 +367,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestChromeWindow)
+FUGUE_TEST_MAIN(TestChromeWindow, QGuiApplication)
 #include "test_chrome_window.moc"

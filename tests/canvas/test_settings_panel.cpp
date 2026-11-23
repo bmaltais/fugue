@@ -13,6 +13,7 @@
 #include "engine/providers.h"
 
 #include <QJsonDocument>
+#include "../test_shard.h"
 
 using namespace canvas_test;
 
@@ -493,5 +494,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestSettingsPanel)
+FUGUE_TEST_MAIN(TestSettingsPanel, QGuiApplication)
 #include "test_settings_panel.moc"
