@@ -2412,7 +2412,7 @@ type with a file input and no media input) or `never` (a transform that only cha
 Resize, Blur, Flip, Color Match, the mask nodes: shown by All only). Without the key the type's category
 decides. The node's **override**, `layout.nodes.<id>.picture` = `show` or `hide` (Show picture, Hide picture and
 Default picture in the Node menu and the node's right-click menu), wins over the mode. A group instance
-is a `result` node: it shows the image its group makes after a run. Where the picture is hidden the node
+is a `result` node: it shows the image its group makes after a run (its first image output's inner node), and before any run, the image its face's file input names, as a Load Image does (a group that exposes a Load node's file is an input node for Sinks and inputs only). Where the picture is hidden the node
 has no picture slot and is shorter, and its thumbnail is not made (the run is told which nodes to skip,
 `RunRequest::noPictures`; a node that a shown Crop or Paint Mask draws over still gets one). A picture
 shown later than the run that made the results waits for the next run: a cached node gives it at once.

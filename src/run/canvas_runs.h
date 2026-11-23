@@ -226,6 +226,7 @@ private:
         bool compares = false;    // Compare Images: its slot is a viewer of A and B (#62)
         QString labelA, labelB;   // what produced A and B: the linked node's title
         QString imageFile;        // the image file its file input names
+        QString resultFrom;       // a group instance: the path id of the inner node whose image output it shows
         bool crops = false;       // Crop: its slot shows the picture arriving at its input, under the frame (#73)
         QString paintsOver;       // a node with a mask widget over an image input (Paint Mask): that input's name
         QString cropFrom;         // the path id of the node that feeds the followed input, if one does

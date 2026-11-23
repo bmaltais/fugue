@@ -4,6 +4,7 @@
 #include <QJsonObject>
 
 #include "canvas/canvas_model.h"
+#include "engine/groups.h"
 #include "engine/registry.h"
 
 using namespace fugue;
@@ -39,7 +40,11 @@ bool CanvasModel::showsPicture(const QString &node) const {
     // A group instance shows the image its group makes, as a node that makes a result does; a type
     // that is not installed (a placeholder) has no role: the mode decides.
     const PictureRole role = type && !isGroup(node) ? pictureRole(*type) : PictureRole::Result;
-    return ::fugue::showsPicture(m_pictureMode, role, type && !isGroup(node) && isInputNode(*type), m_rows[size_t(r)].picture);
+    // A group that exposes a Load node's file on its face is an input node: "Sinks and inputs only" keeps its picture.
+    bool inputNode = type && !isGroup(node) && isInputNode(*type);
+    if (!type && isGroup(node) && m_registry)
+        inputNode = isInputNode(groupFace(m_document, *m_registry, found.type));
+    return ::fugue::showsPicture(m_pictureMode, role, inputNode, m_rows[size_t(r)].picture);
 }
 
 bool CanvasModel::pictureCommandApplies(PictureOverride value) const {
