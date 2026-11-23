@@ -766,3 +766,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: Photoshop's Edit > Paste and File > Place Embedded, Blender's hover rule for keys (one keymap, D5): Ctrl+V pastes nodes in the Graph and a layer in the Canvas view, decided by which of the two the pointer is over or has the focus, as every other key of the view. A drop accepts only picture files, so the window's own drop (a workflow, a Load Image) keeps the rest.
 - Rules met: Floor (rows and the file dialog are the shared ones), Primary (none: no new button), Destructive (none: Undo takes the layer back).
 - Not done: Copy (Edit > Copy is still a greyed row), a paste that follows the pointer, a pasted picture scaled to fit (it keeps its size; the transform below scales it).
+
+### 2026-11-23 Layer > Transform: flip and quarter turns (#236, epic #216)
+
+- Control: the Layer menu's **Transform** submenu (`subMenu-Transform`): `canvas-view.flip-horizontal`, `.flip-vertical`, `.turn-clockwise`, `.turn-counterclockwise` (`src/menu/menus.cpp`, `CanvasView.qml` `transformable`).
+- Old: nothing; a layer could not be moved or turned in the window.
+- New: four rows in a submenu of the Layer menu, on the current paint layer, each ONE undoable step named "Layer flipped: <name>" or "Layer rotated: <name>". Greyed for a group, a mask or picture layer, several layers picked, and off the latest version.
+- Why: Photoshop's Edit > Transform > Flip Horizontal, Rotate 90° CW and CCW; Blender's Image > Transform. A submenu keeps the Layer menu's frequent rows (mask, layer, merge) in their own chunks (Hick).
+- Rules met: Floor (menu rows), Primary (none), Destructive (none: undoable, and the original is kept).
+- Not done: the Move and Free Transform tools (next slice), keys for the rows.

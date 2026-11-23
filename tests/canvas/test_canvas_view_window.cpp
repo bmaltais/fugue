@@ -1139,6 +1139,15 @@ private slots:
         QTRY_COMPARE(model(app)->property("layers").toList().size(), 2);
         QCOMPARE(model(app)->property("layers").toList().first().toMap().value("name").toString(), QString("Pasted 1"));
         QCOMPARE(int(canvas::CanvasStore::forSession().log(m_canvas)->size()), revisions + 1);
+        // #236 slice 2: Layer > Transform acts on the pasted (current) layer: one revision each.
+        click(app, "canvasMenuTitle-Layer");
+        click(app, "subMenu-Transform");
+        click(app, "menuItem-canvas-view.turn-clockwise");
+        QTRY_COMPARE(int(canvas::CanvasStore::forSession().log(m_canvas)->size()), revisions + 2);
+        click(app, "canvasMenuTitle-Layer");
+        click(app, "subMenu-Transform");
+        click(app, "menuItem-canvas-view.flip-horizontal");
+        QTRY_COMPARE(int(canvas::CanvasStore::forSession().log(m_canvas)->size()), revisions + 3);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

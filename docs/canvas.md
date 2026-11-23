@@ -358,6 +358,22 @@ sized, with the layer's mask; the original stays in Fugue (and in a `.fuguepack`
 the placement produced: a layer painted on, or given another mask, since then no longer matches it, and its next transform starts
 from the layer as it is then (Photoshop's rasterise-on-paint).
 
+**Transforming a layer (#236).** Layer > **Transform** has Flip horizontal, Flip vertical, Rotate 90° clockwise and Rotate 90° counterclockwise for the
+current paint layer (a group, a mask layer and a picture layer say in words that they cannot be moved or transformed: transform the group's layers, or
+merge it into one layer first). A layer is drawn from its **original**: a pasted picture's own pixels; for a plain layer, the first transform takes
+the smallest rectangle that holds every pixel that is not transparent (Photoshop's Free Transform box) as the original and draws it again, its
+layer mask cut to the same rectangle and **transformed with it** (where the layer has nothing the mask hides nothing). Every later transform
+starts again from the original, so scaling a layer down to a tenth and back to its size gives the original pixels exactly, and a picture
+bigger than the canvas that was scaled down shows all of it. The picture is resampled on premultiplied alpha (a transparent edge leaks no color) with
+**Lanczos** (the default) or **bicubic**, their support widened when shrinking, or **nearest** (for pixel art; a turn then has no soft edge);
+a quarter turn and a flip lose nothing, any other angle is resampled a second time at the turned positions with a one pixel soft edge. Only the part the
+canvas shows is computed. A layer may reach past the canvas edge: the layer's tiles are cut there (the canvas is the picture), the original keeps the
+rest; a layer is at most 32768 px a side and 16384 x 16384 px. Each transform is ONE revision (producer `canvas-view:transform`; History says
+"Layer moved: Fill", "Layer scaled: …", "Layer rotated: …", "Layer flipped: …", or "Layer transformed: …" for several at once). A layer painted on, or
+given another mask, since its last transform has no current original: its next transform starts from the layer as it is. Growing the canvas
+(Canvas size) moves the original with the layer. The sizes and the placement are kept to a thousandth. Not yet: transforming a group, a mask layer
+or a selection together with a layer, and a command line verb (`fugue canvas layer transform`).
+
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the
 canvas picker, Fit and 100%; each tool's own settings stay in the options bar.

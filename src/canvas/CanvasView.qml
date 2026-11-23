@@ -183,6 +183,8 @@ Item {
     readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(canvasData.pictureSize.width, canvasData.pictureSize.height)))
     // #252: the rows the layers panel has selected, and whether Merge down has two shown layers that can merge (paint layers or groups).
     readonly property var chosenRows: layersPanel.chosen.map(p => canvasData.layers.find(r => r.position === p)).filter(r => r !== undefined)
+    // #236: the current layer can be moved, flipped or turned: a single paint layer (not a group, mask or picture) on the latest version.
+    readonly property bool transformable: canvasData.layersEditable && layersPanel.current !== null && chosenRows.length === 1 && layersPanel.current.kind === "paint"
     readonly property bool mergeable: {
         const upper = layersPanel.current
         if (!canvasData.layersEditable || upper === null || chosenRows.length !== 1 || upper.position < 1)
@@ -360,6 +362,8 @@ Item {
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.paste-layer": case "canvas-view.place-picture": return {enabled: canvasData.layersEditable}
         case "canvas-view.paste-canvas": return {enabled: true}
+        case "canvas-view.flip-horizontal": case "canvas-view.flip-vertical": case "canvas-view.turn-clockwise": case "canvas-view.turn-counterclockwise":
+            return {enabled: transformable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
         case "canvas-view.invert-selection": return {enabled: quickMask}
@@ -448,6 +452,10 @@ Item {
         case "canvas-view.batch": batchDialog.openDialog(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
+        case "canvas-view.flip-horizontal": if (transformable) canvasData.flipLayer(layersPanel.current.position, true); break
+        case "canvas-view.flip-vertical": if (transformable) canvasData.flipLayer(layersPanel.current.position, false); break
+        case "canvas-view.turn-clockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, true); break
+        case "canvas-view.turn-counterclockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, false); break
         case "canvas-view.paste-layer": pasteLayer(); break
         case "canvas-view.paste-canvas": pasteAsNewCanvas(); break
         case "canvas-view.place-picture": placePicture(); break

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "engine/canvas_transform.h"
 #include "engine/new_canvas.h"
 
 namespace fugue::canvas {
@@ -51,6 +52,18 @@ Result<LayerRecord> movedLayer(const Move &move, const LayerRecord &layer) {
         if (!tiles)
             return Result<LayerRecord>(tiles.errors());
         out.tiles = std::move(tiles.value());
+    }
+    if (layer.source) {
+        // A placed or transformed layer's original moves with it (#236): the placement shifts by the same corner, so a picture
+        // that stuck out of the canvas shows its off-canvas part when the canvas grows. A layer painted on since (its original
+        // is not current) has no use for it any more.
+        if (hasCurrentOriginal(layer)) {
+            out.source->transform.cx += move.dx;
+            out.source->transform.cy += move.dy;
+            out.source->rendered = renderedKey(out.tiles, out.hasMask, out.maskTiles);
+        } else {
+            out.source.reset();
+        }
     }
     return out;
 }

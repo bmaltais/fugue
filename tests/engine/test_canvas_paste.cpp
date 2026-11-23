@@ -80,10 +80,10 @@ private slots:
         // Wholly off the canvas: nothing shown, no error.
         const MaskPaint away = renderPlaced(picture, centeredPlacement(20, 10, 500, 500), 30, 20).value();
         QVERIFY(std::all_of(away.pixels().begin(), away.pixels().end(), [](uint8_t v) { return v == 0; }));
-        // A scaling placement is not drawn here (the transform does that).
-        LayerTransform scaled = t;
-        scaled.width = 40;
-        QVERIFY(!renderPlaced(picture, scaled, 30, 20));
+        // A placement that cannot be drawn is refused.
+        LayerTransform bad = t;
+        bad.width = 0;
+        QVERIFY(!renderPlaced(picture, bad, 30, 20));
     }
 
     void pastingIsOneRevisionOfANamedLayerAboveTheOthers() {

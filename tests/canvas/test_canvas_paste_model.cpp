@@ -155,6 +155,67 @@ private slots:
         const ImportedPicture refused = pictureFromFile(m_dir.filePath("huge.png"));
         QVERIFY(!refused.ok());
     }
+
+    // ---- #236 slice 2: transforms ----
+    void aTransformIsOneRevisionNamedForWhatItDid() {
+        CanvasViewModel model;
+        open(model);
+        QImage image(40, 20, QImage::Format_RGBA8888);
+        image.fill(QColor(0, 255, 0));
+        putOnClipboard(image);
+        QVERIFY(model.pasteLayer(100, 50));
+        const int pasted = model.layers().first().toMap().value("position").toInt();
+        const QVariantMap box = model.layerBox(pasted);
+        QVERIFY(box.value("valid").toBool());
+        QVERIFY(box.value("original").toBool());
+        QCOMPARE(box.value("width").toInt(), 40);
+        QCOMPARE(box.value("x").toInt(), 80);
+        QCOMPARE(box.value("corners").toList().size(), 4);
+        int count = revisionCount();
+        QVERIFY(model.moveLayerBy(pasted, 10, -5));
+        QCOMPARE(revisionCount(), count + 1);
+        QCOMPARE(model.stepName(store().info(m_canvas)->head), QStringLiteral("Layer moved: Pasted 1"));
+        QCOMPARE(store().revision(m_canvas, store().info(m_canvas)->head)->producer, QStringLiteral("canvas-view:transform"));
+        QCOMPARE(model.layerBox(pasted).value("x").toInt(), 90);
+        QVERIFY(model.transformLayer(pasted, QVariantMap{{"width", 80}, {"height", 40}}));
+        QCOMPARE(model.stepName(store().info(m_canvas)->head), QStringLiteral("Layer scaled: Pasted 1"));
+        QVERIFY(model.turnLayer(pasted, true));
+        QCOMPARE(model.stepName(store().info(m_canvas)->head), QStringLiteral("Layer rotated: Pasted 1"));
+        QCOMPARE(model.layerBox(pasted).value("angle").toDouble(), 90.0);
+        QVERIFY(model.flipLayer(pasted, true));
+        QCOMPARE(model.stepName(store().info(m_canvas)->head), QStringLiteral("Layer flipped: Pasted 1"));
+        QVERIFY(model.transformLayer(pasted, QVariantMap{{"angle", 30}, {"width", 60}}));
+        QCOMPARE(model.stepName(store().info(m_canvas)->head), QStringLiteral("Layer transformed: Pasted 1"));
+        // Undo goes back one step at a time.
+        count = revisionCount();
+        QVERIFY(model.undo());
+        QCOMPARE(model.layerBox(pasted).value("angle").toDouble(), 90.0 * -1);
+    }
+
+    void aFirstTransformOfAPlainLayerStartsFromItsPixelsAndRefusalsAreInWords() {
+        CanvasViewModel model;
+        open(model);
+        // Top is a whole-canvas layer: its box is the canvas, and moving it is one revision.
+        const QVariantMap box = model.layerBox(1);
+        QVERIFY(box.value("valid").toBool());
+        QVERIFY(!box.value("original").toBool());
+        QCOMPARE(box.value("width").toInt(), 200);
+        QVERIFY(model.moveLayerBy(1, 20, 0));
+        QCOMPARE(model.stepName(store().info(m_canvas)->head), QStringLiteral("Layer moved: Top"));
+        QVERIFY(model.layerBox(1).value("original").toBool());
+        QVERIFY(!model.layerBox(9).value("valid").toBool());
+        QVERIFY(!model.transformLayer(1, QVariantMap{{"width", 0}}));
+        QVERIFY(model.error().contains("cannot be placed"));
+        QVERIFY(!model.transformLayer(1, QVariantMap{{"filter", "sinc"}}));
+        // A group is refused with a plain message.
+        QVERIFY(model.groupLayers(QVariantList{1}));
+        const int groupPosition = model.layers().first().toMap().value("position").toInt();
+        const QVariantMap groupBox = model.layerBox(groupPosition);
+        QVERIFY(!groupBox.value("valid").toBool());
+        QVERIFY(groupBox.value("reason").toString().contains("group"));
+        QVERIFY(!model.flipLayer(groupPosition, true));
+        QVERIFY(model.error().contains("group"));
+    }
 };
 
 QTEST_MAIN(TestCanvasPasteModel)

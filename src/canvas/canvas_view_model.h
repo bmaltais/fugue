@@ -47,6 +47,7 @@
 #include "canvas/canvas_history.h"
 #include "canvas/mask_layer.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_transform.h"
 #include "canvas/widget_edit.h"
 
 namespace fugue {
@@ -163,6 +164,19 @@ public:
     Q_INVOKABLE bool placeFile(const QString &pathOrUrl, double cx = -1, double cy = -1);
     // Whether a dragged file is one placeFile reads (a drop takes only pictures; the window's own drop keeps the rest).
     Q_INVOKABLE bool isPictureFile(const QString &pathOrUrl) const;
+    // #236, Move and Free Transform, Layer > Transform: the layer at `position` placed anew from its original (engine/canvas_transform.h).
+    // `layerBox` says where it is now: {valid, reason, original (an original is kept: a pasted or transformed layer), x, y, width, height
+    // (the box before it is turned: the original scaled), cx, cy (its center), angle (degrees clockwise), flipX, flipY, filter
+    // ("lanczos", "bicubic" or "nearest"), sourceWidth, sourceHeight, corners [{x, y} x4: top left, top right, bottom right, bottom left,
+    // as drawn]}; a layer with no original is its pixels' bounds. Not valid (`reason` in words): a group, a mask or picture layer, an empty
+    // layer, or not the Head shown. `transformLayer` takes {cx, cy, width, height, angle, flipX, flipY, filter} (any left out stays as it
+    // is) and makes ONE revision, producer `canvas-view:transform`, History "Layer moved/scaled/rotated/flipped/transformed: <name>".
+    // `flipLayer` mirrors on screen about the box's center, `turnLayer` a quarter turn, `moveLayerBy` shifts by whole pixels.
+    Q_INVOKABLE QVariantMap layerBox(int position) const;
+    Q_INVOKABLE bool transformLayer(int position, const QVariantMap &placement);
+    Q_INVOKABLE bool flipLayer(int position, bool horizontal);
+    Q_INVOKABLE bool turnLayer(int position, bool clockwise);
+    Q_INVOKABLE bool moveLayerBy(int position, double dx, double dy);
     // Empties the canvas (File > Clear canvas): ONE new revision of the Head, the same size, one empty layer; Undo takes it
     // back. False when the Head is not what is shown.
     Q_INVOKABLE bool clearCanvas();
@@ -231,6 +245,9 @@ private:
     bool applyEdit(const canvas::LayerEdit &edit, const QList<int> &select);
     // A picture placed as a layer (pasteLayer, placeFile).
     bool placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name);
+    // The placement of the layer at `position` of the shown revision (an empty `why` when it can be moved).
+    Result<canvas::CurrentPlacement> placementOf(int position, QString *why) const;
+    bool applyTransform(int position, const canvas::LayerTransform &placement);
     // A stored edit: the view moves on to it (false, with `error`, when it did not land).
     bool land(const Result<canvas::Commit> &done, const QList<int> &select);
     // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).

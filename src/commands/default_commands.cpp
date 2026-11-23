@@ -130,6 +130,11 @@ QList<Row> defaultRows() {
         {"canvas-view.paste-layer", QT_TRANSLATE_NOOP("Command", "Paste the clipboard's picture as a new layer, centered in the view (one undo step)"), {"Ctrl+V"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new layer")},
         {"canvas-view.paste-canvas", QT_TRANSLATE_NOOP("Command", "Make a new canvas of the clipboard's picture"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new canvas")},
         {"canvas-view.place-picture", QT_TRANSLATE_NOOP("Command", "Place a picture file on the canvas as a new layer (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Place picture…")},
+        // #236: Layer > Transform: flip and quarter turns of the current layer, each one revision.
+        {"canvas-view.flip-horizontal", QT_TRANSLATE_NOOP("Command", "Flip the current layer left to right about its center (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Flip horizontal")},
+        {"canvas-view.flip-vertical", QT_TRANSLATE_NOOP("Command", "Flip the current layer top to bottom about its center (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Flip vertical")},
+        {"canvas-view.turn-clockwise", QT_TRANSLATE_NOOP("Command", "Turn the current layer a quarter turn clockwise (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rotate 90° clockwise")},
+        {"canvas-view.turn-counterclockwise", QT_TRANSLATE_NOOP("Command", "Turn the current layer a quarter turn counterclockwise (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rotate 90° counterclockwise")},
         {"canvas-view.fit", QT_TRANSLATE_NOOP("Command", "Fit the picture in the view"), {}, {"Home or 0"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Fit")},
         {"canvas-view.actual-size", QT_TRANSLATE_NOOP("Command", "Show the picture at 100%"), {}, {"1"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "100%")},
         {"canvas-view.zoom-in", QT_TRANSLATE_NOOP("Command", "Zoom in the picture"), {}, {"+"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Zoom in")},

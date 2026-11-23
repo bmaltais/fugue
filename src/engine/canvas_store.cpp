@@ -1080,6 +1080,12 @@ Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &b
     return Commit{added.value(), moved.value()};
 }
 
+Result<Commit> CanvasStore::transformLayer(const QString &canvasId, const QString &base, int position, const LayerTransform &transform, const QString &producer) {
+    const TileReader read = [this](const QString &hash, int width, int height, int channels) { return readBlob(hash, width, height, channels); };
+    const TileSink sink = [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); };
+    return commitTree(canvasId, base, [&](const Tree &tree) { return transformedTree(tree, position, transform, read, sink); }, producer, true);
+}
+
 Result<Commit> CanvasStore::pasteLayer(const QString &canvasId, const QString &base, const MaskPaint &picture, double cx, double cy, int above, const QString &name,
                                        const QString &producer) {
     if (picture.channels() != 4)

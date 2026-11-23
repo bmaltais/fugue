@@ -251,6 +251,13 @@ public:
     Result<Commit> pasteLayer(const QString &canvasId, const QString &base, const mask::MaskPaint &picture, double cx, double cy, int above, const QString &name,
                               const QString &producer);
 
+    // A paint layer moved, scaled, turned or flipped (#236, engine/canvas_transform.h): the layer at `position` of `base` (the head, as
+    // editLayers) is drawn again from its original by `transform` (its own pixels the first time, which then are its original; a
+    // layer painted on since starts again from the layer as it is) and its layer mask goes through the same placement. ONE new
+    // revision, producer `producer` ("canvas-view:transform"); a placement equal to the current one writes nothing. input_invalid, in
+    // words, for a group, a mask or picture layer, or a placement that cannot be drawn.
+    Result<Commit> transformLayer(const QString &canvasId, const QString &base, int position, const LayerTransform &transform, const QString &producer);
+
     // A layer written at the tree level, groups kept (#274; a Canvas Write): `layer` goes on top of the revision `parent`'s layers as a
     // new revision with that parent (producer `producer`), the head not moved: moveHead does that, or accept places it on a newer
     // head. The layer's tiles are ones storeLayerTiles stored (a tile that is not stored is canvas_corrupt on the next read).
