@@ -1016,7 +1016,8 @@ private slots:
         click(app, "canvasModifyOk");
         QTRY_VERIFY(view(app)->property("maskSelected").toBool());
         QVERIFY(!view(app)->property("hasFreeRect").toBool());
-        QVERIFY(view(app)->property("quickMask").toBool()); // the painted selection is shown as the Quick Mask
+        QVERIFY(!view(app)->property("quickMask").toBool()); // Modify no longer switches Quick Mask on: the ants show it
+        QVERIFY(find(app.window, "canvasViewAnts"));
         QObject *mask = view(app)->property("selectionMask").value<QObject *>();
         const auto valueAt = [&](int x, int y) {
             int v = -1;

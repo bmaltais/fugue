@@ -1283,6 +1283,7 @@
   "Paint the part to change as a selection (%1)": "Paint the part to change as a selection (%1)",
   "Quick Mask: paint the part to change, in red (%1)": "Quick Mask: paint the part to change, in red (%1)",
   "Show the hidden part of the mask in red (%1)": "Show the hidden part of the mask in red (%1)",
+  "Show the selection in red (%1)": "Show the selection in red (%1)",
   "The brush's size in canvas pixels ([ and ], Alt+drag on the picture)": "The brush's size in canvas pixels ([ and ], Alt+drag on the picture)",
   "Undo in the Canvas view (a mask stroke, the selection, the region)": "Undo in the Canvas view (a mask stroke, the selection, the region)",
   "Context %1 × %2": "Context %1 × %2",

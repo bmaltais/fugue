@@ -218,10 +218,10 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // Q paints the selection, not a layer mask; Ctrl+Z undoes a stroke of it; Use selection writes it into the followed
-    // Canvas Region (its hash and bounds, one undo step of the document).
-    void quickMaskPaintsTheSelectionForTheRegion() {
-        QSKIP("Skipped: SIGSEGV (null access) in the Quick Mask flow since the marching ants (#318); the brush-selection work for #313 fixes it and replaces this test");
+    // A Quick Mask stroke is the selection on release (#313): the ants outline it at once (no tint, no revision), strokes add,
+    // the eraser (X) subtracts, Ctrl+Z takes one back (also with Q off), Deselect is undoable; Use selection writes the
+    // followed Canvas Region (its hash, one undo step of the document); the tint is optional (\\).
+    void aQuickMaskStrokeIsTheSelectionOnRelease() {
         App app(load(withRegion(m_canvas)));
         QVERIFY(app.open());
         app.model.select({"region"});
@@ -231,7 +231,63 @@ private slots:
         key(app, Qt::Key_Q);
         QTRY_VERIFY(view(app)->property("quickMask").toBool());
         QCOMPARE(view(app)->property("tool").toString(), QString("brush"));
-        QVERIFY(find(app.window, "canvasViewSelection"));
+        QCOMPARE(find(app.window, "canvasViewBrushTargetText")->property("text").toString(), QString("Selection"));
+        drag(app, at, 40);
+        QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
+        QTRY_VERIFY(find(app.window, "canvasViewAnts") && find(app.window, "canvasViewAnts")->property("outlined").toBool());
+        QVERIFY(!find(app.window, "canvasViewSelection")); // no tint unless asked
+        QCOMPARE(revisions(), 1); // a selection is not a revision
+        // A second stroke elsewhere adds: the first stays.
+        drag(app, at + QPoint(0, 80), 20);
+        QTRY_VERIFY(selection(app)->canUndo());
+        QVERIFY(selection(app)->valueAt(128, 128) > 128);
+        // X swaps to the eraser: a stroke over the first takes it out.
+        key(app, Qt::Key_X);
+        QTRY_COMPARE(view(app)->property("tool").toString(), QString("eraser"));
+        drag(app, at, 40);
+        QTRY_COMPARE(selection(app)->valueAt(128, 128), 0);
+        key(app, Qt::Key_Z, Qt::ControlModifier); // one stroke back
+        QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
+        // The tint is optional.
+        key(app, Qt::Key_Backslash);
+        QTRY_VERIFY(find(app.window, "canvasViewSelection"));
+        key(app, Qt::Key_Backslash);
+        QTRY_VERIFY(!find(app.window, "canvasViewSelection"));
+        // Leaving Q keeps the ants, and Ctrl+Z still takes the selection back, one stroke.
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(!view(app)->property("quickMask").toBool());
+        QVERIFY(find(app.window, "canvasViewAnts"));
+        key(app, Qt::Key_Z, Qt::ControlModifier);
+        QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128 || !view(app)->property("maskSelected").toBool());
+        QCOMPARE(revisions(), 1);
+        // Deselect, and Ctrl+Z brings it back.
+        QVERIFY(app.commands.trigger("canvas-view.select-all"));
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        QVERIFY(app.commands.trigger("canvas-view.deselect"));
+        QTRY_VERIFY(!view(app)->property("maskSelected").toBool());
+        key(app, Qt::Key_Z, Qt::ControlModifier);
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        // Use selection is on for a painted selection, with Q off.
+        QVERIFY(app.commands.entry("canvas-view.use-selection").value("enabled").toBool());
+        QVERIFY(app.commands.trigger("canvas-view.use-selection"));
+        const QString hash = app.model.widgets()->regionState("region").value("selection").toString();
+        QVERIFY(hash.startsWith("sha256:"));
+        QVERIFY(canvas::CanvasStore::forSession().selection(hash).ok());
+        QCOMPARE(model(app)->property("region").toMap().value("selection").toString(), hash);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The flow of the old quickMaskPaintsTheSelectionForTheRegion (crashed on main after the ants, #313): Q, stroke, Ctrl+Z (the
+    // mask empties), stroke, Use selection, Q off.
+    void quickMaskPaintsTheSelectionForTheRegion() {
+        App app(load(withRegion(m_canvas)));
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_VERIFY(model(app)->property("region").toMap().value("valid").toBool());
+        const QPoint at = hoverPicture(app);
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
         QCOMPARE(find(app.window, "canvasViewBrushTargetText")->property("text").toString(), QString("Selection"));
         drag(app, at, 40);
         QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
@@ -249,7 +305,58 @@ private slots:
         QCOMPARE(model(app)->property("region").toMap().value("selection").toString(), hash);
         key(app, Qt::Key_Q);
         QTRY_VERIFY(!view(app)->property("quickMask").toBool());
-        QVERIFY(find(app.window, "canvasViewSelection")->isVisible()); // leaving Quick Mask keeps the selection, shown as one
+        QVERIFY(!find(app.window, "canvasViewSelection")); // no tint with Quick Mask off
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A rectangle is the start of the painted selection: the first stroke joins it; a faint stroke (no 50% contour) shows the tint.
+    void aRectangleJoinsTheStrokeAndAFaintStrokeShowsTheTint() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        const QPoint at = hoverPicture(app);
+        const QVariant rect = QVariantMap{{"x", 20}, {"y", 30}, {"width", 40}, {"height", 40}};
+        QVERIFY(QMetaObject::invokeMethod(view(app), "placeFree", Q_ARG(QVariant, rect)));
+        QTRY_VERIFY(view(app)->property("hasFreeRect").toBool());
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
+        drag(app, at, 40);
+        QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
+        QCOMPARE(selection(app)->valueAt(40, 50), 255); // the rectangle, painted in first
+        QVERIFY(!view(app)->property("hasFreeRect").toBool());
+        QCOMPARE(revisions(), 1);
+        // Faint: nothing for the ants to outline, so the tint shows by itself.
+        QVERIFY(app.commands.trigger("canvas-view.deselect"));
+        QTRY_VERIFY(!view(app)->property("maskSelected").toBool());
+        view(app)->setProperty("brushOpacity", 0.3);
+        drag(app, at, 40);
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        QTRY_VERIFY(find(app.window, "canvasViewSelection"));
+        QVERIFY(!find(app.window, "canvasViewAnts") || !find(app.window, "canvasViewAnts")->property("outlined").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A layer-mask stroke is one revision and leaves the selection alone; a Quick Mask stroke is no revision.
+    void aLayerMaskStrokeLeavesTheSelectionAlone() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        const QPoint at = hoverPicture(app);
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
+        drag(app, at + QPoint(0, 60), 20);
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        const int before = selection(app)->valueAt(128, 128);
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(!view(app)->property("quickMask").toBool());
+        model(app)->setProperty("maskIdle", 80);
+        click(app, "canvasLayer-1");
+        click(app, "canvasLayerAddMask");
+        QTRY_COMPARE(revisions(), 2);
+        drag(app, at, 40);
+        QTRY_COMPARE(revisions(), 3);
+        QCOMPARE(selection(app)->valueAt(128, 128), before);
+        QVERIFY(view(app)->property("maskSelected").toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -296,7 +403,7 @@ private slots:
     }
 
     // The marching ants (#313): a rectangle (the free one the region tool draws) and a lasso selection have an outlined ants item,
-    // Quick Mask (the red tint) hides it while it edits, a layer mask made the selection (Ctrl+click its thumbnail) has one, and
+    // Quick Mask keeps it (the red tint is optional), a layer mask made the selection (Ctrl+click its thumbnail) has one, and
     // Deselect (Ctrl+D) removes it.
     void theSelectionHasMarchingAnts() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
@@ -327,9 +434,9 @@ private slots:
         const int before = ants()->property("pointCount").toInt();
         QVERIFY(app.commands.trigger("canvas-view.invert-selection")); // the same edge and the picture's own
         QTRY_VERIFY(ants()->property("pointCount").toInt() != before);
-        key(app, Qt::Key_Q); // Quick Mask edits it as the red tint: no ants meanwhile
+        key(app, Qt::Key_Q); // Quick Mask edits it, the ants stay (the tint is optional)
         QTRY_VERIFY(view(app)->property("quickMask").toBool());
-        QTRY_VERIFY(!ants());
+        QVERIFY(ants());
         key(app, Qt::Key_Q);
         QTRY_VERIFY(ants());
         key(app, Qt::Key_D, Qt::ControlModifier);
@@ -376,6 +483,30 @@ private slots:
         QTest::mouseRelease(app.window, Qt::LeftButton, {}, at + ring[0]);
         QTRY_VERIFY(find(app.window, "canvasViewAnts"));
         save("lasso");
+    }
+
+    // Picture of a brush-painted selection: FUGUE_SHOT_DIR=<dir> test_canvas_tools_window savesThePictureOfABrushSelection.
+    void savesThePictureOfABrushSelection() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("FUGUE_SHOT_DIR is not set");
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"), {}, Look{"tokyo-night", 8});
+        QVERIFY(app.open());
+        openDialog(app);
+        const QPoint at = hoverPicture(app);
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
+        view(app)->setProperty("brushSize", 36);
+        for (const QPoint &p : {QPoint(-50, -20), QPoint(-50, 10), QPoint(-20, 30)}) {
+            QTest::mousePress(app.window, Qt::LeftButton, {}, at + p);
+            for (int x = 4; x <= 90; x += 4)
+                QTest::mouseMove(app.window, at + p + QPoint(x, x / 6));
+            QTest::mouseRelease(app.window, Qt::LeftButton, {}, at + p + QPoint(90, 15));
+        }
+        QTRY_VERIFY(find(app.window, "canvasViewAnts") && find(app.window, "canvasViewAnts")->property("outlined").toBool());
+        QTest::mouseMove(app.window, QPoint(2, 2));
+        QTest::qWait(400);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/brush-selection.png").arg(QString::fromLocal8Bit(dir))));
     }
 
     // #281: Qt gives a disabled item no hover, so a disabled button's "why is this off" tip never showed. Use selection is
