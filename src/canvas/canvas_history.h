@@ -103,8 +103,12 @@ public:
     Q_INVOKABLE bool drop(const QString &revision);
     // Shows a canvas just made elsewhere (the New canvas dialog, #232): the list is read again and it is the one shown.
     Q_INVOKABLE void useCanvas(const QString &id);
+    // Saves the shown canvas as a package to share (#249; Share…): its layers as they are now, or with the history of
+    // every step too. ".fuguepack" is added; a file already there is never replaced. True when written, else `error`.
+    Q_INVOKABLE bool sharePackage(const QString &target, bool withHistory);
     // Makes a canvas from a picture file in this store and opens it (#228; Import picture…): a path or a file: URL; a
-    // blank name is the file's. Returns why not, or empty; the new canvas is then `canvasId`.
+    // blank name is the file's. A shared canvas (.fuguepack, #249) comes in as a new canvas with its history when it has
+    // one, and the notice says when its id was taken here so it got another. Returns why not, or empty; the new canvas is then `canvasId`.
     Q_INVOKABLE QString importPicture(const QString &path, const QString &name = QString());
 
 signals:

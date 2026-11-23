@@ -7,11 +7,14 @@
 // clock of the test's own.
 
 #include <QDirIterator>
+#include <cstdlib>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include "engine/canonical.h"
+#include "engine/edge_fill.h"
 #include "engine/canvas_diff.h"
+#include "engine/canvas_layer_merge.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
 
@@ -46,6 +49,16 @@ LayerEdit edit(LayerOp op, std::vector<int> layers) {
     e.op = op;
     e.layers = std::move(layers);
     return e;
+}
+
+// The same picture, up to the rounding of one more 8-bit step (a merged layer is stored as the 8-bit picture it drew).
+int mostDifferent(const MaskPaint &a, const MaskPaint &b) {
+    if (a.pixels().size() != b.pixels().size())
+        return 1000;
+    int most = 0;
+    for (size_t i = 0; i < a.pixels().size(); ++i)
+        most = std::max(most, std::abs(int(a.pixels()[i]) - int(b.pixels()[i])));
+    return most;
 }
 
 QStringList names(const Tree &t) {
@@ -320,6 +333,218 @@ private slots:
         QCOMPARE(head.maskPixels(top.id)->at(5, 5), uint8_t(77));
         QCOMPARE(top.producer, QStringLiteral("canvas-write:write"));
         QVERIFY(!head.layer(0).visible); // the head's own edit stays
+    }
+
+    // ---- #252: New, Group, Ungroup, Merge down, Flatten, Properties ---------------------------------
+    void aNewLayerIsEmptyAndGoesOnTopOrAboveALayer() {
+        const Tree t = sampleTree();
+        const Tree top = applyLayerEdit(t, edit(LayerOp::New, {})).value();
+        QCOMPARE(names(top), (QStringList{"Base", "Fill 1", "Fill 2", "Layer 4"}));
+        QVERIFY(top.layers[3].tiles.empty());
+        QVERIFY(top.layers[3].visible && top.layers[3].opacity == 1 && top.layers[3].kind == LayerKind::Paint);
+        const Tree above = applyLayerEdit(t, edit(LayerOp::New, {0})).value();
+        QCOMPARE(names(above), (QStringList{"Base", "Layer 4", "Fill 1", "Fill 2"}));
+        LayerEdit named = edit(LayerOp::New, {});
+        named.text = "Sky";
+        QCOMPARE(applyLayerEdit(t, named)->layers.back().name, QStringLiteral("Sky"));
+        QVERIFY(!applyLayerEdit(t, edit(LayerOp::New, {9})).ok());
+        QVERIFY(!applyLayerEdit(t, edit(LayerOp::New, {0, 1})).ok());
+    }
+
+    void aGroupHoldsTheChosenLayersAtTheHighestOnesPlace() {
+        const Tree t = sampleTree();
+        const Tree grouped = applyLayerEdit(t, edit(LayerOp::Group, {0, 2})).value();
+        QCOMPARE(names(grouped), (QStringList{"Fill 1", "Group 4"}));
+        const LayerRecord &group = grouped.layers[1];
+        QVERIFY(group.group);
+        QCOMPARE(group.children.size(), size_t(2));
+        QCOMPARE(group.children[0].name, QStringLiteral("Base"));
+        QCOMPARE(group.children[1].name, QStringLiteral("Fill 2"));
+        QVERIFY(group.tiles.empty());
+        // The tiles are the same hashes; ungroup puts the children back in a flat list, in order.
+        QCOMPARE(grouped.tileCount(), t.tileCount());
+        const Tree back = applyLayerEdit(grouped, edit(LayerOp::Ungroup, {1})).value();
+        QCOMPARE(names(back), (QStringList{"Fill 1", "Base", "Fill 2"}));
+        QVERIFY(!applyLayerEdit(t, edit(LayerOp::Ungroup, {0})).ok());
+        // Groups nest.
+        const Tree nested = applyLayerEdit(grouped, edit(LayerOp::Group, {0, 1})).value();
+        QCOMPARE(nested.layers.size(), size_t(1));
+        QCOMPARE(nested.tileCount(), t.tileCount());
+    }
+
+    void aGroupSurvivesTheStoreAndAppearsAsItsCompositeInADocument() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("groups", sample(), "test").value();
+        LayerEdit group = edit(LayerOp::Group, {1, 2});
+        group.text = "Fills";
+        const Commit c = s.editLayers(made.id, made.head, group, "canvas-view:group").value();
+        QVERIFY(c.move.moved);
+        const Tree stored = s.tree(s.revision(made.id, c.revision.id)->tree).value();
+        QCOMPARE(names(stored), (QStringList{"Base", "Fills"}));
+        QVERIFY(stored.layers[1].group);
+        QCOMPARE(stored.layers[1].children.size(), size_t(2));
+        // The picture is the same: the group is the composite of its children.
+        const PaintDocument before = s.load(made.id, made.head).value(), after = s.load(made.id, c.revision.id).value();
+        QCOMPARE(after.layerCount(), 2);
+        QVERIFY(mostDifferent(after.flatten(), before.flatten()) <= 2);
+        // A group's opacity applies to the whole composite.
+        LayerEdit half = edit(LayerOp::Opacity, {1});
+        half.number = 0.5;
+        const Commit h = s.editLayers(made.id, c.revision.id, half, "canvas-view:opacity").value();
+        QVERIFY(mostDifferent(s.load(made.id, h.revision.id)->flatten(), before.flatten()) > 20);
+        // Undo is one step each.
+        QVERIFY(s.undo(made.id, h.revision.id)->moved);
+        QVERIFY(s.undo(made.id, c.revision.id)->moved);
+        QCOMPARE(s.info(made.id)->head, made.head);
+    }
+
+    void aTreeWithoutGroupsKeepsItsHash() {
+        // A group adds a kind and a key; a layer that is none writes exactly what it wrote before.
+        const QJsonObject json = treeToJson(sampleTree());
+        QVERIFY(!QJsonDocument(json).toJson().contains("children"));
+        QVERIFY(!QJsonDocument(json).toJson().contains("group"));
+        QCOMPARE(treeFromJson(json).value().layers, sampleTree().layers);
+        const Tree grouped = applyLayerEdit(sampleTree(), edit(LayerOp::Group, {0, 1})).value();
+        QCOMPARE(treeFromJson(treeToJson(grouped)).value().layers, grouped.layers);
+    }
+
+    void mergeDownDrawsTheUpperLayerIntoTheLowerOne() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("merge", sample(), "test").value();
+        const PaintDocument before = s.load(made.id, made.head).value();
+        const Commit c = s.editLayers(made.id, made.head, edit(LayerOp::MergeDown, {2}), "canvas-view:merge-down").value();
+        QVERIFY(c.move.moved);
+        const PaintDocument after = s.load(made.id, c.revision.id).value();
+        QCOMPARE(after.layerCount(), 2);
+        QCOMPARE(after.layer(1).name, QStringLiteral("Fill 1")); // the lower layer's name and place
+        QVERIFY(!after.layer(1).hasMask);                         // its mask is baked in
+        QCOMPARE(after.layer(1).opacity, 1.0);
+        QVERIFY(mostDifferent(after.flatten(), before.flatten()) <= 2); // the picture does not change
+        QCOMPARE(s.log(made.id)->size(), size_t(2));                 // one revision
+        QVERIFY(s.undo(made.id, c.revision.id)->moved);
+        QCOMPARE(s.load(made.id, s.info(made.id)->head)->layerCount(), 3);
+    }
+
+    void mergeDownRefusesWhatWouldLoseOrInventPixels() {
+        const Tree t = sampleTree();
+        const auto read = [](const QString &, int, int, int) { return Result<MaskPaint>(MaskPaint(1, 1, 4)); };
+        QVERIFY(!applyPixelEdit(t, edit(LayerOp::MergeDown, {0}), read, {}).ok());  // nothing under the bottom
+        QVERIFY(!applyPixelEdit(t, edit(LayerOp::MergeDown, {1, 2}), read, {}).ok());
+        Tree hidden = t;
+        hidden.layers[2].visible = false;
+        QVERIFY(!applyPixelEdit(hidden, edit(LayerOp::MergeDown, {2}), read, {}).ok());
+        QVERIFY(!applyPixelEdit(t, edit(LayerOp::Flatten, {0}), read, {}).ok());
+        QVERIFY(!applyLayerEdit(t, edit(LayerOp::MergeDown, {2})).ok()); // the pure edit does not read pixels
+    }
+
+    void flattenMakesOneBackgroundLayerOfTheShownOnes() {
+        CanvasStore s = store();
+        PaintDocument d = sample();
+        d.setVisible(d.layer(0).id, false); // hidden: dropped
+        const CanvasInfo made = s.create("flat", d, "test").value();
+        const PaintDocument before = s.load(made.id, made.head).value();
+        const Commit c = s.editLayers(made.id, made.head, edit(LayerOp::Flatten, {}), "canvas-view:flatten").value();
+        QVERIFY(c.move.moved);
+        const PaintDocument after = s.load(made.id, c.revision.id).value();
+        QCOMPARE(after.layerCount(), 1);
+        QCOMPARE(after.layer(0).name, QStringLiteral("Background"));
+        QVERIFY(mostDifferent(after.flatten(), before.flatten()) <= 2);
+        // Flattening what is flat changes nothing and writes nothing.
+        const Commit again = s.editLayers(made.id, c.revision.id, edit(LayerOp::Flatten, {}), "canvas-view:flatten").value();
+        QVERIFY(!again.move.moved);
+        QCOMPARE(again.revision.id, c.revision.id);
+    }
+
+    void propertiesAreOneEditOfSeveralFields() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("props", sample(), "test").value();
+        LayerEdit props = edit(LayerOp::Properties, {});
+        LayerEdit rename = edit(LayerOp::Rename, {1});
+        rename.text = "Red";
+        LayerEdit opacity = edit(LayerOp::Opacity, {1});
+        opacity.number = 0.25;
+        LayerEdit blend = edit(LayerOp::Blend, {1});
+        blend.text = "multiply";
+        LayerEdit maskOff = edit(LayerOp::MaskEnabled, {1});
+        props.steps = {rename, opacity, blend, maskOff};
+        const Commit c = s.editLayers(made.id, made.head, props, "canvas-view:properties").value();
+        QVERIFY(c.move.moved);
+        const Tree t = s.tree(s.revision(made.id, c.revision.id)->tree).value();
+        QCOMPARE(t.layers[1].name, QStringLiteral("Red"));
+        QCOMPARE(t.layers[1].opacity, 0.25);
+        QCOMPARE(t.layers[1].compositeOp, QStringLiteral("svg:multiply"));
+        QVERIFY(!t.layers[1].maskEnabled);
+        QCOMPARE(s.log(made.id)->size(), size_t(2)); // one revision, one undo
+        QVERIFY(!applyLayerEdit(sampleTree(), edit(LayerOp::Properties, {})).ok());
+        // A step that fails fails the whole edit.
+        opacity.number = 3;
+        props.steps = {rename, opacity};
+        QVERIFY(!applyLayerEdit(sampleTree(), props).ok());
+    }
+
+    void groupsAreRefusedWhereTheyWouldBeLostOrCannotBeRead() {
+        Tree t = sampleTree();
+        // Mask and picture layers cannot be grouped; a mask layer cannot be a stored group child.
+        t.layers[1].kind = LayerKind::Mask;
+        QVERIFY(!applyLayerEdit(t, edit(LayerOp::Group, {1})).ok());
+        t = sampleTree();
+        Tree grouped = applyLayerEdit(t, edit(LayerOp::Group, {0, 1, 2})).value();
+        QCOMPARE(groupDepth(grouped.layers[0]), 1);
+        // Depth: eight nested groups are the most; the ninth is refused, and the store refuses to write a deeper tree.
+        Tree deep = grouped;
+        for (int i = 1; i < maxGroupDepth; ++i)
+            deep = applyLayerEdit(deep, edit(LayerOp::Group, {0})).value();
+        QCOMPARE(groupDepth(deep.layers[0]), maxGroupDepth);
+        QVERIFY(treeFromJson(treeToJson(deep)).ok());
+        QVERIFY(!applyLayerEdit(deep, edit(LayerOp::Group, {0})).ok());
+        QJsonObject bad = treeToJson(deep);
+        QJsonArray layers = bad.value("layers").toArray();
+        QJsonObject inner = layers.at(0).toObject();
+        QJsonObject wrapper{{"name", "x"}, {"kind", "group"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject()}, {"children", QJsonArray{inner}}};
+        bad.insert("layers", QJsonArray{wrapper});
+        QVERIFY(!treeFromJson(bad).ok());
+        // A stored group holding a mask layer is not readable.
+        QJsonObject maskChild{{"name", "m"}, {"kind", "mask"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject()}};
+        QJsonObject withMask{{"name", "g"}, {"kind", "group"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject()}, {"children", QJsonArray{maskChild}}};
+        QJsonObject doc = treeToJson(t);
+        doc.insert("layers", QJsonArray{withMask});
+        QVERIFY(!treeFromJson(doc).ok());
+        // Ungroup refuses a group whose own settings it would lose; plain ones come apart.
+        Tree half = grouped;
+        half.layers[0].opacity = 0.5;
+        QVERIFY(!applyLayerEdit(half, edit(LayerOp::Ungroup, {0})).ok());
+        Tree masked = grouped;
+        masked.layers[0].hasMask = true;
+        QVERIFY(!applyLayerEdit(masked, edit(LayerOp::Ungroup, {0})).ok());
+        QVERIFY(applyLayerEdit(grouped, edit(LayerOp::Ungroup, {0})).ok());
+    }
+
+    void mergeDownRefusesALayerMaskThatIsTurnedOff() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("off", sample(), "test").value();
+        const Commit off = s.editLayers(made.id, made.head, edit(LayerOp::MaskEnabled, {1}), "canvas-view:mask-enabled").value(); // Fill 1's mask
+        QVERIFY(off.move.moved);
+        const auto merged = s.editLayers(made.id, off.revision.id, edit(LayerOp::MergeDown, {2}), "canvas-view:merge-down");
+        QVERIFY(!merged);
+        QVERIFY(merged.errors().first().message.contains("turned off"));
+        QCOMPARE(s.info(made.id)->head, off.revision.id);
+    }
+
+    void resizeAndAnAcceptsRebaseRefuseACanvasWithAGroup() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("g", sample(), "test").value();
+        const Commit c = s.editLayers(made.id, made.head, edit(LayerOp::Group, {0, 1}), "canvas-view:group").value();
+        const auto resized = s.resize(made.id, c.revision.id, IRect{0, 0, 100, 100}, edgefill::Mode::Edge, 0, "x");
+        QVERIFY(!resized);
+        QVERIFY(resized.errors().first().message.contains("groups"));
+        // A candidate made from the revision before the group cannot be placed on the grouped head, and the message is about groups.
+        PaintDocument fill = s.load(made.id, made.head).value();
+        fill.loadLayer(LayerKind::Paint, "Fill 3", true, 1, solid(300, 300, {1, 2, 3, 255}));
+        const Revision candidate = s.addRevision(made.id, fill, made.head, "canvas-write:w").value();
+        const auto accepted = s.accept(made.id, candidate.id);
+        QVERIFY(!accepted);
+        QVERIFY(accepted.errors().first().message.contains("groups"));
+        QCOMPARE(s.info(made.id)->head, c.revision.id);
     }
 };
 

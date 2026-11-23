@@ -31,7 +31,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Place embedded / linked | Ph, Pp, Af | placeholder, #236 | place a picture as a layer |
 | Canvas size… / Document properties | Ph, Kr, Af | placeholder, #240 | the resize revision |
 | Edit in external editor | Krita plugins | placeholder, #215 | issue exists |
-| Share / Publish | Ph Share, Af | placeholder, #249 | a package that carries a canvas (epic #206) |
+| Share / Publish | Ph Share, Af | built (#249) | **Share…** asks "As it is now…" (the layers, no history) or "With history…", then where; a `.fuguepack` that Open and Import picture… read back |
 | Automate / Batch | Ph Automate, Kr scripts | placeholder, #250 | a canvas action over a folder of pictures |
 | Open recent | Ph, Pp, Kr, Af | skip | the canvas list is newest first and one click away |
 | Save, Save as, Revert, Save a copy | all | skip | autosaved revisions; Undo and History revert; Export is the copy |
@@ -64,7 +64,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Add layer mask (Ctrl+Shift+M), Invert mask (Ctrl+I), Overlay (\\) | built | existing commands |
 | Reveal all, Hide all (mask) | built | `fillMask`, `clearMask` |
 | Duplicate, Delete, Rename, Raise, Lower, Show or hide | stay in the Layers panel | the panel has them with keys; doubling them is the follow-up |
-| New layer, Merge down, Flatten, Group, Layer properties | placeholder, #252 | the engine has no new-layer or merge op |
+| New layer (Ctrl+Shift+N), Merge down (Ctrl+E), Flatten, Group (Ctrl+G), Ungroup (Ctrl+Shift+G), Layer properties… | built, #252 | engine ops (`canvas_layer_ops`, `canvas_layer_merge`) and `fugue canvas layer new/merge/flatten/group/ungroup`; Photoshop's keys; a group is one row, its composite is what readers see |
 
 ## View
 

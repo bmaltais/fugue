@@ -58,6 +58,14 @@ The D numbers are the audit's decisions of 2026-11-22. D4 (one button: `ViewButt
 
 ## Open
 
+### 2026-11-23 Share… of the Canvas view's menu (#249)
+
+- Control: `src/canvas/CanvasFileDialogs.qml`: the question `canvasShareAsk` (`canvasShareWithHistory`, `canvasShareHead`) and the save dialog `canvasShareDialog` (a `FilePicker`); the row `canvas-view.share` (Canvas > Share…, `menus.cpp`, `CanvasView.qml`) in place of the greyed placeholder; the Import picture… dialog (`canvasViewImportDialog`) also takes `*.fuguepack`. The window's File > Open takes one too (`Workflows::openCanvasPackage`).
+- Old: Share… was a greyed row ("Not built yet (#249)").
+- New: Share… asks one question, what goes in the package (As it is now… keeps no history, With history… keeps every step), each answer opens the portal's save dialog; Cancel closes. The notice (`canvasViewNotice`) says what was saved, or, on Import picture…, what was opened, with its history when it has one, and when its id was taken so it got a new one.
+- Why: sharing is a choice with a real consequence (the history is bigger and shows every step), so it is asked once, at the moment of the share, with the smaller, more private answer as the default (Hick: two answers). A canvas never replaces another on opening, so the person has nothing to confirm there, only to be told.
+- Rules met: Floor (answer buttons 28px), Primary (As it is now… the one accent fill, highlighted and focused, as D8 does for the safe answer), Destructive (nothing is removed; the package never overwrites a file), D9 (the primary answer last, at the right), Words (Share…, With history…, As it is now…, never "head" or a hash), Right-to-left (the row mirrors).
+
 ### Port loses to the resize corner
 
 - File: `src/canvas/FugueCanvas.qml` (`cornerAt` runs before `portUnder`)
@@ -149,6 +157,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: Photoshop's New Document is the reference (owner decision, 2026-11-22), so the order is the one people know: name, then what it starts from, then size and background, with the result summarized before the primary. Presets are chips, not a list: seven short words fit one or two rows and each is one click (Hick). The state of a choice is shown in the quiet marking so the accent stays Create's; the cap is said where the size is typed (visibility) and the error is live, so nothing is lost to a refusal on press. The last settings come back (recognition over recall), the name is never one the root has, and the source follows the clipboard so the common "I just copied a picture" is one click.
 - Rules met: Floor (chips and buttons 28px, fields 28px), Primary (Create is the one highlighted button, last at the right, Cancel before it), Destructive (none: a canvas is never deleted), Gaps (3u between chunks, 2u inside the form, 1u between chips), Learned place (File menu order unchanged: the new rows sit after Projects…; Ctrl+Alt+N is free, Ctrl+N stays New workflow), Posture (a transient dialog).
 - Unified: every New canvas… opens this dialog: File > New canvas…, a canvas input's menu, the Canvas view's canvas menu and empty state, the History dialog's empty state (`NewCanvasQuestion.qml` is retired). The Canvas view and History show the canvas made.
+
+### 2026-11-23 Canvas view: the Layer menu and the Layer properties dialog (#252, epics #206 and #216)
+
+- Control: the Canvas view's Layer menu rows `canvas-view.new-layer`, `.group`, `.ungroup`, `.merge-down`, `.flatten`, `.layer-properties` (were greyed placeholders); the layers panel's right-click menu (a "Combine" heading with New layer, Group layers, Ungroup layers, Merge down, Layer properties…); the dialog `canvasPropertiesAsk` in `src/canvas/CanvasFileDialogs.qml` with `canvasPropertiesName`, `canvasPropertiesOpacity` (`DragNumberField`), `canvasPropertiesBlend-<id>`, `canvasPropertiesMaskOn`, `canvasPropertiesMaskDelete`, `canvasPropertiesOk`.
+- Old: the rows were disabled with "Not built yet (#252)"; a layer's name, opacity, blend and mask were separate controls of the panel, each its own revision.
+- New: the rows are live and carry Photoshop's keys (Ctrl+Shift+N, Ctrl+E, Ctrl+G, Ctrl+Shift+G); a row is disabled (not hidden) when it does not apply: Merge down needs one selected layer with a shown paint layer or group under it, Ungroup needs groups only. The dialog is a `Question` (the window's one dialog form): a caption, Name (text field), Opacity (the panel's 28px drag-number field), Blend mode (a wrapping row of 28px buttons, the current one marked), the Layer mask row only for a masked layer (Mask on/off, and Delete mask in the danger tint: pressing it marks the mask for deletion and the button then reads Keep the mask, so nothing is lost before Apply), then Cancel and Apply (primary, last at the right). Enter in the name field applies. Everything the dialog changed is ONE revision, so one Undo takes it all back.
+- Why: Photoshop's Layer Properties and Krita's layer properties dialog are the references (the owner's model: Photoshop's, Blender's interface); the panel keeps its quick controls for the common single change, the dialog is for several at once and for those who look for it in the menu (recognition over recall). Delete mask is deferred to Apply so the dialog stays a form that Cancel abandons whole.
+- Rules met: Floor (every control 28px), Primary (Apply, one, last at the right; Cancel first), Destructive and D8 (Delete mask in the danger tint, apart from Mask on/off by the row's gap, and nothing is applied before Apply; every edit is one undo step), Gaps (1u inside a row, 3u between rows), Learned place (menu order as Photoshop's Layer menu: New, Group, Merge, Flatten, then properties), Right-to-left (the Question mirrors its content).
 
 ### 2026-11-22 Canvas view: the layers panel (#226, epics #206 and #216)
 

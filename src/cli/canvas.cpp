@@ -13,6 +13,7 @@
 #include "engine/canvas_diff.h"
 #include "engine/canvas_export.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_package.h"
 #include "engine/canvas_resize.h"
 #include "engine/canvas_store.h"
 #include "engine/new_canvas.h"
@@ -64,11 +65,17 @@ QString blendText(const QString &compositeOp) {
 QJsonObject layerJson(const canvas::LayerRecord &layer, int position) {
     QJsonObject out{{"position", position},
                     {"name", layer.name},
-                    {"kind", kindText(layer.kind)},
+                    {"kind", layer.group ? QStringLiteral("group") : kindText(layer.kind)},
                     {"visible", layer.visible},
                     {"opacity", layer.opacity},
                     {"blend", blendText(layer.compositeOp)},
-                    {"tiles", int(layer.tiles.size())}};
+                    {"tiles", layer.tileCount()}};
+    if (layer.group) {
+        QJsonArray children;
+        for (const canvas::LayerRecord &child : layer.children)
+            children.append(child.name);
+        out.insert(QStringLiteral("children"), children);
+    }
     if (layer.hasMask)
         out.insert(QStringLiteral("mask"), QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", int(layer.maskTiles.size())}});
     if (!layer.producer.isEmpty())
@@ -79,9 +86,9 @@ QJsonObject layerJson(const canvas::LayerRecord &layer, int position) {
 }
 
 QString layerLine(const canvas::LayerRecord &layer, int position) {
-    QString line = QStringLiteral("%1 %2: %3%4, opacity %5, %6 tiles").arg(position).arg(layer.name, kindText(layer.kind),
+    QString line = QStringLiteral("%1 %2: %3%4, opacity %5, %6 tiles").arg(position).arg(layer.name, layer.group ? QStringLiteral("group of %1").arg(layer.children.size()) : kindText(layer.kind),
                                                                            layer.visible ? QString() : QStringLiteral(", hidden"))
-                       .arg(layer.opacity).arg(layer.tiles.size());
+                       .arg(layer.opacity).arg(layer.tileCount());
     if (!layer.compositeOp.isEmpty())
         line += QStringLiteral(", blend %1").arg(blendText(layer.compositeOp));
     if (layer.hasMask)
@@ -126,8 +133,29 @@ Reply canvasNew(const Command &command, Context &) {
     return madeReply(made.value(), QStringLiteral("Made"), width, height);
 }
 
+// `canvas import <file.fuguepack>`: the canvas of a package into the store, never over a canvas there.
+Reply importPackage(const Command &command, const QString &file) {
+    CanvasStore store = CanvasStore::forSession();
+    const Result<canvas::CanvasImported> got = canvas::importCanvasPackage(file, store, command.has("name") ? command.value("name") : QString());
+    if (!got)
+        return Reply::failure(got.errors());
+    QJsonObject data = canvasJson(got->info);
+    data.insert(QStringLiteral("part"), got->part == canvas::SharedPart::History ? QStringLiteral("history") : QStringLiteral("head"));
+    data.insert(QStringLiteral("revisions"), got->revisions);
+    data.insert(QStringLiteral("renamed"), got->renamedId);
+    QString text = QStringLiteral("Imported canvas %1 as %2 (%3).").arg(got->info.name, got->info.id,
+                                                                     got->part == canvas::SharedPart::History ? QStringLiteral("with its history, %1 revisions").arg(got->revisions) : QStringLiteral("the head only"));
+    if (got->renamedId) {
+        data.insert(QStringLiteral("packagedId"), got->packagedId);
+        text += QStringLiteral(" The package's id %1 is taken here, so it has a new one; the canvas that was here is untouched.").arg(got->packagedId);
+    }
+    return Reply::success(data, text);
+}
+
 Reply canvasImport(const Command &command, Context &) {
     const QString file = command.positionals.at(0);
+    if (canvas::isCanvasPackage(file))
+        return importPackage(command, file);
     const Result<mask::PaintDocument> document = mask::readCanvasFile(file);
     if (!document)
         return Reply::failure(document.errors());
@@ -264,6 +292,25 @@ Reply canvasExport(const Command &command, Context &) {
     if (command.positionals.size() < 2 && !estimate)
         return Reply::failure(usageError(QStringLiteral("Name the file to write (or the folder, with --layers), or add --estimate."), QStringLiteral("fugue canvas export <id[@rev]> <file> [options]")));
     const QString out = command.positionals.size() > 1 ? command.positionals.at(1) : QString();
+    // A .fuguepack is a package to share (#249); every other target goes to the picture exporter below.
+    const bool package = QFileInfo(out).suffix().compare(QLatin1String("fuguepack"), Qt::CaseInsensitive) == 0;
+    if (command.has("history") && !package)
+        return Reply::failure(usageError(QStringLiteral("--history is for a package: name a file ending in .fuguepack."), QStringLiteral("fugue canvas export <id> <file>.fuguepack --history")));
+    if (package) {
+        for (const char *name : {"layers", "estimate", "lossless", "only-visible", "no-masks", "format", "quality", "scale", "size", "width", "height", "background", "prefix"})
+            if (command.has(QString::fromLatin1(name)))
+                return Reply::failure(usageError(QStringLiteral("--%1 is for a picture or a folder of layers; a .fuguepack is a package of the canvas as it is (add --history for every revision).").arg(QString::fromLatin1(name)),
+                                                 QStringLiteral("fugue canvas export <id> <file>.fuguepack [--history]")));
+        if (ref.written && ref.revision != QLatin1String("head"))
+            return Reply::failure(usageError(QStringLiteral("A package carries the head of a canvas, with or without its history; name the canvas without @%1.").arg(ref.revision), command.positionals.at(0)));
+        const bool history = command.has("history");
+        const CanvasStore shared = CanvasStore::forSession();
+        const Errors written = canvas::writeCanvasPackage(shared, ref.canvas, history ? canvas::SharedPart::History : canvas::SharedPart::Head, QFileInfo(out).absoluteFilePath());
+        if (hasErrors(written))
+            return Reply::failure(written);
+        return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"part", history ? "history" : "head"}, {"path", QFileInfo(out).absoluteFilePath()}},
+                              QStringLiteral("Wrote %1 (%2 of %3).").arg(out, history ? QStringLiteral("the head and its history") : QStringLiteral("the head only"), ref.canvas));
+    }
     if (!layers)
         for (const char *name : {"only-visible", "no-masks", "prefix"})
             if (command.has(QString::fromLatin1(name)))
@@ -604,9 +651,9 @@ Reply canvasLayer(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("layer list takes a canvas (and a revision) only.")));
         return layerList(store, ref);
     }
-    static const QStringList actions{"list", "set", "rename", "rm", "dup", "move"};
+    static const QStringList actions{"list", "set", "rename", "rm", "dup", "move", "new", "merge", "flatten", "group", "ungroup"};
     if (!actions.contains(action))
-        return Reply::failure(usageError(QStringLiteral("\"%1\" is not a layer action.").arg(action), QStringLiteral("Use list, set, rename, rm, dup or move.")));
+        return Reply::failure(usageError(QStringLiteral("\"%1\" is not a layer action.").arg(action), QStringLiteral("Use list, set, rename, rm, dup, move, new, merge, flatten, group or ungroup.")));
     if (ref.written && ref.revision != QLatin1String("head"))
         return Reply::failure(usageError(QStringLiteral("Layers are edited on the head only: write the canvas id without @revision."),
                                          QStringLiteral("To edit an older revision, accept it or undo back to it first.")));
@@ -630,9 +677,12 @@ Reply canvasLayer(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("layer rename takes a canvas, a layer and the new name.")));
         layerWords = rest.mid(0, 1);
     }
-    if (layerWords.isEmpty())
+    const bool wantsNoLayer = action == QLatin1String("flatten") || action == QLatin1String("new");
+    if (layerWords.isEmpty() && !wantsNoLayer)
         return Reply::failure(usageError(QStringLiteral("Name at least one layer, by its position (0 is the bottom) or its name.")));
-    const Result<std::vector<int>> positions = layerPositions(tree.value(), layerWords);
+    if (command.has("name") && action != QLatin1String("new") && action != QLatin1String("group"))
+        return Reply::failure(usageError(QStringLiteral("--name names the layer `layer new` or `layer group` makes; `layer rename` renames one.")));
+    const Result<std::vector<int>> positions = layerPositions(tree.value(), layerWords); // empty for flatten and an on-top new layer
     if (!positions)
         return Reply::failure(positions.errors());
     const auto add = [&](canvas::LayerOp op) -> canvas::LayerEdit & {
@@ -673,6 +723,22 @@ Reply canvasLayer(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("layer set needs --visible, --opacity, --blend or --mask.")));
     } else if (action == QLatin1String("rename")) {
         add(canvas::LayerOp::Rename).text = rest.at(1);
+    } else if (action == QLatin1String("new")) {
+        if (layerWords.size() > 1)
+            return Reply::failure(usageError(QStringLiteral("layer new takes the one layer the new one goes above, or none (on top).")));
+        add(canvas::LayerOp::New).text = command.value("name");
+    } else if (action == QLatin1String("merge")) {
+        if (layerWords.size() != 1)
+            return Reply::failure(usageError(QStringLiteral("layer merge takes the one layer to merge down into the layer under it.")));
+        add(canvas::LayerOp::MergeDown);
+    } else if (action == QLatin1String("flatten")) {
+        if (!layerWords.isEmpty())
+            return Reply::failure(usageError(QStringLiteral("layer flatten takes the canvas only: it flattens every shown layer.")));
+        add(canvas::LayerOp::Flatten);
+    } else if (action == QLatin1String("group")) {
+        add(canvas::LayerOp::Group).text = command.value("name");
+    } else if (action == QLatin1String("ungroup")) {
+        add(canvas::LayerOp::Ungroup);
     } else if (action == QLatin1String("rm")) {
         add(canvas::LayerOp::Remove);
     } else if (action == QLatin1String("dup")) {

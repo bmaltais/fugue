@@ -70,7 +70,7 @@ LargeViewDialog {
             objectName: "canvasHistoryImportDialog"
             title: qsTr("Import a picture as a canvas")
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd *.fuguepack)"), qsTr("All files (*)")]
             onAccepted: { backend.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }
