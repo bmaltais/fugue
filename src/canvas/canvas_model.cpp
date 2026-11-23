@@ -602,7 +602,8 @@ void CanvasModel::layOut(NodeRow &row) const {
         }
         // A placeholder says so on a row of its own (spec 11.6), and a group how many nodes it
         // holds (docs/canvas-look.md 9).
-        if (row.missing || row.groupSize > 0)
+        // The group's row is the card's footer, drawn at the bottom: under a picture, not over it.
+        if (row.missing || (row.groupSize > 0 && !hasThumbnail))
             top += m_rowHeight;
         if (hasThumbnail) {
             // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1, so a tall picture
@@ -614,6 +615,8 @@ void CanvasModel::layOut(NodeRow &row) const {
             const qreal height = qRound(width * std::clamp(run->thumbnailAspect, least, 1.0));
             row.thumbnail = QRectF(inset, top + m_padTop, width, height + extra);
             top = row.thumbnail.bottom();
+            if (row.groupSize > 0)
+                top += m_rowHeight;
         } else if (grows && extra > 0) {
             // The last multiline input is taller; what is below it moves down, section headers too.
             grows->rowHeight += extra;

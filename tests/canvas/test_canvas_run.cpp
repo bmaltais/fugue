@@ -309,6 +309,35 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // A group that shows a picture keeps its "N nodes" footer under it, not over it.
+    void aGroupsPictureLeavesRoomForItsFooter() {
+        RunApp r(R"({
+          "fugue": 1,
+          "groups": {"local/pic": {
+            "version": "1.0.0", "name": "Picture",
+            "inputs": [{"name": "picture", "targets": ["load.file"]}],
+            "outputs": [{"name": "image", "from": "size.image"}],
+            "nodes": {"load": {"type": "fugue/load-image", "version": "1.0.0"},
+                      "size": {"type": "fugue/resize-megapixels", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}}}}},
+          "graph": {"nodes": {"grp": {"type": "local/pic", "version": "1.0.0"}}},
+          "layout": {"nodes": {"grp": {"pos": [100, 100]}}, "view": {"center": [300, 300], "zoom": 1}}
+        })");
+        QVERIFY(r.app.open());
+        const qreal bare = r.role("grp", NodeList::Height).toReal();
+        // After a run the group shows its image output's picture (here set directly, as the look boards do).
+        QImage picture(64, 32, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        QVERIFY(picture.save(QDir(QDir::tempPath()).filePath("fugue-footer-test.png")));
+        r.app.model.setRunState("grp", {{"state", "cached"}, {"thumbnail", QUrl::fromLocalFile(QDir(QDir::tempPath()).filePath("fugue-footer-test.png")).toString()},
+                                        {"thumbnailAspect", 0.5}, {"thumbnailInfo", "64 \u00d7 32"}});
+        QTRY_VERIFY(r.role("grp", NodeList::Thumbnail).toString().startsWith("file://"));
+        const QRectF slot = r.role("grp", NodeList::ThumbnailRect).toRectF();
+        const qreal height = r.role("grp", NodeList::Height).toReal();
+        QVERIFY(height > bare);
+        // The footer row (drawn at the bottom) is wholly below the picture.
+        QVERIFY2(slot.bottom() + r.app.model.rowHeight() <= height, qPrintable(QString("slot bottom %1, row %2, height %3").arg(slot.bottom()).arg(r.app.model.rowHeight()).arg(height)));
+    }
+
     // A node nothing can serve says so before any run, and how to fix it (8.5); a run that
     // reaches it fails with the same words.
     void aNodeNoProviderCanServeShowsWhatIsMissing() {
