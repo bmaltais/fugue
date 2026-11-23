@@ -125,8 +125,10 @@ struct App {
     // The window's areas (#217), their layout kept in the test's own folder.
     fugue::Workspace workspace{dir.path() + "/workspaces.json"};
     fugue::ActiveCanvas activeCanvas; // the canvas last used in a Canvas view (#246)
-    QQmlApplicationEngine engine;
+    // Before the engine, so it outlives it: the engine's teardown can still warn, into this list (declared after it, the list was
+    // destroyed first and the warning wrote into freed memory, a heap corruption that surfaced as an abort or a 300 s hang).
     QStringList warnings;
+    QQmlApplicationEngine engine;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
     QQuickWindow *window = nullptr;
     QQuickItem *canvas = nullptr;

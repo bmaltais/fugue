@@ -850,7 +850,11 @@ Item {
     Keys.onShortcutOverride: event => {
         const bare = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
         if (event.key === Qt.Key_Escape) {
-            event.accepted = root.dragging || taskBar.busy || root.escapeDeselects // a drag's, the task bar's Cancel, or Deselect
+            event.accepted = root.freeTransform || root.dragging || taskBar.busy || root.escapeDeselects // the box's, a drag's, the task bar's Cancel, or Deselect
+            return
+        }
+        if (root.freeTransform && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !App.commands.textFieldFocus) {
+            event.accepted = true // Enter keeps the transform, not the host dialog's confirm
             return
         }
         const owner = App.commands.ownerOfPress(event.key, event.modifiers)
@@ -858,6 +862,25 @@ Item {
         event.accepted = (event.key === Qt.Key_Q && bare && !owner.startsWith("canvas-view.")) || (owner !== "" && App.commands.actsOnGraph(owner))
     }
     Keys.onPressed: event => {
+        if (root.freeTransform && event.key === Qt.Key_Escape) {
+            root.endTransformSession()
+            event.accepted = true
+            return
+        }
+        if (root.freeTransform && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+            root.commitTransform()
+            event.accepted = true
+            return
+        }
+        if ((root.freeTransform || (root.tool === "move" && root.transformable)) && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+            const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+            const arrows = {[Qt.Key_Left]: [-1, 0], [Qt.Key_Right]: [1, 0], [Qt.Key_Up]: [0, -1], [Qt.Key_Down]: [0, 1]}
+            if (arrows[event.key] !== undefined) {
+                root.nudgeLayer(arrows[event.key][0] * step, arrows[event.key][1] * step)
+                event.accepted = true
+                return
+            }
+        }
         if (event.key === Qt.Key_Escape) {
             const frame = regionFrame.item as CropFrame
             if ((!frame || !frame.cancel()) && !taskBar.cancelIfBusy()) {
@@ -1018,10 +1041,18 @@ Item {
             parse: text => Number(String(text).replace("px", "").trim())
             onCommitted: v => guidesData.setGridSpacing(Math.round(v))
         }
+        // Free transform (#236): where the layer is, how big, how turned, how it is resampled; Apply keeps it. Made only while a box is open: its
+        // fields would otherwise be one more dozen objects in every Canvas view that never transforms anything.
+        Loader {
+            id: transformOptions
+            active: root.freeTransform && root.xfPlacement !== null
+            visible: active
+            sourceComponent: Flow {
+                width: optionsBar.width // wraps as the options bar does, not one overflowing row
+                spacing: root.u
         // Free transform (#236): where the layer is (its center), how big, how turned, and how it is resampled; Apply keeps it.
         Chunk {
             lead: false
-            visible: root.freeTransform && root.xfPlacement !== null
             DragNumberField {
                 objectName: "canvasViewTransformX"
                 width: 30 * root.u
@@ -1115,7 +1146,6 @@ Item {
         }
         Chunk {
             lead: false
-            visible: root.freeTransform && root.xfPlacement !== null
             Repeater {
                 model: [{id: "lanczos", text: qsTr("Lanczos"), tip: qsTr("The sharpest resampling for photographs (the default)")},
                         {id: "bicubic", text: qsTr("Bicubic"), tip: qsTr("A smoother resampling")},
@@ -1135,7 +1165,6 @@ Item {
         }
         Chunk {
             lead: false
-            visible: root.freeTransform
             ViewButton {
                 objectName: "canvasViewTransformApply"
                 look: root.look
@@ -1150,6 +1179,8 @@ Item {
                 tip: qsTr("Leave the layer as it was (%1)").arg(qsTr("Escape"))
                 accented: false
                 onTapped: root.endTransformSession()
+            }
+        }
             }
         }
         Text {
@@ -1880,27 +1911,9 @@ Item {
             }
         }
     }
-    // Free Transform's keys: Enter keeps it, Escape leaves it, the arrows move it a pixel (Shift: ten) while the picture has the focus.
-    Shortcut {
-        sequences: ["Return", "Enter"]
-        enabled: root.keysHot && root.freeTransform && !App.commands.textFieldFocus
-        onActivated: root.commitTransform()
-    }
-    Shortcut {
-        sequence: "Escape"
-        enabled: root.keysHot && root.freeTransform
-        onActivated: root.endTransformSession()
-    }
-    Instantiator {
-        model: [{key: "Left", dx: -1, dy: 0}, {key: "Right", dx: 1, dy: 0}, {key: "Up", dx: 0, dy: -1}, {key: "Down", dx: 0, dy: 1},
-                {key: "Shift+Left", dx: -10, dy: 0}, {key: "Shift+Right", dx: 10, dy: 0}, {key: "Shift+Up", dx: 0, dy: -10}, {key: "Shift+Down", dx: 0, dy: 10}]
-        delegate: Shortcut {
-            required property var modelData
-            sequence: modelData.key
-            enabled: root.keysHot && pictureView.activeFocus && !App.commands.textFieldFocus && (root.freeTransform || (root.tool === "move" && root.transformable))
-            onActivated: root.nudgeLayer(modelData.dx, modelData.dy)
-        }
-    }
+    // Free Transform's keys (Enter keeps it, Escape leaves it, the arrows move the layer a pixel, with Shift ten) are the view's own key
+    // handlers above (Keys.onShortcutOverride and Keys.onPressed), not Shortcut objects: a dozen of those made while the view is made upset
+    // the creation of the dialogs under it, which then failed under load with "Cannot find member data".
     // What the box was made for goes away with it: another layer picked, another canvas, a change of the Head.
     Connections {
         target: root.layersPanel
