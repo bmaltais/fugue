@@ -128,6 +128,12 @@ QList<Row> defaultRows() {
         {"canvas-view.compare", QT_TRANSLATE_NOOP("Command", "Compare the shown step with the one before it"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Compare")},
         {"canvas-view.details", QT_TRANSLATE_NOOP("Command", "Show or hide the advanced details under the picture"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Advanced details")},
         {"canvas-view.snap", QT_TRANSLATE_NOOP("Command", "Snap the region's edges to the node's Multiple of"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Snap region")},
+        // Rulers, grid, guides and snap to them (#253): Photoshop's keys (View menu), free in the registry.
+        {"canvas-view.rulers", QT_TRANSLATE_NOOP("Command", "Show or hide the rulers, in canvas pixels"), {"Ctrl+R"}, {"Drag from a ruler: a guide"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rulers")},
+        {"canvas-view.grid", QT_TRANSLATE_NOOP("Command", "Show or hide the grid"), {"Ctrl+'"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Grid")},
+        {"canvas-view.guides", QT_TRANSLATE_NOOP("Command", "Show or hide the guides"), {"Ctrl+;"}, {"Drag a guide back to the ruler: remove it"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Guides")},
+        {"canvas-view.snap-to", QT_TRANSLATE_NOOP("Command", "Snap the region's edges to the guides and the grid that are shown"), {"Ctrl+Shift+;"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Snap to guides and grid")},
+        {"canvas-view.clear-guides", QT_TRANSLATE_NOOP("Command", "Remove every guide of this canvas"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Clear guides")},
     };
 }
 

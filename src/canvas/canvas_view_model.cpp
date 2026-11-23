@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "canvas/region_pick.h"
+#include "canvas/snap.h"
 
 namespace fugue {
 
@@ -363,7 +364,10 @@ QVariantMap CanvasViewModel::snapRegion(const QVariantMap &rect, bool keepSize) 
     const QSize size = pictureSize();
     if (!m_region.value("valid").toBool() || !size.isValid())
         return rect;
-    return mapOf(region::snapped(rectOf(rect), m_region.value("multiple").toInt(), {size.width(), size.height()}, keepSize));
+    // The same snap the Canvas view's frame uses (canvas/snap.h, GuidesModel::snapRect), with the node's Multiple of alone.
+    snap::Targets targets;
+    targets.multiple = m_region.value("multiple").toInt();
+    return mapOf(snap::snapRect(rectOf(rect), targets, {size.width(), size.height()}, keepSize));
 }
 
 QVariantMap CanvasViewModel::previewRegion(const QVariantMap &rect) const {
