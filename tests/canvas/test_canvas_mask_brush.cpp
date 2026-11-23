@@ -147,6 +147,36 @@ private slots:
         QVERIFY(!layerNow.source->maskTiles.empty());
     }
 
+    // #319: with a selection (painted, else a rectangle) the layer mask's brush changes only inside it; one revision per stroke group.
+    void aSelectionLimitsWhereTheMaskBrushPaints() {
+        CanvasViewModel model;
+        MaskLayer layer, selection;
+        open(model, layer);
+        QVERIFY(model.addMask(1));
+        selection.setImageSize(QSize(512, 512));
+        layer.setClipTo(&selection);
+        layer.setClipRect(QRectF(0, 0, 100, 512)); // the painted selection wins over the rectangle
+        selection.fillRect(200, 0, 100, 512, false);
+        model.setMaskIdle(400);
+        stroke(layer, 150, 100, 350, 100, true); // erases (hides) across x 150 to 350
+        stroke(layer, 20, 300, 80, 300, true);   // outside the selection: nothing
+        model.maskPainted();
+        QCOMPARE(layer.valueAt(180, 100), 255);
+        QCOMPARE(layer.valueAt(250, 100), 0);
+        QCOMPARE(layer.valueAt(320, 100), 255);
+        QCOMPARE(layer.valueAt(50, 300), 255);
+        QTRY_COMPARE_WITH_TIMEOUT(revisionCount(), 3, 3000);
+        // No painted selection: the rectangle limits it.
+        selection.clear();
+        stroke(layer, 20, 400, 300, 400, true);
+        QCOMPARE(layer.valueAt(50, 400), 0);
+        QCOMPARE(layer.valueAt(150, 400), 255);
+        // Hide all (clearMask) goes through the same clip.
+        QVERIFY(model.clearMask());
+        QCOMPARE(layer.valueAt(50, 450), 0);
+        QCOMPARE(layer.valueAt(150, 450), 255);
+    }
+
     void undoGoesBackOneRevisionAndReadsTheMaskAgain() {
         CanvasViewModel model;
         MaskLayer layer;

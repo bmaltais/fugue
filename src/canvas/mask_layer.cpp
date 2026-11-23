@@ -161,7 +161,39 @@ void MaskLayer::reset() {
     emit edited();
 }
 
+void MaskLayer::setClipTo(MaskLayer *selection) {
+    if (selection == this)
+        selection = nullptr;
+    if (m_clipTo == selection)
+        return;
+    m_clipTo = selection;
+    emit clipChanged();
+}
+
+void MaskLayer::setClipRect(const QRectF &rect) {
+    if (m_clipRect == rect)
+        return;
+    m_clipRect = rect;
+    emit clipChanged();
+}
+
+// The one place a selection becomes a clip: every paint path of the layer (brush, eraser, shapes, invert, clear, fill) calls it
+// first. A painted selection with something in it wins; otherwise the rectangle; otherwise nothing limits the paint.
+void MaskLayer::applyClip() {
+    std::shared_ptr<const std::vector<uint8_t>> clip;
+    const int w = m_paint->width(), h = m_paint->height();
+    if (m_clipTo && !m_clipTo->isEmpty() && m_clipTo->paint().width() == w && m_clipTo->paint().height() == h) {
+        clip = std::make_shared<const std::vector<uint8_t>>(m_clipTo->paint().pixels());
+    } else if (m_clipRect.width() > 0 && m_clipRect.height() > 0) {
+        mask::MaskPaint area(w, h);
+        area.fillRect(m_clipRect.x(), m_clipRect.y(), m_clipRect.width(), m_clipRect.height());
+        clip = std::make_shared<const std::vector<uint8_t>>(area.pixels());
+    }
+    m_paint->setClip(std::move(clip));
+}
+
 void MaskLayer::beginStroke(bool erase, double size, double hardness, double x, double y, double pressure) {
+    applyClip();
     m_paint->beginStroke(erase ? mask::Mode::Erase : mask::Mode::Paint, {size, hardness, m_brushOpacity, {}});
     m_paint->strokeTo({x, y}, pressure);
     changed(false);
@@ -182,26 +214,31 @@ void MaskLayer::fillPolygon(const QVariantList &points, bool erase) {
     outline.reserve(size_t(points.size()));
     for (const QVariant &p : points)
         outline.push_back(pointOf(p));
+    applyClip();
     m_paint->fillPolygon(outline, erase ? mask::Mode::Erase : mask::Mode::Paint);
     changed(true);
 }
 
 void MaskLayer::fillRect(double x, double y, double width, double height, bool erase) {
+    applyClip();
     m_paint->fillRect(x, y, width, height, erase ? mask::Mode::Erase : mask::Mode::Paint);
     changed(true);
 }
 
 void MaskLayer::invert() {
+    applyClip();
     m_paint->invert();
     changed(true);
 }
 
 void MaskLayer::clear() {
+    applyClip();
     m_paint->clear();
     changed(true);
 }
 
 void MaskLayer::fill() {
+    applyClip();
     m_paint->fill();
     changed(true);
 }

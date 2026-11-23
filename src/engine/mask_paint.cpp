@@ -201,7 +201,16 @@ IRect MaskPaint::takeDirty() {
 
 // ---- painting ---------------------------------------------------------------------------------
 
+bool MaskPaint::setClip(std::shared_ptr<const std::vector<uint8_t>> clip) {
+    if (clip && clip->size() != size_t(m_width) * size_t(m_height))
+        return false;
+    m_clip = std::move(clip);
+    return true;
+}
+
 void MaskPaint::apply(int x, int y, double coverage, Mode mode, double opacity, const Rgba &color) {
+    if (m_clip)
+        coverage *= (*m_clip)[size_t(y) * size_t(m_width) + size_t(x)] / 255.0;
     const uint8_t c = byteOf(coverage * clamp01(opacity));
     if (c == 0)
         return;
@@ -396,26 +405,39 @@ void MaskPaint::fillRect(double x, double y, double width, double height, Mode m
     commitStep();
 }
 
+// A whole-buffer change to `target` (same size as the pixels): every byte moves toward it by the clip's weight there (all
+// the way without a clip), as one step.
+void MaskPaint::replaceWhole(const std::vector<uint8_t> &target) {
+    beginStep();
+    touch({0, 0, m_width, m_height});
+    if (!m_clip) {
+        m_pixels = target;
+    } else {
+        const size_t channels = size_t(m_channels);
+        for (size_t i = 0; i < m_pixels.size(); ++i) {
+            const int weight = (*m_clip)[i / channels];
+            const int old = m_pixels[i];
+            m_pixels[i] = uint8_t(old + ((int(target[i]) - old) * weight + (target[i] >= old ? 127 : -127)) / 255);
+        }
+    }
+    note({0, 0, m_width, m_height});
+    commitStep();
+}
+
 void MaskPaint::invert() {
     if (m_stroking)
         return;
-    beginStep();
-    touch({0, 0, m_width, m_height});
-    for (size_t i = 0; i < m_pixels.size(); ++i)
+    std::vector<uint8_t> target = m_pixels;
+    for (size_t i = 0; i < target.size(); ++i)
         if (m_channels == 1 || i % 4 != 3)
-            m_pixels[i] = uint8_t(255 - m_pixels[i]);
-    note({0, 0, m_width, m_height});
-    commitStep();
+            target[i] = uint8_t(255 - target[i]);
+    replaceWhole(target);
 }
 
 void MaskPaint::clear() {
     if (m_stroking)
         return;
-    beginStep();
-    touch({0, 0, m_width, m_height});
-    std::fill(m_pixels.begin(), m_pixels.end(), uint8_t(0));
-    note({0, 0, m_width, m_height});
-    commitStep();
+    replaceWhole(std::vector<uint8_t>(m_pixels.size(), 0));
 }
 
 bool MaskPaint::assign(const std::vector<uint8_t> &pixels) {
@@ -434,20 +456,15 @@ void MaskPaint::fill() { fill(Rgba{0, 0, 0, 255}); }
 void MaskPaint::fill(Rgba color) {
     if (m_stroking)
         return;
-    beginStep();
-    touch({0, 0, m_width, m_height});
-    if (m_channels == 1) {
-        std::fill(m_pixels.begin(), m_pixels.end(), uint8_t(255));
-    } else {
-        for (size_t i = 0; i < m_pixels.size(); i += 4) {
-            m_pixels[i] = color.r;
-            m_pixels[i + 1] = color.g;
-            m_pixels[i + 2] = color.b;
-            m_pixels[i + 3] = color.a;
+    std::vector<uint8_t> target(m_pixels.size(), 255);
+    if (m_channels == 4)
+        for (size_t i = 0; i < target.size(); i += 4) {
+            target[i] = color.r;
+            target[i + 1] = color.g;
+            target[i + 2] = color.b;
+            target[i + 3] = color.a;
         }
-    }
-    note({0, 0, m_width, m_height});
-    commitStep();
+    replaceWhole(target);
 }
 
 // ---- files and scaling ------------------------------------------------------------------------
