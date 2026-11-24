@@ -647,7 +647,7 @@ private slots:
             {"fugue/image-to-mask", {{}, {"mask"}}},
             {"fugue/mask-to-alpha", {{"mask"}, {}}},
             {"fugue/solid-mask", {{}, {"mask"}}},
-            {"fugue/pad", {{}, {"mask"}}},
+            {"fugue/pad", {{"mask"}, {"mask"}}},
         };
         for (const auto &[id, ports] : expect) {
             const NodeType *type = registry.nodeType(QString::fromLatin1(id));
@@ -661,7 +661,7 @@ private slots:
         // #29's nodes took the role at a patch version.
         for (const char *id : {"fugue/grow-mask", "fugue/invert-mask", "fugue/image-to-mask", "fugue/solid-mask"})
             QCOMPARE(registry.nodeType(QString::fromLatin1(id))->version.toString(), QString("1.0.1"));
-        QCOMPARE(registry.nodeType("fugue/pad")->version.toString(), QString("1.1.0")); // fill and blur added (#243)
+        QCOMPARE(registry.nodeType("fugue/pad")->version.toString(), QString("1.2.0")); // target size and keep mask added (#343)
     }
 
     void theNewNodesHaveTheDefaultsOfTheDesign() {

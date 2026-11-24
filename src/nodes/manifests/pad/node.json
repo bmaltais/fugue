@@ -1,9 +1,9 @@
 {
   "manifest": 1,
   "id": "fugue/pad",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Pad",
-  "description": "Add room around an image for outpainting. The new area holds the nearest picture stretched outward and blurred (edge-blur, the default), stretched only (edge), 0.5 gray as ComfyUI does (gray) or transparent; the mask is 1 over the new area and 0 over the original. Feathering fades the mask inward from the padded edges (ComfyUI's Pad Image for Outpainting).",
+  "description": "Add room around an image for outpainting. The new area holds the nearest picture stretched outward and blurred (edge-blur, the default), stretched only (edge), 0.5 gray as ComfyUI does (gray) or transparent; the mask is 1 over the new area and 0 over the original. Feathering fades the mask inward from the padded edges (ComfyUI's Pad Image for Outpainting). Set both target_width and target_height instead of the four sides to fit the picture inside that size (only ever smaller, never enlarged) and center it. An optional mask marks the area to keep: it is padded with 0 and inverted, and feathering is not applied.",
   "category": "Image/Transform",
   "keywords": [
     "outpaint",
@@ -59,6 +59,35 @@
       "max": 16384,
       "step": 8,
       "integer": true
+    },
+    {
+      "name": "target_width",
+      "type": "number",
+      "label": "Target width",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 8,
+      "integer": true,
+      "advanced": true
+    },
+    {
+      "name": "target_height",
+      "type": "number",
+      "label": "Target height",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 8,
+      "integer": true,
+      "advanced": true
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Keep mask",
+      "optional": true
     },
     {
       "name": "fill",
