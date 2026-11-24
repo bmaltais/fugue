@@ -1458,7 +1458,50 @@ diff --git i/src/core/cuda/i8_gated_residual.cu w/src/core/cuda/i8_gated_residua
 diff --git i/src/core/ggml_extend.cpp w/src/core/ggml_extend.cpp
 --- i/src/core/ggml_extend.cpp
 +++ w/src/core/ggml_extend.cpp
-@@ -705,11 +705,17 @@ ggml_tensor* ggml_ext_attention_ext(GGML
+@@ -411,6 +411,31 @@ ggml_tensor* ggml_ext_conv_1d(GGMLRunner
+     return result;
+ }
+ 
++ggml_tensor* ggml_ext_conv_2d_fast(GGMLRunnerContext* runner_ctx,
++                                   ggml_tensor* x,
++                                   ggml_tensor* w,
++                                   ggml_tensor* b,
++                                   int s0,
++                                   int s1,
++                                   int p0,
++                                   int p1,
++                                   int d0,
++                                   int d1,
++                                   int upsample) {
++#ifndef SD_USE_UPSTREAM_GGML
++    // A VAE's convolution with its bias as one op where a kernel runs it (Fugue #382: CUTLASS on CUDA).
++    if (runner_ctx->fast_conv2d_enabled && b != nullptr && runner_ctx->backend != nullptr && x->type == GGML_TYPE_F32 &&
++        w->type == GGML_TYPE_F16 && b->type == GGML_TYPE_F32 && ggml_is_contiguous(x)) {
++        const SDConv2dParams params = {s0, s1, p0, p1, d0, d1, upsample};
++        ggml_tensor* inputs[]       = {x, w, b};
++        auto* fused                 = ggml_ext_op_create(runner_ctx->ggml_ctx, sd_ggml_conv2d_op(), inputs, 3, &params);
++        if (fused != nullptr && ggml_backend_supports_op(runner_ctx->backend, fused))
++            return fused;
++    }
++#endif
++    return nullptr;
++}
++
+ ggml_tensor* ggml_ext_conv_2d(GGMLRunnerContext* runner_ctx,
+                               ggml_tensor* x,
+                               ggml_tensor* w,
+@@ -439,6 +464,10 @@ ggml_tensor* ggml_ext_conv_2d(GGMLRunner
+         p1 = 0;
+     }
+ 
++    if (direct && scale == 1.f) {
++        if (auto* fused = ggml_ext_conv_2d_fast(runner_ctx, x, w, b, s0, s1, p0, p1, d0, d1, 1))
++            return fused;
++    }
+     if (direct) {
+         x = ggml_conv_2d_direct(ctx, w, x, s0, s1, p0, p1, d0, d1);
+     } else {
+@@ -705,11 +734,17 @@ ggml_tensor* ggml_ext_attention_ext(GGML
      };
  
  #ifndef SD_USE_UPSTREAM_GGML
@@ -1478,7 +1521,7 @@ diff --git i/src/core/ggml_extend.cpp w/src/core/ggml_extend.cpp
          if ((padded_head != d_head || kv_scale != 1.0f) && v_in->type != GGML_TYPE_F32) {
              v_in = ggml_cast(ctx, v_in, GGML_TYPE_F32);
          }
-@@ -723,7 +729,9 @@ ggml_tensor* ggml_ext_attention_ext(GGML
+@@ -723,7 +758,9 @@ ggml_tensor* ggml_ext_attention_ext(GGML
              k_in = ggml_ext_scale(runner_ctx, k_in, kv_scale);
              v_in = ggml_ext_scale(runner_ctx, v_in, kv_scale);
          }
@@ -1489,7 +1532,7 @@ diff --git i/src/core/ggml_extend.cpp w/src/core/ggml_extend.cpp
          auto out = ggml_ext_sage_attn(runner_ctx, q_in, k_in, v_in, scale / kv_scale, GGML_SAGE_ATTN_AUTO);
          if (ggml_backend_supports_op(backend, out)) {
              kqv = kv_scale != 1.0f ? ggml_ext_scale(runner_ctx, out, 1.0f / kv_scale) : out;
-@@ -812,6 +820,17 @@ ggml_tensor* ggml_ext_group_norm(GGMLRun
+@@ -812,6 +849,17 @@ ggml_tensor* ggml_ext_group_norm(GGMLRun
                                   int num_groups,
                                   float eps) {
      auto ctx = runner_ctx->ggml_ctx;
@@ -1819,7 +1862,7 @@ diff --git i/src/core/cuda/group_norm.cu w/src/core/cuda/group_norm.cu
 new file mode 100644
 --- /dev/null
 +++ w/src/core/cuda/group_norm.cu
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,128 @@
 +// Group norm with its affine, and the SiLU after it when there is one, in one kernel (Fugue #382).
 +//
 +// ggml's GROUP_NORM, then MUL by gamma and ADD of beta, then (in a resnet block) SILU each read and
@@ -1831,6 +1874,7 @@ new file mode 100644
 +#include <cstdlib>
 +#include "core/ggml_extensions.h"
 +#include "runtime.h"
++#include "group_norm.cuh"
 +
 +namespace SD_CUDA_NAMESPACE {
 +    namespace sd_group_norm {
@@ -1840,56 +1884,6 @@ new file mode 100644
 +                return fusion && std::atoi(fusion);
 +            }();
 +            return value;
-+        }
-+
-+        // ggml's block_reduce<SUM>: a warp's butterfly, then every warp sums the warps' totals.
-+        template <int Block>
-+        static __device__ __forceinline__ float block_sum(float value, float* shared) {
-+#pragma unroll
-+            for (int offset = 16; offset > 0; offset >>= 1)
-+                value += cuda_shuffle_xor(value, offset, 32);
-+            if constexpr (Block > 32) {
-+                const int warp = threadIdx.x / 32, lane = threadIdx.x % 32;
-+                if (lane == 0)
-+                    shared[warp] = value;
-+                __syncthreads();
-+                value = lane < Block / 32 ? shared[lane] : 0.0f;
-+#pragma unroll
-+                for (int offset = 16; offset > 0; offset >>= 1)
-+                    value += cuda_shuffle_xor(value, offset, 32);
-+            }
-+            return value;
-+        }
-+
-+        template <int Block, bool Silu>
-+        static __global__ void group_norm_affine(const float* x, float* dst, const float* gamma, const float* beta, const int group_size,
-+                                                 const int ne_elements, const float eps, const int plane, const int channels) {
-+            const int start = blockIdx.x * group_size + threadIdx.x;
-+            const int end   = min(blockIdx.x * group_size + group_size, ne_elements);
-+            __shared__ float sums[64];
-+
-+            float tmp = 0.0f;
-+            for (int j = start; j < end; j += Block)
-+                tmp += x[j];
-+            tmp              = block_sum<Block>(tmp, sums);
-+            const float mean = tmp / group_size;
-+
-+            tmp = 0.0f;
-+            for (int j = start; j < end; j += Block) {
-+                const float xi = x[j] - mean;
-+                tmp += xi * xi;
-+            }
-+            tmp                  = block_sum<Block>(tmp, sums + 32);
-+            const float variance = tmp / group_size;
-+            const float scale    = rsqrtf(variance + eps);
-+
-+            for (int j = start; j < end; j += Block) {
-+                const int c = (j / plane) % channels;
-+                float value = __fadd_rn(__fmul_rn(__fmul_rn(x[j] - mean, scale), gamma[c]), beta[c]);
-+                if constexpr (Silu)
-+                    value = value / (1.0f + expf(-value));
-+                dst[j] = value;
-+            }
 +        }
 +
 +        static bool supports(ggml_backend_dev_t device, const ggml_tensor* node, void*) {
@@ -2005,36 +1999,61 @@ diff --git i/src/core/cuda/CMakeLists.txt w/src/core/cuda/CMakeLists.txt
  function(sd_cuda_sources VENDOR LANGUAGE)
      set(SOURCES)
 -    foreach(OP rope int8 i8_lora_merge w4 convrot affine modulate bf16 rms_affine registration)
-+    foreach(OP rope int8 i8_lora_merge w4 convrot affine modulate bf16 rms_affine group_norm registration)
++    foreach(OP rope int8 i8_lora_merge w4 convrot affine modulate bf16 rms_affine group_norm conv2d_f16 registration)
          set(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/${OP}_${VENDOR}.cu")
          string(TOUPPER "${VENDOR}" UPPER_VENDOR)
          file(GENERATE OUTPUT "${SOURCE}" CONTENT "#define SD_CUDA_VENDOR_${UPPER_VENDOR} 1\n#include \"core/cuda/${OP}.cu\"\n")
+@@ -37,6 +37,10 @@ if(SD_CUDA)
+         set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/int8_cuda.cu" APPEND PROPERTY COMPILE_DEFINITIONS SD_CUDA_I8_CUTLASS)
+         set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/registration_cuda.cu" APPEND PROPERTY COMPILE_DEFINITIONS SD_CUDA_CUTE_ATTENTION)
+         set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/int8_cuda.cu" APPEND PROPERTY INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/src/core/cuda")
++        # Fugue #382: the VAE's convolutions through CUTLASS (conv2d_f16.cu)
++        set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/conv2d_f16_cuda.cu" APPEND PROPERTY COMPILE_DEFINITIONS SD_CUDA_CONV_CUTLASS)
++        set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/conv2d_f16_cuda.cu" APPEND PROPERTY INCLUDE_DIRECTORIES "${SD_CUDA_CUTLASS_PATH}/include")
++        set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/conv2d_f16_cuda.cu" APPEND PROPERTY COMPILE_OPTIONS --expt-relaxed-constexpr)
+     endif()
+     set_target_properties(${SD_CUDA_TARGET} PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+     target_link_libraries(${SD_CUDA_TARGET} PRIVATE CUDA::cudart CUDA::cublas)
 diff --git i/src/core/cuda/registration.cu w/src/core/cuda/registration.cu
 --- i/src/core/cuda/registration.cu
 +++ w/src/core/cuda/registration.cu
-@@ -17,6 +17,7 @@ namespace SD_CUDA_NAMESPACE {
+@@ -17,6 +17,8 @@ namespace SD_CUDA_NAMESPACE {
      void register_modulate(ggml_backend_dev_t device);
      void register_bf16(ggml_backend_dev_t device);
      void register_rms_affine(ggml_backend_dev_t device);
 +    void register_group_norm(ggml_backend_dev_t device);  // Fugue #382
++    void register_conv2d_f16(ggml_backend_dev_t device);  // Fugue #382
  #if defined(SD_CUDA_VENDOR_HIP)
      void register_wmma_attention(ggml_backend_dev_t device);
  #endif
-@@ -37,6 +38,7 @@ namespace SD_CUDA_NAMESPACE {
+@@ -37,6 +39,8 @@ namespace SD_CUDA_NAMESPACE {
          register_rope(device);
          register_bf16(device);
          register_rms_affine(device);
 +        register_group_norm(device);
++        register_conv2d_f16(device);
  #if defined(SD_CUDA_VENDOR_HIP)
          register_wmma_attention(device);
  #endif
 diff --git i/src/core/ggml_extensions.h w/src/core/ggml_extensions.h
 --- i/src/core/ggml_extensions.h
 +++ w/src/core/ggml_extensions.h
-@@ -110,6 +110,17 @@ struct SDSageAttentionParams {
+@@ -110,6 +110,29 @@ struct SDSageAttentionParams {
  
  ggml_ext_op_t sd_ggml_sage_attn_op();
  
++// A direct 2D convolution with its bias in one op (Fugue #382): inputs x [W, H, C, N] F32, the kernel
++// [KW, KH, C, K] F16 and the bias [K] F32; the output [OW, OH, K, N] F32, as ggml_conv_2d_direct and
++// an ADD of the bias give it. Strides, padding and dilation as ggml's (0 is the W axis, 1 the H axis).
++// upsample > 1 convolves x scaled up by that factor, nearest neighbour, as ggml_upscale gives it.
++struct SDConv2dParams {
++    int32_t s0, s1, p0, p1, d0, d1, upsample;
++};
++
++ggml_ext_op_t sd_ggml_conv2d_op();
++
++bool sd_ggml_conv2d_describe(const ggml_tensor* node, SDConv2dParams* params);
++
 +// Group norm and its affine in one op (Fugue #382): inputs x [W, H, C, N] F32, gamma and beta [C]
 +// F32; the output is x's shape. A kernel that runs it computes ggml's GROUP_NORM, MUL, ADD values.
 +struct SDGroupNormParams {
@@ -2060,10 +2079,51 @@ diff --git i/src/core/ggml_extensions.cpp w/src/core/ggml_extensions.cpp
  #include <cstring>
  #include <mutex>
  #include <unordered_set>
-@@ -449,6 +450,43 @@ bool sd_ggml_sage_attn_describe(const gg
+@@ -449,6 +450,84 @@ bool sd_ggml_sage_attn_describe(const gg
          return false;
      std::memcpy(params, attributes, sizeof(*params));
      return true;
++}
++
++static bool conv2d_infer(ggml_tensor* const* inputs, int count, const void* attributes, ggml_ext_tensor_desc* out) {
++    if (count != 3 || !attributes)
++        return false;
++    SDConv2dParams p;
++    std::memcpy(&p, attributes, sizeof(p));
++    const auto *x = inputs[0], *w = inputs[1], *b = inputs[2];
++    if (!x || !w || !b || x->type != GGML_TYPE_F32 || w->type != GGML_TYPE_F16 || b->type != GGML_TYPE_F32 ||
++        !ggml_is_contiguous(x) || !ggml_is_contiguous(w) || !ggml_is_contiguous(b) || w->ne[2] != x->ne[2] ||
++        ggml_nelements(b) != w->ne[3] || p.s0 < 1 || p.s1 < 1 || p.d0 < 1 || p.d1 < 1 || p.p0 < 0 || p.p1 < 0 || p.upsample < 1 ||
++        p.upsample > 8)
++        return false;
++    const int64_t iw = x->ne[0] * p.upsample, ih = x->ne[1] * p.upsample;
++    const int64_t ow = (iw + 2 * p.p0 - p.d0 * (w->ne[0] - 1) - 1) / p.s0 + 1;
++    const int64_t oh = (ih + 2 * p.p1 - p.d1 * (w->ne[1] - 1) - 1) / p.s1 + 1;
++    if (ow < 1 || oh < 1)
++        return false;
++    *out = {GGML_TYPE_F32, {ow, oh, w->ne[3], x->ne[3]}};
++    return true;
++}
++
++ggml_ext_op_t sd_ggml_conv2d_op() {
++    static const auto op = [] {
++        const ggml_ext_op_desc desc = {GGML_EXT_ABI_VERSION, "sd.conv2d_f16.v1", sizeof(SDConv2dParams), conv2d_infer};
++        auto result                 = ggml_ext_register_op(&desc);
++        GGML_ASSERT(result);
++        return result;
++    }();
++    return op;
++}
++
++bool sd_ggml_conv2d_describe(const ggml_tensor* node, SDConv2dParams* params) {
++    if (!node || ggml_ext_op_get(node) != sd_ggml_conv2d_op() || node->src[3] || !ggml_is_contiguous(node))
++        return false;
++    ggml_ext_tensor_desc output;
++    const auto* attributes = ggml_ext_op_attributes(node);
++    if (!conv2d_infer(node->src, 3, attributes, &output) || node->type != output.type || std::memcmp(node->ne, output.ne, sizeof(output.ne)))
++        return false;
++    std::memcpy(params, attributes, sizeof(*params));
++    return true;
 +}
 +
 +static bool group_norm_infer(ggml_tensor* const* inputs, int count, const void* attributes, ggml_ext_tensor_desc* out) {
@@ -2104,3 +2164,720 @@ diff --git i/src/core/ggml_extensions.cpp w/src/core/ggml_extensions.cpp
  }
  
  static bool sol_attn_infer(ggml_tensor* const* inputs, int count, const void* attributes, ggml_ext_tensor_desc* out) {
+diff --git i/src/core/ggml_runner.h w/src/core/ggml_runner.h
+--- i/src/core/ggml_runner.h
++++ w/src/core/ggml_runner.h
+@@ -83,6 +83,7 @@ struct GGMLRunnerContext {
+     float conv_scale                                                 = 0.f;
+     float attn_scale                                                 = 0.f;
+     bool conv2d_direct_enabled                                       = false;
++    bool fast_conv2d_enabled                                         = false;  // Fugue #382: sd.conv2d_f16 where a kernel runs it
+     bool conv3d_direct_enabled                                       = false;
+     bool circular_x_enabled                                          = false;
+     bool circular_y_enabled                                          = false;
+@@ -172,6 +173,7 @@ protected:
+     float conv_scale           = 0.f;
+     float attn_scale           = 0.f;
+     bool conv2d_direct_enabled = false;
++    bool fast_conv2d_enabled   = false;
+     bool conv3d_direct_enabled = false;
+     bool circular_x_enabled    = false;
+     bool circular_y_enabled    = false;
+diff --git i/src/core/ggml_runner.cpp w/src/core/ggml_runner.cpp
+--- i/src/core/ggml_runner.cpp
++++ w/src/core/ggml_runner.cpp
+@@ -197,6 +197,7 @@ GGMLRunnerContext GGMLRunner::get_contex
+     runner_ctx.linear_scale          = linear_scale;
+     runner_ctx.attn_scale            = attn_scale;
+     runner_ctx.conv2d_direct_enabled = conv2d_direct_enabled;
++    runner_ctx.fast_conv2d_enabled   = fast_conv2d_enabled;
+     runner_ctx.conv3d_direct_enabled = conv3d_direct_enabled;
+     runner_ctx.circular_x_enabled    = circular_x_enabled;
+     runner_ctx.circular_y_enabled    = circular_y_enabled;
+diff --git i/src/core/cuda/conv2d_f16.cu w/src/core/cuda/conv2d_f16.cu
+new file mode 100644
+--- /dev/null
++++ w/src/core/cuda/conv2d_f16.cu
+@@ -0,0 +1,326 @@
++// sd.conv2d_f16 on CUDA: a 2D convolution and its bias through a CUTLASS implicit-GEMM kernel
++// (Fugue #382). ggml's tensors are channels-first (W fastest), CUTLASS's are channels-last, so the
++// input is transposed to NHWC F16 (the same F16 rounding ggml's direct convolution applies), the
++// kernel accumulates in F32 and stores an NHWC F16 scratch (67 dB from ggml's F32 output on Klein's
++// pictures, and half the bytes), and one more pass writes the NCHW F32 output with
++// the bias added and, when the graph adds a residual right after, the residual too. A nearest 2x
++// upsample before the convolution (a VAE decoder's) is read in place rather than written first. FLUX.2's VAE
++// convolutions on an RTX 3090 run at 120-145 TFLOPS this way against about 27 for ggml's kernel.
++#include <climits>
++#include <cstdlib>
++#include "core/ggml_extensions.h"
++#include "runtime.h"
++
++#ifdef SD_CUDA_CONV_CUTLASS
++#include <cuda_fp16.h>
++#include <mutex>
++#include <unordered_map>
++// CUTLASS needs its kernel header before the device one.
++#include "cutlass/cutlass.h"
++#include "cutlass/conv/kernel/default_conv2d_fprop.h"
++#include "cutlass/conv/device/implicit_gemm_convolution.h"
++#include "cutlass/epilogue/thread/linear_combination.h"
++#include "group_norm.cuh"
++
++namespace SD_CUDA_NAMESPACE {
++    namespace sd_conv2d {
++        // One tile for every VAE shape: within 10% of the best of the tiles tried on each shape.
++        using Kernel = typename cutlass::conv::kernel::DefaultConv2dFprop<
++            cutlass::half_t, cutlass::layout::TensorNHWC, cutlass::half_t, cutlass::layout::TensorNHWC, cutlass::half_t, cutlass::layout::TensorNHWC, float,
++            cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80, cutlass::gemm::GemmShape<128, 128, 32>, cutlass::gemm::GemmShape<64, 64, 32>,
++            cutlass::gemm::GemmShape<16, 8, 16>, cutlass::epilogue::thread::LinearCombination<cutlass::half_t, 8, float, float>,
++            cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 4, cutlass::arch::OpMultiplyAdd,
++            cutlass::conv::IteratorAlgorithm::kOptimized>::Kernel;
++        using Conv = cutlass::conv::device::ImplicitGemmConvolution<Kernel>;
++
++        static bool fusion_disabled() {
++            static const bool value = [] {
++                const char* fusion = std::getenv("GGML_CUDA_DISABLE_FUSION");
++                return fusion && std::atoi(fusion);
++            }();
++            return value;
++        }
++
++        static int compute_capability(int device) {
++            static std::mutex mutex;
++            static std::unordered_map<int, int> cache;
++            std::lock_guard<std::mutex> lock(mutex);
++            auto found = cache.find(device);
++            if (found != cache.end())
++                return found->second;
++            cudaDeviceProp props = {};
++            const int cc         = cudaGetDeviceProperties(&props, device) == cudaSuccess ? props.major * 10 + props.minor : 0;
++            cache.emplace(device, cc);
++            return cc;
++        }
++
++        struct Shape {
++            int n, h, w, c, k, r, s, p, q;
++            SDConv2dParams params;
++        };
++        static Shape shape(const ggml_tensor* conv, const SDConv2dParams& params) {
++            const auto *x = conv->src[0], *kernel = conv->src[1];
++            const int u   = params.upsample;
++            return {int(x->ne[3]), int(x->ne[1]) * u, int(x->ne[0]) * u, int(x->ne[2]), int(kernel->ne[3]), int(kernel->ne[1]), int(kernel->ne[0]),
++                    int(conv->ne[1]), int(conv->ne[0]), params};
++        }
++        static cutlass::conv::Conv2dProblemSize problem(const Shape& s) {
++            return cutlass::conv::Conv2dProblemSize(s.n, s.h, s.w, s.c, s.k, s.r, s.s, s.p, s.q, s.params.p1, s.params.p0, s.params.s1,
++                                                    s.params.s0, s.params.d1, s.params.d0, cutlass::conv::Mode::kCrossCorrelation, 1);
++        }
++        static size_t aligned(size_t bytes) {
++            return (bytes + 255) / 256 * 256;
++        }
++        struct Layout {
++            size_t normalized, input, kernel, output, total;
++        };
++        // `normalized`: a group norm's F16 output that this step makes itself (match_norm).
++        static Layout layout(const Shape& s, bool normalized = false) {
++            Layout l;
++            l.normalized = 0;
++            l.input      = normalized ? aligned(size_t(s.n) * s.h * s.w * s.c * sizeof(half)) : 0;
++            l.kernel = l.input + aligned(size_t(s.n) * s.h * s.w * s.c * sizeof(half));
++            l.output = l.kernel + aligned(size_t(s.k) * s.r * s.s * s.c * sizeof(half));
++            l.total  = l.output + aligned(size_t(s.n) * s.p * s.q * s.k * sizeof(half));
++            return l;
++        }
++
++        static bool supports(ggml_backend_dev_t device, const ggml_tensor* node, void*) {
++            SDConv2dParams params;
++            if (!sd_ggml_conv2d_describe(node, &params))
++                return false;
++            const auto info = cuda_device_info(device);
++            if (info.device < 0 || compute_capability(info.device) < 80)
++                return false;
++            const auto* x = node->src[0];
++            // 128-bit accesses: channels in eights; extents within CUTLASS's int arithmetic.
++            if (x->ne[2] % 8 || node->ne[2] % 8 || ggml_nelements(x) * params.upsample * params.upsample > INT_MAX || ggml_nelements(node) > INT_MAX ||
++                ggml_nelements(node->src[1]) > INT_MAX)
++                return false;
++            Conv::Arguments args(problem(shape(node, params)), {nullptr, {}}, {nullptr, {}}, {nullptr, {}}, {nullptr, {}}, {1.f, 0.f});
++            return Conv::can_implement(args) == cutlass::Status::kSuccess && Conv::get_workspace_size(args) == 0;
++        }
++
++        // The convolution, then an ADD of a residual of its shape.
++        static const ggml_tensor* residual_of(const ggml_tensor* conv, const ggml_tensor* add) {
++            if (add->op != GGML_OP_ADD || add->type != GGML_TYPE_F32 || !ggml_is_contiguous(add) || !ggml_are_same_shape(add, conv))
++                return nullptr;
++            const auto* other = add->src[0] == conv ? add->src[1] : add->src[1] == conv ? add->src[0]
++                                                                                        : nullptr;
++            if (!other || other == conv || other->type != GGML_TYPE_F32 || !ggml_is_contiguous(other) || !ggml_are_same_shape(other, conv))
++                return nullptr;
++            return other;
++        }
++        // A group norm op, its SiLU, then this convolution of it (and maybe a residual ADD): the norm writes
++        // F16 for the convolution (half the bytes, the same values), and its F32 output is never made.
++        static int match_norm(ggml_backend_dev_t device, const ggml_cgraph* graph, int first, void*) {
++            auto* g = const_cast<ggml_cgraph*>(graph);
++            if (fusion_disabled() || first + 2 >= ggml_graph_n_nodes(g))
++                return 0;
++            const auto* norm = ggml_graph_node(g, first);
++            const auto* silu = ggml_graph_node(g, first + 1);
++            const auto* conv = ggml_graph_node(g, first + 2);
++            SDGroupNormParams np;
++            SDConv2dParams cp;
++            if (!sd_ggml_group_norm_describe(norm, &np) || silu->op != GGML_OP_UNARY || ggml_get_unary_op(silu) != GGML_UNARY_OP_SILU ||
++                silu->src[0] != norm || silu->type != GGML_TYPE_F32 || !ggml_are_same_shape(silu, norm) || conv->src[0] != silu ||
++                !supports(device, conv, nullptr) || !sd_ggml_conv2d_describe(conv, &cp) || cp.upsample != 1)
++                return 0;
++            // and the residual ADD after it, as match takes it
++            return first + 3 < ggml_graph_n_nodes(g) && residual_of(conv, ggml_graph_node(g, first + 3)) ? 4 : 3;
++        }
++        static int match(ggml_backend_dev_t device, const ggml_cgraph* graph, int first, void*) {
++            auto* g = const_cast<ggml_cgraph*>(graph);
++            if (fusion_disabled() || first + 1 >= ggml_graph_n_nodes(g))
++                return 0;
++            const auto* conv = ggml_graph_node(g, first);
++            const auto* add  = ggml_graph_node(g, first + 1);
++            return supports(device, conv, nullptr) && residual_of(conv, add) ? 2 : 0;
++        }
++
++        static uintptr_t address(const ggml_tensor* tensor) {
++            size_t offset = 0;
++            while (tensor && !tensor->data && tensor->view_src) {
++                offset += tensor->view_offs;
++                tensor = tensor->view_src;
++            }
++            return tensor && tensor->data ? reinterpret_cast<uintptr_t>(tensor->data) + offset : 0;
++        }
++        static bool overlaps(const ggml_tensor* a, const ggml_tensor* b) {
++            const auto x = address(a), y = address(b);
++            if (!x || !y)
++                return false;
++            return x <= y ? y - x < ggml_nbytes(a) : x - y < ggml_nbytes(b);
++        }
++
++        // The step's convolution: its first node, or its third after a group norm and its SiLU.
++        static int conv_index(ggml_tensor* const* nodes, int count) {
++            return count >= 3 && ggml_ext_op_get(nodes[0]) == sd_ggml_group_norm_op() ? 2 : 0;
++        }
++        static ggml_status prepare(ggml_backend_t, ggml_tensor* const* nodes, int count, void**, size_t* workspace, void*) {
++            SDConv2dParams params;
++            const int at = conv_index(nodes, count);
++            if (!sd_ggml_conv2d_describe(nodes[at], &params))
++                return GGML_STATUS_FAILED;
++            *workspace = layout(shape(nodes[at], params), at == 2).total;
++            return GGML_STATUS_SUCCESS;
++        }
++        static void destroy(void*, void*) {}
++
++        // NCHW F32 -> NHWC F16, through 32x32 tiles in shared memory, scaling up `factor` times (nearest,
++        // as ggml_upscale) on the way: `plane` and `width` are the output's, `source_plane` the input's.
++        template <typename In>
++        static __global__ void to_nhwc(const In* src, half* dst, int channels, int plane, int width, int source_plane, int factor) {
++            __shared__ float tile[32][33];
++            const int n = blockIdx.z;
++            const int c0 = blockIdx.y * 32, i0 = blockIdx.x * 32;
++            src += size_t(n) * channels * source_plane;
++            dst += size_t(n) * channels * plane;
++            const int source_width = width / factor;
++            for (int y = threadIdx.y; y < 32; y += blockDim.y) {
++                const int c = c0 + y, i = i0 + threadIdx.x;
++                const int at = factor == 1 ? i : (i / width / factor) * source_width + (i % width) / factor;
++                tile[y][threadIdx.x] = c < channels && i < plane ? float(src[size_t(c) * source_plane + at]) : 0.f;
++            }
++            __syncthreads();
++            for (int y = threadIdx.y; y < 32; y += blockDim.y) {
++                const int i = i0 + y, c = c0 + threadIdx.x;
++                if (c < channels && i < plane)
++                    dst[size_t(i) * channels + c] = __float2half(tile[threadIdx.x][y]);
++            }
++        }
++        // ggml's kernel [S][R][C][K] (S fastest) -> CUTLASS's KRSC.
++        static __global__ void kernel_to_krsc(const half* src, half* dst, int k, int c, int r, int s) {
++            const int64_t i     = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
++            const int64_t total = int64_t(k) * c * r * s;
++            if (i >= total)
++                return;
++            const int sx = int(i % s), ry = int(i / s % r), ch = int(i / (int64_t(s) * r) % c), ko = int(i / (int64_t(s) * r * c));
++            dst[((int64_t(ko) * r + ry) * s + sx) * c + ch] = src[i];
++        }
++        // NHWC F32 -> NCHW F32 with the bias, and the residual when there is one, as ggml's ADDs round them.
++        static __global__ void to_nchw(const half* src, float* dst, const float* bias, const float* residual, int channels, int plane) {
++            __shared__ float tile[32][33];
++            const int n = blockIdx.z;
++            const int c0 = blockIdx.y * 32, i0 = blockIdx.x * 32;
++            src += size_t(n) * channels * plane;
++            dst += size_t(n) * channels * plane;
++            if (residual)
++                residual += size_t(n) * channels * plane;
++            for (int y = threadIdx.y; y < 32; y += blockDim.y) {
++                const int i = i0 + y, c = c0 + threadIdx.x;
++                tile[y][threadIdx.x] = c < channels && i < plane ? __half2float(src[size_t(i) * channels + c]) : 0.f;
++            }
++            __syncthreads();
++            for (int y = threadIdx.y; y < 32; y += blockDim.y) {
++                const int c = c0 + y, i = i0 + threadIdx.x;
++                if (c < channels && i < plane) {
++                    const size_t at = size_t(c) * plane + i;
++                    float value     = __fadd_rn(tile[threadIdx.x][y], bias[c]);
++                    if (residual)
++                        value = __fadd_rn(residual[at], value);
++                    dst[at] = value;
++                }
++            }
++        }
++
++        static ggml_status execute(const ggml_ext_execution_context* execution, ggml_tensor* const* nodes, int count, void*, void*) {
++            ggml_ext_gpu_context context;
++            SDConv2dParams params;
++            const int at     = conv_index(nodes, count);
++            const auto* conv = nodes[at];
++            auto* dst        = nodes[count - 1];
++            if (!cuda_context(execution->backend, &context) || !sd_ggml_conv2d_describe(conv, &params) || !execution->workspace)
++                return GGML_STATUS_FAILED;
++            const auto* residual = dst != conv ? residual_of(conv, dst) : nullptr;
++            if (dst != conv && !residual)
++                return GGML_STATUS_FAILED;
++            const Shape s    = shape(conv, params);
++            const Layout l   = layout(s, at == 2);
++            auto* scratch    = static_cast<char*>(ggml_backend_buffer_get_base(execution->workspace));
++            auto* input      = reinterpret_cast<half*>(scratch + l.input);
++            auto* kernel     = reinterpret_cast<half*>(scratch + l.kernel);
++            auto* output     = reinterpret_cast<cutlass::half_t*>(scratch + l.output);
++            const auto stream = static_cast<cudaStream_t>(context.stream);
++            // The final pass reads the residual and writes dst element by element at the same index, so
++            // dst may be the residual's own storage, but no other overlap.
++            if ((overlaps(dst, residual) && address(dst) != address(residual)) || overlaps(dst, conv->src[0]) || overlaps(dst, conv->src[1]) ||
++                (at == 2 && (overlaps(dst, nodes[0]->src[0]) || overlaps(dst, nodes[0]->src[1]) || overlaps(dst, nodes[0]->src[2]))) ||
++                overlaps(dst, conv->src[2]))
++                return GGML_STATUS_FAILED;
++
++            const int plane_in = s.h * s.w, plane_out = s.p * s.q, u = params.upsample;
++            const dim3 grid_in((plane_in + 31) / 32, (s.c + 31) / 32, s.n);
++            if (at == 2) {
++                // The group norm and its SiLU write F16 here, the value the transpose would round to.
++                SDGroupNormParams norm;
++                const auto* x = nodes[0]->src[0];
++                if (!sd_ggml_group_norm_describe(nodes[0], &norm))
++                    return GGML_STATUS_FAILED;
++                auto* normalized     = reinterpret_cast<half*>(scratch + l.normalized);
++                const int channels   = int(x->ne[2]);
++                const int plane      = int(x->ne[0] * x->ne[1]);
++                const int group_size = plane * (channels / norm.groups);
++                const unsigned grid  = unsigned(norm.groups * x->ne[3]);
++                const auto* gamma    = static_cast<const float*>(nodes[0]->src[1]->data);
++                const auto* beta     = static_cast<const float*>(nodes[0]->src[2]->data);
++                if (group_size < 1024)
++                    sd_group_norm::group_norm_affine<32, true, half><<<grid, 32, 0, stream>>>(static_cast<const float*>(x->data), normalized, gamma, beta,
++                                                                                              group_size, int(ggml_nelements(x)), norm.eps, plane, channels);
++                else
++                    sd_group_norm::group_norm_affine<1024, true, half><<<grid, 1024, 0, stream>>>(static_cast<const float*>(x->data), normalized, gamma,
++                                                                                                  beta, group_size, int(ggml_nelements(x)), norm.eps, plane, channels);
++                to_nhwc<<<grid_in, dim3(32, 8), 0, stream>>>(normalized, input, s.c, plane_in, s.w, plane_in, 1);
++            } else {
++                to_nhwc<<<grid_in, dim3(32, 8), 0, stream>>>(static_cast<const float*>(conv->src[0]->data), input, s.c, plane_in, s.w, plane_in / (u * u), u);
++            }
++            const int64_t weights = int64_t(s.k) * s.c * s.r * s.s;
++            kernel_to_krsc<<<unsigned((weights + 255) / 256), 256, 0, stream>>>(static_cast<const half*>(conv->src[1]->data), kernel, s.k, s.c, s.r, s.s);
++            if (cudaGetLastError() != cudaSuccess)
++                return GGML_STATUS_FAILED;
++
++            Conv::Arguments args(problem(s), {reinterpret_cast<cutlass::half_t*>(input), cutlass::layout::TensorNHWC::packed({s.n, s.h, s.w, s.c})},
++                                 {reinterpret_cast<cutlass::half_t*>(kernel), cutlass::layout::TensorNHWC::packed({s.k, s.r, s.s, s.c})},
++                                 {output, cutlass::layout::TensorNHWC::packed({s.n, s.p, s.q, s.k})},
++                                 {output, cutlass::layout::TensorNHWC::packed({s.n, s.p, s.q, s.k})}, {1.f, 0.f});
++            Conv op;
++            if (op.initialize(args, nullptr, stream) != cutlass::Status::kSuccess || op(stream) != cutlass::Status::kSuccess)
++                return GGML_STATUS_FAILED;
++
++            to_nchw<<<dim3((plane_out + 31) / 32, (s.k + 31) / 32, s.n), dim3(32, 8), 0, stream>>>(
++                reinterpret_cast<const half*>(output), static_cast<float*>(dst->data), static_cast<const float*>(conv->src[2]->data),
++                residual ? static_cast<const float*>(residual->data) : nullptr, s.k, plane_out);
++            return cudaGetLastError() == cudaSuccess ? GGML_STATUS_SUCCESS : GGML_STATUS_FAILED;
++        }
++    }
++
++    void register_conv2d_f16(ggml_backend_dev_t device) {
++        ggml_ext_kernel_desc desc = {};
++        desc.abi_version          = GGML_EXT_ABI_VERSION;
++        desc.name                 = "sd.conv2d_f16.cutlass." SD_CUDA_NAME ".v1";
++        desc.op                   = GGML_OP_CUSTOM;
++        desc.custom_op            = sd_ggml_conv2d_op();
++        desc.priority             = 100;
++        desc.supports             = sd_conv2d::supports;
++        desc.prepare              = sd_conv2d::prepare;
++        desc.destroy              = sd_conv2d::destroy;
++        desc.execute              = sd_conv2d::execute;
++        GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++        desc.name     = "sd.conv2d_f16_residual.cutlass." SD_CUDA_NAME ".v1";
++        desc.priority = 240;
++        desc.supports = nullptr;
++        desc.match    = sd_conv2d::match;
++        GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++        // Above the norm's own SiLU fusion (240), which takes the same first two nodes.
++        desc.name      = "sd.group_norm_conv2d_f16.cutlass." SD_CUDA_NAME ".v1";
++        desc.custom_op = sd_ggml_group_norm_op();
++        desc.priority  = 260;
++        desc.match     = sd_conv2d::match_norm;
++        GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++    }
++}
++#else
++namespace SD_CUDA_NAMESPACE {
++    void register_conv2d_f16(ggml_backend_dev_t) {}
++}
++#endif
+diff --git i/src/core/ggml_extend.h w/src/core/ggml_extend.h
+--- i/src/core/ggml_extend.h
++++ w/src/core/ggml_extend.h
+@@ -109,6 +109,20 @@ ggml_tensor* ggml_ext_conv_1d(GGMLRunner
+                               bool force_prec_f32 = false);
+ 
+ // w: [OC，IC, KH, KW]
++// A direct convolution and its bias as one sd.conv2d_f16 op, of x scaled up `upsample` times (nearest)
++// first; nullptr where the runner does not ask for it or the backend has no kernel (Fugue #382).
++ggml_tensor* ggml_ext_conv_2d_fast(GGMLRunnerContext* runner_ctx,
++                                   ggml_tensor* x,
++                                   ggml_tensor* w,
++                                   ggml_tensor* b,
++                                   int s0,
++                                   int s1,
++                                   int p0,
++                                   int p1,
++                                   int d0,
++                                   int d1,
++                                   int upsample);
++
+ // x: [N, IC, IH, IW]
+ // b: [OC,]
+ // result: [N, OC, OH, OW]
+diff --git i/src/model/common/ggml_block.hpp w/src/model/common/ggml_block.hpp
+--- i/src/model/common/ggml_block.hpp
++++ w/src/model/common/ggml_block.hpp
+@@ -524,6 +524,16 @@ public:
+                                 ctx->circular_y_enabled,
+                                 scale);
+     }
++
++    // This convolution of x scaled up `factor` times (nearest) as one op, or nullptr where that op does
++    // not apply; the caller then scales up and calls forward (Fugue #382).
++    ggml_tensor* forward_upsampled(GGMLRunnerContext* ctx, ggml_tensor* x, int factor) {
++        const float scale = ctx->conv_scale > 0.f ? ctx->conv_scale : this->scale;
++        if (ctx->weight_adapter || !bias || scale != 1.f || !ctx->conv2d_direct_enabled || ctx->circular_x_enabled || ctx->circular_y_enabled)
++            return nullptr;
++        return ggml_ext_conv_2d_fast(ctx, x, params["weight"], params["bias"], stride.second, stride.first, padding.second, padding.first,
++                                     dilation.second, dilation.first, factor);
++    }
+ };
+ 
+ class Conv2d_grouped : public UnaryBlock {
+diff --git i/src/model/common/block.hpp w/src/model/common/block.hpp
+--- i/src/model/common/block.hpp
++++ w/src/model/common/block.hpp
+@@ -59,6 +59,8 @@ public:
+     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) {
+         // x: [N, channels, h, w]
+         auto conv = std::dynamic_pointer_cast<Conv2d>(blocks["conv"]);
++        if (auto* fused = conv->forward_upsampled(ctx, x, 2))  // Fugue #382: never writes the 4x larger input
++            return fused;
+ 
+         x = ggml_upscale(ctx->ggml_ctx, x, 2, GGML_SCALE_MODE_NEAREST);  // [N, channels, h*2, w*2]
+         x = conv->forward(ctx, x);                                       // [N, out_channels, h*2, w*2]
+diff --git i/src/model/vae/auto_encoder_kl.hpp w/src/model/vae/auto_encoder_kl.hpp
+--- i/src/model/vae/auto_encoder_kl.hpp
++++ w/src/model/vae/auto_encoder_kl.hpp
+@@ -749,6 +749,11 @@ struct AutoEncoderKL : public VAE {
+                                const sd::Tensor<float>& z,
+                                bool decode_graph) override {
+         GGML_ASSERT(!decode_only || decode_graph);
++        // Fugue #382: sd.conv2d_f16 for this VAE's decoding only (FLUX.1/2, Z-Image, SD: AutoEncoderKL;
++        // other VAEs keep ggml's convolution). Encoding with it is 0.20 -> 0.12 s a 1024x1024 picture,
++        // but an edit's reference latents feed the DiT, which turns the small difference into 37-38 dB
++        // on the edited picture; the encoder keeps ggml's convolution until that is chosen.
++        fast_conv2d_enabled = decode_graph;
+         auto get_graph = [&]() -> ggml_cgraph* {
+             return build_graph(z, decode_graph);
+         };
+diff --git i/src/core/cuda/group_norm.cuh w/src/core/cuda/group_norm.cuh
+new file mode 100644
+--- /dev/null
++++ w/src/core/cuda/group_norm.cuh
+@@ -0,0 +1,58 @@
++// ggml's GROUP_NORM with its affine and an optional SiLU in one kernel (Fugue #382), shared by
++// group_norm.cu and conv2d_f16.cu (which hands its F16 output straight to a convolution).
++#pragma once
++#include "runtime.h"
++
++namespace SD_CUDA_NAMESPACE {
++    namespace sd_group_norm {
++        // ggml's block_reduce<SUM>: a warp's butterfly, then every warp sums the warps' totals.
++        template <int Block>
++        static __device__ __forceinline__ float block_sum(float value, float* shared) {
++#pragma unroll
++            for (int offset = 16; offset > 0; offset >>= 1)
++                value += cuda_shuffle_xor(value, offset, 32);
++            if constexpr (Block > 32) {
++                const int warp = threadIdx.x / 32, lane = threadIdx.x % 32;
++                if (lane == 0)
++                    shared[warp] = value;
++                __syncthreads();
++                value = lane < Block / 32 ? shared[lane] : 0.0f;
++#pragma unroll
++                for (int offset = 16; offset > 0; offset >>= 1)
++                    value += cuda_shuffle_xor(value, offset, 32);
++            }
++            return value;
++        }
++
++        template <int Block, bool Silu, typename Out = float>
++        static __global__ void group_norm_affine(const float* x, Out* dst, const float* gamma, const float* beta, const int group_size,
++                                                 const int ne_elements, const float eps, const int plane, const int channels) {
++            const int start = blockIdx.x * group_size + threadIdx.x;
++            const int end   = min(blockIdx.x * group_size + group_size, ne_elements);
++            __shared__ float sums[64];
++
++            float tmp = 0.0f;
++            for (int j = start; j < end; j += Block)
++                tmp += x[j];
++            tmp              = block_sum<Block>(tmp, sums);
++            const float mean = tmp / group_size;
++
++            tmp = 0.0f;
++            for (int j = start; j < end; j += Block) {
++                const float xi = x[j] - mean;
++                tmp += xi * xi;
++            }
++            tmp                  = block_sum<Block>(tmp, sums + 32);
++            const float variance = tmp / group_size;
++            const float scale    = rsqrtf(variance + eps);
++
++            for (int j = start; j < end; j += Block) {
++                const int c = (j / plane) % channels;
++                float value = __fadd_rn(__fmul_rn(__fmul_rn(x[j] - mean, scale), gamma[c]), beta[c]);
++                if constexpr (Silu)
++                    value = value / (1.0f + expf(-value));
++                dst[j] = Out(value);
++            }
++        }
++    }
++}
+# warnings
+# Upstream code the helper's build warns about, fixed without changing behaviour (the owner's rule: fix
+# every warning). Not #382 performance work.
+diff --git i/src/core/cuda/sageattention/attn_utils.cuh w/src/core/cuda/sageattention/attn_utils.cuh
+--- i/src/core/cuda/sageattention/attn_utils.cuh
++++ w/src/core/cuda/sageattention/attn_utils.cuh
+@@ -167,7 +167,7 @@ namespace sageattention {
+                 offset_Q = smem_Q.advance_offset_by_row<16>(offset_Q);
+             }
+             // ! using permutation invariance
+-            offset_Q = smem_Q.advance_offset_by_column<2>(offset_Q - (num_tiles_q * 16 * stride), iter);
++            offset_Q = smem_Q.template advance_offset_by_column<2>(offset_Q - (num_tiles_q * 16 * stride), iter);
+ 
+ #pragma unroll
+             for (uint32_t fk = 0; fk < num_tiles_k; fk++) {
+@@ -185,7 +185,7 @@ namespace sageattention {
+                     }
+                 }
+             }
+-            offset_K = smem_K.advance_offset_by_column<2>(offset_K - (num_tiles_k * 16 * stride), iter);
++            offset_K = smem_K.template advance_offset_by_column<2>(offset_K - (num_tiles_k * 16 * stride), iter);
+         }
+ 
+         // following iteration, mma mode is kInplace
+@@ -197,7 +197,7 @@ namespace sageattention {
+                 smem_Q.ldmatrix_m8n8x4(offset_Q, RQ[fq]);
+                 offset_Q = smem_Q.advance_offset_by_row<16>(offset_Q);
+             }
+-            offset_Q = smem_Q.advance_offset_by_column<2>(offset_Q - (num_tiles_q * 16 * stride), iter);
++            offset_Q = smem_Q.template advance_offset_by_column<2>(offset_Q - (num_tiles_q * 16 * stride), iter);
+ 
+ #pragma unroll
+             for (uint32_t fk = 0; fk < num_tiles_k; fk++) {
+@@ -215,7 +215,7 @@ namespace sageattention {
+                     }
+                 }
+             }
+-            offset_K = smem_K.advance_offset_by_column<2>(offset_K - (num_tiles_k * 16 * stride), iter);
++            offset_K = smem_K.template advance_offset_by_column<2>(offset_K - (num_tiles_k * 16 * stride), iter);
+         }
+ 
+         offset_Q -= (2 * num_tiles_qk_inner);
+@@ -513,7 +513,7 @@ namespace sageattention {
+                     }
+                 }
+ 
+-                offset_V = smem_V.advance_offset_by_column<2>(offset_V, fv);
++                offset_V = smem_V.template advance_offset_by_column<2>(offset_V, fv);
+             }
+             offset_V = smem_V.advance_offset_by_row<16>(offset_V - (2 * num_tiles_v));
+         }
+@@ -544,7 +544,7 @@ namespace sageattention {
+                     }
+                 }
+ 
+-                offset_V = smem_V.advance_offset_by_column<2>(offset_V, fv);
++                offset_V = smem_V.template advance_offset_by_column<2>(offset_V, fv);
+             }
+             offset_V = smem_V.advance_offset_by_row<16>(offset_V - (2 * num_tiles_v));
+         }
+@@ -563,7 +563,7 @@ namespace sageattention {
+                     }
+                 }
+ 
+-                offset_V = smem_V.advance_offset_by_column<2>(offset_V, fv);
++                offset_V = smem_V.template advance_offset_by_column<2>(offset_V, fv);
+             }
+             offset_V = smem_V.advance_offset_by_row<16>(offset_V - (2 * num_tiles_v));
+         }
+diff --git i/src/core/util.cpp w/src/core/util.cpp
+--- i/src/core/util.cpp
++++ w/src/core/util.cpp
+@@ -2,7 +2,7 @@
+ #include <algorithm>
+ #include <cctype>
+ #include <cmath>
+-#include <codecvt>
++#include <stdexcept>
+ #include <cstdarg>
+ #include <cstdlib>
+ #include <cstring>
+@@ -388,14 +388,58 @@ bool sd_preview_noisy
+ static sd_graph_eval_callback_t sd_backend_eval_cb = nullptr;
+ static void* sd_backend_eval_cb_data               = nullptr;
+ 
++// UTF-8 <-> UTF-32 by hand: std::wstring_convert is deprecated (C++17). Like it, an invalid sequence
++// or code point (overlong, a surrogate, above U+10FFFF) throws std::range_error.
+ std::u32string utf8_to_utf32(const std::string& utf8_str) {
+-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
+-    return converter.from_bytes(utf8_str);
++    std::u32string out;
++    out.reserve(utf8_str.size());
++    for (size_t i = 0; i < utf8_str.size();) {
++        const auto lead = static_cast<unsigned char>(utf8_str[i]);
++        int extra       = lead < 0x80 ? 0 : (lead & 0xE0) == 0xC0 ? 1
++                                        : (lead & 0xF0) == 0xE0   ? 2
++                                        : (lead & 0xF8) == 0xF0   ? 3
++                                                                  : -1;
++        if (extra < 0 || i + static_cast<size_t>(extra) >= utf8_str.size())
++            throw std::range_error("invalid UTF-8");
++        char32_t code = extra == 0 ? lead : lead & (0x3F >> extra);
++        for (int k = 1; k <= extra; ++k) {
++            const auto next = static_cast<unsigned char>(utf8_str[i + k]);
++            if ((next & 0xC0) != 0x80)
++                throw std::range_error("invalid UTF-8");
++            code = (code << 6) | (next & 0x3F);
++        }
++        static const char32_t minimum[] = {0, 0x80, 0x800, 0x10000};
++        if (code < minimum[extra] || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
++            throw std::range_error("invalid UTF-8");
++        out.push_back(code);
++        i += extra + 1;
++    }
++    return out;
+ }
+ 
+ std::string utf32_to_utf8(const std::u32string& utf32_str) {
+-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
+-    return converter.to_bytes(utf32_str);
++    std::string out;
++    out.reserve(utf32_str.size());
++    for (const char32_t code : utf32_str) {
++        if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
++            throw std::range_error("invalid code point");
++        if (code < 0x80) {
++            out.push_back(static_cast<char>(code));
++        } else if (code < 0x800) {
++            out.push_back(static_cast<char>(0xC0 | (code >> 6)));
++            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
++        } else if (code < 0x10000) {
++            out.push_back(static_cast<char>(0xE0 | (code >> 12)));
++            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
++            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
++        } else {
++            out.push_back(static_cast<char>(0xF0 | (code >> 18)));
++            out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
++            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
++            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
++        }
++    }
++    return out;
+ }
+ 
+ std::u32string unicode_value_to_utf32(int unicode_value) {
+diff --git i/src/api/image_metadata.cpp w/src/api/image_metadata.cpp
+--- i/src/api/image_metadata.cpp
++++ w/src/api/image_metadata.cpp
+@@ -2,7 +2,6 @@
+ 
+ #include <algorithm>
+ #include <cctype>
+-#include <codecvt>
+ #include <cstdint>
+ #include <cstring>
+ #include <filesystem>
+@@ -415,12 +414,32 @@ namespace sd::metadata_reader {
+             text.push_back(static_cast<char16_t>(little_endian ? data[offset] | (uint16_t(data[offset + 1]) << 8)
+                                                                : (uint16_t(data[offset]) << 8) | data[offset + 1]));
+         }
+-        try {
+-            std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
+-            return trim_trailing_nuls(converter.to_bytes(text));
+-        } catch (const std::range_error&) {
+-            return json{{"error", "invalid UTF-16 UserComment"}, {"raw_hex_preview", hex_preview(data, size)}};
++        // UTF-16 to UTF-8 by hand: std::wstring_convert is deprecated (C++17). An unpaired surrogate is
++        // invalid, as it was for the converter.
++        std::string utf8;
++        for (size_t i = 0; i < text.size(); ++i) {
++            char32_t code = text[i];
++            if (code >= 0xD800 && code <= 0xDBFF && i + 1 < text.size() && text[i + 1] >= 0xDC00 && text[i + 1] <= 0xDFFF)
++                code = 0x10000 + ((code - 0xD800) << 10) + (char32_t(text[++i]) - 0xDC00);
++            else if (code >= 0xD800 && code <= 0xDFFF)
++                return json{{"error", "invalid UTF-16 UserComment"}, {"raw_hex_preview", hex_preview(data, size)}};
++            if (code < 0x80) {
++                utf8.push_back(static_cast<char>(code));
++            } else if (code < 0x800) {
++                utf8.push_back(static_cast<char>(0xC0 | (code >> 6)));
++                utf8.push_back(static_cast<char>(0x80 | (code & 0x3F)));
++            } else if (code < 0x10000) {
++                utf8.push_back(static_cast<char>(0xE0 | (code >> 12)));
++                utf8.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
++                utf8.push_back(static_cast<char>(0x80 | (code & 0x3F)));
++            } else {
++                utf8.push_back(static_cast<char>(0xF0 | (code >> 18)));
++                utf8.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
++                utf8.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
++                utf8.push_back(static_cast<char>(0x80 | (code & 0x3F)));
++            }
+         }
++        return trim_trailing_nuls(utf8);
+     }
+ 
+     json parse_exif_value(const std::vector<uint8_t>& data,
+diff --git i/thirdparty/stb_image.h w/thirdparty/stb_image.h
+--- i/thirdparty/stb_image.h
++++ w/thirdparty/stb_image.h
+@@ -5161,9 +5161,9 @@ static int stbi__parse_png_file(stbi__pn
+                // non-paletted with tRNS = constant alpha. if header-scanning, we can stop now.
+                if (scan == STBI__SCAN_header) { ++s->img_n; return 1; }
+                if (z->depth == 16) {
+-                  for (k = 0; k < s->img_n; ++k) tc16[k] = (stbi__uint16)stbi__get16be(s); // copy the values as-is
++                  for (k = 0; k < s->img_n && k < 3; ++k) tc16[k] = (stbi__uint16)stbi__get16be(s); // copy the values as-is (k < 3: img_n is 1 or 3 here; tells GCC, Fugue)
+                } else {
+-                  for (k = 0; k < s->img_n; ++k) tc[k] = (stbi_uc)(stbi__get16be(s) & 255) * stbi__depth_scale_table[z->depth]; // non 8-bit images will be larger
++                  for (k = 0; k < s->img_n && k < 3; ++k) tc[k] = (stbi_uc)(stbi__get16be(s) & 255) * stbi__depth_scale_table[z->depth]; // non 8-bit images will be larger (k < 3 as above)
+                }
+             }
+             break;
+diff --git i/src/conditioning/conditioner.hpp w/src/conditioning/conditioner.hpp
+--- i/src/conditioning/conditioner.hpp
++++ w/src/conditioning/conditioner.hpp
+@@ -120,7 +120,9 @@ static inline sd::Tensor<float> apply_to
+     }
+ 
+     if (hidden_states.dim() == 1) {
+-        hidden_states.unsqueeze_(1);
++        // reshape_, the same [n, 1] as unsqueeze_(1): GCC 16 reads unsqueeze_'s vector insert here as a
++        // memcpy into zero bytes (-Wstringop-overflow, a false positive).
++        hidden_states.reshape_({hidden_states.shape()[0], 1});
+     }
+ 
+     GGML_ASSERT(static_cast<size_t>(hidden_states.shape()[1]) == weights.size());

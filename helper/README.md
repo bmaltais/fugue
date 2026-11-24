@@ -278,6 +278,16 @@ and checked at every pin move.
 
 When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
 
+## Warnings hunks
+
+The patch's last group, `# warnings`, fixes what the helper's build warns about in upstream code, with
+no change in behaviour, so the build stays warning-free: `.template` on dependent member-template calls
+in `sageattention/attn_utils.cuh` (#174), hand-written UTF conversions instead of the deprecated
+`std::wstring_convert` (`core/util.cpp`, `api/image_metadata.cpp`, same errors on invalid input), and
+two GCC 16 `-Wstringop-overflow` false positives (`thirdparty/stb_image.h`: an explicit bound the code
+already had; `conditioning/conditioner.hpp`: `reshape_` for the same `unsqueeze_`). Send them upstream with
+the rest when the owner says so.
+
 ## Performance hunks (#382)
 
 The last group of the patch makes sampling faster and leaves the pictures alone, except
@@ -292,6 +302,7 @@ Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024
 | `core/ggml_extend.cpp` | With SageAttention, V is permuted and cast to F16 in one copy | identical | yes |
 | `core/cuda/int8.cu` | A FLUX single block's linear2 input, `concat(attention, swiglu(linear1's MLP half))`, and its ConvRot quantize run as one kernel reading both in place: the activation and the concat are never written (`swiglu_concat_match`). Text to image 3.20 s -> 2.98 s, edit 16.3 s -> 15.3 s | identical | yes |
 | `core/ggml_extend.cpp`, `core/ggml_extensions.*`, `core/cuda/group_norm.cu`, `CMakeLists.txt`, `registration.cu` | A group norm with its affine is one op (`sd.group_norm_affine`) where a kernel runs it, and the CUDA kernel takes the SiLU after it too: one pass instead of four, with ggml's sums and rounding. Elsewhere the ggml ops as before. VAE decode at 1024x1024 0.43 s -> 0.37 s | identical | yes |
+| `core/cuda/conv2d_f16.cu`, `group_norm.cuh`, `core/ggml_extend.*`, `core/ggml_extensions.*`, `core/ggml_runner.*`, `model/common/*block.hpp`, `model/vae/auto_encoder_kl.hpp`, `CMakeLists.txt`, `registration.cu` | An AutoEncoderKL decoder's (FLUX.1/2, Z-Image, SD) 2D convolutions with their bias are one op (`sd.conv2d_f16`) run by a CUTLASS implicit-GEMM kernel (F16 in, F32 accumulate, NHWC, 120-145 TFLOPS on an RTX 3090 against ggml's 27). The nearest 2x upsample before a convolution is read in place, a residual ADD after one is folded into its output pass, and a group norm and SiLU before one hand it F16. Elsewhere, on other backends and for channels not in eights, ggml's convolution. The encoder keeps ggml's: its 0.20 -> 0.12 s would change an edit's picture to 37-38 dB through the DiT. Other VAEs (SeedVR2's, video VAEs) keep ggml's. Klein decode at 1024x1024 0.37 s -> 0.21 s; Z-Image's VAE too | 67-70 dB | yes |
 | `dgl/models/vae.*` | A VAE keeps its encodes of the same pixels (content hashes, shape, posterior, tiling; at most 32 latents and 256 MB, dropped when its weights change or the context goes), only where the encode does not use the RNG (the FLUX.2 VAE). An edit's references are encoded once, not for every seed: -0.7 s a warm edit job | identical | yes |
 
 SageAttention: on CUDA the helper adds `"sage_attn": true` to every context that does not set it
