@@ -191,8 +191,11 @@ QJsonObject embeddedSummary(const QString &path) {
         const QJsonObject entry = it.value().toObject();
         if (!out.contains("seed") && entry.value("auto").toObject().contains("seed"))
             out.insert("seed", entry.value("auto").toObject().value("seed"));
-        if (!out.contains("model") && !textOf(entry.value("model")).isEmpty())
-            out.insert("model", entry.value("model"));
+        // The run section records the model as its handle (11.7); its name is what people read.
+        const QJsonValue model = entry.value("model");
+        const QString modelName = model.isObject() ? textOf(model.toObject().value("name")) : textOf(model);
+        if (!out.contains("model") && !modelName.isEmpty())
+            out.insert("model", modelName);
     }
     return out;
 }
