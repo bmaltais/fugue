@@ -252,6 +252,28 @@ private slots:
         QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("width").toInt(), 80);
     }
 
+    // A run that fails lands nothing of its own (#337), as on the task bar: its first Write comes from the cache after the undo, a
+    // second Write that reads it then fails, and the cached revision stays off the head.
+    void aFailedRunDoesNotPlaceItsCachedWrite() {
+        const QString id = canvas();
+        const QString before = fugue({"canvas", "show", id, "--json"}).data().value("revision").toString();
+        QByteArray failing = kFill;
+        failing.replace("\"name\": \"Fill\"}}}}}", "\"name\": \"Fill\"}},\n"
+                        "   \"late\": {\"type\": \"fugue/canvas-write\", \"version\": \"1.6.0\", \"inputs\": {\"canvas\": {\"from\": \"region.canvas\"}, \"image\": {\"from\": \"flip.image\"},"
+                        " \"stitch\": {\"from\": \"region.stitch\"}, \"blend\": 0, \"onto\": \"Nowhere\", \"name\": {\"from\": \"write.head\"}}}}}}");
+        QVERIFY(failing.contains("\"late\""));
+        const QString file = write("failing.fugue", failing);
+        const QStringList args{"canvas", "act", id, file, "--rect", "8,8,32,32", "--seed", "7", "--wait", "--json"};
+        const Outcome first = fugue(args);
+        QCOMPARE(first.exitCode, 1); // the first Write landed, the second failed
+        QVERIFY2(fugue({"canvas", "show", id, "--json"}).data().value("revision").toString() != before, first.out + first.err);
+        QCOMPARE(fugue({"canvas", "undo", id, "--json"}).exitCode, 0);
+        const Outcome again = fugue(args);
+        QCOMPARE(again.exitCode, 1);
+        QVERIFY2(again.err.contains("write (cached)"), again.err);
+        QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("revision").toString(), before);
+    }
+
     // A layer-role action works on the layer named by --layer (a name or a position), and says so when none is given.
     void aLayerActionTakesALayer() {
         const QString id = canvas();

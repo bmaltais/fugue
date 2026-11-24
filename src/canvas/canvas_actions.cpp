@@ -325,13 +325,7 @@ QVariantMap CanvasActions::generateNow(const QVariantMap &request, bool live) {
     }
     if (live)
         return startLive(*chosen, *plan, canvasId);
-    m_grown = {};
-    m_growEnd.clear();
-    if (plan->grew) {
-        m_grown.canvas = plan->canvas;
-        m_grown.grew = true;
-        m_grown.growRevision = plan->growRevision;
-    }
+    m_outcome = canvas::ActOutcome(chosen->graph, *plan, m_actionName);
     QStringList started;
     for (const Document &bound : plan->runs) {
         RunRequest run;
@@ -400,8 +394,14 @@ void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
     }
     if (!m_runs.contains(run))
         return;
+    const QString landed = m_outcome.note(run, event);
+    if (m_link.enabled() && !landed.isEmpty()) {
+        // The layer this Generate lands is the preview kept, not a change to preview again.
+        m_ownRevisions.insert(landed);
+        if (m_noteRevision == landed)
+            m_link.adopt(m_noteKey);
+    }
     const QString kind = event.value("event").toString();
-    const QString node = event.value("node").toString();
     if (kind == QLatin1String("run.started")) {
         m_active = run;
         m_progress = -1;
@@ -425,30 +425,8 @@ void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
             m_liveFade = false;
             emit liveChanged();
         }
-    } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
-        const Entry *chosen = entry(m_action);
-        if (chosen && chosen->graph.writes.contains(node)) {
-            const QJsonObject meta = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject();
-            m_writes[run] << WriteResult{kind == QLatin1String("node.cached"), meta.value("canvas").toString(), meta.value("revision").toString()};
-            if (m_link.enabled() && !m_writes[run].last().revision.isEmpty()) {
-                // The layer this Generate lands is the preview kept, not a change to preview again.
-                m_ownRevisions.insert(m_writes[run].last().revision);
-                if (m_noteRevision == m_writes[run].last().revision)
-                    m_link.adopt(m_noteKey);
-            }
-        }
-        if (chosen && chosen->graph.news.contains(node) && kind == QLatin1String("node.done")) {
-            const QString made = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject().value("canvas").toString();
-            if (!made.isEmpty())
-                m_made[run] << made;
-        }
-    } else if (kind == QLatin1String("node.error")) {
-        m_nodeErrors[run] << Error::fromJson(event.value("error").toObject());
     } else if (kind == QLatin1String("run.done")) {
-        Errors errors = m_nodeErrors.take(run);
-        for (const QJsonValue &value : event.value("errors").toArray())
-            errors << Error::fromJson(value.toObject());
-        endRun(run, event.value("status").toString(), errors);
+        endRun(run, event.value("status").toString());
     }
 }
 
@@ -462,7 +440,7 @@ void CanvasActions::clearLive(bool fade) {
     emit liveChanged();
 }
 
-void CanvasActions::endRun(const QString &run, const QString &status, const Errors &errors) {
+void CanvasActions::endRun(const QString &run, const QString &status) {
     m_runs.removeAll(run);
     m_liveRects.remove(run);
     clearLive(status == QLatin1String("ok")); // the layer is already on the canvas: the frame fades; else it goes at once
@@ -470,42 +448,22 @@ void CanvasActions::endRun(const QString &run, const QString &status, const Erro
         m_active.clear();
         m_progress = -1;
     }
-    const QList<WriteResult> writes = m_writes.take(run);
-    const QStringList made = m_made.take(run);
-    if (status == QLatin1String("ok")) {
-        const QString source = m_canvas;
-        for (const QString &id : made)
-            emit canvasMade(source, id);
-        for (const WriteResult &write : writes)
-            if (write.cached && !write.revision.isEmpty())
-                placeAgain(write);
-    } else if (status != QLatin1String("cancelled")) {
-        const auto hard = std::find_if(errors.cbegin(), errors.cend(), [](const Error &e) { return e.severity == Error::Severity::Error; });
-        const Error first = hard != errors.cend() ? *hard : makeError(QStringLiteral("node_failed"), tr("%1 did not finish.").arg(m_actionName));
-        // A missing model offers the download; nothing else does.
-        setError(plainWords(first, m_actionName), first.code, cannotRunNow(first.code) ? m_action : QString());
+    const canvas::ActOutcome::RunEnd end = m_outcome.endRun(run, status);
+    const QString source = m_canvas;
+    for (const QString &id : end.made)
+        emit canvasMade(source, id);
+    if (!end.notice.isEmpty())
+        m_notice = end.notice;
+    if (end.error) // a missing model offers the download; nothing else does
+        setError(end.error->message, end.error->code, cannotRunNow(end.error->code) ? m_action : QString());
+    if (status != QLatin1String("ok") && status != QLatin1String("cancelled"))
         cancel(); // the rest of a Count N would fail the same way: one Generate ends as one
-    }
-    if (m_grown.grew && status != QLatin1String("ok") && m_growEnd.isEmpty())
-        m_growEnd = status;
-    if (m_grown.grew && m_runs.isEmpty()) {
-        // The last run of this Generate ended: an Expand that did not write anything takes its empty strip back.
-        if (!m_growEnd.isEmpty() && canvas::takeBackGrowth(m_grown))
-            m_notice = canvas::growthTakenBack(m_actionName, m_growEnd == QLatin1String("cancelled"));
-        m_grown = {};
-        m_growEnd.clear();
-    }
+    if (m_runs.isEmpty()) // the last run of this Generate ended
+        if (const QString back = m_outcome.finish(); !back.isEmpty())
+            m_notice = back;
     emit stateChanged();
     emit progressChanged();
     emit finished(run, status);
-}
-
-void CanvasActions::placeAgain(const WriteResult &write) {
-    const Result<canvas::PlacedAgain> placed = canvas::placeWriteAgain(write.canvas, write.revision);
-    if (!placed)
-        setError(plainWords(placed.error(), m_actionName), placed.error().code);
-    else if (!placed->moved && !placed->layer.isEmpty())
-        m_notice = tr("Same prompt, seed and selection as “%1”. Change the seed to get another.").arg(placed->layer);
 }
 
 // --- the Advanced popover and Count (slice 4) ---
@@ -916,9 +874,8 @@ void CanvasActions::endLive(const QString &status, const Errors &errors) {
     } else if (status == QLatin1String("cancelled")) {
         m_link.ended(LiveLink::End::Cancelled, liveNow());
     } else {
-        const auto hard = std::find_if(errors.cbegin(), errors.cend(), [](const Error &e) { return e.severity == Error::Severity::Error; });
-        const Error first = hard != errors.cend() ? *hard : makeError(QStringLiteral("node_failed"), tr("%1 did not finish.").arg(m_actionName));
-        setError(plainWords(first, m_actionName), first.code, cannotRunNow(first.code) ? m_action : QString());
+        const Error failure = canvas::failureOf(errors, m_actionName);
+        setError(failure.message, failure.code, cannotRunNow(failure.code) ? m_action : QString());
         m_link.ended(LiveLink::End::Failed, liveNow());
         clearLive(false);
     }

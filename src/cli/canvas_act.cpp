@@ -17,6 +17,7 @@
 #include "cli/commands.h"
 #include "cli/runs.h"
 #include "engine/canvas_act.h"
+#include "engine/canvas_act_outcome.h"
 #include "engine/canvas_store.h"
 #include "engine/file_hashes.h"
 #include "engine/mask_paint.h"
@@ -443,19 +444,17 @@ Reply canvasAct(const Command &command, Context &context) {
     }
 
     installStopHandlers();
-    struct Written {
-        QString canvas, revision;
-        bool cached = false;
-    };
-    QList<Written> writes;
+    canvas::ActOutcome outcome(chosen->graph, plan.value(), action.name);
     QStringList made;
-    QString status = QStringLiteral("ok");
+    QString status = QStringLiteral("ok"), notice;
     Error failure;
+    std::optional<Error> notPlaced;
     int finished = 0;
     for (int n = 0; n < runs.size(); ++n) {
         int lastPercent = -10;
         QString lastNode;
         const std::function<void(const QJsonObject &)> onEvent = [&](const QJsonObject &event) {
+            outcome.note(runs.at(n).id(), event);
             const QString kind = event.value("event").toString(), node = event.value("node").toString();
             const QString prefix = runs.size() > 1 ? QStringLiteral("[%1 of %2] ").arg(n + 1).arg(runs.size()) : QString();
             if (kind == QLatin1String("node.running")) {
@@ -471,43 +470,35 @@ Reply canvasAct(const Command &command, Context &context) {
             } else if (kind == QLatin1String("node.preview")) {
                 context.log(prefix + node + QStringLiteral(" preview frame"));
             } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
-                const QJsonObject meta = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject();
-                if (chosen->graph.writes.contains(node))
-                    writes.append({meta.value("canvas").toString(), meta.value("revision").toString(), kind == QLatin1String("node.cached")});
-                if (chosen->graph.news.contains(node) && kind == QLatin1String("node.done") && !meta.value("canvas").toString().isEmpty())
-                    made << meta.value("canvas").toString();
                 context.log(prefix + node + (kind == QLatin1String("node.cached") ? QStringLiteral(" (cached)") : QStringLiteral(" done")));
             }
         };
         const canvas::BatchRunResult result = waitForRun(runs.at(n), context, onEvent);
+        const canvas::ActOutcome::RunEnd end =
+            outcome.endRun(runs.at(n).id(), result.status, result.code.isEmpty() ? Errors{} : Errors{makeError(result.code, result.message)});
+        made << end.made;
+        if (!end.notice.isEmpty())
+            notice = end.notice;
         if (result.status == QLatin1String("ok")) {
-            ++finished;
+            if (end.error)
+                notPlaced = end.error; // its result is not on the canvas: the command says so, as the bar does
+            else
+                ++finished;
             continue;
         }
         status = result.status;
-        const Error raw = makeError(result.code.isEmpty() ? QStringLiteral("node_failed") : result.code, result.message);
-        failure = makeError(result.status == QLatin1String("cancelled") ? QStringLiteral("cancelled") : raw.code,
-                            result.status == QLatin1String("cancelled") ? QStringLiteral("Cancelled.") : canvas::plainWords(raw, action.name),
-                            raw.message != canvas::plainWords(raw, action.name) ? raw.message : QString());
+        failure = result.status == QLatin1String("cancelled") ? makeError(QStringLiteral("cancelled"), QStringLiteral("Cancelled.")) : *end.error;
         for (int rest = n + 1; rest < runs.size(); ++rest) // one Generate ends as one
             cancelBound(runs.at(rest), context);
         break;
     }
+    if (status == QLatin1String("ok") && notPlaced) {
+        status = QStringLiteral("failed");
+        failure = *notPlaced;
+    }
     // An Expand that was cancelled or failed after the canvas grew: the empty strip is taken back when nothing else changed the canvas
     // (#310; the growth stays in the history, Redo brings it back).
-    QString growthNotice;
-    if (status != QLatin1String("ok") && canvas::takeBackGrowth(plan.value()))
-        growthNotice = canvas::growthTakenBack(action.name, status == QLatin1String("cancelled"));
-    // A Write that came from the cache lands nothing: its revision goes on the head again (design decision 5).
-    QString notice;
-    for (const Written &write : std::as_const(writes))
-        if (write.cached && !write.revision.isEmpty()) {
-            const Result<canvas::PlacedAgain> placed = canvas::placeWriteAgain(write.canvas, write.revision);
-            if (!placed)
-                notice = canvas::plainWords(placed.error(), action.name);
-            else if (!placed->moved && !placed->layer.isEmpty())
-                notice = QStringLiteral("Same prompt, seed and selection as \"%1\". Change the seed to get another.").arg(placed->layer);
-        }
+    const QString growthNotice = outcome.finish();
 
     const Result<canvas::CanvasInfo> info = store.info(canvasId);
     QJsonArray layers;

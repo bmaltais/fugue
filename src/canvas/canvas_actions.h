@@ -61,6 +61,7 @@
 #include "canvas/canvas_model.h"
 #include "canvas/mask_layer.h"
 #include "engine/canvas_act.h"
+#include "engine/canvas_act_outcome.h"
 #include "engine/canvas_action.h"
 #include "engine/canvas_batch.h"
 #include "engine/document.h"
@@ -235,17 +236,11 @@ signals:
 
 private:
     using Entry = canvas::ActionEntry;
-    struct WriteResult {
-        bool cached = false;
-        QString canvas, revision;
-    };
 
     const Entry *entry(const QString &id) const;
     void rebuildList();
     void onEvent(const QString &run, const QJsonObject &event);
-    void endRun(const QString &run, const QString &status, const Errors &errors);
-    // A Write that came from the cache: its revision placed on the head again (see the header).
-    void placeAgain(const WriteResult &write);
+    void endRun(const QString &run, const QString &status);
     void setError(const QString &line, const QString &code, const QString &action = {});
     QVariantMap refuse(const QString &why);
     void remember(const QString &action, const QString &prompt);
@@ -305,13 +300,7 @@ private:
     qint64 m_liveSeed = 0;
     QString m_noteKey, m_noteRevision;
     QSet<QString> m_ownRevisions; // revisions this runner's Generates landed: not a change the person made
-    // The growth an Expand made before its runs (#310): taken back when the last run ends cancelled or failed and the canvas is as the
-    // growth left it. `m_growEnd` is the first run's status that was not ok.
-    canvas::ActPlan m_grown;
-    QString m_growEnd;
-    QHash<QString, QStringList> m_made; // per run, the canvases its Canvas New nodes made
-    QHash<QString, QList<WriteResult>> m_writes; // per run, its Writes' landed revisions
-    QHash<QString, Errors> m_nodeErrors;         // per run, its node errors so far
+    canvas::ActOutcome m_outcome; // what this Generate's runs came to: the layers, the canvases made, the errors, Expand's growth
 };
 
 } // namespace fugue
