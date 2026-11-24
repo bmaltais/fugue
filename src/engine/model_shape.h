@@ -36,9 +36,10 @@
 // Families and formats, from tensor names too: an LLM encoder is Qwen3 (q_norm in its
 // attention), Qwen3.5 (linear_attn layers) or Qwen2.5 (neither); Z-Image and FLUX.2 read Qwen3,
 // Qwen-Image Qwen2.5-VL, so another family does not fit. A file in a quantization
-// stable-diffusion.cpp cannot load fits nothing: ComfyUI's mixed quantization (comfy_quant
-// tensors: int8 ConvRot, fp8mixed; the helper aborts on them), GPTQ (weight_codebook), SVDQuant
-// (Nunchaku: qweight with proj_down), AWQ (qweight with scaled_zeros).
+// stable-diffusion.cpp cannot load fits nothing: a ComfyUI quantization (comfy_quant tensors,
+// whose JSON payloads give the formats) unless every format in the file is one a real run
+// proved (int8_tensorwise; nvfp4, as in fp8mixed files, aborts the helper), GPTQ (weight_codebook),
+// SVDQuant (Nunchaku: qweight with proj_down), AWQ (qweight with scaled_zeros).
 //
 // What a file is (ModelShape::kind): a LoRA by its low-rank tensors (lora_A/lora_B, lora_up/
 // lora_down, LoKr, LoHa), a checkpoint by a diffusion model and a VAE decoder in one file, else
@@ -97,7 +98,7 @@ struct ModelShape {
     // diffusion model reads; empty when not known.
     QString llmFamily;
     // The quantization stable-diffusion.cpp has no kernels for that the file is in ("ComfyUI
-    // mixed quantization", "GPTQ"); empty when it can load it.
+    // nvfp4 quantization", "GPTQ"); empty when it can load it.
     QString unloadable;
 };
 
