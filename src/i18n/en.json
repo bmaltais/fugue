@@ -1710,5 +1710,10 @@
   "Put this picture in a Load Image node of the current workflow": "Put this picture in a Load Image node of the current workflow",
   "Re-run": "Re-run",
   "Send to Load Image": "Send to Load Image",
-  "Show only the results marked as favorites": "Show only the results marked as favorites"
+  "Show only the results marked as favorites": "Show only the results marked as favorites",
+  "Drag to move": "Drag to move",
+  "Move the task bar": "Move the task bar",
+  "Pin position": "Pin position",
+  "Pinned: unpin it in the ⋯ menu to move it": "Pinned: unpin it in the ⋯ menu to move it",
+  "Reset position": "Reset position"
 }
