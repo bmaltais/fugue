@@ -962,6 +962,23 @@ private:
         return used;
     }
 
+    // The model handle of the nearest node upstream of `n` (itself first, then its dependencies
+    // breadth first) that selected one, or empty.
+    QJsonObject nearestModel(const NodeRun &n) const {
+        QStringList queue{n.path};
+        QSet<QString> seen;
+        for (qsizetype i = 0; i < queue.size(); ++i) {
+            if (seen.contains(queue.at(i)))
+                continue;
+            seen.insert(queue.at(i));
+            const NodeRun &node = m_nodes.constFind(queue.at(i)).value();
+            if (node.selection && !node.selection->model.handle.isEmpty())
+                return node.selection->model.handle;
+            queue += node.dependencies;
+        }
+        return {};
+    }
+
     NodeContext contextFor(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -974,6 +991,7 @@ private:
         context.registry = m_env.registry;
         context.document = m_options.document;
         context.usedUpstream = usedUpstream(n);
+        context.upstreamModel = nearestModel(n);
         context.roots = m_options.roots;
         const QString path = n.path;
         context.progress = [this, path](double value, const QString &stage, const QString &message) {

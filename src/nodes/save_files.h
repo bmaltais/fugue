@@ -5,6 +5,8 @@
 // rule that a save takes the first free numbered name and never overwrites a file.
 
 #include <QByteArray>
+#include <QDateTime>
+#include <QJsonObject>
 #include <QString>
 
 #include "engine/atomic_file.h"
@@ -13,13 +15,30 @@
 
 namespace fugue::nodes {
 
-// The `name` input as a plain file name that fits (with `.<extension>`) in 255 bytes. An error on
-// the name input otherwise.
-Result<QString> saveName(const NodeContext &context, const QString &extension);
+// The model's file name without its known extension (.gguf, .safetensors, ...) and without any
+// folder, made safe as one name part: anything but letters, digits and `._-+() ` becomes `_`.
+// "unknown" when `handle` names none (a run with no model upstream of the Save node).
+QString modelLabel(const QJsonObject &handle);
 
-// The folder a save writes in, made: the `folder` input (a relative one is under the output folder
-// and may not leave it), else the output folder. Checked against the run's write roots.
-Result<QString> saveFolder(const NodeContext &context);
+// The `name` input made into a relative file name: `{date}` (yyyy-MM-dd), `{time}` (hh-mm-ss) and
+// `{model}` (modelLabel) replaced, then split on `/` into folders and a file name. Every part must
+// be plain: no empty part, no `.` or `..`, none starting with `.`, no backslash, at most 255 bytes
+// (the file name with `.<extension>`). The result is `folder/folder/name`, never absolute. An error
+// on the name input otherwise. A name with no token and no `/` comes back as it was typed, trimmed.
+Result<QString> expandSaveName(const QString &name, const QDateTime &now, const QString &model, const QString &extension);
+
+// Where a save writes: `folder` is the resolved, made folder (below) and `name` the file's stem
+// in it (no `/`), after the `name` input's subfolders are made inside it.
+struct SaveLocation {
+    QString folder;
+    QString name;
+};
+
+// The `name` and `folder` inputs resolved and checked. The folder is the `folder` input (a
+// relative one is under the output folder and may not leave it), else the output folder, and the
+// name's subfolders go below it; the result is canonical, inside the folder after links are
+// followed (a link below it that leads out is refused), inside the run's write roots, and made.
+Result<SaveLocation> saveLocation(const NodeContext &context, const QString &extension);
 
 // The workflow text a saved `what` ("image", "video", "audio") embeds: the share copy (11.5) with a
 // `run` section holding what was used upstream (11.7). `embed` is full, no-prompts or none. Empty

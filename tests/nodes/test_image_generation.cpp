@@ -882,7 +882,7 @@ private slots:
         const QJsonObject nodes{
             {"g", node(kGenerate, {{"prompt", "a lighthouse at dusk"}, {"seed", 42}, {"width", 768}})},
             {"e", node(kEdit, {{"instruction", "make it night"}, {"images", QJsonArray{from("g.image")}}})},
-            {"s", node("fugue/save-image", {{"image", from("e.image")}, {"name", "night"},
+            {"s", node("fugue/save-image", {{"image", from("e.image")}, {"name", "{model}/night"},
                                             {"folder", machine.file("out")}})},
             {"seed", node("fugue/preview", {{"value", from("g.seed")}})},
             {"size", node("fugue/preview", {{"value", from("g.height")}})},
@@ -905,7 +905,8 @@ private slots:
         QCOMPARE(outputs.value("model").toObject().value("value").toObject(), handle(FakeMachine::kRecipe));
 
         const QString saved = outputs.value("s").toObject().value("file").toObject().value("path").toString();
-        QVERIFY2(saved.startsWith(machine.file("out")), qPrintable(result.out));
+        // `{model}` is the model the run used upstream of the Save node (a subfolder here).
+        QCOMPARE(saved, machine.file("out") + "/" + FakeMachine::kRecipe + "/night.png");
         QCOMPARE(sizeOf(saved), QSize(768, 1024));
         const Result<QJsonObject> embedded = readEmbeddedWorkflow(saved);
         QVERIFY2(embedded.ok(), qPrintable(embedded.ok() ? QString() : embedded.error().message));

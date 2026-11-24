@@ -27,8 +27,11 @@
 #include "engine/run_folder.h"
 #include "engine/scheduler.h"
 #include "nodes/builtin.h"
+#include "nodes/save_files.h"
 
 using namespace fugue;
+using fugue::nodes::expandSaveName;
+using fugue::nodes::modelLabel;
 
 namespace {
 
@@ -539,6 +542,52 @@ private slots:
         QVERIFY(ran.error.startsWith("node_failed"));
         QCOMPARE(ran.outcome.errors.value(0).input, QString("name"));
         QVERIFY(!QFileInfo::exists(path("escape.png")));
+    }
+
+    // The name tokens, pure: date and time in the stated shapes, the model's file name without its
+    // extension and made safe, and "unknown" when no model is known.
+    void nameTokensAreFilledIn() {
+        const QDateTime now(QDate(2026, 11, 23), QTime(14, 5, 9));
+        const auto expand = [&](const QString &name, const QString &model = "m") { return expandSaveName(name, now, model, "png"); };
+        QCOMPARE(expand("{date}/{model}_{time}").value(), QString("2026-11-23/m_14-05-09"));
+        QCOMPARE(expand(" plain {x} ").value(), QString("plain {x}")); // no token: as typed, trimmed
+        const auto label = [](const char *name) { return modelLabel(QJsonObject{{"name", name}}); };
+        QCOMPARE(label("flux-2-klein-9b.Q8_0.gguf"), QString("flux-2-klein-9b.Q8_0"));
+        QCOMPARE(label("Klein\\..\\a/b:c*.safetensors"), QString("b_c_"));
+        QCOMPARE(label("z-image-1.5"), QString("z-image-1.5")); // not an extension
+        QCOMPARE(label("..hidden.gguf"), QString("hidden"));
+        QCOMPARE(modelLabel({}), QString("unknown"));
+    }
+
+    // A `/` makes a folder inside the one saved to, and the tokens fill in.
+    void saveImageMakesASubfolderFromTheNameTokens() {
+        const QString source = makePng("src-sub", 4, 4);
+        const Ran ran = run(saveFlow(source, "'name': '{date}/{model}_{time}', 'embed': 'none', 'folder': '" + outDir() + "'"));
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        const QString written = ran.outcome.outputs.value("s").value("file").media().path();
+        // No model ran in this graph.
+        const QRegularExpression shape("^" + QRegularExpression::escape(outDir()) + "/\\d{4}-\\d\\d-\\d\\d/unknown_\\d\\d-\\d\\d-\\d\\d\\.png$");
+        QVERIFY2(shape.match(written).hasMatch(), qPrintable(written));
+        QVERIFY(QFileInfo::exists(written));
+    }
+
+    // A name or a token that tries to leave the folder writes nothing outside it: not `..`, not an
+    // absolute path, not a backslash, and not a link below the folder that leads out.
+    void saveImageNeverWritesOutsideTheFolderForAName() {
+        const QString source = makePng("src-escape", 4, 4);
+        const QString inside = path("jail");
+        QVERIFY(QDir().mkpath(inside));
+        QVERIFY(QDir().mkpath(path("elsewhere")));
+        QVERIFY(QFile::link(path("elsewhere"), inside + "/link"));
+        const QStringList bad{"a/../../escape", "../escape", "/tmp/escape", "a//b", "a/", "sub\\escape", ".hidden/x", "link/escape"};
+        for (const QString &name : bad) {
+            const Ran ran = run(saveFlow(source, "'name': '" + QString(name).replace("\\", "\\\\") + "', 'embed': 'none', 'folder': '" + inside + "'"));
+            QVERIFY2(!ran.error.isEmpty(), qPrintable(name + " was saved"));
+            QCOMPARE(ran.outcome.errors.value(0).input, QString("name"));
+        }
+        QVERIFY(QDir(path("elsewhere")).isEmpty());
+        QVERIFY(!QFileInfo::exists(path("escape.png")) && !QFileInfo::exists("/tmp/escape.png"));
+        QVERIFY(QDir(inside).entryList(QDir::Files | QDir::NoDotAndDotDot).isEmpty());
     }
 
     // A name as long as a file name may be is saved; a longer one is refused on the name input,
