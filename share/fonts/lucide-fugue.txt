@@ -68,3 +68,4 @@ download e0b6
 lock e10f
 lock-open e110
 paintbrush e2e7
+info e0fe

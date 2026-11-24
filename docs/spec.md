@@ -2313,8 +2313,10 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   "DA workflow" and no longer "update". `tag:`, `source:` (name or author) and `family:` limit a word to one field; a
   value with spaces is quoted, `family:"klein 9b"`. `fugue template list` gives `source` and `families` for each.
 - The dialog shows categories, a search over title, description and tags, and cards with the
-  preview and what this machine lacks (models, packs; a check, reading no model file). Opening
-  one makes a new unsaved tab named after it, its samples taken into the inputs folder as a
+  preview and what this machine lacks (models, packs; a check, reading no model file). A click
+  on a card, or Enter on it, opens it; a small "i" at the picture's bottom right corner (I or Space on the
+  focused card) shows its details first (Open and Cancel at the foot, Escape closes them, then the dialog).
+  Opening one makes a new unsaved tab named after it, its samples taken into the inputs folder as a
   pasted image is, so it runs as it opens and a save keeps it portable. The CLI writes the
   workflow with its samples copied into `inputs/` beside it, never replacing a file: a sample
   whose name is taken by another file takes `-2`, `-3`..., and the workflow names that. A sample

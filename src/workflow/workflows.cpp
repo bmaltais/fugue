@@ -7,6 +7,7 @@
 #include "engine/atomic_file.h"
 #include "engine/canvas_package.h"
 #include "engine/compile_for_run.h"
+#include "workflow/corner_brightness.h"
 #include "engine/compiler.h"
 #include "engine/embed.h"
 #include "engine/file_inputs.h"
@@ -805,6 +806,7 @@ QVariantList Workflows::templates() const {
                                {"source", t.source.toVariantMap()},
                                {"families", t.families},
                                {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
+                               {"lightCorner", cornerLuminance(t.preview) > lightCornerThreshold},
                                {"own", t.own},
                                {"missingModels", missing},
                                {"ready", places.ready},
