@@ -65,11 +65,26 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 # patch, not git apply: inside another git checkout (this one) git apply skips every file.
 find_program(PATCH_EXECUTABLE patch REQUIRED)
+# FetchContent runs PATCH_COMMAND only when it extracts the source, so an existing build folder
+# would keep building the old patch. The source folder is named after the patch's hash: a changed
+# patch gets a fresh extract, patched once, and the build reconfigures when the patch changes.
+set(sdcpp_patch ${CMAKE_CURRENT_SOURCE_DIR}/sdcpp.patch)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${sdcpp_patch})
+file(SHA256 ${sdcpp_patch} sdcpp_patch_sha256)
+string(SUBSTRING ${sdcpp_patch_sha256} 0 12 sdcpp_patch_id)
+set(sdcpp_source_dir ${FETCHCONTENT_BASE_DIR}/sdcpp-src-${sdcpp_patch_id})
+# Earlier patches' sources (and the unhashed folder of older builds) are only disk space now.
+file(GLOB sdcpp_old_sources LIST_DIRECTORIES true ${FETCHCONTENT_BASE_DIR}/sdcpp-src ${FETCHCONTENT_BASE_DIR}/sdcpp-src-*)
+list(REMOVE_ITEM sdcpp_old_sources ${sdcpp_source_dir})
+if(sdcpp_old_sources)
+  file(REMOVE_RECURSE ${sdcpp_old_sources})
+endif()
 FetchContent_Declare(sdcpp
   URL https://github.com/leejet/stable-diffusion.cpp/archive/${sdcpp_commit}.tar.gz
   URL_HASH SHA256=${sdcpp_sha256}
+  SOURCE_DIR ${sdcpp_source_dir}
   SYSTEM  # its headers (and thirdparty/: json.hpp, stb) warn under our flags; they are not ours
-  PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 --forward --input=${CMAKE_CURRENT_SOURCE_DIR}/sdcpp.patch)
+  PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 --forward --input=${sdcpp_patch})
 FetchContent_MakeAvailable(sdcpp)
 
 add_executable(fugue-helper src/main.cpp src/restore.h)
