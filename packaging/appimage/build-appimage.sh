@@ -117,7 +117,7 @@ say "Qt platform plugins: $(find "$qt/plugins/platforms" -name '*.so' -printf '%
 say "Qt wayland plugin folders: $(find "$qt/plugins" -maxdepth 1 -name 'wayland-*' -printf '%f ')"
 export QMAKE=$qt/bin/qmake
 export QML_SOURCES_PATHS=$here/qml-imports
-export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
+export EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so"
 export EXTRA_QT_PLUGINS="iconengines;wayland-decoration-client;wayland-graphic-integration-client;wayland-shell-integration;imageformats;multimedia;tls;platforminputcontexts;xcbglintegrations;egldeviceintegrations"
 export NO_STRIP=1 # linuxdeploy's own strip is older than the toolchain's relocation format
 export LD_LIBRARY_PATH=$qt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
@@ -153,11 +153,13 @@ need '*/share/fugue/templates/categories.json'
 need '*/share/mime/packages/fugue.xml'
 need '*/share/applications/fugue.desktop'
 ((! missing)) || die "the bundle is incomplete"
-if readelf -d "$appdir/usr/bin/fugue" | grep -q 'RUNPATH\|RPATH'; then :; else die "usr/bin/fugue has no RUNPATH: the bundled libraries would not be found"; fi
-if readelf -d "$appdir/usr/bin/fugue" | grep -E 'RUNPATH|RPATH' | grep -q "$qt"; then die "usr/bin/fugue still points at the build's Qt"; fi
-# the bundled libvips is the one the build used, not a system copy of another version
-bundled=$(find "$appdir/usr/lib" -name 'libvips.so.42.*' -print -quit)
-[[ -n $bundled && $(basename "$(readlink -f "$vips_lib"/libvips.so.42)") == "$(basename "$bundled")" ]] || die "the AppDir's libvips is not the one the app was built with ($vips_lib)"
+runpath=$(readelf -d "$appdir/usr/bin/fugue" | grep -E 'RUNPATH|RPATH' || true)
+[[ -n $runpath ]] || die "usr/bin/fugue has no RUNPATH: the bundled libraries would not be found"
+[[ $runpath != *"$qt"* ]] || die "usr/bin/fugue still points at the build's Qt: $runpath"
+# The bundled libvips is the one the app was built with, not a system copy of another version. linuxdeploy copies
+# a library under its soname (libvips.so.42), so the version is read from the file.
+vips_version=$(pkg-config --modversion vips-cpp)
+grep -aq "$vips_version" "$appdir/usr/lib/libvips.so.42" || die "the AppDir's libvips is not $vips_version, the one the app was built with ($vips_lib)"
 desktop-file-validate "$appdir/usr/share/applications/fugue.desktop" 2>/dev/null || say "desktop-file-validate is not installed or complains: not fatal"
 
 # --- pack ------------------------------------------------------------------------------------------------------------
