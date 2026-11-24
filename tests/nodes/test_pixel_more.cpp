@@ -193,6 +193,73 @@ private slots:
         QCOMPARE(gray.d[0], 0.5f);
     }
 
+    // ---- Pad's target size and keep mask (#343) ----
+
+    Result<Values> padTo(const Img &in, int tw, int th, const Img *keep = nullptr, int feathering = 0, int left = 0) {
+        Values inputs{{"image", Value(handleOf(in))}, {"left", left}, {"top", 0}, {"right", 0}, {"bottom", 0},
+                      {"target_width", tw}, {"target_height", th}, {"feathering", feathering}, {"fill", "gray"}};
+        if (keep)
+            inputs.insert("mask", Value(handleOf(*keep)));
+        return runNode("fugue/pad", inputs);
+    }
+
+    void padToATargetShrinksAndCenters() {
+        const Img in{4, 2, 3, std::vector<float>(24, 1.0f)};
+        const Result<Values> r = padTo(in, 4, 4); // scale 1: only the height has room, 1 above and 1 below
+        QVERIFY(r.ok());
+        const Img out = imgOf(r.value().value("image").media());
+        QCOMPARE(out.w, 4);
+        QCOMPARE(out.h, 4);
+        QCOMPARE(out.d[0], 0.5f);          // gray row on top
+        QCOMPARE(out.d[(1 * 4) * 3], 1.0f); // the picture starts at row 1
+        const Img big{8, 4, 3, std::vector<float>(96, 1.0f)};
+        const Img small = imgOf(padTo(big, 4, 4).value().value("image").media()); // scale 0.5: 4 x 2, centered
+        QCOMPARE(small.d[0], 0.5f);
+        QCOMPARE(small.d[(1 * 4) * 3], 1.0f);
+        const Img mask = imgOf(padTo(big, 4, 4).value().value("mask").media());
+        QCOMPARE(mask.d[0], 1.0f);
+        QCOMPARE(mask.d[1 * 4], 0.0f);
+    }
+
+    void padToATargetNeverEnlarges() {
+        const Img in{2, 2, 3, std::vector<float>(12, 1.0f)};
+        const Img out = imgOf(padTo(in, 6, 4).value().value("image").media());
+        QCOMPARE(out.w, 6);
+        QCOMPARE(out.h, 4);
+        QCOMPARE(out.d[(1 * 6 + 2) * 3], 1.0f); // still 2 x 2, at (2, 1)
+        QCOMPARE(out.d[(1 * 6 + 1) * 3], 0.5f);
+        QCOMPARE(out.d[(1 * 6 + 4) * 3], 0.5f);
+    }
+
+    void padFeathersQuadraticallyOnPaddedSides() {
+        const Img in{20, 20, 3, std::vector<float>(1200, 1.0f)};
+        const Result<Values> r = runNode("fugue/pad", {{"image", Value(handleOf(in))}, {"left", 4}, {"top", 0}, {"right", 0},
+                                                       {"bottom", 0}, {"feathering", 4}, {"fill", "gray"}});
+        const Img mask = imgOf(r.value().value("mask").media());
+        const auto at = [&](int x, int y) { return mask.d[size_t(y) * 24 + size_t(x)]; };
+        QCOMPARE(at(0, 5), 1.0f);              // padding
+        QCOMPARE(at(4, 5), 1.0f);              // d = 0: v = 1
+        QCOMPARE(at(5, 5), 0.5625f);           // d = 1: (3/4)^2
+        QCOMPARE(at(7, 5), 0.0625f);           // d = 3
+        QCOMPARE(at(8, 5), 0.0f);
+        QCOMPARE(at(10, 0), 0.0f);             // no padding on top: no feather there
+    }
+
+    void padKeepMaskIsInvertedAndNotFeathered() {
+        const Img in{2, 1, 3, {1, 1, 1, 1, 1, 1}};
+        const Img keep{2, 1, 1, {1.0f, 0.25f}};
+        const Img mask = imgOf(padTo(in, 4, 1, &keep, 40).value().value("mask").media()); // 1 px each side
+        QCOMPARE(mask.d, (std::vector<float>{1.0f, 0.0f, 0.75f, 1.0f}));
+    }
+
+    void padRefusesAnInvalidTargetCombination() {
+        const Img in{2, 2, 3, std::vector<float>(12, 1.0f)};
+        QCOMPARE(padTo(in, 6, 0).errors().value(0).code, QString("input_invalid"));  // only one side
+        QCOMPARE(padTo(in, 6, 6, nullptr, 0, 2).errors().value(0).code, QString("input_invalid")); // and per-side
+        const Img wrong{3, 2, 1, std::vector<float>(6, 1.0f)};
+        QCOMPARE(padTo(in, 6, 6, &wrong).errors().value(0).code, QString("input_invalid")); // mask size
+    }
+
     void padRefusesAFillOrBlurItDoesNotKnow() {
         const Img in{2, 1, 3, {1, 0, 0, 0, 0, 1}};
         QCOMPARE(pad(in, 1, 0, 0, 0, "paint").errors().value(0).code, QString("value_not_in_choices"));
