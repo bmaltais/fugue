@@ -69,11 +69,14 @@ ln -sf "$ldqt" "$work/plugins/linuxdeploy-plugin-qt"
 export APPIMAGE_EXTRACT_AND_RUN=1
 
 # --- the version, as the package computes it (packaging/PKGBUILD pkgver) --------------------------------------
-if described=$(git -C "$root" describe --long --tags --match 'v*' 2>/dev/null); then
+# A container runs as another user than the checkout's owner: git refuses it ("dubious ownership") and prints nothing.
+gitc() { git -c safe.directory="$root" -C "$root" "$@"; }
+if described=$(gitc describe --long --tags --match 'v*' 2>/dev/null); then
   version=$(sed -E 's/^v//; s/-0-g[0-9a-f]+$//; s/-([0-9]+)-g([0-9a-f]+)$/.r\1.g\2/; s/-/_/g' <<<"$described")
 else
-  version=$(printf '0.1.0.r%s.g%s' "$(git -C "$root" rev-list --count HEAD)" "$(git -C "$root" rev-parse --short HEAD)")
+  version=$(printf '0.1.0.r%s.g%s' "$(gitc rev-list --count HEAD)" "$(gitc rev-parse --short HEAD)")
 fi
+[[ $version =~ ^[0-9][0-9A-Za-z_.]*[0-9A-Za-z]$ && $version != *.r.g* ]] || die "could not work out the version (got '$version'): is this a git checkout with its history?"
 file=Fugue-$version-$arch.AppImage
 say "building $file with Qt $("$qt/bin/qmake" -query QT_VERSION)"
 

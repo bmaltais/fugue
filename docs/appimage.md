@@ -32,10 +32,20 @@ Qt is LGPL and is shipped as shared libraries, replaceable by extracting the App
 
 ## What the host needs
 
-A desktop already has these: the GPU stack (OpenGL/EGL libraries, the Vulkan loader, Mesa drivers or NVIDIA's), fontconfig
-with one font, libxkbcommon, D-Bus, glib. For the window on a bare server or container the smoke test installs exactly
-that list (`.github/workflows/appimage.yml`, job `smoke`). Wayland and X11 both work (Qt picks Wayland when
-`WAYLAND_DISPLAY` is set). `uv` is needed for packs that use it, as with the packaged build.
+A desktop already has all of these; a minimal system or a container needs them installed (the smoke test installs exactly
+this list, `.github/workflows/appimage.yml`, job `smoke`). They are host libraries on purpose: the GPU stack must match the
+host's driver, so none is bundled.
+
+| | Debian, Ubuntu | Fedora |
+|---|---|---|
+| OpenGL and EGL (GLVND) | `libopengl0 libglx0 libgl1 libegl1` | `libglvnd-opengl libglvnd-glx libglvnd-egl mesa-libGL mesa-libEGL` |
+| Vulkan loader and drivers | `libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri` | `vulkan-loader mesa-dri-drivers` |
+| Video decoding (Qt Multimedia) | `libva2` | `libva` |
+| Wayland client | `libwayland-client0` | `libwayland-client` |
+| Fonts, keyboard, D-Bus, glib | `libfontconfig1 fonts-dejavu-core libxkbcommon0 libdbus-1-3 libglib2.0-0` | `fontconfig dejavu-sans-fonts libxkbcommon dbus-libs glib2` |
+
+Wayland and X11 both work (Qt picks Wayland when `WAYLAND_DISPLAY` is set); the X11 libraries (xcb and friends) are
+bundled or already on any X11 desktop. `uv` is needed for packs that use it, as with the packaged build.
 
 ## Checking it
 
