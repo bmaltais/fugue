@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/save-video",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Save Video",
   "description": "Writes a video to the output folder, with the workflow embedded so the file can be dropped back onto Fugue. Plays on the node.",
   "category": "Basic",

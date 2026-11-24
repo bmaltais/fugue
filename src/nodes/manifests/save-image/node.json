@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/save-image",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Save Image",
   "description": "Writes an image to the output folder, with the workflow embedded so the file can be dropped back onto Fugue.",
   "category": "Basic",
