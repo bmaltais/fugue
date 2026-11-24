@@ -8,8 +8,14 @@
 
 #include <unistd.h>
 
+#include "engine/document.h"
+#include "engine/file_hashes.h"
+#include "engine/model_catalog.h"
+#include "engine/model_library.h"
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
+#include "engine/readiness.h"
+#include "engine/templates.h"
 #include "engine/trust_store.h"
 
 namespace fugue::cli {
@@ -35,6 +41,8 @@ void describe(const PackSummary &pack) {
     say(QStringLiteral("  Runs as:     %1").arg(pack.runtimeKinds.isEmpty() ? QStringLiteral("(no nodes)") : pack.runtimeKinds.join(", ")));
     say(QStringLiteral("  Declares:    %1").arg(pack.permissions.isEmpty() ? QStringLiteral("nothing (network, files, GPU)") : pack.permissions.join(", ")));
     say(QStringLiteral("  Nodes:       %1").arg(pack.nodes.size()));
+    if (!pack.setupCommand.isEmpty())
+        say(QStringLiteral("  Setup:       %1").arg(displayCommand(pack.setupCommand)));
     say(QStringLiteral("  Fugue enforces no sandbox: a trusted pack runs programs as you."));
 }
 
@@ -162,17 +170,105 @@ Reply packList(const Command &, Context &) {
 
 Reply packAdd(const Command &command, Context &context) {
     TrustStore trust;
-    const Result<PackAdded> added = addPack(command.positionals.at(0), command.value("ref"), packsDir(), trust, terminalPrompts(context));
+    // One question for the install, its setup command (shown in the same list) and the trust (#379).
+    PackPrompts prompts = terminalPrompts(context);
+    prompts.install = [](const PackSummary &pack) {
+        return prompt(pack, QStringLiteral("Install this pack%1 and trust it?").arg(pack.setupCommand.isEmpty() ? QString() : QStringLiteral(", run its setup")));
+    };
+    prompts.runSetup = [](const PackSummary &) { return Answer::Yes; }; // shown above, covered by that yes
+    prompts.trust = [](const PackSummary &) { return Answer::Yes; };
+    const Result<PackAdded> added = addPack(command.positionals.at(0), command.value("ref"), packsDir(), trust, prompts);
     if (!added)
         return Reply::failure(added.errors());
     QString text = QStringLiteral("Installed %1 %2.").arg(added->pack.id, added->pack.version);
-    if (added->setupSkipped)
-        text += QStringLiteral(" Its setup was not run; run it yourself in %1.").arg(added->pack.folder);
+    if (added->setupRan)
+        text += QStringLiteral(" Its setup ran.");
     // Beside another major of the pack its folder is <id>@<major>, which the pack commands take.
-    text += QStringLiteral(" Trust it with `fugue pack trust %1` before it runs.").arg(QFileInfo(added->pack.folder).fileName());
+    const Result<PackSummary> trusted = trustPack(QFileInfo(added->pack.folder).fileName(), packsDir(), trust, prompts);
+    if (!trusted)
+        return Reply::failure(trusted.errors());
+    text += QStringLiteral(" Trusted it.");
     Reply reply = Reply::success(addedJson(*added), text);
     reply.errors = added.warnings();
     return reply;
+}
+
+namespace {
+
+// Shows the plan, asks once on a terminal, runs it (#379). With no terminal it is needs_confirmation.
+Reply prepare(const ReadinessRequest &request, Context &context, const QString &what) {
+    FileHashes hashes(FileHashes::defaultPath());
+    TrustStore trust;
+    const ModelCatalog catalog = ModelCatalog::load();
+    ReadinessEnv env{ModelLibrary::current(&context.registry)};
+    env.registry = &context.registry;
+    env.hashes = &hashes;
+    env.trust = &trust;
+    env.packsDir = packsDir();
+    env.catalog = &catalog;
+    env.prompts.log = [&context](const QString &line) { context.log(QStringLiteral("  ") + line); };
+    const ReadinessPlan plan = buildReadinessPlan(request, env);
+    Reply reply = Reply::success(QJsonObject{{"plan", plan.toJson()}, {"ready", plan.empty()}},
+                                 plan.empty() ? QStringLiteral("%1 is ready.").arg(what) : plan.lines().join(QLatin1Char('\n')));
+    for (Error problem : plan.problems)
+        reply.errors.append(problem);
+    if (plan.empty())
+        return reply;
+    if (!onTerminal())
+        return Reply::failure(Error(makeError(QStringLiteral("needs_confirmation"),
+                                              QStringLiteral("Getting %1 ready needs a person to agree, and there is no terminal to ask on.").arg(what),
+                                              QStringLiteral("The list is: %1 Run the same command in a terminal; no flag answers for the person.").arg(plan.headline()))));
+    for (const QString &line : plan.lines())
+        say(line);
+    if (plan.lowSpace())
+        return Reply::failure(makeError(QStringLiteral("download_failed"), QStringLiteral("There is not enough free space where the models go (%1).").arg(plan.destination),
+                                        QStringLiteral("Change Settings > Folders > Download models into, then run it again.")));
+    if (yesNo(QStringLiteral("Install and trust all?")) != Answer::Yes)
+        return Reply::failure(makeError(QStringLiteral("cancelled"), QStringLiteral("Nothing was changed.")));
+    ReadinessRun run{packsDir(), &trust, &hashes};
+    run.log = env.prompts.log;
+    run.onRow = [&plan](int row, RowState state, const QString &detail) {
+        if (state != RowState::Done && state != RowState::Failed)
+            return;
+        const QString name = row < plan.packs.size() ? plan.packs.at(row).pack.id : plan.models.at(row - plan.packs.size()).name;
+        say(QStringLiteral("  %1 %2%3").arg(state == RowState::Done ? QStringLiteral("done  ") : QStringLiteral("FAILED"), name,
+                                         detail.isEmpty() ? QString() : QStringLiteral(": ") + detail));
+    };
+    const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+    if (!outcome.ok) {
+        Errors errors = outcome.errors;
+        if (errors.isEmpty())
+            errors << makeError(QStringLiteral("cancelled"), QStringLiteral("Stopped."));
+        errors.first().hint = QStringLiteral("Not done: %1. Run the same command again; it lists only what is still missing.").arg(outcome.retry.join(QStringLiteral(", ")));
+        return Reply::failure(errors);
+    }
+    return Reply::success(QJsonObject{{"plan", plan.toJson()}, {"ready", true}, {"done", outcome.done}},
+                          QStringLiteral("%1 is ready.").arg(what));
+}
+
+} // namespace
+
+Reply templatePrepare(const Command &command, Context &context) {
+    const TemplateLibrary library(TemplateLibrary::standardRoots(), &context.registry);
+    const std::optional<Template> chosen = library.find(command.positionals.at(0));
+    if (!chosen) {
+        Error error = makeError("usage", QStringLiteral("There is no template \"%1\".").arg(command.positionals.at(0)),
+                                "Use the id of one `fugue template list` shows.");
+        for (const Template &t : library.list())
+            error.valid.append(t.id);
+        return Reply::failure(error);
+    }
+    const Result<Document> document = Document::loadFile(chosen->workflow);
+    if (!document)
+        return Reply::failure(document.errors());
+    return prepare(requestFor(*document, context.registry, chosen->carriedPacks), context, chosen->title);
+}
+
+Reply workflowPrepare(const Command &command, Context &context) {
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
+    if (!document)
+        return Reply::failure(document.errors());
+    return prepare(requestFor(*document, context.registry, {}), context, QFileInfo(command.positionals.at(0)).fileName());
 }
 
 Reply packRemove(const Command &command, Context &context) {

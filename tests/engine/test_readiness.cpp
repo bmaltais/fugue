@@ -200,7 +200,7 @@ private slots:
         ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
         const ReadinessOutcome outcome = runReadinessPlan(plan, run);
         QVERIFY(!outcome.ok);
-        QCOMPARE(outcome.errors.first().code, QString("pack_changed"));
+        QCOMPARE(outcome.errors.first().code, QString("pack_invalid"));
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
     }
 

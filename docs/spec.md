@@ -1000,7 +1000,7 @@ holding that node's `node.json`.
   same plan and run it with the same executor: one yes covers each pack's install, its trust, its setup command and the model downloads.
   Nothing happens without that yes, a pack **update** or a pack that declares **more** than the person saw
   still asks on its own, and the executor refuses a pack that differs from the one the list showed (another version, setup command or
-  permissions: `pack_changed`).
+  permissions: `pack_invalid`).
 - Updates are explicit and pinned. Nothing updates on its own. `pack update` fetches the pack
   again at the same ref, or at `--ref`, shows the new version and asks; a pack already at that
   commit is left alone. A new version asks for trust again. A pack that was copied in by hand
@@ -2898,8 +2898,9 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue node list [--type <port type>]` | Installed node types. |
 | `fugue node describe <type id>[@<major>]…` | Full manifests as data. |
 | `fugue node new <name>`, `fugue node test <path>` | Authoring ([6.11](#611-authoring-tools)). |
-| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` (an `<id>@<major>` where majors of a pack sit side by side) | Packs ([6.6](#66-installing)); `list` says where each comes from (`own`, or `inherited from Default` in a project that inherits `packs`, with the warning of 1.4.2 about what an inherited pack writes). All but `list` need a human ([13.6](#136-safety)). |
+| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]` (one question: install, setup and trust), `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` (an `<id>@<major>` where majors of a pack sit side by side) | Packs ([6.6](#66-installing)); `list` says where each comes from (`own`, or `inherited from Default` in a project that inherits `packs`, with the warning of 1.4.2 about what an inherited pack writes). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
+| `fugue template prepare <id>`, `fugue workflow prepare <file>` | Get a template or workflow ready with one question (#379, [6.6](#66-installing)): lists the packs to install and trust, each environment's setup command and size, and the missing models (file, licence, size, host, folder) with the totals and the free space where they go, asks once on a terminal, then runs the list (install, trust, setup, downloads) and stops at the first failure, naming what is left; a rerun lists only that. Nothing is ready to ask: `ready: true`. With no terminal it fails with `needs_confirmation` and prints the list; no flag answers for the person. Reply: `{plan, ready, done?}`. |
 | `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks, and where it comes from (`own`, `inherited from Default`, `bundled`); what is wrong with one is a warning. |
 | `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call; an inherited folder is refused as read-only); progress on stderr. Each failure is an error; what arrived stays. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers; each file says which root it is in and whether that is the project's own or inherited from Default (`origin`), and `roots` lists the model folders searched. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
@@ -3068,7 +3069,7 @@ validate and run.
 ### 13.6 Safety
 
 - These always need a human: trusting a pack, `pack add`, `pack update`, `pack remove`, running
-  a pack's `setup`, adding a provider or a key, starting or stopping a model server. From the CLI
+  a pack's `setup`, `template prepare`, `workflow prepare` (one question for the whole list), adding a provider or a key, starting or stopping a model server. From the CLI
   they ask on an interactive terminal. With no terminal they fail with `needs_confirmation`.
   There is no flag that answers for the human.
 - A run that reaches an untrusted pack fails with `pack_untrusted`.

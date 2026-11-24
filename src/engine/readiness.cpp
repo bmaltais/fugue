@@ -356,7 +356,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             if (!added) {
                 Errors errors = added.errors();
                 if (refused)
-                    errors.prepend(makeError(QStringLiteral("pack_changed"),
+                    errors.prepend(makeError(QStringLiteral("pack_invalid"),
                                              QStringLiteral("The pack %1 is not what the list showed (its version, setup command or permissions changed), so it was not installed.").arg(row.pack.id),
                                              QStringLiteral("Get ready again to see the pack as it is now.")));
                 const bool cancelled = report.stopped() && !errors.isEmpty() && errors.first().code != QLatin1String("setup_failed");
@@ -371,7 +371,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
         if (!trusted) {
             Errors errors = trusted.errors();
             if (refused)
-                errors.prepend(makeError(QStringLiteral("pack_changed"),
+                errors.prepend(makeError(QStringLiteral("pack_invalid"),
                                          QStringLiteral("The pack %1 is not what the list showed, so it was not trusted.").arg(row.pack.id)));
             stopAt(i, errors, false);
             outcome.packsChanged = outcome.packsChanged || row.installs();

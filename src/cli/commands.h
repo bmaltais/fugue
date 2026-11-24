@@ -76,6 +76,9 @@ Reply packAdd(const Command &command, Context &context);
 Reply packRemove(const Command &command, Context &context);
 Reply packUpdate(const Command &command, Context &context);
 Reply packTrust(const Command &command, Context &context);
+// `template prepare` and `workflow prepare` (#379): the one list and the one question (engine/readiness.h).
+Reply templatePrepare(const Command &command, Context &context);
+Reply workflowPrepare(const Command &command, Context &context);
 
 // cache.cpp: `cache status` and `cache clear` (10.6).
 Reply cacheStatus(const Command &command, Context &context);

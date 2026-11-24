@@ -70,7 +70,7 @@ A run executes the sinks (Save, Preview) and what they need; a node no sink depe
 ## What needs a person
 
 An agent cannot do these. They fail with `needs_confirmation` when there is no terminal, and no flag
-answers for the human: `fugue pack add|update|remove|trust`, running a pack's setup, adding a
+answers for the human: `fugue pack add|update|remove|trust`, `fugue template prepare <id>` and `fugue workflow prepare <file>` (they list everything a template or workflow needs and ask once), running a pack's setup, adding a
 provider or key, starting or stopping a model server. A run that reaches an untrusted pack fails
 with `pack_untrusted`. If a workflow needs a pack or a model server, say what to install or start
 and ask the user to do it; do not work around it. Fugue reads anywhere under the home folder and
@@ -103,6 +103,7 @@ fail with `permission_denied`.
 | `fugue pack trust <id>` | Trust a pack (a person confirms) |
 | `fugue model list` | Models on disk and offered by providers (`--type`, `--hash`); each file and each searched folder says whether it is the project's own or inherited from Default; a project that inherits `models` reuses the Default's remembered hashes for files in the inherited folders (so `--hash` and runs do not read them again), and writes its own hashes only in its own folder |
 | `fugue model get <file or template id>` | Download the missing models a workflow or template names (`--into`) |
+| `fugue template prepare <id>`, `fugue workflow prepare <file>` | List what a template or workflow needs (packs, trust, setup, models) and ask once; a person confirms |
 | `fugue template list` | Templates, with the models and packs each needs; `origin` is `own`, `bundled` or `inherited from Default` (a project that inherits `templates`) |
 | `fugue cache status` | What the caches hold (results, thumbnails, runs): bytes, files, oldest, and the results per workflow and node |
 | `fugue cache clear` | Clear a cache, results unless `--kind results\|thumbnails\|runs\|all`; `--workflow`, `--node`, `--older-than 30d`, `--dry-run` first. Saved outputs, frozen results and a run going or queued are never removed |

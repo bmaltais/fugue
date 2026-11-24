@@ -156,7 +156,7 @@ private slots:
         QString shown = atTerminal({"pack", "add", source}, "n\n", &exitCode);
         QCOMPARE(exitCode, 1);
         QVERIFY(shown.contains("io.example.tools"));
-        QVERIFY(shown.contains("Install this pack?"));
+        QVERIFY(shown.contains("Install this pack and trust it?"));
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
 
         shown = atTerminal({"pack", "add", source}, "y\n", &exitCode);
@@ -164,8 +164,7 @@ private slots:
         QVERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
         QVERIFY(shown.contains("Fugue enforces no sandbox"));
 
-        shown = atTerminal({"pack", "trust", "io.example.tools"}, "y\n", &exitCode);
-        QCOMPARE(exitCode, 0);
+        // The one yes installed and trusted it: no second question.
         QCOMPARE(fugue({"pack", "list", "--json"}).json().value("data").toObject().value("packs").toArray().at(0).toObject().value("trusted").toBool(), true);
 
         atTerminal({"pack", "remove", "io.example.tools"}, "y\n", &exitCode);
@@ -188,11 +187,38 @@ private slots:
         file.close();
 
         int exitCode = -1;
-        const QString shown = atTerminal({"pack", "add", source}, "y\nn\n", &exitCode); // install yes, setup no
+        const QString shown = atTerminal({"pack", "add", source}, "y\n", &exitCode); // one yes: install, setup and trust
         QVERIFY2(exitCode == 0, qPrintable(shown));
-        QVERIFY2(shown.contains("touch 'made it'"), qPrintable(shown));
-        QVERIFY(!QFileInfo(packs() + "/io.example.setup/made it").exists());
-        QVERIFY(shown.contains("setup was not run") || shown.contains("Its setup was not run"));
+        QVERIFY2(shown.contains("touch 'made it'"), qPrintable(shown)); // the command is in the list it asked about
+        QVERIFY(QFileInfo(packs() + "/io.example.setup/made it").exists());
+    }
+
+    // #379: `workflow prepare` lists what a workflow needs and asks once; with no terminal it is needs_confirmation.
+    void prepareListsAndAsksOnce() {
+        const QString source = makePack(m_dir.filePath("source3"), "io.example.tools", "1.0.0");
+        const QString workflow = m_dir.filePath("needs.fugue");
+        write(workflow, QJsonDocument(QJsonObject{
+            {"fugue", 1},
+            {"requires", QJsonObject{{"packs", QJsonObject{{"io.example.tools", QJsonObject{{"version", "1.0.0"}, {"source", source}}}}}}},
+            {"graph", QJsonObject{{"nodes", QJsonObject{{"t", QJsonObject{{"type", "io.example.tools/tool"}, {"version", "1.0.0"},
+                                                                             {"inputs", QJsonObject{}}}}}}}}}).toJson());
+        const Outcome none = fugue({"workflow", "prepare", workflow, "--json"});
+        QCOMPARE(none.exitCode, 1);
+        QCOMPARE(none.firstCode(), QString("needs_confirmation"));
+        QVERIFY(none.out.contains("install 1 pack"));
+        QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
+        if (QStandardPaths::findExecutable("script").isEmpty())
+            return;
+        int exitCode = -1;
+        QString shown = atTerminal({"workflow", "prepare", workflow}, "n\n", &exitCode);
+        QCOMPARE(exitCode, 1);
+        QVERIFY(shown.contains("Install and trust all?"));
+        QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
+        shown = atTerminal({"workflow", "prepare", workflow}, "y\n", &exitCode);
+        QVERIFY2(exitCode == 0, qPrintable(shown));
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
+        QVERIFY(QFileInfo(m_dir.filePath("state/fugue/trust.json")).exists());
+        QCOMPARE(fugue({"workflow", "prepare", workflow, "--json"}).exitCode, 0); // nothing left: no question
     }
 };
 
