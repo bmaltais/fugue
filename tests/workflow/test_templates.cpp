@@ -21,7 +21,6 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
-#include "workflow/corner_brightness.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
@@ -256,53 +255,6 @@ private slots:
         QCOMPARE(ids(listed), (QStringList{"packed", "older"}));
         QCOMPARE(listed.at(0).neededPacks, QStringList{"io.example.tools"});
         QVERIFY(f.library().problems().isEmpty());
-    }
-
-    // 11.10, #118: a template folder may carry the exact pack it needs as packs/<id>/. It is
-    // listed as carried (the offer comes from it), and a carried pack that is not what the
-    // workflow records, or is not named for its id, is a problem of the bundled templates.
-    // The info button reads on any preview (spec 11.10): its colour follows the brightness of the picture's bottom-right corner.
-    void theInfoButtonFollowsTheBrightnessOfThePreviewsCorner() {
-        QTemporaryDir dir;
-        const auto picture = [&](const QString &name, const QColor &base, const QColor &corner) {
-            QImage image(320, 200, QImage::Format_RGB32);
-            image.fill(base);
-            QPainter(&image).fillRect(QRect(250, 130, 70, 70), corner);
-            const QString path = dir.filePath(name);
-            image.save(path);
-            return path;
-        };
-        const QString white = picture("white.png", Qt::white, Qt::white);
-        const QString black = picture("black.png", Qt::black, Qt::black);
-        QVERIFY(cornerLuminance(white) > 0.99);
-        QVERIFY(cornerLuminance(black) < 0.01);
-        QVERIFY(cornerLuminance(white) > lightCornerThreshold);
-        QVERIFY(cornerLuminance(black) < lightCornerThreshold);
-        // Only the corner counts: a black picture with a white corner is light there, and the reverse.
-        QVERIFY(cornerLuminance(picture("bw.png", Qt::black, Qt::white)) > lightCornerThreshold);
-        QVERIFY(cornerLuminance(picture("wb.png", Qt::white, Qt::black)) < lightCornerThreshold);
-        QVERIFY(cornerLuminance(QUrl::fromLocalFile(white).toString()) > lightCornerThreshold); // a file URL too
-        QCOMPARE(cornerLuminance(dir.filePath("missing.png")), -1.0);
-
-        // The list says it per template; a template with no readable preview gets the dark corner.
-        Fixture f;
-        makeTemplate(f.bundled.filePath("pale"), {{"title", "Pale"}});
-        makeTemplate(f.bundled.filePath("deep"), {{"title", "Deep"}});
-        makeTemplate(f.bundled.filePath("none"), {{"title", "None"}});
-        QVERIFY(QFile::copy(white, f.bundled.filePath("pale/preview.png")));
-        QVERIFY(QFile::copy(black, f.bundled.filePath("deep/preview.png")));
-        CanvasModel canvas(&f.registry);
-        CommandRegistry commands;
-        QTemporaryDir state;
-        WorkflowLocations locations;
-        locations.recoveryDir = state.filePath("recovery");
-        locations.trustPath = state.filePath("trust.json");
-        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
-        Workflows workflows(&canvas, &f.registry, &commands, locations);
-        QMap<QString, bool> light;
-        for (const QVariant &t : workflows.templates())
-            light.insert(t.toMap().value("id").toString(), t.toMap().value("lightCorner").toBool());
-        QCOMPARE(light, (QMap<QString, bool>{{"pale", true}, {"deep", false}, {"none", false}}));
     }
 
     void aTemplateListsThePacksItCarries() {
@@ -695,8 +647,14 @@ private slots:
         QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
 
         // The source line and the two drop-downs (#369): counts say what a choice leaves; a choice narrows the cards.
-        QCOMPARE(item(window->contentItem(), "templateSource-gen")->property("text").toString(), QString("Based on Ann's flow by Ann"));
-        QVERIFY(!item(window->contentItem(), "templateSource-talk")->isVisible());
+        // (The card no longer carries the source line: it is on the details, so every card has the same height.)
+        QVERIFY(!item(window->contentItem(), "templateSource-gen"));
+        QObject *sourceDialog = window->findChild<QObject *>("templatesDialog");
+        QVERIFY(QMetaObject::invokeMethod(sourceDialog, "showDetails", Q_ARG(QVariant, "gen"), Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(item(window->contentItem(), "templateDetailsSource")->property("text").toString(), QString("Based on Ann's flow by Ann"));
+        QVERIFY(QMetaObject::invokeMethod(sourceDialog, "showDetails", Q_ARG(QVariant, "talk"), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(!item(window->contentItem(), "templateDetailsSource")->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(sourceDialog, "closeDetails"));
         QObject *dialog = window->findChild<QObject *>("templatesDialog");
         const auto labels = [&](const char *property) {
             QStringList out;

@@ -96,6 +96,27 @@ private slots:
         QVERIFY(shot.copy(dialog.adjusted(-40, -40, 40, 40)).save(shotDir() + "/templates.png"));
     }
 
+    // The dialog in the light theme and in a narrow window, dark and light (look checks, not README pictures).
+    void templatesLayouts_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<int>("width");
+        QTest::addColumn<QString>("file");
+        QTest::newRow("light") << "catppuccin-latte" << 1600 << "templates-light.png";
+        QTest::newRow("narrow") << QString() << 760 << "templates-narrow.png";
+        QTest::newRow("narrow-light") << "catppuccin-latte" << 760 << "templates-narrow-light.png";
+    }
+    void templatesLayouts() {
+        QFETCH(QString, theme);
+        QFETCH(int, width);
+        QFETCH(QString, file);
+        App app(load(template_("text-to-image")), {}, Look{theme, 8});
+        QVERIFY(app.open());
+        prepare(app, {width, width > 1000 ? 1000 : 800});
+        QVERIFY(app.commands.run("file.templates"));
+        QTest::qWait(1500); // the cards' previews load
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/" + file));
+    }
+
     // The same dialog with a Source and a Model family chosen, in the light theme (a look check, not a README picture).
     void templatesFiltered() {
         App app(load(template_("text-to-image")), {}, Look{"catppuccin-latte", 8});
