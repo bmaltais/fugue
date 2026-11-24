@@ -131,6 +131,10 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
         error.input = input;
         return error;
     };
+    const auto familyName = [](const QString &family) {
+        return family == QLatin1String("qwen3.5") ? QStringLiteral("Qwen3.5") : family == QLatin1String("qwen2.5") ? QStringLiteral("Qwen2.5")
+                                                                                : QStringLiteral("Qwen3");
+    };
     const auto kind = [](TextKind k) {
         return k == TextKind::T5 ? QStringLiteral("a T5 encoder") : k == TextKind::Clip ? QStringLiteral("a CLIP encoder")
                                                                                         : QStringLiteral("a language model");
@@ -145,6 +149,8 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                 ? QStringLiteral("it is %1, and Load Models loads the T5 of FLUX.1 and Wan only.").arg(kind(is))
                             : is == TextKind::T5 && reads != TextKind::T5
                                 ? QStringLiteral("it is %1, and the model reads %2.").arg(kind(is), kind(reads))
+                            : !diffusion->llmFamily.isEmpty() && !encoder->llmFamily.isEmpty() && diffusion->llmFamily != encoder->llmFamily
+                                ? QStringLiteral("it is a %1 encoder, and the model reads %2.").arg(familyName(encoder->llmFamily), familyName(diffusion->llmFamily))
                             : is != diffusion->textKind.value_or(TextKind::Llm)
                                 ? QStringLiteral("it is %1, and the model reads %2.")
                                       .arg(kind(is), kind(diffusion->textKind.value_or(TextKind::Llm)))

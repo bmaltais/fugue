@@ -106,6 +106,28 @@ void writeSafetensors(const QString &path, const QJsonObject &shapes) {
         qFatal("cannot write %s", qPrintable(path));
 }
 
+// A safetensors file with ComfyUI quantization tensors: `quant` maps each layer to its payload bytes, written as
+// the layer's .comfy_quant tensor (U8) in the data section, as ComfyUI saves them.
+void writeQuantSafetensors(const QString &path, const QList<std::pair<QString, QByteArray>> &quant) {
+    QJsonObject header;
+    QByteArray data;
+    for (const auto &[layer, payload] : quant) {
+        header.insert(layer + ".comfy_quant", QJsonObject{{"dtype", "U8"},
+                                                          {"shape", QJsonArray{payload.size()}},
+                                                          {"data_offsets", QJsonArray{data.size(), data.size() + payload.size()}}});
+        data += payload;
+    }
+    const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+    QByteArray out(8, '\0');
+    const quint64 size = quint64(json.size());
+    std::memcpy(out.data(), &size, 8);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(out + json + data) < 0)
+        qFatal("cannot write %s", qPrintable(path));
+}
+
+QByteArray quantFormat(const char *format) { return QByteArray("{\"format\": \"") + format + "\"}"; }
+
 ModelShape shape(const QString &path) {
     const std::optional<ModelShape> read = readModelShape(path);
     if (!read)
@@ -483,16 +505,11 @@ private slots:
     // What the owner's runs crashed the helper on (2026-11-20): ComfyUI's mixed quantization, and a
     // Qwen3.5 encoder as wide as Klein 9B's Qwen3-8B.
     void formatsTheHelperCannotLoadAndLlmFamiliesAreTold() {
-        writeSafetensors(file("qwen3.5_9b_int8_convrot.safetensors"),
-                         {{"model.embed_tokens.weight", QJsonArray{248320, 4096}},
-                          {"model.layers.0.linear_attn.in_proj_qkv.weight", QJsonArray{8192, 4096}},
-                          {"model.layers.0.linear_attn.in_proj_qkv.comfy_quant", QJsonArray{3}}});
+        writeQuantSafetensors(file("qwen3.5_9b_w4a8.safetensors"), {{"model.layers.0.mlp.up_proj", quantFormat("asym_w4a8_int8")}});
         writeSafetensors(file("qwen_3_8b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
                                                          {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}}});
-        writeSafetensors(file("qwen_3_8b_fp8mixed.safetensors"),
-                         {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
-                          {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}},
-                          {"model.layers.0.self_attn.q_proj.comfy_quant", QJsonArray{3}}});
+        writeQuantSafetensors(file("qwen_3_8b_fp8mixed.safetensors"), {{"model.layers.0.self_attn.q_proj", quantFormat("float8_e4m3fn")},
+                                                                       {"model.layers.0.mlp.up_proj", quantFormat("nvfp4")}});
         writeSafetensors(file("qwen3.5_9b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{248320, 4096}},
                                                           {"model.layers.0.linear_attn.A_log", QJsonArray{32}}});
         writeSafetensors(file("svdq-z-image.safetensors"), {{"layers.0.attention.qkv.qweight", QJsonArray{4, 4}},
@@ -503,8 +520,8 @@ private slots:
             shape.llmFamily = QStringLiteral("qwen3");
             return shape;
         }();
-        QVERIFY(shape(file("qwen3.5_9b_int8_convrot.safetensors")).unloadable.contains("ComfyUI"));
-        QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen3.5_9b_int8_convrot.safetensors"))), Fit::DoesNotFit);
+        QVERIFY(shape(file("qwen3.5_9b_w4a8.safetensors")).unloadable.contains("ComfyUI asym_w4a8_int8"));
+        QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen3.5_9b_w4a8.safetensors"))), Fit::DoesNotFit);
         QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen_3_8b_fp8mixed.safetensors"))), Fit::DoesNotFit);
         QCOMPARE(shape(file("qwen_3_8b.safetensors")).llmFamily, QStringLiteral("qwen3"));
         QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen_3_8b.safetensors"))), Fit::Fits);
@@ -517,6 +534,56 @@ private slots:
         ModelShape klein = klein9b;
         klein.layers.insert(layerKey("double_blocks.0.img_attn.proj"), ModelShape::Widths{4096, 4096});
         QCOMPARE(loraFits(klein, shape(file("z-image-lora.safetensors"))), Fit::DoesNotFit);
+    }
+
+    // ComfyUI's quantization is allowed by format, read from each .comfy_quant payload (#340): int8_tensorwise passed
+    // a real run; every format in a file must be allowed, and a payload that cannot be read is a clean refusal.
+    void aComfyQuantizationIsAllowedByFormat() {
+        writeQuantSafetensors(file("int8.safetensors"), {{"a.q_proj", quantFormat("int8_tensorwise")},
+                                                         {"a.k_proj", "{\"format\": \"int8_tensorwise\", \"convrot\": true}"}});
+        QVERIFY(shape(file("int8.safetensors")).unloadable.isEmpty());
+        writeQuantSafetensors(file("w4a4.safetensors"), {{"a.q_proj", quantFormat("convrot_w4a4")}});
+        QCOMPARE(shape(file("w4a4.safetensors")).unloadable, QStringLiteral("ComfyUI convrot_w4a4 quantization"));
+        // One refused format refuses the file, and the message names it, not the allowed one.
+        writeQuantSafetensors(file("mixed.safetensors"), {{"a.q_proj", quantFormat("int8_tensorwise")}, {"a.k_proj", quantFormat("nvfp4")}});
+        QCOMPARE(shape(file("mixed.safetensors")).unloadable, QStringLiteral("ComfyUI nvfp4 quantization"));
+        for (const QByteArray &bad : {QByteArray("not json"), QByteArray("{}"), QByteArray("{\"format\": 3}"), QByteArray(5000, ' ')}) {
+            writeQuantSafetensors(file("bad.safetensors"), {{"a.q_proj", quantFormat("int8_tensorwise")}, {"a.k_proj", bad}});
+            QVERIFY2(shape(file("bad.safetensors")).unloadable.contains("cannot be read"), bad.left(20).constData());
+        }
+        // Offsets that run past the end of the file read nothing: refused, not a crash.
+        writeSafetensors(file("short.safetensors"), {{"a.q_proj.comfy_quant", QJsonArray{3}}});
+        QVERIFY(shape(file("short.safetensors")).unloadable.contains("cannot be read"));
+        // GPTQ stays refused whatever its payload says.
+        writeSafetensors(file("gptq.safetensors"), {{"a.q_proj.weight_codebook", QJsonArray{16}}});
+        QCOMPARE(shape(file("gptq.safetensors")).unloadable, QStringLiteral("GPTQ"));
+    }
+
+    // Qwen-Image 2.1 reads Qwen3-VL (txt_in.in_layer, 4096 wide), Qwen-Image Qwen2.5-VL (txt_in.weight): told by tensors (#340).
+    void qwenImage21ReadsQwen3VlAndNotQwen35() {
+        writeSafetensors(file("qimg21.safetensors"), {{"txt_in.in_layer.weight", QJsonArray{4096, 4096}},
+                                                      {"time_text_embed.timestep_embedder.linear_1.weight", QJsonArray{4096, 256}},
+                                                      {"img_in.weight", QJsonArray{4096, 64}}});
+        writeSafetensors(file("qimg.safetensors"), {{"txt_in.weight", QJsonArray{3072, 3584}},
+                                                    {"time_text_embed.timestep_embedder.linear_1.weight", QJsonArray{3072, 256}},
+                                                    {"img_in.weight", QJsonArray{3072, 64}}});
+        writeSafetensors(file("qwen3vl.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
+                                                       {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}},
+                                                       {"model.visual.blocks.0.attn.qkv.weight", QJsonArray{3, 3}}});
+        writeSafetensors(file("qwen25vl.safetensors"), {{"model.embed_tokens.weight", QJsonArray{152064, 3584}},
+                                                        {"model.layers.0.self_attn.q_proj.weight", QJsonArray{3584, 3584}},
+                                                        {"visual.blocks.0.attn.qkv.weight", QJsonArray{3, 3}}});
+        writeSafetensors(file("qwen35.safetensors"), {{"model.embed_tokens.weight", QJsonArray{248320, 4096}},
+                                                      {"model.layers.0.linear_attn.A_log", QJsonArray{32}}});
+        const ModelShape v21 = shape(file("qimg21.safetensors")), v1 = shape(file("qimg.safetensors"));
+        QCOMPARE(v21.textWidth, std::optional<int>(4096));
+        QCOMPARE(v21.llmFamily, QStringLiteral("qwen3"));
+        QCOMPARE(v21.latentChannels, std::optional<int>(64)); // no 2x2 patching, as the 64-channel VAE
+        QCOMPARE(v1.latentChannels, std::optional<int>(16));
+        QCOMPARE(v1.llmFamily, QStringLiteral("qwen2.5"));
+        QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen3vl.safetensors"))), Fit::Fits);
+        QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen35.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loadableTextEncoderFits(v1, shape(file("qwen25vl.safetensors"))), Fit::Fits);
     }
 
     void aShapeIsReadAgainOnlyWhenTheFileChanges() {

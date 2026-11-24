@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QMutexLocker>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStringList>
 #include <QtEndian>
 
@@ -26,7 +27,21 @@ struct Header {
     Shapes shapes;
     QByteArray architecture;            // GGUF general.architecture
     std::optional<int> embeddingLength; // GGUF <architecture>.embedding_length
+    // ComfyUI's quantization, read from the payloads of the .comfy_quant tensors (safetensors):
+    // the formats in the file, and whether any payload could not be read as one.
+    QSet<QString> quantFormats;
+    bool quantUnreadable = false;
 };
+
+// ComfyUI quantization formats stable-diffusion.cpp at the pin loads and that gave a correct picture
+// in a real run on an RTX 3090 (#340): int8_tensorwise, in a Qwen-Image 2.1 diffusion model and a
+// Qwen3-VL text encoder. A format is added here only after such a run; any other is refused.
+// The pin reads convrot_w4a4 and asym_w4a8_int8 too; they were not run.
+const QStringList kAllowedQuantFormats{QStringLiteral("int8_tensorwise")};
+// The longest quantization payload (a format line is under 100 bytes) and the most such tensors
+// read from one file (a 70B model has about 600): a bigger one is not a ComfyUI quantization file.
+constexpr qint64 kLongestQuantPayload = 4096;
+constexpr int kMostQuantTensors = 8192;
 
 // The longest header read: a GGUF file's tokenizer metadata is a few MB, a safetensors header
 // well under one. Anything beyond is not a model header.
@@ -149,11 +164,30 @@ std::optional<Header> readSafetensors(QFile &file) {
         return std::nullopt;
     Header header;
     const QJsonObject tensors = document.object();
+    const qint64 dataStart = qint64(sizeof size) + qint64(size);
+    int quantTensors = 0;
     for (auto it = tensors.begin(); it != tensors.end(); ++it) {
         QList<qint64> shape;
         for (const QJsonValue &d : it.value().toObject().value(QStringLiteral("shape")).toArray())
             shape.append(d.toInteger());
         header.shapes.insert(it.key(), shape);
+        if (!it.key().endsWith(QLatin1String(".comfy_quant")) || header.quantUnreadable)
+            continue;
+        // The payload is JSON like {"format": "int8_tensorwise"}; anything else is unreadable.
+        const QJsonArray offsets = it.value().toObject().value(QStringLiteral("data_offsets")).toArray();
+        const qint64 begin = offsets.size() == 2 ? offsets.at(0).toInteger(-1) : -1;
+        const qint64 end = offsets.size() == 2 ? offsets.at(1).toInteger(-1) : -1;
+        QString format;
+        if (++quantTensors <= kMostQuantTensors && begin >= 0 && end > begin && end - begin <= kLongestQuantPayload
+            && file.seek(dataStart + begin)) {
+            const QByteArray payload = file.read(end - begin);
+            if (payload.size() == end - begin)
+                format = QJsonDocument::fromJson(payload).object().value(QStringLiteral("format")).toString();
+        }
+        if (format.isEmpty())
+            header.quantUnreadable = true;
+        else
+            header.quantFormats.insert(format);
     }
     return header;
 }
@@ -255,9 +289,11 @@ QHash<QString, ModelShape::Widths> loraLayers(QList<std::pair<QString, ModelShap
 }
 
 // Why stable-diffusion.cpp at the pin cannot load these tensors, or empty (ModelShape::unloadable).
-QString unloadableFormat(const Shapes &shapes) {
+// A ComfyUI quantization is refused unless every format in the file is allowed (kAllowedQuantFormats),
+// and the message names the formats that are not.
+QString unloadableFormat(const Header &header) {
     bool comfyQuant = false, qweight = false, projDown = false, scaledZeros = false;
-    for (auto it = shapes.begin(); it != shapes.end(); ++it) {
+    for (auto it = header.shapes.begin(); it != header.shapes.end(); ++it) {
         const QString &name = it.key();
         if (name.endsWith(QLatin1String(".weight_codebook"))) // GPTQ files carry comfy_quant too
             return QStringLiteral("GPTQ");
@@ -266,8 +302,18 @@ QString unloadableFormat(const Shapes &shapes) {
         projDown = projDown || name.endsWith(QLatin1String(".proj_down"));
         scaledZeros = scaledZeros || name.endsWith(QLatin1String(".scaled_zeros"));
     }
-    if (comfyQuant)
-        return QStringLiteral("ComfyUI mixed quantization");
+    if (comfyQuant) {
+        if (header.quantUnreadable || header.quantFormats.isEmpty())
+            return QStringLiteral("a ComfyUI quantization whose metadata cannot be read");
+        QStringList refused;
+        for (const QString &format : header.quantFormats)
+            if (!kAllowedQuantFormats.contains(format))
+                refused << format;
+        if (!refused.isEmpty()) {
+            refused.sort(); // the hash's order must not show in the message
+            return QStringLiteral("ComfyUI %1 quantization").arg(refused.join(QStringLiteral(", ")));
+        }
+    }
     if (qweight && projDown)
         return QStringLiteral("SVDQuant (Nunchaku)");
     if (qweight && scaledZeros)
@@ -286,7 +332,7 @@ bool isUnetLayer(const QString &name) {
 ModelShape shapeOf(const Header &header) {
     const Shapes &shapes = header.shapes;
     ModelShape shape;
-    shape.unloadable = unloadableFormat(shapes);
+    shape.unloadable = unloadableFormat(header);
     if (isLora(shapes)) { // its tensors are named after the model's: none of the figures below
         shape.kind = ModelKind::Lora;
         const QList<std::pair<QString, ModelShape::Widths>> changed = changedLayers(shapes);
@@ -316,7 +362,7 @@ ModelShape shapeOf(const Header &header) {
     }
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
-                        QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
+                        QStringLiteral("txt_in.in_layer.weight"), QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
     shape.clipWidth = inputWidth(tensor(shapes, {QStringLiteral("vector_in.in_layer.weight")}));
     std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
@@ -333,6 +379,10 @@ ModelShape shapeOf(const Header &header) {
         shape.hidden = int(image->at(0));
     if (const std::optional<int> in = inputWidth(image)) // a linear layer takes 2x2 patches of the channels
         shape.latentChannels = image->size() == 2 ? (*in % 4 == 0 ? std::optional<int>(*in / 4) : std::nullopt) : in;
+    // Qwen-Image 2.1 takes the 64 channels of its VAE as they are, with no 2x2 patching.
+    if (image && image->size() == 2 && shape.latentChannels && hasTensor(shapes, QStringLiteral("time_text_embed."))
+        && hasTensor(shapes, QStringLiteral("txt_in.in_layer.")))
+        shape.latentChannels = inputWidth(image);
     // An inpaint model takes the masked picture in its input beside the noise (14.4), as Wan's
     // image-to-video takes its first frame, and makes the channels its VAE has: SD 1.x, 2.x and SDXL
     // Inpaint read 9 (4 noise, 4 masked picture, 1 mask) through the convolution and make 4; FLUX.1
@@ -357,10 +407,10 @@ ModelShape shapeOf(const Header &header) {
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
         shape.videoVae = wan || (hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in.")));
-        // The LLM it reads: Qwen-Image Qwen2.5-VL; Z-Image (cap_embedder) and FLUX.2 (txt_in with
-        // no vector_in) Qwen3.
+        // The LLM it reads: Qwen-Image Qwen2.5-VL (txt_in.weight), but Qwen-Image 2.1 Qwen3-VL
+        // (txt_in.in_layer, text_norm); Z-Image (cap_embedder) and FLUX.2 (txt_in with no vector_in) Qwen3.
         if (*shape.videoVae && !wan)
-            shape.llmFamily = QStringLiteral("qwen2.5");
+            shape.llmFamily = hasTensor(shapes, QStringLiteral("txt_in.in_layer.")) ? QStringLiteral("qwen3") : QStringLiteral("qwen2.5");
         else if (!t5 && (hasTensor(shapes, QStringLiteral("cap_embedder.")) || hasTensor(shapes, QStringLiteral("txt_in."))))
             shape.llmFamily = QStringLiteral("qwen3");
         shape.unet = hasTensor(shapes, QStringLiteral("input_blocks.")) || hasTensor(shapes, QStringLiteral("down_blocks."));
