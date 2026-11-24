@@ -15,6 +15,7 @@
 #include "engine/ids.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
+#include "engine/model_catalog.h"
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/model_recommend.h"
@@ -40,8 +41,10 @@
 #include <QClipboard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QUuid>
 
+#include <algorithm>
 #include <functional>
 
 namespace fugue {
@@ -118,6 +121,37 @@ QString downloadSize(const QList<MissingModel> &missing) {
         ++count;
     }
     return count ? ModelDownloads::sizeText(bytes) : QString();
+}
+
+// The rows of a template's details view: each model it uses, with its type ("diffusion model"), size and license
+// (read from the catalog by file name or hash when it lists the file), and where it is: "disk", "served" (by a
+// paired host) or "missing".
+QVariantList modelRows(const QJsonArray &models, const QList<ModelPlaces> &placed, const ModelCatalog &catalog) {
+    QVariantList rows;
+    for (qsizetype i = 0; i < models.size(); ++i) {
+        const QJsonObject handle = models.at(i).toObject();
+        const QString name = handle.value(QStringLiteral("name")).toString();
+        const QString hash = handle.value(QStringLiteral("hash")).toString().section(QLatin1Char(':'), -1);
+        const CatalogModel *found = nullptr;
+        for (const CatalogModel &entry : catalog.all())
+            if (entry.file == name || (!hash.isEmpty() && entry.sha256 == hash)) {
+                found = &entry;
+                break;
+            }
+        const ModelPlaces place = placed.value(i);
+        QString kind = handle.value(QStringLiteral("resource")).toString().section(QLatin1Char('/'), -1).replace(QLatin1Char('-'), QLatin1Char(' '));
+        if (!kind.isEmpty())
+            kind[0] = kind.at(0).toUpper();
+        const qint64 size = handle.contains(QStringLiteral("size")) ? qint64(handle.value(QStringLiteral("size")).toDouble())
+                                                                    : found ? found->size : -1;
+        rows.append(QVariantMap{{"name", name},
+                                {"kind", kind},
+                                {"size", size > 0 ? ModelDownloads::sizeText(size) : QString()},
+                                {"license", found ? licenseLine(*found) : QString()},
+                                {"status", place.local ? QStringLiteral("disk") : !place.hosts.isEmpty() ? QStringLiteral("served")
+                                                                                                         : QStringLiteral("missing")}});
+    }
+    return rows;
 }
 
 // A model folder as the banner's choice names it.
@@ -694,6 +728,7 @@ QVariantList Workflows::templates() const {
     FileHashes hashes(FileHashes::defaultPath());
     const ModelSpeeds speeds;
     const ModelLibrary models = ModelLibrary::current(m_registry);
+    const ModelCatalog catalog = ModelCatalog::load();
     QVariantList out;
     for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
         QVariantList missing;
@@ -732,7 +767,25 @@ QVariantList Workflows::templates() const {
             status << tr("Packs needed: %1").arg(elsewhere.join(QStringLiteral(", ")));
         if (!carried.isEmpty())
             status << tr("Carries the pack to install: %1").arg(carried.join(QStringLiteral(", ")));
+        QVariantList packs;
+        for (const QString &pack : t.neededPacks) {
+            const auto carriedHere = std::find_if(t.carriedPacks.cbegin(), t.carriedPacks.cend(), [&](const CarriedPack &c) { return c.id == pack; });
+            packs.append(QVariantMap{{"id", pack},
+                                     {"title", packTitle(pack, carriedHere != t.carriedPacks.cend() ? carriedHere->name : QString())},
+                                     {"carried", carriedHere != t.carriedPacks.cend()},
+                                     {"installed", false}});
+        }
+        for (const CarriedPack &c : t.carriedPacks)
+            if (!t.neededPacks.contains(c.id))
+                packs.append(QVariantMap{{"id", c.id}, {"title", packTitle(c.id, c.name)}, {"carried", true}, {"installed", true}});
+        QStringList inputs; // the sample pictures of its inputs folder, as file URLs
+        const QDir inputsDir(t.folder + QStringLiteral("/inputs"));
+        for (const QFileInfo &file : inputsDir.entryInfoList({QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.webp")}, QDir::Files, QDir::Name))
+            inputs << QUrl::fromLocalFile(file.absoluteFilePath()).toString();
         out.append(QVariantMap{{"id", t.id},
+                               {"modelList", modelRows(t.models, placed, catalog)},
+                               {"packs", packs},
+                               {"inputs", inputs},
                                {"title", t.title},
                                {"description", t.description},
                                {"category", t.category},

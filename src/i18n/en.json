@@ -1816,5 +1816,14 @@
   "Move the task bar": "Move the task bar",
   "Pin position": "Pin position",
   "Pinned: unpin it in the ⋯ menu to move it": "Pinned: unpin it in the ⋯ menu to move it",
-  "Reset position": "Reset position"
+  "Reset position": "Reset position",
+  "Models used": "Models used",
+  "On disk": "On disk",
+  "Packs needed": "Packs needed",
+  "Served": "Served",
+  "carried by the template": "carried by the template",
+  "from elsewhere": "from elsewhere",
+  "installed": "installed",
+  "not installed": "not installed",
+  "Sample inputs": "Sample inputs"
 }

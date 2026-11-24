@@ -22,6 +22,9 @@ Popup {
     required property CanvasLook look
     property var entries: []
     property bool searchable: false
+    // Each typed word must begin a word of the entry (as the templates window's search, engine/template_search.cpp), not
+    // sit anywhere in it. Off: a word may be anywhere (the model menus').
+    property bool wordStart: false
     property string query: ""
     // What `nothing` says when no entry matches the query.
     property string nothingMatches: qsTr("Nothing matches “%1”")
@@ -280,7 +283,7 @@ Popup {
             if (e.separator === true)
                 continue // a search result is one list
             const said = [e.text, e.detail, heading ? heading.text : "", e.keywords].join(" ").toLowerCase()
-            const fits = e.keep !== true && e.value !== undefined && words.every(w => said.includes(w))
+            const fits = e.keep !== true && e.value !== undefined && words.every(w => wordStart ? startsAWord(said, w) : said.includes(w))
             if (!fits && e.keep !== true)
                 continue
             if (fits && heading && !headingShown) {
@@ -295,6 +298,19 @@ Popup {
         if (!matched)
             out.push({ text: nothingMatches.arg(text.trim()), enabled: false })
         return out
+    }
+
+    // Whether `word` (lower case) begins a word of `text` (lower case): at its start or after a non-letter, non-digit.
+    function startsAWord(text, word) {
+        for (let at = text.indexOf(word); at >= 0; at = text.indexOf(word, at + 1))
+            if (at === 0 || !isWordChar(text[at - 1]))
+                return true
+        return false
+    }
+
+    // A letter (of any script: its case differs, or it is a CJK character that has none) or a digit.
+    function isWordChar(c) {
+        return c.toLowerCase() !== c.toUpperCase() || (c >= "0" && c <= "9") || c.charCodeAt(0) > 0x2e7f
     }
 
     function firstIndex() {
