@@ -15,7 +15,8 @@ namespace fugue {
 class Registry;
 
 // Calls `visit` with the node id, the input name and the value of every input that holds an input
-// file (InputSpec::holdsInputFile: widget `file`, `mask` or `paint`) and whose value is a text literal, in the graph and in each group definition. A node
+// file (InputSpec::holdsInputFile: widget `file`, `mask` or `paint`) and whose value is a text literal, in the graph and in each group definition.
+// A group instance's input counts when it feeds such an input, through nested groups. A node
 // whose type is not installed is skipped. `visit` may change the value.
 void forEachFileLiteral(Document &document, const Registry &registry,
                         const std::function<void(const QString &node, const QString &input, InputValue &value)> &visit);
