@@ -31,10 +31,10 @@
     {"name": "denoise", "type": "number", "label": "Denoise", "default": 1, "min": 0, "max": 1, "step": 0.05,
      "widget": "slider",
      "description": "For a latent from VAE Encode, VAE Encode Video or another Sampler: how far to move from it, 0 keeps it, 1 ignores it. An Empty Latent always starts from noise."},
-    {"name": "denoise_mode", "type": "text", "label": "Denoise mode", "optional": true, "advanced": true,
+    {"name": "denoise_mode", "shown_when": {"denoise": {"lt": 1}}, "type": "text", "label": "Denoise mode", "optional": true, "advanced": true,
      "choices": ["noise_level", "schedule_cut"],
      "description": "How Denoise below 1 is read for a start latent. Unset or noise_level: the start picture is mixed with noise to that level and the steps run from there. schedule_cut: ComfyUI's reading: the schedule is made int(Steps / Denoise) long and its last Steps steps run, so Steps are always run and the sigmas match ComfyUI's. Not for video; Denoise 0 is refused."},
-    {"name": "soft_mask", "type": "boolean", "label": "Soft mask", "default": false, "advanced": true,
+    {"name": "soft_mask", "shown_when": {"carries": {"latent": "mask"}}, "type": "boolean", "label": "Soft mask", "default": false, "advanced": true,
      "description": "For a latent from VAE Encode with a mask: read the mask's gray as how much to change (differential diffusion): white is redrawn from the start, gray is held until later in the run, black is kept. Off: the mask is white or not. Not for an inpaint model, which has its own mask input. Needs this build's helper."}
   ],
   "outputs": [

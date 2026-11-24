@@ -15,6 +15,7 @@
      "description": "The part to redraw, white; the rest stays as it is. A picture model made for inpainting (FLUX.1 Fill, SDXL Inpaint) reads it as it is; any other redraws only this part at each step. It must be the size of the image. Nothing painted is an error."}
   ],
   "outputs": [
-    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+    {"name": "latent", "type": "fugue/latent", "label": "Latent", "carries": ["mask"],
+     "carries_when": {"linked": "mask"}}
   ]
 }

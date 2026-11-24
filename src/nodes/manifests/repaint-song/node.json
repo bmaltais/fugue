@@ -38,6 +38,7 @@
     },
     {
       "name": "lyrics",
+      "shown_when": {"instrumental": [false]},
       "type": "text",
       "label": "Lyrics",
       "default": "",

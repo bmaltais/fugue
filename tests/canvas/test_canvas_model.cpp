@@ -685,6 +685,94 @@ private slots:
         QCOMPARE(crop.value("mode").toString(), QString("bypass"));
         QCOMPARE(port(crop, "outputs", "image").value("passFrom").toString(), QString("image"));
     }
+
+    // Rows that do not apply are hidden (#429), on the real Pad and Sampler: heights, values kept, a link shows the row.
+    void padHidesBlurAndFeatheringThatDoNotApply() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "pad": {"type": "fugue/pad", "version": "1.2.0", "inputs": {"fill": "gray", "blur": 7}},
+            "keep": {"type": "fugue/solid-mask", "version": "1.0.0", "inputs": {}}}}})"));
+        QVariantMap pad = node(canvas, "pad");
+        QVERIFY(port(pad, "inputs", "blur").value("notUsed").toBool());
+        QVERIFY(port(pad, "inputs", "blur").value("hidden").toBool());
+        QCOMPARE(port(pad, "inputs", "blur").value("rowHeight").toDouble(), 0.0);
+        QVERIFY(!port(pad, "inputs", "feathering").value("notUsed").toBool()); // no Keep mask: it applies
+        const qreal height = pad.value("nodeHeight").toDouble();
+        WidgetEdit *edits = canvas.widgets();
+        // Fill edge-blur: Blur applies and, folded as an Advanced row, still takes no room until opened.
+        edits->setValue("pad", "fill", "edge-blur");
+        pad = node(canvas, "pad");
+        QVERIFY(!port(pad, "inputs", "blur").value("notUsed").toBool());
+        QCOMPARE(pad.value("nodeHeight").toDouble(), height); // Advanced is folded either way
+        // The hidden value was kept and goes to the engine as it is.
+        QCOMPARE(canvas.document().graph.nodes.value("pad").inputs.value("blur").literal().toInt(), 7);
+        // A Keep mask hides Feathering; a link to a hidden row shows it.
+        QVERIFY(canvas.connectPorts("keep", "mask", "pad", "mask"));
+        QVERIFY(port(node(canvas, "pad"), "inputs", "feathering").value("notUsed").toBool());
+        edits->setValue("pad", "fill", "gray");
+        QVERIFY(port(node(canvas, "pad"), "inputs", "blur").value("notUsed").toBool());
+    }
+
+    void aSectionHeaderGoesWithTheRowsThatApply() {
+        // Advanced open: the two hidden rows leave no gap and the header stays for the ones left.
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "pad": {"type": "fugue/pad", "version": "1.2.0", "inputs": {"fill": "gray"}}}},
+            "layout": {"nodes": {"pad": {"advanced": true}}}})"));
+        const QVariantMap open = node(canvas, "pad");
+        QVERIFY(port(open, "inputs", "blur").value("notUsed").toBool());
+        QCOMPARE(port(open, "inputs", "blur").value("rowHeight").toDouble(), 0.0);
+        QVERIFY(port(open, "inputs", "target_width").value("rowHeight").toDouble() > 0);
+        QVERIFY(port(open, "inputs", "feathering").value("rowHeight").toDouble() > 0);
+        CanvasModel shown(&m_registry);
+        shown.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "pad": {"type": "fugue/pad", "version": "1.2.0", "inputs": {"fill": "edge-blur"}}}},
+            "layout": {"nodes": {"pad": {"advanced": true}}}})"));
+        QCOMPARE(node(shown, "pad").value("nodeHeight").toDouble(),
+                 open.value("nodeHeight").toDouble() + canvas.rowHeight());
+    }
+
+    void samplerHidesSoftMaskWithoutAMaskedLatentAndDenoiseModeAtFullDenoise() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "keep": {"type": "fugue/solid-mask", "version": "1.0.0", "inputs": {}},
+            "enc": {"type": "fugue/vae-encode", "version": "1.1.0", "inputs": {}},
+            "empty": {"type": "fugue/empty-latent", "version": "1.0.0", "inputs": {}},
+            "s": {"type": "fugue/sampler", "version": "1.4.0", "inputs": {"latent": {"from": "empty.latent"}}}}},
+            "layout": {"nodes": {"s": {"advanced": true}}}})"));
+        const auto notUsed = [&](const QString &input) { return port(node(canvas, "s"), "inputs", input).value("notUsed").toBool(); };
+        const auto height = [&] { return node(canvas, "s").value("nodeHeight").toDouble(); };
+        QVERIFY(notUsed("soft_mask")); // an Empty Latent has no mask
+        QVERIFY(notUsed("denoise_mode")); // Denoise is 1
+        const qreal without = height();
+        QVERIFY(canvas.connectPorts("enc", "latent", "s", "latent"));
+        QVERIFY(notUsed("soft_mask")); // VAE Encode without a mask
+        // Only the encoder is edited; the Sampler follows.
+        QVERIFY(canvas.connectPorts("keep", "mask", "enc", "mask"));
+        QVERIFY(!notUsed("soft_mask"));
+        QCOMPARE(height(), without + canvas.rowHeight());
+        QVERIFY(canvas.disconnectInput("enc", "mask"));
+        QVERIFY(notUsed("soft_mask"));
+        QCOMPARE(height(), without);
+        canvas.widgets()->setValue("s", "denoise", 0.5);
+        QVERIFY(!notUsed("denoise_mode"));
+    }
+
+    // A group's face reads the inner conditions under the exposed names; one it does not expose always shows.
+    void aGroupFaceHidesWhatItsInnerConditionHides() {
+        const auto face = [&](const char *inputs) {
+            CanvasModel canvas(&m_registry);
+            canvas.setDocument(document(QByteArray(R"({"fugue": 1, "graph": {"nodes": {
+                "g": {"type": "local/p", "version": "1.0.0", "inputs": {"how": "gray"}}}},
+                "groups": {"local/p": {"version": "1.0.0", "name": "P", "inputs": [)") + inputs + R"(],
+                  "outputs": [], "nodes": {"pad": {"type": "fugue/pad", "version": "1.2.0", "inputs": {}}}}}})"));
+            return node(canvas, "g");
+        };
+        const QVariantMap both = face(R"({"name": "how", "targets": ["pad.fill"]}, {"name": "soft", "targets": ["pad.blur"]})");
+        QVERIFY(port(both, "inputs", "soft").value("notUsed").toBool());
+        const QVariantMap alone = face(R"({"name": "soft", "targets": ["pad.blur"]})");
+        QVERIFY(!port(alone, "inputs", "soft").value("notUsed").toBool());
+    }
 };
 
 QTEST_MAIN(TestCanvasModel)

@@ -732,6 +732,9 @@ private:
         qreal headerTop = -1; // -1: no header above it
         QString header;       // the header's section name
         bool hidden = false;
+        // Hidden because its `shown_when` does not hold (#429), not folded as Advanced: the value is kept,
+        // a link ends the hiding, and the section header goes with the last row that applies.
+        bool notUsed = false;
     };
     // Stacking order of nodes that overlap: raised when a node is selected or moved, not saved.
     QHash<QString, int> m_stack;
@@ -766,6 +769,10 @@ private:
         // A group instance's exposed inputs as the group narrows them (compiler.h's
         // exposedInputSpec), what its widgets offer and check.
         std::map<QString, fugue::InputSpec> exposed;
+        // The inputs of the type, or of the group's face: what `shown_when` is read from at layout.
+        QList<fugue::InputSpec> specs;
+        // Some input's condition asks what a linked source carries, so a change to another node can change this face.
+        bool readsUpstream = false;
     };
     struct LinkRow {
         fugue::PortRef from;

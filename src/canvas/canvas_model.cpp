@@ -8,6 +8,7 @@
 #include "engine/compiler.h"
 #include "engine/group_library.h"
 #include "engine/groups.h"
+#include "engine/input_use.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 #include "search/node_search.h"
@@ -389,6 +390,9 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
     row.id = id;
     const QJsonObject layout = m_document.layout.value("nodes").toObject().value(id).toObject();
     portsFromType(row, node);
+    for (const InputSpec &spec : row.specs)
+        for (const ShownClause &clause : spec.shownWhen.clauses)
+            row.readsUpstream = row.readsUpstream || clause.kind == ShownClause::Kind::Carries;
 
     // Inputs the document sets but the face lacks (an older or newer minor version, or a
     // placeholder), and outputs other nodes link from: kept as ports of unknown type, so
@@ -476,6 +480,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         const GroupDefinition *group = m_document.group(node.type);
         row.title = face.name;
         row.groupSize = int(group->nodes.size());
+        row.specs = face.inputs;
         for (const GroupInput &exposed : group->inputs) {
             if (const InputSpec *spec = face.input(exposed.name)) {
                 row.exposed.insert_or_assign(exposed.name, *spec);
@@ -502,6 +507,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
     }
     if (const NodeType *type = m_registry ? m_registry->nodeTypeFor(node.type, node.version.major) : nullptr) {
         row.title = type->name;
+        row.specs = type->inputs;
         for (const InputSpec &spec : type->inputs)
             row.inputs.push_back(fromInput(spec, spec.name, {}));
         for (const OutputSpec &spec : type->outputs)
@@ -578,6 +584,12 @@ void CanvasModel::layOut(NodeRow &row) const {
         };
         std::stable_sort(laidOut.begin(), laidOut.end(), [&](const Port *a, const Port *b) { return rank(a) < rank(b); });
     }
+    // The rows that do not apply with the node's values now (`shown_when`, #429), each hidden like a folded
+    // Advanced row; its value is kept and a link on it (never listed) shows it.
+    QSet<QString> notUsed;
+    if (m_registry)
+        for (const UnusedInput &unused : unusedInputs(m_document.graph.nodes, m_document, *m_registry, node, row.specs))
+            notUsed.insert(unused.input);
     const auto run = m_run.constFind(row.id);
     const bool hasThumbnail = run != m_run.constEnd() && !run->thumbnail.isEmpty();
     const qreal maxTall = qRound(40 * unit());
@@ -603,7 +615,14 @@ void CanvasModel::layOut(NodeRow &row) const {
             const QString portSection = port.advanced && port.section.isEmpty() ? QString::fromLatin1(kAdvancedSection) : port.section;
             port.headerTop = -1;
             port.header.clear();
-            port.hidden = false;
+            port.hidden = port.notUsed = notUsed.contains(port.name);
+            if (port.notUsed) {
+                // No row, and no header of its own: the section's header goes above the next row that applies.
+                port.rowTop = top;
+                port.rowHeight = 0;
+                port.y = top - m_rowHeight / 2;
+                continue;
+            }
             if (!portSection.isEmpty() && portSection != section) {
                 port.headerTop = top;
                 port.header = portSection;
@@ -814,7 +833,8 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"widget", port.widget},
                     {"widgetType", port.widgetType},
                     {"required", port.required},
-                    {"hidden", port.hidden}};
+                    {"hidden", port.hidden},
+                    {"notUsed", port.notUsed}};
     if (!port.role.isEmpty())
         map.insert("role", port.role);
     if (!port.over.isEmpty())
@@ -828,7 +848,7 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
             map.insert("advancedOpen", row.advancedOpen);
             int folded = 0;
             for (const Port &other : row.inputs)
-                folded += other.hidden ? 1 : 0;
+                folded += other.hidden && !other.notUsed ? 1 : 0;
             map.insert("folded", folded);
         }
     }

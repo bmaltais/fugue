@@ -881,8 +881,44 @@ search, versions, groups, caching, the canvas and workflows treat all tiers alik
 | `section`, `advanced` | Grouping on the node face; `advanced` inputs are collapsed. |
 | `role` | `mask` on an `image` input that takes a mask: the port is drawn hollow. Changes no compatibility ([14.4](#144-masking-and-inpainting-167)). The only value is `mask`, and only on an image port; anything else disables the node. |
 | `over` | For widget `mask` or `paint`: the image input it is painted over. |
+| `shown_when` | A condition on the node's other inputs; the face hides the row while it does not hold ([6.1.1](#611-rows-that-do-not-apply-shown_when)). |
 
-**Output fields**: `name`, `type`, `label`, `description`, `list`, `optional`, `role`.
+**Output fields**: `name`, `type`, `label`, `description`, `list`, `optional`, `role`, and `carries`, `carries_when` ([6.1.1](#611-rows-that-do-not-apply-shown_when)).
+
+#### 6.1.1 Rows that do not apply (`shown_when`)
+
+An input can say when it applies, so a node face shows only the rows that do something with the values it has (#429;
+Blender's panels do the same). The condition is an object; every key must hold, and a key is one of:
+
+| Key | Holds when |
+| --- | --- |
+| `"<input>": [v, ...]` | the input's value is one of the listed values: `{"fill": ["edge-blur"]}` |
+| `"<input>": {"lt": n, "le": n, "gt": n, "ge": n}` | a number input compares so: `{"denoise": {"lt": 1}}` (the keys given all hold) |
+| `"linked": "<input>"`, with `"is": true` (default) or `false` | the input has a link, or has none: `{"linked": "mask", "is": false}` |
+| `"carries": {"<input>": "<property>"}` | the source linked to the input carries the property, read from the graph without running it: `{"carries": {"latent": "mask"}}` |
+
+An input named `linked`, `is` or `carries` cannot be used in a condition. A condition names other inputs of the same node
+(never its own row), or the manifest is refused. What a source carries is declared on its output: `carries` lists
+properties (`["mask"]`), `carries_when` (the same kind of condition, on the node's own inputs) says when they hold, so VAE
+Encode's `latent` is `"carries": ["mask"], "carries_when": {"linked": "mask"}`. A source with no declaration for the property
+does not carry it, but one with no static answer (a node type that is not installed, a group instance, a bypassed node)
+gives none, and so does a value with none (a wired input, a seed set to `auto`): **a row with no answer is shown.**
+
+The rules (`engine/input_use.h` is the one place that applies them; the face and the CLI both ask it):
+- A hidden row is not drawn and takes no room; the node's height follows, its position and its links' order do not move,
+  and a section header goes with the first row of its section that is shown.
+- **A linked row is always shown**, so a wire never ends at a hidden row. Only a value row can hide: a port with no widget
+  cannot take a wire once hidden, so none of the built-ins puts a condition on one.
+- **A hidden row keeps its value** and the engine gets it unchanged: hiding changes what is seen, never what runs.
+- A condition on a group's exposed input is read through the group's face: the inner input names become the exposed ones,
+  and a condition on an input the group does not expose is dropped (the row always shows).
+- `fugue validate` and `fugue workflow describe` list each hidden row as `not used: <input>: Applies only when <why>.`
+  (JSON: `not_used`, a list of `{input, why}` on the node).
+
+Built-in manifests that use it: Pad (`blur` only with Fill edge-blur; `feathering` only without a Keep mask), Sampler
+(`denoise_mode` only with Denoise below 1; `soft_mask` only when the latent comes from a masked VAE Encode), the song nodes'
+`lyrics` unless Instrumental, Canvas Region's `x`, `y`, `width` and `height` without a Mask, and Generate Image's `strength`
+with a start image.
 
 ### 6.2 Widgets
 
@@ -3247,7 +3283,7 @@ once and stops on close). Zoomed out, the slot is the label ("Video · 0:04") as
 
 | Type id | Inputs | Outputs | Notes |
 | --- | --- | --- | --- |
-| `fugue/pad` 1.2.0 | `image`, `left`, `top`, `right`, `bottom`, `target_width`, `target_height` (advanced, 0 = unset), `mask` (optional keep mask), `fill` (edge-blur, edge, gray, transparent; default edge-blur), `feathering` (advanced, default 40), `blur` (advanced, 0 to 512, default 24) | `image`, `mask` | ComfyUI's Pad Image for Outpainting with a choice of what the new area holds (#243; `engine/edge_fill.*`, the code the canvas resize uses, 14.5): `gray` is 0.5 (alpha 1) as ComfyUI (the parity tests run it), `edge` the nearest picture pixel stretched outward (a corner takes the corner pixel), `edge-blur` that blurred by `blur` px (the benchmark's best outpaint start, docs/inpaint-outpaint-research.md 4.6), `transparent` alpha 0 (an RGB picture gets an alpha channel). The picture itself is never blurred. The mask is 1 in the new area and 0 over the original; feathering fades it inward as ((f - d) / f)^2 and is ignored when twice it is not smaller than the image's sides. The default changed from gray (1.0.1) to edge-blur in 1.1.0, so a saved Pad node without `fill` now pads with the edge; set `fill` to gray for the old result. 1.2.0 (#343, Klein DA 4): **target size** `target_width` and `target_height` (both or neither, else `input_invalid`; not together with a non-zero side, `input_invalid`): the picture shrinks (area resampling) by `min(tw/W, th/H)` when that is below 1, never enlarges, and is centered with `pad_top = (th - h) // 2` (the rest goes to the bottom; the same for left and right), the sides being worked out from it. **Keep mask** `mask`: marks the area to keep (the picture's size, else `input_invalid`; it shrinks with the picture); it is padded with 0 and inverted, so the output mask is 1 - keep over the picture and 1 in the new area, and feathering is not applied. With none of the three set the output is as in 1.1.0. |
+| `fugue/pad` 1.2.0 | `image`, `left`, `top`, `right`, `bottom`, `target_width`, `target_height` (advanced, 0 = unset), `mask` (optional keep mask), `fill` (edge-blur, edge, gray, transparent; default edge-blur), `feathering` (advanced, default 40), `blur` (advanced, 0 to 512, default 24) | `image`, `mask` | ComfyUI's Pad Image for Outpainting with a choice of what the new area holds (#243; `engine/edge_fill.*`, the code the canvas resize uses, 14.5): `gray` is 0.5 (alpha 1) as ComfyUI (the parity tests run it), `edge` the nearest picture pixel stretched outward (a corner takes the corner pixel), `edge-blur` that blurred by `blur` px (the benchmark's best outpaint start, docs/inpaint-outpaint-research.md 4.6), `transparent` alpha 0 (an RGB picture gets an alpha channel). The picture itself is never blurred. The mask is 1 in the new area and 0 over the original; feathering fades it inward as ((f - d) / f)^2 and is ignored when twice it is not smaller than the image's sides. The default changed from gray (1.0.1) to edge-blur in 1.1.0, so a saved Pad node without `fill` now pads with the edge; set `fill` to gray for the old result. 1.2.0 (#343, Klein DA 4): **target size** `target_width` and `target_height` (both or neither, else `input_invalid`; not together with a non-zero side, `input_invalid`): the picture shrinks (area resampling) by `min(tw/W, th/H)` when that is below 1, never enlarges, and is centered with `pad_top = (th - h) // 2` (the rest goes to the bottom; the same for left and right), the sides being worked out from it. **Keep mask** `mask`: marks the area to keep (the picture's size, else `input_invalid`; it shrinks with the picture); it is padded with 0 and inverted, so the output mask is 1 - keep over the picture and 1 in the new area, and feathering is not applied. With none of the three set the output is as in 1.1.0. Rows (#429): `blur` shows only with Fill edge-blur, `feathering` only while no Keep mask is linked (6.1.1); a hidden value is kept. |
 | `fugue/extend-edges` 1.0.0 | `image`, `mask`, `mode` (edge, edge-blur; default edge-blur), `blur` (advanced, 0 to 512, default 24) | `image` | The part under the mask filled from the nearest picture, stretched outward and (edge-blur) blurred: for a hole open on one side (an outpaint strip, a removal at the edge), where Fill Masked's blur pulls the far side in. "Nearest" is the nearest pixel the mask leaves (m = 0), found by two sweeps of the 8 neighbours; where m = 0 the pixel is byte-identical, elsewhere out = image x (1 - m) + fill x m, as Fill Masked. A picture with nothing outside the mask is gray. Property tests, no parity (no permissive reference). |
 | `fugue/rotate` | `image`, `rotation` (none, 90 degrees, 180 degrees, 270 degrees) | `image` | Clockwise. |
 | `fugue/flip` | `image`, `direction` (horizontally, vertically) | `image` | |
@@ -3520,7 +3556,7 @@ out: `image`.
   it does at the encode), with `denoise` as the strength. Text Encode does not change. The mask
   must be the size of the picture (else `node_failed` on `mask`); a latent the Sampler makes carries
   no mask. The Sampler's advanced `soft_mask` (boolean, default off, Sampler 1.1.0) adds the helper option
-  `fugue.soft_mask: true` for such a latent (#179, 8.10); the mask file keeps its gray either way.
+  `fugue.soft_mask: true` for such a latent (#179, 8.10); the mask file keeps its gray either way. The face shows `soft_mask` only when its latent comes from a VAE Encode with a mask linked, and `denoise_mode` only while Denoise is below 1 (#429, 6.1.1); a hidden value is kept and sent.
 - Helper (8.10): `sample` and `generate` take `"mask": IN` (job input `mask`), read as one channel
   at the request's size; the three-channel reader used for pictures would break FLUX.1 Fill's
   packing of the mask, and stable-diffusion.cpp's own CLI reads it as one channel. An image

@@ -105,6 +105,7 @@
     },
     {
       "name": "feathering",
+      "shown_when": {"linked": "mask", "is": false},
       "type": "number",
       "label": "Feathering",
       "default": 40,
@@ -117,6 +118,7 @@
     },
     {
       "name": "blur",
+      "shown_when": {"fill": ["edge-blur"]},
       "type": "number",
       "label": "Blur",
       "default": 24,

@@ -57,11 +57,21 @@ struct Faces {
             spec.label = !exposed.label.isEmpty() ? exposed.label : exposed.name == target.port ? innerLabel : QString();
             spec.section = exposed.section;
             spec.advanced = exposed.section == QLatin1String(kAdvancedSection);
+            // A condition reads the inner node's inputs; on the face it reads the same inputs under
+            // their exposed names, and a condition on one the group does not expose is dropped.
+            spec.shownWhen = inner->shownWhen.renamed([&](const QString &name) {
+                for (const GroupInput &other : group->inputs)
+                    if (other.targets.contains(PortRef{target.node, name}))
+                        return other.name;
+                return QString();
+            });
             type.inputs << spec;
         }
         for (const GroupOutput &exposed : group->outputs) {
             if (std::optional<OutputSpec> spec = output(*group, exposed.from)) {
                 spec->name = exposed.name;
+                spec->carries.clear(); // what the inner node's inputs decide is not a fact about the face
+                spec->carriesWhen = {};
                 if (!exposed.label.isEmpty())
                     spec->label = exposed.label;
                 else if (exposed.name != exposed.from.port)

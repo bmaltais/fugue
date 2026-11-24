@@ -494,6 +494,23 @@ private slots:
                  list.out.constData());
     }
 
+    // A hidden row keeps its value, and `validate` and `describe` say it is not used (#429).
+    void validateAndDescribeSayWhichInputsAreNotUsed() {
+        write(m_dir.filePath("pad.fugue"),
+              flow("\"m\": {\"type\": \"fugue/solid-mask\", \"version\": \"1.0.0\", \"inputs\": {}}, "
+                   "\"p\": {\"type\": \"fugue/pad\", \"version\": \"1.2.0\", \"inputs\": "
+                   "{\"image\": {\"from\": \"m.mask\"}, \"fill\": \"gray\", \"blur\": 7}}"));
+        Outcome o = fugue({"validate", m_dir.filePath("pad.fugue"), "--json"}, FUGUE_BINARY);
+        const QJsonArray unused = o.json().value("data").toObject().value("nodes").toObject().value("p").toObject().value("not_used").toArray();
+        QVERIFY2(unused.size() == 1, o.out.constData());
+        QCOMPARE(unused.at(0).toObject().value("input").toString(), QString("blur"));
+        QCOMPARE(unused.at(0).toObject().value("why").toString(), QString("Applies only when Fill is edge-blur."));
+        o = fugue({"validate", m_dir.filePath("pad.fugue")}, FUGUE_BINARY);
+        QVERIFY2(o.out.contains("not used: blur: Applies only when Fill is edge-blur."), o.out.constData());
+        o = fugue({"workflow", "describe", m_dir.filePath("pad.fugue")}, FUGUE_BINARY);
+        QVERIFY2(o.out.contains("not used p.blur: Applies only when Fill is edge-blur."), o.out.constData());
+    }
+
     // --- workflows ---
 
     void validateReportsDocumentErrors() {

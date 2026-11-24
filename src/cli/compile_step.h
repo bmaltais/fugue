@@ -4,12 +4,14 @@
 // validate`, `compile`, `run` and `workflow describe` all compile through here and
 // nowhere else, so a flag such as --provider means the same thing in each.
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 
 #include "cli/commands.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
+#include "engine/input_use.h"
 
 namespace fugue::cli {
 
@@ -23,6 +25,9 @@ struct CompileSettings {
 // the user's trust, so a pin to an unknown instance is unknown_provider. A providers.json that cannot be used fails the compile; a provider
 // instance that cannot be made is a warning among the errors.
 Compilation compileDocument(const Document &document, Registry &registry, const CompileSettings &settings = {});
+
+// [{"input", "why"}] for a node's "not_used" (validate and workflow describe).
+QJsonArray notUsedJson(const QList<UnusedInput> &unused);
 
 // What validate reports.
 struct Validation {
