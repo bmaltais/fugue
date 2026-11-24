@@ -812,6 +812,17 @@ private slots:
                                           "Family: All", "Type a name…"}));
         app.key(Qt::Key_Return); // the first is the one that fits
         QTRY_COMPARE(app.stored("models", "text_encoder").toObject().value("name").toString(), QString("qwen_3_8b.safetensors"));
+        // The list opens on the model in use, checked (the owner, 2026-11-24): the stored diffusion model is
+        // matched by its hash when the file's is known, else by its name, and only one entry is checked.
+        QTRY_VERIFY(!app.menuOpen());
+        app.click(app.in("models", "diffusion_model"));
+        QTRY_VERIFY(app.menuOpen());
+        menu = app.popup("widgetMenu");
+        QStringList checked;
+        for (const QVariant &entry : menu->property("entries").toList())
+            if (entry.toMap().value("checked").toBool())
+                checked << entry.toMap().value("text").toString();
+        QCOMPARE(checked, QStringList{"klein9b.safetensors"});
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

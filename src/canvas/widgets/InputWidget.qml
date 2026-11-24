@@ -404,6 +404,7 @@ Rectangle {
         let group = null
         let other = false
         let fitsShown = false
+        let currentMarked = false
         for (const m of listed) {
             if (isOther(m) && !other) {
                 other = true
@@ -420,13 +421,19 @@ Rectangle {
                 entries.push({ text: heading, heading: true, enabled: false })
             }
             if (m.path !== undefined) {
-                // The file a stored handle names is the one with its hash, not only its name.
-                // The recommended file says why (#370), the star is in its detail for a glance.
+                // The file a stored handle names: by its hash when both are known, else by its name (a file Fugue
+                // has not hashed yet has none, and the list must still open on the model in use, highlighted).
+                // One entry only, the first. The recommended file says why (#370), the star is in its detail.
                 const recommended = m.recommended === true
+                const isCurrent = !currentMarked && current !== undefined
+                                  && (currentHash !== undefined && m.handle.hash !== undefined ? m.handle.hash === currentHash
+                                                                                              : m.name === current)
+                if (isCurrent)
+                    currentMarked = true
                 entries.push({ text: m.title, detail: (recommended ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
                                value: { disk: m.path }, dim: m.fits === false,
                                place: "local", note: m.fitNote ? m.fitNote : (recommended ? m.recommendedWhy : ""),
-                               checked: currentHash !== undefined && m.handle.hash === currentHash })
+                               checked: isCurrent })
                 continue
             }
             // Where it lives (#164): a paired host's model says so, dimmed "host offline" when the
