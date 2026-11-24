@@ -215,20 +215,37 @@ private slots:
     }
 
     // #72: the rows under a growing multiline input move down, and so do the section headers
-    // among them: the Advanced header stays between Height and Seed and its click still opens it.
+    // among them: the Advanced header stays under the last plain row (Mask; Seed is plain, so it is
+    // above the header too) and its click still opens it.
     void aPinnedHeightMovesTheSectionHeadersWithTheirRows() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(workflow(R"({"gen": {"pos": [300, 80], "size": [240, 700]}})")));
         const QVariantMap gen = node(canvas, "gen");
-        const QVariantMap height = port(gen, "inputs", "height");
+        const QVariantMap mask = port(gen, "inputs", "mask");
         const QVariantMap steps = port(gen, "inputs", "steps");
         const QVariantMap seed = port(gen, "inputs", "seed");
         QVERIFY(steps.value("advancedHeader").toBool());
         const qreal header = steps.value("headerTop").toDouble();
-        QCOMPARE(header, height.value("rowTop").toDouble() + height.value("rowHeight").toDouble());
-        QVERIFY(header < seed.value("rowTop").toDouble());
+        QCOMPARE(header, mask.value("rowTop").toDouble() + mask.value("rowHeight").toDouble());
+        QVERIFY(seed.value("rowTop").toDouble() < header);
         QCOMPARE(canvas.advancedHeaderAt(310, 80 + header + 2), QStringLiteral("gen"));
-        QCOMPARE(canvas.advancedHeaderAt(310, 80 + height.value("rowTop").toDouble() + 2), QString());
+        QCOMPARE(canvas.advancedHeaderAt(310, 80 + mask.value("rowTop").toDouble() + 2), QString());
+    }
+
+    // The Sampler lists denoise (plain) between its advanced inputs: one Advanced header, with denoise above it.
+    void aSectionHasOneHeaderWhateverTheManifestOrder() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(QByteArray(R"({"fugue": 1, "graph": {"nodes": {
+            "sample": {"type": "fugue/sampler", "version": "1.4.0", "inputs": {}}}},
+            "layout": {"nodes": {"sample": {"pos": [0, 0], "advanced": true}}}})")));
+        const QVariantMap sample = node(canvas, "sample");
+        int headers = 0;
+        for (const QVariant &input : sample.value("inputs").toList())
+            headers += input.toMap().contains("headerTop") ? 1 : 0;
+        QCOMPARE(headers, 1);
+        const qreal header = port(sample, "inputs", "sampler").value("headerTop").toDouble();
+        QVERIFY(port(sample, "inputs", "denoise").value("rowTop").toDouble() < header);
+        QVERIFY(port(sample, "inputs", "soft_mask").value("rowTop").toDouble() > header);
     }
 
     void aSavedSizeIsKeptOnReloadAndClampedWhenOutOfRange() {
