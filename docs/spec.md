@@ -989,8 +989,27 @@ holding that node's `node.json`.
   this same question and trusted by the same one ([6.7](#67-trust)), never silently, and what
   ships with Fugue does not matter. Installing beside another major needs no replace (above).
 - The prompt shows the pack, its version and source, the runtime kinds of its nodes and what
-  they declare ([6.3](#63-the-needs-block)). Installing does not trust: `fugue pack trust <id>`
-  or the first run does ([6.7](#67-trust)).
+  they declare ([6.3](#63-the-needs-block)). On a terminal `fugue pack add` asks **one question**
+  for the install and the trust together (#379: "Install this pack and trust it?"; a pack with a `setup` shows its exact command in the
+  same list, [6.8](#68-per-pack-environments)); a yes does all of it, a no installs nothing. Settings > Packs keeps the install,
+  the setup and the trust as separate actions for one-off changes. Without a terminal `pack add` fails with
+  `needs_confirmation`.
+- **Get ready (#379).** What a template, workflow or package needs (packs, their environments and the models) is one
+  **ReadinessPlan** (`engine/readiness.h`), built from the workflow's nodes and `requires`, a template's carried packs and a package's
+  contents. The window's "Get ready" sheet ([11.10](#1110-templates)) and `fugue template prepare` / `fugue workflow prepare` show that
+  same plan and run it with the same executor: one yes covers each pack's install, its trust, its setup command and the model downloads.
+  Nothing happens without that yes, a pack **update** still asks on its own, and the executor refuses a pack that differs from the one
+  the list showed (another version, setup command or permissions: `pack_invalid`).
+  **Before the yes nothing is fetched or written**: a folder pack (carried, or a local source resolved against the workflow's own
+  folder) is copied to a staging folder, read in full (it must load, hold no symbolic link, and be the id and major the workflow
+  names), and the yes installs that same copy; a git pack's row shows only what the workflow records (id, version, source, pinned
+  ref) and "details after the download". **After the yes** a git pack from a workflow or package is cloned over https only (ssh, git
+  and file only when a person types them into `pack add` or Settings > Packs), at most 200 MB, checked against the id and major the
+  workflow names, and if it declares permissions (network, files, GPU) that the list could not show it asks once, for that row alone
+  (**Allow** or **Skip**). A pack installed but not trusted is removed again, and the list says so. Free space is checked before each
+  download. A list with problems (a pack with no source, a folder that is the wrong pack) is not "ready": the problems are reported
+  and `prepare` exits non-zero. Folders chosen on the sheet (a picked model folder, **Models go into**) are written to the settings
+  at the yes, not before.
 - Updates are explicit and pinned. Nothing updates on its own. `pack update` fetches the pack
   again at the same ref, or at `--ref`, shows the new version and asks; a pack already at that
   commit is left alone. A new version asks for trust again. A pack that was copied in by hand
@@ -1005,6 +1024,8 @@ holding that node's `node.json`.
 
 ### 6.7 Trust
 
+- Trust is part of the one yes that installs the pack from the Get ready sheet or `fugue pack add` ([6.6](#66-installing)); it is
+  still stored per pack id and version, and nothing else changes: an update asks again.
 - The first time a node from a pack would run, Fugue shows the pack, its runtime kinds and its
   declared permissions (network, files outside the run folder, GPU), and the user must allow it.
   The decision is stored per pack id and version in `trust.json`; a pack update asks again.
@@ -1022,7 +1043,9 @@ holding that node's `node.json`.
 
 A pack may declare `setup` (for example `uv sync` into a virtual environment inside the pack
 folder). It runs only after the user is shown the exact command and confirms. There is no shared
-environment, so packs cannot conflict with one another.
+environment, so packs cannot conflict with one another. The command is shown in the same list as the install and the trust
+([6.6](#66-installing)), so one yes covers it and nothing asks again at the first run (#379). `setup` may record `size` (bytes it
+downloads, for example 27 MB of ONNX Runtime); the Get ready list shows it and adds it to the disk space it needs.
 
 ### 6.9 Native tier
 
@@ -1596,6 +1619,14 @@ it as a module folder and run it with no code of its own in Fugue.
   Download queues it, on the same line as every other download (the banner shows it), with the
   checks above. When the file is in place its handle is the input's value, as for a file picked
   from disk. Nothing downloads without that answer (6.7: nothing silent).
+- **Where downloads go, and the one yes (#379).** The "Get ready" sheet ([11.10](#1110-templates)) and `fugue template prepare` /
+  `fugue workflow prepare` list the missing models with the packs and environments, each with file, licence (when the catalog has it),
+  size, source host and destination folder, then ask once. The sheet has a **Models go into** row with the current
+  `download_folder` (Fugue's own folder when unset), the free space at that folder against the download size, and **Change…**, which
+  offers the model folders (`model_paths` and Fugue's own) or **Pick a folder…**: a picked folder is added to `model_paths` as a
+  ComfyUI-layout root (Fugue downloads only into folders it searches) and becomes the new `download_folder`. Files still go in the
+  type's subfolder. A destination with too little free space says so before the yes and offers another folder. Settings > Folders has
+  the same setting, "Download models into". Models still download one after another; the first failure stops the rest.
 - Fugue never modifies or deletes a model file.
 
 ### 8.10 GPU memory and the helper
@@ -2102,8 +2133,8 @@ start it offers to recover.
 - Opening a package (File > Open, a drop, the desktop; told by its first bytes, so one renamed
   `.zip` opens too) unpacks it and opens it as
   its template opens: a new unsaved workflow, its images taken into the inputs folder, the
-  banners naming its missing models (Download) and the first pack it says where to get
-  (Install…, which opens Settings > Packs at the recorded source and commit, asking there).
+  banner naming what it lacks with the one **Get ready…** button (#379, [11.10](#1110-templates)): its packs
+  at the source and commit it records, their environments and its missing models, asked once on one sheet.
   It is unpacked under the cache folder, not `/tmp` (memory on Arch), and removed once open;
   an input naming a file it did not hold keeps the bare name. Only plain files and folders with
   relative names inside it are taken: an absolute name, `..`, `\` or `:`, a link or a device is
@@ -2209,6 +2240,16 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   whose name is taken by another file takes `-2`, `-3`..., and the workflow names that. A sample
   must be a file inside its template's folder; one that leads out, by `..` or a link, is not read.
   The person's own template wins over a bundled one of the same id, even when it is broken.
+- **Get ready (#379).** A template that is not ready (a carried pack not installed or not trusted, its environment, missing
+  models) is made ready with one question. The banner of the opened template keeps its line and has one button, **Get ready…**
+  (it replaces the separate Install pack, Download and "Into …" controls); it opens **one sheet** with the headline ("Fugue will
+  install and trust 1 pack, set up 1 environment and download 1 model, 1.2 GB"), a row per pack and per model that opens to the
+  full detail the separate prompts gave (the pack, version, source, runtime kinds and declared permissions, the setup command and its
+  size; the model's licence, size, host and folder), the **Models go into** row ([8.9](#89-models-on-disk)), and **Install and trust
+  all** or Cancel. Then it shows one list with progress per row and **Stop**; the first failure stops the run, says what is left, and
+  **Get ready again** lists only that. Nothing happens before the yes; a pack update, or a pack that declares more than was shown,
+  still asks on its own ([6.6](#66-installing)). A package ([11.5](#115-export)) opens the same way: its `requires` name the packs
+  and models, and it carries no pack. `fugue template prepare <id>` and `fugue workflow prepare <file>` do the same on a terminal.
 - **Where its models are (#164).** A card says, with a small badge and a tooltip, where each of
   its models can be had: `monitor`, "On this machine" (a file in the model folders, or a model a
   server on this machine serves) and `server`, "Shared by <host>" (a model a paired host serves
@@ -2876,8 +2917,9 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue node list [--type <port type>]` | Installed node types. |
 | `fugue node describe <type id>[@<major>]…` | Full manifests as data. |
 | `fugue node new <name>`, `fugue node test <path>` | Authoring ([6.11](#611-authoring-tools)). |
-| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` (an `<id>@<major>` where majors of a pack sit side by side) | Packs ([6.6](#66-installing)); `list` says where each comes from (`own`, or `inherited from Default` in a project that inherits `packs`, with the warning of 1.4.2 about what an inherited pack writes). All but `list` need a human ([13.6](#136-safety)). |
+| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]` (one question: install, setup and trust), `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` (an `<id>@<major>` where majors of a pack sit side by side) | Packs ([6.6](#66-installing)); `list` says where each comes from (`own`, or `inherited from Default` in a project that inherits `packs`, with the warning of 1.4.2 about what an inherited pack writes). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
+| `fugue template prepare <id>`, `fugue workflow prepare <file>` | Get a template or workflow ready with one question (#379, [6.6](#66-installing)): lists the packs to install and trust, each environment's setup command and size, and the missing models (file, licence, size, host, folder) with the totals and the free space where they go, asks once on a terminal, then runs the list (install, trust, setup, downloads) and stops at the first failure, naming what is left; a rerun lists only that. Nothing is ready to ask: `ready: true`. With no terminal it fails with `needs_confirmation` and prints the list; no flag answers for the person. Reply: `{plan, ready, done?}`. |
 | `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks, and where it comes from (`own`, `inherited from Default`, `bundled`); what is wrong with one is a warning. |
 | `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call; an inherited folder is refused as read-only); progress on stderr. Each failure is an error; what arrived stays. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers; each file says which root it is in and whether that is the project's own or inherited from Default (`origin`), and `roots` lists the model folders searched. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
@@ -3046,7 +3088,7 @@ validate and run.
 ### 13.6 Safety
 
 - These always need a human: trusting a pack, `pack add`, `pack update`, `pack remove`, running
-  a pack's `setup`, adding a provider or a key, starting or stopping a model server. From the CLI
+  a pack's `setup`, `template prepare`, `workflow prepare` (one question for the whole list), adding a provider or a key, starting or stopping a model server. From the CLI
   they ask on an interactive terminal. With no terminal they fail with `needs_confirmation`.
   There is no flag that answers for the human.
 - A run that reaches an untrusted pack fails with `pack_untrusted`.

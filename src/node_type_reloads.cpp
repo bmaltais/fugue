@@ -17,6 +17,9 @@ void followNodeTypeReloads(RegistryReloader &reloader, const AppObjects &objects
         if (objects.canvasActions) // an action's nodes may be installed, or gone, now
             objects.canvasActions->refresh();
     });
+    // The Get ready sheet installed or trusted a pack (#379): the same reload as the Packs page.
+    if (objects.workflows)
+        QObject::connect(objects.workflows->readiness(), &ReadinessSheet::packsModified, &reloader, &RegistryReloader::reload);
     // Queued: the save's own call (a menu, a button) is over before every row is made again.
     if (objects.canvasModel)
         QObject::connect(objects.canvasModel->groups(), &GroupEdit::librarySaved, &reloader, &RegistryReloader::reload,

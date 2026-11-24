@@ -1,0 +1,533 @@
+#include "engine/readiness.h"
+
+#include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QFileInfo>
+#include <QNetworkAccessManager>
+#include <QStorageInfo>
+#include <QTimer>
+#include <QUrl>
+#include "engine/version.h"
+
+#include <algorithm>
+
+#include "engine/document.h"
+#include "engine/file_hashes.h"
+#include "engine/model_catalog.h"
+#include "engine/pack_loader.h"
+#include "engine/registry.h"
+
+namespace fugue {
+
+namespace {
+
+QString plural(int count, const QString &one, const QString &many) {
+    return QStringLiteral("%1 %2").arg(count).arg(count == 1 ? one : many);
+}
+
+qint64 freeAt(const QString &folder) {
+    QString at = QDir::cleanPath(folder);
+    while (!at.isEmpty() && !QFileInfo(at).isDir()) {
+        const QString parent = QFileInfo(at).absolutePath();
+        if (parent == at)
+            break;
+        at = parent;
+    }
+    const QStorageInfo info(at);
+    return info.isValid() && info.isReady() ? info.bytesAvailable() : -1;
+}
+
+Error problem(const QString &code, const QString &message, const QString &hint = {}) {
+    Error error = makeError(code, message, hint);
+    error.severity = Error::Severity::Warning;
+    return error;
+}
+
+QString sourceText(const PackSource &source) {
+    if (source.location.isEmpty())
+        return {};
+    return source.ref.isEmpty() ? source.location : QStringLiteral("%1 at %2").arg(source.location, source.ref);
+}
+
+QString packName(const PackSummary &pack) { return pack.name.isEmpty() ? pack.id : pack.name; }
+
+} // namespace
+
+ReadinessRequest requestFor(const Document &document, const Registry &registry, const QList<CarriedPack> &carried,
+                            const QString &baseFolder) {
+    ReadinessRequest request;
+    request.models = document.models();
+    const QStringList needed = packsNeeded(document, registry);
+    const QJsonObject recorded = document.requirements.value(QStringLiteral("packs")).toObject();
+    for (const PackUse &use : TrustStore::packsUsed(document, registry)) {
+        WantedPack want;
+        want.id = use.id;
+        want.version = use.version;
+        want.needsInstall = needed.contains(use.id);
+        const QJsonObject entry = recorded.value(use.id).toObject();
+        want.name = entry.value(QStringLiteral("name")).toString();
+        const auto own = std::find_if(carried.cbegin(), carried.cend(), [&](const CarriedPack &c) { return c.id == use.id; });
+        if (own != carried.cend()) {
+            want.hasSource = true;
+            want.source = PackSource{PackSource::Kind::Path, own->folder, {}, {}};
+            if (!own->name.isEmpty())
+                want.name = own->name;
+        } else if (const QString source = entry.value(QStringLiteral("source")).toString(); !source.isEmpty()) {
+            // A folder (relative to the workflow's own, not the working directory), or a real git address; else no source.
+            const QString folder = QFileInfo(source).isRelative() && !baseFolder.isEmpty() ? QDir(baseFolder).absoluteFilePath(source) : source;
+            if (QFileInfo(folder).isDir()) {
+                want.hasSource = true;
+                want.source = PackSource{PackSource::Kind::Path, QDir::cleanPath(folder), {}, {}};
+            } else if (looksLikeGitUrl(source)) {
+                want.hasSource = true;
+                want.source = PackSource{PackSource::Kind::Git, source, entry.value(QStringLiteral("ref")).toString(), {}};
+            }
+        }
+        request.packs.append(want);
+    }
+    return request;
+}
+
+void ReadinessPlan::recount() {
+    environmentBytes = 0;
+    unknownEnvironments = 0;
+    for (const ReadinessPack &row : std::as_const(packs)) {
+        if (!row.hasEnvironment())
+            continue;
+        if (row.pack.setupSize >= 0)
+            environmentBytes += row.pack.setupSize;
+        else
+            ++unknownEnvironments;
+    }
+}
+
+int ReadinessPlan::installCount() const {
+    return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.installs(); }));
+}
+int ReadinessPlan::trustOnlyCount() const { return int(packs.size()) - installCount(); }
+int ReadinessPlan::environmentCount() const {
+    return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.hasEnvironment(); }));
+}
+
+QString ReadinessPlan::headline() const {
+    QStringList parts;
+    if (const int n = installCount())
+        parts << QStringLiteral("install %1").arg(plural(n, QStringLiteral("pack"), QStringLiteral("packs")));
+    if (const int n = trustOnlyCount())
+        parts << QStringLiteral("trust %1").arg(plural(n, QStringLiteral("pack"), QStringLiteral("packs")));
+    if (const int n = environmentCount())
+        parts << QStringLiteral("set up %1").arg(plural(n, QStringLiteral("environment"), QStringLiteral("environments")));
+    if (!models.isEmpty()) {
+        QString text = QStringLiteral("download %1").arg(plural(int(models.size()), QStringLiteral("model"), QStringLiteral("models")));
+        if (downloadBytes > 0)
+            text += QStringLiteral(" (%1%2)").arg(unknownSizes ? QStringLiteral("at least ") : QString(), sizeText(downloadBytes));
+        parts << text;
+    }
+    if (parts.isEmpty())
+        return QStringLiteral("Nothing to get ready.");
+    const QString last = parts.takeLast();
+    return QStringLiteral("Fugue will %1.").arg(parts.isEmpty() ? last : parts.join(QStringLiteral(", ")) + QStringLiteral(" and ") + last);
+}
+
+QStringList ReadinessPlan::lines() const {
+    QStringList out{headline(), QString()};
+    for (const ReadinessPack &row : packs) {
+        const PackSummary &p = row.pack;
+        out << QStringLiteral("  %1 %2 %3 (%4)").arg(row.installs() ? QStringLiteral("Install and trust pack:") : QStringLiteral("Trust pack:"),
+                                                  packName(p), p.version, p.id);
+        if (const QString from = sourceText(p.source); row.installs() && !from.isEmpty())
+            out << QStringLiteral("    From:      %1").arg(from);
+        if (row.pending) {
+            out << QStringLiteral("    Details after download: what it runs as, what it declares and its setup are shown by the pack itself once fetched (https only, 200 MB at most);");
+            out << QStringLiteral("    a pack that declares network, file or GPU access asks once more before it is installed.");
+            continue;
+        }
+        out << QStringLiteral("    Runs as:   %1").arg(p.runtimeKinds.isEmpty() ? QStringLiteral("(no nodes)") : p.runtimeKinds.join(QStringLiteral(", ")));
+        out << QStringLiteral("    Declares:  %1").arg(p.permissions.isEmpty() ? QStringLiteral("nothing (network, files, GPU)") : p.permissions.join(QStringLiteral(", ")));
+        if (row.hasEnvironment()) {
+            out << QStringLiteral("    Setup:     %1%2").arg(displayCommand(p.setupCommand),
+                                                         p.setupSize >= 0 ? QStringLiteral(" (downloads %1)").arg(sizeText(p.setupSize)) : QString());
+            if (!p.setupDescription.isEmpty())
+                out << QStringLiteral("               %1").arg(p.setupDescription);
+        }
+    }
+    if (!packs.isEmpty())
+        out << QStringLiteral("  Fugue enforces no sandbox: a trusted pack runs programs as you.");
+    for (const ReadinessModel &m : models) {
+        out << QStringLiteral("  Download model: %1 (%2) from %3%4").arg(m.name, m.size >= 0 ? sizeText(m.size) : QStringLiteral("size not recorded"), m.host,
+                                                                          m.license.isEmpty() ? QString() : QStringLiteral(", licence %1").arg(m.license));
+        out << QStringLiteral("    Into:      %1").arg(m.folder);
+    }
+    if (!models.isEmpty()) {
+        out << QStringLiteral("  Models go into %1%2").arg(destination, freeBytes >= 0 ? QStringLiteral(" (%1 free)").arg(sizeText(freeBytes)) : QString());
+        if (lowSpace())
+            out << QStringLiteral("  There is not enough free space there for the download; change Settings > Folders > Download models into.");
+    }
+    for (const Error &p : problems)
+        out << QStringLiteral("  Cannot do: %1").arg(p.message);
+    return out;
+}
+
+QJsonObject ReadinessPlan::toJson() const {
+    QJsonArray packRows, modelRows;
+    for (const ReadinessPack &row : packs) {
+        const PackSummary &p = row.pack;
+        QJsonObject o{{"action", row.installs() ? "install" : "trust"}, {"pending", row.pending}, {"id", p.id}, {"version", p.version}, {"name", p.name},
+                      {"runtime", QJsonArray::fromStringList(p.runtimeKinds)}, {"permissions", QJsonArray::fromStringList(p.permissions)}};
+        if (const QString from = sourceText(p.source); !from.isEmpty())
+            o.insert("source", from);
+        if (row.hasEnvironment())
+            o.insert("setup", QJsonObject{{"command", QJsonArray::fromStringList(p.setupCommand)}, {"description", p.setupDescription},
+                                          {"size", p.setupSize >= 0 ? QJsonValue(double(p.setupSize)) : QJsonValue()}});
+        packRows.append(o);
+    }
+    for (const ReadinessModel &m : models)
+        modelRows.append(QJsonObject{{"name", m.name}, {"resource", m.resource}, {"license", m.license}, {"host", m.host},
+                                     {"size", m.size >= 0 ? QJsonValue(double(m.size)) : QJsonValue()}, {"folder", m.folder}, {"path", m.target.path}});
+    return QJsonObject{{"headline", headline()}, {"packs", packRows}, {"models", modelRows}, {"destination", destination},
+                       {"download_bytes", double(downloadBytes)}, {"unknown_sizes", unknownSizes},
+                       {"environment_bytes", double(environmentBytes)}, {"free_bytes", double(freeBytes)},
+                       {"low_space", lowSpace()}, {"problems", fugue::toJson(problems)}};
+}
+
+ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const ReadinessEnv &env) {
+    ReadinessPlan plan;
+    PackPrompts prompts = env.prompts;
+    for (const WantedPack &want : request.packs) {
+        const bool installedHere = env.registry && !env.registry->packVersion(want.id).isEmpty();
+        if (want.needsInstall) {
+            if (installedHere) {
+                plan.problems << problem(QStringLiteral("pack_update"),
+                                         QStringLiteral("The pack %1 is installed at another version than this needs.").arg(want.id),
+                                         QStringLiteral("Update it in Settings > Packs or with `fugue pack update %1`; an update asks on its own.").arg(want.id));
+                continue;
+            }
+            if (!want.hasSource) {
+                plan.problems << problem(QStringLiteral("pack_source_unknown"),
+                                         QStringLiteral("The pack %1 is not installed and nothing says where to get it.").arg(want.id),
+                                         QStringLiteral("Install it with `fugue pack add <folder|git-url>`."));
+                continue;
+            }
+            if (want.source.kind == PackSource::Kind::Git) {
+                // Nothing is fetched before the yes: the row shows what the workflow records.
+                if (!looksLikeGitUrl(want.source.location) || want.source.ref.isEmpty()) {
+                    plan.problems << problem(QStringLiteral("pack_source_unknown"),
+                                             QStringLiteral("The pack %1 comes from %2, which is not a git address pinned to a tag or a commit.").arg(want.id, want.source.location),
+                                             QStringLiteral("Install it yourself with `fugue pack add <folder|git-url> --ref <tag|commit>`."));
+                    continue;
+                }
+                ReadinessPack row;
+                row.pending = true;
+                row.pack.id = want.id;
+                row.pack.version = want.version;
+                row.pack.name = want.name;
+                row.pack.source = want.source;
+                plan.packs.append(row);
+                continue;
+            }
+            const Result<std::shared_ptr<PreparedPack>> prepared = preparePack(want.source, env.packsDir, prompts);
+            if (!prepared) {
+                Error e = prepared.error();
+                e.severity = Error::Severity::Warning;
+                plan.problems << e;
+                continue;
+            }
+            // It must be the pack the workflow needs: its id, and the major its nodes were made with.
+            const PackSummary &shown = (*prepared)->summary;
+            const std::optional<Version> wantedVersion = Version::parse(want.version);
+            if (shown.id != want.id || (wantedVersion && Version::parse(shown.version) && Version::parse(shown.version)->major != wantedVersion->major)) {
+                plan.problems << problem(QStringLiteral("pack_invalid"),
+                                         QStringLiteral("%1 holds the pack %2 %3, not the pack %4 %5 this needs.").arg(want.source.location, shown.id, shown.version, want.id, want.version));
+                continue;
+            }
+            ReadinessPack row;
+            row.pack = shown;
+            row.prepared = *prepared;
+            plan.packs.append(row);
+            continue;
+        }
+        // Installed here: only its trust may be missing, for a pack in the packs folder.
+        if (!installedHere || !env.trust || TrustStore::isBuiltIn(want.id) || env.trust->isTrusted(want.id, want.version))
+            continue;
+        for (const QFileInfo &entry : QDir(env.packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (entry.fileName().startsWith(QLatin1Char('.')) || parsePackRef(entry.fileName()).id != want.id)
+                continue;
+            const Result<PackSummary> summary = summarizePack(entry.filePath());
+            if (!summary || summary->version != want.version)
+                continue;
+            ReadinessPack row;
+            row.action = ReadinessPack::Action::Trust;
+            row.pack = *summary;
+            row.folderName = entry.fileName();
+            plan.packs.append(row);
+            break;
+        }
+    }
+    plan.recount();
+
+    // Models: the missing ones with a source, all into one folder (a root of one kind takes them only when all are that kind).
+    ModelLibrary library = env.library;
+    FileHashes fallback(FileHashes::defaultPath());
+    FileHashes &hashes = env.hashes ? *env.hashes : fallback;
+    QList<PortType> types;
+    for (const MissingModel &model : library.missing(request.models, hashes))
+        if (const std::optional<PortType> type = PortType::parse(model.handle.value(QStringLiteral("resource")).toString());
+            type && !model.source.isEmpty())
+            types << *type;
+    library.fitDownloadRoot(types);
+    plan.destination = library.downloadRoot();
+    plan.destinations = library.downloadRoots(types);
+    for (const MissingModel &model : library.missing(request.models, hashes)) {
+        const QString name = model.handle.value(QStringLiteral("name")).toString();
+        if (model.source.isEmpty()) {
+            plan.problems << problem(QStringLiteral("model_missing"), QStringLiteral("The model %1 has no source to download from.").arg(name),
+                                     QStringLiteral("Put it in %1.").arg(model.folder));
+            continue;
+        }
+        const Result<DownloadTarget> target = planDownload(library, model);
+        if (!target) {
+            for (Error e : target.errors()) {
+                e.severity = Error::Severity::Warning;
+                plan.problems << e;
+            }
+            continue;
+        }
+        ReadinessModel row;
+        row.name = name;
+        row.resource = model.handle.value(QStringLiteral("resource")).toString();
+        row.host = target->source.host();
+        row.size = model.size;
+        row.target = *target;
+        row.folder = QFileInfo(target->path).absolutePath();
+        if (env.catalog) {
+            QString hash = model.handle.value(QStringLiteral("hash")).toString();
+            if (hash.startsWith(QLatin1String("sha256:")))
+                hash = hash.mid(7);
+            for (const CatalogModel &entry : env.catalog->all())
+                if (!hash.isEmpty() && entry.sha256 == hash) {
+                    row.license = entry.license;
+                    row.licenseUrl = entry.licenseUrl;
+                    break;
+                }
+        }
+        if (row.size >= 0)
+            plan.downloadBytes += row.size;
+        else
+            ++plan.unknownSizes;
+        plan.models.append(row);
+    }
+    if (!plan.models.isEmpty())
+        plan.freeBytes = env.freeSpace ? env.freeSpace(plan.destination) : freeAt(plan.destination);
+    return plan;
+}
+
+namespace {
+
+// Tells the run's observer, and polls for a stop.
+struct Reporter {
+    ReadinessRun &run;
+    void row(int index, RowState state, const QString &detail = {}) const {
+        if (run.onRow)
+            run.onRow(index, state, detail);
+    }
+    bool stopped() const { return run.cancelled && run.cancelled(); }
+};
+
+PackPrompts approvals(const PackSummary &shown, ReadinessRun &run, bool &refused) {
+    // The one yes was given for exactly this pack: any question whose pack differs is answered No.
+    const auto answer = [&shown, &refused](const PackSummary &now) {
+        if (samePack(shown, now))
+            return Answer::Yes;
+        refused = true;
+        return Answer::No;
+    };
+    PackPrompts prompts;
+    prompts.install = prompts.trust = prompts.runSetup = answer;
+    prompts.log = run.log;
+    prompts.cancelled = run.cancelled;
+    return prompts;
+}
+
+QString rowName(const ReadinessPlan &plan, int index) {
+    if (index < plan.packs.size()) {
+        const ReadinessPack &row = plan.packs.at(index);
+        return QStringLiteral("%1 %2").arg(row.installs() ? QStringLiteral("install pack") : QStringLiteral("trust pack"), row.pack.id);
+    }
+    return QStringLiteral("download %1").arg(plan.models.at(index - plan.packs.size()).name);
+}
+
+} // namespace
+
+ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) {
+    ReadinessOutcome outcome;
+    const Reporter report{run};
+    const int total = plan.rowCount();
+    QList<RowState> states(total, RowState::Waiting);
+    const auto finish = [&](int index, RowState state, const QString &detail = {}) {
+        states[index] = state;
+        report.row(index, state, detail);
+    };
+    const auto stopAt = [&](int index, const Errors &errors, bool cancelled) {
+        outcome.failedRow = index;
+        outcome.cancelled = cancelled;
+        outcome.errors += errors;
+        const QString detail = errors.isEmpty() ? QString() : errors.first().message;
+        finish(index, cancelled ? RowState::Skipped : RowState::Failed, detail);
+    };
+
+    TrustStore fallbackTrust;
+    TrustStore &trust = run.trust ? *run.trust : fallbackTrust;
+    for (int i = 0; i < plan.packs.size() && outcome.failedRow < 0; ++i) {
+        if (report.stopped()) {
+            stopAt(i, {}, true);
+            break;
+        }
+        const ReadinessPack &row = plan.packs.at(i);
+        report.row(i, RowState::Running);
+        bool refused = false;
+        PackSummary shown = row.pack; // what the yes covers for this row
+        std::shared_ptr<PreparedPack> prepared = row.prepared;
+        QString folderName = row.folderName;
+        PackPrompts prompts = approvals(shown, run, refused);
+        if (row.installs() && row.pending) {
+            // A git pack: only now fetched, over https only, and no bigger than a pack may be.
+            if (QUrl(row.pack.source.location).scheme() != QLatin1String("https")) {
+                stopAt(i, Errors{makeError(QStringLiteral("pack_invalid"),
+                                           QStringLiteral("The pack %1 comes from %2: a workflow or package may only name an https address.").arg(row.pack.id, row.pack.source.location),
+                                           QStringLiteral("Install it yourself with `fugue pack add`, which asks first."))}, false);
+                break;
+            }
+            PackPrompts fetching = prompts;
+            fetching.maxCloneBytes = 200000000;
+            fetching.fetch = run.fetch;
+            const Result<std::shared_ptr<PreparedPack>> got = preparePack(row.pack.source, run.packsDir, fetching);
+            if (!got) {
+                stopAt(i, got.errors(), report.stopped());
+                break;
+            }
+            prepared = *got;
+            shown = prepared->summary;
+            const std::optional<Version> wantedVersion = Version::parse(row.pack.version);
+            const std::optional<Version> gotVersion = Version::parse(shown.version);
+            if (shown.id != row.pack.id || (wantedVersion && gotVersion && gotVersion->major != wantedVersion->major)) {
+                stopAt(i, Errors{makeError(QStringLiteral("pack_invalid"),
+                                           QStringLiteral("%1 holds the pack %2 %3, not the pack %4 %5 the workflow names, so it was not installed.")
+                                               .arg(row.pack.source.location, shown.id, shown.version, row.pack.id, row.pack.version))}, false);
+                break;
+            }
+            // Nothing about its permissions could be shown before the download: more than nothing is asked, for this row alone.
+            if (!shown.permissions.isEmpty() && !(run.allowMore && run.allowMore(shown, shown.permissions))) {
+                finish(i, RowState::Skipped, QStringLiteral("skipped: it declares %1").arg(shown.permissions.join(QStringLiteral(", "))));
+                continue;
+            }
+            prompts = approvals(shown, run, refused);
+        }
+        if (row.installs()) {
+            const Result<PackAdded> added = installPrepared(prepared, run.packsDir, trust, prompts);
+            if (!added) {
+                Errors errors = added.errors();
+                if (refused)
+                    errors.prepend(makeError(QStringLiteral("pack_invalid"),
+                                             QStringLiteral("The pack %1 is not what the list showed (its version, setup command or permissions changed), so it was not installed.").arg(row.pack.id),
+                                             QStringLiteral("Get ready again to see the pack as it is now.")));
+                const bool cancelled = report.stopped() && !errors.isEmpty() && errors.first().code != QLatin1String("setup_failed");
+                stopAt(i, errors, cancelled);
+                break;
+            }
+            outcome.packsChanged = true;
+            folderName = QFileInfo(added->pack.folder).fileName();
+        }
+        // The same yes trusts it (6.7): trust is per id and version, so a new version asks again.
+        const Result<PackSummary> trusted = trustPack(folderName, run.packsDir, trust, prompts);
+        if (!trusted) {
+            Errors errors = trusted.errors();
+            if (refused)
+                errors.prepend(makeError(QStringLiteral("pack_invalid"),
+                                         QStringLiteral("The pack %1 is not what the list showed, so it was not trusted.").arg(row.pack.id)));
+            if (row.installs()) {
+                // Installed but not trusted is a half state: undo the install, and say so.
+                PackPrompts removing;
+                removing.remove = [](const PackSummary &) { return Answer::Yes; };
+                const Result<PackSummary> removed = removePack(folderName, run.packsDir, trust, removing);
+                errors.prepend(makeError(QStringLiteral("pack_invalid"),
+                                         removed ? QStringLiteral("The pack %1 could not be trusted, so its install was undone.").arg(row.pack.id)
+                                                 : QStringLiteral("The pack %1 was installed but could not be trusted, and removing it failed: it is in %2 and not trusted.").arg(row.pack.id, run.packsDir)));
+            }
+            stopAt(i, errors, false);
+            outcome.packsChanged = true;
+            break;
+        }
+        outcome.packsChanged = true;
+        ++outcome.done;
+        finish(i, RowState::Done);
+    }
+
+    if (outcome.failedRow < 0 && !plan.models.isEmpty() && !report.stopped()) {
+        QNetworkAccessManager network;
+        FileHashes fallbackHashes(FileHashes::defaultPath());
+        FileHashes &hashes = run.hashes ? *run.hashes : fallbackHashes;
+        const int base = int(plan.packs.size());
+        // One file after another, each its own queue: the row is the loop's, never a position in a de-duplicated line.
+        for (int m = 0; m < plan.models.size() && outcome.failedRow < 0; ++m) {
+            const ReadinessModel &model = plan.models.at(m);
+            const int row = base + m;
+            if (report.stopped()) {
+                stopAt(row, {}, true);
+                break;
+            }
+            // Free space is checked before each file, not only when the list was shown.
+            const qint64 free = run.freeSpace ? run.freeSpace(model.folder) : freeAt(model.folder);
+            if (model.size >= 0 && free >= 0 && model.size > free) {
+                stopAt(row, Errors{makeError(QStringLiteral("download_failed"),
+                                             QStringLiteral("There is not enough free space for %1 in %2 (%3 needed, %4 free).")
+                                                 .arg(model.name, model.folder, sizeText(model.size), sizeText(free)),
+                                             QStringLiteral("Choose another folder for the models and get ready again."))}, false);
+                break;
+            }
+            DownloadQueue queue(&network, &hashes);
+            queue.setRetries(run.retries, run.retryDelayMs);
+            QEventLoop loop;
+            Errors failed;
+            bool arrived = false;
+            QObject::connect(&queue, &DownloadQueue::started, &loop, [&](int) { report.row(row, RowState::Running); });
+            QObject::connect(&queue, &DownloadQueue::progress, &loop, [&](int, qint64 got, qint64 all) {
+                if (run.onProgress)
+                    run.onProgress(row, got, all);
+            });
+            QObject::connect(&queue, &DownloadQueue::fileFinished, &loop, [&](int, const Errors &errors) {
+                failed = errors;
+                arrived = errors.isEmpty();
+            });
+            QObject::connect(&queue, &DownloadQueue::finished, &loop, &QEventLoop::quit);
+            QTimer poll;
+            QObject::connect(&poll, &QTimer::timeout, &loop, [&] {
+                if (report.stopped())
+                    queue.cancel();
+            });
+            poll.start(100);
+            queue.add({model.target});
+            if (queue.busy())
+                loop.exec();
+            if (arrived) {
+                ++outcome.done;
+                finish(row, RowState::Done);
+            } else {
+                stopAt(row, failed, report.stopped());
+            }
+        }
+    }
+
+    for (int i = 0; i < total; ++i)
+        if (states[i] == RowState::Waiting) {
+            states[i] = RowState::Skipped;
+            report.row(i, RowState::Skipped);
+        }
+    for (int i = 0; i < total; ++i)
+        if (states[i] != RowState::Done)
+            outcome.retry << rowName(plan, i);
+    outcome.ok = outcome.failedRow < 0 && outcome.done == total;
+    return outcome;
+}
+
+} // namespace fugue

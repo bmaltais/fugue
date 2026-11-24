@@ -339,6 +339,19 @@ Popup {
                         inherited: panel.model.inheritedModelPaths
                         kinds: true
                     }
+                    SettingsParts.Setting {
+                        visible: panel.page === 1
+                        title: qsTr("Download models into")
+                        note: qsTr("Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders above.")
+                        key: "download_folder"
+                        Choices {
+                            Layout.fillWidth: true
+                            name: "downloadFolder"
+                            current: panel.model.downloadFolder
+                            options: panel.model.downloadFolders.map(f => ({value: f.path, text: f.title}))
+                            onPicked: value => panel.apply(panel.model.set("download_folder", value))
+                        }
+                    }
                     PathsSetting {
                         visible: panel.page === 1
                         title: qsTr("Extra pack folders")

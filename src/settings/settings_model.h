@@ -75,6 +75,10 @@ class SettingsModel : public QObject {
     // The folders of the Default project this project reads and never writes: its models folder and
     // model_paths (when `models` is inherited), its packs folder and pack_paths (when `packs` is); ~ for home.
     Q_PROPERTY(QStringList inheritedModelPaths READ inheritedModelPaths NOTIFY changed)
+    // Where downloaded models go (`download_folder`, spec 8.9, #379): the folder in effect (Fugue's own when unset) and the
+    // folders that can be chosen, each {path, title}: Fugue's own and the model folders it may write in.
+    Q_PROPERTY(QString downloadFolder READ downloadFolder NOTIFY changed)
+    Q_PROPERTY(QVariantList downloadFolders READ downloadFolders NOTIFY changed)
     Q_PROPERTY(QStringList inheritedPackPaths READ inheritedPackPaths NOTIFY changed)
     // What is wrong with settings.json, one line each, and whether the panel may write it.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
@@ -128,6 +132,8 @@ public:
     bool restoreTabs() const { return m_effective.settings.restoreTabs; }
     QVariantMap origins() const;
     QStringList inheritedModelPaths() const;
+    QString downloadFolder() const;
+    QVariantList downloadFolders() const;
     QStringList inheritedPackPaths() const;
     double cacheResultsGb() const { return m_file.settings.cacheResultsGb; }
     double cacheThumbnailsGb() const { return m_file.settings.cacheThumbnailsGb; }

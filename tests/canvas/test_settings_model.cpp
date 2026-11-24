@@ -48,6 +48,26 @@ private slots:
         QVERIFY(configDir().startsWith(m_home.path()));
     }
 
+    // #379: Settings > Folders' "Download models into" is the banner's old choice with the same key.
+    void downloadModelsIntoOneOfTheModelFolders() {
+        QTemporaryDir comfy;
+        SettingsModel model;
+        QCOMPARE(model.downloadFolder(), dataDir() + "/models");
+        QCOMPARE(model.downloadFolders().size(), 1);
+        QCOMPARE(model.downloadFolders().at(0).toMap().value("title").toString(), QStringLiteral("Fugue's models folder"));
+        QCOMPARE(model.addPath("model_paths", comfy.path()), QString());
+        QCOMPARE(model.downloadFolders().size(), 2);
+        QCOMPARE(model.set("download_folder", comfy.path()), QString());
+        QCOMPARE(model.downloadFolder(), comfy.path());
+        QCOMPARE(SettingsModel().downloadFolder(), comfy.path());
+        // Fugue's own folder is the default: the key leaves the file.
+        QCOMPARE(model.set("download_folder", dataDir() + "/models"), QString());
+        QCOMPARE(model.downloadFolder(), dataDir() + "/models");
+        QFile file(settingsFile());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QVERIFY(!QJsonDocument::fromJson(file.readAll()).object().contains("download_folder"));
+    }
+
     void aChangeIsWrittenAndANewModelReadsItBack() {
         {
             SettingsModel model;

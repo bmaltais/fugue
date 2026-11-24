@@ -23,6 +23,7 @@
 #include "engine/providers_file.h"
 #include "theme.h"
 #include "translator.h"
+#include "workflow/readiness_sheet.h"
 
 namespace fugue {
 
@@ -246,6 +247,27 @@ QString SettingsModel::inputsFolder() const {
     return chosen.isEmpty() ? outputFolder() + QStringLiteral("/inputs") : tilde(QDir::cleanPath(expandHome(chosen)));
 }
 
+namespace {
+// The library of these settings, with the download folder they name.
+ModelLibrary downloadLibrary(const Settings &settings, const Registry *types) {
+    ModelLibrary library(ModelLibrary::roots(settings), types, ModelLibrary::rootKinds(settings));
+    if (!settings.downloadFolder.isEmpty())
+        library.setDownloadRoot(QDir::cleanPath(expandHome(settings.downloadFolder)));
+    return library;
+}
+} // namespace
+
+QString SettingsModel::downloadFolder() const { return downloadLibrary(m_effective.settings, m_types).downloadRoot(); }
+
+QVariantList SettingsModel::downloadFolders() const {
+    const ModelLibrary library = downloadLibrary(m_effective.settings, m_types);
+    QStringList roots = m_types ? library.downloadRoots({}) : library.roots(); // those that take any model, as the sheet offers
+    QVariantList list;
+    for (const QString &root : roots)
+        list.append(QVariantMap{{"path", root}, {"title", ReadinessSheet::rootTitle(root, library.roots().value(0))}});
+    return list;
+}
+
 QString SettingsModel::set(const QString &key, const QVariant &value) {
     if (!m_file.writable)
         return tr("Fix %1 first: it is not a JSON object.").arg(tilde(m_path));
@@ -253,6 +275,11 @@ QString SettingsModel::set(const QString &key, const QVariant &value) {
     if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder")) {
         const QString typed = pathText(value).trimmed();
         json = typed.isEmpty() ? settingDefault(key) : QJsonValue(folderValue(typed));
+    } else if (key == QLatin1String("download_folder")) {
+        // Fugue's own folder is the default: no key.
+        const QString typed = QDir::cleanPath(expandHome(pathText(value).trimmed()));
+        const QString own = ModelLibrary::roots(m_effective.settings).value(0);
+        json = pathText(value).trimmed().isEmpty() || typed == own ? settingDefault(key) : QJsonValue(typed);
     } else if (key == QLatin1String("language") && !json.isUndefined()) { // undefined: give the key up
         const QString code = value.toString();
         if (code.isEmpty())

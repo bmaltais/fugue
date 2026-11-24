@@ -23,6 +23,7 @@
 #include <QStringList>
 
 #include <functional>
+#include <memory>
 
 namespace fugue {
 
@@ -46,6 +47,7 @@ struct PackSummary {
     QStringList nodes;        // node type ids
     QStringList setupCommand; // empty when the pack has no setup
     QString setupDescription;
+    qint64 setupSize = -1;    // bytes its setup downloads, when pack.json's setup says (`size`); -1 when it does not
     PackSource source;        // empty location when installed by copying into the folder by hand
     QString oldVersion;       // for an update: the version being replaced (empty when it did not load)
     bool updating = false;    // the pack replaces an installed one
@@ -63,6 +65,11 @@ struct PackPrompts {
     std::function<void(const QString &)> log;
     // True when the person stopped the work: git and a setup are killed, and the rest is skipped.
     std::function<bool()> cancelled;
+    // A git clone above this many bytes is refused (0: no limit). A pack is a few files.
+    qint64 maxCloneBytes = 0;
+    // Brings a git source into `workFolder` (an empty folder) and returns the commit it is at; null runs git. For tests, so
+    // nothing reaches a network.
+    std::function<Result<QString>(const PackSource &, const QString &workFolder)> fetch;
 };
 
 struct PackAdded {
@@ -77,6 +84,32 @@ PackSource readPackSource(const QString &packFolder);
 // A summary of the pack at `folder` (an installed or staged one). Reads pack.json and the
 // manifests of its nodes; errors when the pack does not load.
 Result<PackSummary> summarizePack(const QString &folder);
+
+// A pack read into a staging folder (a folder is copied, a git address cloned), not yet installed. Installing it
+// (installPrepared) puts that same copy in place, so what was shown is what is installed. The staging folder goes with the
+// last reference to it.
+struct PreparedPack {
+    PackSummary summary; // as `addPack` would ask about it (folder: where it would go)
+    QString staging;
+    QString folder;      // the staged pack folder
+    PackSource source;
+    PreparedPack() = default;
+    PreparedPack(const PreparedPack &) = delete;
+    ~PreparedPack();
+};
+
+// True for what a git source may be: https, ssh, git, file or user@host:path.
+bool looksLikeGitUrl(const QString &text);
+// True when `a` and `b` are the same pack as a person reads it: id, version, setup command, permissions, runtime kinds, nodes
+// and (when `a` names one) the commit. What a yes covers, and no more.
+bool samePack(const PackSummary &shown, const PackSummary &now);
+
+// Reads the pack at `source` into a staging folder and checks it (it loads, no symbolic links, not installed at that major
+// already). Nothing is installed and nothing is asked. `source.ref` is required for git.
+Result<std::shared_ptr<PreparedPack>> preparePack(const PackSource &source, const QString &packsDir, const PackPrompts &prompts = {});
+// Asks `prompts.install` and puts the prepared pack in place, as `addPack` does after its staging.
+Result<PackAdded> installPrepared(const std::shared_ptr<PreparedPack> &prepared, const QString &packsDir, TrustStore &trust,
+                                  const PackPrompts &prompts);
 
 // `fugue pack add`. A folder is copied; a git URL (https, ssh, git, file or user@host:path) is
 // cloned and `ref` checked out. `packsDir` is where the pack goes.

@@ -127,35 +127,15 @@ Item {
                     color: root.look.text
                     text: App.workflows.notice
                 }
-                // Where they go, when more than one model folder can take them; remembered. Made
-                // only when shown, as the progress row below: the window keeps few items (#5).
+                // One button for everything the workflow lacks (#379): packs, their trust and environments, and models,
+                // asked once on the sheet, with where models go.
                 Loader {
-                    active: App.workflows.downloadOffer !== "" && App.workflows.downloadRoots.length > 1
-                    sourceComponent: ComboBox {
-                        objectName: "downloadInto"
-                        model: App.workflows.downloadRoots.map(r => qsTr("Into %1").arg(r.title))
-                        currentIndex: Math.max(0, App.workflows.downloadRoots.findIndex(r => r.path === App.workflows.downloadRoot))
-                        onActivated: index => App.workflows.setDownloadRoot(App.workflows.downloadRoots[index].path)
-                        Accessible.name: qsTr("Download into")
-                    }
-                }
-                // A pack its nodes come from, where the workflow says it can be had (#91).
-                Repeater {
-                    model: App.workflows.packOffers
-                    ThemedButton {
-                        required property var modelData
-                        objectName: "installPack"
-                        text: modelData.text
-                        onClicked: App.workflows.installPackById(modelData.id)
-                    }
-                }
-                Loader {
-                    active: App.workflows.downloadOffer !== ""
+                    active: App.workflows.getReadyOffer // made only when shown: the window keeps few items (#5)
                     sourceComponent: ThemedButton {
-                        objectName: "downloadModels"
+                        objectName: "getReady"
                         highlighted: true
-                        text: App.workflows.downloadOffer
-                        onClicked: App.workflows.downloadMissing()
+                        text: qsTr("Get ready…")
+                        onClicked: App.workflows.readiness.show()
                     }
                 }
                 ToolButton {
@@ -239,10 +219,25 @@ Item {
         }
     }
 
+    // The sheet asks about packs it installs together with everything else (#379), so this waits for it.
+    // Made the first time it opens, and kept: the window keeps few items (#5).
+    property var getReadySheet: null
+    Component {
+        id: getReadyComponent
+        GetReadySheet {}
+    }
+    Connections {
+        target: App.workflows.readiness
+        function onChanged() {
+            if (App.workflows.readiness.open && !root.getReadySheet)
+                root.getReadySheet = getReadyComponent.createObject(root)
+        }
+    }
+
     Question {
         id: trustAsk
         objectName: "trustAsk"
-        visible: App.workflows.pendingTrust.length > 0
+        visible: App.workflows.pendingTrust.length > 0 && !App.workflows.getReadyOffer && !App.workflows.readiness.open
         closePolicy: Popup.NoAutoClose
         ColumnLayout {
             anchors.fill: parent
