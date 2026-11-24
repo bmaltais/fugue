@@ -554,6 +554,30 @@ void CanvasModel::layOut(NodeRow &row) const {
         row.height = m_headerHeight;
         return;
     }
+    // The order rows are laid out in: each section's rows together, so a section has one header: the rows with no
+    // section first, then the named sections in the order they first appear, Advanced last; the manifest's order
+    // within each. A manifest may list a plain input between advanced ones (the Sampler's denoise after flow_shift,
+    // denoise_mode after it), which gave two "Advanced" headers. row.inputs keeps the manifest's order: bypass and
+    // other rules read it (a bypassed node passes its first input of a type).
+    std::vector<Port *> laidOut;
+    {
+        const auto sectionOf = [](const Port &port) {
+            return port.advanced && port.section.isEmpty() ? QString::fromLatin1(kAdvancedSection) : port.section;
+        };
+        QStringList seen;
+        for (Port &port : row.inputs) {
+            laidOut.push_back(&port);
+            if (const QString section = sectionOf(port); !section.isEmpty() && !seen.contains(section))
+                seen.append(section);
+        }
+        const auto rank = [&](const Port *port) {
+            const QString section = sectionOf(*port);
+            if (section.isEmpty())
+                return -1;
+            return section == QLatin1String(kAdvancedSection) ? int(seen.size()) : int(seen.indexOf(section));
+        };
+        std::stable_sort(laidOut.begin(), laidOut.end(), [&](const Port *a, const Port *b) { return rank(a) < rank(b); });
+    }
     const auto run = m_run.constFind(row.id);
     const bool hasThumbnail = run != m_run.constEnd() && !run->thumbnail.isEmpty();
     const qreal maxTall = qRound(40 * unit());
@@ -572,7 +596,8 @@ void CanvasModel::layOut(NodeRow &row) const {
             place(port, m_rowHeight);
         Port *grows = nullptr;
         QString section;
-        for (Port &port : row.inputs) {
+        for (Port *laid : laidOut) {
+            Port &port = *laid;
             const InputValue value = node.inputs.value(port.name);
             // A section starts with its header row; Advanced stays folded unless open or linked.
             const QString portSection = port.advanced && port.section.isEmpty() ? QString::fromLatin1(kAdvancedSection) : port.section;
@@ -630,7 +655,8 @@ void CanvasModel::layOut(NodeRow &row) const {
             // The last multiline input is taller; what is below it moves down, section headers too.
             grows->rowHeight += extra;
             bool below = false;
-            for (Port &port : row.inputs) {
+            for (Port *laid : laidOut) {
+                Port &port = *laid;
                 if (below) {
                     port.rowTop += extra;
                     port.y += extra;
