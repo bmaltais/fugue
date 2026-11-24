@@ -278,6 +278,30 @@ and checked at every pin move.
 
 When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
 
+## Performance hunks (#382)
+
+The last group of the patch makes sampling faster and leaves the pictures alone, except
+SageAttention, which the helper turns on (below). Each hunk is commented in the source. Numbers are
+Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024; an edit has three
+1024x1024 references.
+
+| Hunk | What it does | Pixels | Upstreamable |
+| --- | --- | --- | --- |
+| `model_loader.*`, `dgl/ops/sampling.cpp` | A lazy weight load during sampling is logged on its own line (`sampling loaded the model weights first`) and left out of `sampling completed` | identical | yes |
+| `core/cuda/i8_gemm.cu`, `i8_gated_residual.cu` | No Stream-K for the int8 GEMMs on Ampere (sm_80/86); Ada and newer keep it from 8192 rows. Edit sampling 19.4 s -> 18.5 s | identical | yes |
+| `core/ggml_extend.cpp` | With SageAttention, V is permuted and cast to F16 in one copy | identical | yes |
+| `core/cuda/int8.cu` | A FLUX single block's linear2 input, `concat(attention, swiglu(linear1's MLP half))`, and its ConvRot quantize run as one kernel reading both in place: the activation and the concat are never written (`swiglu_concat_match`). Text to image 3.20 s -> 2.98 s, edit 16.3 s -> 15.3 s | identical | yes |
+| `core/ggml_extend.cpp`, `core/ggml_extensions.*`, `core/cuda/group_norm.cu`, `CMakeLists.txt`, `registration.cu` | A group norm with its affine is one op (`sd.group_norm_affine`) where a kernel runs it, and the CUDA kernel takes the SiLU after it too: one pass instead of four, with ggml's sums and rounding. Elsewhere the ggml ops as before. VAE decode at 1024x1024 0.43 s -> 0.37 s | identical | yes |
+| `dgl/models/vae.*` | A VAE keeps its encodes of the same pixels (content hashes, shape, posterior, tiling; at most 32 latents and 256 MB, dropped when its weights change or the context goes), only where the encode does not use the RNG (the FLUX.2 VAE). An edit's references are encoded once, not for every seed: -0.7 s a warm edit job | identical | yes |
+
+SageAttention: on CUDA the helper adds `"sage_attn": true` to every context that does not set it
+(`withDefaults` in `src/main.cpp`). The patch (`core/ggml_extend.cpp`) takes SageAttention only where
+it beats flash attention: no mask, a head of 64 or 128, and no K/V range scaling (Z-Image scales K
+and V and was 3% slower a step with it, so it keeps flash attention and its pictures are unchanged);
+elsewhere flash attention as before. Text to image 3.38 s -> 3.20 s, edit 18.5 s -> 16.2 s; against flash attention
+the pictures are 33-40 dB PSNR apart and look the same. A request that sends `"sage_attn": false` in
+its context keeps flash attention.
+
 ## Moving the pin
 
 The pin moves only on purpose (spec 8.10).
@@ -291,7 +315,7 @@ The pin moves only on purpose (spec 8.10).
    git diff <new commit> > ../fugue/helper/sdcpp.patch
    ```
    Keep the patch to the cut and its hooks: no change to sampling or model code, except the opt-in
-   hunks above. Re-read each one against the new commit: the template names the cut depends on (The
+   hunks and the performance hunks above. Re-read each one against the new commit: the template names the cut depends on (The
    seam), `blend_mask` and the `sample` arguments may have moved or changed. `SDCondition` is guarded by
    a `static_assert` in `fugue_stages.h`.
 2. Update the commits and hashes in `CMakeLists.txt` and `packaging/PKGBUILD` together.

@@ -1239,12 +1239,21 @@ index 8b3330e..3109d2a 100644
      };
  
 diff --git i/src/dgl/ops/sampling.cpp w/src/dgl/ops/sampling.cpp
-index f040539..e46a8e7 100644
 --- i/src/dgl/ops/sampling.cpp
 +++ w/src/dgl/ops/sampling.cpp
-@@ -58,6 +58,12 @@ namespace sd::dgl::ops {
+@@ -3,6 +3,7 @@
+ #include <cmath>
+ 
+ #include "core/util.h"
++#include "model_loader.h"
+ #include "dgl/models/dit.h"
+ #include "dgl/models/fwd.h"
+ #include "dgl/ops/predictor.h"
+@@ -57,7 +58,14 @@ namespace sd::dgl::ops {
+     Tensor<float> run_sample(const Tensor<float>& input, const std::vector<float>& sigmas, PredictionExecution& prediction_run, const SamplingSolver& solver, const SamplingOptions& options, RunEvents& events) {
          validate_mask(input, options);
          const int64_t sampling_start = ggml_time_ms();
++        const int64_t load_before    = sd_thread_tensor_load_ms();  // a lazy weight load is timed on its own
          LOG_INFO("sampling started: method=%s, steps=%zu", options.method.c_str(), sigmas.size() - 1);
 +        {   // the schedule that runs, for checking a cut of it against another implementation's
 +            std::string schedule;
@@ -1255,7 +1264,7 @@ index f040539..e46a8e7 100644
          auto& model                  = prediction_run.dit();
          const auto& parameterization = prediction_run.parameterization();
          sd::ParallelScope tensor_scope(model.tensor_executor.get());
-@@ -74,6 +80,7 @@ namespace sd::dgl::ops {
+@@ -74,6 +82,7 @@ namespace sd::dgl::ops {
              step.solver_index   = index;
              step.completes_step = index > 0 || (terminal_zero && index < 0 && step.index == static_cast<int>(sigmas.size() - 1));
              step.mask_input     = options.mask_input;
@@ -1263,6 +1272,18 @@ index f040539..e46a8e7 100644
              const auto target   = static_cast<size_t>(step.index);
              if (target < sigmas.size())
                  step.target_sigma = sigmas[target];
+@@ -96,7 +105,10 @@ namespace sd::dgl::ops {
+         if (options.finish.value_or(false) && !terminal_zero)
+             output = parameterization.finish(sigmas.back(), output);
+         observation.end(output);
+-        LOG_INFO("sampling completed, taking %.2fs", (ggml_time_ms() - sampling_start) / 1000.0);
++        const int64_t load_ms = sd_thread_tensor_load_ms() - load_before;
++        if (load_ms > 0)
++            LOG_INFO("sampling loaded the model weights first, taking %.2fs", load_ms / 1000.0);
++        LOG_INFO("sampling completed, taking %.2fs", (ggml_time_ms() - sampling_start - load_ms) / 1000.0);
+         return output;
+     }
+ 
 diff --git i/src/dgl/ops/sampling.h w/src/dgl/ops/sampling.h
 index 9cf837d..623107c 100644
 --- i/src/dgl/ops/sampling.h
@@ -1346,3 +1367,740 @@ index 41988f3..764ec34 100644
      {{name}}_resized = tensor::interpolate({{name}}_original, size = [{{resize_width}}, {{resize_height}}], mode = "lanczos")
      {{name}}_pixels = tensor::crop({{name}}_resized, axes = [0, 1], start = [{{crop_x}}, {{crop_y}}], size = [{{width}}, {{height}}])
  {% else %}
+# Fugue #382 performance hunks (see helper/README.md, Performance hunks).
+diff --git i/src/model_loader.h w/src/model_loader.h
+--- i/src/model_loader.h
++++ w/src/model_loader.h
+@@ -13,6 +13,10 @@
+ 
+ TensorTypeRules parse_tensor_type_rules(const std::string& tensor_type_rules);
+ 
++// Milliseconds this thread has spent in ModelLoader::load_tensors, so a caller can keep a lazy
++// weight load that happens inside its own timing apart (Fugue #382: sampling loads the DiT).
++int64_t sd_thread_tensor_load_ms();
++
+ void convert_tensor(void* src,
+                     ggml_type src_type,
+                     void* dst,
+diff --git i/src/model_loader.cpp w/src/model_loader.cpp
+--- i/src/model_loader.cpp
++++ w/src/model_loader.cpp
+@@ -1111,6 +1111,12 @@ std::vector<ggml_backend_buffer_t> Model
+     return buffers;
+ }
+ 
++static thread_local int64_t thread_tensor_load_ms = 0;
++
++int64_t sd_thread_tensor_load_ms() {
++    return thread_tensor_load_ms;
++}
++
+ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
+                                bool enable_mmap,
+                                const std::set<std::string>* target_tensor_names,
+@@ -1447,6 +1453,7 @@ bool ModelLoader::load_tensors(on_new_te
+     }
+ 
+     int64_t end_time = ggml_time_ms();
++    thread_tensor_load_ms += end_time - start_time;
+     if (log_progress) {
+         LOG_INFO("loading tensors completed, taking %.2fs (read: %.2fs, memcpy: %.2fs, convert: %.2fs, copy_to_backend: %.2fs)",
+                  (end_time - start_time) / 1000.f,
+diff --git i/src/core/cuda/i8_gemm.cu w/src/core/cuda/i8_gemm.cu
+--- i/src/core/cuda/i8_gemm.cu
++++ w/src/core/cuda/i8_gemm.cu
+@@ -376,15 +376,20 @@ namespace sd_i8_cutlass {
+         p.launch         = launch<Types>;
+         return true;
+     }
++    // Stream-K from 8192 rows was tuned on Ada; on Ampere (sm_80/86) the plain tile order is faster for
++    // every shape measured (Klein 9B edit on an RTX 3090: 13.4 -> 10.3 ms and 25.2 -> 23.9 ms; Fugue #382).
++    static bool use_stream_k(const Plan& p) {
++        return p.rows >= 8192 && !(p.device.major == 8 && p.device.minor < 9);
++    }
+     template <class Config>
+     static bool configure_tile(Plan& p) {
+         if (p.packed_w4)
+             return configure_kernel<DenseTypes<Config, false, true>>(p);
+         if (p.split)
+-            return p.rows >= 8192 ? configure_kernel<GatedTypes<Config, true, true>>(p) : configure_kernel<GatedTypes<Config, false, true>>(p);
++            return use_stream_k(p) ? configure_kernel<GatedTypes<Config, true, true>>(p) : configure_kernel<GatedTypes<Config, false, true>>(p);
+         if (p.activation != SDI8GemmActivation::None)
+-            return p.rows >= 8192 ? configure_kernel<GatedTypes<Config, true>>(p) : configure_kernel<GatedTypes<Config, false>>(p);
+-        return p.rows >= 8192 ? configure_kernel<DenseTypes<Config, true>>(p) : configure_kernel<DenseTypes<Config, false>>(p);
++            return use_stream_k(p) ? configure_kernel<GatedTypes<Config, true>>(p) : configure_kernel<GatedTypes<Config, false>>(p);
++        return use_stream_k(p) ? configure_kernel<DenseTypes<Config, true>>(p) : configure_kernel<DenseTypes<Config, false>>(p);
+     }
+     static bool configure(Plan& p) {
+         // This SiTU shape fits two resident CTAs per SM with the narrower, three-stage tile on Ada.
+diff --git i/src/core/cuda/i8_gated_residual.cu w/src/core/cuda/i8_gated_residual.cu
+--- i/src/core/cuda/i8_gated_residual.cu
++++ w/src/core/cuda/i8_gated_residual.cu
+@@ -282,11 +282,16 @@ namespace sd_i8_gated {
+         plan.launch           = launch<Types>;
+         return true;
+     }
++    // Stream-K from 8192 rows was tuned on Ada; on Ampere (sm_80/86) the plain tile order is faster for
++    // every shape measured (Klein 9B edit on an RTX 3090: 13.4 -> 10.3 ms and 25.2 -> 23.9 ms; Fugue #382).
++    static bool use_stream_k(const Operation& op, const Plan& plan) {
++        return op.rows >= 8192 && !(plan.device.major == 8 && plan.device.minor < 9);
++    }
+     template <class Config>
+     static bool configure(const Operation& op, Plan& plan) {
+         if (op.scale != 1.f)
+-            return op.rows >= 8192 ? configure<Config, true, true>(op, plan) : configure<Config, true, false>(op, plan);
+-        return op.rows >= 8192 ? configure<Config, false, true>(op, plan) : configure<Config, false, false>(op, plan);
++            return use_stream_k(op, plan) ? configure<Config, true, true>(op, plan) : configure<Config, true, false>(op, plan);
++        return use_stream_k(op, plan) ? configure<Config, false, true>(op, plan) : configure<Config, false, false>(op, plan);
+     }
+     static bool configure(const Operation& op, Plan& plan) {
+         if (plan.device.major == 8 && plan.device.minor == 9 && op.scale == 1.f &&
+diff --git i/src/core/ggml_extend.cpp w/src/core/ggml_extend.cpp
+--- i/src/core/ggml_extend.cpp
++++ w/src/core/ggml_extend.cpp
+@@ -705,11 +705,17 @@ ggml_tensor* ggml_ext_attention_ext(GGML
+     };
+ 
+ #ifndef SD_USE_UPSTREAM_GGML
+-    if (sage_attn && mask == nullptr && d_head > 0 && d_head <= 128) {
++    // SageAttention only where it beats flash attention (Fugue #382): a head of 64 or 128 and no K/V
++    // range scaling, which would cost the copies it saves (Z-Image: 3% slower a step on an RTX 3090).
++    if (sage_attn && mask == nullptr && (d_head == 64 || d_head == 128) && kv_scale == 1.0f) {
+         auto q_in                 = ggml_reshape_4d(ctx, ggml_ext_cont(runner_ctx, q->type == GGML_TYPE_F32 ? q : ggml_cast(ctx, q, GGML_TYPE_F32)), d_head, L_q, n_head, N);
+         auto k_in                 = ggml_reshape_4d(ctx, ggml_ext_cont(runner_ctx, k->type == GGML_TYPE_F32 ? k : ggml_cast(ctx, k, GGML_TYPE_F32)), d_head, L_k, n_kv_head, N);
+-        auto v_in                 = ggml_ext_cont(runner_ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
+         const int64_t padded_head = d_head <= 64 ? 64 : 128;
++        // V needing no padding or scaling is permuted and cast to F16 in one copy, not an F32 copy and
++        // a cast (Fugue #382: 13.7 ms a step of Klein 9B at 1024x1024 on an RTX 3090, same values).
++        const bool v_cast_once = padded_head == d_head && kv_scale == 1.0f;
++        auto v_in              = v_cast_once ? ggml_cast(ctx, ggml_permute(ctx, v, 0, 2, 1, 3), GGML_TYPE_F16)
++                                             : ggml_ext_cont(runner_ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
+         if ((padded_head != d_head || kv_scale != 1.0f) && v_in->type != GGML_TYPE_F32) {
+             v_in = ggml_cast(ctx, v_in, GGML_TYPE_F32);
+         }
+@@ -723,7 +729,9 @@ ggml_tensor* ggml_ext_attention_ext(GGML
+             k_in = ggml_ext_scale(runner_ctx, k_in, kv_scale);
+             v_in = ggml_ext_scale(runner_ctx, v_in, kv_scale);
+         }
+-        v_in     = ggml_cast(ctx, v_in, GGML_TYPE_F16);
++        if (v_in->type != GGML_TYPE_F16) {
++            v_in = ggml_cast(ctx, v_in, GGML_TYPE_F16);
++        }
+         auto out = ggml_ext_sage_attn(runner_ctx, q_in, k_in, v_in, scale / kv_scale, GGML_SAGE_ATTN_AUTO);
+         if (ggml_backend_supports_op(backend, out)) {
+             kqv = kv_scale != 1.0f ? ggml_ext_scale(runner_ctx, out, 1.0f / kv_scale) : out;
+@@ -812,6 +820,17 @@ ggml_tensor* ggml_ext_group_norm(GGMLRun
+                                  int num_groups,
+                                  float eps) {
+     auto ctx = runner_ctx->ggml_ctx;
++#ifndef SD_USE_UPSTREAM_GGML
++    // One op where the backend has a kernel for it (Fugue #382: CUDA), with ggml's values.
++    if (ggml_n_dims(x) >= 3 && w != nullptr && b != nullptr && x->type == GGML_TYPE_F32 && ggml_is_contiguous(x) &&
++        w->type == GGML_TYPE_F32 && b->type == GGML_TYPE_F32 && runner_ctx->backend != nullptr) {
++        const SDGroupNormParams params = {num_groups, eps};
++        ggml_tensor* inputs[]          = {x, w, b};
++        auto* fused                    = ggml_ext_op_create(ctx, sd_ggml_group_norm_op(), inputs, 3, &params);
++        if (fused != nullptr && ggml_backend_supports_op(runner_ctx->backend, fused))
++            return fused;
++    }
++#endif
+     if (ggml_n_dims(x) >= 3 && w != nullptr && b != nullptr) {
+         w = ggml_reshape_4d(ctx, w, 1, 1, w->ne[0], 1);
+         b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
+diff --git i/src/dgl/models/vae.h w/src/dgl/models/vae.h
+--- i/src/dgl/models/vae.h
++++ w/src/dgl/models/vae.h
+@@ -1,6 +1,11 @@
+ #ifndef __SD_DGL_MODELS_VAE_H__
+ #define __SD_DGL_MODELS_VAE_H__
+ 
++#include <cstdint>
++#include <list>
++#include <mutex>
++#include <string>
++
+ #include "config.h"
+ #include "core/tensor.hpp"
+ #include "dgl/models/fwd.h"
+@@ -19,6 +24,23 @@ namespace sd::dgl::models {
+ 
+         bool refresh_weights() override { return runtime_.refresh_weights(); }
+         bool attach_loras() override { return runtime_.attach_loras(); }
++        // A LoRA makes a model variant of its own, so only changed files (refresh_weights) or a rebuild
++        // change this model's weights.
++        void invalidate_cached_state() override { clear_encode_cache(); }
++
++        // Encodes of the same pixels are kept while the model lives (Fugue #382: an edit's reference
++        // pictures are encoded again for every seed). Only an encode that does not depend on the RNG
++        // is kept; the key is the input's content (two hashes), shape, posterior and tiling.
++        struct EncodeCacheEntry {
++            std::string key;
++            Tensor<float> latents;
++        };
++        std::list<EncodeCacheEntry> encode_cache_;  // most recently used first
++        size_t encode_cache_bytes_ = 0;
++        std::mutex encode_cache_mutex_;
++        bool encode_is_deterministic() const;
++        std::string encode_cache_key(const Tensor<float>& input, bool posterior_mode) const;
++        void clear_encode_cache();
+         bool build_variant(const Model& source, ModelLoader loader) override;
+ 
+         bool build_runners();
+@@ -46,6 +68,7 @@ namespace sd::dgl::models {
+         int align_video_frames(int frames);
+         void validate_vae_latent(const Tensor<float>& latent) const;
+         Tensor<float> encode_vae_latents(const Tensor<float>& input, bool posterior_mode, const std::shared_ptr<RNG>& rng);
++        Tensor<float> encode_vae_latents_uncached(const Tensor<float>& input, bool posterior_mode, const std::shared_ptr<RNG>& rng);
+         Tensor<float> vae_to_dit_latents(const Tensor<float>& latent);
+         Tensor<float> dit_to_vae_latents(const Tensor<float>& latent);
+         Tensor<float> decode_vae_latents(const Tensor<float>& latent, bool decode_video);
+diff --git i/src/dgl/models/vae.cpp w/src/dgl/models/vae.cpp
+--- i/src/dgl/models/vae.cpp
++++ w/src/dgl/models/vae.cpp
+@@ -1,5 +1,8 @@
+ #include "dgl/models/vae.h"
+ 
++#include <functional>
++#include <string_view>
++
+ #include "model/vae/geometry.hpp"
+ 
+ #include "core/backend_fit.h"
+@@ -60,7 +63,37 @@ namespace sd::dgl::models {
+         return runtime_.build_variant(base.runtime_, std::move(loader));
+     }
+ 
++    bool VAE::encode_is_deterministic() const {
++        // The FLUX.2 VAE's latent is its output as it is: no posterior sample, so no RNG.
++        return !tae_ && sd_version_uses_flux2_vae(version());
++    }
++
++    std::string VAE::encode_cache_key(const Tensor<float>& input, bool posterior_mode) const {
++        const auto* bytes = reinterpret_cast<const unsigned char*>(input.data());
++        const size_t size = static_cast<size_t>(input.numel()) * sizeof(float);
++        uint64_t fnv      = 1469598103934665603ull;
++        for (size_t i = 0; i < size; ++i)
++            fnv = (fnv ^ bytes[i]) * 1099511628211ull;
++        const size_t other = std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(bytes), size));
++        std::string key    = std::to_string(fnv) + ":" + std::to_string(other) + ":";
++        for (auto dim : input.shape())
++            key += std::to_string(dim) + "x";
++        const auto& t = vae_tiling_params;
++        key += ":" + std::to_string(posterior_mode) + std::to_string(circular_x) + std::to_string(circular_y) + ":" +
++               std::to_string(t.enabled) + std::to_string(t.temporal_tiling) + "," + std::to_string(t.tile_size_w) + "," +
++               std::to_string(t.tile_size_h) + "," + std::to_string(t.target_overlap) + "," + std::to_string(t.rel_size_w) + "," +
++               std::to_string(t.rel_size_h) + "," + (t.extra_tiling_args ? t.extra_tiling_args : "");
++        return key;
++    }
++
++    void VAE::clear_encode_cache() {
++        std::lock_guard<std::mutex> lock(encode_cache_mutex_);
++        encode_cache_.clear();
++        encode_cache_bytes_ = 0;
++    }
++
+     bool VAE::build_runners() {
++        clear_encode_cache();
+         auto ctx              = runtime_.model_build_context();
+         ctx.params.vae_format = format_;
+         first_stage_model     = uses_tae() ? component_builders::build_tae_runner(ctx, decode_only_)
+@@ -139,6 +172,34 @@ namespace sd::dgl::models {
+     sd::Tensor<float> VAE::encode_vae_latents(const sd::Tensor<float>& x, bool posterior_mode, const std::shared_ptr<RNG>& rng) {
+         if (decode_only_)
+             throw std::runtime_error("this TAE was loaded with decode_only and cannot encode");
++        const bool cached = encode_is_deterministic();
++        const std::string key = cached ? encode_cache_key(x, posterior_mode) : std::string();
++        if (cached) {
++            std::lock_guard<std::mutex> lock(encode_cache_mutex_);
++            for (auto it = encode_cache_.begin(); it != encode_cache_.end(); ++it) {
++                if (it->key == key) {
++                    encode_cache_.splice(encode_cache_.begin(), encode_cache_, it);
++                    LOG_DEBUG("vae_encode: the same pixels were encoded before, reusing their latent");
++                    return encode_cache_.front().latents;
++                }
++            }
++        }
++        auto latents = encode_vae_latents_uncached(x, posterior_mode, rng);
++        if (cached && !latents.empty()) {
++            constexpr size_t max_entries = 32, max_bytes = size_t(256) << 20;
++            const size_t bytes = static_cast<size_t>(latents.numel()) * sizeof(float);
++            std::lock_guard<std::mutex> lock(encode_cache_mutex_);
++            encode_cache_.push_front({key, latents});
++            encode_cache_bytes_ += bytes;
++            while (encode_cache_.size() > max_entries || encode_cache_bytes_ > max_bytes) {
++                encode_cache_bytes_ -= static_cast<size_t>(encode_cache_.back().latents.numel()) * sizeof(float);
++                encode_cache_.pop_back();
++            }
++        }
++        return latents;
++    }
++
++    sd::Tensor<float> VAE::encode_vae_latents_uncached(const sd::Tensor<float>& x, bool posterior_mode, const std::shared_ptr<RNG>& rng) {
+         report_run_progress("vae_encode");
+         // Qwen 2.1 expands each vision slot into four reference latent tokens.
+         const auto alignment = version() == VERSION_QWEN_IMAGE_2_1 ? 32 : get_vae_scale_factor();
+diff --git i/src/core/cuda/int8.cu w/src/core/cuda/int8.cu
+--- i/src/core/cuda/int8.cu
++++ w/src/core/cuda/int8.cu
+@@ -76,7 +76,29 @@ namespace SD_CUDA_NAMESPACE {
+             d = index == 0 ? -d : d;
+             return __fadd_rn(__fadd_rn(__fadd_rn(a, b), c), d);
+         }
+-        static __global__ void quantize_convrot(const float* src, int8_t* dst, float* scales, int64_t k, int64_t rows, int64_t dst_stride) {
++        // A row of a quantizer's input: plain, or (Fugue #382) a FLUX single block's linear2 input read in
++        // place, [attention | swiglu(gate, up)], so neither the activation nor the concat is written.
++        struct PlainRows {
++            const float* src;
++            int64_t k;
++            __device__ __forceinline__ float operator()(int64_t row, int64_t i) const { return src[row * k + i]; }
++        };
++        struct SwigluConcatRows {
++            const float* prefix;  // [rows, prefix_k], contiguous
++            const float* gate;    // the activated half of the GLU input
++            const float* up;      // the other half
++            int64_t prefix_k, stride;
++            __device__ __forceinline__ float operator()(int64_t row, int64_t i) const {
++                if (i < prefix_k)
++                    return prefix[row * prefix_k + i];
++                const int64_t j = row * stride + (i - prefix_k);
++                const float x   = gate[j];
++                // ggml's GLU SWIGLU, op_silu(x) * g, written the same way so the values are the same.
++                return (x / (1.0f + expf(-x))) * up[j];
++            }
++        };
++        template <class Rows>
++        static __device__ __forceinline__ void quantize_convrot_row(const Rows& load, int8_t* dst, float* scales, int64_t k, int64_t rows, int64_t dst_stride) {
+             constexpr int group_size = 256;
+             const int64_t row        = blockIdx.x;
+             const int tid            = threadIdx.x;
+@@ -84,8 +106,7 @@ namespace SD_CUDA_NAMESPACE {
+                 return;
+             extern __shared__ float values[];
+             __shared__ float maxima[32];
+-            const float* src_row = src + row * k;
+-            int8_t* dst_row      = dst + row * dst_stride;
++            int8_t* dst_row = dst + row * dst_stride;
+             {
+                 const int lane = tid % 32;
+                 for (int64_t group = tid / 32; group < k / group_size; group += blockDim.x / 32) {
+@@ -93,7 +114,7 @@ namespace SD_CUDA_NAMESPACE {
+ #pragma unroll
+                     for (int j = 0; j < 8; ++j) {
+                         const int64_t i   = group * group_size + j * 32 + lane;
+-                        const float value = src_row[i];
++                        const float value = load(row, i);
+                         v[j]              = value * (1.0f / 16.0f);
+                     }
+                     // One logical warp owns H256, keeping every butterfly in registers.
+@@ -163,6 +184,12 @@ namespace SD_CUDA_NAMESPACE {
+                 dst_row[i] = (int8_t)value;
+             }
+         }
++        static __global__ void quantize_convrot(const float* src, int8_t* dst, float* scales, int64_t k, int64_t rows, int64_t dst_stride) {
++            quantize_convrot_row(PlainRows{src, k}, dst, scales, k, rows, dst_stride);
++        }
++        static __global__ void quantize_convrot_swiglu_concat(SwigluConcatRows load, int8_t* dst, float* scales, int64_t k, int64_t rows, int64_t dst_stride) {
++            quantize_convrot_row(load, dst, scales, k, rows, dst_stride);
++        }
+ 
+         template <typename Input>
+         static __global__ void convrot_group_amax_i8_cuda(
+@@ -646,6 +673,7 @@ namespace SD_CUDA_NAMESPACE {
+             SDI8CudaGemmPlan* gemm = nullptr;
+             bool fused_activation  = false;
+             bool situ              = false;
++            bool swiglu_concat     = false;  // QUANTIZE of [prefix | swiglu] read in place (swiglu_concat_match)
+         };
+         static size_t reserve(size_t& total, size_t bytes) {
+             const size_t offset = total;
+@@ -670,6 +698,7 @@ namespace SD_CUDA_NAMESPACE {
+             p->padded      = (p->rows + 3) / 4 * 4;
+             p->group       = mat ? op.group_size : 0;
+             p->situ        = (p->kind == GATED || p->kind == SWIGLU_QUANTIZE) && ggml_get_glu_op(nodes[1]) == GGML_GLU_OP_SITU;
++            p->swiglu_concat = !mat && count == 3 && nodes[0]->op == GGML_OP_GLU;
+             if (!mat)
+                 sd_ggml_convrot_describe(dst, &p->group);
+             size_t total = 0;
+@@ -855,6 +884,67 @@ namespace SD_CUDA_NAMESPACE {
+             }
+             return cuda_last_error();
+         }
++        static CUDAError swiglu_concat_launch(const Plan& p, CUDAStream stream, ggml_tensor* const* nodes, int8_t* dst, float* scales) {
++            const auto* glu    = nodes[0];
++            const auto* source = glu->src[0];
++            const auto* prefix = nodes[1]->src[0];
++            const int64_t half = source->ne[0] / 2;
++            const bool swapped = glu->op_params[1] != 0;
++            const auto* base   = static_cast<const float*>(source->data);
++            const SwigluConcatRows load{static_cast<const float*>(prefix->data), base + (swapped ? half : 0), base + (swapped ? 0 : half),
++                                        prefix->ne[0], int64_t(source->nb[1] / sizeof(float))};
++            if (p.padded > p.rows) {
++                auto error = cuda_memset_async(dst + p.k * p.rows, 0, size_t(p.k) * (p.padded - p.rows), stream);
++                if (error != cuda_success)
++                    return error;
++            }
++            static std::mutex mutex;
++            static std::unordered_map<int, bool> configured;
++            {
++                std::lock_guard<std::mutex> lock(mutex);
++                if (!configured[p.device.device]) {
++                    auto error = cuda_set_shared_memory(quantize_convrot_swiglu_concat, int(p.device.shared_memory - 128));
++                    if (error != cuda_success)
++                        return error;
++                    configured[p.device.device] = true;
++                }
++            }
++            const int threads = p.k <= 1024 ? 128 : p.k <= 8192 ? 256
++                                                                : 1024;
++            quantize_convrot_swiglu_concat<<<unsigned(p.rows), threads, size_t(p.k) * sizeof(float), stream>>>(load, dst, scales, p.k, p.rows, p.k);
++            return cuda_last_error();
++        }
++        // A FLUX single block's linear2 input, concat(attention, swiglu(view of linear1)), and its ConvRot
++        // quantize run as one kernel that reads both in place (Fugue #382): the activation and the concat
++        // are never written. Klein 9B at 1024x1024 on an RTX 3090: 43 ms a step less, the same values.
++        static int swiglu_concat_match(ggml_backend_dev_t device, const ggml_cgraph* graph, int first, void*) {
++            auto* g = const_cast<ggml_cgraph*>(graph);
++            if (fusion_disabled() || first + 2 >= ggml_graph_n_nodes(g))
++                return 0;
++            const auto* glu    = ggml_graph_node(g, first);
++            const auto* concat = ggml_graph_node(g, first + 1);
++            const auto* quant  = ggml_graph_node(g, first + 2);
++            const auto* source = glu->src[0];
++            if (glu->op != GGML_OP_GLU || ggml_get_glu_op(glu) != GGML_GLU_OP_SWIGLU || glu->src[1] || !source ||
++                glu->type != GGML_TYPE_F32 || source->type != GGML_TYPE_F32 || !ggml_is_contiguous(glu) ||
++                source->nb[0] != sizeof(float) || source->ne[0] % 2 || source->nb[1] % sizeof(float) ||
++                source->nb[2] != source->ne[1] * source->nb[1] || source->nb[3] != source->ne[2] * source->nb[2])
++                return 0;
++            if (concat->op != GGML_OP_CONCAT || concat->op_params[0] != 0 || concat->src[1] != glu ||
++                concat->type != GGML_TYPE_F32 || !ggml_is_contiguous(concat))
++                return 0;
++            const auto* prefix = concat->src[0];
++            if (!prefix || prefix->type != GGML_TYPE_F32 || !ggml_is_contiguous(prefix) || prefix->ne[0] % 256 || glu->ne[0] % 256)
++                return 0;
++            for (int d = 1; d < 4; ++d)
++                if (prefix->ne[d] != glu->ne[d] || concat->ne[d] != glu->ne[d])
++                    return 0;
++            int group;
++            if (quant->src[0] != concat || !sd_ggml_convrot_describe(quant, &group) || group != 256 || !convrot_supports(device, quant, nullptr) ||
++                size_t(concat->ne[0]) * sizeof(float) + 128 > cuda_device_info(device).shared_memory)
++                return 0;
++            return 3;
++        }
+         template <bool Dequantize>
+         static __global__ void gated_activation(const float* src, const float* xs, const float* ws, float* dst, int64_t n, int64_t rows, bool situ) {
+             const int64_t i    = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+@@ -939,7 +1029,8 @@ namespace SD_CUDA_NAMESPACE {
+             if (!mat) {
+                 auto* quant  = static_cast<int8_t*>(output);
+                 auto* scales = reinterpret_cast<float*>(quant + p.k * p.padded);
+-                error        = convrot_launch(p, stream, static_cast<const float*>(dst->src[0]->data), quant, scales, reinterpret_cast<float*>(scratch_at(p.partial)));
++                error        = p.swiglu_concat ? swiglu_concat_launch(p, stream, nodes, quant, scales)
++                                                   : convrot_launch(p, stream, static_cast<const float*>(dst->src[0]->data), quant, scales, reinterpret_cast<float*>(scratch_at(p.partial)));
+             } else {
+                 auto* quant = reinterpret_cast<int8_t*>(scratch_at(p.quant));
+                 const float* scales;
+@@ -1184,6 +1275,15 @@ namespace SD_CUDA_NAMESPACE {
+         desc.custom_op = sd_ggml_convrot_op();
+         desc.supports  = sd_i8_cuda::convrot_supports;
+         GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++        desc.name      = "sd.quantize_i8_convrot.swiglu_concat." SD_CUDA_NAME ".v1";
++        desc.op        = GGML_OP_GLU;
++        desc.custom_op = nullptr;
++        desc.priority  = 240;
++        desc.supports  = nullptr;
++        desc.match     = sd_i8_cuda::swiglu_concat_match;
++        GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++        desc.op        = GGML_OP_CUSTOM;
++        desc.match     = nullptr;
+ #ifdef SD_CUDA_I8_CUTLASS
+         desc.name      = "sd.linear_i8.swiglu_split.cuda.v1";
+         desc.custom_op = sd_ggml_i8_op();
+diff --git i/src/core/cuda/group_norm.cu w/src/core/cuda/group_norm.cu
+new file mode 100644
+--- /dev/null
++++ w/src/core/cuda/group_norm.cu
+@@ -0,0 +1,177 @@
++// Group norm with its affine, and the SiLU after it when there is one, in one kernel (Fugue #382).
++//
++// ggml's GROUP_NORM, then MUL by gamma and ADD of beta, then (in a resnet block) SILU each read and
++// write the whole activation. ggml_ext_group_norm makes one op of the first three where a kernel
++// runs it (sd_ggml_group_norm_op); this file is that kernel, and it takes a following SILU too. It
++// computes the group statistics exactly as ggml's group_norm_f32 does (the same sums, the same
++// reduction tree) and rounds each step as the separate kernels do, so the values are the same.
++#include <climits>
++#include <cstdlib>
++#include "core/ggml_extensions.h"
++#include "runtime.h"
++
++namespace SD_CUDA_NAMESPACE {
++    namespace sd_group_norm {
++        static bool fusion_disabled() {
++            static const bool value = [] {
++                const char* fusion = std::getenv("GGML_CUDA_DISABLE_FUSION");
++                return fusion && std::atoi(fusion);
++            }();
++            return value;
++        }
++
++        // ggml's block_reduce<SUM>: a warp's butterfly, then every warp sums the warps' totals.
++        template <int Block>
++        static __device__ __forceinline__ float block_sum(float value, float* shared) {
++#pragma unroll
++            for (int offset = 16; offset > 0; offset >>= 1)
++                value += cuda_shuffle_xor(value, offset, 32);
++            if constexpr (Block > 32) {
++                const int warp = threadIdx.x / 32, lane = threadIdx.x % 32;
++                if (lane == 0)
++                    shared[warp] = value;
++                __syncthreads();
++                value = lane < Block / 32 ? shared[lane] : 0.0f;
++#pragma unroll
++                for (int offset = 16; offset > 0; offset >>= 1)
++                    value += cuda_shuffle_xor(value, offset, 32);
++            }
++            return value;
++        }
++
++        template <int Block, bool Silu>
++        static __global__ void group_norm_affine(const float* x, float* dst, const float* gamma, const float* beta, const int group_size,
++                                                 const int ne_elements, const float eps, const int plane, const int channels) {
++            const int start = blockIdx.x * group_size + threadIdx.x;
++            const int end   = min(blockIdx.x * group_size + group_size, ne_elements);
++            __shared__ float sums[64];
++
++            float tmp = 0.0f;
++            for (int j = start; j < end; j += Block)
++                tmp += x[j];
++            tmp              = block_sum<Block>(tmp, sums);
++            const float mean = tmp / group_size;
++
++            tmp = 0.0f;
++            for (int j = start; j < end; j += Block) {
++                const float xi = x[j] - mean;
++                tmp += xi * xi;
++            }
++            tmp                  = block_sum<Block>(tmp, sums + 32);
++            const float variance = tmp / group_size;
++            const float scale    = rsqrtf(variance + eps);
++
++            for (int j = start; j < end; j += Block) {
++                const int c = (j / plane) % channels;
++                float value = __fadd_rn(__fmul_rn(__fmul_rn(x[j] - mean, scale), gamma[c]), beta[c]);
++                if constexpr (Silu)
++                    value = value / (1.0f + expf(-value));
++                dst[j] = value;
++            }
++        }
++
++        static bool supports(ggml_backend_dev_t device, const ggml_tensor* node, void*) {
++            SDGroupNormParams params;
++            return sd_ggml_group_norm_describe(node, &params) && cuda_device_info(device).device >= 0;
++        }
++
++        // The op, then a SILU of it.
++        static int match(ggml_backend_dev_t device, const ggml_cgraph* graph, int first, void*) {
++            auto* g = const_cast<ggml_cgraph*>(graph);
++            if (fusion_disabled() || first + 1 >= ggml_graph_n_nodes(g))
++                return 0;
++            const auto* norm = ggml_graph_node(g, first);
++            const auto* silu = ggml_graph_node(g, first + 1);
++            if (!supports(device, norm, nullptr) || silu->op != GGML_OP_UNARY || ggml_get_unary_op(silu) != GGML_UNARY_OP_SILU ||
++                silu->src[0] != norm || silu->type != GGML_TYPE_F32 || !ggml_is_contiguous(silu) || !ggml_are_same_shape(silu, norm))
++                return 0;
++            return 2;
++        }
++
++        static uintptr_t address(const ggml_tensor* tensor) {
++            size_t offset = 0;
++            while (tensor && !tensor->data && tensor->view_src) {
++                offset += tensor->view_offs;
++                tensor = tensor->view_src;
++            }
++            return tensor && tensor->data ? reinterpret_cast<uintptr_t>(tensor->data) + offset : 0;
++        }
++        static bool overlaps(const ggml_tensor* a, const ggml_tensor* b) {
++            const auto x = address(a), y = address(b);
++            if (!x || !y)
++                return false;
++            return x <= y ? y - x < ggml_nbytes(a) : x - y < ggml_nbytes(b);
++        }
++        // Writing exactly over the input is safe: a group's block reads its values before it writes them.
++        static bool needs_scratch(const ggml_tensor* dst, const ggml_tensor* norm) {
++            return (overlaps(dst, norm->src[0]) && address(dst) != address(norm->src[0])) || overlaps(dst, norm->src[1]) ||
++                   overlaps(dst, norm->src[2]);
++        }
++
++        static ggml_status prepare(ggml_backend_t, ggml_tensor* const* nodes, int count, void**, size_t* workspace, void*) {
++            const auto* dst  = nodes[count - 1];
++            const bool fresh = !dst->data && !dst->buffer && !dst->view_src;
++            *workspace       = fresh || (dst->data && !needs_scratch(dst, nodes[0])) ? 0 : ggml_nbytes(dst);
++            return GGML_STATUS_SUCCESS;
++        }
++        static void destroy(void*, void*) {}
++
++        static ggml_status execute(const ggml_ext_execution_context* execution, ggml_tensor* const* nodes, int count, void*, void*) {
++            ggml_ext_gpu_context context;
++            SDGroupNormParams params;
++            const auto* norm = nodes[0];
++            auto* dst        = nodes[count - 1];
++            if (!cuda_context(execution->backend, &context) || !sd_ggml_group_norm_describe(norm, &params))
++                return GGML_STATUS_FAILED;
++            const bool alias = needs_scratch(dst, norm);
++            if (alias && !execution->workspace)
++                return GGML_STATUS_FAILED;
++            auto* output         = static_cast<float*>(alias ? ggml_backend_buffer_get_base(execution->workspace) : dst->data);
++            const auto stream    = static_cast<CUDAStream>(context.stream);
++            const auto* x        = norm->src[0];
++            const int channels   = int(x->ne[2]);
++            const int plane      = int(x->ne[0] * x->ne[1]);
++            const int group_size = plane * (channels / params.groups);
++            const int elements   = int(ggml_nelements(x));
++            const unsigned grid  = unsigned(params.groups * x->ne[3]);
++            const auto* in       = static_cast<const float*>(x->data);
++            const auto* gamma    = static_cast<const float*>(norm->src[1]->data);
++            const auto* beta     = static_cast<const float*>(norm->src[2]->data);
++            const bool silu      = count == 2;
++            // ggml's launch: a warp for a group under 1024 values, else 1024 threads.
++            if (group_size < 1024) {
++                if (silu)
++                    group_norm_affine<32, true><<<grid, 32, 0, stream>>>(in, output, gamma, beta, group_size, elements, params.eps, plane, channels);
++                else
++                    group_norm_affine<32, false><<<grid, 32, 0, stream>>>(in, output, gamma, beta, group_size, elements, params.eps, plane, channels);
++            } else if (silu) {
++                group_norm_affine<1024, true><<<grid, 1024, 0, stream>>>(in, output, gamma, beta, group_size, elements, params.eps, plane, channels);
++            } else {
++                group_norm_affine<1024, false><<<grid, 1024, 0, stream>>>(in, output, gamma, beta, group_size, elements, params.eps, plane, channels);
++            }
++            CUDAError error = cuda_last_error();
++            if (error == cuda_success && alias)
++                error = cuda_copy_async(dst->data, output, ggml_nbytes(dst), stream);
++            return error == cuda_success ? GGML_STATUS_SUCCESS : GGML_STATUS_FAILED;
++        }
++    }
++
++    void register_group_norm(ggml_backend_dev_t device) {
++        ggml_ext_kernel_desc desc = {};
++        desc.abi_version          = GGML_EXT_ABI_VERSION;
++        desc.name                 = "sd.group_norm_affine." SD_CUDA_NAME ".v1";
++        desc.op                   = GGML_OP_CUSTOM;
++        desc.custom_op            = sd_ggml_group_norm_op();
++        desc.priority             = 100;
++        desc.supports             = sd_group_norm::supports;
++        desc.prepare              = sd_group_norm::prepare;
++        desc.destroy              = sd_group_norm::destroy;
++        desc.execute              = sd_group_norm::execute;
++        GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++        desc.name     = "sd.group_norm_affine_silu." SD_CUDA_NAME ".v1";
++        desc.priority = 240;
++        desc.supports = nullptr;
++        desc.match    = sd_group_norm::match;
++        GGML_ASSERT(ggml_ext_register_kernel_ex(device, &desc, GGML_EXT_KERNEL_CAPTURE_SAFE | GGML_EXT_KERNEL_REPLAY_REUSABLE));
++    }
++}
+diff --git i/src/core/cuda/CMakeLists.txt w/src/core/cuda/CMakeLists.txt
+--- i/src/core/cuda/CMakeLists.txt
++++ w/src/core/cuda/CMakeLists.txt
+@@ -2,7 +2,7 @@ cmake_policy(SET CMP0079 NEW)
+ 
+ function(sd_cuda_sources VENDOR LANGUAGE)
+     set(SOURCES)
+-    foreach(OP rope int8 i8_lora_merge w4 convrot affine modulate bf16 rms_affine registration)
++    foreach(OP rope int8 i8_lora_merge w4 convrot affine modulate bf16 rms_affine group_norm registration)
+         set(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/${OP}_${VENDOR}.cu")
+         string(TOUPPER "${VENDOR}" UPPER_VENDOR)
+         file(GENERATE OUTPUT "${SOURCE}" CONTENT "#define SD_CUDA_VENDOR_${UPPER_VENDOR} 1\n#include \"core/cuda/${OP}.cu\"\n")
+diff --git i/src/core/cuda/registration.cu w/src/core/cuda/registration.cu
+--- i/src/core/cuda/registration.cu
++++ w/src/core/cuda/registration.cu
+@@ -17,6 +17,7 @@ namespace SD_CUDA_NAMESPACE {
+     void register_modulate(ggml_backend_dev_t device);
+     void register_bf16(ggml_backend_dev_t device);
+     void register_rms_affine(ggml_backend_dev_t device);
++    void register_group_norm(ggml_backend_dev_t device);  // Fugue #382
+ #if defined(SD_CUDA_VENDOR_HIP)
+     void register_wmma_attention(ggml_backend_dev_t device);
+ #endif
+@@ -37,6 +38,7 @@ namespace SD_CUDA_NAMESPACE {
+         register_rope(device);
+         register_bf16(device);
+         register_rms_affine(device);
++        register_group_norm(device);
+ #if defined(SD_CUDA_VENDOR_HIP)
+         register_wmma_attention(device);
+ #endif
+diff --git i/src/core/ggml_extensions.h w/src/core/ggml_extensions.h
+--- i/src/core/ggml_extensions.h
++++ w/src/core/ggml_extensions.h
+@@ -110,6 +110,17 @@ struct SDSageAttentionParams {
+ 
+ ggml_ext_op_t sd_ggml_sage_attn_op();
+ 
++// Group norm and its affine in one op (Fugue #382): inputs x [W, H, C, N] F32, gamma and beta [C]
++// F32; the output is x's shape. A kernel that runs it computes ggml's GROUP_NORM, MUL, ADD values.
++struct SDGroupNormParams {
++    int32_t groups;
++    float eps;
++};
++
++ggml_ext_op_t sd_ggml_group_norm_op();
++
++bool sd_ggml_group_norm_describe(const ggml_tensor* node, SDGroupNormParams* params);
++
+ bool sd_ggml_sage_attn_describe(const ggml_tensor* node, SDSageAttentionParams* params);
+ 
+ struct SDSolAttentionParams {
+diff --git i/src/core/ggml_extensions.cpp w/src/core/ggml_extensions.cpp
+--- i/src/core/ggml_extensions.cpp
++++ w/src/core/ggml_extensions.cpp
+@@ -27,6 +27,7 @@ void sd_ggml_rotate_convrot(float* value
+ #include "ggml-ext.h"
+ 
+ #include <algorithm>
++#include <climits>
+ #include <cstring>
+ #include <mutex>
+ #include <unordered_set>
+@@ -449,6 +450,43 @@ bool sd_ggml_sage_attn_describe(const gg
+         return false;
+     std::memcpy(params, attributes, sizeof(*params));
+     return true;
++}
++
++static bool group_norm_infer(ggml_tensor* const* inputs, int count, const void* attributes, ggml_ext_tensor_desc* out) {
++    if (count != 3 || !attributes)
++        return false;
++    SDGroupNormParams params;
++    std::memcpy(&params, attributes, sizeof(params));
++    const auto* x = inputs[0];
++    if (!x || x->type != GGML_TYPE_F32 || !ggml_is_contiguous(x) || params.groups <= 0 || !(params.eps >= 0.f) ||
++        x->ne[2] % params.groups || ggml_nelements(x) > INT_MAX)
++        return false;
++    for (int i = 1; i < 3; ++i)
++        if (!inputs[i] || inputs[i]->type != GGML_TYPE_F32 || !ggml_is_contiguous(inputs[i]) || ggml_nelements(inputs[i]) != x->ne[2])
++            return false;
++    *out = {GGML_TYPE_F32, {x->ne[0], x->ne[1], x->ne[2], x->ne[3]}};
++    return true;
++}
++
++ggml_ext_op_t sd_ggml_group_norm_op() {
++    static const auto op = [] {
++        const ggml_ext_op_desc desc = {GGML_EXT_ABI_VERSION, "sd.group_norm_affine.v1", sizeof(SDGroupNormParams), group_norm_infer};
++        auto result                 = ggml_ext_register_op(&desc);
++        GGML_ASSERT(result);
++        return result;
++    }();
++    return op;
++}
++
++bool sd_ggml_group_norm_describe(const ggml_tensor* node, SDGroupNormParams* params) {
++    if (!node || ggml_ext_op_get(node) != sd_ggml_group_norm_op() || node->src[3] || !ggml_is_contiguous(node))
++        return false;
++    ggml_ext_tensor_desc output;
++    const auto* attributes = ggml_ext_op_attributes(node);
++    if (!group_norm_infer(node->src, 3, attributes, &output) || node->type != output.type || std::memcmp(node->ne, output.ne, sizeof(output.ne)))
++        return false;
++    std::memcpy(params, attributes, sizeof(*params));
++    return true;
+ }
+ 
+ static bool sol_attn_infer(ggml_tensor* const* inputs, int count, const void* attributes, ggml_ext_tensor_desc* out) {

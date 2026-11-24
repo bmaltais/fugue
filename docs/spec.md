@@ -1636,6 +1636,10 @@ it as a module folder and run it with no code of its own in Fugue.
   generation that runs out of memory frees the others and is tried once more. Fugue's own
   residency ([9.3](#93-residency)) records the helper as one model of its instance: dropping it
   shuts the helper down.
+- On CUDA the helper adds `"sage_attn": true` to a context that does not set it: the diffusion model
+  runs SageAttention where it beats flash attention (no mask, a head of 64 or 128, no K/V range
+  scaling: FLUX.2 yes, Z-Image no), about a third less attention time; the pictures are 33-40 dB PSNR
+  from flash attention's and look the same (#382). `"sage_attn": false` keeps flash attention.
 - stable-diffusion.cpp loads a model as one context of all its files and checks at load that
   every component is there, so every stage job names all of them, even the ones it does not run:
   one `fugue/model` gives the same context to every stage, and the helper keeps that one loaded
