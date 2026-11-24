@@ -153,7 +153,7 @@ public:
     // naming a file in it (a file the sender lacked, or one not an image) keeps only the bare name.
     bool openTemplate(const Template &chosen, bool fromPackage = false);
     // The templates for the Templates dialog, in TemplateLibrary::list()'s order, each a map:
-    // id, title, description, category, categoryTitle, tags, preview (a file URL or empty), lightCorner (the preview's bottom-right corner is light: the info button goes dark, workflow/corner_brightness.h),
+    // id, title, description, category, categoryTitle, tags, preview (a file URL or empty),
     // own, missingModels (name, source, folder each), neededPacks (not installed, or at another version), and status, one line: what
     // it lacks on this machine, or empty when it is ready; download, the button's text for its
     // missing models that have a source (as downloadOffer), else empty. A check: no model file is read.

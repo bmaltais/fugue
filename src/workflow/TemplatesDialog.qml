@@ -434,30 +434,29 @@ Popup {
                                         asynchronous: true
                                         sourceSize.width: 512
                                     }
-                                    // About this template: the details, over the picture's corner. A small round
-                                    // chip, dark on a light corner of the picture and light on a dark one, always a little visible and fully on hover or focus of the card.
+                                    // About this template: the details. The same chip as the models' place badge in the other
+                                    // corner (theme body, strong hairline, its height), always fully shown, a bold "i": it reads on
+                                    // any picture (the owner found the faint outlined one hard to see).
                                     Rectangle {
                                         id: infoChip
                                         objectName: "templateInfo-" + cell.modelData.id
                                         anchors { right: parent.right; bottom: parent.bottom; margins: dialog.u }
-                                        width: 6 * dialog.u
-                                        height: width
-                                        radius: width / 2
-                                        // Dark on a light corner, light on a dark one (the picture's own brightness there).
-                                        readonly property bool onLight: cell.modelData.lightCorner === true
-                                        color: Qt.alpha(onLight ? "#ffffff" : "#000000", infoHover.hovered ? 0.85 : 0.6)
+                                        height: 16 + dialog.u
+                                        width: height
+                                        radius: height / 2
+                                        color: infoHover.hovered ? dialog.look.well : dialog.look.body
                                         border.width: 1
-                                        border.color: Qt.alpha(onLight ? "#000000" : "#ffffff", 0.25)
-                                        opacity: cardHover.hovered || infoHover.hovered
-                                                 || (grid.activeFocus && grid.currentIndex === cell.index) ? 1 : 0.55
-                                        Behavior on opacity { NumberAnimation { duration: 90 } }
+                                        border.color: infoHover.hovered ? dialog.look.accent : dialog.look.hairlineStrong
                                         Accessible.role: Accessible.Button
                                         Accessible.name: qsTr("About this template")
-                                        Glyph {
+                                        Text {
                                             anchors.centerIn: parent
-                                            look: dialog.look
-                                            name: "info"
-                                            color: infoChip.onLight ? "#111111" : "#ffffff"
+                                            text: "i"
+                                            color: infoHover.hovered ? dialog.look.accent : dialog.look.text
+                                            font.family: "serif"
+                                            font.bold: true
+                                            font.italic: false
+                                            font.pixelSize: Math.round(infoChip.height * 0.72)
                                         }
                                         ToolTip.visible: infoHover.hovered
                                         ToolTip.delay: App.theme.look.tooltipDelay
