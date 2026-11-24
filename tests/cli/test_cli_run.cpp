@@ -547,6 +547,30 @@ private slots:
         QCOMPARE(names, (QStringList{"This machine", "lab", "studio"}));
     }
 
+    void aSecondRegistrationKeepsAnUnchangedInstancesProvider() {
+        // The window registers at each run's turn; a new provider would end the helper the old
+        // one started, and the models it holds (#382).
+        test::PairedHome home;
+        Registry registry;
+        QVERIFY(!hasErrors(cli::registerProviders(registry)));
+        QList<std::shared_ptr<Provider>> first;
+        for (const ProviderEntry &entry : registry.providers())
+            first << entry.provider;
+        QVERIFY(!hasErrors(cli::registerProviders(registry)));
+        for (int i = 0; i < registry.providers().size(); ++i)
+            QCOMPARE(registry.providers().at(i).provider.get(), first.at(i).get());
+        // A changed instance gets a new provider.
+        QDir().mkpath(home.dir.filePath("config/fugue")); // PairedHome's XDG_CONFIG_HOME
+        QFile file(home.dir.filePath("config/fugue/providers.json"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(R"({"providers": [{"name": "This machine", "type": "omarchy", "timeout_s": 7}]})");
+        file.close();
+        QVERIFY(!hasErrors(cli::registerProviders(registry)));
+        QCOMPARE(registry.providers().size(), 1);
+        QVERIFY(registry.providers().at(0).provider);
+        QVERIFY(registry.providers().at(0).provider.get() != first.at(0).get());
+    }
+
     void aWorkerCollectsGarbageAtMostOncePerHour() {
         const auto oldRun = [&](const QString &id) {
             auto folder = RunFolder::create(runsRoot(), id);

@@ -18,6 +18,8 @@ namespace fugue::cli {
 //     as they were, and the caller must not go on as if there were none;
 //   - a warning for each instance whose provider cannot be made (an unknown type). The
 //     instance is still registered, without a provider, so a pin to it resolves.
+// An instance already in the registry, unchanged, keeps its provider (and the helper or
+// server it started), so the window's runs share the models it holds (spec 9.3).
 Errors registerProviders(Registry &registry);
 
 // Needs the registry's providers set (registerProviders).

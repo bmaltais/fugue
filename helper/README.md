@@ -287,6 +287,7 @@ not change). The tree of the replayed branch's last commit was checked equal to 
 | `314a4a4` a CUTLASS convolution for VAE decoding | `85af2362` (#382) | idem |
 | `0b3ff56` fix the upstream code the build warns about | `b919007f` | Warnings commit |
 | `0bcd3ab` the CUTLASS convolution for AutoEncoderKL decoding only | `b083a041` (#382) | idem (the last row of the Performance table); the tag `fugue-2026-11-24` |
+| `06986ec` VAE conv: the output takes the group norm's scratch when it fits | — (fork only, #382) | a 1024x1024 decode's compute buffer 3328 -> 3073 MB; not pinned yet |
 
 Each fork commit's message says which Fugue commit it came from. New engine commits go on the fork alone; add a row
 here with the fork's short hash.
