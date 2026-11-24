@@ -11,6 +11,7 @@
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
 #include "engine/paths.h"
+#include "engine/registry.h"
 #include "engine/settings.h"
 #include "workflow/model_downloads.h"
 
@@ -40,6 +41,9 @@ QString packSummaryLine(const ReadinessPack &row, const QString &from) {
     return parts.join(QStringLiteral(" · "));
 }
 
+// How often a download's progress changes the view at most.
+constexpr int kProgressMs = 200;
+
 QString joinParts(const QStringList &parts) {
     if (parts.size() < 2)
         return parts.join(QString());
@@ -50,6 +54,10 @@ QString joinParts(const QStringList &parts) {
 
 ReadinessSheet::ReadinessSheet(const Registry *registry, QString trustPath, Request request, QObject *parent)
     : QObject(parent), m_registry(registry), m_trustPath(std::move(trustPath)), m_request(std::move(request)) {
+    m_publishTimer.setSingleShot(true);
+    m_publishTimer.setInterval(kProgressMs);
+    connect(&m_publishTimer, &QTimer::timeout, this, &ReadinessSheet::publish);
+    m_ownRoot = ModelLibrary::current(m_registry).roots().value(0);
     publish(); // QML reads the view before anything is shown
 }
 
@@ -97,6 +105,7 @@ void ReadinessSheet::rebuild() {
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
+    m_ownRoot = env.library.roots().value(0);
     m_plan = buildReadinessPlan(m_request(), env);
     m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
     m_details = QStringList(m_plan.rowCount());
@@ -170,7 +179,12 @@ void ReadinessSheet::start() {
     m_cancel = false;
     m_phase = QStringLiteral("running");
     publish();
-    const ReadinessPlan plan = m_plan;
+    ReadinessPlan plan = m_plan;
+    // The run plans the pack's own model types against a copy of the node types, made here: the window's registry is filled
+    // again on the window's thread (RegistryReloader) as soon as the pack lands in the packs folder, while the run would be
+    // reading it on its own. Kept until the next start(), which is refused while this run is on.
+    m_runTypes = m_registry ? std::make_unique<const Registry>(*m_registry) : nullptr;
+    plan.registry = m_runTypes.get();
     const QString trustPath = m_trustPath;
     QPointer<ReadinessSheet> self(this);
     std::atomic<bool> *cancel = &m_cancel; // the destructor waits for the thread
@@ -190,7 +204,7 @@ void ReadinessSheet::start() {
             tell([=](ReadinessSheet &sheet) {
                 if (row >= 0 && row < sheet.m_fractions.size()) {
                     sheet.m_fractions[row] = all > 0 ? double(got) / double(all) : -1;
-                    sheet.publish();
+                    sheet.publishSoon();
                 }
             });
         };
@@ -305,7 +319,13 @@ bool ReadinessSheet::waitIdle(int msec) {
     return thread->wait(msec);
 }
 
+void ReadinessSheet::publishSoon() {
+    if (!m_publishTimer.isActive())
+        m_publishTimer.start();
+}
+
 void ReadinessSheet::publish() {
+    m_publishTimer.stop(); // what it would show is in this view
     QVariantMap view;
     QStringList parts;
     if (const int n = m_plan.installCount())
@@ -353,8 +373,7 @@ void ReadinessSheet::publish() {
                               {"fraction", m_fractions.value(row)}};
     }
     view["models"] = models;
-    const ModelLibrary library = ModelLibrary::current(m_registry);
-    const QString own = library.roots().value(0);
+    const QString &own = m_ownRoot; // not the settings again for every progress step
     view["destination"] = m_plan.destination;
     view["destinationTitle"] = rootTitle(m_plan.destination, own);
     QVariantList destinations;

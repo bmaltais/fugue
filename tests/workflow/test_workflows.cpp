@@ -32,6 +32,7 @@
 #include "theme.h"
 #include "translator.h"
 #include "workflow/content_hash.h"
+#include "workflow/readiness_sheet.h"
 #include "workflow/workflow_io.h"
 #include "workflow/workflows.h"
 
@@ -163,6 +164,47 @@ private slots:
         sheet->close();
         QVERIFY(!sheet->isOpen());
         QCOMPARE(QDir(packsDir()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList());
+    }
+
+    // The Get ready run never holds the window's thread: a slow step (a setup that takes long, as `uv sync` does) runs on the
+    // sheet's own thread while the window's events go on, and Stop ends it at once with nothing installed.
+    void aSlowStepOfTheRunLeavesTheWindowFreeAndStopEndsIt() {
+        Fixture f;
+        const QString folder = f.file("source/io.example.slow");
+        const QString id = "io.example.slow";
+        QVERIFY(QDir().mkpath(folder + "/tool"));
+        QVERIFY(write(folder + "/pack.json", QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id}, {"version", "1.0.0"}, {"name", "Slow"},
+                                                                       {"nodes", QJsonArray{"tool"}},
+                                                                       {"setup", QJsonObject{{"command", QJsonArray{"sh", "-c", "exec sleep 30"}}}}}).toJson()));
+        QVERIFY(write(folder + "/tool/node.json", QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id + "/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
+                                                                            {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                                                                            {"inputs", QJsonArray{}}, {"outputs", QJsonArray{}}}).toJson()));
+        QVERIFY(write(folder + "/tool/run.sh", "#!/bin/sh\n"));
+        ReadinessSheet sheet(&f.registry, f.locations.trustPath, [&] {
+            WantedPack pack;
+            pack.id = id;
+            pack.version = "1.0.0";
+            pack.needsInstall = pack.hasSource = true;
+            pack.source = PackSource{PackSource::Kind::Path, folder, {}, {}};
+            return ReadinessRequest{{pack}, {}};
+        });
+        sheet.show();
+        QCOMPARE(sheet.view().value("packs").toList().size(), 1);
+        int ticks = 0;
+        QTimer tick;
+        connect(&tick, &QTimer::timeout, this, [&] { ++ticks; });
+        tick.start(10);
+        sheet.start();
+        QCOMPARE(sheet.phase(), QString("running"));
+        QTRY_COMPARE(sheet.view().value("packs").toList().first().toMap().value("state").toString(), QString("running"));
+        const int before = ticks;
+        QTRY_VERIFY(ticks >= before + 10); // the window's timer fires while the setup runs
+        QCOMPARE(sheet.phase(), QString("running"));
+        sheet.cancel();
+        QTRY_COMPARE(sheet.phase(), QString("finished")); // well before the setup's 30 s
+        QVERIFY(!sheet.view().value("ok").toBool());
+        QVERIFY(!QFileInfo::exists(packsDir() + "/" + id));
+        QVERIFY(!TrustStore(f.locations.trustPath).isTrusted(id, "1.0.0"));
     }
 
     void contentHashIgnoresViewRequirementsAndRunButNotLayout() {
