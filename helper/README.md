@@ -290,6 +290,7 @@ Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024
 | `model_loader.*`, `dgl/ops/sampling.cpp` | A lazy weight load during sampling is logged on its own line (`sampling loaded the model weights first`) and left out of `sampling completed` | identical | yes |
 | `core/cuda/i8_gemm.cu`, `i8_gated_residual.cu` | No Stream-K for the int8 GEMMs on Ampere (sm_80/86); Ada and newer keep it from 8192 rows. Edit sampling 19.4 s -> 18.5 s | identical | yes |
 | `core/ggml_extend.cpp` | With SageAttention, V is permuted and cast to F16 in one copy | identical | yes |
+| `dgl/models/vae.*` | A VAE keeps its encodes of the same pixels (content hashes, shape, posterior, tiling; at most 32 latents and 256 MB, dropped when its weights change or the context goes), only where the encode does not use the RNG (the FLUX.2 VAE). An edit's references are encoded once, not for every seed: -0.7 s a warm edit job | identical | yes |
 
 SageAttention: on CUDA the helper adds `"sage_attn": true` to every context that does not set it
 (`withDefaults` in `src/main.cpp`), so the DiT uses SageAttention where its kernel applies and flash
