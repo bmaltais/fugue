@@ -66,16 +66,24 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 # patch, not git apply: inside another git checkout (this one) git apply skips every file.
 find_program(PATCH_EXECUTABLE patch REQUIRED)
 # FetchContent runs PATCH_COMMAND only when it extracts the source, so an existing build folder
-# would keep building the old patch. The source folder is named after the patch's hash: a changed
-# patch gets a fresh extract, patched once, and the build reconfigures when the patch changes.
+# would keep building the old patch (#374). The patch's hash is kept beside the source: when the
+# patch changed, the source and its populate step are removed and extracted and patched again at
+# the same path. The same path matters: ccache then hits for every file the patch did not change,
+# so a patch edit rebuilds in seconds, not the 11 minutes of a new folder (#382).
 set(sdcpp_patch ${CMAKE_CURRENT_SOURCE_DIR}/sdcpp.patch)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${sdcpp_patch})
 file(SHA256 ${sdcpp_patch} sdcpp_patch_sha256)
-string(SUBSTRING ${sdcpp_patch_sha256} 0 12 sdcpp_patch_id)
-set(sdcpp_source_dir ${FETCHCONTENT_BASE_DIR}/sdcpp-src-${sdcpp_patch_id})
-# Earlier patches' sources (and the unhashed folder of older builds) are only disk space now.
-file(GLOB sdcpp_old_sources LIST_DIRECTORIES true ${FETCHCONTENT_BASE_DIR}/sdcpp-src ${FETCHCONTENT_BASE_DIR}/sdcpp-src-*)
-list(REMOVE_ITEM sdcpp_old_sources ${sdcpp_source_dir})
+set(sdcpp_source_dir ${FETCHCONTENT_BASE_DIR}/sdcpp-src)
+set(sdcpp_patch_stamp ${FETCHCONTENT_BASE_DIR}/sdcpp-patch.sha256)
+set(sdcpp_patched_with "")
+if(EXISTS ${sdcpp_patch_stamp})
+  file(READ ${sdcpp_patch_stamp} sdcpp_patched_with)
+endif()
+if(NOT sdcpp_patched_with STREQUAL sdcpp_patch_sha256)
+  file(REMOVE_RECURSE ${sdcpp_source_dir} ${FETCHCONTENT_BASE_DIR}/sdcpp-subbuild)
+endif()
+# The hash-named folders a build made between #374 and this change are only disk space now.
+file(GLOB sdcpp_old_sources LIST_DIRECTORIES true ${FETCHCONTENT_BASE_DIR}/sdcpp-src-*)
 if(sdcpp_old_sources)
   file(REMOVE_RECURSE ${sdcpp_old_sources})
 endif()
@@ -86,6 +94,7 @@ FetchContent_Declare(sdcpp
   SYSTEM  # its headers (and thirdparty/: json.hpp, stb) warn under our flags; they are not ours
   PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 --forward --input=${sdcpp_patch})
 FetchContent_MakeAvailable(sdcpp)
+file(WRITE ${sdcpp_patch_stamp} ${sdcpp_patch_sha256})
 
 add_executable(fugue-helper src/main.cpp src/restore.h)
 target_link_libraries(fugue-helper PRIVATE stable-diffusion)
