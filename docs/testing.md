@@ -9,6 +9,7 @@ before every commit.
 bin/test                    # the whole suite: builds, then ctest -j<cores> (arguments go to ctest)
 bin/test --changed          # only the tests the change since origin/main can affect
 bin/test --changed main     # ... since another base
+bin/test test_a test_b      # only these tests (and their shards): builds just them
 bin/build test_menus        # one test program; run it with ctest -R test_menus or build/test_menus
 ```
 
