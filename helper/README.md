@@ -278,6 +278,16 @@ and checked at every pin move.
 
 When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
 
+## Warnings hunks
+
+The patch's last group, `# warnings`, fixes what the helper's build warns about in upstream code, with
+no change in behaviour, so the build stays warning-free: `.template` on dependent member-template calls
+in `sageattention/attn_utils.cuh` (#174), hand-written UTF conversions instead of the deprecated
+`std::wstring_convert` (`core/util.cpp`, `api/image_metadata.cpp`, same errors on invalid input), and
+two GCC 16 `-Wstringop-overflow` false positives (`thirdparty/stb_image.h`: an explicit bound the code
+already had; `conditioning/conditioner.hpp`: `reshape_` for the same `unsqueeze_`). Send them upstream with
+the rest when the owner says so.
+
 ## Performance hunks (#382)
 
 The last group of the patch makes sampling faster and leaves the pictures alone, except
