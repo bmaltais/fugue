@@ -105,6 +105,9 @@ struct NodeContext {
     // (a randomized input made concrete; a provider node's engine and model).
     // Same purpose as `document`, and likewise not in the cache key.
     QJsonObject usedUpstream;
+    // The model handle of the nearest node upstream that used a model (a provider's selection),
+    // or empty: what a Save node's `{model}` name token is made from.
+    QJsonObject upstreamModel;
     // The folders a node that reads or writes files by path may use (13.6), from
     // RunOptions::roots; none means not limited. Load Image and Save Image check them.
     std::optional<FileRoots> roots;

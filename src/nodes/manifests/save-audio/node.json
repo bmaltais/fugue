@@ -11,7 +11,8 @@
   "needs": {"files": true},
   "inputs": [
     {"name": "audio", "type": "audio", "label": "Audio"},
-    {"name": "name", "type": "text", "label": "Name", "default": "fugue", "widget": "line"},
+    {"name": "name", "type": "text", "label": "Name", "default": "fugue", "widget": "line",
+     "description": "{date} (yyyy-MM-dd), {time} (hh-mm-ss) and {model} (the model's file name without its extension) are filled in. A / makes a subfolder, for example {date}/{model}_{time}."},
     {"name": "format", "type": "text", "label": "Format", "default": "flac", "choices": ["flac", "mp3", "opus"],
      "description": "flac: lossless. mp3: small and plays everywhere. opus: smallest for its quality. A file already in flac or mp3 is copied as it is."},
     {"name": "embed", "type": "text", "label": "Embed workflow", "default": "full",

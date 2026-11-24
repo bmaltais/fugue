@@ -5,6 +5,9 @@
 // (a NodeKernel's run, a ProviderKernel's request and outputs); and at the bottom the shipped
 // `fugue` binary running a graph of them through the fake helper (tests/helper_support).
 
+#include <algorithm>
+#include <cmath>
+
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -27,6 +30,7 @@
 #include "engine/remote_helper_provider.h"
 #include "engine/vips.h"
 #include "nodes/builtin.h"
+#include "nodes/denoise_cut.h"
 #include "nodes/kernels.h"
 #include "../engine/fake_http.h"
 #include "../engine/provider_support.h"
@@ -608,6 +612,86 @@ private slots:
         QCOMPARE(request->params.value("width").toInt(), 640);
         QCOMPARE(request->params.value("height").toInt(), 480);
         QVERIFY(!request->params.contains("sample.method")); // unset: the model's own
+    }
+
+    // ComfyUI's schedule cut (#359): int(steps / denoise) steps, the last `steps` of them run.
+    void theScheduleCutIsAsLongAsComfyUIsAndKeepsTheStepsAsked() {
+        const auto cut = fugue::denoiseCut(6, 0.6);
+        QVERIFY(cut);
+        QCOMPARE(cut->steps, 10); // a float would give 9
+        QCOMPARE(cut->strength, 5.5 / 10);
+        // N equal to steps: the whole schedule, not an error.
+        QCOMPARE(fugue::denoiseCut(6, 0.95)->steps, 6);
+        // The engine keeps min(floor(N * strength) + 1, N) steps: always `steps`, even through float.
+        for (int steps : {1, 4, 6, 8, 20, 50})
+            for (double denoise : {0.05, 0.3, 0.5, 0.6, 0.75, 0.9, 0.99}) {
+                const auto c = fugue::denoiseCut(steps, denoise);
+                QVERIFY(c);
+                const float strength = float(c->strength);
+                QCOMPARE(std::min(int(std::floor(c->steps * strength)) + 1, c->steps), steps);
+            }
+        QVERIFY(!fugue::denoiseCut(6, 1.0)); // nothing to cut at a full redraw
+        QVERIFY(!fugue::denoiseCut(6, 0.0));
+    }
+
+    void theSamplersScheduleCutIsSentOnlyWhenAsked() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/runs/r/nodes/encode/latent.bin"},
+                                 {"meta", QJsonObject{{"width", 640}, {"height", 480}, {"model", model}}}};
+        const Values wired{{"model", Value(model)},
+                           {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                           {"latent", Value(latent)}, {"steps", Value(6)}, {"denoise", Value(0.6)}};
+        const Result<JobRequest> unset = bench.request(kSampler, wired);
+        QVERIFY(unset);
+        QCOMPARE(unset->params.value("sample.steps").toInt(), 6); // as before
+        QCOMPARE(unset->params.value("strength").toDouble(), 0.6);
+        QVERIFY(!unset->params.contains("sample.args"));
+        Values noiseLevel = wired;
+        noiseLevel.insert("denoise_mode", Value(QStringLiteral("noise_level")));
+        QCOMPARE(bench.request(kSampler, noiseLevel)->params, unset->params);
+
+        Values cut = wired;
+        cut.insert("denoise_mode", Value(QStringLiteral("schedule_cut")));
+        const Result<JobRequest> request = bench.request(kSampler, cut);
+        QVERIFY(request);
+        QCOMPARE(request->params.value("sample.steps").toInt(), 10);
+        QCOMPARE(request->params.value("strength").toDouble(), 0.55);
+        QCOMPARE(request->params.value("sample.args").toString(), QStringLiteral("strength_as_noise_level=false"));
+        QCOMPARE(request->inputs.value("init_latent").toObject(), unset->inputs.value("init_latent").toObject());
+
+        // An Empty Latent starts from noise and keeps its steps.
+        const Result<Values> empty = bench.run(kEmptyLatent, {});
+        QVERIFY(empty);
+        cut.insert("latent", empty->value("latent"));
+        const Result<JobRequest> fromNoise = bench.request(kSampler, cut);
+        QVERIFY(fromNoise);
+        QCOMPARE(fromNoise->params.value("sample.steps").toInt(), 6);
+        QVERIFY(!fromNoise->params.contains("sample.args"));
+        QVERIFY(!fromNoise->params.contains("strength"));
+    }
+
+    void aScheduleCutAtDenoiseZeroOrOnAVideoIsRefused() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/l.bin"},
+                                 {"meta", QJsonObject{{"width", 64}, {"height", 64}, {"model", model}}}};
+        Values wired{{"model", Value(model)},
+                     {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                     {"latent", Value(latent)}, {"denoise_mode", Value(QStringLiteral("schedule_cut"))}, {"denoise", Value(0.0)}};
+        const Result<JobRequest> zero = bench.request(kSampler, wired);
+        QVERIFY(!zero);
+        QCOMPARE(zero.error().input, QStringLiteral("denoise"));
+        const QJsonObject clip{{"data", "fugue/latent"},
+                               {"path", "/v.bin"},
+                               {"meta", QJsonObject{{"width", 320}, {"height", 192}, {"frames", 33}, {"fps", 16}, {"model", model}}}};
+        wired.insert("latent", Value(clip));
+        wired.insert("denoise", Value(0.5));
+        const Result<JobRequest> video = bench.request(kSampler, wired);
+        QVERIFY(!video);
+        QCOMPARE(video.error().input, QStringLiteral("denoise_mode"));
     }
 
     void aSampledLatentKnowsItsSizeAndModel() {

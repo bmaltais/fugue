@@ -510,7 +510,7 @@ struct Hooks {
 // callback is global, and the worker runs one job at a time.
 class PreviewScope {
 public:
-    PreviewScope(const json &request, const Hooks &hooks, bool video) : m_hooks(hooks) {
+    PreviewScope(const json &request, const Hooks &hooks, bool video, const std::string &version) : m_hooks(hooks) {
         std::string mode = request.value("preview", "");
         m_file = request.value("preview_file", "");
         if (video || m_file.empty() || !hooks.preview || (mode != "proj" && mode != "tae" && mode != "vae"))
@@ -520,7 +520,11 @@ public:
             mode = "proj";
         const json params = request.value("params", json::object());
         const json &asked = params.contains("sample.steps") ? params["sample.steps"] : params.value("steps", json());
-        const int steps = asked.is_number() ? asked.get<int>() : 20;
+        int steps = asked.is_number() ? asked.get<int>() : 20;
+        // A schedule cut asks for a longer schedule than it runs (strength_args.h).
+        if (params.contains("strength") && params["strength"].is_number())
+            steps = fugue_helper::sampledSteps(steps, params.value("sample.args", std::string()), version,
+                                               params["strength"].get<double>());
         m_active = sd_set_preview_callback(&PreviewScope::frame, mode.c_str(), std::max(1, (steps + 7) / 8), true, false,
                                            this) == SD_STATUS_OK;
     }
@@ -742,7 +746,7 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     }
 
     sd_result_t *result = nullptr;
-    PreviewScope previews(request, hooks, video);
+    PreviewScope previews(request, hooks, video, sd_get_model_version_name(ctx));
     // sd_generate_image clears a cancel asked before it starts, so that one is heard here.
     if (running && !running(ctx))
         fail("cancelled", op + " was cancelled");

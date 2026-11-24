@@ -11,7 +11,8 @@
   "needs": {"files": true},
   "inputs": [
     {"name": "image", "type": "image", "label": "Image"},
-    {"name": "name", "type": "text", "label": "Name", "default": "fugue", "widget": "line"},
+    {"name": "name", "type": "text", "label": "Name", "default": "fugue", "widget": "line",
+     "description": "{date} (yyyy-MM-dd), {time} (hh-mm-ss) and {model} (the model's file name without its extension) are filled in. A / makes a subfolder, for example {date}/{model}_{time}."},
     {"name": "format", "type": "text", "label": "Format", "default": "png", "choices": ["png", "webp"]},
     {"name": "embed", "type": "text", "label": "Embed workflow", "default": "full",
      "choices": ["full", "no-prompts", "none"],

@@ -771,6 +771,41 @@ private slots:
                  (QStringList{"node.cached r2", "node.cached s2", "node.cached s1"}));
     }
 
+    // A Save node learns the model the run used from the nearest node upstream that was given a
+    // diffusion model (Load Models), not from its VAE or text encoder, also when that node is frozen.
+    void aNodeKnowsTheDiffusionModelUpstreamOfIt() {
+        World world;
+        QVERIFY(!hasErrors(world.registry.add(DeclaredPortType{*PortType::parse("fugue/diffusion-model"), PortKind::Resource, "Diffusion model", {}, {}, {}})));
+        QVERIFY(!hasErrors(world.registry.add(DeclaredPortType{*PortType::parse("fugue/vae"), PortKind::Resource, "VAE", {}, {}, {}})));
+        world.type("fugue/loader",
+                   "'inputs': [{'name': 'vae', 'type': 'fugue/vae'}, {'name': 'diffusion_model', 'type': 'fugue/diffusion-model'}],"
+                   " 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &) -> Result<Values> { return Values{{"text", Value(QString("loaded"))}}; });
+        QJsonObject seen;
+        world.kernel("fugue/save", [&](const NodeContext &context) -> Result<Values> {
+            seen = context.upstreamModel;
+            return Values{};
+        });
+        const QByteArray nodes =
+            "{'l': {'type': 'fugue/loader', 'inputs': {'vae': {'resource': 'fugue/vae', 'name': 'ae.safetensors'},"
+            " 'diffusion_model': {'resource': 'fugue/diffusion-model', 'name': 'klein.gguf'}}},"
+            " 'j': {'type': 'fugue/join', 'inputs': {'a': {'from': 'l.text'}, 'b': '!'}},"
+            " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'j.text'}}}}";
+        const Ran first = world.run(world.graph(nodes));
+        QCOMPARE(first.outcome.status, RunStatus::Ok);
+        QCOMPARE(seen.value("name").toString(), QStringLiteral("klein.gguf"));
+
+        // Frozen: the node is served from the cache, and its model is still known.
+        QVERIFY(world.cache->freeze(first.outcome.keys.value("l")));
+        seen = {};
+        QJsonObject frozen = json(QByteArray(nodes).replace("'b': '!'", "'b': '?'")); // so Save runs again
+        QJsonObject l = frozen.value("l").toObject();
+        l.insert("frozen", first.outcome.keys.value("l"));
+        frozen.insert("l", l);
+        QCOMPARE(world.run(world.graph(frozen)).outcome.states.value("l"), NodeState::Frozen);
+        QCOMPARE(seen.value("name").toString(), QStringLiteral("klein.gguf"));
+    }
+
     // --- freeze (10.4) ---
 
     void aFrozenNodeKeepsItsResultWhateverChangesUpstream() {

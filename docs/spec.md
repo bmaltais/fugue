@@ -3064,7 +3064,7 @@ merged, its `node.json` is the source of truth.
 | `fugue/number` | `value` | `value` | |
 | `fugue/image-size` | `aspect` (1:1, 16:9, 9:16, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 6:5, 5:6, 21:9, 9:21), `megapixels` (default 1), `multiple` (advanced, default 64) | `width`, `height` | The size of that many megapixels in that shape, each side a multiple; the same function sizes Generate Image's start image. |
 | `fugue/load-image` | `file` (file picker) | `image`, `width`, `height` | Keyed by the file's content hash. The image is upright: an EXIF orientation is applied, and `width`, `height` are the size it is seen at. |
-| `fugue/save-image` | `image`, `name`, `format` (png, webp), `embed` (full, no-prompts, none), `folder` (optional) | `file` | Sink. Writes to the output folder. Never overwrites a file: `<name>.png`, else `<name>-2.png`, `-3`, and so on, also when several Save nodes write one name at once. [11.7](#117-embedding-in-outputs). |
+| `fugue/save-image` | `image`, `name`, `format` (png, webp), `embed` (full, no-prompts, none), `folder` (optional) | `file` | Sink. Writes to the output folder. `name` may hold `{date}` (yyyy-MM-dd), `{time}` (hh-mm-ss), both local time at the save, and `{model}` (the file name without its extension of the diffusion model used by the nearest upstream node that has one: the model a provider node selected (also when its result is frozen), or the `diffusion_model` a Load Models node holds; never its VAE, text encoder, LoRA or an upscaler; made safe: folders in it are dropped, control characters removed and other characters than letters, digits and `._-+() ` become `_`; `unknown` when no such model is upstream), and `/` to make subfolders: `{date}/{model}_{time}`. The tokens are not part of the node's cache key (the typed name is), so a repeat run of an unchanged Save is a cache hit and writes no second file. Subfolders stay inside the folder saved to: `..`, a part starting with a dot, an empty part (so an absolute name), a backslash, a control character, or a link below the folder that leads out is an error on `name`. Save Video and Save Audio take the same `name` (one shared code). Never overwrites a file: `<name>.png`, else `<name>-2.png`, `-3`, and so on (the end of a name that is 255 bytes long gives way to the number), also when several Save nodes write one name at once. [11.7](#117-embedding-in-outputs). |
 | `fugue/preview` | `value` (any) | none | Sink. Shows the value on the node; from the CLI it is in the run result. |
 | `fugue/generate-image` | `prompt`, `negative_prompt`, `model` (optional), `width` (optional), `height` (optional), `steps` (optional), `guidance` (optional), `seed`, `image` (optional start image), `strength`, `mask` (optional, 1.1.0: [14.4](#144-masking-and-inpainting-167)) | `image`, `seed`, `width`, `height`, `model` | Capability `image.generate`. Unset optional inputs use the model's defaults; an unset size is the start image's, else the model's default; a default of 0 (sd-server's "the model's own") is no default, so the server picks. |
 | `fugue/edit-image` | `instruction`, `images` (list, 1 to the model's limit, else 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`; `instruction` is sent as its `prompt`. |
@@ -3220,7 +3220,7 @@ denoise 1, `simple` with shift 2.02 equals ComfyUI's `simple` to 5e-4 and `discr
 the engine's 1000). Denoise below 1 does not match: ComfyUI cuts the last `steps + 1` sigmas of an
 `int(steps / denoise)`-step schedule; the helper starts at the noise level `denoise` on the `steps`-step
 schedule (strength_args.h, #244), and on a 4 to 6 step schedule, crowded near 1, that leaves one or two steps. The table
-is on #341. Not yet changed: an opt-in helper reading of denoise as ComfyUI's cut.
+is on #341. The opt-in reading is the Sampler's `denoise_mode` (below).
 
 **Reference size (#342, 2026-11-23; the engine at 3b12781f).** Text Encode 1.1.0 has an advanced `reference_size`:
 `auto` (the default) or `exact`. At the pin the engine sizes every reference itself before the VAE, in
@@ -3243,6 +3243,28 @@ on the predictor (`generation_image.cpp`, the `increase` list in `image_referenc
 for the model), the target takes time index 0, the references start at 1 (`rope.hpp`, `gen_flux_ids`, `x_index + 1`)
 and each takes `index * ref_index_scale` with the scale 10 for FLUX.2 (`flux.hpp`, the flux2 config), so the
 references get 10, 20, 30 in the order they are sent, as ComfyUI's ReferenceLatent does. No change was needed.
+
+**Denoise mode (#359, 2026-11-23; the engine at 3b12781f).** The Sampler's advanced `denoise_mode` (1.4.0) is `noise_level`
+or `schedule_cut`, unset by default; unset or `noise_level` sends what it always did. With `schedule_cut`, a start latent
+and 0 < denoise < 1, the kernel sends ComfyUI's reading (`src/nodes/denoise_cut.h`, shared with Detail Regions later):
+N = int(steps / denoise) in double (6 steps at 0.6 give 10; a float gives 9), `sample.steps` = N, `strength` =
+(steps - 0.5) / N and `sample.args` = `strength_as_noise_level=false`. The engine's `slice_sigmas_by_strength`
+(`image_helpers.dgl`) keeps the last `min(floor(N * strength) + 1, N)` steps, exactly `steps` of them; the half step keeps
+the cut off an integer so the helper's float strength cannot drop one. `strengthSampleArgs` leaves a request that names the
+reading alone. An Empty Latent keeps its steps; denoise 0 in this mode is an input error; a video latent refuses the mode
+(Wan's high-noise split counts steps). The live preview is paced by the steps that run, not by N (`sampledSteps` in
+`strength_args.h`). The patch logs the schedule that runs (`sampling sigmas: ...`). Checked on an RTX 3090 (FLUX.2 Klein 4B
+Q8_0, 256 x 256, 6 steps, `flow_shift` 2.02, euler), schedule_cut, sigmas as logged:
+
+| Scheduler | Denoise | Fugue (logged) | ComfyUI (#341) |
+|---|---|---|---|
+| simple | 0.5 | 0.8829, 0.8436, 0.7908, 0.7153, 0.6018, 0.4087, 0 | 0.8829, 0.8434, 0.7904, 0.7153, 0.6013, 0.4068, 0 |
+| simple | 0.75 | 0.9577, 0.9263, 0.8829, 0.8189, 0.7153, 0.5185, 0 | not measured |
+| discrete | 0.5 | 0.8629, 0.8120, 0.7394, 0.6275, 0.4325, 0.0075, 0 | 0.8629, 0.8119, 0.7392, 0.6272, 0.4319, 0.0056, 0 |
+| discrete | 0.75 | 0.9497, 0.9097, 0.8500, 0.7516, 0.5585, 0.0075, 0 | not measured |
+
+The differences are those of denoise 1 (the engine's 1000-point table against ComfyUI's 10000; last discrete sigma 0.0075
+against 0.0056).
 
 ### 14.4 Masking and inpainting (#167)
 

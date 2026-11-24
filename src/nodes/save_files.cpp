@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonObject>
+#include <QRegularExpression>
 
 #include "engine/embed.h"
 #include "engine/file_roots.h"
@@ -15,23 +16,10 @@
 
 namespace fugue::nodes {
 
-Result<QString> saveName(const NodeContext &context, const QString &extension) {
-    const QString name = context.input("name").text().trimmed();
-    if (name.isEmpty() || name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\')) || name.startsWith(QLatin1Char('.')))
-        return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
-                              QStringLiteral("\"%1\" cannot be a file name.").arg(name),
-                              QStringLiteral("Use a plain name without folders; the folder input says where."));
-    // A file name holds at most 255 bytes (NAME_MAX) with its extension.
-    if (const qsizetype bytes = QFile::encodeName(name + QLatin1Char('.') + extension).size(); bytes > 255)
-        return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
-                              QStringLiteral("The name is too long for a file name: %1 bytes with .%2, at most 255.")
-                                  .arg(bytes)
-                                  .arg(extension),
-                              QStringLiteral("Use a shorter name."));
-    return name;
-}
+namespace {
 
-Result<QString> saveFolder(const NodeContext &context) {
+// What the folder input says, resolved and made (see saveLocation).
+Result<QString> baseFolder(const NodeContext &context) {
     // Relative folders are under the output folder, so a workflow made elsewhere cannot
     // write outside it by accident.
     QString folder = context.input("folder").text().trimmed();
@@ -51,19 +39,112 @@ Result<QString> saveFolder(const NodeContext &context) {
     if (folder.isEmpty())
         return makeInputError(QStringLiteral("node_failed"), QStringLiteral("folder"),
                               QStringLiteral("The folder %1 goes through links that loop.").arg(context.input("folder").text().trimmed()));
-    if (context.roots) {
-        // Write into the path that was checked.
-        const Result<QString> writable = context.roots->checkWrite(folder, QStringLiteral("folder"));
-        if (!writable)
-            return writable.errors();
-        folder = writable.value();
+    return folder;
+}
+
+Error badName(const QString &name, const QString &why) {
+    return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
+                          QStringLiteral("\"%1\" cannot be a file name: %2.").arg(name, why),
+                          QStringLiteral("Use a plain name; `/` makes a subfolder, and {date}, {time} and {model} are filled in."));
+}
+
+} // namespace
+
+QString modelLabel(const QJsonObject &handle) {
+    QString name = handle.value("name").toString();
+    name = name.mid(name.lastIndexOf(QRegularExpression(QStringLiteral("[/\\\\]"))) + 1);
+    static const QStringList extensions{"gguf", "safetensors", "sft", "ckpt", "pt", "pth", "bin", "onnx"};
+    if (const qsizetype dot = name.lastIndexOf(QLatin1Char('.')); dot > 0 && extensions.contains(name.mid(dot + 1).toLower()))
+        name.truncate(dot);
+    name.removeIf([](QChar c) { return c.category() == QChar::Other_Control; });
+    for (QChar &c : name)
+        if (!c.isLetterOrNumber() && !QStringLiteral("._-+() ").contains(c))
+            c = QLatin1Char('_');
+    name = name.trimmed();
+    while (name.startsWith(QLatin1Char('.')))
+        name.remove(0, 1);
+    return name.isEmpty() ? QStringLiteral("unknown") : name;
+}
+
+Result<QString> expandSaveName(const QString &typed, const QDateTime &now, const QString &model, const QString &extension) {
+    QString name = typed.trimmed();
+    name.replace(QStringLiteral("{date}"), now.toString(QStringLiteral("yyyy-MM-dd")));
+    name.replace(QStringLiteral("{time}"), now.toString(QStringLiteral("hh-mm-ss")));
+    name.replace(QStringLiteral("{model}"), model);
+    if (name.contains(QLatin1Char('\\')))
+        return badName(name, QStringLiteral("a backslash is not allowed"));
+    for (const QChar c : std::as_const(name))
+        if (c.category() == QChar::Other_Control)
+            return badName(QStringLiteral("(a name with a control character)"),
+                           QStringLiteral("a control character is not allowed"));
+    const QStringList parts = name.split(QLatin1Char('/'));
+    for (qsizetype i = 0; i < parts.size(); ++i) {
+        const QString &part = parts.at(i);
+        if (part.isEmpty())
+            return badName(name, name.isEmpty() ? QStringLiteral("it is empty") : QStringLiteral("it is absolute or has an empty folder"));
+        if (part.startsWith(QLatin1Char('.')))
+            return badName(name, QStringLiteral("a part starting with a dot (. or ..) is not allowed"));
+        // A file name holds at most 255 bytes (NAME_MAX), the file's with its extension.
+        const QString full = i == parts.size() - 1 ? part + QLatin1Char('.') + extension : part;
+        if (const qsizetype bytes = QFile::encodeName(full).size(); bytes > 255)
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
+                                  QStringLiteral("The name is too long for a file name: %1 bytes with .%2, at most 255.")
+                                      .arg(bytes)
+                                      .arg(extension),
+                                  QStringLiteral("Use a shorter name."));
     }
-    if (Errors made = makeFolder(folder); !made.isEmpty()) {
+    return name;
+}
+
+Result<SaveLocation> saveLocation(const NodeContext &context, const QString &extension) {
+    const Result<QString> relative = expandSaveName(context.input("name").text(), QDateTime::currentDateTime(),
+                                                    modelLabel(context.upstreamModel), extension);
+    if (!relative)
+        return relative.errors();
+    const Result<QString> base = baseFolder(context);
+    if (!base)
+        return base.errors();
+    const qsizetype slash = relative->lastIndexOf(QLatin1Char('/'));
+    const auto checked = [&](const QString &folder, const QString &input) -> Result<QString> {
+        if (!context.roots)
+            return folder;
+        // Write into the path that was checked.
+        return context.roots->checkWrite(folder, input);
+    };
+    const Result<QString> baseOk = checked(base.value(), QStringLiteral("folder"));
+    if (!baseOk)
+        return baseOk.errors();
+    QString folder = baseOk.value();
+    if (slash >= 0) {
+        // The subfolders as the system resolves them: a link inside the folder that leads out
+        // is judged by where it leads.
+        const QString wanted = canonicalPath(base.value() + QLatin1Char('/') + relative->left(slash));
+        if (wanted.isEmpty())
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
+                                  QStringLiteral("\"%1\" goes through links that loop.").arg(relative.value()),
+                                  QStringLiteral("Use another name."));
+        if (!isInside(wanted, base.value()))
+            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("name"),
+                                  QStringLiteral("\"%1\" leads out of the folder %2.").arg(relative.value(), base.value()),
+                                  QStringLiteral("A name's folders stay inside the folder the file is saved in."));
+        const Result<QString> subOk = checked(wanted, QStringLiteral("name"));
+        if (!subOk)
+            return subOk.errors();
+        folder = subOk.value();
+    }
+    if (Errors made = makeFolder(baseOk.value()); !made.isEmpty()) {
         made.first().input = QStringLiteral("folder");
         made.first().hint = QStringLiteral("Pick another folder in the node.");
         return made;
     }
-    return folder;
+    if (folder != baseOk.value()) {
+        if (Errors made = makeFolder(folder); !made.isEmpty()) {
+            made.first().input = QStringLiteral("name");
+            made.first().hint = QStringLiteral("Use another name: a folder in it may be a file already.");
+            return made;
+        }
+    }
+    return SaveLocation{folder, relative->mid(slash + 1)};
 }
 
 Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &embed, const QString &what) {
@@ -85,7 +166,18 @@ Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &em
 }
 
 QString numberedName(const QString &name, int n, const QString &extension) {
-    return n == 1 ? QStringLiteral("%1.%2").arg(name, extension) : QStringLiteral("%1-%2.%3").arg(name).arg(n).arg(extension);
+    if (n == 1)
+        return QStringLiteral("%1.%2").arg(name, extension);
+    // The suffix takes room from the name: a name that fits (255 bytes) with no suffix would not
+    // with `-100000`, so its end is cut (at a character) to make the numbered one fit too.
+    const QString tail = QStringLiteral("-%1.%2").arg(n).arg(extension);
+    QString stem = name;
+    const qsizetype room = 255 - QFile::encodeName(tail).size();
+    while (!stem.isEmpty() && QFile::encodeName(stem).size() > room)
+        stem.chop(1);
+    if (!stem.isEmpty() && stem.back().isHighSurrogate())
+        stem.chop(1);
+    return stem + tail;
 }
 
 Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const QString &name, const QString &extension) {
