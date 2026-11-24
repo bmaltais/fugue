@@ -575,6 +575,23 @@ private slots:
         QCOMPARE(request->inputs, (QJsonObject{{"conditioning", QJsonObject{{"path", conditioning.value("path")}}}}));
     }
 
+    void theSamplersFlowShiftIsSentOnlyWhenSet() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<Values> empty = bench.run(kEmptyLatent, {});
+        QVERIFY(empty);
+        const QJsonObject conditioning{{"data", "fugue/conditioning"}, {"path", "/c.bin"}};
+        const Values wired{{"model", Value(model)}, {"conditioning", Value(conditioning)}, {"latent", empty->value("latent")}};
+        const Result<JobRequest> unset = bench.request(kSampler, wired);
+        QVERIFY(unset);
+        QVERIFY(!unset->params.contains("sample.flow_shift")); // empty: the engine's own, the request as before
+        Values withShift = wired;
+        withShift.insert("flow_shift", Value(2.02));
+        const Result<JobRequest> set = bench.request(kSampler, withShift);
+        QVERIFY(set);
+        QCOMPARE(set->params.value("sample.flow_shift").toDouble(), 2.02);
+    }
+
     void theSamplerRedrawsFromAGivenLatentAsFarAsDenoiseSays() {
         Bench bench;
         const QJsonObject model = bench.loaded(bench.zImage());

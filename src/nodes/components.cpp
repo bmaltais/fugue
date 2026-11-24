@@ -822,6 +822,9 @@ public:
             params.insert(QStringLiteral("sample.method"), method.text());
         if (const Value scheduler = context.input(QStringLiteral("scheduler")); !scheduler.isEmpty())
             params.insert(QStringLiteral("sample.scheduler"), scheduler.text());
+        // Only for a schedule that reads it (not Klein's own flux2 one): the engine's default when empty.
+        if (const Value shift = context.input(QStringLiteral("flow_shift")); !shift.isEmpty())
+            params.insert(QStringLiteral("sample.flow_shift"), shift.number());
         // The edit's references, sent as Text Encode sent them, so both stages make one generation.
         const Result<QList<MediaHandle>> references = referencesOf(context.input(QStringLiteral("conditioning")), *context.hashes);
         if (!references)
