@@ -99,6 +99,7 @@ _helper() {
 
 build() {
   cd "$srcdir/$pkgbase"
+  export FUGUE_SHARED_LIBS=OFF # the package is one self-contained binary; bin/build defaults to shared libraries for development
   ./bin/build fugue # the app only: the tests are built by check(), which a CI package build skips
   _helper vulkan
   [[ -n ${FUGUE_SKIP_CUDA:-} ]] || _helper cuda
@@ -106,7 +107,7 @@ build() {
 
 check() {
   cd "$srcdir/$pkgbase"
-  ./bin/build
+  FUGUE_SHARED_LIBS=OFF ./bin/build
   QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure --no-tests=error
 }
 
