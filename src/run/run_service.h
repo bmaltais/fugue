@@ -5,7 +5,8 @@
 // RunService is the window's end of the engine. It owns one thread, the run thread, and
 // everything a run touches lives there: its own Registry (node types, filled again after a
 // reloadNodeTypes(), and the provider instances read again at each run's turn, as a
-// `fugue __worker` does), the kernels, the
+// `fugue __worker` does; an instance that has not changed keeps its provider, so the helper
+// and the models it holds stay between runs, spec 9.3), the kernels, the
 // result cache and file-hash memo (cli::Process), the Run objects and the engine lock. The UI
 // thread only hands over a copy of the document and gets events back, so nothing it does
 // waits on compiling, hashing, moving outputs into the store, a provider or the queue.

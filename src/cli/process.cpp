@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include <algorithm>
 #include <limits>
 
 #include "engine/cache_manager.h"
@@ -20,16 +21,34 @@ QString stampPath() {
 
 } // namespace
 
+namespace {
+
+bool sameInstance(const ProviderInstance &a, const ProviderInstance &b) {
+    return a.name == b.name && a.type == b.type && a.address == b.address && a.key == b.key && a.enabled == b.enabled &&
+           a.settings == b.settings;
+}
+
+} // namespace
+
 Errors registerProviders(Registry &registry) {
     const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
     if (!instances)
         return instances.errors();
+    // An instance that has not changed keeps the provider it has: the window registers again at
+    // each run's turn, and a new provider would end the helper the old one started, with the
+    // models it holds (#382: Klein's DiT read again, 4 s, on every run).
+    const QList<ProviderEntry> previous = registry.providers();
     Errors problems;
     QList<ProviderEntry> entries;
     for (const ProviderInstance &instance : instances.value()) {
         ProviderEntry entry;
         entry.instance = instance;
-        if (instance.enabled) {
+        const auto kept = std::find_if(previous.begin(), previous.end(), [&](const ProviderEntry &old) {
+            return old.provider && sameInstance(old.instance, instance);
+        });
+        if (instance.enabled && kept != previous.end()) {
+            entry.provider = kept->provider;
+        } else if (instance.enabled) {
             const Result<std::shared_ptr<Provider>> provider = createProvider(instance);
             if (provider) {
                 entry.provider = provider.value();
