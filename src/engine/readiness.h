@@ -106,7 +106,8 @@ struct ReadinessPlan {
     int unknownEnvironments = 0;
     qint64 freeBytes = -1;       // free where the models go; -1 when it cannot be told
     // What a run needs to plan the deferred models again once the packs are in: the registry the plan was built with
-    // (it must outlive the plan) and the model folders as they were chosen.
+    // (it must outlive the plan, and nothing may change it during a run on another thread: give the run a copy then) and
+    // the model folders as they were chosen.
     const Registry *registry = nullptr;
     std::shared_ptr<ModelLibrary> library;
     // What cannot be made ready from here: a pack with no known source, a model with no source, a
@@ -159,7 +160,7 @@ struct ReadinessRun {
     FileHashes *hashes = nullptr;
     // Called as a row changes: its number (packs, then models), its state and a line (the error on Failed).
     std::function<void(int row, RowState state, const QString &detail)> onRow;
-    // A model's bytes, as they arrive.
+    // A model's bytes, as they arrive: at most every 100 ms, and once more when the last byte is in.
     std::function<void(int row, qint64 received, qint64 total)> onProgress;
     // What git and a setup print.
     std::function<void(const QString &)> log;

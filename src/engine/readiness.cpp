@@ -394,6 +394,9 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
 
 namespace {
 
+// How often a download's progress reaches ReadinessRun::onProgress at most.
+constexpr qint64 kProgressMs = 100;
+
 // Tells the run's observer, and polls for a stop.
 struct Reporter {
     ReadinessRun &run;
@@ -612,9 +615,14 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             Errors failed;
             bool arrived = false;
             QObject::connect(&queue, &DownloadQueue::started, &loop, [&](int) { report.row(row, RowState::Running); });
+            // The queue says so for every chunk the network hands over (thousands a second on a fast line): the
+            // observer hears it at most every kProgressMs, and once at the end.
+            QElapsedTimer told;
             QObject::connect(&queue, &DownloadQueue::progress, &loop, [&](int, qint64 got, qint64 all) {
-                if (run.onProgress)
-                    run.onProgress(row, got, all);
+                if (!run.onProgress || (told.isValid() && told.elapsed() < kProgressMs && got != all))
+                    return;
+                told.start();
+                run.onProgress(row, got, all);
             });
             QObject::connect(&queue, &DownloadQueue::fileFinished, &loop, [&](int, const Errors &errors) {
                 failed = errors;

@@ -13,6 +13,7 @@
 #include <QObject>
 #include <QString>
 #include <QThread>
+#include <QTimer>
 #include <QWaitCondition>
 #include <QVariantList>
 #include <QVariantMap>
@@ -20,6 +21,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 
 #include "engine/model_library.h"
 #include "engine/readiness.h"
@@ -88,6 +90,8 @@ private:
     bool savePlacement();
     bool askMore(const PackSummary &pack, const QStringList &permissions);
     void publish();
+    // A download's progress: the view is made again at most every kProgressMs (each change rebuilds the sheet's rows in QML).
+    void publishSoon();
     void setRow(int row, RowState state, const QString &detail);
     void ended(const ReadinessOutcome &outcome);
 
@@ -105,6 +109,9 @@ private:
     QList<double> m_fractions;
     QVariantMap m_view;
     QThread *m_thread = nullptr;
+    std::unique_ptr<const Registry> m_runTypes; // the run's copy of the node types (start())
+    QTimer m_publishTimer; // publishSoon()'s
+    QString m_ownRoot;     // Fugue's own models folder, as rebuild() found it
     QString m_destination; // chosen with Change…, not yet written
     QString m_picked;      // a folder picked with Pick a folder…, not yet a model folder
     QVariantMap m_question;

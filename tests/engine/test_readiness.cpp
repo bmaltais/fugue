@@ -9,9 +9,16 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QProcess>
+#include <QScopeGuard>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QtTest>
+
+#include <future>
 
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
@@ -365,6 +372,67 @@ private slots:
         ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
         QVERIFY(runReadinessPlan(plan, run).ok);
         QVERIFY(m_trust->isTrusted("io.test.segment", "1.0.0"));
+    }
+
+    // Spec 8.9: a file with the handle's name and no remembered hash is taken to be the one, as `fugue validate` and the canvas
+    // check take it, also in an extra model folder in ComfyUI's layout. The plan reads no model file to tell.
+    void aFileWithTheNameAndNoRememberedHashIsNotDownloaded() {
+        const QString comfy = m_dir.filePath("comfy");
+        write(comfy + "/loras/a.safetensors", "not the bytes the hash names"); // only a run reads it and finds out
+        ReadinessEnv e = env();
+        e.library = ModelLibrary({models(), comfy}, &m_registry);
+        const ReadinessPlan plan = buildReadinessPlan(request(makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true")),
+                                                              {model("a.safetensors", m_bytes, "/a.safetensors", m_bytes.size())}), e);
+        QCOMPARE(plan.models.size(), 0);
+        QVERIFY(plan.problems.isEmpty());
+        QVERIFY(m_hashes->known(comfy + "/loras/a.safetensors").isEmpty()); // not hashed
+    }
+
+    // The freeze of #379's sheet: a download reported every chunk the network handed over (thousands a second), and each one
+    // rebuilt the window's sheet. The observer now hears it at most every 100 ms, and once at the end.
+    void aDownloadsProgressIsToldAFewTimesASecondNotPerChunk() {
+        const QByteArray body(64 * 16384, 'z');
+        std::promise<quint16> port;
+        // A server on a thread of its own that sends the body in small, spaced chunks, as a real network does.
+        QThread *server = QThread::create([&body, &port] {
+            QTcpServer listener;
+            port.set_value(listener.listen(QHostAddress::LocalHost, 0) ? listener.serverPort() : 0);
+            if (!listener.waitForNewConnection(10000))
+                return;
+            QTcpSocket *socket = listener.nextPendingConnection();
+            socket->waitForReadyRead(5000);
+            socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nConnection: close\r\nContent-Length: "
+                          + QByteArray::number(body.size()) + "\r\n\r\n");
+            for (qsizetype at = 0; at < body.size(); at += 16384) {
+                socket->write(body.mid(at, 16384));
+                socket->waitForBytesWritten(5000);
+                QThread::msleep(4);
+            }
+            socket->disconnectFromHost();
+            if (socket->state() != QAbstractSocket::UnconnectedState)
+                socket->waitForDisconnected(5000);
+        });
+        server->start();
+        const auto stop = qScopeGuard([server] { server->wait(); delete server; });
+        const quint16 at = port.get_future().get();
+        QVERIFY(at != 0);
+        QJsonObject wanted = model("a.safetensors", body, "/a.safetensors", body.size());
+        wanted["source"] = QStringLiteral("http://127.0.0.1:%1/a.safetensors").arg(at);
+        ReadinessRequest r;
+        r.models = {wanted};
+        const ReadinessPlan plan = buildReadinessPlan(r, env());
+        QCOMPARE(plan.models.size(), 1);
+        int told = 0;
+        qint64 last = 0;
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.onProgress = [&](int, qint64 got, qint64) { ++told; last = got; };
+        QElapsedTimer clock;
+        clock.start();
+        const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY2(outcome.ok, outcome.errors.isEmpty() ? "" : qPrintable(outcome.errors.first().message));
+        QCOMPARE(last, qint64(body.size())); // the end is always told
+        // One every 100 ms of the run at most, plus the first and the last: never one per chunk (64 of them here).
+        QVERIFY2(told <= clock.elapsed() / 100 + 2, qPrintable(QStringLiteral("%1 in %2 ms").arg(told).arg(clock.elapsed())));
     }
 };
 
