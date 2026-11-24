@@ -291,6 +291,7 @@ Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024
 | `core/cuda/i8_gemm.cu`, `i8_gated_residual.cu` | No Stream-K for the int8 GEMMs on Ampere (sm_80/86); Ada and newer keep it from 8192 rows. Edit sampling 19.4 s -> 18.5 s | identical | yes |
 | `core/ggml_extend.cpp` | With SageAttention, V is permuted and cast to F16 in one copy | identical | yes |
 | `core/cuda/int8.cu` | A FLUX single block's linear2 input, `concat(attention, swiglu(linear1's MLP half))`, and its ConvRot quantize run as one kernel reading both in place: the activation and the concat are never written (`swiglu_concat_match`). Text to image 3.20 s -> 2.98 s, edit 16.3 s -> 15.3 s | identical | yes |
+| `core/ggml_extend.cpp`, `core/ggml_extensions.*`, `core/cuda/group_norm.cu`, `CMakeLists.txt`, `registration.cu` | A group norm with its affine is one op (`sd.group_norm_affine`) where a kernel runs it, and the CUDA kernel takes the SiLU after it too: one pass instead of four, with ggml's sums and rounding. Elsewhere the ggml ops as before. VAE decode at 1024x1024 0.43 s -> 0.37 s | identical | yes |
 | `dgl/models/vae.*` | A VAE keeps its encodes of the same pixels (content hashes, shape, posterior, tiling; at most 32 latents and 256 MB, dropped when its weights change or the context goes), only where the encode does not use the RNG (the FLUX.2 VAE). An edit's references are encoded once, not for every seed: -0.7 s a warm edit job | identical | yes |
 
 SageAttention: on CUDA the helper adds `"sage_attn": true` to every context that does not set it
