@@ -93,13 +93,10 @@ class SaveImageKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         const QString format = context.input("format").text();
-        const Result<QString> name = saveName(context, format);
-        if (!name)
-            return name.errors();
+        const Result<SaveLocation> where = saveLocation(context, format);
+        if (!where)
+            return where.errors();
         const QString embed = context.input("embed").text();
-        const Result<QString> folder = saveFolder(context);
-        if (!folder)
-            return folder.errors();
 
         // The pixels as a PNG the engine can write (8 or 16 bit), made from a copy so an input
         // file is never the one read and written.
@@ -142,7 +139,7 @@ public:
             }
         }
         QFile::remove(scratch->path());
-        const Result<QString> target = saveAsNew(folder.value(), name.value(), format, bytes);
+        const Result<QString> target = saveAsNew(where->folder, where->name, format, bytes);
         if (!target)
             return target.errors();
 

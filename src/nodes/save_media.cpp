@@ -80,12 +80,9 @@ public:
             return makeInputError(QStringLiteral("node_failed"), QStringLiteral("format"),
                                   QStringLiteral("\"%1\" is not a format this node writes.").arg(format));
 
-        const Result<QString> name = saveName(context, container->extension);
-        if (!name)
-            return name.errors();
-        const Result<QString> folder = saveFolder(context);
-        if (!folder)
-            return folder.errors();
+        const Result<SaveLocation> where = saveLocation(context, container->extension);
+        if (!where)
+            return where.errors();
 
         // The file to write from: pending trim and crop of a video are applied first (7.2).
         const MediaHandle input = context.input(kind).media();
@@ -99,8 +96,8 @@ public:
         const Result<QByteArray> embedded = workflowToEmbed(context, context.input("embed").text(), kind);
         const QByteArray workflow = embedded.value();
 
-        PartialFile::removeStale(folder.value());
-        PartialFile partial(folder.value(), numberedName(name.value(), 1, container->extension));
+        PartialFile::removeStale(where->folder);
+        PartialFile partial(where->folder, numberedName(where->name, 1, container->extension));
         const bool copy = container->copyWhenSame && source->format() == container->extension;
         // The tags go in through a file: a workflow is longer than one argument may be.
         QString tags;
@@ -128,7 +125,7 @@ public:
         if (!tags.isEmpty())
             QFile::remove(tags);
 
-        const Result<QString> target = commitAsNew(partial, folder.value(), name.value(), container->extension);
+        const Result<QString> target = commitAsNew(partial, where->folder, where->name, container->extension);
         if (!target)
             return target.errors();
         const Result<MediaHandle> file = MediaHandle::probe(m_type, *target, *context.hashes);
