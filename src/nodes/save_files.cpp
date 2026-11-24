@@ -22,23 +22,20 @@ namespace {
 Result<QString> baseFolder(const NodeContext &context) {
     // Relative folders are under the output folder, so a workflow made elsewhere cannot
     // write outside it by accident.
-    QString folder = context.input("folder").text().trimmed();
-    if (folder.isEmpty()) {
-        folder = outputDir();
-    } else if (QDir::isRelativePath(folder)) {
-        folder = outputDir() + QLatin1Char('/') + folder;
-        if (!isInside(canonicalPath(folder), canonicalPath(outputDir())))
-            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
-                                  QStringLiteral("%1 leads out of the output folder %2.").arg(context.input("folder").text().trimmed(), outputDir()),
-                                  QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
-    }
+    const QString typed = context.input("folder").text().trimmed();
     // The folder as the system resolves it (links followed where they stand, then `..`),
     // so making it, writing in it and checking it are about one folder. QDir::mkpath
-    // would clean `link/..` away on paper while the write follows the link.
-    folder = canonicalPath(folder);
+    // would clean `link/..` away on paper while the write follows the link. Resolved once:
+    // the folder that is checked is the folder that is returned.
+    const bool relative = !typed.isEmpty() && QDir::isRelativePath(typed);
+    const QString folder = canonicalPath(typed.isEmpty() ? outputDir() : relative ? outputDir() + QLatin1Char('/') + typed : typed);
+    if (relative && !isInside(folder, canonicalPath(outputDir())))
+        return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
+                              QStringLiteral("%1 leads out of the output folder %2.").arg(typed, outputDir()),
+                              QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
     if (folder.isEmpty())
         return makeInputError(QStringLiteral("node_failed"), QStringLiteral("folder"),
-                              QStringLiteral("The folder %1 goes through links that loop.").arg(context.input("folder").text().trimmed()));
+                              QStringLiteral("The folder %1 goes through links that loop.").arg(typed));
     return folder;
 }
 
@@ -144,7 +141,11 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
     if (folder != baseOk.value()) {
         // `folder` is inside the base after links were followed, so the way down is the path
         // between them; a link met there now (one swapped in since) is refused.
-        opened = opened->below(folder.mid(baseOk.value().size() + 1), true);
+        const QString prefix = baseOk.value().endsWith(QLatin1Char('/')) ? baseOk.value() : baseOk.value() + QLatin1Char('/');
+        if (!folder.startsWith(prefix))
+            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("name"),
+                                  QStringLiteral("\"%1\" is not inside the folder %2 any more.").arg(relative.value(), baseOk.value()));
+        opened = opened->below(folder.mid(prefix.size()), true);
         if (!opened) {
             Errors made = opened.errors();
             made.first().input = QStringLiteral("name");

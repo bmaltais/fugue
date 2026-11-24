@@ -202,6 +202,49 @@ private slots:
         QVERIFY(QDir(outside.path()).isEmpty(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot));
     }
 
+    // A link (or file) planted at the partial file's name is never written through: the partial file is
+    // made exclusively, for write() and for a program that writes path() (ffmpeg).
+    void aLinkPlantedAtThePartialNameIsNotWrittenThrough() {
+        QTemporaryDir outside;
+        writeAll(outside.filePath("victim"), "keep");
+        const Result<FolderFd> dir = FolderFd::open(path("o3"), true);
+        QVERIFY(dir.ok());
+        for (const bool viaCreate : {false, true}) {
+            PartialFile partial(dir.value(), "a.png");
+            QVERIFY(QFile::link(outside.filePath("victim"), path("o3/" + partial.name())));
+            const Errors made = viaCreate ? partial.create() : partial.write("x", "a.png");
+            QVERIFY(hasErrors(made));
+            QCOMPARE(readAll(outside.filePath("victim")), QByteArray("keep"));
+            QVERIFY(QFile::remove(path("o3/" + partial.name())));
+        }
+    }
+
+    void partsThatAreNotPlainNamesAreRefused() {
+        QVERIFY(QDir(path("")).mkpath("o4/a"));
+        const Result<FolderFd> base = FolderFd::open(path("o4"), false);
+        QVERIFY(base.ok());
+        for (const char *bad : {"..", "a/../..", ".", "a//b", ""})
+            QVERIFY2(!base->below(bad, true).ok(), bad);
+        QVERIFY(!FolderFd::open(path("o4/a/.."), false).ok());
+    }
+
+    // Walking needs only the search permission of the folders above, and a write-only folder takes a file.
+    void aFolderBehindSearchOnlyAndWriteOnlyFoldersIsWritten() {
+        QVERIFY(QDir(path("")).mkpath("o5/x/t"));
+        QVERIFY(QFile::setPermissions(path("o5/x/t"), QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        QVERIFY(QFile::setPermissions(path("o5/x"), QFileDevice::ExeOwner));
+        const Result<FolderFd> dir = FolderFd::open(path("o5/x/t"), true);
+        bool written = false;
+        if (dir.ok()) {
+            PartialFile partial(dir.value(), "a.png");
+            written = !hasErrors(partial.write("c", "a.png")) && partial.commit("a.png", Overwrite::Never).ok();
+        }
+        QFile::setPermissions(path("o5/x"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QFile::setPermissions(path("o5/x/t"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QVERIFY(written);
+        QCOMPARE(readAll(path("o5/x/t/a.png")), QByteArray("c"));
+    }
+
     void foldersAreMadeAndAnExistingNameIsKept() {
         const Result<FolderFd> dir = FolderFd::open(path("a/b"), true);
         QVERIFY(dir.ok());

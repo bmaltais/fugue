@@ -72,12 +72,20 @@ QString linkedFile(const QString &path) {
     return info.absoluteFilePath();
 }
 
-// One step into `name` below `parent`: never through a link. A missing folder is made when `create`.
+// One step into `name` below `parent`: never through a link, and only a plain folder name (`..`
+// is not stopped by O_NOFOLLOW). A missing folder is made when `create`. The descriptors are
+// O_PATH ones, so a folder needs only the search (x) permission of its parents, not read.
 Result<int> stepInto(int parent, const QByteArray &name, bool create, const QString &shown, const QString &whole) {
-    const int flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+    if (name.isEmpty() || name == "." || name == "..")
+        return makeError(QStringLiteral("permission_denied"), QStringLiteral("The folder %1 has a part that is not a plain name.").arg(whole));
+    const int flags = O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+    bool making = false;
     int fd = ::openat(parent, name.constData(), flags);
-    if (fd < 0 && errno == ENOENT && create && (::mkdirat(parent, name.constData(), 0777) == 0 || errno == EEXIST))
-        fd = ::openat(parent, name.constData(), flags);
+    if (fd < 0 && errno == ENOENT && create) {
+        making = true;
+        if (::mkdirat(parent, name.constData(), 0777) == 0 || errno == EEXIST)
+            fd = ::openat(parent, name.constData(), flags);
+    }
     if (fd >= 0)
         return fd;
     const int error = errno;
@@ -85,8 +93,9 @@ Result<int> stepInto(int parent, const QByteArray &name, bool create, const QStr
     if (::fstatat(parent, name.constData(), &info, AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(info.st_mode))
         return makeError(QStringLiteral("permission_denied"),
                          QStringLiteral("Cannot write in %1: it is a link, which a save does not follow.").arg(shown));
-    return makeError(writeFailureCode(error),
-                     QStringLiteral("Cannot create the folder %1: %2.").arg(whole, QString::fromLocal8Bit(std::strerror(error))));
+    return makeError(writeFailureCode(error), QStringLiteral("Cannot %1 the folder %2: %3.")
+                                                  .arg(making ? QStringLiteral("create") : QStringLiteral("open"), whole,
+                                                       QString::fromLocal8Bit(std::strerror(error))));
 }
 
 } // namespace
@@ -94,7 +103,7 @@ Result<int> stepInto(int parent, const QByteArray &name, bool create, const QStr
 Result<FolderFd> FolderFd::open(const QString &dir, bool create) {
     if (beforeFolderOpen)
         beforeFolderOpen(dir);
-    int fd = ::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int fd = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0)
         return makeError(writeFailureCode(errno), QStringLiteral("Cannot open the folder %1.").arg(dir));
     QString walked;
@@ -114,7 +123,7 @@ Result<FolderFd> FolderFd::below(const QString &relative, bool create) const {
     if (fd < 0)
         return makeError(writeFailureCode(errno), QStringLiteral("Cannot open the folder %1.").arg(m_path));
     QString walked = m_path;
-    for (const QString &part : relative.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+    for (const QString &part : relative.split(QLatin1Char('/'))) {
         walked += QLatin1Char('/') + part;
         const Result<int> next = stepInto(fd, QFile::encodeName(part), create, walked, m_path + QLatin1Char('/') + relative);
         ::close(fd);
@@ -166,10 +175,31 @@ PartialFile::PartialFile(const FolderFd &dir, const QString &name)
     m_path = QDir(dir.path()).filePath(QFile::decodeName(m_leaf));
 }
 
+// The file made here and held open, so what is written (by us, or by a program given path())
+// is that file, whatever is planted at its name: exclusive, never through a link, a plain file.
+Errors PartialFile::create() const {
+    if (!m_dir || m_file >= 0)
+        return {};
+    errno = 0;
+    struct stat info {};
+    const int fd = ::openat(m_dir->fd(), m_leaf.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+    if (fd < 0)
+        return {writeFailed(m_path, errno)};
+    if (::fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+        const int error = errno != 0 ? errno : EIO;
+        ::close(fd);
+        ::unlinkat(m_dir->fd(), m_leaf.constData(), 0);
+        return {writeFailed(m_path, error)};
+    }
+    m_file = fd;
+    return {};
+}
+
 QString PartialFile::path() const {
     if (!m_dir)
         return m_path;
-    return QStringLiteral("/proc/%1/fd/%2/%3").arg(::getpid()).arg(m_dir->fd()).arg(QFile::decodeName(m_leaf));
+    // The open file's own magic link: it leads to that file, not to a name that can be swapped.
+    return QStringLiteral("/proc/%1/fd/%2").arg(::getpid()).arg(m_file);
 }
 
 void PartialFile::removeStale(const FolderFd &dir) {
@@ -195,6 +225,8 @@ void PartialFile::removeStale(const QString &dir) {
 }
 
 PartialFile::~PartialFile() {
+    if (m_file >= 0)
+        ::close(m_file);
     if (m_committed)
         return;
     if (m_dir)
@@ -208,8 +240,9 @@ Errors PartialFile::write(const QByteArray &bytes, const QString &what) const {
     errno = 0;
     bool opened;
     if (m_dir) {
-        const int fd = ::openat(m_dir->fd(), m_leaf.constData(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0666);
-        opened = fd >= 0 && out.open(fd, QIODevice::WriteOnly, QFile::AutoCloseHandle);
+        if (Errors made = create(); !made.isEmpty())
+            return made;
+        opened = out.open(m_file, QIODevice::WriteOnly, QFile::DontCloseHandle);
     } else {
         opened = out.open(QIODevice::WriteOnly);
     }

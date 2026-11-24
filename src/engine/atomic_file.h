@@ -10,6 +10,7 @@
 // that may be the user's (Save Image) never does.
 
 #include <QByteArray>
+#include <QFile>
 #include <QString>
 
 #include "engine/result.h"
@@ -78,9 +79,16 @@ public:
     PartialFile(const PartialFile &) = delete;
     PartialFile &operator=(const PartialFile &) = delete;
 
-    // Where to write the content (a program such as ffmpeg may write it itself). For a PartialFile
-    // in a FolderFd this is a /proc/<pid>/fd path that leads through the open folder.
+    // The partial file's name in its folder (a PartialFile in a FolderFd).
+    QString name() const { return QFile::decodeName(m_leaf); }
+
+    // Where to write the content (a program such as ffmpeg may write it itself). In a FolderFd this is
+    // /proc/<pid>/fd/<n> of the partial file held open (after create(); needs /proc and a process that
+    // may be inspected, so not PR_SET_DUMPABLE 0), which no link at its name can redirect.
     QString path() const;
+    // In a FolderFd: makes the partial file now (a program that writes path() needs it there; write()
+    // does it itself). Empty when made; else an error. Nothing to do for a PartialFile in a path.
+    Errors create() const;
 
     // Writes `bytes` as the whole content. On failure an error naming `what`, with
     // writeFailureCode's code.
@@ -102,6 +110,7 @@ public:
 private:
     QString m_path;       // the whole path, or in a FolderFd the folder's path and the name, for messages
     const FolderFd *m_dir = nullptr;
+    mutable int m_file = -1; // the partial file, open, in a FolderFd
     QByteArray m_leaf;    // the partial file's name in m_dir
     bool m_committed = false;
 };

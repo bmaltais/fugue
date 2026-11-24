@@ -98,6 +98,8 @@ public:
 
         PartialFile::removeStale(*where->dir);
         PartialFile partial(*where->dir, numberedName(where->name, 1, container->extension));
+        if (const Errors made = partial.create(); hasErrors(made))
+            return made;
         const bool copy = container->copyWhenSame && source->format() == container->extension;
         // The tags go in through a file: a workflow is longer than one argument may be.
         QString tags;
