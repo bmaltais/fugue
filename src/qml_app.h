@@ -21,6 +21,7 @@
 #include "canvas/mask_layer.h" // a QML item (MaskLayer): the module registers it from here
 #include "canvas/paint_layer.h" // a QML item (PaintLayer): likewise
 #include "canvas/float_place_qml.h" // a QML singleton (FloatPlace): the module registers it from here
+#include "canvas/compare_detail_qml.h" // a QML singleton (CompareDetail): the module registers it from here
 #include "commands/command_registry.h"
 #include "menu/color_history.h"
 #include "menu/image_actions.h"

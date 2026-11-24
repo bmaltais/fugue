@@ -27,6 +27,12 @@ Item {
     property url sourceA
     property url sourceB
     property url sourceDifference
+    // The files themselves, when `sources` are smaller copies of them: drawn over the copy, once loaded, while `detail` is
+    // on (the node's face asks for it when zoomed in, #371). Left empty, the view only ever draws its sources.
+    property url fileA
+    property url fileB
+    property url fileDifference
+    property bool detail: false
     property size sizeA: Qt.size(0, 0)
     property size sizeB: Qt.size(0, 0)
     property string labelA: "A"
@@ -143,24 +149,43 @@ Item {
 
         Rectangle { anchors.fill: parent; color: view.background }
 
-        // One image, drawn in the frame of A inside the clip rectangle (x, y, w, h of the view).
+        // The image of a Layer: A's frame, smooth down to the file's own pixels, then nearest-neighbour.
+        component Picture: Image {
+            required property real panelCx
+            required property point origin // the layer's top left
+            x: view.edgeX(panelCx) - origin.x
+            y: view.edgeY() - origin.y
+            width: view.aw * view.imageScale
+            height: view.ah * view.imageScale
+            asynchronous: true
+            cache: false
+            fillMode: Image.PreserveAspectCrop
+            smooth: implicitWidth <= 0 || width <= implicitWidth
+            mipmap: smooth
+        }
+
+        // One image, drawn in the frame of A inside the clip rectangle (x, y, w, h of the view). With `sharpSource` and
+        // the view's `detail` on, the file is loaded beside the copy and takes over when it is ready: the copy stays
+        // drawn until then, so nothing flashes, and goes (with the file) when `detail` goes off.
         component Layer: Item {
             id: piece
             property url source
+            property url sharpSource
             property real panelCx: view.panelW / 2
             clip: true
-            Image {
-                x: view.edgeX(piece.panelCx) - piece.x
-                y: view.edgeY() - piece.y
-                width: view.aw * view.imageScale
-                height: view.ah * view.imageScale
+            Picture {
+                panelCx: piece.panelCx
+                origin: Qt.point(piece.x, piece.y)
                 source: piece.source
-                asynchronous: true
-                cache: false
-                fillMode: Image.PreserveAspectCrop
-                // Smooth (and mipmapped) down to the file's own pixels, then nearest-neighbour.
-                smooth: implicitWidth <= 0 || width <= implicitWidth
-                mipmap: smooth
+                visible: !sharp.ready
+            }
+            Picture {
+                id: sharp
+                panelCx: piece.panelCx
+                origin: Qt.point(piece.x, piece.y)
+                readonly property bool ready: status === Image.Ready
+                source: view.detail ? piece.sharpSource : ""
+                visible: ready
             }
         }
 
@@ -169,6 +194,7 @@ Item {
             objectName: "layerB"
             visible: view.sliding || (view.mode === "flip" && view.showB)
             source: view.sourceB
+            sharpSource: view.fileB
             width: view.width
             height: view.height
         }
@@ -176,6 +202,7 @@ Item {
             objectName: "layerA"
             visible: view.sliding || view.single || (view.mode === "flip" && !view.showB)
             source: view.sourceA
+            sharpSource: view.fileA
             width: view.mode === "slider" ? view.position * view.width : view.width
             height: view.mode === "slider_horizontal" ? view.position * view.height : view.height
         }
@@ -184,6 +211,7 @@ Item {
             objectName: "layerPairA"
             visible: view.paired
             source: view.sourceA
+            sharpSource: view.fileA
             width: view.panelW
             height: view.height
         }
@@ -193,6 +221,7 @@ Item {
             x: view.panelW
             panelCx: view.panelW + view.panelW / 2
             source: view.sourceB
+            sharpSource: view.fileB
             width: view.panelW
             height: view.height
         }
@@ -200,6 +229,7 @@ Item {
             objectName: "layerDifference"
             visible: view.mode === "difference"
             source: view.sourceDifference
+            sharpSource: view.fileDifference
             width: view.width
             height: view.height
         }
