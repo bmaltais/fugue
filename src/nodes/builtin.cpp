@@ -42,6 +42,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addTextGenerationKernels(kernels);
     addTextTemplateKernels(kernels);
     addUpscaleKernels(kernels);
+    addRestoreKernels(kernels);
     addUpscaleVideoModelKernels(kernels);
     // The programs of the packs on disk (7).
     kernels.setCommandKernel(std::make_shared<CommandKernel>());

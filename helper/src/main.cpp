@@ -24,6 +24,11 @@
 //                        "context": {"model_path"}, "params": {"tile_size"} (no sd context: the
 //                        upscaler stays loaded between calls); "frames": DIR, "frames_output":
 //                        DIR instead of image and output: every PNG of a folder, in name order
+//   {"op": "restore",    "image": IN, "output": OUT}           PNG -> PNG restored by SeedVR2 at its own
+//                        "context": {"model_path", "vae_path"}, size (the caller scales it first): padded
+//                        "params": {"tile_size", "overlap",    to a multiple of 16, VAE-encoded in tiles,
+//                        "seed"}                               one euler step, decoded in tiles, cropped;
+//                        refused before loading: model_unsupported (the files' tensor names), input_invalid (size, tiling)
 //
 // A context of a video model (Wan) makes the same operations on video: the library's video
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
@@ -61,7 +66,7 @@
 //   {"op": "shutdown"}         -> {}, then it exits; so does it when stdin closes
 //
 // The capability is the operation: text.encode (encode), latent.sample (sample),
-// latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale). params.context is the request's
+// latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale), image.restore (restore). params.context is the request's
 // "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent,
 // .image, .mask and .frames ({"path"}) are its input files, and its outputs are written into output_dir
 // as conditioning.bin, latent.bin, image.png (an upscale of frames: the folder frames-out/). Jobs
@@ -106,6 +111,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -116,6 +122,7 @@
 #include "ggml-backend.h"
 #include "json.hpp"
 #include "stable-diffusion.h"
+#include "restore.h"
 #include "strength_args.h"
 
 // stb and json.hpp come from stable-diffusion.cpp's thirdparty/, a system include folder here
@@ -492,6 +499,9 @@ struct Hooks {
     // Told the context just before the generation (false from it: cancelled, do not start) and
     // null after it.
     std::function<bool(sd_ctx_t *)> running;
+    // The same for a restore, which runs on a DGL context: told it before the run (false: cancelled) and
+    // null after; the server cancels it with sd_dgl_ctx_cancel.
+    std::function<bool(sd_dgl_ctx_t *)> runningDgl;
     // True once the job is cancelled: polled between the frames of an upscale, which has no
     // cancel inside a frame.
     std::function<bool()> cancelled;
@@ -637,13 +647,211 @@ json runUpscale(const json &request, Contexts &contexts, const Hooks &hooks) {
     }
 }
 
+
+// image.restore: SeedVR2 through the library's DGL (the pin has no vid_upscale call; its docs/models/seedvr2.md
+// script is the model). The picture is already the size it should end at (Fugue scales it, so the
+// reference of the colour fix is the same picture). The program, the limits and the progress bar are in
+// restore.h; this reads the request, checks it before anything is freed, and runs the program on a DGL
+// context made for the job.
+struct DglFree {
+    void operator()(sd_dgl_ctx_t *c) const { sd_dgl_ctx_free(c); }
+};
+struct DglResultFree {
+    void operator()(sd_dgl_result_t *r) const { sd_dgl_result_free(r); }
+};
+
+// The tracker the global tile callback feeds while a restore runs (both run on the worker thread).
+fugue_helper::RestoreProgress *g_restoreProgress = nullptr;
+
+// A whole number in [low, high] from a request value, or a refusal naming the field.
+int64_t wholeNumber(const json &params, const char *field, int64_t fallback) {
+    if (!params.contains(field))
+        return fallback;
+    const json &value = params[field];
+    if (value.is_number_integer() || value.is_number_unsigned())
+        return value.get<int64_t>();
+    if (value.is_number_float() && std::isfinite(value.get<double>()) && value.get<double>() == std::floor(value.get<double>()) &&
+        std::fabs(value.get<double>()) < 9e15)
+        return static_cast<int64_t>(value.get<double>());
+    fail("input_invalid", std::string(field) + " must be a whole number");
+}
+
+// The tensor names of a safetensors or GGUF file's header (empty when it is neither or cannot be read).
+std::set<std::string> tensorNames(const std::string &path) {
+    std::set<std::string> names;
+    std::ifstream in(path, std::ios::binary);
+    char magic[4] = {};
+    if (!in.read(magic, 4))
+        return names;
+    const auto u64 = [&] {
+        uint64_t v = 0;
+        in.read(reinterpret_cast<char *>(&v), 8);
+        return in ? v : uint64_t(~0ull);
+    };
+    const auto u32 = [&] {
+        uint32_t v = 0;
+        in.read(reinterpret_cast<char *>(&v), 4);
+        return v;
+    };
+    const auto text = [&](uint64_t limit) {
+        const uint64_t length = u64();
+        if (!in || length > limit)
+            return std::string("\1");
+        std::string value(length, '\0');
+        in.read(value.data(), static_cast<std::streamsize>(length));
+        return value;
+    };
+    if (std::memcmp(magic, "GGUF", 4) == 0) {
+        u32(); // version
+        const uint64_t tensors = u64(), pairs = u64();
+        if (!in || tensors > 1'000'000 || pairs > 1'000'000)
+            return names;
+        // A value: its type, then the bytes; an array is a type and a count, then that many values.
+        std::function<bool(uint32_t)> skip = [&](uint32_t type) {
+            static const int sizes[] = {1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8, 8};
+            if (type == 8)
+                return text(1 << 28) != "\1" && bool(in);
+            if (type == 9) {
+                const uint32_t inner = u32();
+                const uint64_t count = u64();
+                if (!in || inner > 12 || count > (1ull << 32))
+                    return false;
+                if (inner != 8 && inner != 9) {
+                    in.seekg(static_cast<std::streamoff>(count * sizes[inner]), std::ios::cur);
+                    return bool(in);
+                }
+                for (uint64_t i = 0; i < count; ++i)
+                    if (!skip(inner))
+                        return false;
+                return true;
+            }
+            if (type > 12)
+                return false;
+            in.seekg(sizes[type], std::ios::cur);
+            return bool(in);
+        };
+        for (uint64_t i = 0; i < pairs; ++i) {
+            if (text(1 << 20) == "\1" || !skip(u32()))
+                return names;
+        }
+        for (uint64_t i = 0; i < tensors; ++i) {
+            const std::string name = text(1 << 20);
+            if (name == "\1")
+                return {};
+            names.insert(name);
+            const uint32_t dims = u32();
+            if (!in || dims > 8)
+                return {};
+            in.seekg(static_cast<std::streamoff>(dims) * 8 + 4 + 8, std::ios::cur);
+            if (!in)
+                return {};
+        }
+        return names;
+    }
+    // safetensors: an 8-byte length (its first 4 bytes are already read), then a JSON object.
+    in.seekg(0);
+    const uint64_t length = u64();
+    if (!in || length == 0 || length > (100ull << 20))
+        return names;
+    std::string header(length, '\0');
+    if (!in.read(header.data(), static_cast<std::streamsize>(length)))
+        return names;
+    const json parsed = json::parse(header, nullptr, false);
+    if (!parsed.is_object())
+        return names;
+    for (const auto &item : parsed.items())
+        if (item.key() != "__metadata__")
+            names.insert(item.key());
+    return names;
+}
+
+json runRestore(const json &request, Contexts &contexts, const Hooks &hooks) {
+    const json context = request.value("context", json::object());
+    const json params = request.value("params", json::object());
+    const std::string model = context.value("model_path", ""), vae = context.value("vae_path", "");
+    if (model.empty() || vae.empty())
+        fail("input_invalid", "\"model_path\" and \"vae_path\" are required for restore");
+    if (!fugue_helper::isValidUtf8(model) || !fugue_helper::isValidUtf8(vae))
+        fail("input_invalid", "a model path is not valid UTF-8");
+    const int64_t tile = wholeNumber(params, "tile_size", 512), overlap = wholeNumber(params, "overlap", 64);
+    const int64_t seed = wholeNumber(params, "seed", 0);
+    if (const std::string why = fugue_helper::restoreTilingError(tile, overlap); !why.empty())
+        fail("input_invalid", why);
+    if (seed < 0)
+        fail("input_invalid", "seed must be a whole number of 0 or more");
+    const std::string input = required(request, "image");
+    Tensor image = loadImage(input);
+    if (const std::string why = fugue_helper::restoreGeometryError(sd_tensor_dim(image.get(), 1), sd_tensor_dim(image.get(), 2)); !why.empty())
+        fail("input_invalid", why);
+    // The files are read for their tensor names before anything loaded is freed: the wrong file (a
+    // Klein model, a GGUF without its embedding, a Flux VAE) fails here, as the upscaler's does.
+    const auto unsupported = [](const std::string &file, const std::string &why) {
+        fail("model_unsupported", std::filesystem::path(file).filename().string() + ": " + why);
+    };
+    for (const auto &[file, vaeFile] : {std::pair{model, false}, std::pair{vae, true}}) {
+        const std::set<std::string> names = tensorNames(file);
+        if (names.empty())
+            unsupported(file, "cannot read its tensor names (a .safetensors or .gguf file is needed)");
+        if (const std::string why = vaeFile ? fugue_helper::restoreVaeError(names) : fugue_helper::restoreModelError(names); !why.empty())
+            unsupported(file, why);
+    }
+    if (hooks.cancelled && hooks.cancelled())
+        fail("cancelled", "restore was cancelled");
+    // Free what is loaded (an upscaler, a diffusion context): the DiT needs the whole card.
+    contexts.dropOthers(nullptr);
+    std::unique_ptr<sd_dgl_ctx_t, DglFree> dgl(sd_dgl_ctx_create_once());
+    if (!dgl)
+        fail("out_of_memory", "cannot create the DGL context");
+    sd_dgl_ctx_set(dgl.get(), "embed_metadata", "off");
+    struct Bar {
+        fugue_helper::RestoreProgress tracker;
+        const Hooks *hooks;
+    } bar{{}, &hooks};
+    sd_dgl_ctx_set_progress_callback(
+        dgl.get(),
+        [](const sd_generation_progress_t *progress, void *data) {
+            auto *self = static_cast<Bar *>(data);
+            if (!progress || !progress->stage)
+                return;
+            self->tracker.stage(progress->stage, progress->completed, progress->total);
+            if (self->hooks->progress)
+                self->hooks->progress(self->tracker.value());
+        },
+        &bar);
+    g_restoreProgress = &bar.tracker;
+    // A cancel asked while it loaded is heard here; later ones reach the run through sd_dgl_ctx_cancel.
+    if (hooks.runningDgl && !hooks.runningDgl(dgl.get())) {
+        g_restoreProgress = nullptr;
+        fail("cancelled", "restore was cancelled");
+    }
+    const std::string source = fugue_helper::restoreScript(json(model).dump(), json(vae).dump(), static_cast<int>(tile),
+                                                           std::min(0.5, double(overlap) / double(tile)), seed);
+    const sd_dgl_tensor_input_t binding{"image", image.get()};
+    sd_dgl_result_t *raw = nullptr;
+    const sd_status_t status = sd_dgl_run(dgl.get(), source.c_str(), &binding, 1, &raw);
+    std::unique_ptr<sd_dgl_result_t, DglResultFree> result(raw);
+    g_restoreProgress = nullptr;
+    if (hooks.runningDgl)
+        hooks.runningDgl(nullptr);
+    if (status == SD_STATUS_CANCELLED)
+        fail("cancelled", "restore was cancelled");
+    check(status, "restoring " + std::filesystem::path(input).filename().string());
+    const sd_tensor_t *restored = sd_dgl_value_tensor(sd_dgl_value_field(sd_dgl_result_root(result.get()), "image"));
+    if (!restored)
+        fail("helper_failed", "no image was made");
+    saveImage(restored, required(request, "output"));
+    return {{"outputs", json::array({json{{"image", request["output"]}}})}};
+}
+
 json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     const std::string op = request.value("op", "");
     const auto &running = hooks.running;
     if (op == "upscale")
         return runUpscale(request, contexts, hooks);
+    if (op == "restore")
+        return runRestore(request, contexts, hooks);
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
-        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate or upscale");
+        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate, upscale or restore");
 
     // A mask is read and checked first, so a wrong one is refused before any model loads.
     const json params = request.value("params", json::object());
@@ -1308,7 +1516,7 @@ public:
                         {"engine", "sdcpp"},
                         {"shares_filesystem", false},
                         {"backend", FUGUE_BACKEND},
-                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale"}},
+                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale", "image.restore"}},
                         {"free_memory_bytes", availableMemory()},
                         {"host", hostName()}};
         });
@@ -1583,6 +1791,8 @@ private:
                 job.cancel = true;
                 if (m_running)
                     sd_cancel_generation(m_running, SD_CANCEL_ALL);
+                if (m_runningDgl)
+                    sd_dgl_ctx_cancel(m_runningDgl);
             }
             return {{"state", job.state}};
         }
@@ -1607,7 +1817,8 @@ private:
                                                             {"latent.sample", "sample"},
                                                             {"latent.decode", "decode"},
                                                             {"latent.encode", "vae_encode"},
-                                                            {"image.upscale", "upscale"}};
+                                                            {"image.upscale", "upscale"},
+                                                            {"image.restore", "restore"}};
         const std::string capability = message.value("capability", "");
         const auto op = ops.find(capability);
         if (op == ops.end())
@@ -1627,6 +1838,8 @@ private:
             request["conditioning"] = (dir / "conditioning.bin").string();
         else if (op->second == "sample" || op->second == "vae_encode")
             request["latent"] = (dir / "latent.bin").string();
+        else if (op->second == "restore")
+            request["output"] = (dir / "image.png").string();
         else if (op->second == "upscale") {
             request["output"] = (dir / "image.png").string(); // "image" stays the input
             request["frames_output"] = (dir / "frames-out").string();
@@ -1707,6 +1920,13 @@ private:
                     m_running = ctx;
                     return true;
                 };
+                hooks.runningDgl = [this](sd_dgl_ctx_t *ctx) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (ctx && m_jobs[m_current].cancel)
+                        return false;
+                    m_runningDgl = ctx;
+                    return true;
+                };
                 hooks.cancelled = [this] {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     return m_jobs[m_current].cancel;
@@ -1774,6 +1994,12 @@ private:
             return;
         if (self->m_jobs[self->m_current].request.contains("frames")) // the frames are the progress
             return;
+        if (g_restoreProgress) { // a restore's tiles are one span of its own bar, never the whole of it
+            g_restoreProgress->tiles(step, steps);
+            self->m_progress[self->m_current] = g_restoreProgress->value();
+            self->say(self->statusOf(self->m_current, self->m_jobs[self->m_current]));
+            return;
+        }
         self->m_progress[self->m_current] = double(step) / steps;
         self->say(self->statusOf(self->m_current, self->m_jobs[self->m_current]));
     }
@@ -1786,6 +2012,7 @@ private:
     std::deque<std::string> m_queue;
     std::string m_current;         // the running job
     sd_ctx_t *m_running = nullptr; // its context while it generates, for cancel
+    sd_dgl_ctx_t *m_runningDgl = nullptr; // a restore's, the same
     int m_count = 0;
     uint64_t m_finished = 0;
     Models *m_models = nullptr; // set over HTTP

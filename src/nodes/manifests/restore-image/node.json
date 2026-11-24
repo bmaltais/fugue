@@ -1,0 +1,33 @@
+{
+  "manifest": 1,
+  "id": "fugue/restore-image",
+  "version": "1.0.0",
+  "name": "Restore Image",
+  "description": "Makes an image bigger and sharper with SeedVR2, which redraws the detail a plain resize cannot: the image is resized by the factor (lanczos), restored in one diffusion step with tiled encoding and decoding, and its colors are put back from the resized input. Good after a generator, on blurred or low-resolution photos. A 7B model needs about 8 GB for itself, and more for a big result.",
+  "category": "Image/Transform",
+  "picture": "result",
+  "keywords": ["restore", "upscale", "enlarge", "seedvr2", "super resolution", "sharpen", "detail", "denoise", "x3"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["image.restore"],
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "model", "type": "fugue/seedvr2-model", "label": "SeedVR2 model",
+     "description": "A SeedVR2 checkpoint with its stored embeddings: the Comfy-Org INT8 ConvRot files (seedvr2_7b_int8_convrot, seedvr2_3b_int8_convrot), kept in a seedvr2 folder of your model folders. Other repackagings (GGUF, the numz fp8) do not carry the embeddings and are refused."},
+    {"name": "vae", "type": "fugue/seedvr2-vae", "label": "SeedVR2 VAE", "description": "ema_vae_fp16, the VAE both SeedVR2 sizes use, kept in a seedvr2_vae folder of your model folders."},
+    {"name": "factor", "type": "number", "label": "Factor", "default": 3, "min": 1, "max": 8, "step": 1, "integer": true,
+     "description": "How many times bigger each side becomes. The result is at most about 16.8 MP (4098 x 4098), what a 24 GB card finishes with the 7B model."},
+    {"name": "color_fix", "type": "text", "label": "Color fix", "default": "lab", "choices": ["lab", "wavelet", "none"],
+     "description": "lab: the input's low frequencies and colors on the restored detail (a and b matched in CIELAB, lightness a fifth of the way). wavelet: only the low frequencies. none: the model's colors."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"},
+    {"name": "tile", "type": "number", "label": "Tile size", "default": 512, "min": 64, "max": 2048, "step": 32, "integer": true,
+     "advanced": true, "description": "Pixels per side of the pieces the VAE encodes and decodes in (they overlap and are blended). Smaller uses less memory and is slower."},
+    {"name": "overlap", "type": "number", "label": "Tile overlap", "default": 64, "min": 0, "max": 1024, "step": 8, "integer": true,
+     "advanced": true, "description": "Pixels two neighbouring tiles share, at most half the tile."}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "width", "type": "number", "label": "Width"},
+    {"name": "height", "type": "number", "label": "Height"}
+  ]
+}

@@ -72,7 +72,7 @@ FetchContent_Declare(sdcpp
   PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 --forward --input=${CMAKE_CURRENT_SOURCE_DIR}/sdcpp.patch)
 FetchContent_MakeAvailable(sdcpp)
 
-add_executable(fugue-helper src/main.cpp)
+add_executable(fugue-helper src/main.cpp src/restore.h)
 target_link_libraries(fugue-helper PRIVATE stable-diffusion)
 # cpp-httplib (--serve-http) is in stable-diffusion.cpp's thirdparty/ too.
 target_include_directories(fugue-helper SYSTEM PRIVATE ${sdcpp_SOURCE_DIR}/thirdparty)
@@ -82,3 +82,11 @@ set_target_properties(fugue-helper PROPERTIES OUTPUT_NAME fugue-helper-${FUGUE_H
 # The app looks for its helpers in lib/fugue (#78 picks one). Install with
 # `--component fugue-helper`: stable-diffusion.cpp and ggml have install rules of their own.
 install(TARGETS fugue-helper RUNTIME DESTINATION lib/fugue COMPONENT fugue-helper)
+
+# The restore op's program against the engine's checker (no model, no GPU): not built by default.
+enable_testing()
+add_executable(fugue-helper-restore-test EXCLUDE_FROM_ALL test/restore_test.cpp)
+target_link_libraries(fugue-helper-restore-test PRIVATE stable-diffusion)
+target_include_directories(fugue-helper-restore-test PRIVATE src)
+target_compile_options(fugue-helper-restore-test PRIVATE -Wall -Wextra)
+add_test(NAME restore-program COMMAND fugue-helper-restore-test)

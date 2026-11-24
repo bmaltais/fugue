@@ -22,6 +22,7 @@ void addSaveMediaKernels(Kernels &kernels);       // save_media.cpp
 void addTextTemplateKernels(Kernels &kernels);   // text_template.cpp
 void addTextGenerationKernels(Kernels &kernels);  // text_generation.cpp
 void addUpscaleKernels(Kernels &kernels);         // upscale.cpp
+void addRestoreKernels(Kernels &kernels);         // restore.cpp
 void addUpscaleVideoModelKernels(Kernels &kernels); // upscale_video_model.cpp
 
 } // namespace fugue::nodes

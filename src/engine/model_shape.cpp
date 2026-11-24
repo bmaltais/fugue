@@ -333,6 +333,10 @@ ModelShape shapeOf(const Header &header) {
     const Shapes &shapes = header.shapes;
     ModelShape shape;
     shape.unloadable = unloadableFormat(header);
+    shape.seedvr2Model = hasTensor(shapes, QStringLiteral("vid_in.proj.weight"));
+    shape.seedvr2StoredEmbeddings = hasTensor(shapes, QStringLiteral("positive_conditioning"));
+    shape.seedvr2Vae = hasTensor(shapes, QStringLiteral("encoder.conv_out.bias")) &&
+                       hasTensor(shapes, QStringLiteral("decoder.up_blocks.0.upsamplers.0.upscale_conv.weight"));
     if (isLora(shapes)) { // its tensors are named after the model's: none of the figures below
         shape.kind = ModelKind::Lora;
         const QList<std::pair<QString, ModelShape::Widths>> changed = changedLayers(shapes);
