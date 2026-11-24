@@ -36,6 +36,7 @@ CompareView {
     onImageScaleChanged: refreshDetail()
     onZoomChanged: refreshDetail()
     onActualChanged: refreshDetail()
+    onActualBChanged: refreshDetail()
     onSizeAChanged: refreshDetail()
     onSizeBChanged: refreshDetail()
     sourceA: picture("a")

@@ -254,6 +254,39 @@ private slots:
         QVERIFY(view.width() > 0);
     }
 
+    // 100% follows the larger picture (#420): B is 3x A, so the first press is of B, the second of A, the third of B.
+    void hundredPercentFollowsTheLargerPicture() {
+        QTemporaryDir files;
+        RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 48, 30, Qt::blue)));
+        QVERIFY(r.app.open());
+        r.run();
+        r.app.model.select({"cmp"});
+        const auto view = [&](const char *key) { return r.app.model.compareView("cmp").value(key).toBool(); };
+        QVERIFY(r.app.commands.trigger("compare.actual"));
+        QVERIFY(view("actual") && view("actualB"));
+        QVERIFY(r.app.commands.trigger("compare.actual"));
+        QVERIFY(view("actual") && !view("actualB"));
+        QVERIFY(r.app.commands.trigger("compare.actual"));
+        QVERIFY(view("actual") && view("actualB"));
+        QVERIFY(r.app.commands.trigger("compare.fit"));
+        QVERIFY(!view("actual") && !view("actualB"));
+        QCOMPARE(r.app.model.undoStack()->count(), 0);
+    }
+
+    // Equal sizes: 100% stays A's and never toggles.
+    void hundredPercentOfEqualPicturesStaysA() {
+        QTemporaryDir files;
+        RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 16, 10, Qt::blue)));
+        QVERIFY(r.app.open());
+        r.run();
+        r.app.model.select({"cmp"});
+        for (int press = 0; press < 2; ++press) {
+            QVERIFY(r.app.commands.trigger("compare.actual"));
+            QVERIFY(r.app.model.compareView("cmp").value("actual").toBool());
+            QVERIFY(!r.app.model.compareView("cmp").value("actualB").toBool());
+        }
+    }
+
     // The keys belong to the node: with no Compare Images selected they are not taken.
     void theKeysApplyOnlyWithACompareNodeSelected() {
         QTemporaryDir files;

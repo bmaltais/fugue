@@ -4,6 +4,7 @@
 #include "canvas/input_links.h"
 #include "canvas/node_size.h"
 
+#include "engine/compare_scale.h"
 #include "engine/compiler.h"
 #include "engine/group_library.h"
 #include "engine/groups.h"
@@ -1802,7 +1803,7 @@ QVariantMap CanvasModel::compareView(const QString &node) const {
     QVariantMap view{{"mode", flipped ? QStringLiteral("flip") : widgetMode},
                      {"position", literal("position").toDouble(0.5)},
                      {"showB", widgetMode == QLatin1String("b")},
-                     {"zoom", 1.0}, {"actual", false}, {"centerX", 0.5}, {"centerY", 0.5}};
+                     {"zoom", 1.0}, {"actual", false}, {"actualB", false}, {"centerX", 0.5}, {"centerY", 0.5}};
     const QVariantMap changed = m_compareView.value(node);
     for (auto it = changed.cbegin(); it != changed.cend(); ++it)
         view.insert(it.key(), it.value());
@@ -1840,9 +1841,18 @@ bool CanvasModel::compareStep(const QString &node, const QString &step) {
     } else if (step == QLatin1String("next-mode")) {
         setCompareView(node, {{"mode", modes.value((modes.indexOf(mode) + 1) % modes.size())}});
     } else if (step == QLatin1String("fit")) {
-        setCompareView(node, {{"zoom", 1.0}, {"actual", false}, {"centerX", 0.5}, {"centerY", 0.5}});
+        setCompareView(node, {{"zoom", 1.0}, {"actual", false}, {"actualB", false}, {"centerX", 0.5}, {"centerY", 0.5}});
     } else if (step == QLatin1String("actual")) {
-        setCompareView(node, {{"actual", true}});
+        // 100% of the larger picture; a second press toggles A and B when they differ (#420).
+        const QVariantMap run = compareResult(node);
+        const auto sizeOf = [&](const char *which) {
+            const QVariantMap p = run.value(QLatin1String(which)).toMap();
+            return QSizeF(p.value("width").toDouble(), p.value("height").toDouble());
+        };
+        const QSizeF a = sizeOf("a"), b = sizeOf("b");
+        const compare::Actual next = compare::nextActual(a.width(), a.height(), b.width(), b.height(),
+                                                          view.value("actual").toBool(), view.value("actualB").toBool());
+        setCompareView(node, {{"actual", next.actual}, {"actualB", next.ofB}});
     } else {
         return false;
     }

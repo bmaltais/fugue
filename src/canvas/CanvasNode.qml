@@ -506,6 +506,7 @@ Item {
                         viewState: node.compareView
                         look: node.look
                         wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
+                        zoomChips: true // Fit and 100% on hover (#420)
                         onPressed: node.canvasModel.select([node.nodeId])
                         onActivated: node.canvasView.openCompare(node.nodeId)
                         opacity: node.thumbnailDim ? 0.5 : 1
