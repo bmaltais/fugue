@@ -56,8 +56,12 @@ QStringList modelFamilies(const QJsonArray &models) {
     QStringList out;
     for (const QJsonValue value : models) {
         const QJsonObject model = value.toObject();
-        const QString family = modelFamily(model.value(QStringLiteral("resource")).toString(),
-                                           model.value(QStringLiteral("name")).toString());
+        const QString resource = model.value(QStringLiteral("resource")).toString();
+        // A template's families are its main models: a text encoder serves many (Qwen3 8B reads for Klein 9B and
+        // others), so it is a picker family (#370) but never a template's (#369).
+        if (resource.endsWith(QLatin1String("text-encoder")))
+            continue;
+        const QString family = modelFamily(resource, model.value(QStringLiteral("name")).toString());
         if (!family.isEmpty() && !out.contains(family))
             out << family;
     }
