@@ -323,6 +323,11 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
     flush();
 
     relink(affected);
+    // A face that reads what its source carries (the Sampler's Soft mask) follows a change upstream.
+    for (int r = 0; r < int(m_rows.size()); ++r)
+        if (m_rows[size_t(r)].readsUpstream && !affected.contains(m_rows[size_t(r)].id))
+            relayOut(r);
+
     const bool reroutesChanged = oldLayout.value("links") != doc.layout.value("links");
     QSet<int> ends;
     for (int i = 0; i < int(m_links.size()); ++i) {

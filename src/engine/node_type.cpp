@@ -161,6 +161,22 @@ bool widgetFits(const QString &widget, const InputSpec &input) {
     return false;
 }
 
+// Reads a `shown_when` or `carries_when` condition (6.1).
+void readCondition(Reader &r, const QJsonObject &o, const char *key, ShownWhen &out, const QString &where,
+                   const QString &input, const QString &output) {
+    const QJsonValue value = o.value(QLatin1String(key));
+    if (value.isUndefined())
+        return;
+    if (!value.isObject()) {
+        r.fail(QStringLiteral("%1 \"%2\" must be an object.").arg(where, QLatin1String(key)), input, output);
+        return;
+    }
+    QStringList problems;
+    out = ShownWhen::parse(value.toObject(), problems);
+    for (const QString &problem : std::as_const(problems))
+        r.fail(QStringLiteral("%1 \"%2\": %3").arg(where, QLatin1String(key), problem), input, output);
+}
+
 std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index) {
     InputSpec input;
     const QString at = QStringLiteral("input %1").arg(index + 1);
@@ -206,6 +222,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.boolean(o, "advanced", input.advanced, where, n);
     r.string(o, "role", input.role, where, n);
     r.string(o, "over", input.over, where, n);
+    readCondition(r, o, "shown_when", input.shownWhen, where, n, {});
     if (o.contains("choices")) {
         QStringList choices;
         r.strings(o, "choices", choices, where, n);
@@ -217,7 +234,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.unknownFields(o,
                     {"name", "type", "label", "description", "default", "optional", "list", "min_items",
                      "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
-                     "advanced", "role", "over"},
+                     "advanced", "role", "over", "shown_when"},
                     where, n);
 
     if (parsed) {
@@ -308,7 +325,12 @@ std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int ind
     r.string(o, "description", output.description, where, {}, n);
     r.boolean(o, "optional", output.optional, where, {}, n);
     r.string(o, "role", output.role, where, {}, n);
-    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional", "role"}, where, {}, n);
+    r.strings(o, "carries", output.carries, where);
+    readCondition(r, o, "carries_when", output.carriesWhen, where, {}, n);
+    if (o.contains("carries_when") && output.carries.isEmpty())
+        r.fail(where + QStringLiteral(" has \"carries_when\" but carries nothing."), {}, n);
+    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional", "role", "carries", "carries_when"},
+                    where, {}, n);
     if (!output.role.isEmpty() && (output.role != QLatin1String(kMaskRole) || !parsed || parsed->id != "image"))
         r.fail(where + QStringLiteral(" has the role \"%1\"; the only role is \"mask\", on an image port.")
                            .arg(output.role),
@@ -473,6 +495,19 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
                    input.name);
     }
 
+    // A condition reads other inputs of the same node, never its own row.
+    for (const InputSpec &input : std::as_const(type.inputs))
+        for (const QString &name : input.shownWhen.inputs()) {
+            const InputSpec *other = nullptr;
+            for (const InputSpec &candidate : std::as_const(type.inputs))
+                if (candidate.name == name)
+                    other = &candidate;
+            if (!other || other == &input)
+                r.fail(QStringLiteral("input %1 has a \"shown_when\" that reads %2, which is not another input of this node.")
+                           .arg(input.name, name),
+                       input.name);
+        }
+
     seen.clear();
     const QJsonValue outputs = manifest.value("outputs");
     if (!outputs.isArray())
@@ -487,6 +522,13 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
         if (output)
             type.outputs << *output;
     }
+
+    for (const OutputSpec &output : std::as_const(type.outputs))
+        for (const QString &name : output.carriesWhen.inputs())
+            if (!type.input(name))
+                r.fail(QStringLiteral("output %1 has a \"carries_when\" that reads %2, which is not an input of this node.")
+                           .arg(output.name, name),
+                       {}, output.name);
 
     if (r.failed())
         return std::nullopt;
@@ -543,6 +585,8 @@ QJsonObject NodeType::toJson() const {
         putIfTrue(i, "advanced", input.advanced);
         putIf(i, "role", input.role);
         putIf(i, "over", input.over);
+        if (!input.shownWhen.isEmpty())
+            i.insert("shown_when", input.shownWhen.raw);
         inputList << i;
     }
     o.insert("inputs", inputList);
@@ -555,6 +599,10 @@ QJsonObject NodeType::toJson() const {
         putIf(out, "description", output.description);
         putIfTrue(out, "optional", output.optional);
         putIf(out, "role", output.role);
+        if (!output.carries.isEmpty())
+            out.insert("carries", QJsonArray::fromStringList(output.carries));
+        if (!output.carriesWhen.isEmpty())
+            out.insert("carries_when", output.carriesWhen.raw);
         outputList << out;
     }
     o.insert("outputs", outputList);

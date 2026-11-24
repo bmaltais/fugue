@@ -26,7 +26,7 @@
      "max": 9007199254740991, "widget": "seed"},
     {"name": "image", "type": "image", "label": "Start image", "optional": true,
      "description": "Redrawn from instead of from noise. Fitted to the size by covering it and cutting the middle."},
-    {"name": "strength", "type": "number", "label": "Strength", "default": 0.7, "min": 0, "max": 1, "step": 0.05,
+    {"name": "strength", "shown_when": {"linked": "image"}, "type": "number", "label": "Strength", "default": 0.7, "min": 0, "max": 1, "step": 0.05,
      "widget": "slider", "description": "How far to move from the start image: 0 keeps it, 1 ignores it."},
     {"name": "mask", "type": "image", "label": "Mask", "optional": true, "role": "mask",
      "description": "With a start image: the part to redraw, white; the rest of the result is the start image, to the pixel (a soft edge is a Feather Mask). It must be the size of the start image. Only a model that takes a mask can redraw by one: otherwise this is an error (mask_unsupported), never a silent full redraw. Nothing painted is an error."}

@@ -143,8 +143,13 @@ Reply validateWorkflow(const Command &command, Context &context) {
     for (auto it = validation.nodes.begin(); it != validation.nodes.end(); ++it) {
         const QJsonObject node = it.value().toObject();
         const QString reason = node.value("reason").toString();
-        lines << QStringLiteral("  %1  %2%3").arg(it.key(), node.value("state").toString(),
-                                                  reason.isEmpty() ? QString() : " (" + reason + ")");
+        lines << (node.contains("state")
+                      ? QStringLiteral("  %1  %2%3").arg(it.key(), node.value("state").toString(),
+                                                         reason.isEmpty() ? QString() : " (" + reason + ")")
+                      : QStringLiteral("  %1").arg(it.key())); // a group instance: its inner nodes have the states
+        for (const QJsonValue &input : node.value("not_used").toArray())
+            lines << QStringLiteral("    not used: %1: %2").arg(input.toObject().value("input").toString(),
+                                                                  input.toObject().value("why").toString());
     }
     Reply reply = Reply::success(QJsonObject{{"valid", true}, {"nodes", validation.nodes}}, lines.join('\n'));
     reply.errors = validation.errors; // warnings only
@@ -185,13 +190,18 @@ Reply workflowDescribe(const Command &command, Context &context) {
     QJsonArray links;
     QStringList lines;
     const Nodes &all = document->graph.nodes;
+    const QMap<QString, QList<UnusedInput>> unused = unusedInputs(*document, context.registry);
     for (auto it = all.cbegin(); it != all.cend(); ++it) {
         const NodeType *type = context.registry.nodeType(it->type);
         QJsonObject node{{"id", it.key()}, {"type", it->type}, {"mode", nodeModeName(it->mode)}};
+        if (unused.contains(it.key()))
+            node.insert("not_used", notUsedJson(unused.value(it.key())));
         // A group id is not a node type, so only a missing type outside groups counts.
         node.insert("known", type != nullptr || document->group(it->type) != nullptr);
         nodes.append(node);
         lines << QStringLiteral("node %1: %2").arg(it.key(), it->type);
+        for (const UnusedInput &input : unused.value(it.key()))
+            lines << QStringLiteral("not used %1.%2: %3").arg(it.key(), input.input, input.why);
         for (auto input = it->inputs.cbegin(); input != it->inputs.cend(); ++input) {
             if (input->kind() == InputValue::Kind::Link) {
                 links.append(QJsonObject{{"from", input->from().toString()},

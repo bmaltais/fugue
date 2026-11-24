@@ -12,6 +12,8 @@
 #include "engine/port_type.h"
 #include "engine/version.h"
 
+#include "engine/shown_when.h"
+
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
@@ -48,6 +50,8 @@ struct InputSpec {
     bool advanced = false;
     QString role; // "mask" on an image input that takes a mask (6.1, 14.4); empty for none
     QString over; // widget `mask` only: the image input the mask is painted over; empty: the node's own `file` input
+    // `shown_when` (6.1, #429): the face hides the row while this does not hold. Empty: always shown.
+    ShownWhen shownWhen;
 
     // True for an input whose text literal names a file that travels with the workflow (spec 11.2,
     // 11.5, 11.10, 14.4): a `file` input's picture, a `mask` input's painted mask, or a `paint` input's .ora canvas. The one
@@ -69,6 +73,11 @@ struct OutputSpec {
     QString description;
     bool optional = false; // may come back empty (3.3)
     QString role;          // "mask" on an image output that holds a mask (6.1, 14.4); empty for none
+    // What the value on this output carries, such as "mask" on a latent that holds a mask (6.1, #429), so a
+    // `shown_when` on a downstream input can ask without running anything. `carries_when` is a condition on
+    // the node's own inputs for it to hold (VAE Encode's latent carries a mask when its `mask` is linked).
+    QStringList carries;
+    ShownWhen carriesWhen;
 };
 
 struct NodeType {
