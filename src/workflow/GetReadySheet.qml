@@ -13,7 +13,7 @@ import "../canvas"
 Question {
     id: sheet
     objectName: "getReadySheet"
-    readonly property var sheetModel: App.workflows.readiness
+    property var sheetModel: App.workflows.readiness // not readonly: the picture tests give it a made-up plan
     readonly property var view: sheetModel.view
     readonly property string phase: sheetModel.phase
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
@@ -65,160 +65,214 @@ Question {
         LayoutMirroring.enabled: sheet.rightToLeft
         LayoutMirroring.childrenInherit: true
 
-        Label {
-            objectName: "getReadyHeadline"
+        // The title, then what will happen in one line with the totals.
+        ColumnLayout {
             Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            font.bold: true
-            text: sheet.view.headline
-        }
-        Label {
-            visible: sheet.view.packs.length > 0
-            Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            color: sheet.look.label
-            text: qsTr("A pack's nodes run as you, with no sandbox. Nothing is installed, trusted, set up or downloaded until you say yes here.")
+            spacing: sheet.look.unit
+            Text {
+                objectName: "getReadyTitle"
+                Layout.fillWidth: true
+                text: qsTr("Get ready")
+                wrapMode: Text.Wrap
+                color: sheet.look.text
+                font.pixelSize: sheet.look.overlayTitleSize
+                font.weight: Font.DemiBold
+            }
+            Text {
+                objectName: "getReadyHeadline"
+                Layout.fillWidth: true
+                text: sheet.view.headline
+                wrapMode: Text.Wrap
+                color: sheet.look.label
+                font.pixelSize: sheet.look.textSize
+            }
         }
 
-        ScrollView {
+        // What it takes, in groups. It scrolls (up and down only) when it is taller than the window can spare; a row that is
+        // too long is cut at its end, with the whole line as its tooltip, so there is no sideways bar.
+        Flickable {
+            id: list
+            objectName: "getReadyList"
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(rows.implicitHeight, 280)
+            Layout.topMargin: sheet.look.unit
+            Layout.preferredHeight: Math.min(rows.implicitHeight, 0.45 * (Overlay.overlay ? Overlay.overlay.height : 800))
             clip: true
+            contentWidth: width
+            contentHeight: rows.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: FugueScrollBar { look: sheet.look }
+
             ColumnLayout {
                 id: rows
-                width: sheet.width - 12 * sheet.look.unit - 16
-                spacing: 2 * sheet.look.unit
+                width: list.width - (list.ScrollBar.vertical as FugueScrollBar).breadth
+                spacing: 0
+
+                Text {
+                    visible: sheet.view.packs.length > 0
+                    Layout.leftMargin: 2 * sheet.look.unit
+                    Layout.bottomMargin: 0.5 * sheet.look.unit
+                    text: qsTr("Packs")
+                    color: sheet.look.label
+                    font.pixelSize: sheet.look.labelSize
+                    font.weight: Font.DemiBold
+                }
                 Repeater {
                     model: sheet.view.packs
-                    ColumnLayout {
+                    GetReadyRow {
                         id: packRow
                         required property var modelData
                         readonly property string key: "pack:" + modelData.id
                         objectName: "getReadyPack-" + modelData.id
                         Layout.fillWidth: true
-                        spacing: sheet.look.unit
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label {
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                text: (packRow.modelData.install ? qsTr("Install and trust the pack %1 %2") : qsTr("Trust the pack %1 %2")).arg(packRow.modelData.name).arg(packRow.modelData.version)
-                                      + (packRow.modelData.setup !== "" ? qsTr(", and set up its environment") : "")
-                            }
-                            Label {
-                                color: packRow.modelData.state === "failed" ? sheet.look.error : sheet.look.label
-                                text: sheet.stateText(packRow.modelData.state)
-                            }
-                            ToolButton {
-                                objectName: "getReadyDetails-" + packRow.modelData.id
-                                visible: !packRow.modelData.pending
-                                text: sheet.expanded[packRow.key] ? qsTr("Hide details") : qsTr("Details")
-                                focusPolicy: Qt.NoFocus
-                                onClicked: sheet.toggle(packRow.key)
-                            }
-                        }
-                        Label {
-                            objectName: "getReadySummary-" + packRow.modelData.id
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            color: sheet.look.label
-                            text: packRow.modelData.summary
-                        }
-                        Label {
-                            visible: sheet.expanded[packRow.key] === true
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            color: sheet.look.label
-                            text: (packRow.modelData.source !== "" ? qsTr("From: %1").arg(packRow.modelData.source) + "\n" : "")
-                                  + qsTr("Runs as: %1").arg(packRow.modelData.runtime) + "\n"
-                                  + qsTr("Declares: %1").arg(packRow.modelData.permissions)
-                                  + (packRow.modelData.setup !== "" ? "\n" + qsTr("Setup command: %1").arg(packRow.modelData.setup)
-                                     + (packRow.modelData.setupSize !== "" ? " (" + qsTr("downloads %1").arg(packRow.modelData.setupSize) + ")" : "")
-                                     + (packRow.modelData.setupNote !== "" ? "\n" + packRow.modelData.setupNote : "") : "")
-                        }
-                        Label {
-                            visible: packRow.modelData.detail !== "" && packRow.modelData.state === "failed"
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            color: sheet.look.error
-                            text: packRow.modelData.detail
-                        }
+                        look: sheet.look
+                        glyph: "boxes"
+                        title: modelData.name + " " + modelData.version
+                        subtitle: modelData.pending ? modelData.summary
+                                  : (modelData.install ? qsTr("Install and trust") : qsTr("Trust"))
+                                    + (modelData.source !== "" ? " · " + qsTr("from %1").arg(modelData.source) : "")
+                        more: modelData.pending ? ""
+                              : qsTr("Runs as: %1").arg(modelData.runtime) + "\n" + qsTr("Declares: %1").arg(modelData.permissions)
+                        open: sheet.expanded[key] === true
+                        stateText: sheet.stateText(modelData.state)
+                        failed: modelData.state === "failed"
+                        error: failed ? modelData.detail : ""
+                        onToggled: sheet.toggle(key)
                     }
+                }
+
+                // A pack's environment is part of its row's work, so it shows the same state.
+                Text {
+                    visible: envs.count > 0
+                    Layout.topMargin: 2 * sheet.look.unit
+                    Layout.leftMargin: 2 * sheet.look.unit
+                    Layout.bottomMargin: 0.5 * sheet.look.unit
+                    text: qsTr("Environments")
+                    color: sheet.look.label
+                    font.pixelSize: sheet.look.labelSize
+                    font.weight: Font.DemiBold
+                }
+                Repeater {
+                    id: envs
+                    model: sheet.view.packs.filter(p => p.setup !== "")
+                    GetReadyRow {
+                        id: envRow
+                        required property var modelData
+                        readonly property string key: "env:" + modelData.id
+                        objectName: "getReadyEnvironment-" + modelData.id
+                        Layout.fillWidth: true
+                        look: sheet.look
+                        glyph: "settings"
+                        title: qsTr("Environment for %1").arg(modelData.name)
+                        trailing: modelData.setupSize
+                        subtitle: qsTr("runs %1").arg(modelData.setup)
+                        more: modelData.setupNote
+                        open: sheet.expanded[key] === true
+                        stateText: sheet.stateText(modelData.state)
+                        failed: modelData.state === "failed"
+                        onToggled: sheet.toggle(key)
+                    }
+                }
+
+                Text {
+                    visible: sheet.view.models.length > 0
+                    Layout.topMargin: 2 * sheet.look.unit
+                    Layout.leftMargin: 2 * sheet.look.unit
+                    Layout.bottomMargin: 0.5 * sheet.look.unit
+                    text: qsTr("Models")
+                    color: sheet.look.label
+                    font.pixelSize: sheet.look.labelSize
+                    font.weight: Font.DemiBold
                 }
                 Repeater {
                     model: sheet.view.models
-                    ColumnLayout {
+                    GetReadyRow {
                         id: modelRow
                         required property var modelData
                         readonly property string key: "model:" + modelData.name
                         objectName: "getReadyModel-" + modelData.name
                         Layout.fillWidth: true
-                        spacing: sheet.look.unit
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label {
-                                Layout.fillWidth: true
-                                elide: Text.ElideMiddle
-                                text: qsTr("Download %1 (%2)").arg(modelRow.modelData.name).arg(modelRow.modelData.size)
-                                      + (modelRow.modelData.typeFrom !== "" ? " · " + modelRow.modelData.typeFrom : "")
-                            }
-                            Label {
-                                color: modelRow.modelData.state === "failed" ? sheet.look.error : sheet.look.label
-                                text: sheet.stateText(modelRow.modelData.state)
-                            }
-                            ToolButton {
-                                text: sheet.expanded[modelRow.key] ? qsTr("Hide details") : qsTr("Details")
-                                focusPolicy: Qt.NoFocus
-                                onClicked: sheet.toggle(modelRow.key)
-                            }
-                        }
-                        ProgressBar {
-                            visible: modelRow.modelData.state === "running"
-                            Layout.fillWidth: true
-                            from: 0
-                            to: 1
-                            indeterminate: modelRow.modelData.fraction < 0
-                            value: Math.max(0, modelRow.modelData.fraction)
-                        }
-                        Label {
-                            visible: sheet.expanded[modelRow.key] === true
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            color: sheet.look.label
-                            text: qsTr("From: %1").arg(modelRow.modelData.host) + "\n"
-                                  + (modelRow.modelData.license !== "" ? qsTr("Licence: %1").arg(modelRow.modelData.license) + "\n" : "")
-                                  + qsTr("Into: %1").arg(modelRow.modelData.folder)
-                        }
-                        Label {
-                            visible: modelRow.modelData.detail !== "" && modelRow.modelData.state === "failed"
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            color: sheet.look.error
-                            text: modelRow.modelData.detail
-                        }
+                        look: sheet.look
+                        glyph: "download"
+                        title: modelData.name
+                        trailing: modelData.size
+                        subtitle: [modelData.license, modelData.typeFrom].filter(t => t !== "").join(" · ")
+                        more: qsTr("From: %1").arg(modelData.host) + "\n"
+                              + (modelData.license !== "" ? qsTr("Licence: %1").arg(modelData.license) + "\n" : "")
+                              + qsTr("Into: %1").arg(modelData.folder)
+                        open: sheet.expanded[key] === true
+                        running: modelData.state === "running"
+                        fraction: modelData.fraction
+                        stateText: modelData.state === "running" && modelData.fraction >= 0 ? Math.round(modelData.fraction * 100) + "%"
+                                   : sheet.stateText(modelData.state)
+                        failed: modelData.state === "failed"
+                        error: failed ? modelData.detail : ""
+                        onToggled: sheet.toggle(key)
                     }
                 }
             }
         }
 
-        // Where models go (8.9): the current folder with free space against the download size, and Change….
-        RowLayout {
+        // Where models go (8.9), a labelled row of its own: the folder, the room in it against the download, and the way to
+        // change it right beside them.
+        Rectangle {
+            id: destination
             objectName: "getReadyDestination"
             visible: sheet.view.hasModels
             Layout.fillWidth: true
-            spacing: 2 * sheet.look.unit
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: qsTr("Models go into: %1").arg(sheet.view.destinationTitle)
-                      + (sheet.view.freeText !== "" ? " · " + sheet.view.freeText : "")
-                      + (sheet.view.sizeText !== "" ? " · " + qsTr("needs %1").arg(sheet.view.sizeText) : "")
-            }
-            ThemedButton {
-                objectName: "getReadyChange"
-                visible: sheet.phase === "review"
-                text: qsTr("Change…")
-                onClicked: destinationMenu.popup()
+            implicitHeight: destinationRow.implicitHeight + 6 * sheet.look.unit
+            radius: sheet.look.smallCorner
+            color: sheet.look.well
+            RowLayout {
+                id: destinationRow
+                anchors.fill: parent
+                anchors.margins: 3 * sheet.look.unit
+                anchors.leftMargin: 3 * sheet.look.unit
+                spacing: 3 * sheet.look.unit
+                Glyph {
+                    look: sheet.look
+                    name: "folder"
+                    color: sheet.look.label
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                ColumnLayout {
+                    Layout.fillWidth: false
+                    Layout.maximumWidth: Math.max(10 * sheet.look.unit, destination.width - 14 * sheet.look.unit - change.width - 12 * sheet.look.unit)
+                    spacing: 0
+                    Text {
+                        text: qsTr("Download models to")
+                        color: sheet.look.label
+                        font.pixelSize: sheet.look.labelSize
+                    }
+                    Text {
+                        id: destinationName
+                        objectName: "getReadyDestinationName"
+                        Layout.fillWidth: true
+                        text: sheet.view.destinationTitle
+                        elide: Text.ElideMiddle
+                        color: sheet.look.text
+                        font.pixelSize: sheet.look.textSize
+                        HoverHandler { id: destinationHover }
+                        ToolTip.visible: destinationHover.hovered && sheet.view.destination !== ""
+                        ToolTip.delay: sheet.look.tooltipDelay
+                        ToolTip.text: sheet.view.destination
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: [sheet.view.freeText, sheet.view.sizeText !== "" ? qsTr("needs %1").arg(sheet.view.sizeText) : ""].filter(t => t !== "").join(" · ")
+                        elide: Text.ElideRight
+                        color: sheet.view.lowSpace ? sheet.look.error : sheet.look.label
+                        font.pixelSize: sheet.look.labelSize
+                    }
+                }
+                ThemedButton {
+                    id: change
+                    objectName: "getReadyChange"
+                    visible: sheet.phase === "review"
+                    Layout.alignment: Qt.AlignVCenter
+                    text: qsTr("Change model folder…")
+                    onClicked: destinationMenu.popup()
+                }
+                Item { Layout.fillWidth: true }
             }
         }
         Label {
@@ -227,6 +281,7 @@ Question {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: sheet.look.error
+            font.pixelSize: sheet.look.textSize
             text: qsTr("There is not enough free space in that folder for the download. Change it to another folder before you go on.")
         }
         Repeater {
@@ -248,6 +303,7 @@ Question {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 font.bold: true
+                font.pixelSize: sheet.look.textSize
                 text: sheet.view.question.text ?? ""
             }
             QuestionAnswers {
@@ -270,6 +326,27 @@ Question {
             wrapMode: Text.Wrap
             color: sheet.view.ok ? sheet.look.text : sheet.look.error
             text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Try again; it lists only what is left.").arg(sheet.view.retry.join(", ")))
+        }
+
+        // The pack warning, a quiet note by the yes it is about.
+        RowLayout {
+            objectName: "getReadyWarning"
+            visible: sheet.view.packs.length > 0
+            Layout.fillWidth: true
+            spacing: 2 * sheet.look.unit
+            Glyph {
+                look: sheet.look
+                name: "triangle-alert"
+                color: sheet.look.label
+                Layout.alignment: Qt.AlignTop
+            }
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: sheet.look.label
+                font.pixelSize: sheet.look.labelSize
+                text: qsTr("A pack's nodes run as you, with no sandbox. Nothing is installed, trusted, set up or downloaded until you say yes here.")
+            }
         }
 
         QuestionAnswers {

@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QImage>
 #include <QPainter>
+#include <QQmlPropertyMap>
 #include <QQuickStyle>
 #include <QtTest>
 
@@ -144,6 +145,78 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "flux2-klein-9b-da-restore"), Q_ARG(QVariant, QVariant())));
         QTest::qWait(1000); // the banner and the sample inputs load
         QVERIFY(test_support::grab(app.window).save(shotDir() + "/" + file));
+    }
+
+    // The Get ready sheet (#379) with a pack, its environment and four models, in review, open on one row's details, and
+    // part-way through the run, dark and light. The sheet shows a made-up plan (a property map in place of the C++ model).
+    void getReady_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("suffix");
+        QTest::newRow("dark") << QString() << "";
+        QTest::newRow("light") << "catppuccin-latte" << "-light";
+    }
+    void getReady() {
+        QFETCH(QString, theme);
+        QFETCH(QString, suffix);
+        App app(load(template_("text-to-image")), {}, Look{theme, 8});
+        QVERIFY(app.open());
+        prepare(app, {1200, 900});
+        app.workflows.readiness()->show(); // makes the sheet (the window builds it the first time it opens)
+        QObject *sheet = nullptr;
+        QTRY_VERIFY((sheet = app.window->findChild<QObject *>("getReadySheet")));
+        const auto model = [](const QString &name, const QString &size, const QString &license, const QString &typeFrom) {
+            return QVariantMap{{"name", name}, {"size", size}, {"host", "huggingface.co"}, {"license", license}, {"licenseUrl", ""},
+                               {"folder", typeFrom.isEmpty() ? "~/.local/share/fugue/models/diffusion_models" : "its folder, once the pack is installed"},
+                               {"typeFrom", typeFrom}, {"state", ""}, {"detail", ""}, {"fraction", 0.0}};
+        };
+        QVariantMap view{
+            {"headline", "Fugue will install and trust 1 pack, set up 1 environment and download 4 models, 19.7 GB."},
+            {"packs", QVariantList{QVariantMap{{"id", "segment"}, {"name", "Segment Nodes"}, {"version", "1.2.0"}, {"install", true}, {"pending", false},
+                                               {"summary", "from github.com/example/fugue-segment at v1.2.0 · declares network, files · runs uv sync"},
+                                               {"source", "github.com/example/fugue-segment at v1.2.0"}, {"runtime", "python"},
+                                               {"permissions", "network, files"}, {"setup", "uv sync"}, {"setupNote", "Installs the segmentation libraries."},
+                                               {"setupSize", "1.3 GB"}, {"state", ""}, {"detail", ""}}}},
+            {"models", QVariantList{model("Qwen3-8B-Q8_0.gguf", "8.7 GB", "Apache-2.0", ""),
+                                    model("flux-2-klein-9b-Q4_K_M.gguf", "5.9 GB", "FLUX Non-Commercial", ""),
+                                    model("ae.safetensors", "335 MB", "", "type from Segment Nodes: Segment by Points (needs a mask)"),
+                                    model("sam2_hiera_large.pt", "898 MB", "Apache-2.0", "type from Segment Nodes")}},
+            {"destination", "/home/me/.local/share/fugue/models"}, {"destinationTitle", "Fugue's models folder"},
+            {"destinations", QVariantList{}}, {"hasModels", true}, {"freeText", "343.2 GB free"}, {"sizeText", "19.7 GB"},
+            {"lowSpace", false}, {"problems", QStringList{}}, {"question", QVariantMap{}}, {"message", ""}, {"ok", false},
+            {"retry", QStringList{}}, {"empty", false}};
+        auto *map = QQmlPropertyMap::create(sheet);
+        map->insert("open", true);
+        map->insert("phase", "review");
+        map->insert("view", view);
+        QVERIFY(sheet->setProperty("sheetModel", QVariant::fromValue(static_cast<QObject *>(map))));
+        QTRY_VERIFY(sheet->property("visible").toBool());
+        QTest::qWait(500);
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/get-ready" + suffix + ".png"));
+        // Open on a model's details.
+        QVERIFY(sheet->setProperty("expanded", QVariantMap{{"model:Qwen3-8B-Q8_0.gguf", true}, {"pack:segment", true}}));
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/get-ready-details" + suffix + ".png"));
+        // Part-way through the run: the pack done, one download going, one failed to start, two waiting.
+        QVariantMap running = view;
+        QVariantList packs = running.value("packs").toList();
+        QVariantMap pack = packs.at(0).toMap();
+        pack["state"] = "done";
+        packs[0] = pack;
+        QVariantList models = running.value("models").toList();
+        QVariantMap first = models.at(0).toMap();
+        first["state"] = "done";
+        QVariantMap second = models.at(1).toMap();
+        second["state"] = "running";
+        second["fraction"] = 0.42;
+        models[0] = first;
+        models[1] = second;
+        running["packs"] = packs;
+        running["models"] = models;
+        map->insert("phase", "running");
+        map->insert("view", running);
+        QVERIFY(sheet->setProperty("expanded", QVariantMap{}));
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/get-ready-running" + suffix + ".png"));
     }
 
     // The node library panel (N) beside a workflow.
