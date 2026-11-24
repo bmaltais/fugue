@@ -32,7 +32,7 @@ generator=()
 if [[ ! -f $root/build/CMakeCache.txt ]] && command -v ninja >/dev/null; then
   generator=(-G Ninja)
 fi
-cmake -S "$root" -B "$root/build" "${generator[@]}" -DCMAKE_BUILD_TYPE=Release "${launcher[@]}" >/dev/null
+cmake -S "$root" -B "$root/build" "${generator[@]}" -DCMAKE_BUILD_TYPE=Release -DFUGUE_SHARED_LIBS="${FUGUE_SHARED_LIBS:-ON}" "${launcher[@]}" >/dev/null
 # Optional CMake targets: `bin/build fugue` builds only the app (no tests). None builds all.
 targets=()
 if (($#)); then

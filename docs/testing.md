@@ -21,6 +21,13 @@ start the built `fugue` (`tests/cli`, `tests/nodes`); any change under `src/` al
 core headers, test helpers, templates) runs the whole suite, and a change no test covers (documentation) runs
 nothing. It errs towards running more. Run the whole suite before you merge.
 
+`bin/build` builds the engine, core, cli and nodes libraries as shared objects (`-DFUGUE_SHARED_LIBS=ON`, the
+default there): an edit to an engine or node source relinks one library instead of ~215 programs (a one-file
+engine edit: 9 s static, 3 s shared). Editing a widely included header is compile-bound either way (about 4
+minutes for `engine/registry.h`). For a static build, like the package's, run `FUGUE_SHARED_LIBS=OFF bin/build`
+in a fresh `build/` (the choice is cached in the folder). A test that calls a library a library only links
+privately (libarchive, zlib, Vulkan) must link it itself, as `test_paint_file` does.
+
 `bin/build` and `bin/test` share one machine-wide lock, so only one big build or run happens at a time.
 A new build folder uses Ninja and lld when they are installed (a folder made with Make keeps Make; delete
 `build/` to move). The window's resources are built once for all tests, so a `Main.qml` edit rebuilds in

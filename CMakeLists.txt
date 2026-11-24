@@ -24,11 +24,22 @@ pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive)
 find_package(Vulkan REQUIRED) # free GPU memory by device type (spec 8.10); no device is created
 find_package(ZLIB REQUIRED) # the PSD reader inflates channel data into a buffer of exactly the promised size (engine/psd_file.cpp)
 
+# Development builds (bin/build) pass -DFUGUE_SHARED_LIBS=ON: the four libraries below become shared objects, so
+# an edit to one of their sources relinks one library instead of every program that holds a copy of it (#373).
+# The default (packaging, CI without bin/build) stays static: one self-contained `fugue` binary.
+option(FUGUE_SHARED_LIBS "Build the engine, core, cli and nodes libraries as shared objects" OFF)
+if(FUGUE_SHARED_LIBS)
+  set(fugue_lib_type SHARED)
+  set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
+else()
+  set(fugue_lib_type STATIC)
+endif()
+
 # The engine: documents, compiler, scheduler, cache, providers. It runs with
 # no display (the CLI and tests use it headless), so it never links Gui or
 # Quick. A new file in src/engine/ needs no line here.
 file(GLOB fugue_engine_sources CONFIGURE_DEPENDS src/engine/*.cpp src/engine/*.h)
-add_library(fugue_engine STATIC ${fugue_engine_sources})
+add_library(fugue_engine ${fugue_lib_type} ${fugue_engine_sources})
 target_include_directories(fugue_engine PUBLIC src)
 target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan PkgConfig::ARCHIVE ZLIB::ZLIB)
 target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
@@ -56,7 +67,7 @@ file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src
      src/workflow/*.cpp src/workflow/*.h src/run/*.cpp src/run/*.h src/settings/*.cpp src/settings/*.h
      src/panels/*.cpp src/panels/*.h src/media/*.cpp src/media/*.h src/workspace/*.cpp src/workspace/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
-add_library(fugue_core STATIC ${fugue_sources})
+add_library(fugue_core ${fugue_lib_type} ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
 # The window's runs (src/run) start and queue them as the CLI does, with its code.
 target_link_libraries(fugue_core PUBLIC fugue_engine fugue_cli
@@ -143,7 +154,7 @@ fugue_add_qml(fugue_workspace_qml src/workspace /workspace)
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
 # hands over to it before it creates a QGuiApplication.
 file(GLOB fugue_cli_sources CONFIGURE_DEPENDS src/cli/*.cpp src/cli/*.h)
-add_library(fugue_cli STATIC ${fugue_cli_sources})
+add_library(fugue_cli ${fugue_lib_type} ${fugue_cli_sources})
 target_include_directories(fugue_cli PUBLIC src)
 target_link_libraries(fugue_cli PUBLIC fugue_engine)
 # The agent skill (spec 13.5) is compiled in, so the one binary installs it wherever it is.
@@ -158,7 +169,7 @@ qt_add_resources(fugue_cli fugue_skill PREFIX /fugue/skills FILES share/skills/f
 # library that is linked into every executable using it, so the resource initializer is
 # never dropped by the linker (tests/cli checks the shipped binary knows fugue/text).
 file(GLOB fugue_nodes_sources CONFIGURE_DEPENDS src/nodes/*.cpp src/nodes/*.h)
-add_library(fugue_nodes STATIC ${fugue_nodes_sources})
+add_library(fugue_nodes ${fugue_lib_type} ${fugue_nodes_sources})
 target_include_directories(fugue_nodes PUBLIC src)
 target_link_libraries(fugue_nodes PUBLIC fugue_engine)
 # The region picker (src/canvas/region_pick.cpp) calls the Canvas Region node's own geometry, so the box and
@@ -255,6 +266,9 @@ foreach(test_source ${fugue_engine_tests})
                              FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>"
                              FUGUE_FAKE_MODULE_PROVIDER="$<TARGET_FILE:fake_module_provider>")
   add_dependencies(${test_name} fake_fugue_helper fake_module_provider)
+  if(test_name STREQUAL "test_paint_file")
+    target_link_libraries(${test_name} PRIVATE PkgConfig::ARCHIVE) # it reads the zip itself; the engine's own link is private
+  endif()
   fugue_add_test(${test_name})
 endforeach()
 
