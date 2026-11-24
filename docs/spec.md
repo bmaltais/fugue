@@ -1686,12 +1686,8 @@ it as a module folder and run it with no code of its own in Fugue.
   median used, in `model_speed.json` of the state folder (shared by every process; a record reads the file again before it writes).
   Nothing benchmarks by itself: the numbers come from real runs. Measured on the owner's RTX 3090 (workbench klein-da notes,
   2026-11-23, 1024x1024, 6 steps): Klein 9B INT8 ConvRot about 3.0 s sampling against about 5.6 s for Q8_0 GGUF, warm.
-- **Settings > Models (#370)** lists the diffusion models, text encoders and checkpoints found, by family, with the same family filter
-  (labelled **Family**, "All families" first, searchable) and the Recommended mark; it changes nothing. The files are sorted
-  by family name, then by file name, both case-insensitive with numbers in natural order (`sortedModelFiles`; files of no family
-  last). A Recommended file has an accent **Recommended** chip after its name, with the reason as its second line; the rows have
-  no size bar (their size is written on the row).
-- Fugue never modifies or deletes a model file.
+- **No Models page in Settings** (removed 2026-11-24, owner): it only listed the files and their Recommended mark, which the
+  pickers and template cards already show, and a list of files is not a setting. A Model library panel beside the canvas is its own issue.
 
 ### 8.10 GPU memory and the helper
 

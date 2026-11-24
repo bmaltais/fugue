@@ -297,40 +297,6 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // The Models page: a Recommended chip on the marked row only, a labelled family filter that starts at "All families",
-    // and a picture when FUGUE_SHOT_DIR is set (offscreen). The files are given to the page, as the model would.
-    void theModelsPageMarksTheRecommendedFile() {
-        App app(load(emptyDoc));
-        QVERIFY(app.open());
-        app.commands.trigger("app.settings");
-        QTRY_VERIFY(panelOpen(app.window));
-        QObject *panel = app.window->findChild<QObject *>("settingsPanel");
-        panel->setProperty("page", "models");
-        QQuickItem *empty = NEED("modelsEmpty"); // no files here: the page says so, and has no filter yet
-        const auto file = [](const char *family, const char *name, qint64 size, bool recommended) {
-            return QVariant(QVariantMap{{"family", family}, {"name", name}, {"size", size}, {"recommended", recommended},
-                                        {"reason", recommended ? "Recommended: best quality that fits here (Q8 level)" : ""}});
-        };
-        QQuickItem *page = empty->parentItem();
-        while (page && !page->property("files").isValid())
-            page = page->parentItem();
-        QVERIFY(page);
-        page->setProperty("files", QVariantList{file("FLUX.1", "flux1-dev-Q4_0.gguf", 6'800'000'000, false),
-                                                file("FLUX.1", "flux1-dev-Q8_0.gguf", 12'700'000'000, true),
-                                                file("Z-Image", "z_image_turbo_bf16.safetensors", 12'300'000'000, false)});
-        QQuickItem *drop = NEED("modelFamily");
-        QTRY_VERIFY(find(app.window, "models-badge-1"));
-        QVERIFY(!find(app.window, "models-badge-0"));
-        QVERIFY(!find(app.window, "models-badge-2"));
-        QCOMPARE(drop->property("currentText").toString(), QStringLiteral("All families"));
-        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
-        if (!dir.isEmpty()) {
-            QTest::qWait(300);
-            QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/settings-models.png"));
-        }
-        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
-    }
-
     // The page list is alphabetical by title, opens on General, and Up and Down walk it in that order.
     void thePagesAreAlphabeticalAndOpenOnGeneral() {
         App app(load(emptyDoc));
@@ -342,7 +308,7 @@ private slots:
         QStringList ids;
         for (const QVariant &page : panel->property("pages").toList())
             ids << page.toMap().value("id").toString();
-        QCOMPARE(ids, (QStringList{"cache", "folders", "general", "keymap", "models", "packs", "providers", "run", "theme"}));
+        QCOMPARE(ids, (QStringList{"cache", "folders", "general", "keymap", "packs", "providers", "run", "theme"}));
         QQuickItem *cache = NEED("settingsPage-cache");
         QVERIFY(cache->mapToScene(QPointF(0, 0)).y() < NEED("settingsPage-folders")->mapToScene(QPointF(0, 0)).y());
         click(app, NEED("settingsPage-general"));

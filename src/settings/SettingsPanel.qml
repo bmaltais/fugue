@@ -48,8 +48,7 @@ Popup {
     readonly property var pages: [{id: "general", title: qsTr("General")}, {id: "folders", title: qsTr("Folders")},
                                   {id: "run", title: qsTr("Run")}, {id: "providers", title: qsTr("Providers")},
                                   {id: "keymap", title: qsTr("Keymap")}, {id: "theme", title: qsTr("Theme")},
-                                  {id: "packs", title: qsTr("Packs")}, {id: "cache", title: qsTr("Cache")},
-                                  {id: "models", title: qsTr("Models")}]
+                                  {id: "packs", title: qsTr("Packs")}, {id: "cache", title: qsTr("Cache")}]
                                  .sort((a, b) => a.title.localeCompare(b.title))
     // The pages whose changes go to settings.json (the files' note under the page).
     readonly property bool inSettingsFile: page === "general" || page === "folders" || page === "run"
@@ -424,14 +423,6 @@ Popup {
                         visible: panel.page === "cache"
                         Layout.fillWidth: true
                         sourceComponent: CachePage { host: panel }
-                    }
-
-                    // Models (#370): made when first shown, as the Cache page.
-                    Loader {
-                        active: panel.page === "models" || item !== null
-                        visible: panel.page === "models"
-                        Layout.fillWidth: true
-                        sourceComponent: ModelsPage { host: panel }
                     }
 
                     // Keymap

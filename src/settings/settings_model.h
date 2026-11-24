@@ -170,10 +170,6 @@ public:
     Q_INVOKABLE QString modelFolderFound(const QString &path) const;
     // The kinds a folder can be set to hold: {value, text}, "" first.
     Q_INVOKABLE QVariantList modelFolderKinds() const;
-    // The Models page (#370): the model files of the types that have families (diffusion models, text
-    // encoders, checkpoints) as maps {type, name, path, size, family, recommended, reason}, files of no family
-    // with an empty `family`. Reads the headers of the files of a known family.
-    Q_INVOKABLE QVariantList modelFiles() const;
     // Reads both files again.
     Q_INVOKABLE void reload();
 
@@ -221,9 +217,5 @@ private:
     const Registry *m_types = nullptr; // the node types and port types, for what a folder holds
     std::function<void(const QUrl &)> m_openUrl;
 };
-
-// The Models page's order: families by name (case-insensitive, numbers in natural order, files of no family
-// last), and inside a family the files by file name the same way. `files` are modelFiles() maps.
-QVariantList sortedModelFiles(QVariantList files);
 
 } // namespace fugue
