@@ -203,7 +203,7 @@ private slots:
     }
 
     // A link (or file) planted at the partial file's name is never written through: the partial file is
-    // made exclusively, for write() and for a program that writes path() (ffmpeg).
+    // made exclusively, under another name when that one is taken, for write() and for a program that writes path() (ffmpeg).
     void aLinkPlantedAtThePartialNameIsNotWrittenThrough() {
         QTemporaryDir outside;
         writeAll(outside.filePath("victim"), "keep");
@@ -213,9 +213,9 @@ private slots:
             PartialFile partial(dir.value(), "a.png");
             QVERIFY(QFile::link(outside.filePath("victim"), path("o3/" + partial.name())));
             const Errors made = viaCreate ? partial.create() : partial.write("x", "a.png");
-            QVERIFY(hasErrors(made));
+            QVERIFY(!hasErrors(made)); // another name was taken
             QCOMPARE(readAll(outside.filePath("victim")), QByteArray("keep"));
-            QVERIFY(QFile::remove(path("o3/" + partial.name())));
+            QVERIFY(!QFileInfo::exists(path("o3/" + partial.name())) || !QFileInfo(path("o3/" + partial.name())).isSymLink());
         }
     }
 

@@ -171,8 +171,8 @@ Errors makeFolder(const QString &dir) {
 PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
 
 PartialFile::PartialFile(const FolderFd &dir, const QString &name)
-    : m_dir(&dir), m_leaf(QFile::encodeName(partialName(name))) {
-    m_path = QDir(dir.path()).filePath(QFile::decodeName(m_leaf));
+    : m_dir(&dir), m_name(name), m_leaf(QFile::encodeName(partialName(name))) {
+    m_path = QDir(dir.path()).filePath(name);
 }
 
 // The file made here and held open, so what is written (by us, or by a program given path())
@@ -180,9 +180,16 @@ PartialFile::PartialFile(const FolderFd &dir, const QString &name)
 Errors PartialFile::create() const {
     if (!m_dir || m_file >= 0)
         return {};
-    errno = 0;
     struct stat info {};
-    const int fd = ::openat(m_dir->fd(), m_leaf.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+    int fd = -1;
+    // A partial name already taken (a leftover, or planted) gets another name, a few times.
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        errno = 0;
+        fd = ::openat(m_dir->fd(), m_leaf.constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+        if (fd >= 0 || errno != EEXIST)
+            break;
+        m_leaf = QFile::encodeName(partialName(m_name));
+    }
     if (fd < 0)
         return {writeFailed(m_path, errno)};
     if (::fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
@@ -198,6 +205,9 @@ Errors PartialFile::create() const {
 QString PartialFile::path() const {
     if (!m_dir)
         return m_path;
+    Q_ASSERT_X(m_file >= 0, "PartialFile::path", "create() first");
+    if (m_file < 0)
+        return {};
     // The open file's own magic link: it leads to that file, not to a name that can be swapped.
     return QStringLiteral("/proc/%1/fd/%2").arg(::getpid()).arg(m_file);
 }

@@ -108,9 +108,14 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
         // Write into the path that was checked.
         return context.roots->checkWrite(folder, input);
     };
+    // The write roots only say yes or no: the folder opened is the one resolved above, never a
+    // second resolve of it.
     const Result<QString> baseOk = checked(base.value(), QStringLiteral("folder"));
     if (!baseOk)
         return baseOk.errors();
+    if (baseOk.value() != base.value())
+        return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
+                              QStringLiteral("The folder %1 changed while it was checked.").arg(base.value()));
     QString folder = baseOk.value();
     if (slash >= 0) {
         // The subfolders as the system resolves them: a link inside the folder that leads out
@@ -127,7 +132,10 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
         const Result<QString> subOk = checked(wanted, QStringLiteral("name"));
         if (!subOk)
             return subOk.errors();
-        folder = subOk.value();
+        if (subOk.value() != wanted)
+            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("name"),
+                                  QStringLiteral("The folder %1 changed while it was checked.").arg(wanted));
+        folder = wanted;
     }
     // Opened once, here: from now on the folders are held by descriptor, not by name. The base
     // is opened (and made) from the root without following a link; the name's subfolders below it.

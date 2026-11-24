@@ -80,7 +80,7 @@ public:
     PartialFile &operator=(const PartialFile &) = delete;
 
     // The partial file's name in its folder (a PartialFile in a FolderFd).
-    QString name() const { return QFile::decodeName(m_leaf); }
+    QString name() const { return QFile::decodeName(m_leaf); } // changes if create() had to pick another
 
     // Where to write the content (a program such as ffmpeg may write it itself). In a FolderFd this is
     // /proc/<pid>/fd/<n> of the partial file held open (after create(); needs /proc and a process that
@@ -111,7 +111,8 @@ private:
     QString m_path;       // the whole path, or in a FolderFd the folder's path and the name, for messages
     const FolderFd *m_dir = nullptr;
     mutable int m_file = -1; // the partial file, open, in a FolderFd
-    QByteArray m_leaf;    // the partial file's name in m_dir
+    QString m_name;       // the name it was made for, to pick another partial name from
+    mutable QByteArray m_leaf;    // the partial file's name in m_dir
     bool m_committed = false;
 };
 
