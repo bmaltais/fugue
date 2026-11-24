@@ -747,7 +747,8 @@ private slots:
         };
         QQuickItem *info = item(window->contentItem(), "templateInfo-talk");
         QVERIFY(info);
-        QTest::qWait(300); // the cards settle after the filter was cleared: the chip is small, so click where it ends up
+        // The card is laid out at the next polish: the chip is at the picture's bottom corner once the picture is 16:10.
+        QTRY_VERIFY(info->parentItem()->height() > 0 && qAbs(info->parentItem()->height() - info->parentItem()->width() * 10 / 16) < 1);
         QTest::mouseClick(window, Qt::LeftButton, {}, info->mapToScene(QPointF(info->width() / 2, info->height() / 2)).toPoint());
         QTRY_VERIFY(detailsShown());
         QCOMPARE(item(window->contentItem(), "templateDetailsTitle")->property("text").toString(), QString("Talk"));
