@@ -139,7 +139,7 @@ public:
             }
         }
         QFile::remove(scratch->path());
-        const Result<QString> target = saveAsNew(where->folder, where->name, format, bytes);
+        const Result<QString> target = saveAsNew(where.value(), format, bytes);
         if (!target)
             return target.errors();
 

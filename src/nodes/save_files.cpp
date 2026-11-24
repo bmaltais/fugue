@@ -22,23 +22,20 @@ namespace {
 Result<QString> baseFolder(const NodeContext &context) {
     // Relative folders are under the output folder, so a workflow made elsewhere cannot
     // write outside it by accident.
-    QString folder = context.input("folder").text().trimmed();
-    if (folder.isEmpty()) {
-        folder = outputDir();
-    } else if (QDir::isRelativePath(folder)) {
-        folder = outputDir() + QLatin1Char('/') + folder;
-        if (!isInside(canonicalPath(folder), canonicalPath(outputDir())))
-            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
-                                  QStringLiteral("%1 leads out of the output folder %2.").arg(context.input("folder").text().trimmed(), outputDir()),
-                                  QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
-    }
+    const QString typed = context.input("folder").text().trimmed();
     // The folder as the system resolves it (links followed where they stand, then `..`),
     // so making it, writing in it and checking it are about one folder. QDir::mkpath
-    // would clean `link/..` away on paper while the write follows the link.
-    folder = canonicalPath(folder);
+    // would clean `link/..` away on paper while the write follows the link. Resolved once:
+    // the folder that is checked is the folder that is returned.
+    const bool relative = !typed.isEmpty() && QDir::isRelativePath(typed);
+    const QString folder = canonicalPath(typed.isEmpty() ? outputDir() : relative ? outputDir() + QLatin1Char('/') + typed : typed);
+    if (relative && !isInside(folder, canonicalPath(outputDir())))
+        return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
+                              QStringLiteral("%1 leads out of the output folder %2.").arg(typed, outputDir()),
+                              QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
     if (folder.isEmpty())
         return makeInputError(QStringLiteral("node_failed"), QStringLiteral("folder"),
-                              QStringLiteral("The folder %1 goes through links that loop.").arg(context.input("folder").text().trimmed()));
+                              QStringLiteral("The folder %1 goes through links that loop.").arg(typed));
     return folder;
 }
 
@@ -111,9 +108,14 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
         // Write into the path that was checked.
         return context.roots->checkWrite(folder, input);
     };
+    // The write roots only say yes or no: the folder opened is the one resolved above, never a
+    // second resolve of it.
     const Result<QString> baseOk = checked(base.value(), QStringLiteral("folder"));
     if (!baseOk)
         return baseOk.errors();
+    if (baseOk.value() != base.value())
+        return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
+                              QStringLiteral("The folder %1 changed while it was checked.").arg(base.value()));
     QString folder = baseOk.value();
     if (slash >= 0) {
         // The subfolders as the system resolves them: a link inside the folder that leads out
@@ -130,21 +132,36 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
         const Result<QString> subOk = checked(wanted, QStringLiteral("name"));
         if (!subOk)
             return subOk.errors();
-        folder = subOk.value();
+        if (subOk.value() != wanted)
+            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("name"),
+                                  QStringLiteral("The folder %1 changed while it was checked.").arg(wanted));
+        folder = wanted;
     }
-    if (Errors made = makeFolder(baseOk.value()); !made.isEmpty()) {
+    // Opened once, here: from now on the folders are held by descriptor, not by name. The base
+    // is opened (and made) from the root without following a link; the name's subfolders below it.
+    Result<FolderFd> opened = FolderFd::open(baseOk.value(), true);
+    if (!opened) {
+        Errors made = opened.errors();
         made.first().input = QStringLiteral("folder");
         made.first().hint = QStringLiteral("Pick another folder in the node.");
         return made;
     }
     if (folder != baseOk.value()) {
-        if (Errors made = makeFolder(folder); !made.isEmpty()) {
+        // `folder` is inside the base after links were followed, so the way down is the path
+        // between them; a link met there now (one swapped in since) is refused.
+        const QString prefix = baseOk.value().endsWith(QLatin1Char('/')) ? baseOk.value() : baseOk.value() + QLatin1Char('/');
+        if (!folder.startsWith(prefix))
+            return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("name"),
+                                  QStringLiteral("\"%1\" is not inside the folder %2 any more.").arg(relative.value(), baseOk.value()));
+        opened = opened->below(folder.mid(prefix.size()), true);
+        if (!opened) {
+            Errors made = opened.errors();
             made.first().input = QStringLiteral("name");
             made.first().hint = QStringLiteral("Use another name: a folder in it may be a file already.");
             return made;
         }
     }
-    return SaveLocation{folder, relative->mid(slash + 1)};
+    return SaveLocation{folder, relative->mid(slash + 1), std::make_shared<FolderFd>(std::move(opened.value()))};
 }
 
 Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &embed, const QString &what) {
@@ -193,13 +210,13 @@ Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const Q
                      QStringLiteral("Pick another name or folder in the node."));
 }
 
-Result<QString> saveAsNew(const QString &folder, const QString &name, const QString &extension, const QByteArray &bytes) {
-    PartialFile::removeStale(folder); // what a save that died here left behind
-    PartialFile partial(folder, numberedName(name, 1, extension));
-    if (const Errors written = partial.write(bytes, QDir(folder).filePath(numberedName(name, 1, extension)));
+Result<QString> saveAsNew(const SaveLocation &where, const QString &extension, const QByteArray &bytes) {
+    PartialFile::removeStale(*where.dir); // what a save that died here left behind
+    PartialFile partial(*where.dir, numberedName(where.name, 1, extension));
+    if (const Errors written = partial.write(bytes, QDir(where.folder).filePath(numberedName(where.name, 1, extension)));
         hasErrors(written))
         return written;
-    return commitAsNew(partial, folder, name, extension);
+    return commitAsNew(partial, where.folder, where.name, extension);
 }
 
 } // namespace fugue::nodes

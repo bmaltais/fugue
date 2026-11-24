@@ -158,6 +158,105 @@ private slots:
         QVERIFY(hasErrors(written));
         QCOMPARE(written.first().code, QString("file_not_found"));
     }
+
+    // #360: a folder swapped for a link to an outside folder after the check is refused, and
+    // nothing is written outside.
+    void aFolderSwappedForALinkAfterTheCheckIsRefused() {
+        QTemporaryDir outside;
+        QVERIFY(QDir(path("")).mkpath("out/sub"));
+        static QString swap, away, outsidePath;
+        swap = path("out/sub");
+        away = path("out/sub-moved");
+        outsidePath = outside.path();
+        beforeFolderOpen = [](const QString &) {
+            QVERIFY(QDir().rename(swap, away));
+            QVERIFY(QFile::link(outsidePath, swap));
+        };
+        const Result<FolderFd> dir = FolderFd::open(path("out/sub"), true);
+        beforeFolderOpen = nullptr;
+        QVERIFY(!dir.ok());
+        QCOMPARE(dir.errors().first().code, QString("permission_denied"));
+        QVERIFY(QDir(outside.path()).isEmpty(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot));
+    }
+
+    // A link swapped in for a subfolder after the base was opened cannot lead the write out
+    // either, and a write through the open folder stays in the folder that was opened.
+    void aWriteThroughTheOpenFolderStaysInIt() {
+        QTemporaryDir outside;
+        QVERIFY(QDir(path("")).mkpath("o2/sub"));
+        const Result<FolderFd> base = FolderFd::open(path("o2"), true);
+        QVERIFY(base.ok());
+        QVERIFY(QDir().rename(path("o2/sub"), path("o2/sub-moved")));
+        QVERIFY(QFile::link(outside.path(), path("o2/sub")));
+        QVERIFY(!base->below("sub", true).ok());
+
+        const Result<FolderFd> opened = base->below("made/deeper", true);
+        QVERIFY(opened.ok());
+        QVERIFY(QDir().rename(path("o2/made"), path("o2/made-moved")));
+        QVERIFY(QFile::link(outside.path(), path("o2/made")));
+        PartialFile partial(opened.value(), "a.png");
+        QVERIFY(!hasErrors(partial.write("content", "a.png")));
+        const Result<bool> committed = partial.commit("a.png", Overwrite::Never);
+        QVERIFY(committed.ok() && *committed);
+        QVERIFY(QFile::exists(path("o2/made-moved/deeper/a.png")));
+        QVERIFY(QDir(outside.path()).isEmpty(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot));
+    }
+
+    // A link (or file) planted at the partial file's name is never written through: the partial file is
+    // made exclusively, under another name when that one is taken, for write() and for a program that writes path() (ffmpeg).
+    void aLinkPlantedAtThePartialNameIsNotWrittenThrough() {
+        QTemporaryDir outside;
+        writeAll(outside.filePath("victim"), "keep");
+        const Result<FolderFd> dir = FolderFd::open(path("o3"), true);
+        QVERIFY(dir.ok());
+        for (const bool viaCreate : {false, true}) {
+            PartialFile partial(dir.value(), "a.png");
+            QVERIFY(QFile::link(outside.filePath("victim"), path("o3/" + partial.name())));
+            const Errors made = viaCreate ? partial.create() : partial.write("x", "a.png");
+            QVERIFY(!hasErrors(made)); // another name was taken
+            QCOMPARE(readAll(outside.filePath("victim")), QByteArray("keep"));
+            QVERIFY(!QFileInfo::exists(path("o3/" + partial.name())) || !QFileInfo(path("o3/" + partial.name())).isSymLink());
+        }
+    }
+
+    void partsThatAreNotPlainNamesAreRefused() {
+        QVERIFY(QDir(path("")).mkpath("o4/a"));
+        const Result<FolderFd> base = FolderFd::open(path("o4"), false);
+        QVERIFY(base.ok());
+        for (const char *bad : {"..", "a/../..", ".", "a//b", ""})
+            QVERIFY2(!base->below(bad, true).ok(), bad);
+        QVERIFY(!FolderFd::open(path("o4/a/.."), false).ok());
+    }
+
+    // Walking needs only the search permission of the folders above, and a write-only folder takes a file.
+    void aFolderBehindSearchOnlyAndWriteOnlyFoldersIsWritten() {
+        QVERIFY(QDir(path("")).mkpath("o5/x/t"));
+        QVERIFY(QFile::setPermissions(path("o5/x/t"), QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        QVERIFY(QFile::setPermissions(path("o5/x"), QFileDevice::ExeOwner));
+        const Result<FolderFd> dir = FolderFd::open(path("o5/x/t"), true);
+        bool written = false;
+        if (dir.ok()) {
+            PartialFile partial(dir.value(), "a.png");
+            written = !hasErrors(partial.write("c", "a.png")) && partial.commit("a.png", Overwrite::Never).ok();
+        }
+        QFile::setPermissions(path("o5/x"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QFile::setPermissions(path("o5/x/t"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QVERIFY(written);
+        QCOMPARE(readAll(path("o5/x/t/a.png")), QByteArray("c"));
+    }
+
+    void foldersAreMadeAndAnExistingNameIsKept() {
+        const Result<FolderFd> dir = FolderFd::open(path("a/b"), true);
+        QVERIFY(dir.ok());
+        QVERIFY(QFileInfo(path("a/b")).isDir());
+        PartialFile first(dir.value(), "x.png"), second(dir.value(), "x.png");
+        QVERIFY(!hasErrors(first.write("1", "x.png")) && !hasErrors(second.write("2", "x.png")));
+        QVERIFY(*first.commit("x.png", Overwrite::Never));
+        QVERIFY(!*second.commit("x.png", Overwrite::Never));
+        QCOMPARE(readAll(path("a/b/x.png")), QByteArray("1"));
+        QVERIFY(!FolderFd::open(path("a/b/x.png"), false).ok());
+        QVERIFY(!FolderFd::open(path("none/there"), false).ok());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestAtomicFile)
