@@ -5,6 +5,9 @@
 #
 # For a build only this machine runs, `-DCMAKE_CUDA_ARCHITECTURES=native -DGGML_NATIVE=ON`
 # compiles far less than the package's portable default.
+#
+# FUGUE_SDCPP_SOURCE=<a clone of github.com/bmaltais/stable-diffusion.cpp> builds that folder instead of the
+# pinned tarball, so an engine edit rebuilds only what it touches (helper/README.md, Changing the engine).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,9 +18,19 @@ if [[ ! $backend =~ ^(cuda|vulkan|cpu)$ ]]; then
   exit 2
 fi
 args=()
+if [[ -n ${FUGUE_SDCPP_SOURCE:-} ]]; then
+  if [[ ! -f $FUGUE_SDCPP_SOURCE/CMakeLists.txt ]]; then
+    echo "FUGUE_SDCPP_SOURCE=$FUGUE_SDCPP_SOURCE is not a stable-diffusion.cpp checkout" >&2
+    exit 2
+  fi
+  args+=(-DFETCHCONTENT_SOURCE_DIR_SDCPP="$(cd "$FUGUE_SDCPP_SOURCE" && pwd)")
+else
+  # CMake keeps the path in the build folder's cache: without this a build after a clone's would still use the clone.
+  args+=(-UFETCHCONTENT_SOURCE_DIR_SDCPP)
+fi
 if command -v ccache >/dev/null; then
   # As bin/build: objects are reused across build folders and worktrees, so a fresh
-  # build-helper-<backend>/ or a reapplied patch recompiles only the files that changed.
+  # build-helper-<backend>/ or a changed engine commit recompiles only the files that changed.
   export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$(dirname "$root")}"
   args+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache)
 else

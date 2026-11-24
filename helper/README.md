@@ -1,12 +1,12 @@
 # fugue-helper
 
-stable-diffusion.cpp at a pinned commit with Fugue's stage patch, so encode, sample and decode
+Fugue's fork of stable-diffusion.cpp at a pinned commit (upstream plus Fugue's changes as commits, [The fork](#the-fork)), so encode, sample and decode
 run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper)).
 
 | File | What it is |
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
-| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/api/fugue_stages.h`), the stage runs (`src/api/fugue_stage.cpp`: the cut of a rendered program, the `fugue::` built-ins, the reader of a clip's YUV4MPEG2), one hook each in `generate_images` and `generate_video`, and the opt-in soft-mask blend (see The seam), and `ref_image_args` (`resize_before_vae=false` keeps each edit reference at its own size; `generation_image.cpp`) |
+| the fork (`bmaltais/stable-diffusion.cpp`) | The engine itself is not in this repo: it is the fork's `fugue` branch ([The fork](#the-fork)). Its changes: `fugue.*` image and video options, the stage file format (`src/api/fugue_stages.h`), the stage runs (`src/api/fugue_stage.cpp`: the cut of a rendered program, the `fugue::` built-ins, the reader of a clip's YUV4MPEG2), one hook each in `generate_images` and `generate_video`, the opt-in soft-mask blend (see The seam), and `ref_image_args` (`resize_before_vae=false` keeps each edit reference at its own size; `generation_image.cpp`) |
 | `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider) and `fugue-helper --serve-http` (the same over HTTP, for a paired host); the formats are at its top |
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
@@ -31,7 +31,7 @@ CI runs it). A cancel reaches a running restore through `sd_dgl_ctx_cancel`.
 ## The seam
 
 Since upstream's Diffusion Graph Language (6cd0ef1) a generation is a DGL program: C++ renders one from
-`src/api/templates/*.dgl` for the model family and runs its statements in source order. The patch leaves
+`src/api/templates/*.dgl` for the model family and runs its statements in source order. The fork leaves
 the rendering alone and cuts the rendered program (`src/api/fugue_stage.cpp`, reached only by a request
 with a `fugue.*` option or the noise-level reading of strength):
 
@@ -81,9 +81,8 @@ Fetch SHA256SUMS first (`gh release download vX -p SHA256SUMS -D dist`) so the u
 lines. On the host: unpack, put the binary at `~/.local/lib/fugue/fugue-helper-cuda`, and follow
 the paired-host steps below.
 
-Editing the patch: the fetched source is patched once, when the build folder is made. Either
-start a fresh `build-helper-<backend>/`, or make the same edit in
-`build-helper-<backend>/_deps/sdcpp-src` and rebuild.
+`FUGUE_SDCPP_SOURCE=<a clone of the fork>` builds that folder instead of the pinned tarball
+(`-DFETCHCONTENT_SOURCE_DIR_SDCPP`): see [Changing the engine](#changing-the-engine).
 
 ## Paired host (`--serve-http`)
 
@@ -250,7 +249,7 @@ order, one at a time, into the other folder under the same name (written as `.pa
 progress is the frames done; the reply is `{"outputs": [{"frames": "out/"}], "scale": 4, "frames": N}`.
 The folder is on the helper's disk, so a paired host (`--serve-http`) does not take it. A cancel is
 heard between frames (`cancelled`); inside one image the library has no hook, and Fugue ends the
-helper after its grace period. No change to the stage patch: the upscaler API is the library's own.
+helper after its grace period. No change to the fork: the upscaler API is the library's own.
 
 ## Strength (image to image)
 
@@ -260,27 +259,83 @@ scale (0.5 starts at 0.96, 0.75 is a full redraw), so for every model that is no
 adds `strength_as_noise_level=true,force_first_sigma=true` to `sample.args`: strength is the sigma the start picture is
 noised to, the same at any step count (`src/strength_args.h`, tested by `tests/engine/test_helper_strength.cpp`; numbers in
 `docs/inpaint-outpaint-research.md` 4.7). A request that sends either key itself is not changed; a video model is not
-touched. Upstream's DGL engine dropped both options, so the patch keeps them: `fugue_stage.cpp` reads them from
+touched. Upstream's DGL engine dropped both options, so the fork keeps them: `fugue_stage.cpp` reads them from
 `sample.args` and replaces the `sigmas` statement with `fugue::noise_level_sigmas`, the old algorithm on the denoiser's
 `noise_level_to_sigma`. Re-check at a pin move that `slice_sigmas_by_strength` is still how the templates trim, and that
 new version names in `src/model/integrations/` are not step-fraction models.
 
-## Opt-in hunks (not stage seams)
+## The fork
 
-The patch is stage hooks, plus these hunks that change behaviour only when an option is set and leave
+The engine is [github.com/bmaltais/stable-diffusion.cpp](https://github.com/bmaltais/stable-diffusion.cpp) (MIT, like
+upstream), branch `fugue`: leejet's commit `3b12781f` plus Fugue's changes as commits, replayed on 2026-11-24 from
+the history of the `sdcpp.patch` this folder used to hold (#410). `CMakeLists.txt` pins a fork commit, the one a tag
+`fugue-<date>` names, and fetches its tarball with the SHA-256 (`curl -sL <tarball URL> | sha256sum`, twice: it must
+not change). The tree of the replayed branch's last commit was checked equal to upstream plus the last `sdcpp.patch`, byte for byte.
+
+| Fork commit | From Fugue | What it changes |
+| --- | --- | --- |
+| `502dc31` Fugue changes as of the 3b12781f port | `b7ca74c4` .. `ba4afa47` (#77, #105, #173, #179, #130, #356): one commit, as those were written against older upstream commits | The stage patch and what it carries up to the port: stage options and runs, video stages, staged inpainting, soft mask, video to video (the tables below) |
+| `d63ec3f` Text Encode: reference_size | `b7c1e25f`, `bc55967b` (#342) | `ref_image_args=resize_before_vae=false`, in both stages; a side that is not a multiple of the VAE's is cut from the middle |
+| `5e66c73` Helper logs the schedule | `51c7b779` (#359) | `sampling sigmas: ...` |
+| `15a3acc` time a lazy model load | `fbaa1ea9` (#382) | Performance table, first row |
+| `14c9195` no Stream-K for int8 GEMMs on Ampere | `dc16dd15` (#382) | idem |
+| `06bf16b` SageAttention by default, V cast in one copy | `f1c1e527` (#382) | idem |
+| `0abd5db` keep a VAE's encodes | `5018bfaa` (#382) | idem |
+| `8a5d720` fuse a FLUX single block's swiglu and concat | `cb82df6f` (#382) | idem |
+| `6bc6fc9` one kernel for a VAE's group norm | `28a208b3` (#382) | idem |
+| `667ed40` SageAttention only where it beats flash attention | `858ab29e` (#382) | idem |
+| `314a4a4` a CUTLASS convolution for VAE decoding | `85af2362` (#382) | idem |
+| `0b3ff56` fix the upstream code the build warns about | `b919007f` | Warnings commit |
+| `0bcd3ab` the CUTLASS convolution for AutoEncoderKL decoding only | `b083a041` (#382) | idem (the last row of the Performance table); the tag `fugue-2026-11-24` |
+
+Each fork commit's message says which Fugue commit it came from. New engine commits go on the fork alone; add a row
+here with the fork's short hash.
+
+### Changing the engine
+
+```sh
+git clone https://github.com/bmaltais/stable-diffusion.cpp ~/github/stable-diffusion.cpp
+git -C ~/github/stable-diffusion.cpp remote add upstream https://github.com/leejet/stable-diffusion.cpp
+git -C ~/github/stable-diffusion.cpp checkout fugue
+# edit in the clone, then build the helper from it: only the files you touched recompile
+FUGUE_SDCPP_SOURCE=~/github/stable-diffusion.cpp bin/build-helper cuda
+```
+
+1. Edit in the clone and build with `FUGUE_SDCPP_SOURCE` (it only passes `-DFETCHCONTENT_SOURCE_DIR_SDCPP`; a build
+   without it afterwards goes back to the pinned tarball).
+2. Commit on `fugue`, with the Fugue issue number in the subject and a line `Fugue: bmaltais/fugue#NNN`. Push.
+3. Tag the commit `fugue-<date>` and push the tag. Bump the pin: `sdcpp_commit` and `sdcpp_sha256` in
+   `CMakeLists.txt`, `_sdcpp` and its `sha256sums` entry in `packaging/PKGBUILD` (CI checks the two name the same commit).
+4. Add a row to the table above, and in the Fugue PR describe the behaviour; reviewers read the engine diff in the
+   fork's own commits, not here.
+
+### Upgrading upstream
+
+Rebase `fugue` onto the new upstream commit (`git fetch upstream && git rebase <new commit>`; fix conflicts as in
+any rebase), build, run the checks of [Moving the pin](#moving-the-pin), tag, and bump the pin (with the new ggml and
+CUTLASS commits, below). Re-read the opt-in changes against the new commit.
+
+### Upstream's AI policy
+
+leejet's `AGENTS.md` and `CONTRIBUTING.md` apply to pull requests sent to upstream, not to the fork. Only the owner
+sends pull requests upstream: an agent works in the fork, never opens a PR to `leejet/stable-diffusion.cpp`.
+
+## Opt-in changes (not stage seams)
+
+The fork is stage hooks, plus these changes, which change behaviour only when an option is set and leave
 upstream's output byte-identical when it is off (spec 8.10). Each is listed here with its upstream PR
-and checked at every pin move.
+and checked at every upstream upgrade.
 
-| Option | What it does | Hunks | Upstream PR |
+| Option | What it does | Files | Upstream PR |
 | --- | --- | --- | --- |
 | `fugue.soft_mask` (bool, image) | Differential diffusion ([arXiv 2306.00950](https://arxiv.org/abs/2306.00950), written from the paper: its repository has no licence). A mask's gray is a change strength: a latent cell with value `m` is redrawn from step `i` of `k` when `m > (k - 1 - i) / k` and held to the start latent before | `config.h`, `api/options.cpp` (the option); `api/fugue_stage.cpp` (no threshold on `mask_pixels` when on, kept for an inpaint model; `soft_mask = true` on `sample`); `dgl/models/diffusion_prediction.h` (`blend_mask`), `dgl/ops/sampling.*`, `dgl/bindings/arguments.cpp`, `registration.cpp` (a defaulted `soft_mask` argument of `sample`) | not sent yet: [the description](../docs/differential-diffusion-upstream.md) is ready for the owner (#179) |
 | `fugue.init_video` (string, video; with `fugue.init_latent_in` / `_out` for a video) | Video to video: a YUV4MPEG2 clip is encoded with the VAE (or its latent is read) and replaces the start latent, and `strength` below 1 drops the first sigmas of the schedule (the high-noise pass of Wan 2.2 first), as image to image does. Not for LTX, MiniMax H3, S2V or a latent upscale | `config.h`, `api/options.cpp` (the option); `api/fugue_stage.cpp` (`read_y4m`, `fugue::load_clip`, `base` and `sigmas` of the Wan program) | not sent yet; library `strength` for a video is read by LTX only upstream |
 
-When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
+When an upstream PR is merged and the fork is rebased onto it, drop the commit.
 
-## Warnings hunks
+## Warnings commit
 
-The patch's last group, `# warnings`, fixes what the helper's build warns about in upstream code, with
+One commit (`fix the upstream code the build warns about`) fixes what the helper's build warns about in upstream code, with
 no change in behaviour, so the build stays warning-free: `.template` on dependent member-template calls
 in `sageattention/attn_utils.cuh` (#174), hand-written UTF conversions instead of the deprecated
 `std::wstring_convert` (`core/util.cpp`, `api/image_metadata.cpp`, same errors on invalid input), and
@@ -288,14 +343,14 @@ two GCC 16 `-Wstringop-overflow` false positives (`thirdparty/stb_image.h`: an e
 already had; `conditioning/conditioner.hpp`: `reshape_` for the same `unsqueeze_`). Send them upstream with
 the rest when the owner says so.
 
-## Performance hunks (#382)
+## Performance commits (#382)
 
-The last group of the patch makes sampling faster and leaves the pictures alone, except
-SageAttention, which the helper turns on (below). Each hunk is commented in the source. Numbers are
+The last commits of the fork make sampling faster and leaves the pictures alone, except
+SageAttention, which the helper turns on (below). Each change is commented in the source. Numbers are
 Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024; an edit has three
 1024x1024 references.
 
-| Hunk | What it does | Pixels | Upstreamable |
+| Files | What it does | Pixels | Upstreamable |
 | --- | --- | --- | --- |
 | `model_loader.*`, `dgl/ops/sampling.cpp` | A lazy weight load during sampling is logged on its own line (`sampling loaded the model weights first`) and left out of `sampling completed` | identical | yes |
 | `core/cuda/i8_gemm.cu`, `i8_gated_residual.cu` | No Stream-K for the int8 GEMMs on Ampere (sm_80/86); Ada and newer keep it from 8192 rows. Edit sampling 19.4 s -> 18.5 s | identical | yes |
@@ -306,7 +361,7 @@ Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024
 | `dgl/models/vae.*` | A VAE keeps its encodes of the same pixels (content hashes, shape, posterior, tiling; at most 32 latents and 256 MB, dropped when its weights change or the context goes), only where the encode does not use the RNG (the FLUX.2 VAE). An edit's references are encoded once, not for every seed: -0.7 s a warm edit job | identical | yes |
 
 SageAttention: on CUDA the helper adds `"sage_attn": true` to every context that does not set it
-(`withDefaults` in `src/main.cpp`). The patch (`core/ggml_extend.cpp`) takes SageAttention only where
+(`withDefaults` in `src/main.cpp`). The fork (`core/ggml_extend.cpp`) takes SageAttention only where
 it beats flash attention: no mask, a head of 64 or 128, and no K/V range scaling (Z-Image scales K
 and V and was 3% slower a step with it, so it keeps flash attention and its pictures are unchanged);
 elsewhere flash attention as before. Text to image 3.38 s -> 3.20 s, edit 18.5 s -> 16.2 s; against flash attention
@@ -317,22 +372,16 @@ its context keeps flash attention.
 
 The pin moves only on purpose (spec 8.10).
 
-1. Carry the patch to the new commit with git's three-way merge:
-   ```sh
-   git clone https://github.com/leejet/stable-diffusion.cpp sdcpp && cd sdcpp
-   git checkout <old commit> && patch -p1 < ../fugue/helper/sdcpp.patch
-   git add -A && git commit -m "Fugue stage patch"
-   git rebase --onto <new commit> <old commit>   # fix conflicts as in any rebase
-   git diff <new commit> > ../fugue/helper/sdcpp.patch
-   ```
-   Keep the patch to the cut and its hooks: no change to sampling or model code, except the opt-in
-   hunks and the performance hunks above. Re-read each one against the new commit: the template names the cut depends on (The
+1. Rebase the fork's `fugue` branch onto the new upstream commit ([Upgrading upstream](#upgrading-upstream)).
+   Keep the changes to the cut and its hooks: no change to sampling or model code, except the opt-in
+   changes and the performance commits above. Re-read each one against the new commit: the template names the cut depends on (The
    seam), `blend_mask` and the `sample` arguments may have moved or changed. `SDCondition` is guarded by
    a `static_assert` in `fugue_stages.h`.
-2. Update the commits and hashes in `CMakeLists.txt` and `packaging/PKGBUILD` together.
-   `git ls-tree <new commit> ggml thirdparty/cutlass` gives the ggml and CUTLASS commits;
+2. Tag the fork, then update the commits and hashes in `CMakeLists.txt` and `packaging/PKGBUILD` together (the fork's tag commit
+   for the engine).
+   `git ls-tree <new upstream commit> ggml thirdparty/cutlass` gives the ggml and CUTLASS commits;
    `curl -sL <tarball URL> | sha256sum` gives each hash.
-3. Build, then check where the patch can break. The model families are stable-diffusion.cpp's
+3. Build, then check where the fork can break. The model families are stable-diffusion.cpp's
    to test. Run each stage as its own process:
    - Z-Image Turbo, plus one `generate` run with the same request: the pixels must be the same;
    - SDXL with a negative prompt (CLIP conditioning, two sets);

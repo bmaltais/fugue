@@ -1,6 +1,6 @@
 name: Helper
 
-# stable-diffusion.cpp with Fugue's stage patch (helper/). It takes long to build, so it runs
+# stable-diffusion.cpp with Fugue's changes, from its fork (helper/). It takes long to build, so it runs
 # only when the helper or its packaging changes, and keeps ccache's folder between runs.
 on:
   pull_request:
@@ -17,7 +17,7 @@ jobs:
     name: Build the helper (Vulkan)
     runs-on: ubuntu-latest
     # The CUDA helper needs a multi-gigabyte toolkit and is built where it runs; Vulkan checks
-    # the patch and the code.
+    # the engine and the code.
     container: archlinux:latest
     defaults:
       run:

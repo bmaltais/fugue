@@ -103,7 +103,7 @@ jobs:
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ccache g++ patch zstd \
+          sudo apt-get install -y --no-install-recommends cmake ccache g++ zstd \
             cuda-nvcc-13-0 cuda-cudart-dev-13-0 libcublas-dev-13-0
           sudo ln -sfn /usr/local/cuda-13.0 /usr/local/cuda
 
