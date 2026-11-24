@@ -9,6 +9,7 @@
 #   src/<area>/...                   the tests of tests/<area>/, the tests that #include "<area>/" and, for
 #                                    a .qml file, the tests that name it; the engine and the cli also run the
 #                                    tests that start the built `fugue` (tests/cli, tests/nodes)
+#   any change under src/        also fugue_tests (the English catalog check, a few seconds)
 #   anything else under src/, tests/ (shared helpers), build files, templates/, examples/, share/: full
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -54,6 +55,9 @@ while IFS= read -r file; do
     *) ;; # docs, packaging, .github, scripts, helper, README: no test covers them
   esac
 done <<<"$files"
+
+# fugue_tests checks the English string catalog against every tr()/qsTr() in src/: any source change can break it.
+if grep -q '^src/' <<<"$files"; then chosen[fugue_tests]=1; fi
 
 if ((${#chosen[@]} == 0 && qml == 0)); then echo "none only files no test covers changed since $base"; exit 0; fi
 names=("${!chosen[@]}")
