@@ -1,5 +1,6 @@
 #include "settings/settings_model.h"
 
+#include <QCollator>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -383,7 +384,24 @@ QVariantList SettingsModel::modelFiles() const {
                                    {"family", mark.family}, {"recommended", mark.recommended}, {"reason", mark.reason}});
         }
     }
-    return out;
+    return sortedModelFiles(out);
+}
+
+QVariantList sortedModelFiles(QVariantList files) {
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::stable_sort(files.begin(), files.end(), [&](const QVariant &a, const QVariant &b) {
+        const QVariantMap x = a.toMap(), y = b.toMap();
+        const QString fx = x.value("family").toString(), fy = y.value("family").toString();
+        if (fx != fy) {
+            if (fx.isEmpty() || fy.isEmpty())
+                return fy.isEmpty(); // a file of no family goes last
+            return collator.compare(fx, fy) < 0;
+        }
+        return collator.compare(x.value("name").toString(), y.value("name").toString()) < 0;
+    });
+    return files;
 }
 
 QVariantList SettingsModel::modelFolderKinds() const {

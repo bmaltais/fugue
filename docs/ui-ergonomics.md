@@ -1005,3 +1005,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: details before the open is the Photoshop (New from template) and Blender (splash and File > New) convention: look, then commit; a card's two-line description could not say what a template does or needs. One drop-down for every choice list, so the Templates window, the model picker and Settings look and behave the same.
 - Rule: Floor (28px controls), Primary (Open on the details; none in the grid), Learned place (Enter still opens a card; Escape backs out one layer).
 - Not done: the Recommended mark (#370) on a model row of the details.
+
+### 2026-11-24 Polish: hover help on node rows, Settings > Models, a card's Download
+
+- Control: a node's input and output rows (`src/canvas/CanvasNode.qml`, tooltip on the row), `src/settings/ModelsPage.qml` with `SizedList.qml` (new `badge` and `bar`), the Family drop-down (`modelFamily`), and the template card's Download (`templateDownload-<id>`).
+- Old: no help on a row; the Models page's files in disk order, the recommendation a faint second line, a grey bar under each row with no label, an unlabelled drop-down; a card's Download refused a model whose type a missing pack declares.
+- New: resting on a row or its port shows the label in bold and the description; files sorted by family then name; an accent Recommended chip (4px corner, caption size, DemiBold, `accentForeground` on `accent`) after the name, the reason as the second line; no bar; a "Family" label (labelSize) before the drop-down, "All families" first; Download for a template that needs packs opens the template and its Get ready sheet.
+- Why: help where the question arises (Blender's tooltip on a property); a state a person must act on is a chip, not a caption; a bar with no scale is noise (no technical text around the work).
+- Rule: Floor (no new button; the chip is a label), Primary (Recommended is the one accent mark on a row), Learned place (the tooltip is the app's, delay as the layers panel's).
+- Not checked by a person: the tooltip over a widget well of a tall (multiline) input, and at the narrowest settings width.

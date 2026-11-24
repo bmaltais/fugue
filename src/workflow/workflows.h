@@ -272,8 +272,9 @@ public:
 
     // Downloads the missing models the banner offers (downloadOffer), into downloadRoot().
     Q_INVOKABLE void downloadMissing();
-    // Downloads the missing models of the template with this id.
-    Q_INVOKABLE void downloadTemplate(const QString &id);
+    // Downloads the missing models of the template with this id; one that needs packs is opened instead, and the
+    // Get ready sheet plans the packs and the models (true: opened, the dialog should close).
+    Q_INVOKABLE bool downloadTemplate(const QString &id);
     // A workflow's models (its `requires.models`) that are not on this machine, as a template card counts them (a canvas
     // action's, #231): {count (missing), total, download (the button's text, empty when none has a source), size}.
     QVariantMap missingModels(const QJsonArray &models) const;

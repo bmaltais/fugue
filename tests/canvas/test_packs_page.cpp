@@ -127,7 +127,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
-        click(app, NEED("settingsPage-6"));
+        click(app, NEED("settingsPage-packs"));
         type(app, NEED("packLocation"), m_source);
         click(app, NEED("packAdd"));
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
@@ -145,7 +145,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
-        click(app, NEED("settingsPage-6"));
+        click(app, NEED("settingsPage-packs"));
 
         type(app, NEED("packLocation"), m_source);
         click(app, NEED("packAdd"));
@@ -192,7 +192,7 @@ private slots:
         QVERIFY(QFileInfo(packs() + "/local/group/node.json").isFile());
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
-        click(app, NEED("settingsPage-6"));
+        click(app, NEED("settingsPage-packs"));
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "libraryGroup-local/group"), 20000);
 
         click(app, NEED("libraryRename-local/group"));

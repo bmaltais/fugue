@@ -144,6 +144,7 @@ widget wells can span the node, and the outputs sit next to the header where the
 | Wired input | label left, 3u from the edge |
 | Unwired input with a widget | a well across the row (section 4.4) |
 | Port mark | centered on the node's edge (section 5) |
+| Hover help | resting on a row or its port shows the app's tooltip after `tooltipDelay`: the label in bold, then the manifest's `description` (a group's exposed input takes its inner input's); no description, no tooltip |
 
 ### 4.4 Widgets (spec 6.2)
 

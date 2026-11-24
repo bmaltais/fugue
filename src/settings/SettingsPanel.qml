@@ -18,7 +18,7 @@ Popup {
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
-    property int page: 0
+    property string page: "general" // a page id (pages)
     // Why the last change was refused, until the next change.
     property string error: ""
 
@@ -43,8 +43,16 @@ Popup {
     // Runs a model call and keeps its refusal, if any.
     function apply(result) { error = result; return result === "" }
 
-    readonly property var pages: [qsTr("General"), qsTr("Folders"), qsTr("Run"), qsTr("Providers"),
-                                  qsTr("Keymap"), qsTr("Theme"), qsTr("Packs"), qsTr("Cache"), qsTr("Models")]
+    // The pages by their stable id, in the order of their translated titles (locale-aware, so each language sorts
+    // its own way). Code and tests name a page by id, never by its place.
+    readonly property var pages: [{id: "general", title: qsTr("General")}, {id: "folders", title: qsTr("Folders")},
+                                  {id: "run", title: qsTr("Run")}, {id: "providers", title: qsTr("Providers")},
+                                  {id: "keymap", title: qsTr("Keymap")}, {id: "theme", title: qsTr("Theme")},
+                                  {id: "packs", title: qsTr("Packs")}, {id: "cache", title: qsTr("Cache")},
+                                  {id: "models", title: qsTr("Models")}]
+                                 .sort((a, b) => a.title.localeCompare(b.title))
+    // The pages whose changes go to settings.json (the files' note under the page).
+    readonly property bool inSettingsFile: page === "general" || page === "folders" || page === "run"
 
     // The desktop portal's folder picker (Qt's own where there is none).
     property var pickDone: null
@@ -96,28 +104,29 @@ Popup {
                     model: panel.pages
                     delegate: Rectangle {
                         id: tab
-                        required property string modelData
+                        required property var modelData
                         required property int index
-                        objectName: "settingsPage-" + index
+                        readonly property string pageId: modelData.id
+                        objectName: "settingsPage-" + pageId
                         Layout.fillWidth: true
                         implicitHeight: 7 * panel.u
                         radius: panel.look.smallCorner
-                        color: panel.page === index ? panel.look.selectedRow : tabHover.hovered ? panel.look.well : "transparent"
+                        color: panel.page === tab.pageId ? panel.look.selectedRow : tabHover.hovered ? panel.look.well : "transparent"
                         activeFocusOnTab: true
                         Accessible.role: Accessible.PageTab
-                        Accessible.name: modelData
-                        Accessible.selected: panel.page === index
-                        Keys.onSpacePressed: panel.page = index
-                        Keys.onUpPressed: if (index > 0) panel.page = index - 1
-                        Keys.onDownPressed: if (index < panel.pages.length - 1) panel.page = index + 1
+                        Accessible.name: modelData.title
+                        Accessible.selected: panel.page === tab.pageId
+                        Keys.onSpacePressed: panel.page = tab.pageId
+                        Keys.onUpPressed: if (index > 0) panel.page = panel.pages[index - 1].id
+                        Keys.onDownPressed: if (index < panel.pages.length - 1) panel.page = panel.pages[index + 1].id
                         HoverHandler { id: tabHover }
-                        TapHandler { onTapped: { panel.page = tab.index; panel.error = "" } }
+                        TapHandler { onTapped: { panel.page = tab.pageId; panel.error = "" } }
                         Text {
                             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 2 * panel.u }
-                            text: tab.modelData
+                            text: tab.modelData.title
                             color: panel.look.text
                             font.pixelSize: panel.look.textSize
-                            font.weight: panel.page === tab.index ? Font.DemiBold : Font.Normal
+                            font.weight: panel.page === tab.pageId ? Font.DemiBold : Font.Normal
                         }
                     }
                 }
@@ -144,7 +153,7 @@ Popup {
 
                     // settings.json cannot be used as it is.
                     Repeater {
-                        model: panel.page < 3 ? panel.model.problems : []
+                        model: panel.inSettingsFile ? panel.model.problems : []
                         delegate: Text {
                             required property string modelData
                             Layout.fillWidth: true
@@ -157,7 +166,7 @@ Popup {
 
                     // General
                     SettingsParts.Setting {
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Graph navigation") // "canvas" is the picture to a person; the node view is the Graph (#228)
                         key: "navigation"
                         origin: panel.model.origins["navigation"] ?? ""
@@ -176,7 +185,7 @@ Popup {
                     SettingsParts.Setting {
                         id: corners
                         readonly property int radius: panel.model.cornerRadius // -1: follow Omarchy
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Corner radius")
                         key: "corner_radius"
                         origin: panel.model.origins["corner_radius"] ?? ""
@@ -226,7 +235,7 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Magnify small nodes on hover")
                         key: "hover_magnifier"
                         origin: panel.model.origins["hover_magnifier"] ?? ""
@@ -240,7 +249,7 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Node pictures")
                         key: "picture_mode"
                         origin: panel.model.origins["picture_mode"] ?? ""
@@ -260,7 +269,7 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Sampler preview")
                         key: "step_preview"
                         origin: panel.model.origins["step_preview"] ?? ""
@@ -280,7 +289,7 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Reopen tabs at start")
                         key: "restore_tabs"
                         origin: panel.model.origins["restore_tabs"] ?? ""
@@ -294,7 +303,7 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 0
+                        visible: panel.page === "general"
                         title: qsTr("Language")
                         key: "language"
                         origin: panel.model.origins["language"] ?? ""
@@ -312,7 +321,7 @@ Popup {
 
                     // Folders
                     SettingsParts.FolderSetting {
-                        visible: panel.page === 1
+                        visible: panel.page === "folders"
                         title: qsTr("Output folder")
                         note: qsTr("Where Save Image writes. A Save node's own folder is inside it.")
                         host: panel
@@ -321,7 +330,7 @@ Popup {
                         isDefault: panel.model.outputFolderIsDefault
                     }
                     SettingsParts.FolderSetting {
-                        visible: panel.page === 1
+                        visible: panel.page === "folders"
                         title: qsTr("Inputs folder")
                         note: qsTr("Where images pasted or dropped into Load Image are kept. By default inside the output folder.")
                         host: panel
@@ -330,7 +339,7 @@ Popup {
                         isDefault: panel.model.inputsFolderIsDefault
                     }
                     PathsSetting {
-                        visible: panel.page === 1
+                        visible: panel.page === "folders"
                         title: qsTr("Extra model folders")
                         note: qsTr("Searched for models besides Fugue's own: a ComfyUI models folder as it is, or a folder of one kind of model, such as LoRAs.")
                         host: panel
@@ -340,7 +349,7 @@ Popup {
                         kinds: true
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 1
+                        visible: panel.page === "folders"
                         title: qsTr("Download models into")
                         note: qsTr("Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders above.")
                         key: "download_folder"
@@ -353,7 +362,7 @@ Popup {
                         }
                     }
                     PathsSetting {
-                        visible: panel.page === 1
+                        visible: panel.page === "folders"
                         title: qsTr("Extra pack folders")
                         note: qsTr("Searched for node packs besides Fugue's own.")
                         host: panel
@@ -364,7 +373,7 @@ Popup {
 
                     // Run
                     SettingsParts.Setting {
-                        visible: panel.page === 2
+                        visible: panel.page === "run"
                         title: qsTr("Seeds of new nodes")
                         key: "new_seed"
                         origin: panel.model.origins["new_seed"] ?? ""
@@ -379,7 +388,7 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        visible: panel.page === 2
+                        visible: panel.page === "run"
                         title: qsTr("Embed the workflow in new Save Image nodes")
                         key: "embed_workflow"
                         origin: panel.model.origins["embed_workflow"] ?? ""
@@ -397,37 +406,37 @@ Popup {
 
                     // Providers
                     ProvidersPage {
-                        visible: panel.page === 3
+                        visible: panel.page === "providers"
                         Layout.fillWidth: true
                         host: panel
                     }
 
                     // Packs
                     PacksPage {
-                        visible: panel.page === 6
+                        visible: panel.page === "packs"
                         Layout.fillWidth: true
                         host: panel
                     }
 
                     // Cache (#141): made when first shown, so the page costs nothing until then.
                     Loader {
-                        active: panel.page === 7 || item !== null
-                        visible: panel.page === 7
+                        active: panel.page === "cache" || item !== null
+                        visible: panel.page === "cache"
                         Layout.fillWidth: true
                         sourceComponent: CachePage { host: panel }
                     }
 
                     // Models (#370): made when first shown, as the Cache page.
                     Loader {
-                        active: panel.page === 8 || item !== null
-                        visible: panel.page === 8
+                        active: panel.page === "models" || item !== null
+                        visible: panel.page === "models"
                         Layout.fillWidth: true
                         sourceComponent: ModelsPage { host: panel }
                     }
 
                     // Keymap
                     SettingsParts.Setting {
-                        visible: panel.page === 4
+                        visible: panel.page === "keymap"
                         title: qsTr("Keymap file")
                         note: qsTr("Your changes to the default keys, as a list of keys added and keys unset. Press ? for every key.")
                         ColumnLayout {
@@ -474,7 +483,7 @@ Popup {
 
                     // Theme
                     SettingsParts.Setting {
-                        visible: panel.page === 5
+                        visible: panel.page === "theme"
                         title: qsTr("Theme")
                         note: qsTr("Fugue follows the Omarchy theme and the desktop text size. Change them in Omarchy. The corner radius of nodes and popups is set on the General page.")
                         GridLayout {
@@ -541,8 +550,8 @@ Popup {
                 visible: panel.error === ""
                 elide: Text.ElideMiddle
                 // Where the page's changes go; the keymap and theme pages say it themselves.
-                text: panel.page === 3 ? qsTr("Saved to %1 as you change it.").arg(panel.model.providersPath)
-                    : panel.page < 3 ? qsTr("Saved to %1 as you change it.").arg(panel.model.path) : ""
+                text: panel.page === "providers" ? qsTr("Saved to %1 as you change it.").arg(panel.model.providersPath)
+                    : panel.inSettingsFile ? qsTr("Saved to %1 as you change it.").arg(panel.model.path) : ""
                 color: panel.look.label
                 font.pixelSize: panel.look.captionSize
             }

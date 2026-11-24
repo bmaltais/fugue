@@ -222,4 +222,8 @@ private:
     std::function<void(const QUrl &)> m_openUrl;
 };
 
+// The Models page's order: families by name (case-insensitive, numbers in natural order, files of no family
+// last), and inside a family the files by file name the same way. `files` are modelFiles() maps.
+QVariantList sortedModelFiles(QVariantList files);
+
 } // namespace fugue

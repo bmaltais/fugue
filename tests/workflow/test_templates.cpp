@@ -332,6 +332,14 @@ private slots:
         QCOMPARE(install.first().at(0).toString(), f.bundled.filePath("carrier/packs/io.example.tools"));
         QCOMPARE(install.first().at(1).toString(), QString());
 
+        // A card's Download for a template that needs a pack opens it, and the Get ready sheet plans the pack
+        // (a direct download refuses a model whose type the pack declares).
+        QSignalSpy sheet(workflows.readiness(), &ReadinessSheet::shown);
+        const int tabs = workflows.count();
+        QVERIFY(workflows.downloadTemplate("carrier"));
+        QCOMPARE(workflows.count(), tabs + 1);
+        QCOMPARE(sheet.size(), 1);
+
         // Another major installed beside it does not satisfy the node's recorded major.
         QVERIFY(f.registry.addManifest(sharpen("2.0.0")).isEmpty());
         f.registry.setPackVersion("io.example.tools", "2.0.0");

@@ -421,7 +421,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(open(app.window, "settingsPanel"));
-        click(app, NEED("settingsPage-1"));
+        click(app, NEED("settingsPage-folders"));
         // The Default's own models folder first, then its model_paths.
         QVERIFY(NEED("model_paths-inherited-0"));
         QVERIFY(NEED("model_paths-inherited-1"));
@@ -442,7 +442,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(open(app.window, "settingsPanel"));
-        click(app, NEED("settingsPage-6"));
+        click(app, NEED("settingsPage-packs"));
         QCOMPARE(textOf(NEED("packInherited-io.example.tools")), QString("Inherited from Default"));
         QVERIFY(textOf(NEED("packWarning-io.example.tools")).contains("Default"));
         click(app, NEED("packRemove-io.example.tools"));
@@ -482,9 +482,9 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(open(app.window, "settingsPanel"));
         shot(app, "projects-settings-general");
-        click(app, NEED("settingsPage-1"));
+        click(app, NEED("settingsPage-folders"));
         shot(app, "projects-settings-folders");
-        click(app, NEED("settingsPage-6"));
+        click(app, NEED("settingsPage-packs"));
         shot(app, "projects-settings-packs");
     }
 };
