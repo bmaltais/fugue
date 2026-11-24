@@ -197,6 +197,10 @@ void MaskLayer::beginStroke(bool erase, double size, double hardness, double x, 
     m_paint->beginStroke(erase ? mask::Mode::Erase : mask::Mode::Paint, {size, hardness, m_brushOpacity, {}});
     m_paint->strokeTo({x, y}, pressure);
     changed(false);
+    if (!m_stroking) {
+        m_stroking = true;
+        emit strokingChanged();
+    }
 }
 
 void MaskLayer::strokeTo(double x, double y, double pressure) {
@@ -207,6 +211,10 @@ void MaskLayer::strokeTo(double x, double y, double pressure) {
 void MaskLayer::endStroke() {
     m_paint->endStroke();
     changed(true);
+    if (m_stroking) {
+        m_stroking = false;
+        emit strokingChanged();
+    }
 }
 
 void MaskLayer::fillPolygon(const QVariantList &points, bool erase) {

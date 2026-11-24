@@ -18,6 +18,7 @@
 #include "canvas/region_picker.h" // a QML type (RegionPicker): the module registers it from here
 #include "canvas/guides_model.h" // a QML type (GuidesModel): the module registers it from here
 #include "canvas/transform_gesture.h" // a QML type (TransformGesture, the Move and Free Transform gestures): the module registers it from here
+#include "canvas/paint_target.h" // a QML type (PaintTarget, which tool paints the selection or the mask, #380)
 #include "canvas/mask_layer.h" // a QML item (MaskLayer): the module registers it from here
 #include "canvas/paint_layer.h" // a QML item (PaintLayer): likewise
 #include "canvas/float_place_qml.h" // a QML singleton (FloatPlace): the module registers it from here
