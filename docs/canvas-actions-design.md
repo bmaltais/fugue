@@ -83,6 +83,8 @@ Write is a sink.
 The **count** of variations is not an input. The bar makes the count itself, as N runs; it is hidden when the action
 has no `seed` role, because the runs would come out the same.
 
+The `inputs` list is shared with an app's block (spec 4.9, `engine/input_binding.*`): one reader, one check of the targets, one binding of the values. An input with a role and a `name` is keyed by the name (an app with two pictures); an action's inputs have no such need.
+
 Things the block never says, and why:
 - **Which canvas.** Fugue fills in the shown canvas.
 - **Which revision.** Fugue fills in the head that was shown when you pressed Generate.

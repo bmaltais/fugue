@@ -469,6 +469,8 @@ A workflow is one UTF-8 JSON document, extension `.fugue`.
 | `groups` | no | Group definitions used by the graph ([4.4](#44-groups-section)). |
 | `layout` | no | Positions and everything visual. Removing it never changes what the graph does. |
 | `requires` | no | What the workflow needs. Written on save, informational on load. |
+| `action` | no | A canvas action's binding block ([14.5](#145-the-canvas-revision-store-206-208), docs/canvas-actions-design.md 1.2). Outside `sourceHash`. |
+| `app` | no | An app's binding block ([4.9](#49-app)). Outside `sourceHash`. |
 | `run` | no | Only in a copy embedded in an output ([11.7](#117-embedding-in-outputs)): the values used. Never affects a run. |
 
 A reader must reject a document whose `fugue` is greater than it supports, with the error
@@ -688,6 +690,51 @@ only ever execute this form, and `fugue compile` prints it.
   `--provider` change a compile, so with a compiled graph they are `usage` errors.
 
 ---
+
+### 4.9 `app`
+
+An **App** (#384, epic #397) is a workflow shown as one simple screen: the inputs worth changing, a Run button, the results.
+The graph stays the truth and the app is a list kept beside it, so a fix in the graph is a fix in the app. There is no node
+type and no second file format: the list is a top-level `app` block of `workflow.fugue`, the way a canvas action's binding is
+(an `action` block). Both are top-level keys, so an older Fugue keeps them on a round trip (4.1), they are outside
+`sourceHash` (no cache key changes), and save, save as, a template, a `.fuguepack` and the share copy (11.5) carry them with the document.
+
+```json
+"app": {
+  "format": 1,
+  "title": "Restyle",
+  "description": "Paints a picture in a style.",
+  "defaultView": "app",
+  "inputs": [
+    {"role": "image", "name": "subject", "targets": ["load.file"], "label": "Picture"},
+    {"role": "prompt", "targets": ["encode.prompt"], "label": "Prompt"},
+    {"role": "seed", "targets": ["sample.seed"]},
+    {"name": "steps", "targets": ["sample.steps"], "min": 1, "max": 8, "section": "Advanced"}
+  ],
+  "outputs": [{"node": "save", "label": "Result"}]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `format` | 1. A later format is `unsupported_format_version` ("Needs a newer Fugue"). |
+| `title`, `description` | What the app card and the app's screen show. A title is required. |
+| `defaultView` | `app` (default) or `graph`: what opening it shows first. |
+| `inputs[]` | The form, in order (the list's order is the form's order; there is no `order` field). One shared schema with an action's `inputs` (docs/canvas-actions-design.md 1.2): `role`, `name`, `targets`, `label`, `section` (`Advanced` folds), `default`, `min`, `max`, `choices`, `choice_values`, `optional`, `fallback`. `targets` are one or more `<node id>.<input>`, all of one type, a top-level node's input or a group instance's exposed input. `choices` on a target that has its own choices must be a subset of them (5.4). |
+| `inputs[].role` | `prompt`, `negative_prompt`, `strength`, `seed`, `model`, `layer`, plus `image` and `mask` (the `file` and `mask` inputs of a Load Image). A role with a `name` is keyed by the name, so an app can take two pictures. An input with no role needs a `name` (a-z, 0-9, `_`) and is plain. The key (the name, else the role) is unique in the list. |
+| `outputs[]` | `node` (the id of a Save or Preview node) and an optional `label`. The run's results of these nodes are the app's results; the app owns no store (results and History are the existing ones). At least one is needed to be valid. |
+
+**Deleting a node.** As for a group's exposed port (5.4), a target whose node or input is gone is dropped, an input left with no
+target is dropped, and an output whose node is gone is dropped; each is reported as the warning `app_stale`, in words. A node
+whose type is not installed (a pack is missing) is not stale: its targets stay, and checking says the pack is missing. What is
+still wrong after that (a target linked to another node, of a type the role does not take, an output that is not a sink, no
+output) is `app_invalid`, in words. Fugue never guesses a binding.
+
+**Engine** (`engine/app_binding.*`, `engine/input_binding.*`): `appOf`/`parseApp` read the block, `toJson`/`setApp`/`clearApp` write
+it, `pruneApp` and `checkApp` are the two passes above, and `bindApp(document, app, values)` returns the run's copy of the
+workflow with a form's values in (a missing value keeps the block's default, else the workflow's own; a number is held in
+`min`..`max`; a word of `choices` with `choice_values` becomes its number). The file is never changed. The reader of
+`inputs[]` is the one `engine/canvas_action.*` uses.
 
 ## 5. Groups
 
@@ -3118,7 +3165,7 @@ Codes in v0.1:
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Canvas (#208) | `canvas_not_found` (no such canvas, revision or stored tree; or a canvas with no revision asked for its head), `canvas_ambiguous` (a revision prefix that starts more than one), `canvas_corrupt` (a stored object is not the content it is named for, or is not well formed); #210: `canvas_not_candidate` (accept or drop of a revision that is in the head's history or already accepted), `canvas_conflict` (a candidate made from an older revision that changed more than it added layers cannot be placed on the head), `canvas_head_moved` as an error of `fugue canvas accept` (the head moved while it ran; nothing changed); #226: `canvas_head_moved` also for a layer edit, `undo` or `redo` whose head moved, `canvas_no_step` (`undo` of the first revision, `redo` with nothing undone) ([14.5](#145-the-canvas-revision-store-206-208)) |
 | Canvas nodes (#209) | `padding_raised` (a warning, Canvas Region 1.3.0, #242: Padding was below Feather + 16, so Canvas Write's blend would end in a hard edge at the region's box; it was raised to that), `canvas_head_moved` (Canvas Write, an error since 1.4.0, #239: the canvas changed size while the workflow ran, so the run's layer could not be placed on the head; the run says so in plain words and writes nothing visible; when it can be placed, it is, with no warning); `input_invalid` on `revision` when Canvas Region got a revision that was not named in full at compile; a canvas or revision that is not there fails the compile with `canvas_not_found` on the node's `revision`; a canvas input left blank is the Active canvas ([14.5](#145-the-canvas-revision-store-206-208), #246): it compiles to the active canvas's id, and only with no canvas in the root at all `input_invalid` on `canvas` ("Choose a canvas") is raised when the node runs |
-| Canvas actions (#231) | `action_invalid` (a workflow's `action` block is not well formed, or does not fit its graph: a target node or input that is missing, linked or of the wrong type, no Canvas Region or Canvas Write, two Regions and no `region`, a Write onto another canvas; the message says which); a block of a later format is `unsupported_format_version`; `pack_missing` (the action's nodes are of a pack that is not installed, `fugue canvas act`, #231 slice 10), `act_refused` (`fugue canvas act`: the request is not one the action can run, in the words the task bar shows: select an area, type a prompt, pick a side, select a layer) ([14.5](#145-the-canvas-revision-store-206-208), docs/canvas-actions-design.md) |
+| Canvas actions (#231) | `action_invalid` (a workflow's `action` block is not well formed, or does not fit its graph: a target node or input that is missing, linked or of the wrong type, no Canvas Region or Canvas Write, two Regions and no `region`, a Write onto another canvas; the message says which); a block of a later format is `unsupported_format_version`; `app_invalid` (the same for an `app` block, 4.9) and `app_stale` (a warning: a target or output of the app's block was dropped because its node is gone); `pack_missing` (the action's nodes are of a pack that is not installed, `fugue canvas act`, #231 slice 10), `act_refused` (`fugue canvas act`: the request is not one the action can run, in the words the task bar shows: select an area, type a prompt, pick a side, select a layer) ([14.5](#145-the-canvas-revision-store-206-208), docs/canvas-actions-design.md) |
 | Masks (#167) | `mask_empty`, `mask_unsupported`, `stitch_mismatch`; warnings `mask_full`, `mask_resized` (Paint too) ([14.4](#144-masking-and-inpainting-167)) |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`, `node_test_failed` (`fugue node test`: an output is not what the test expects) |
 | Cache | `cache_busy` (a warning: `fugue cache clear` left the results and previews alone because a run is going) |
