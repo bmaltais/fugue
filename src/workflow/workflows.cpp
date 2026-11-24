@@ -204,6 +204,17 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
                                      this);
     // What was installed, trusted or downloaded changes what the banner lacks (the registry reload does the same for packs).
     connect(m_readiness, &ReadinessSheet::finished, this, [this] { refreshMissing(false); });
+    // One click: the sheet is for the tab that was shown when it opened; once everything is ready it has closed itself and that
+    // tab is the one shown, ready to run, whichever tab the person went to meanwhile.
+    connect(m_readiness, &ReadinessSheet::shown, this, [this] { m_readyTabId = m_current < 0 ? QString() : m_tabs[size_t(m_current)].id; });
+    connect(m_readiness, &ReadinessSheet::succeeded, this, [this] {
+        for (int i = 0; i < count(); ++i)
+            if (m_tabs[size_t(i)].id == m_readyTabId) {
+                setCurrent(i);
+                break;
+            }
+        refreshMissing(false);
+    });
     m_canvas->widgets()->setDownloads(m_downloads); // the model picker's catalog downloads share the line (#134)
     // The banner says what arrived, or what went wrong; what is still missing comes back.
     connect(m_downloads, &ModelDownloads::finished, this, [this](int arrived, const Errors &all) {

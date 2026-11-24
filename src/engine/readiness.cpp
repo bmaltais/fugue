@@ -3,7 +3,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QStorageInfo>
 #include <QTimer>
@@ -110,6 +112,10 @@ int ReadinessPlan::environmentCount() const {
     return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.hasEnvironment(); }));
 }
 
+int ReadinessPlan::deferredCount() const {
+    return int(std::count_if(models.cbegin(), models.cend(), [](const ReadinessModel &m) { return m.deferred; }));
+}
+
 QString ReadinessPlan::headline() const {
     QStringList parts;
     if (const int n = installCount())
@@ -157,7 +163,11 @@ QStringList ReadinessPlan::lines() const {
     for (const ReadinessModel &m : models) {
         out << QStringLiteral("  Download model: %1 (%2) from %3%4").arg(m.name, m.size >= 0 ? sizeText(m.size) : QStringLiteral("size not recorded"), m.host,
                                                                           m.license.isEmpty() ? QString() : QStringLiteral(", licence %1").arg(m.license));
-        out << QStringLiteral("    Into:      %1").arg(m.folder);
+        if (m.deferred)
+            out << QStringLiteral("    Into:      its %1 folder under %2, once the pack is in (type from %3)")
+                       .arg(m.resource, destination, m.typeFrom.isEmpty() ? QStringLiteral("a pack in this list") : m.typeFrom);
+        else
+            out << QStringLiteral("    Into:      %1").arg(m.folder);
     }
     if (!models.isEmpty()) {
         out << QStringLiteral("  Models go into %1%2").arg(destination, freeBytes >= 0 ? QStringLiteral(" (%1 free)").arg(sizeText(freeBytes)) : QString());
@@ -184,12 +194,62 @@ QJsonObject ReadinessPlan::toJson() const {
     }
     for (const ReadinessModel &m : models)
         modelRows.append(QJsonObject{{"name", m.name}, {"resource", m.resource}, {"license", m.license}, {"host", m.host},
-                                     {"size", m.size >= 0 ? QJsonValue(double(m.size)) : QJsonValue()}, {"folder", m.folder}, {"path", m.target.path}});
+                                     {"size", m.size >= 0 ? QJsonValue(double(m.size)) : QJsonValue()}, {"folder", m.folder}, {"path", m.target.path},
+                                     {"type_from", m.typeFrom}, {"deferred", m.deferred}});
     return QJsonObject{{"headline", headline()}, {"packs", packRows}, {"models", modelRows}, {"destination", destination},
                        {"download_bytes", double(downloadBytes)}, {"unknown_sizes", unknownSizes},
                        {"environment_bytes", double(environmentBytes)}, {"free_bytes", double(freeBytes)},
                        {"low_space", lowSpace()}, {"problems", fugue::toJson(problems)}};
 }
+
+namespace {
+
+// The workflow's own record of `model` (with its source and size), found again by name and type.
+QJsonObject entryOf(const QJsonArray &entries, const MissingModel &model) {
+    for (const QJsonValue &value : entries) {
+        const QJsonObject entry = value.toObject();
+        if (entry.value(QStringLiteral("name")) == model.handle.value(QStringLiteral("name"))
+            && entry.value(QStringLiteral("resource")) == model.handle.value(QStringLiteral("resource"))
+            && entry.value(QStringLiteral("hash")) == model.handle.value(QStringLiteral("hash")))
+            return entry;
+    }
+    return model.handle;
+}
+
+// The ids of the port types a pack folder declares in its pack.json.
+QStringList declaredTypeIds(const QString &folder) {
+    QFile file(folder + QStringLiteral("/pack.json"));
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QStringList ids;
+    for (const QJsonValue &type : QJsonDocument::fromJson(file.readAll()).object().value(QStringLiteral("types")).toArray())
+        ids << type.toObject().value(QStringLiteral("id")).toString();
+    return ids;
+}
+
+// When the model's type is not known here but a pack this plan installs gives it (or may: a git pack is not read before the
+// yes), the name of that pack ("a pack in this list" when it cannot be told); else nothing, and the model is planned now.
+std::optional<QString> typeFromPack(const ReadinessPlan &plan, const QString &resource, const ModelLibrary &library) {
+    const std::optional<PortType> type = PortType::parse(resource);
+    if (type && !library.downloadFolder(*type).isEmpty())
+        return std::nullopt;
+    const QString id = type ? type->id : resource;
+    QStringList pending;
+    for (const ReadinessPack &row : plan.packs) {
+        if (!row.installs())
+            continue;
+        const QString name = packName(row.pack);
+        if (row.pending)
+            pending << name;
+        else if (row.prepared && declaredTypeIds(row.prepared->folder).contains(id))
+            return name;
+    }
+    if (pending.isEmpty())
+        return std::nullopt;
+    return pending.size() == 1 ? pending.first() : QString();
+}
+
+} // namespace
 
 ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const ReadinessEnv &env) {
     ReadinessPlan plan;
@@ -285,21 +345,29 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
                                      QStringLiteral("Put it in %1.").arg(model.folder));
             continue;
         }
-        const Result<DownloadTarget> target = planDownload(library, model);
-        if (!target) {
-            for (Error e : target.errors()) {
-                e.severity = Error::Severity::Warning;
-                plan.problems << e;
-            }
-            continue;
-        }
         ReadinessModel row;
         row.name = name;
         row.resource = model.handle.value(QStringLiteral("resource")).toString();
-        row.host = target->source.host();
         row.size = model.size;
-        row.target = *target;
-        row.folder = QFileInfo(target->path).absolutePath();
+        row.entry = entryOf(request.models, model);
+        // Its type is declared by a pack this plan installs: nothing to plan until that pack is in (#418).
+        if (const std::optional<QString> from = typeFromPack(plan, row.resource, library)) {
+            row.deferred = true;
+            row.typeFrom = *from;
+            row.host = QUrl(model.source).host();
+        } else {
+            const Result<DownloadTarget> target = planDownload(library, model);
+            if (!target) {
+                for (Error e : target.errors()) {
+                    e.severity = Error::Severity::Warning;
+                    plan.problems << e;
+                }
+                continue;
+            }
+            row.host = target->source.host();
+            row.target = *target;
+            row.folder = QFileInfo(target->path).absolutePath();
+        }
         if (env.catalog) {
             QString hash = model.handle.value(QStringLiteral("hash")).toString();
             if (hash.startsWith(QLatin1String("sha256:")))
@@ -317,6 +385,8 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
             ++plan.unknownSizes;
         plan.models.append(row);
     }
+    plan.registry = env.registry;
+    plan.library = std::make_shared<ModelLibrary>(library);
     if (!plan.models.isEmpty())
         plan.freeBytes = env.freeSpace ? env.freeSpace(plan.destination) : freeAt(plan.destination);
     return plan;
@@ -376,6 +446,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
         finish(index, cancelled ? RowState::Skipped : RowState::Failed, detail);
     };
 
+    QStringList installedFolders; // the packs this run put in place, to read the types they declare
     TrustStore fallbackTrust;
     TrustStore &trust = run.trust ? *run.trust : fallbackTrust;
     for (int i = 0; i < plan.packs.size() && outcome.failedRow < 0; ++i) {
@@ -437,6 +508,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             }
             outcome.packsChanged = true;
             folderName = QFileInfo(added->pack.folder).fileName();
+            installedFolders << run.packsDir + QLatin1Char('/') + folderName;
         }
         // The same yes trusts it (6.7): trust is per id and version, so a new version asks again.
         const Result<PackSummary> trusted = trustPack(folderName, run.packsDir, trust, prompts);
@@ -468,13 +540,62 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
         FileHashes fallbackHashes(FileHashes::defaultPath());
         FileHashes &hashes = run.hashes ? *run.hashes : fallbackHashes;
         const int base = int(plan.packs.size());
+        QList<ReadinessModel> models = plan.models;
+        // Models whose type a pack of this plan gives: planned now that the packs are in, with the types they declare (#418).
+        Registry installed;
+        std::optional<ModelLibrary> after;
+        for (int m = 0; m < models.size() && outcome.failedRow < 0; ++m) {
+            ReadinessModel &model = models[m];
+            if (!model.deferred)
+                continue;
+            if (!after) {
+                if (!plan.registry || !plan.library) {
+                    stopAt(base + m, Errors{makeError(QStringLiteral("pack_invalid"), QStringLiteral("The model %1 could not be planned after its pack was installed.").arg(model.name))}, false);
+                    break;
+                }
+                installed = *plan.registry;
+                for (const QString &folder : std::as_const(installedFolders))
+                    loadPack(installed, folder);
+                after = plan.library->withRegistry(&installed);
+            }
+            const QString packText = model.typeFrom.isEmpty() ? QStringLiteral("a pack in this list") : model.typeFrom;
+            const std::optional<PortType> type = PortType::parse(model.resource);
+            if (!type || after->downloadFolder(*type).isEmpty()) {
+                stopAt(base + m, Errors{makeError(QStringLiteral("pack_invalid"),
+                                                  QStringLiteral("%1 was installed, but it does not declare the model type %2 that %3 needs, so the model cannot be downloaded.")
+                                                      .arg(packText, model.resource, model.name),
+                                                  QStringLiteral("The workflow and the pack do not match: get a version of the pack that declares %1.").arg(model.resource))}, false);
+                break;
+            }
+            FileHashes lookup(FileHashes::defaultPath());
+            FileHashes &known = run.hashes ? *run.hashes : lookup;
+            const QList<MissingModel> still = after->missing(QJsonArray{model.entry}, known);
+            if (still.isEmpty()) { // it is here already, under the type the pack gave it
+                model.deferred = false;
+                model.target = {};
+                continue;
+            }
+            const Result<DownloadTarget> target = planDownload(*after, still.first());
+            if (!target) {
+                stopAt(base + m, target.errors(), false);
+                break;
+            }
+            model.target = *target;
+            model.folder = QFileInfo(target->path).absolutePath();
+            model.deferred = false;
+        }
         // One file after another, each its own queue: the row is the loop's, never a position in a de-duplicated line.
         for (int m = 0; m < plan.models.size() && outcome.failedRow < 0; ++m) {
-            const ReadinessModel &model = plan.models.at(m);
+            const ReadinessModel &model = models.at(m);
             const int row = base + m;
             if (report.stopped()) {
                 stopAt(row, {}, true);
                 break;
+            }
+            if (model.target.path.isEmpty()) { // found here once its pack was in
+                ++outcome.done;
+                finish(row, RowState::Done);
+                continue;
             }
             // Free space is checked before each file, not only when the list was shown.
             const qint64 free = run.freeSpace ? run.freeSpace(model.folder) : freeAt(model.folder);

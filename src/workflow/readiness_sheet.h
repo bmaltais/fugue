@@ -33,7 +33,7 @@ class ReadinessSheet : public QObject {
     QML_ELEMENT
     QML_UNCREATABLE("made by Workflows")
     Q_PROPERTY(bool open READ isOpen NOTIFY changed)
-    // "review" (the list, waiting for the yes), "running", or "finished" (ended: all done, or stopped).
+    // "review" (the list, waiting for the yes), "running", or "finished" (ended: all done, or stopped; after all done the sheet closes itself).
     Q_PROPERTY(QString phase READ phase NOTIFY changed)
     // What the sheet shows: headline, packs and models (one map each: name, detail lines, state and detail text), the
     // destination ("Models go into": destination, destinationTitle, destinations [{path, title}], freeText, sizeText,
@@ -75,6 +75,10 @@ signals:
     void packsModified();
     // A run ended (ok: every row done).
     void finished(bool ok);
+    // The sheet was opened (show()).
+    void shown();
+    // A run ended with everything ready: the sheet has closed itself.
+    void succeeded();
 
 private:
     void rebuild();

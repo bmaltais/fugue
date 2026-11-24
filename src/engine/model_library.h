@@ -91,6 +91,13 @@ public:
     static QHash<QString, QString> rootKinds(const Settings &settings);
 
     QStringList roots() const { return m_roots; }
+    // The same folders and settings reading another registry's types (the packs installed since).
+    ModelLibrary withRegistry(const Registry *registry) const {
+        ModelLibrary copy = *this;
+        copy.m_registry = registry;
+        copy.m_listed.clear();
+        return copy;
+    }
 
     // The roots that belong to the Default project (spec 1.4.2): searched like any other, never written
     // in, never a download target. `current()` sets them from the settings.

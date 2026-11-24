@@ -2322,11 +2322,17 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   (it replaces the separate Install pack, Download and "Into …" controls); it opens **one sheet** with the headline ("Fugue will
   install and trust 1 pack, set up 1 environment and download 1 model, 1.2 GB"), a row per pack and per model that opens to the
   full detail the separate prompts gave (the pack, version, source, runtime kinds and declared permissions, the setup command and its
-  size; the model's licence, size, host and folder), the **Models go into** row ([8.9](#89-models-on-disk)), and **Install and trust
-  all** or Cancel. Then it shows one list with progress per row and **Stop**; the first failure stops the run, says what is left, and
-  **Get ready again** lists only that. Nothing happens before the yes; a pack update, or a pack that declares more than was shown,
+  size; the model's licence, size, host and folder), the **Models go into** row ([8.9](#89-models-on-disk)), and **Install**
+  (one word whenever there is anything to do: packs, environments or models) or Cancel. It is one click: a model whose resource
+  type is declared by a pack in the same list (the Segment pack's GroundingDINO model) is a row like the others, marked "type from
+  <pack>", in the totals and the free-space check; it cannot be planned before that pack is in, so the run plans it after the pack
+  rows, with the types the installed packs declare, and downloads it in the same run. If the pack, once installed, does not
+  declare the type, that is a `pack_invalid` error saying so. Then the sheet shows one list with progress per row and **Stop**; the
+  first failure stops the run, keeps the sheet open, says what is left, and **Try again** lists only that. When every row is done
+  the sheet closes by itself and the template it was opened for is the tab shown, ready to run; no "done" sheet is left.
+  Nothing happens before the yes; a pack update, or a pack that declares more than was shown,
   still asks on its own ([6.6](#66-installing)). A package ([11.5](#115-export)) opens the same way: its `requires` name the packs
-  and models, and it carries no pack. `fugue template prepare <id>` and `fugue workflow prepare <file>` do the same on a terminal.
+  and models, and it carries no pack. `fugue template prepare <id>` and `fugue workflow prepare <file>` do the same on a terminal, one question for the packs and every model.
 - **Where its models are (#164).** A card says, with a small badge and a tooltip, where each of
   its models can be had: `monitor`, "On this machine" (a file in the model folders, or a model a
   server on this machine serves) and `server`, "Shared by <host>" (a model a paired host serves

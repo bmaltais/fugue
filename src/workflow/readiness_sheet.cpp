@@ -116,6 +116,7 @@ void ReadinessSheet::show() {
     m_ok = false;
     m_open = true;
     publish();
+    emit shown();
 }
 
 void ReadinessSheet::close() {
@@ -286,10 +287,15 @@ void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
             lines << (error.hint.isEmpty() ? error.message : error.message + QLatin1Char(' ') + error.hint);
         m_message = tr("It stopped at the first failure: %1").arg(lines.join(QLatin1Char(' ')));
     }
+    // One click, then done: when everything is ready the sheet goes away (no "done" sheet to close); a failure stays open.
+    if (m_ok)
+        m_open = false;
     publish();
     if (outcome.packsChanged)
         emit packsModified();
     emit finished(outcome.ok);
+    if (m_ok)
+        emit succeeded();
 }
 
 bool ReadinessSheet::waitIdle(int msec) {
@@ -340,7 +346,9 @@ void ReadinessSheet::publish() {
         const ReadinessModel &m = m_plan.models.at(i);
         const int row = int(m_plan.packs.size()) + i;
         models << QVariantMap{{"name", m.name}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")},
-                              {"host", m.host}, {"license", m.license}, {"licenseUrl", m.licenseUrl}, {"folder", m.folder},
+                              {"host", m.host}, {"license", m.license}, {"licenseUrl", m.licenseUrl},
+                              {"folder", m.deferred ? tr("its folder, once the pack is installed") : m.folder},
+                              {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},
                               {"state", stateName(m_states.value(row))}, {"detail", m_details.value(row)},
                               {"fraction", m_fractions.value(row)}};
     }

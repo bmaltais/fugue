@@ -9,7 +9,7 @@ import "../canvas"
 // The "Get ready" sheet (spec 6.6, 8.9, 11.10; #379): what the shown workflow needs (packs to install and trust, their
 // environments, the missing models) as one list and one yes, then a row of progress each. The list, the checks and the work
 // are App.workflows.readiness (C++, workflow/readiness_sheet.h, the same plan the CLI's `prepare` shows); this only shows it.
-// Nothing happens until "Install and trust all".
+// Nothing happens until "Install".
 Question {
     id: sheet
     objectName: "getReadySheet"
@@ -160,6 +160,7 @@ Question {
                                 Layout.fillWidth: true
                                 elide: Text.ElideMiddle
                                 text: qsTr("Download %1 (%2)").arg(modelRow.modelData.name).arg(modelRow.modelData.size)
+                                      + (modelRow.modelData.typeFrom !== "" ? " · " + modelRow.modelData.typeFrom : "")
                             }
                             Label {
                                 color: modelRow.modelData.state === "failed" ? sheet.look.error : sheet.look.label
@@ -268,7 +269,7 @@ Question {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: sheet.view.ok ? sheet.look.text : sheet.look.error
-            text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Get ready again to retry; it lists only what is left.").arg(sheet.view.retry.join(", ")))
+            text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Try again; it lists only what is left.").arg(sheet.view.retry.join(", ")))
         }
 
         QuestionAnswers {
@@ -287,7 +288,7 @@ Question {
             ThemedButton {
                 objectName: "getReadyAgain"
                 visible: sheet.phase === "finished" && !sheet.view.ok
-                text: qsTr("Get ready again")
+                text: qsTr("Try again")
                 onClicked: sheet.sheetModel.show()
             }
             ThemedButton {
@@ -295,7 +296,7 @@ Question {
                 visible: sheet.phase === "review" && !sheet.view.empty
                 enabled: !sheet.view.lowSpace
                 highlighted: true
-                text: sheet.view.packs.length > 0 ? qsTr("Install and trust all") : qsTr("Download all")
+                text: qsTr("Install")
                 onClicked: sheet.sheetModel.start()
             }
         }

@@ -12,7 +12,8 @@
 // trust, its setup command and the model downloads, with no second question. It still decides nothing
 // itself: it is only called after a yes, and a pack that changed since the plan showed it (another
 // version, another setup command, other permissions) is refused, so the yes is never stretched to
-// something the person did not read. Each row is all or nothing (a pack is staged and put in place only
+// something the person did not read. A model whose resource type a pack of the same plan declares is planned after the pack rows,
+// with the types the installed packs declare, and downloaded in the same run (#418). Each row is all or nothing (a pack is staged and put in place only
 // once it loads and its setup worked, 6.6; a model is written as a `.part` and kept only when its hash
 // matches, 8.9). The first failure stops the run: the rows after it are not started, nothing is half
 // installed, and the outcome says what to run again (a new plan holds only what is still missing).
@@ -86,7 +87,12 @@ struct ReadinessModel {
     QString host;       // the source's host
     qint64 size = -1;   // -1: not recorded
     DownloadTarget target; // the file it becomes
-    QString folder;     // where it goes
+    QString folder;     // where it goes; empty while `deferred`
+    QJsonObject entry;  // what the workflow records (Document::models()'s form), to plan it again once its pack is in
+    // Its resource type is declared by a pack this plan installs, so it cannot be planned before that pack is in (#418):
+    // it is listed like any other model and the same yes covers it. The run plans it after the pack rows.
+    bool deferred = false;
+    QString typeFrom;   // deferred: the pack that gives its type (its name), or empty when the list cannot tell
 };
 
 struct ReadinessPlan {
@@ -99,6 +105,10 @@ struct ReadinessPlan {
     qint64 environmentBytes = 0; // the setups' sizes that are known
     int unknownEnvironments = 0;
     qint64 freeBytes = -1;       // free where the models go; -1 when it cannot be told
+    // What a run needs to plan the deferred models again once the packs are in: the registry the plan was built with
+    // (it must outlive the plan) and the model folders as they were chosen.
+    const Registry *registry = nullptr;
+    std::shared_ptr<ModelLibrary> library;
     // What cannot be made ready from here: a pack with no known source, a model with no source, a
     // pack that did not preview. Warnings, not part of the one yes.
     Errors problems;
@@ -112,6 +122,7 @@ struct ReadinessPlan {
     // A row per pack, then per model (the run's row numbers).
     int rowCount() const { return int(packs.size() + models.size()); }
     // Disk the whole needs: the models and the environments, as far as sizes are known.
+    int deferredCount() const;
     qint64 diskBytes() const { return downloadBytes + environmentBytes; }
     // The models do not fit where they go (needs a known free space).
     bool lowSpace() const { return freeBytes >= 0 && downloadBytes > freeBytes; }
