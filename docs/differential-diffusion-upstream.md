@@ -1,7 +1,7 @@
 # Upstream pull request: differential diffusion (soft masks)
 
-For the owner to send to leejet/stable-diffusion.cpp (#179). Not sent. The patch Fugue carries is
-`helper/sdcpp.patch` (the hunks of `fugue.soft_mask`); an upstream version would use the library's own
+For the owner to send to leejet/stable-diffusion.cpp (#179). Not sent. The change Fugue carries is in its
+fork (`bmaltais/stable-diffusion.cpp`, branch `fugue`; the `fugue.soft_mask` commits); an upstream version would use the library's own
 option names. Written from the paper (arXiv 2306.00950, Algorithm 1); the authors' repository has no
 licence and was not read.
 

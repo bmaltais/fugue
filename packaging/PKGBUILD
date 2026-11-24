@@ -53,19 +53,20 @@ checkdepends=(
   'jq'
   'noto-fonts'
 )
-_sdcpp=3b12781fac1a22eda27ad0f08d0884ef816f24d7
+# Fugue's fork, tag fugue-2026-11-24: upstream 3b12781f plus Fugue's engine commits.
+_sdcpp=0bcd3abf4af88d54ed74f30ab3230d70272c56bc
 _ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
 _cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
 _src=${FUGUE_SRC:+file://$FUGUE_SRC}
 _src=${_src:-$url.git}
 source=("$pkgbase::git+$_src${FUGUE_REF:+#$FUGUE_REF}"
         "fugue-workflows::git+https://github.com/bmaltais/fugue-workflows.git"
-        "sdcpp-$_sdcpp.tar.gz::https://github.com/leejet/stable-diffusion.cpp/archive/$_sdcpp.tar.gz"
+        "sdcpp-$_sdcpp.tar.gz::https://github.com/bmaltais/stable-diffusion.cpp/archive/$_sdcpp.tar.gz"
         "ggml-$_ggml.tar.gz::https://github.com/leejet/ggml/archive/$_ggml.tar.gz"
         "cutlass-$_cutlass.tar.gz::https://github.com/NVIDIA/cutlass/archive/$_cutlass.tar.gz")
 sha256sums=('SKIP'
             'SKIP'
-            '1122fa32b5e2d5dc376da0220bcd10c741f76eb5a6dad8170d5a6582979dc2a9'
+            '94304e04cd1c5fdf8a8d2ab1069b8fbd85f83e63fa1ab648a526381dac663fc8'
             '8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2'
             '36429479df2ab1cd1c7981c2d34e786106326ccfefc8846f902f76151a65e112')
 
@@ -86,12 +87,6 @@ prepare() {
   git submodule init templates
   git config submodule.templates.url "$srcdir/fugue-workflows"
   git -c protocol.file.allow=always submodule update templates
-  # A second makepkg run (no -C) re-extracts the tarballs over the patched tree: the files turn
-  # pristine again but the file the patch adds stays, and the patch refuses it. Start from a clean tree.
-  rm -rf "$srcdir/stable-diffusion.cpp-$_sdcpp"
-  bsdtar -xf "$srcdir/sdcpp-$_sdcpp.tar.gz" -C "$srcdir"
-  cd "$srcdir/stable-diffusion.cpp-$_sdcpp"
-  patch -p1 --forward --input="$srcdir/$pkgbase/helper/sdcpp.patch"
 }
 
 # The helper for one backend, from the sources above rather than a download.

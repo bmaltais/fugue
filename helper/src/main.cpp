@@ -1,5 +1,5 @@
-// fugue-helper: stages of image generation on stable-diffusion.cpp with Fugue's stage patch
-// (helper/sdcpp.patch, spec 8.10).
+// fugue-helper: stages of image generation on stable-diffusion.cpp in Fugue's fork
+// (helper/README.md, spec 8.10).
 //
 //   fugue-helper <request.json>     one operation, then exit
 //   fugue-helper --serve            the provider protocol over stdio (8.8), for HelperProvider
