@@ -3175,7 +3175,7 @@ helper's stage capabilities: Load Models (diffusion model, text encoder and VAE 
 one `fugue/model`, [2.6](#26-data-values-latents-and-conditioning)), Apply LoRA (strength,
 stacking; the result is a derived handle, [2.5](#25-resource-handles)), Text Encode (prompt and
 negative prompt, one conditioning; optional reference pictures for an edit, #88), Empty Latent, Sampler (seed, steps, guidance, sampler,
-scheduler, denoise), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
+scheduler, denoise, and the advanced optional flow shift, Sampler 1.3.0, #341), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
 pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
 1, checked by hand on an RTX 3090 (SDXL's size conditioning differs: Appendix A);
 the templates `z-image-turbo`, `flux2-klein-4b` and `flux2-klein-9b` are ready to open (11.10).
@@ -3208,6 +3208,41 @@ VAE Decode as separate jobs give the same PNG, byte for byte, as one `generate` 
 `init_image` and `mask`, for FLUX.2 Klein 4B (Q8_0, 4 steps), FLUX.1 Fill (`fluxFillFP8_v10`, 6
 steps) and SDXL Inpaint (RealVisXL V4.0 with the SDXL Inpaint UNet, 8 steps); without the hook the
 FLUX.1 Fill staged picture differs from the single run's.
+
+**Flow shift and ComfyUI's schedules (#341, 2026-11-23; the engine at 3b12781f).** The Sampler's advanced
+`flow_shift` (a number, empty by default) is sent as `sample.flow_shift` and only then; empty, the request is
+the same as before. The engine applies it in the model's time-to-sigma map, so it changes the `discrete` and
+`simple` schedules and not the one FLUX.2 Klein defaults to (`flux2`, which takes its own mu from the image size
+and the step count and ignores the shift). Klein's engine default is shift 1.0 (the weights have no guidance
+input). The map is ComfyUI's `flux_time_shift`, so ComfyUI's Klein value 2.02 means the same number here: at
+denoise 1, `simple` with shift 2.02 equals ComfyUI's `simple` to 5e-4 and `discrete` with shift 2.02 equals its
+`normal` except the last sigma above zero (0.0075 against 0.0056, because ComfyUI's table has 10000 points and
+the engine's 1000). Denoise below 1 does not match: ComfyUI cuts the last `steps + 1` sigmas of an
+`int(steps / denoise)`-step schedule; the helper starts at the noise level `denoise` on the `steps`-step
+schedule (strength_args.h, #244), and on a 4 to 6 step schedule, crowded near 1, that leaves one or two steps. The table
+is on #341. Not yet changed: an opt-in helper reading of denoise as ComfyUI's cut.
+
+**Reference size (#342, 2026-11-23; the engine at 3b12781f).** Text Encode 1.1.0 has an advanced `reference_size`:
+`auto` (the default) or `exact`. At the pin the engine sizes every reference itself before the VAE, in
+`src/api/generation_image.cpp` (`reference_pixels`): to at most 1 MP and the output's area, aspect kept, each side
+rounded to a multiple of 16 (32 for Qwen-Image). The option `ref_image_args` that the older engine had
+(`image.cpp`, `resize_before_vae`) is gone with the DGL move, so the stage patch adds it back as the one setting
+`ref_image_args = "resize_before_vae=false"` (anything else but `resize_before_vae=true` is `input_invalid`): the
+reference then keeps the size the graph gave it, whatever the model. Text Encode sends it with `ref_images` when
+`exact`, and puts `reference_size` on the conditioning's descriptor, so the Sampler sends the same value (a request
+with `auto` or unset carries no `ref_image_args`, so it is as before). A side that is not a multiple of the VAE's (16, 32 for Qwen-Image) is cut from the
+middle down to the multiple (`crop_only` in the patched `reference_pixels`: 330x190 reaches the VAE as 320x176), the rule
+of ComfyUI's VAE Encode, which crops the pixels to a multiple of the VAE's factor; without the cut the engine's VAE would
+rescale the picture to the nearest multiple (330x190 to 336x192, a slight stretch). Checked on the 3090 with 330x190 and 250x250
+(clean result, 320x176 and 240x240); aligned references are unchanged byte for byte. The helper logs each reference's size before and after at
+the VAE (`reference N: WxH -> WxH`). Checked on the RTX 3090 (FLUX.2 Klein 9B Q8_0, 256 x 256, 4 steps, references
+320x192, 256x256 and 192x320): `exact` reached the VAE as 320x192, 256x256 and 192x320, in the encode and the
+sample; `auto` gave 656x400, 512x512 and 400x656 at the encode (no output size, so a megapixel) and 336x192, 256x256
+and 192x336 at the sample. **Reference indices.** FLUX.2 (`sd_version_is_flux2`) sets `ref_index_mode = increase`
+on the predictor (`generation_image.cpp`, the `increase` list in `image_references`, and `flux.hpp` forces it again
+for the model), the target takes time index 0, the references start at 1 (`rope.hpp`, `gen_flux_ids`, `x_index + 1`)
+and each takes `index * ref_index_scale` with the scale 10 for FLUX.2 (`flux.hpp`, the flux2 config), so the
+references get 10, 20, 30 in the order they are sent, as ComfyUI's ReferenceLatent does. No change was needed.
 
 ### 14.4 Masking and inpainting (#167)
 
