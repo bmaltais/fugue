@@ -60,6 +60,7 @@ CanvasActions::CanvasActions(RunService *service, const Registry *registry, Work
       m_historyPath(stateDir() + QStringLiteral("/canvas-prompts.json")),
       m_settingsPath(stateDir() + QStringLiteral("/canvas-actions.json")) {
     m_form = new CanvasModel(registry, this);
+    m_barPlace = new TaskBarPlace(stateDir() + QStringLiteral("/canvas-task-bar.json"), this);
     if (workflows)
         m_form->widgets()->setDownloads(workflows->downloads());
     connect(m_form, &CanvasModel::edited, this, &CanvasActions::syncForm);
