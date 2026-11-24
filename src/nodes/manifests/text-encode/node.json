@@ -17,7 +17,7 @@
      "description": "Pictures to edit or take from, for a model that edits (FLUX.2 Klein, Qwen-Image Edit). Each goes to the model at most a megapixel, unless Reference size is exact; Resize to Megapixels sets it."},
     {"name": "reference_size", "type": "text", "label": "Reference size", "default": "auto", "advanced": true,
      "choices": ["auto", "exact"],
-     "description": "Auto: the engine scales each reference to at most a megapixel (and the output's area), to a multiple of 16, before the model sees it. Exact: each keeps the size the graph gave it, as ComfyUI's edit does; the sides should be multiples of 16 (Resize to Megapixels does that)."},
+     "description": "Auto: the engine scales each reference to at most a megapixel (and the output's area), to a multiple of 16, before the model sees it. Exact: each keeps the size the graph gave it, as ComfyUI's edit does; a side that is not a multiple of 16 (32 for Qwen-Image) is cut from the middle down to one, as ComfyUI's VAE Encode does."},
     {"name": "first_frame", "type": "image", "label": "First frame", "optional": true,
      "description": "The picture a clip starts from, for an image-to-video model (Wan 2.2 I2V or TI2V). It is scaled to cover the size of Clip and cut from the middle."},
     {"name": "clip", "type": "fugue/latent", "label": "Clip", "optional": true,

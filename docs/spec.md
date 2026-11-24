@@ -3230,8 +3230,11 @@ rounded to a multiple of 16 (32 for Qwen-Image). The option `ref_image_args` tha
 `ref_image_args = "resize_before_vae=false"` (anything else but `resize_before_vae=true` is `input_invalid`): the
 reference then keeps the size the graph gave it, whatever the model. Text Encode sends it with `ref_images` when
 `exact`, and puts `reference_size` on the conditioning's descriptor, so the Sampler sends the same value (a request
-with `auto` or unset carries no `ref_image_args`, so it is as before). `exact` needs sides that are multiples of 16 (Resize to
-Megapixels gives that); the engine does not round them. The helper logs each reference's size before and after at
+with `auto` or unset carries no `ref_image_args`, so it is as before). A side that is not a multiple of the VAE's (16, 32 for Qwen-Image) is cut from the
+middle down to the multiple (`crop_only` in the patched `reference_pixels`: 330x190 reaches the VAE as 320x176), the rule
+of ComfyUI's VAE Encode, which crops the pixels to a multiple of the VAE's factor; without the cut the engine's VAE would
+rescale the picture to the nearest multiple (330x190 to 336x192, a slight stretch). Checked on the 3090 with 330x190 and 250x250
+(clean result, 320x176 and 240x240); aligned references are unchanged byte for byte. The helper logs each reference's size before and after at
 the VAE (`reference N: WxH -> WxH`). Checked on the RTX 3090 (FLUX.2 Klein 9B Q8_0, 256 x 256, 4 steps, references
 320x192, 256x256 and 192x320): `exact` reached the VAE as 320x192, 256x256 and 192x320, in the encode and the
 sample; `auto` gave 656x400, 512x512 and 400x656 at the encode (no output size, so a megapixel) and 336x192, 256x256
