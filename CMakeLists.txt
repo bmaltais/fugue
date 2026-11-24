@@ -16,7 +16,7 @@ if(fugue_linker_has_lld)
   add_link_options(-fuse-ld=lld)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 # Shared packages are zips (engine/share_package.h); pacman itself needs libarchive.

@@ -91,6 +91,20 @@ Read it first at [install.sh](install.sh); `bash -s -- --dry-run` shows what it 
 
 ## Install by hand
 
+On another Linux (Ubuntu, Fedora, Debian and others) there is an AppImage, one file for the window and the command
+line (x86_64; glibc 2.35 or newer):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bmaltais/fugue/main/install.sh | bash   # no pacman: it installs the AppImage
+```
+
+It goes to `~/.local/bin/fugue` with a launcher entry, the icon and the `.fugue` and `.fuguepack` file types;
+`--dry-run` shows the plan, `--dir FOLDER` and `--no-desktop` change it. Or download
+`Fugue-*-x86_64.AppImage` from the [latest release](https://github.com/bmaltais/fugue/releases), check it
+against `SHA256SUMS`, `chmod +x` it and run it: with no argument it opens the window, with a command
+(`Fugue-*.AppImage run flow.fugue`) it is the command line. The graphics libraries and drivers come from your system;
+see [docs/appimage.md](docs/appimage.md) for what it needs and the generation helper, which is a separate download.
+
 Fugue is packaged for Arch and Omarchy. Download the packages from the
 [latest release](https://github.com/bmaltais/fugue/releases) and install:
 
@@ -104,7 +118,7 @@ file name ends in your architecture, for example `fugue-*-aarch64.pkg.tar.zst`.
 For generation on an NVIDIA GPU, also install the helper with `fugue-helper-cuda-*.pkg.tar.zst`
 (`sudo pacman -U fugue-helper-cuda-*.pkg.tar.zst`). The release includes `SHA256SUMS`.
 
-This is a test release and the packages are unsigned.
+This is a test release and the packages and the AppImage are unsigned.
 
 ## Docs
 
