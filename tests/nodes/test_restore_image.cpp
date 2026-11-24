@@ -5,9 +5,15 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QDataStream>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <cmath>
+#include <limits>
 
 #include "engine/file_hashes.h"
 #include "engine/media.h"
@@ -44,8 +50,20 @@ class TestRestoreImage : public QObject {
         c.registry = &m_registry;
         return c;
     }
-    QJsonObject modelFile(const QString &resource, const QString &folder, const QString &name) {
-        const QByteArray content = name.toUtf8() + " weights";
+    // A safetensors file with these tensor names (and nothing else a reader looks at): what the node reads of a model.
+    QJsonObject modelFile(const QString &resource, const QString &folder, const QString &name, const QStringList &tensors) {
+        QJsonObject header;
+        int offset = 0;
+        for (const QString &tensor : tensors) {
+            header.insert(tensor, QJsonObject{{"dtype", "F16"}, {"shape", QJsonArray{1}}, {"data_offsets", QJsonArray{offset, offset + 2}}});
+            offset += 2;
+        }
+        const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+        QByteArray content;
+        QDataStream(&content, QIODevice::WriteOnly).setByteOrder(QDataStream::LittleEndian);
+        for (int i = 0; i < 8; ++i)
+            content.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+        content += json + QByteArray(offset, '\0');
         const QString path = dataDir() + "/models/" + folder + "/" + name;
         QDir().mkpath(QFileInfo(path).absolutePath());
         QFile file(path);
@@ -55,8 +73,14 @@ class TestRestoreImage : public QObject {
                            {"hash", "sha256:" + QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex())},
                            {"name", name}};
     }
-    QJsonObject model() { return modelFile("fugue/diffusion-model", "diffusion_models", "seedvr2_test.safetensors"); }
-    QJsonObject vae() { return modelFile("fugue/vae", "vae", "seedvr2_test_vae.safetensors"); }
+    QJsonObject model(const QString &name = "seedvr2_test.safetensors",
+                      const QStringList &tensors = {"vid_in.proj.weight", "positive_conditioning", "negative_conditioning"}) {
+        return modelFile("fugue/seedvr2-model", "seedvr2", name, tensors);
+    }
+    QJsonObject vae(const QString &name = "seedvr2_test_vae.safetensors",
+                    const QStringList &tensors = {"encoder.conv_out.bias", "decoder.up_blocks.0.upsamplers.0.upscale_conv.weight"}) {
+        return modelFile("fugue/seedvr2-vae", "seedvr2_vae", name, tensors);
+    }
     MediaHandle picture(int w, int h, int bands, double value = 100) {
         vips::VImage image = vips::VImage::black(w, h, vips::VImage::option()->set("bands", bands)) + value;
         return MediaHandle::fromImage(image.cast(VIPS_FORMAT_UCHAR)).value();
@@ -106,8 +130,8 @@ private slots:
         QVERIFY2(r.ok(), qPrintable(r.errors().value(0).message));
         QCOMPARE(r->capability, QString("image.restore"));
         const QJsonObject files = r->params.value("context").toObject();
-        QCOMPARE(files.value("model_path").toString(), dataDir() + "/models/diffusion_models/seedvr2_test.safetensors");
-        QCOMPARE(files.value("vae_path").toString(), dataDir() + "/models/vae/seedvr2_test_vae.safetensors");
+        QCOMPARE(files.value("model_path").toString(), dataDir() + "/models/seedvr2/seedvr2_test.safetensors");
+        QCOMPARE(files.value("vae_path").toString(), dataDir() + "/models/seedvr2_vae/seedvr2_test_vae.safetensors");
         QCOMPARE(r->params.value("tile_size").toInt(), 256);
         QCOMPARE(r->params.value("overlap").toInt(), 32);
         QCOMPARE(r->params.value("seed").toInt(), 42);
@@ -118,7 +142,7 @@ private slots:
     }
 
     void namesBothFilesForAPairedHost() {
-        NodeContext c = context(inputs(picture(4, 4, 3)));
+        NodeContext c = context(inputs(picture(8, 8, 3)));
         const Result<JobRequest> r = request(c, false);
         QVERIFY(r.ok());
         const QJsonObject files = r->params.value("context").toObject();
@@ -130,25 +154,75 @@ private slots:
         }
     }
 
-    void refusesWhatCannotRun() {
-        const MediaHandle image = picture(4, 4, 3);
-        const auto code = [&](Values in) {
-            NodeContext c = context(in);
-            const Result<JobRequest> r = request(c);
-            return r.ok() ? QString("ok") : r.errors().value(0).code + ":" + r.errors().value(0).input;
-        };
+    QString code(Values in) {
+        NodeContext c = context(in);
+        const Result<JobRequest> r = request(c);
+        return r.ok() ? QString("ok") : r.errors().value(0).code + ":" + r.errors().value(0).input;
+    }
+    QString message(Values in) {
+        NodeContext c = context(in);
+        const Result<JobRequest> r = request(c);
+        return r.ok() ? QString() : r.errors().value(0).message;
+    }
+
+    void refusesAMissingFileOrABadTiling() {
+        const MediaHandle image = picture(32, 32, 3);
         Values noVae = inputs(image);
         noVae.remove("vae");
         QCOMPARE(code(noVae), QString("missing_input:vae"));
         Values gone = inputs(image);
-        gone.insert("model", Value(QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, 'a')}, {"name", "gone.safetensors"}}));
+        gone.insert("model", Value(QJsonObject{{"resource", "fugue/seedvr2-model"}, {"hash", "sha256:" + QString(64, 'a')}, {"name", "gone.safetensors"}}));
         QCOMPARE(code(gone), QString("model_missing:model"));
         Values wide = inputs(image);
         wide.insert("overlap", Value(300.0)); // more than half of the 512 tile
         QCOMPARE(code(wide), QString("value_out_of_range:overlap"));
-        Values huge = inputs(picture(4000, 10, 3));
-        huge.insert("factor", Value(8.0));
-        QCOMPARE(code(huge), QString("value_out_of_range:factor"));
+        Values tiny = inputs(image);
+        tiny.insert("tile", Value(8.0));
+        QCOMPARE(code(tiny), QString("value_out_of_range:tile"));
+    }
+
+    void aWiredFactorThatIsNotANumberOrIsHugeIsRefusedBeforeAnyConversion() {
+        for (double factor : {std::nan(""), 1e300, -3.0, 0.0, 9.0, std::numeric_limits<double>::infinity()}) {
+            Values in = inputs(picture(32, 32, 3));
+            in.insert("factor", Value(factor));
+            QCOMPARE(code(in), QString("value_out_of_range:factor"));
+        }
+    }
+
+    void aPictureTooSmallAtTheFactorIsRefusedOnTheImageWithTheMinimum() {
+        // 5 x 5 at 3 is 15, one short of the 16 the model needs; 6 x 6 is 18.
+        Values in = inputs(picture(5, 5, 3));
+        QCOMPARE(code(in), QString("value_out_of_range:image"));
+        const QString why = message(in);
+        QVERIFY2(why.contains("at least 16") && why.contains("at least 6 x 6"), qPrintable(why));
+        QCOMPARE(code(inputs(picture(6, 6, 3))), QString("ok"));
+        Values wideShort = inputs(picture(600, 4, 3)); // one side is enough to refuse it
+        QCOMPARE(code(wideShort), QString("value_out_of_range:image"));
+    }
+
+    void aResultBeyondWhatTheCardFinishesIsRefusedWithTheLargestThatFits() {
+        // 2000 x 2000 at 3 is 6000 x 6000 (36 MP), past the 16.8 MP cap; factor 2 (4000 x 4000, 16 MP) would fit.
+        Values in = inputs(picture(2000, 2000, 3, 10));
+        QCOMPARE(code(in), QString("value_out_of_range:factor"));
+        const QString why = message(in);
+        QVERIFY2(why.contains("36.0 MP") && why.contains("at most 16.8 MP") && why.contains("largest factor for this image is 2"), qPrintable(why));
+        QVERIFY2(why.contains("up to 1.9 MP"), qPrintable(why)); // at factor 3: 16.8 / 9
+        // A picture too big even at factor 1 is the image's fault.
+        QCOMPARE(code([&] { Values big = inputs(picture(4300, 4300, 3, 10)); big.insert("factor", Value(1.0)); return big; }()), QString("value_out_of_range:image"));
+    }
+
+    void aWrongModelOrVaeIsModelUnsupportedOnItsInputBeforeAnyJob() {
+        const MediaHandle image = picture(32, 32, 3);
+        Values klein = inputs(image); // a FLUX.2 Klein DiT in the SeedVR2 folder
+        klein.insert("model", Value(model("klein.safetensors", {"double_blocks.0.img_attn.qkv.weight", "txt_in.weight"})));
+        QCOMPARE(code(klein), QString("model_unsupported:model"));
+        Values gguf = inputs(image); // SeedVR2 layers with no stored embedding (the GGUF, the numz fp8)
+        gguf.insert("model", Value(model("numz.safetensors", {"vid_in.proj.weight", "blocks.0.attn.rope.rope.freqs"})));
+        QCOMPARE(code(gguf), QString("model_unsupported:model"));
+        QVERIFY(message(gguf).contains("stored embeddings"));
+        Values flux = inputs(image); // a Flux VAE
+        flux.insert("vae", Value(vae("flux.safetensors", {"encoder.conv_in.weight", "decoder.conv_in.weight"})));
+        QCOMPARE(code(flux), QString("model_unsupported:vae"));
     }
 
     void colorFixNoneKeepsTheModelsPicture() {
@@ -190,7 +264,7 @@ private slots:
     }
 
     void aHelperWithoutAPictureIsNodeFailed() {
-        NodeContext c = context(inputs(picture(4, 4, 3)));
+        NodeContext c = context(inputs(picture(8, 8, 3)));
         QVERIFY(request(c).ok());
         const Result<Values> out = m_kernels.provider("fugue/restore-image")->outputs(c, selection(), JobResult{});
         QVERIFY(!out.ok());

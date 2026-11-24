@@ -72,6 +72,61 @@ double detail(const Pixels &p, int c) {
     return s / n;
 }
 
+// A picture with detail at every scale: a few smooth waves, blocks and per-pixel noise, in 0.1..0.9.
+Pixels busy(int w, int h, unsigned seed) {
+    Pixels p(w, h, 3);
+    unsigned state = seed * 2654435761u + 1u;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int c = 0; c < 3; ++c) {
+                state = state * 1664525u + 1013904223u;
+                const float noise = float((state >> 9) & 0x7FFF) / 32767.0f;
+                const float wave = 0.5f + 0.25f * std::sin(0.11f * x + c) * std::cos(0.07f * y);
+                const float block = ((x / 9 + y / 7) % 2) ? 0.08f : -0.08f;
+                p.at(x, y, c) = std::clamp(wave + block + 0.12f * (noise - 0.5f), 0.02f, 0.98f);
+            }
+    return p;
+}
+
+// The wavelet reconstruction written the plain way, to pin what it must be: each level blurs the
+// previous one with the 3x3 kernel [1 2 1; 2 4 2; 1 2 1] / 16 whose taps are `dilation` pixels
+// apart (2^level, or `fixedDilation` when set), the edge pixel repeated beyond the border; the
+// result is the content minus its own last blur plus the reference's, clamped to 0..1.
+Pixels naiveLow(const Pixels &in, int levels, int fixedDilation) {
+    Pixels current = in;
+    for (int level = 0; level < levels; ++level) {
+        const int d = fixedDilation ? fixedDilation : (1 << level);
+        Pixels next = current;
+        static const float k[3] = {1, 2, 1};
+        for (int y = 0; y < in.height; ++y)
+            for (int x = 0; x < in.width; ++x)
+                for (int c = 0; c < in.channels; ++c) {
+                    float sum = 0;
+                    for (int j = -1; j <= 1; ++j)
+                        for (int i = -1; i <= 1; ++i)
+                            sum += k[j + 1] * k[i + 1] * current.at(std::clamp(x + i * d, 0, in.width - 1), std::clamp(y + j * d, 0, in.height - 1), c);
+                    next.at(x, y, c) = sum / 16.0f;
+                }
+        current = next;
+    }
+    return current;
+}
+
+Pixels naiveWavelet(const Pixels &content, const Pixels &reference, int levels, int fixedDilation = 0) {
+    const Pixels contentLow = naiveLow(content, levels, fixedDilation), referenceLow = naiveLow(reference, levels, fixedDilation);
+    Pixels out = content;
+    for (size_t i = 0; i < out.data.size(); ++i)
+        out.data[i] = std::clamp(content.data[i] - contentLow.data[i] + referenceLow.data[i], 0.0f, 1.0f);
+    return out;
+}
+
+float maxDifference(const Pixels &a, const Pixels &b) {
+    float worst = 0;
+    for (size_t i = 0; i < a.data.size(); ++i)
+        worst = std::max(worst, std::fabs(a.data[i] - b.data[i]));
+    return worst;
+}
+
 } // namespace
 
 class TestRestoreColor : public QObject {
@@ -95,11 +150,18 @@ private slots:
         QVERIFY(out.at(5, 5, 0) - out.at(5, 5, 2) > 0.1f);
     }
 
-    void aPictureAgainstItselfIsTheIdentity() {
-        const Pixels p = sum(ramp(48, 48, 0.2f), stripes(48, 48, 0.5f, 0.06f));
-        const Pixels out = waveletReconstruction(p, p);
-        for (size_t i = 0; i < p.data.size(); ++i)
-            QVERIFY(std::fabs(out.data[i] - p.data[i]) < 1e-4f);
+    void theWaveletIsFiveLevelsOfDilatedBinomialBlursWithRepeatedEdges() {
+        const Pixels content = busy(72, 56, 1), reference = busy(72, 56, 2);
+        const Pixels out = waveletReconstruction(content, reference);
+        // Exactly the plain implementation of the description...
+        QVERIFY2(maxDifference(out, naiveWavelet(content, reference, 5)) < 1e-4f, qPrintable(QString::number(maxDifference(out, naiveWavelet(content, reference, 5)))));
+        // ...and not a version with another level count, or with every tap one pixel apart.
+        QVERIFY(maxDifference(out, naiveWavelet(content, reference, 4)) > 0.003f);
+        QVERIFY(maxDifference(out, naiveWavelet(content, reference, 6)) > 0.003f);
+        QVERIFY(maxDifference(out, naiveWavelet(content, reference, 5, 1)) > 0.003f);
+        QVERIFY(maxDifference(out, naiveWavelet(content, reference, 1)) > 0.003f);
+        // A level count given is honoured.
+        QVERIFY(maxDifference(waveletReconstruction(content, reference, 3), naiveWavelet(content, reference, 3)) < 1e-4f);
     }
 
     void lowFrequenciesFollowTheReferenceAndHighOnesTheContent() {
@@ -142,7 +204,7 @@ private slots:
         QVERIFY(none.empty());
     }
 
-    void aAndBHistogramsMatchTheReferenceAndLMovesAFifthOfTheWay() {
+    void aAndBHistogramsMatchTheReference() {
         // A cast-shifted picture of the same scene: reference warm, content cool.
         Pixels reference(40, 40, 3), content(40, 40, 3);
         for (int y = 0; y < 40; ++y)
@@ -157,20 +219,14 @@ private slots:
             }
         const Pixels out = labColorFix(content, reference);
         std::vector<float> outA, outB, refA, refB;
-        double outL = 0, refL = 0, wavL = 0;
-        const Pixels wavelet = waveletReconstruction(content, reference);
-        for (int y = 0; y < 40; ++y)
+                for (int y = 0; y < 40; ++y)
             for (int x = 0; x < 40; ++x) {
                 const Lab o = rgbToLab(out.at(x, y, 0), out.at(x, y, 1), out.at(x, y, 2));
                 const Lab r = rgbToLab(reference.at(x, y, 0), reference.at(x, y, 1), reference.at(x, y, 2));
-                const Lab w = rgbToLab(wavelet.at(x, y, 0), wavelet.at(x, y, 1), wavelet.at(x, y, 2));
                 outA.push_back(float(o.a));
                 outB.push_back(float(o.b));
                 refA.push_back(float(r.a));
                 refB.push_back(float(r.b));
-                outL += o.l;
-                refL += r.l;
-                wavL += w.l;
             }
         std::sort(outA.begin(), outA.end());
         std::sort(refA.begin(), refA.end());
@@ -183,10 +239,60 @@ private slots:
             worst = std::max(worst, double(std::fabs(outB[i] - refB[i])));
         }
         QVERIFY2(worst < 3.0, qPrintable(QString::number(worst)));
-        // The mean L sits between the wavelet result's and the reference's, a fifth of the way.
-        const double n = 40 * 40;
-        const double expected = wavL / n + 0.2 * (refL / n - wavL / n);
-        QVERIFY2(std::fabs(outL / n - expected) < 1.5, qPrintable(QString("%1 %2").arg(outL / n).arg(expected)));
+    }
+
+    // Grey pictures (a = b = 0, so no colour leaves the gamut): lightness alone, where the 0.8 / 0.2 mix shows.
+    static Pixels greyRamp(int w, int h, float from, float to, unsigned seed) {
+        Pixels p(w, h, 3);
+        unsigned state = seed;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                state = state * 1664525u + 1013904223u;
+                const float v = from + (to - from) * float(x + y * w) / float(w * h) + 0.01f * (float((state >> 9) & 0xFF) / 255.0f - 0.5f);
+                for (int c = 0; c < 3; ++c)
+                    p.at(x, y, c) = std::clamp(v, 0.0f, 1.0f);
+            }
+        return p;
+    }
+
+    void lightnessIsFourFifthsTheWaveletResultAndAFifthHistogramMatched() {
+        // A dull content (narrow lightness range) against a reference that spans dark to bright.
+        const Pixels content = greyRamp(60, 60, 0.35f, 0.50f, 3), reference = greyRamp(60, 60, 0.05f, 0.95f, 9);
+        const Pixels wavelet = waveletReconstruction(content, reference);
+        std::vector<float> own, target;
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 60; ++x) {
+                own.push_back(float(rgbToLab(wavelet.at(x, y, 0), wavelet.at(x, y, 1), wavelet.at(x, y, 2)).l));
+                target.push_back(float(rgbToLab(reference.at(x, y, 0), reference.at(x, y, 1), reference.at(x, y, 2)).l));
+            }
+        std::vector<float> matched = own;
+        matchHistogram(matched, target);
+        double gap = 0; // how far apart the two lightnesses are: the weight must be visible in it
+        for (size_t i = 0; i < own.size(); ++i)
+            gap += std::fabs(matched[i] - own[i]);
+        QVERIFY2(gap / own.size() > 2.0, qPrintable(QString::number(gap / own.size())));
+
+        const Pixels out = labColorFix(content, reference);
+        double worst = 0;
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 60; ++x) {
+                const size_t i = size_t(y) * 60 + x;
+                const double expected = 0.8 * own[i] + 0.2 * matched[i];
+                worst = std::max(worst, std::fabs(rgbToLab(out.at(x, y, 0), out.at(x, y, 1), out.at(x, y, 2)).l - expected));
+            }
+        // Half and half (a 0.5 weight) would be 0.3 * gap away, all matched (1.0) 0.8 * gap.
+        QVERIFY2(worst < 0.3, qPrintable(QString::number(worst)));
+    }
+
+    void labAndWaveletDifferOnAPictureWhoseColoursAndLightnessMoved() {
+        const Pixels content = busy(48, 48, 4), reference = busy(48, 48, 5);
+        Pixels warm = reference;
+        for (int y = 0; y < warm.height; ++y)
+            for (int x = 0; x < warm.width; ++x) {
+                warm.at(x, y, 0) = std::min(1.0f, warm.at(x, y, 0) * 1.3f);
+                warm.at(x, y, 2) *= 0.6f;
+            }
+        QVERIFY(maxDifference(labColorFix(content, warm), waveletReconstruction(content, warm)) > 0.02f);
     }
 
     void theLabFixKeepsTheContentsDetail() {

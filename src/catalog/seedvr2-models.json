@@ -3,7 +3,7 @@
   "models": [
     {
       "id": "seedvr2-7b-int8",
-      "resource": "fugue/diffusion-model",
+      "resource": "fugue/seedvr2-model",
       "title": "SeedVR2 7B (INT8)",
       "description": "Restore Image's best quality; the 7B model, INT8 ConvRot, 8 GB.",
       "file": "seedvr2_7b_int8_convrot.safetensors",
@@ -23,51 +23,8 @@
       ]
     },
     {
-      "id": "seedvr2-7b-sharp-int8",
-      "resource": "fugue/diffusion-model",
-      "title": "SeedVR2 7B Sharp (INT8)",
-      "description": "The 7B model tuned for a crisper result, INT8 ConvRot, 8 GB.",
-      "file": "seedvr2_7b_sharp_int8_convrot.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/df48879708206a403d2a61acd55578c2e80fd233/diffusion_models/seedvr2_7b_sharp_int8_convrot.safetensors",
-      "size": 8334897976,
-      "sha256": "db48be2f1cc7e36b01a2aa529810f5d9c6a971edd29be225cf1b0eb18d51c366",
-      "architecture": "SeedVR2 7B Sharp (DiT)",
-      "license": "Apache-2.0",
-      "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
-      "commercial": true,
-      "author": "ByteDance Seed (repackaged by Comfy-Org)",
-      "source": "https://huggingface.co/Comfy-Org/SeedVR2",
-      "tags": [
-        "seedvr2",
-        "restore",
-        "upscale",
-        "sharp"
-      ]
-    },
-    {
-      "id": "seedvr2-3b-int8",
-      "resource": "fugue/diffusion-model",
-      "title": "SeedVR2 3B (INT8)",
-      "description": "A smaller, faster SeedVR2 for Restore Image, INT8 ConvRot, 3.5 GB.",
-      "file": "seedvr2_3b_int8_convrot.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/df48879708206a403d2a61acd55578c2e80fd233/diffusion_models/seedvr2_3b_int8_convrot.safetensors",
-      "size": 3458259704,
-      "sha256": "c3dec8bcc5916843a8a858572970597462e1f2dc598d6dfd818f6cd40f53a157",
-      "architecture": "SeedVR2 3B (DiT)",
-      "license": "Apache-2.0",
-      "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
-      "commercial": true,
-      "author": "ByteDance Seed (repackaged by Comfy-Org)",
-      "source": "https://huggingface.co/Comfy-Org/SeedVR2",
-      "tags": [
-        "seedvr2",
-        "restore",
-        "upscale"
-      ]
-    },
-    {
       "id": "seedvr2-vae",
-      "resource": "fugue/vae",
+      "resource": "fugue/seedvr2-vae",
       "title": "SeedVR2 VAE",
       "description": "The video VAE SeedVR2 (3B and 7B) restores through; 0.5 GB.",
       "file": "ema_vae_fp16.safetensors",

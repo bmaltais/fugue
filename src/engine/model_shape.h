@@ -100,6 +100,11 @@ struct ModelShape {
     // The quantization stable-diffusion.cpp has no kernels for that the file is in ("ComfyUI
     // nvfp4 quantization", "GPTQ"); empty when it can load it.
     QString unloadable;
+    // SeedVR2 (Restore Image, #346): a diffusion model that carries its stored embeddings, the only form the
+    // engine recognises (the GGUF and fp8 repackagings keep them in another file); and its VAE.
+    bool seedvr2Model = false;
+    bool seedvr2StoredEmbeddings = false;
+    bool seedvr2Vae = false;
 };
 
 // What a file is, as a pack.json resource type names the files it holds ("files", 6.4):

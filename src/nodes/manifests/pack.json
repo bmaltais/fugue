@@ -184,6 +184,31 @@
       ]
     },
     {
+      "id": "fugue/seedvr2-model",
+      "version": 1,
+      "kind": "resource",
+      "name": "SeedVR2 model",
+      "extensions": [
+        ".safetensors"
+      ],
+      "folders": [
+        "seedvr2",
+        "SEEDVR2"
+      ]
+    },
+    {
+      "id": "fugue/seedvr2-vae",
+      "version": 1,
+      "kind": "resource",
+      "name": "SeedVR2 VAE",
+      "extensions": [
+        ".safetensors"
+      ],
+      "folders": [
+        "seedvr2_vae"
+      ]
+    },
+    {
       "id": "fugue/latent",
       "version": 1,
       "kind": "data",

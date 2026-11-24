@@ -27,7 +27,8 @@
 //   {"op": "restore",    "image": IN, "output": OUT}           PNG -> PNG restored by SeedVR2 at its own
 //                        "context": {"model_path", "vae_path"}, size (the caller scales it first): padded
 //                        "params": {"tile_size", "overlap",    to a multiple of 16, VAE-encoded in tiles,
-//                        "seed"}                               one euler step, decoded in tiles, cropped
+//                        "seed"}                               one euler step, decoded in tiles, cropped;
+//                        refused before loading: model_unsupported (the files' tensor names), input_invalid (size, tiling)
 //
 // A context of a video model (Wan) makes the same operations on video: the library's video
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
@@ -110,6 +111,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -120,6 +122,7 @@
 #include "ggml-backend.h"
 #include "json.hpp"
 #include "stable-diffusion.h"
+#include "restore.h"
 #include "strength_args.h"
 
 // stb and json.hpp come from stable-diffusion.cpp's thirdparty/, a system include folder here
@@ -496,6 +499,9 @@ struct Hooks {
     // Told the context just before the generation (false from it: cancelled, do not start) and
     // null after it.
     std::function<bool(sd_ctx_t *)> running;
+    // The same for a restore, which runs on a DGL context: told it before the run (false: cancelled) and
+    // null after; the server cancels it with sd_dgl_ctx_cancel.
+    std::function<bool(sd_dgl_ctx_t *)> runningDgl;
     // True once the job is cancelled: polled between the frames of an upscale, which has no
     // cancel inside a frame.
     std::function<bool()> cancelled;
@@ -644,51 +650,9 @@ json runUpscale(const json &request, Contexts &contexts, const Hooks &hooks) {
 
 // image.restore: SeedVR2 through the library's DGL (the pin has no vid_upscale call; its docs/models/seedvr2.md
 // script is the model). The picture is already the size it should end at (Fugue scales it, so the
-// reference of the colour fix is the same picture). A script is built from the request: the paths and
-// numbers go in as literals, the picture as the one tensor input. The sides are padded with zeros to a
-// multiple of 16, the VAE encodes and decodes in tiles (tile in pixels; overlap a share of the tile, the
-// library takes at most one half), and one euler step runs from noise on the encoded picture and a ones
-// channel, with the checkpoint's own positive embedding. A single frame is one window of one frame.
-std::string restoreScript(const std::string &model, const std::string &vae, int tile, double overlap, int64_t seed) {
-    std::ostringstream out;
-    out << "# version: 0.0.0\n"
-        << "var {\n"
-        << "    dit_path = " << json(model).dump() << "\n"
-        << "    vae_path = " << json(vae).dump() << "\n"
-        << "    tile = " << tile << "\n"
-        << "    overlap = " << overlap << "\n"
-        << "    seed = " << seed << "\n"
-        << "}\n"
-        << R"(fn main(image) {
-    dit = load_dit(dit_path)
-    vae = load_vae(vae_path)
-    shape = tensor::shape(image)
-    width = shape[1]
-    height = shape[2]
-    aligned_width = math::ceil_div(width, 16) * 16
-    aligned_height = math::ceil_div(height, 16) * 16
-    planar = tensor::permute(tensor::cast(tensor::unsqueeze(image, axis = 3), "f32"), axes = [1, 2, 3, 0])
-    padded = tensor::pad(tensor::clamp(tensor::div(planar, 255.0), min = 0, max = 1), [0, aligned_width - width, 0, aligned_height - height])
-    pixels = tensor::reshape(padded, [aligned_width, aligned_height, 1, 3, 1])
-    tiles = tiling(tile_size_w = tile, tile_size_h = tile, target_overlap = overlap)
-    rng = make_rng("cuda", seed = seed)
-    encoded = vae_encode(vae, pixels, rng = rng, tiling = tiles, posterior = "mode")
-    condition_latent = vae_to_dit_latents(vae, encoded)
-    encoded_shape = tensor::shape(encoded)
-    mask = tensor::full([encoded_shape[0], encoded_shape[1], encoded_shape[2], 1, encoded_shape[4]], 1)
-    condition = { crossattn = seedvr2::positive_embedding(dit), concat = tensor::concat([condition_latent, mask], axis = 3) }
-    noise = tensor::randn_like(condition_latent, rng = rng)
-    latent = sample(noise, tensor::vector([1.0, 0.0]), predict = predictor(dit, condition), method = "euler", rng = rng)
-    decoded = vae_decode(vae, dit_to_vae_latents(vae, latent), tiling = tiles, dtype = "f32")
-    cropped = tensor::crop(decoded, axes = [0, 1, 2], start = [0, 0, 0], size = [width, height, 1])
-    unit = tensor::clamp(tensor::reshape(cropped, [width, height, 3]), min = 0, max = 1)
-    packed = tensor::cast(tensor::add(tensor::mul(tensor::permute(unit, axes = [2, 0, 1]), 255.0), 0.5), "u8")
-    return { image = packed }
-}
-)";
-    return out.str();
-}
-
+// reference of the colour fix is the same picture). The program, the limits and the progress bar are in
+// restore.h; this reads the request, checks it before anything is freed, and runs the program on a DGL
+// context made for the job.
 struct DglFree {
     void operator()(sd_dgl_ctx_t *c) const { sd_dgl_ctx_free(c); }
 };
@@ -696,39 +660,181 @@ struct DglResultFree {
     void operator()(sd_dgl_result_t *r) const { sd_dgl_result_free(r); }
 };
 
+// The tracker the global tile callback feeds while a restore runs (both run on the worker thread).
+fugue_helper::RestoreProgress *g_restoreProgress = nullptr;
+
+// A whole number in [low, high] from a request value, or a refusal naming the field.
+int64_t wholeNumber(const json &params, const char *field, int64_t fallback) {
+    if (!params.contains(field))
+        return fallback;
+    const json &value = params[field];
+    if (value.is_number_integer() || value.is_number_unsigned())
+        return value.get<int64_t>();
+    if (value.is_number_float() && std::isfinite(value.get<double>()) && value.get<double>() == std::floor(value.get<double>()) &&
+        std::fabs(value.get<double>()) < 9e15)
+        return static_cast<int64_t>(value.get<double>());
+    fail("input_invalid", std::string(field) + " must be a whole number");
+}
+
+// The tensor names of a safetensors or GGUF file's header (empty when it is neither or cannot be read).
+std::set<std::string> tensorNames(const std::string &path) {
+    std::set<std::string> names;
+    std::ifstream in(path, std::ios::binary);
+    char magic[4] = {};
+    if (!in.read(magic, 4))
+        return names;
+    const auto u64 = [&] {
+        uint64_t v = 0;
+        in.read(reinterpret_cast<char *>(&v), 8);
+        return in ? v : uint64_t(~0ull);
+    };
+    const auto u32 = [&] {
+        uint32_t v = 0;
+        in.read(reinterpret_cast<char *>(&v), 4);
+        return v;
+    };
+    const auto text = [&](uint64_t limit) {
+        const uint64_t length = u64();
+        if (!in || length > limit)
+            return std::string("\1");
+        std::string value(length, '\0');
+        in.read(value.data(), static_cast<std::streamsize>(length));
+        return value;
+    };
+    if (std::memcmp(magic, "GGUF", 4) == 0) {
+        u32(); // version
+        const uint64_t tensors = u64(), pairs = u64();
+        if (!in || tensors > 1'000'000 || pairs > 1'000'000)
+            return names;
+        // A value: its type, then the bytes; an array is a type and a count, then that many values.
+        std::function<bool(uint32_t)> skip = [&](uint32_t type) {
+            static const int sizes[] = {1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8, 8};
+            if (type == 8)
+                return text(1 << 28) != "\1" && bool(in);
+            if (type == 9) {
+                const uint32_t inner = u32();
+                const uint64_t count = u64();
+                if (!in || inner > 12 || count > (1ull << 32))
+                    return false;
+                if (inner != 8 && inner != 9) {
+                    in.seekg(static_cast<std::streamoff>(count * sizes[inner]), std::ios::cur);
+                    return bool(in);
+                }
+                for (uint64_t i = 0; i < count; ++i)
+                    if (!skip(inner))
+                        return false;
+                return true;
+            }
+            if (type > 12)
+                return false;
+            in.seekg(sizes[type], std::ios::cur);
+            return bool(in);
+        };
+        for (uint64_t i = 0; i < pairs; ++i) {
+            if (text(1 << 20) == "\1" || !skip(u32()))
+                return names;
+        }
+        for (uint64_t i = 0; i < tensors; ++i) {
+            const std::string name = text(1 << 20);
+            if (name == "\1")
+                return {};
+            names.insert(name);
+            const uint32_t dims = u32();
+            if (!in || dims > 8)
+                return {};
+            in.seekg(static_cast<std::streamoff>(dims) * 8 + 4 + 8, std::ios::cur);
+            if (!in)
+                return {};
+        }
+        return names;
+    }
+    // safetensors: an 8-byte length (its first 4 bytes are already read), then a JSON object.
+    in.seekg(0);
+    const uint64_t length = u64();
+    if (!in || length == 0 || length > (100ull << 20))
+        return names;
+    std::string header(length, '\0');
+    if (!in.read(header.data(), static_cast<std::streamsize>(length)))
+        return names;
+    const json parsed = json::parse(header, nullptr, false);
+    if (!parsed.is_object())
+        return names;
+    for (const auto &item : parsed.items())
+        if (item.key() != "__metadata__")
+            names.insert(item.key());
+    return names;
+}
+
 json runRestore(const json &request, Contexts &contexts, const Hooks &hooks) {
     const json context = request.value("context", json::object());
     const json params = request.value("params", json::object());
     const std::string model = context.value("model_path", ""), vae = context.value("vae_path", "");
     if (model.empty() || vae.empty())
         fail("input_invalid", "\"model_path\" and \"vae_path\" are required for restore");
-    const int tile = params.value("tile_size", 512);
-    const int overlap = params.value("overlap", 64);
-    if (tile < 64 || overlap < 0 || overlap >= tile)
-        fail("input_invalid", "tile_size must be at least 64 and overlap in [0, tile_size)");
+    if (!fugue_helper::isValidUtf8(model) || !fugue_helper::isValidUtf8(vae))
+        fail("input_invalid", "a model path is not valid UTF-8");
+    const int64_t tile = wholeNumber(params, "tile_size", 512), overlap = wholeNumber(params, "overlap", 64);
+    const int64_t seed = wholeNumber(params, "seed", 0);
+    if (const std::string why = fugue_helper::restoreTilingError(tile, overlap); !why.empty())
+        fail("input_invalid", why);
+    if (seed < 0)
+        fail("input_invalid", "seed must be a whole number of 0 or more");
     const std::string input = required(request, "image");
     Tensor image = loadImage(input);
-    if (sd_tensor_dim(image.get(), 1) < 16 || sd_tensor_dim(image.get(), 2) < 16)
-        fail("input_invalid", "the image is smaller than 16 pixels on a side");
+    if (const std::string why = fugue_helper::restoreGeometryError(sd_tensor_dim(image.get(), 1), sd_tensor_dim(image.get(), 2)); !why.empty())
+        fail("input_invalid", why);
+    // The files are read for their tensor names before anything loaded is freed: the wrong file (a
+    // Klein model, a GGUF without its embedding, a Flux VAE) fails here, as the upscaler's does.
+    const auto unsupported = [](const std::string &file, const std::string &why) {
+        fail("model_unsupported", std::filesystem::path(file).filename().string() + ": " + why);
+    };
+    for (const auto &[file, vaeFile] : {std::pair{model, false}, std::pair{vae, true}}) {
+        const std::set<std::string> names = tensorNames(file);
+        if (names.empty())
+            unsupported(file, "cannot read its tensor names (a .safetensors or .gguf file is needed)");
+        if (const std::string why = vaeFile ? fugue_helper::restoreVaeError(names) : fugue_helper::restoreModelError(names); !why.empty())
+            unsupported(file, why);
+    }
+    if (hooks.cancelled && hooks.cancelled())
+        fail("cancelled", "restore was cancelled");
     // Free what is loaded (an upscaler, a diffusion context): the DiT needs the whole card.
     contexts.dropOthers(nullptr);
     std::unique_ptr<sd_dgl_ctx_t, DglFree> dgl(sd_dgl_ctx_create_once());
     if (!dgl)
         fail("out_of_memory", "cannot create the DGL context");
     sd_dgl_ctx_set(dgl.get(), "embed_metadata", "off");
-    if (hooks.progress)
-        sd_dgl_ctx_set_progress_callback(
-            dgl.get(), [](const sd_generation_progress_t *progress, void *data) {
-                if (progress && progress->total > 0)
-                    (*static_cast<const std::function<void(double)> *>(data))(double(progress->completed) / double(progress->total));
-            },
-            const_cast<std::function<void(double)> *>(&hooks.progress));
-    // The library caps overlap at a half of the tile.
-    const std::string source = restoreScript(model, vae, tile, std::min(0.5, double(overlap) / tile), params.value("seed", int64_t(0)));
+    struct Bar {
+        fugue_helper::RestoreProgress tracker;
+        const Hooks *hooks;
+    } bar{{}, &hooks};
+    sd_dgl_ctx_set_progress_callback(
+        dgl.get(),
+        [](const sd_generation_progress_t *progress, void *data) {
+            auto *self = static_cast<Bar *>(data);
+            if (!progress || !progress->stage)
+                return;
+            self->tracker.stage(progress->stage, progress->completed, progress->total);
+            if (self->hooks->progress)
+                self->hooks->progress(self->tracker.value());
+        },
+        &bar);
+    g_restoreProgress = &bar.tracker;
+    // A cancel asked while it loaded is heard here; later ones reach the run through sd_dgl_ctx_cancel.
+    if (hooks.runningDgl && !hooks.runningDgl(dgl.get())) {
+        g_restoreProgress = nullptr;
+        fail("cancelled", "restore was cancelled");
+    }
+    const std::string source = fugue_helper::restoreScript(json(model).dump(), json(vae).dump(), static_cast<int>(tile),
+                                                           std::min(0.5, double(overlap) / double(tile)), seed);
     const sd_dgl_tensor_input_t binding{"image", image.get()};
     sd_dgl_result_t *raw = nullptr;
     const sd_status_t status = sd_dgl_run(dgl.get(), source.c_str(), &binding, 1, &raw);
     std::unique_ptr<sd_dgl_result_t, DglResultFree> result(raw);
+    g_restoreProgress = nullptr;
+    if (hooks.runningDgl)
+        hooks.runningDgl(nullptr);
+    if (status == SD_STATUS_CANCELLED)
+        fail("cancelled", "restore was cancelled");
     check(status, "restoring " + std::filesystem::path(input).filename().string());
     const sd_tensor_t *restored = sd_dgl_value_tensor(sd_dgl_value_field(sd_dgl_result_root(result.get()), "image"));
     if (!restored)
@@ -736,7 +842,6 @@ json runRestore(const json &request, Contexts &contexts, const Hooks &hooks) {
     saveImage(restored, required(request, "output"));
     return {{"outputs", json::array({json{{"image", request["output"]}}})}};
 }
-
 
 json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     const std::string op = request.value("op", "");
@@ -1686,6 +1791,8 @@ private:
                 job.cancel = true;
                 if (m_running)
                     sd_cancel_generation(m_running, SD_CANCEL_ALL);
+                if (m_runningDgl)
+                    sd_dgl_ctx_cancel(m_runningDgl);
             }
             return {{"state", job.state}};
         }
@@ -1813,6 +1920,13 @@ private:
                     m_running = ctx;
                     return true;
                 };
+                hooks.runningDgl = [this](sd_dgl_ctx_t *ctx) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (ctx && m_jobs[m_current].cancel)
+                        return false;
+                    m_runningDgl = ctx;
+                    return true;
+                };
                 hooks.cancelled = [this] {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     return m_jobs[m_current].cancel;
@@ -1880,6 +1994,12 @@ private:
             return;
         if (self->m_jobs[self->m_current].request.contains("frames")) // the frames are the progress
             return;
+        if (g_restoreProgress) { // a restore's tiles are one span of its own bar, never the whole of it
+            g_restoreProgress->tiles(step, steps);
+            self->m_progress[self->m_current] = g_restoreProgress->value();
+            self->say(self->statusOf(self->m_current, self->m_jobs[self->m_current]));
+            return;
+        }
         self->m_progress[self->m_current] = double(step) / steps;
         self->say(self->statusOf(self->m_current, self->m_jobs[self->m_current]));
     }
@@ -1892,6 +2012,7 @@ private:
     std::deque<std::string> m_queue;
     std::string m_current;         // the running job
     sd_ctx_t *m_running = nullptr; // its context while it generates, for cancel
+    sd_dgl_ctx_t *m_runningDgl = nullptr; // a restore's, the same
     int m_count = 0;
     uint64_t m_finished = 0;
     Models *m_models = nullptr; // set over HTTP

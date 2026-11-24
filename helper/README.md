@@ -23,6 +23,11 @@ size has no scaling step (the caller resizes first). When the pin moves, re-run 
 `seedvr2::positive_embedding`: a checkpoint without `positive_conditioning` (the GGUF and numz fp8 files) is not
 recognised by the engine.
 
+`helper/src/restore.h` holds what needs no engine (the program, the size and tiling limits, the tensor-name checks, the
+progress bar); `tests/engine/test_helper_restore.cpp` tests it in the app's suite, and `helper/test/restore_test.cpp` feeds the
+program to `sd_dgl_check` (`cmake --build build-helper-<backend> --target fugue-helper-restore-test && ctest --test-dir build-helper-<backend>`;
+CI runs it). A cancel reaches a running restore through `sd_dgl_ctx_cancel`.
+
 ## The seam
 
 Since upstream's Diffusion Graph Language (6cd0ef1) a generation is a DGL program: C++ renders one from

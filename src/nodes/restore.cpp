@@ -9,15 +9,19 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 
 #include <vips/vips8>
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #include "engine/file_hashes.h"
 #include "engine/media.h"
+#include "engine/model_shape.h"
 #include "engine/vips.h"
+#include "../../helper/src/restore.h" // the limits, one source for the node and the helper
 #include "nodes/kernels.h"
 #include "nodes/pixel_io.h"
 #include "nodes/restore_color.h"
@@ -26,8 +30,6 @@
 namespace fugue::nodes {
 
 namespace {
-
-constexpr int kMaxSide = 16384; // as Resize's manifest `max`
 
 // 8-bit PNG of float pixels (with alpha when it has it), what the helper reads and the fix reads back.
 Result<QString> writePng(const Pixels &pixels, const QString &path) {
@@ -52,6 +54,56 @@ Result<Pixels> readPng(const QString &path, FileHashes &hashes) {
     return pixelsOf(Value(handle.value()), QStringLiteral("image"));
 }
 
+// Whether a picture of `inWidth` x `inHeight` at `factor` is one the model can restore on a 24 GB card
+// (helper/src/restore.h has the limits, the helper checks them again), else the error saying what fits.
+std::optional<Error> checkSize(double inWidth, double inHeight, double factor) {
+    const double width = std::nearbyint(inWidth * factor), height = std::nearbyint(inHeight * factor);
+    const double minimum = double(fugue_helper::kMinRestoreSide);
+    if (width < minimum || height < minimum)
+        return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("image"),
+                              QStringLiteral("The image is %1 x %2, which at a factor of %3 is %4 x %5: too small. SeedVR2 needs at least %6 pixels on each side of the result, so at least %7 x %7 here.")
+                                  .arg(inWidth).arg(inHeight).arg(factor).arg(width).arg(height).arg(fugue_helper::kMinRestoreSide)
+                                  .arg(std::ceil(minimum / factor)),
+                              QStringLiteral("Use a bigger image or a bigger factor."));
+    const double limit = double(fugue_helper::kMaxRestorePixels);
+    if (width > fugue_helper::kMaxRestoreSide || height > fugue_helper::kMaxRestoreSide || width * height > limit) {
+        const double largestFactor = std::floor(std::sqrt(limit / (inWidth * inHeight)));
+        const double fits = limit / (factor * factor);
+        const QString advice = largestFactor >= 1 ? QStringLiteral("The largest factor for this image is %1.").arg(largestFactor)
+                                                  : QStringLiteral("This image is too big even at a factor of 1: make it smaller first.");
+        return makeInputError(
+            QStringLiteral("value_out_of_range"), largestFactor >= 1 ? QStringLiteral("factor") : QStringLiteral("image"),
+            QStringLiteral("A factor of %1 makes a picture of %2 x %3 (%4 MP). A 24 GB card restores at most %5 MP (4098 x 4098); at this factor the image can be up to %6 MP (about %7 x %7). %8")
+                .arg(factor).arg(width).arg(height).arg(width * height / 1e6, 0, 'f', 1).arg(limit / 1e6, 0, 'f', 1)
+                .arg(fits / 1e6, 0, 'f', 1).arg(std::floor(std::sqrt(fits))).arg(advice));
+    }
+    return std::nullopt;
+}
+
+// The two model files by their tensor names (engine/model_shape.h): a file of another model, or a SeedVR2 one
+// that keeps its embeddings elsewhere (the GGUF, the numz fp8), is said here and not after 8 GB are read.
+std::optional<Error> checkFiles(const QString &modelPath, const QString &vaePath) {
+    const auto unsupported = [](const QString &input, const QString &path, const QString &why) {
+        Error error = makeError(QStringLiteral("model_unsupported"), QStringLiteral("%1: %2.").arg(QFileInfo(path).fileName(), why),
+                                QStringLiteral("Use the Comfy-Org INT8 ConvRot checkpoint and ema_vae_fp16 (the catalog lists both)."));
+        error.input = input;
+        return error;
+    };
+    ModelShapes &shapes = ModelShapes::shared();
+    const std::optional<ModelShape> model = shapes.of(modelPath);
+    if (!model)
+        return unsupported(QStringLiteral("model"), modelPath, QStringLiteral("cannot read its tensor names (a .safetensors file is needed)"));
+    if (!model->seedvr2Model)
+        return unsupported(QStringLiteral("model"), modelPath, QStringLiteral("this is not a SeedVR2 diffusion model"));
+    if (!model->seedvr2StoredEmbeddings)
+        return unsupported(QStringLiteral("model"), modelPath,
+                           QStringLiteral("this SeedVR2 file does not carry its stored embeddings (positive_conditioning), which the engine needs"));
+    const std::optional<ModelShape> vae = shapes.of(vaePath);
+    if (!vae || !vae->seedvr2Vae)
+        return unsupported(QStringLiteral("vae"), vaePath, QStringLiteral("this is not the SeedVR2 VAE"));
+    return std::nullopt;
+}
+
 class RestoreImageKernel : public ProviderKernel {
 public:
     Requirement requirement(const NodeType &, const Values &) const override {
@@ -61,15 +113,37 @@ public:
     }
 
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
-        const int tile = int(context.input(QStringLiteral("tile")).number());
-        const int overlap = int(context.input(QStringLiteral("overlap")).number());
-        if (overlap * 2 > tile)
+        const double factor = context.input(QStringLiteral("factor")).number();
+        const double tile = context.input(QStringLiteral("tile")).number();
+        const double overlap = context.input(QStringLiteral("overlap")).number();
+        // A wired number can be anything: checked as a double, before any conversion to an int.
+        if (!std::isfinite(factor) || factor < 1 || factor > 8)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("factor"),
+                                  QStringLiteral("A factor of %1 is outside 1 to 8.").arg(factor));
+        if (!std::isfinite(tile) || tile < fugue_helper::kMinTile || tile > fugue_helper::kMaxTile)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("tile"),
+                                  QStringLiteral("A tile of %1 is outside %2 to %3.").arg(tile).arg(fugue_helper::kMinTile).arg(fugue_helper::kMaxTile));
+        if (!std::isfinite(overlap) || overlap < 0 || overlap * 2 > tile)
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("overlap"),
-                                  QStringLiteral("An overlap of %1 is more than half the tile of %2.").arg(overlap).arg(tile),
+                                  QStringLiteral("An overlap of %1 is not between 0 and half the tile of %2.").arg(overlap).arg(tile),
                                   QStringLiteral("Use an overlap of at most half the tile size."));
+
+        // The size, from the image's header (nothing is decoded or resampled before it is known to fit).
+        const Result<vips::VImage> header = context.input(QStringLiteral("image")).isMedia()
+                                                ? context.input(QStringLiteral("image")).media().image()
+                                                : Result<vips::VImage>(makeInputError(QStringLiteral("missing_input"), QStringLiteral("image"),
+                                                                                      QStringLiteral("Input image has no image.")));
+        if (!header)
+            return header.errors();
+        const double inWidth = header->width(), inHeight = header->height();
+        const auto sizeError = checkSize(inWidth, inHeight, factor);
+        if (sizeError)
+            return *sizeError;
+        const int width = int(std::nearbyint(inWidth * factor)), height = int(std::nearbyint(inHeight * factor));
+
         const Result<QJsonValue> model = modelFile(context, selection, QStringLiteral("model"),
                                                    QStringLiteral("No SeedVR2 model is picked."),
-                                                   QStringLiteral("Pick one in the node (the catalog lists the downloads)."));
+                                                   QStringLiteral("Pick one in the node (the catalog lists the download)."));
         if (!model)
             return model.errors();
         const Result<QJsonValue> vae = modelFile(context, selection, QStringLiteral("vae"),
@@ -77,16 +151,14 @@ public:
                                                  QStringLiteral("Pick ema_vae_fp16 in the node (the catalog lists the download)."));
         if (!vae)
             return vae.errors();
+        if (selection.sharesFilesystem) { // a paired host's files are checked by its helper
+            if (const auto bad = checkFiles(model.value().toString(), vae.value().toString()))
+                return *bad;
+        }
 
         const Result<Pixels> input = pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
         if (!input)
             return input.errors();
-        const double factor = context.input(QStringLiteral("factor")).number();
-        const int width = std::max(1, int(std::nearbyint(input->width * factor)));
-        const int height = std::max(1, int(std::nearbyint(input->height * factor)));
-        if (width > kMaxSide || height > kMaxSide)
-            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("factor"),
-                                  QStringLiteral("A factor of %1 makes a picture of %2 x %3, above %4.").arg(factor).arg(width).arg(height).arg(kMaxSide));
         // The picture at its final size: what the model restores, and what the colour fix measures against.
         const Result<QString> file = writePng(resample(input.value(), width, height, ResizeMethod::Lanczos),
                                               QDir(context.workDir).filePath(QStringLiteral("input.png")));
@@ -96,8 +168,8 @@ public:
         JobRequest request;
         request.capability = QStringLiteral("image.restore");
         request.params = QJsonObject{{"context", QJsonObject{{"model_path", model.value()}, {"vae_path", vae.value()}}},
-                                     {"tile_size", tile},
-                                     {"overlap", overlap},
+                                     {"tile_size", int(tile)},
+                                     {"overlap", int(overlap)},
                                      {"seed", context.input(QStringLiteral("seed")).json().toInteger()}};
         request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", file.value()}});
         return request;
