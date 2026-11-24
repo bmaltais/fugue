@@ -239,7 +239,7 @@ private slots:
     void anEmbeddedWorkflowGivesThePromptTheSeedAndTheModel() {
         QJsonObject document = graph();
         document.insert("run", QJsonObject{{"nodes", QJsonObject{{"gen", QJsonObject{{"auto", QJsonObject{{"seed", 12345}}},
-                                                                                       {"model", "flux-dev"}}}}}});
+                                                                                       {"model", QJsonObject{{"name", "flux-dev"}}}}}}}});
         const QString path = makePng(dir.filePath("emb.png"), 8, 8, QJsonDocument(document).toJson(QJsonDocument::Compact));
         const QJsonObject summary = embeddedSummary(path);
         QVERIFY(summary.value("embedded").toBool());
