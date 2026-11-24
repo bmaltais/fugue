@@ -43,10 +43,15 @@ say "a command that writes state: it goes under XDG, never beside the AppImage"
 
 say "the window opens the text-to-image workflow (offscreen: it saves a screenshot and quits)"
 shot=$work/window.png
+status=0
 OMARCHY_LOOK_SCREENSHOT=$shot OMARCHY_LOOK_SIZE=1280x800 OMARCHY_LOOK_DELAY_MS=3000 \
-  timeout 120 "$image" "$share/fugue/templates/text-to-image/workflow.fugue" 2>"$work/window.log" \
-  || { cat "$work/window.log"; fail "the window did not start and quit cleanly"; }
-[[ -s $shot ]] || { cat "$work/window.log"; fail "the window saved no screenshot"; }
+  timeout 120 "$image" "$share/fugue/templates/text-to-image/workflow.fugue" >"$work/window.log" 2>&1 || status=$?
+if ((status != 0)) || [[ ! -s $shot ]]; then
+  echo "---- the window's output (exit status $status; 124 is the 120 s timeout) ----"
+  cat "$work/window.log"
+  echo "---- end ----"
+  fail "the window did not start and quit cleanly (exit status $status, screenshot: $([[ -s $shot ]] && echo saved || echo none))"
+fi
 if grep -E 'module .* is not installed|Cannot load library|could not find the Qt platform plugin|QQmlApplicationEngine failed' "$work/window.log"; then
   fail "the window logged a loading problem"
 fi

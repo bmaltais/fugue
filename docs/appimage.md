@@ -40,8 +40,8 @@ host's driver, so none is bundled.
 |---|---|---|
 | OpenGL and EGL (GLVND) | `libopengl0 libglx0 libgl1 libegl1` | `libglvnd-opengl libglvnd-glx libglvnd-egl mesa-libGL mesa-libEGL` |
 | Vulkan loader and drivers | `libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri` | `vulkan-loader mesa-dri-drivers` |
-| Video decoding (Qt Multimedia) | `libva2` | `libva` |
-| Wayland client | `libwayland-client0` | `libwayland-client` |
+| Video decoding (Qt Multimedia) | `libva2 libva-drm2 libva-x11-2` | `libva` |
+| Wayland client | `libwayland-client0 libwayland-cursor0 libwayland-egl1` | `libwayland-client libwayland-cursor libwayland-egl` |
 | Fonts, keyboard, D-Bus, glib | `libfontconfig1 fonts-dejavu-core libxkbcommon0 libdbus-1-3 libglib2.0-0` | `fontconfig dejavu-sans-fonts libxkbcommon dbus-libs glib2` |
 
 Wayland and X11 both work (Qt picks Wayland when `WAYLAND_DISPLAY` is set); the X11 libraries (xcb and friends) are
