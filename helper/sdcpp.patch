@@ -1239,12 +1239,21 @@ index 8b3330e..3109d2a 100644
      };
  
 diff --git i/src/dgl/ops/sampling.cpp w/src/dgl/ops/sampling.cpp
-index f040539..e46a8e7 100644
 --- i/src/dgl/ops/sampling.cpp
 +++ w/src/dgl/ops/sampling.cpp
-@@ -58,6 +58,12 @@ namespace sd::dgl::ops {
+@@ -3,6 +3,7 @@
+ #include <cmath>
+ 
+ #include "core/util.h"
++#include "model_loader.h"
+ #include "dgl/models/dit.h"
+ #include "dgl/models/fwd.h"
+ #include "dgl/ops/predictor.h"
+@@ -57,7 +58,14 @@ namespace sd::dgl::ops {
+     Tensor<float> run_sample(const Tensor<float>& input, const std::vector<float>& sigmas, PredictionExecution& prediction_run, const SamplingSolver& solver, const SamplingOptions& options, RunEvents& events) {
          validate_mask(input, options);
          const int64_t sampling_start = ggml_time_ms();
++        const int64_t load_before    = sd_thread_tensor_load_ms();  // a lazy weight load is timed on its own
          LOG_INFO("sampling started: method=%s, steps=%zu", options.method.c_str(), sigmas.size() - 1);
 +        {   // the schedule that runs, for checking a cut of it against another implementation's
 +            std::string schedule;
@@ -1255,7 +1264,7 @@ index f040539..e46a8e7 100644
          auto& model                  = prediction_run.dit();
          const auto& parameterization = prediction_run.parameterization();
          sd::ParallelScope tensor_scope(model.tensor_executor.get());
-@@ -74,6 +80,7 @@ namespace sd::dgl::ops {
+@@ -74,6 +82,7 @@ namespace sd::dgl::ops {
              step.solver_index   = index;
              step.completes_step = index > 0 || (terminal_zero && index < 0 && step.index == static_cast<int>(sigmas.size() - 1));
              step.mask_input     = options.mask_input;
@@ -1263,6 +1272,18 @@ index f040539..e46a8e7 100644
              const auto target   = static_cast<size_t>(step.index);
              if (target < sigmas.size())
                  step.target_sigma = sigmas[target];
+@@ -96,7 +105,10 @@ namespace sd::dgl::ops {
+         if (options.finish.value_or(false) && !terminal_zero)
+             output = parameterization.finish(sigmas.back(), output);
+         observation.end(output);
+-        LOG_INFO("sampling completed, taking %.2fs", (ggml_time_ms() - sampling_start) / 1000.0);
++        const int64_t load_ms = sd_thread_tensor_load_ms() - load_before;
++        if (load_ms > 0)
++            LOG_INFO("sampling loaded the model weights first, taking %.2fs", load_ms / 1000.0);
++        LOG_INFO("sampling completed, taking %.2fs", (ggml_time_ms() - sampling_start - load_ms) / 1000.0);
+         return output;
+     }
+ 
 diff --git i/src/dgl/ops/sampling.h w/src/dgl/ops/sampling.h
 index 9cf837d..623107c 100644
 --- i/src/dgl/ops/sampling.h
@@ -1346,3 +1367,42 @@ index 41988f3..764ec34 100644
      {{name}}_resized = tensor::interpolate({{name}}_original, size = [{{resize_width}}, {{resize_height}}], mode = "lanczos")
      {{name}}_pixels = tensor::crop({{name}}_resized, axes = [0, 1], start = [{{crop_x}}, {{crop_y}}], size = [{{width}}, {{height}}])
  {% else %}
+# Fugue #382 performance hunks (see helper/README.md, Performance hunks).
+diff --git i/src/model_loader.h w/src/model_loader.h
+--- i/src/model_loader.h
++++ w/src/model_loader.h
+@@ -13,6 +13,10 @@
+ 
+ TensorTypeRules parse_tensor_type_rules(const std::string& tensor_type_rules);
+ 
++// Milliseconds this thread has spent in ModelLoader::load_tensors, so a caller can keep a lazy
++// weight load that happens inside its own timing apart (Fugue #382: sampling loads the DiT).
++int64_t sd_thread_tensor_load_ms();
++
+ void convert_tensor(void* src,
+                     ggml_type src_type,
+                     void* dst,
+diff --git i/src/model_loader.cpp w/src/model_loader.cpp
+--- i/src/model_loader.cpp
++++ w/src/model_loader.cpp
+@@ -1111,6 +1111,12 @@ std::vector<ggml_backend_buffer_t> Model
+     return buffers;
+ }
+ 
++static thread_local int64_t thread_tensor_load_ms = 0;
++
++int64_t sd_thread_tensor_load_ms() {
++    return thread_tensor_load_ms;
++}
++
+ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
+                                bool enable_mmap,
+                                const std::set<std::string>* target_tensor_names,
+@@ -1447,6 +1453,7 @@ bool ModelLoader::load_tensors(on_new_te
+     }
+ 
+     int64_t end_time = ggml_time_ms();
++    thread_tensor_load_ms += end_time - start_time;
+     if (log_progress) {
+         LOG_INFO("loading tensors completed, taking %.2fs (read: %.2fs, memcpy: %.2fs, convert: %.2fs, copy_to_backend: %.2fs)",
+                  (end_time - start_time) / 1000.f,
