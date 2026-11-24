@@ -201,32 +201,40 @@ Reply packAdd(const Command &command, Context &context) {
     return reply;
 }
 
-ReadinessPlan readinessPlanFor(const ReadinessRequest &request, Context &context) {
-    FileHashes hashes(FileHashes::defaultPath());
+namespace {
+
+// The stores a readiness plan reads (#379), kept alive for as long as the plan's env points at them.
+struct ReadinessStores {
+    FileHashes hashes{FileHashes::defaultPath()};
     TrustStore trust;
     const ModelCatalog catalog = ModelCatalog::load();
-    ReadinessEnv env{ModelLibrary::current(&context.registry)};
-    env.registry = &context.registry;
-    env.hashes = &hashes;
-    env.trust = &trust;
-    env.packsDir = packsDir();
-    env.catalog = &catalog;
-    return buildReadinessPlan(request, env);
+
+    ReadinessEnv envFor(Context &context) {
+        ReadinessEnv env{ModelLibrary::current(&context.registry)};
+        env.registry = &context.registry;
+        env.hashes = &hashes;
+        env.trust = &trust;
+        env.packsDir = packsDir();
+        env.catalog = &catalog;
+        return env;
+    }
+};
+
+} // namespace
+
+ReadinessPlan readinessPlanFor(const ReadinessRequest &request, Context &context) {
+    ReadinessStores stores;
+    return buildReadinessPlan(request, stores.envFor(context));
 }
 
 namespace {
 
 // Shows the plan, asks once on a terminal, runs it (#379). With no terminal it is needs_confirmation.
 Reply prepare(const ReadinessRequest &request, Context &context, const QString &what) {
-    FileHashes hashes(FileHashes::defaultPath());
-    TrustStore trust;
-    const ModelCatalog catalog = ModelCatalog::load();
-    ReadinessEnv env{ModelLibrary::current(&context.registry)};
-    env.registry = &context.registry;
-    env.hashes = &hashes;
-    env.trust = &trust;
-    env.packsDir = packsDir();
-    env.catalog = &catalog;
+    ReadinessStores stores;
+    FileHashes &hashes = stores.hashes;
+    TrustStore &trust = stores.trust;
+    ReadinessEnv env = stores.envFor(context);
     env.prompts.log = [&context](const QString &line) { context.log(QStringLiteral("  ") + line); };
     const ReadinessPlan plan = buildReadinessPlan(request, env); // reads folders only: no network before the yes
     // Problems are not "ready": what cannot be done is said and the exit is non-zero.
