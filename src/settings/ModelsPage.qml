@@ -24,20 +24,34 @@ ColumnLayout {
     readonly property var shown: files.filter(f => family === "" || f.family === family)
     spacing: 4 * u
 
+    // The reason without its "Recommended: " lead: the badge says that.
+    function reasonOf(f) {
+        const text = f.reason.replace(/^Recommended: /, "")
+        return text.charAt(0).toUpperCase() + text.slice(1)
+    }
+
     // Read when the page is made (when first shown).
     Component.onCompleted: files = host.model.modelFiles()
 
     SettingsParts.Setting {
         title: qsTr("Models")
-        note: qsTr("The model files Fugue found, by family. Recommended marks the file of a model that fits this computer, with the best quality at the best speed here. Folders are set on the Folders page.")
-        ThemedDropDown {
-            objectName: "modelFamily"
+        note: qsTr("The model files Fugue found, by family. A Recommended badge marks the file of a model that fits this computer, with the best quality at the best speed here. Folders are set on the Folders page.")
+        RowLayout {
             visible: page.families.length > 0
-            options: [{value: "", text: qsTr("All")}].concat(page.families.map(f => ({value: f, text: f})))
-            value: page.family
-            label: qsTr("Model family")
-            searchable: true
-            onPicked: v => page.family = v
+            spacing: 2 * page.u
+            Text {
+                text: qsTr("Family")
+                color: page.look.label
+                font.pixelSize: page.look.labelSize
+            }
+            ThemedDropDown {
+                objectName: "modelFamily"
+                options: [{value: "", text: qsTr("All families")}].concat(page.families.map(f => ({value: f, text: f})))
+                value: page.family
+                label: qsTr("Family")
+                searchable: true
+                onPicked: v => page.family = v
+            }
         }
     }
 
@@ -52,9 +66,11 @@ ColumnLayout {
     SizedList {
         Layout.fillWidth: true
         name: "models"
+        bar: false // a file's size says it; a bar of its share of the biggest means nothing here
         model: page.shown.map(f => ({
             title: f.name,
-            detail: (f.family !== "" ? f.family : qsTr("Other")) + (f.recommended ? " · " + f.reason : ""),
+            detail: (f.family !== "" ? f.family : qsTr("Other")) + (f.recommended ? " · " + page.reasonOf(f) : ""),
+            badge: f.recommended ? qsTr("Recommended") : "",
             size: (f.size / 1e9 >= 1) ? qsTr("%1 GB").arg((f.size / 1e9).toFixed(1)) : qsTr("%1 MB").arg(Math.max(1, Math.round(f.size / 1e6))),
             bytes: f.size, actionText: "", actionEnabled: false
         }))

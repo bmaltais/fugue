@@ -443,6 +443,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         Port port;
         port.name = name;
         port.label = label.isEmpty() ? (spec.label.isEmpty() ? spec.name : spec.label) : label;
+        port.description = spec.description;
         port.type = spec.type;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
         // A resource input is a value row too: unwired, it shows the model picker (2.5). A list
@@ -465,6 +466,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.name = name;
         port.label = spec.label.isEmpty() ? spec.name : spec.label;
         port.output = true;
+        port.description = spec.description;
         port.type = spec.type;
         port.role = spec.role;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
@@ -835,6 +837,8 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"required", port.required},
                     {"hidden", port.hidden},
                     {"notUsed", port.notUsed}};
+    if (!port.description.isEmpty())
+        map.insert("description", port.description);
     if (!port.role.isEmpty())
         map.insert("role", port.role);
     if (!port.over.isEmpty())

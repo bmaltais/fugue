@@ -711,6 +711,7 @@ private:
     struct Port {
         QString name;
         QString label;
+        QString description; // the manifest's help text, shown on hover (empty: none)
         bool output = false;
         std::optional<fugue::PortSpec> type; // none: unknown (a placeholder's port)
         fugue::PortKind kind = fugue::PortKind::Unknown;

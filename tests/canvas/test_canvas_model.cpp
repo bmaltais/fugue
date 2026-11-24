@@ -81,6 +81,38 @@ class TestCanvasModel : public QObject {
 private slots:
     void initTestCase() { nodes::addBuiltinNodeTypes(m_registry); }
 
+    // The manifest's description reaches the port map, for the hover help on a node's row (#hover).
+    void portsCarryTheirDescription() {
+        Registry registry;
+        NodeType type;
+        type.id = "io.example.tools/soften";
+        type.version = *Version::parse("1.0.0");
+        type.name = "Soften";
+        type.runtime = QJsonObject{{"kind", "builtin"}};
+        InputSpec blur;
+        blur.name = "blur";
+        blur.type = {*PortType::parse("number"), false};
+        blur.description = "How far the edge is blurred.";
+        type.inputs.append(blur);
+        InputSpec plain = blur;
+        plain.name = "plain";
+        plain.description.clear();
+        type.inputs.append(plain);
+        OutputSpec out;
+        out.name = "image";
+        out.type = {*PortType::parse("image"), false};
+        out.description = "The softened picture.";
+        type.outputs.append(out);
+        QVERIFY(registry.add(type).isEmpty());
+        CanvasModel canvas(&registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "s": {"type": "io.example.tools/soften", "version": "1.0.0"}}}})"));
+        const QVariantMap s = node(canvas, "s");
+        QCOMPARE(port(s, "inputs", "blur").value("description").toString(), QString("How far the edge is blurred."));
+        QVERIFY(!port(s, "inputs", "plain").contains("description"));
+        QCOMPARE(port(s, "outputs", "image").value("description").toString(), QString("The softened picture."));
+    }
+
     void showsEveryNodeWhereTheLayoutPutsIt() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));

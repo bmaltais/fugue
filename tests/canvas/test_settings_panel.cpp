@@ -8,6 +8,7 @@
 
 #include "canvas_app.h"
 #include "../scroll_checks.h"
+#include "../window_grab.h"
 #include "engine/json.h"
 #include "engine/paths.h"
 #include "engine/providers.h"
@@ -296,12 +297,69 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The Models page: a Recommended chip on the marked row only, a labelled family filter that starts at "All families",
+    // and a picture when FUGUE_SHOT_DIR is set (offscreen). The files are given to the page, as the model would.
+    void theModelsPageMarksTheRecommendedFile() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        QObject *panel = app.window->findChild<QObject *>("settingsPanel");
+        panel->setProperty("page", "models");
+        QQuickItem *empty = NEED("modelsEmpty"); // no files here: the page says so, and has no filter yet
+        const auto file = [](const char *family, const char *name, qint64 size, bool recommended) {
+            return QVariant(QVariantMap{{"family", family}, {"name", name}, {"size", size}, {"recommended", recommended},
+                                        {"reason", recommended ? "Recommended: best quality that fits here (Q8 level)" : ""}});
+        };
+        QQuickItem *page = empty->parentItem();
+        while (page && !page->property("files").isValid())
+            page = page->parentItem();
+        QVERIFY(page);
+        page->setProperty("files", QVariantList{file("FLUX.1", "flux1-dev-Q4_0.gguf", 6'800'000'000, false),
+                                                file("FLUX.1", "flux1-dev-Q8_0.gguf", 12'700'000'000, true),
+                                                file("Z-Image", "z_image_turbo_bf16.safetensors", 12'300'000'000, false)});
+        QQuickItem *drop = NEED("modelFamily");
+        QTRY_VERIFY(find(app.window, "models-badge-1"));
+        QVERIFY(!find(app.window, "models-badge-0"));
+        QVERIFY(!find(app.window, "models-badge-2"));
+        QCOMPARE(drop->property("currentText").toString(), QStringLiteral("All families"));
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (!dir.isEmpty()) {
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/settings-models.png"));
+        }
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The page list is alphabetical by title, opens on General, and Up and Down walk it in that order.
+    void thePagesAreAlphabeticalAndOpenOnGeneral() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        QObject *panel = app.window->findChild<QObject *>("settingsPanel");
+        QCOMPARE(panel->property("page").toString(), QStringLiteral("general"));
+        QStringList ids;
+        for (const QVariant &page : panel->property("pages").toList())
+            ids << page.toMap().value("id").toString();
+        QCOMPARE(ids, (QStringList{"cache", "folders", "general", "keymap", "models", "packs", "providers", "run", "theme"}));
+        QQuickItem *cache = NEED("settingsPage-cache");
+        QVERIFY(cache->mapToScene(QPointF(0, 0)).y() < NEED("settingsPage-folders")->mapToScene(QPointF(0, 0)).y());
+        click(app, NEED("settingsPage-general"));
+        NEED("settingsPage-general")->forceActiveFocus();
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_COMPARE(panel->property("page").toString(), QStringLiteral("keymap"));
+        NEED("settingsPage-keymap")->forceActiveFocus();
+        QTest::keyClick(app.window, Qt::Key_Up);
+        QTRY_COMPARE(panel->property("page").toString(), QStringLiteral("general"));
+    }
+
     void aTypedFolderIsCheckedAndPersists() {
         App app(load(emptyDoc));
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        click(app, NEED("settingsPage-1"));
+        click(app, NEED("settingsPage-folders"));
         QQuickItem *output = NEED("output_folder");
         type(app, output, "not/absolute");
         QTRY_VERIFY(find(app.window, "settingsError"));
@@ -323,7 +381,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        click(app, NEED("settingsPage-1"));
+        click(app, NEED("settingsPage-folders"));
         click(app, NEED("output_folder-choose"));
         QTRY_VERIFY(app.window->findChild<QObject *>("settingsFolderDialog"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -345,7 +403,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        click(app, NEED("settingsPage-1"));
+        click(app, NEED("settingsPage-folders"));
         type(app, NEED("model_paths-add"), loras.path());
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).modelPaths(), QStringList{loras.path()});
         QTRY_COMPARE(NEED("model_paths-found-0")->property("text").toString(), QStringLiteral("Found: LoRAs"));
@@ -367,7 +425,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        click(app, NEED("settingsPage-2"));
+        click(app, NEED("settingsPage-run"));
         click(app, NEED("newSeed-fixed"));
         click(app, NEED("embed-none"));
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).embedWorkflow(), QStringLiteral("none"));
@@ -387,7 +445,7 @@ private slots:
         QVERIFY(providers.startsWith(app.dir.path()));
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        click(app, NEED("settingsPage-3"));
+        click(app, NEED("settingsPage-providers"));
         NEED("providerDefault-0");
         QVERIFY(!QFile::exists(providers));
         type(app, NEED("providerKey-0"), "sk-hidden-123");
@@ -417,7 +475,7 @@ private slots:
         QFile::remove(keymap);
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        click(app, NEED("settingsPage-4"));
+        click(app, NEED("settingsPage-keymap"));
         click(app, NEED("keymapOpen"));
         QTRY_COMPARE(app.openedUrls.size(), 1);
         QCOMPARE(app.openedUrls.first(), QUrl::fromLocalFile(keymap));
@@ -438,8 +496,8 @@ private slots:
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        for (int page = 0; page < 6; ++page) {
-            click(app, NEED(QStringLiteral("settingsPage-%1").arg(page)));
+        for (const QString &page : QStringList{"general", "folders", "run", "providers", "keymap", "theme"}) {
+            click(app, NEED("settingsPage-" + page));
             QTest::qWait(20);
         }
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -454,8 +512,8 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         int overflowing = 0;
-        for (int index = 0; index < 6; ++index) {
-            click(app, NEED(QStringLiteral("settingsPage-%1").arg(index)));
+        for (const QString &index : QStringList{"general", "folders", "run", "providers", "keymap", "theme"}) {
+            click(app, NEED("settingsPage-" + index));
             QTest::qWait(60);
             QQuickItem *page = nullptr;
             for (QQuickItem *flick : app.window->contentItem()->findChildren<QQuickItem *>())
@@ -467,9 +525,9 @@ private slots:
                 continue;
             ++overflowing;
             const QString under = scroll_checks::contentUnderBar(page, bar);
-            QVERIFY2(under.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index).arg(under)));
+            QVERIFY2(under.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index, under)));
             const QString failed = scroll_checks::scrollsByWheelAndThumb(app.window, page);
-            QVERIFY2(failed.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index).arg(failed)));
+            QVERIFY2(failed.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index, failed)));
         }
         QVERIFY(overflowing > 0);
     }
@@ -486,10 +544,10 @@ private slots:
         QCOMPARE(app.settings.setProviderField(1, "key", "k"), QString());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        for (int page = 0; page < 6; ++page) {
-            click(app, NEED(QStringLiteral("settingsPage-%1").arg(page)));
+        for (const QString &page : QStringList{"general", "folders", "run", "providers", "keymap", "theme"}) {
+            click(app, NEED("settingsPage-" + page));
             QTest::qWait(300);
-            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2.png").arg(out).arg(page)));
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2.png").arg(out, page)));
         }
     }
 };

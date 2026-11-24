@@ -361,7 +361,7 @@ ApplicationWindow {
                 win.settingsPanel = settingsComponent.createObject(win.contentItem)
             if (id === "cache.clear-previews") {
                 // Settings > Cache, asking about the previews: what is lost is said there (#141).
-                win.settingsPanel.page = 7 // Cache, the last page
+                win.settingsPanel.page = "cache"
                 win.appSettingsModel.cache.refresh()
                 win.appSettingsModel.cache.ask("thumbnails")
             }
@@ -378,7 +378,7 @@ ApplicationWindow {
                 return
             if (!win.settingsPanel)
                 win.settingsPanel = settingsComponent.createObject(win.contentItem)
-            win.settingsPanel.page = 6 // Packs
+            win.settingsPanel.page = "packs"
             win.settingsPanel.open()
             win.appSettingsModel.packs.add(source, ref)
         }

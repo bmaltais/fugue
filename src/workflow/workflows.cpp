@@ -1123,10 +1123,16 @@ void Workflows::downloadMissing() {
         startDownloads(m_offer.models, QStringLiteral("workflow"));
 }
 
-void Workflows::downloadTemplate(const QString &id) {
+bool Workflows::downloadTemplate(const QString &id) {
     const std::optional<Template> chosen = TemplateLibrary(m_templateRoots, m_registry).find(id);
-    if (chosen)
-        startDownloads(chosen->models, QStringLiteral("template:") + id);
+    if (!chosen)
+        return false;
+    // A template that needs a pack has models whose type may come from it, and a direct download refuses those:
+    // the Get ready sheet (the open's own) plans the pack first, then the models.
+    if (!chosen->neededPacks.isEmpty())
+        return openTemplate(*chosen);
+    startDownloads(chosen->models, QStringLiteral("template:") + id);
+    return false;
 }
 
 void Workflows::setDownloadRoot(const QString &root) {

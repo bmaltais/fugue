@@ -169,6 +169,12 @@ Popup {
         return out
     }
 
+    // A card's Download: a template that needs packs opens, and its Get ready sheet does the downloads.
+    function downloadTemplate(id) {
+        if (App.workflows.downloadTemplate(id))
+            close()
+    }
+
     function openTemplate(id) {
         if (App.workflows.openTemplateById(id))
             close()
@@ -538,7 +544,7 @@ Popup {
                                         Accessible.name: statusRow.downloading ? qsTr("Cancel the download") : cell.modelData.download
                                         tip: statusRow.downloading ? "" : cell.modelData.download
                                         onClicked: statusRow.downloading ? statusRow.downloads.cancel()
-                                                                         : App.workflows.downloadTemplate(cell.modelData.id)
+                                                                         : dialog.downloadTemplate(cell.modelData.id)
                                     }
                                 }
                             }
