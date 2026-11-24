@@ -73,6 +73,7 @@ ColumnLayout {
                 }
                 SettingsParts.SmallButton {
                     objectName: list.name + "-action-" + row.index
+                    visible: text !== ""
                     text: row.modelData.actionText
                     enabled: row.modelData.actionEnabled
                     opacity: enabled ? 1 : 0.5

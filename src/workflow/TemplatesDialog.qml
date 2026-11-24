@@ -467,7 +467,9 @@ Popup {
                                     ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
                                     ToolTip.delay: App.theme.look.tooltipDelay
                                     ToolTip.text: statusRow.failed ? statusRow.downloads.failure
-                                                  : cell.modelData.missingModels.map(m => qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
+                                                  : cell.modelData.missingModels.map(m => m.suggest !== ""
+                                                      ? qsTr("%1, into %2. You have %3, another quantization of it.").arg(m.name, m.folder, m.suggest)
+                                                      : qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
                                     HoverHandler { id: statusHover }
                                 }
                                 // Its own press target: a click here does not open the template.

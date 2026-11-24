@@ -7,7 +7,9 @@
 #include "canvas/input_links.h"
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
+#include "engine/model_family.h"
 #include "engine/model_library.h"
+#include "engine/model_speed.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
 
@@ -676,6 +678,7 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
         m_catalog = ModelCatalog::load(); // read each time: a file dropped in the catalog folder shows
     m_catalogMissing.insert(key, m_catalog.missing(type, library(), portType, hashes()));
     requestFits(node, input);
+    requestMarks(node, input);
     if (!m_source)
         m_source = listOfferedModels;
     m_loading.insert(key);
@@ -811,6 +814,54 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     });
 }
 
+qint64 WidgetEdit::otherModelsMb(const QString &node, const QString &input) {
+    qint64 total = 0;
+    const auto &inputs = m_canvas->scopeDocument().graph.nodes.value(node).inputs;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        if (it.key() == input || it.value().kind() != InputValue::Kind::Resource)
+            continue;
+        const InputSpec *spec = m_canvas->inputSpec(node, it.key());
+        const QString type = spec ? spec->type.type.toString() : QString();
+        if (type != kDiffusionModel && type != kTextEncoder && type != kVae)
+            continue;
+        const Result<QString> found = library().resolve(it.value().handle(), hashes(), ModelLibrary::Hashing::RememberedOnly);
+        if (found)
+            total += QFileInfo(found.value()).size() / 1000000;
+    }
+    return total;
+}
+
+void WidgetEdit::requestMarks(const QString &node, const QString &input) {
+    const QString key = fitsKey(node, input);
+    const QString type = target(node, input).spec->type.type.toString();
+    Marks &marks = m_marks[key];
+    marks.byPath.clear();
+    marks.asked = ++m_fitsAsked;
+    QList<MarkedFile> files;
+    for (const Model &model : m_diskModels.value(modelsKey(node, input)))
+        files.append({model.path, model.size});
+    if (files.isEmpty())
+        return;
+    QPointer<WidgetEdit> self(this);
+    ModelShapes *shapes = m_shapes;
+    std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
+    const int asked = marks.asked;
+    const qint64 others = otherModelsMb(node, input);
+    m_shapePool.start([self, shapes, stop, key, asked, type, files, others] {
+        if (stop->load())
+            return;
+        const ModelSpeeds speeds;
+        const QHash<QString, ModelMark> found = markModels(type, files, RecommendContext{localComputeDevice(), others, &speeds}, *shapes);
+        QMetaObject::invokeMethod(self, [self, key, asked, found] {
+            if (!self || self->m_marks.value(key).asked != asked)
+                return;
+            self->m_marks[key].byPath = found;
+            ++self->m_modelsRevision;
+            emit self->modelsChanged();
+        });
+    });
+}
+
 QString WidgetEdit::fitsModel(const QString &node, const QString &input) const {
     return m_fits.value(fitsKey(node, input)).model;
 }
@@ -820,6 +871,8 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
     if (key.isEmpty())
         return {};
     const QHash<QString, Judged> fits = m_fits.value(fitsKey(node, input)).byPath;
+    const QHash<QString, ModelMark> marks = m_marks.value(fitsKey(node, input)).byPath;
+    const QString type = target(node, input).spec->type.type.toString();
     QVariantList list;
     for (const Model &model : m_models.value(key) + m_diskModels.value(key)) {
         QVariantMap entry{{"name", model.name},
@@ -834,6 +887,11 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
             entry.insert("path", model.path);
             entry.insert("folder", model.folder);
             entry.insert("size", model.size);
+            entry.insert("family", modelFamily(familyKindOf(type), QFileInfo(model.path).fileName()));
+            if (const auto mark = marks.constFind(model.path); mark != marks.constEnd() && mark->recommended) {
+                entry.insert("recommended", true);
+                entry.insert("recommendedWhy", mark->reason);
+            }
             if (const auto fit = fits.constFind(model.path); fit != fits.constEnd()) {
                 entry.insert("fits", fit->fits); // absent when the file's header tells nothing
                 if (!fit->why.isEmpty())

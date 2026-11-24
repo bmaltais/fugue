@@ -18,6 +18,7 @@
 // handle (provider.h, OfferedModel). Results are written into the job's outputDir by the helper
 // itself (it shares the filesystem).
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonObject>
 #include <QProcess>
@@ -25,6 +26,7 @@
 #include <QTimer>
 
 #include <functional>
+#include <optional>
 
 #include "engine/providers.h"
 
@@ -112,6 +114,17 @@ private:
         int generation = 0; // the helper process it ran in
         QString helperJob;  // its id in that process
         bool cancelled = false; // asked to stop: a helper that dies meanwhile cancels it
+        // The sampling's speed (#370, engine/model_speed.h): set for a sampling job at guidance 1 on a
+        // model file; the steps' times from the first progress line seen to the last.
+        struct Speed {
+            QString modelFile;
+            double megapixels = 0;
+            double firstProgress = 0;
+            double lastProgress = 0;
+            qint64 firstMs = 0;
+            qint64 lastMs = 0;
+        };
+        std::optional<Speed> speed;
     };
 
     // Starts a helper; why not, when it failed at once.
@@ -135,6 +148,10 @@ private:
     static Error stopped(const QString &why);
     static QString previewMode(const QString &capability);
     static QList<QByteArray> takeLines(QByteArray &buffer);
+    // The speed probe of a job, when it is a sampling job worth measuring.
+    static std::optional<Job::Speed> speedProbe(const JobRequest &request);
+    // Notes a progress line of a running job, and records the speed when the job is done.
+    void noteSpeed(Job &job, const QJsonObject &message);
     QString lastLog() const;
 
     ProviderInstance m_instance;
@@ -153,6 +170,7 @@ private:
     QHash<QString, Answer> m_waiting; // request id -> what to do with the reply
     QHash<QString, Job> m_jobs;       // by our job id
     QHash<QString, QString> m_byHelperJob; // the running helper's job id -> ours, while not over
+    QElapsedTimer m_clock; // for the steps' times
     QTimer m_idle;
     QTimer m_yield; // asks m_yieldProbe while the helper idles
     std::function<bool()> m_yieldProbe;

@@ -63,6 +63,7 @@
 #include "canvas/canvas_choices.h"
 #include "engine/model_catalog.h"
 #include "engine/model_offers.h"
+#include "engine/model_recommend.h"
 #include "engine/model_shape.h"
 
 #include <QThreadPool>
@@ -189,6 +190,8 @@ public:
     Q_INVOKABLE bool modelsLoading(const QString &node, const QString &input) const;
     // The diffusion model a text encoder, VAE or LoRA list is judged against (#85, #86): its
     // name, for the "Fits …" heading; empty when the list is not judged against one.
+    // Each listed file also has `family` (engine/model_family.h, "" when none), and `recommended` with
+    // `recommendedWhy` for the one file of a model the rule picks (engine/model_recommend.h, #370).
     Q_INVOKABLE QString fitsModel(const QString &node, const QString &input) const;
     // What the picker says when no model is listed: what kind is missing and how to get one.
     Q_INVOKABLE QString modelsEmptyText(const QString &node, const QString &input) const;
@@ -375,6 +378,17 @@ private:
     };
     QHash<QString, Fits> m_fits;
     int m_fitsAsked = 0;
+    // The Recommended marks of the listed files (#370), by node and input (fitsKey), read from the files'
+    // headers on m_shapePool like the fits; `asked` drops an answer that a later request overtook.
+    struct Marks {
+        int asked = 0;
+        QHash<QString, fugue::ModelMark> byPath;
+    };
+    QHash<QString, Marks> m_marks;
+    void requestMarks(const QString &node, const QString &input);
+    // The size in MB of the other models the node has picked (a text encoder and VAE beside a diffusion
+    // model...), which share the device's memory with the one listed; remembered hashes only.
+    qint64 otherModelsMb(const QString &node, const QString &input);
     fugue::ModelShapes *m_shapes = &fugue::ModelShapes::shared(); // lives as long as the process
     QThreadPool m_shapePool;
     static QString fitsKey(const QString &node, const QString &input);

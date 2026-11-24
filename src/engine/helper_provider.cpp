@@ -7,7 +7,9 @@
 #include <QJsonDocument>
 
 #include <algorithm>
+#include <cmath>
 
+#include "engine/model_speed.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
 
@@ -193,6 +195,7 @@ void HelperProvider::submit(const JobRequest &request, Reply<QString> reply) {
             return later(std::move(reply), Result<QString>(unreachable(why)));
     }
     const int generation = m_generation;
+    const std::optional<Job::Speed> speed = speedProbe(request);
     QJsonObject message{{"op", "submit"},
                         {"capability", request.capability},
                         {"model", request.model},
@@ -205,7 +208,7 @@ void HelperProvider::submit(const JobRequest &request, Reply<QString> reply) {
     if (!preview.isEmpty())
         message.insert("preview", preview);
     send(message,
-         [this, reply, generation](const Result<QJsonObject> &answer) {
+         [this, reply, generation, speed](const Result<QJsonObject> &answer) {
              if (!answer)
                  return reply(Result<QString>(answer.error()));
              const QString helperJob = answer->value("job").toString();
@@ -214,6 +217,7 @@ void HelperProvider::submit(const JobRequest &request, Reply<QString> reply) {
              job.status.state = QStringLiteral("queued");
              job.generation = generation;
              job.helperJob = helperJob;
+             job.speed = speed;
              m_jobs.insert(id, job);
              m_byHelperJob.insert(helperJob, id);
              reply(Result<QString>(id));
@@ -318,6 +322,54 @@ QString HelperProvider::previewMode(const QString &capability) {
     return setting == QLatin1String("fast") ? QStringLiteral("proj") : setting == QLatin1String("off") ? QString() : setting;
 }
 
+std::optional<HelperProvider::Job::Speed> HelperProvider::speedProbe(const JobRequest &request) {
+    if (request.capability != QLatin1String("latent.sample") || request.params.contains(QStringLiteral("video_frames")))
+        return std::nullopt;
+    // Only a sampling at guidance 1 (a distilled model: one pass a step) compares like with like.
+    if (request.params.value(QStringLiteral("sample.guidance.txt_cfg")).toDouble(1) != 1.0)
+        return std::nullopt;
+    const QJsonObject context = request.params.value(QStringLiteral("context")).toObject();
+    const QString file = context.contains(QStringLiteral("diffusion_model_path"))
+                             ? context.value(QStringLiteral("diffusion_model_path")).toString()
+                             : context.value(QStringLiteral("model_path")).toString();
+    const double megapixels = request.params.value(QStringLiteral("width")).toDouble() *
+                              request.params.value(QStringLiteral("height")).toDouble() / 1e6;
+    if (file.isEmpty() || megapixels <= 0)
+        return std::nullopt;
+    Job::Speed speed;
+    speed.modelFile = file;
+    speed.megapixels = megapixels;
+    return speed;
+}
+
+void HelperProvider::noteSpeed(Job &job, const QJsonObject &message) {
+    if (!job.speed || m_launch.describeOverProtocol) // a module of its own is not the helper whose device this is
+        return;
+    Job::Speed &speed = *job.speed;
+    const QString state = message.value("state").toString();
+    const double progress = message.value("progress").toDouble();
+    if (state == QLatin1String("running") && progress > 0 && progress < 1) {
+        if (!m_clock.isValid())
+            m_clock.start();
+        const qint64 now = m_clock.elapsed();
+        if (speed.firstProgress == 0) {
+            speed.firstProgress = progress;
+            speed.firstMs = now;
+        }
+        speed.lastProgress = progress;
+        speed.lastMs = now;
+    } else if (state == QLatin1String("done") && speed.firstProgress > 0) {
+        // The first line seen is step 1, so its progress is 1 / steps; the last is the step before the end
+        // or the end. At least three steps between them, else the figure is mostly noise.
+        const double steps = std::round(1.0 / speed.firstProgress);
+        const double between = std::round((speed.lastProgress - speed.firstProgress) * steps);
+        if (steps >= 2 && steps <= 200 && between >= 3 && speed.lastMs > speed.firstMs)
+            ModelSpeeds().record(localComputeDevice().id(), speed.modelFile,
+                                 (speed.lastMs - speed.firstMs) / 1000.0 / between / speed.megapixels);
+        job.speed.reset();
+    }
+}
+
 QList<QByteArray> HelperProvider::takeLines(QByteArray &buffer) {
     QList<QByteArray> lines;
     qsizetype end;
@@ -372,6 +424,7 @@ void HelperProvider::helperStatus(const QString &helperJob, const QJsonObject &m
     status.state = message.value("state").toString();
     status.progress = message.value("progress").toDouble();
     status.stage = message.value("stage").toString();
+    noteSpeed(m_jobs[id], message);
     // A frame of the sampling: a picture file the helper just wrote, read at once (it writes the next over it).
     if (const QString file = message.value("preview").toString(); !file.isEmpty()) {
         QFile frame(file);

@@ -22,6 +22,8 @@
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
+#include "engine/model_recommend.h"
+#include "engine/model_speed.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
@@ -44,6 +46,15 @@ QList<ListedModel> offered(const QString &type) {
     if (!done)
         loop.exec();
     return models;
+}
+
+// A family name compared as people type it: case and punctuation aside ("flux.2 klein 9b").
+QString squashed(const QString &text) {
+    QString out;
+    for (const QChar c : text)
+        if (c.isLetterOrNumber())
+            out += c.toLower();
+    return out;
 }
 
 } // namespace
@@ -73,8 +84,21 @@ Reply modelList(const Command &command, Context &context) {
     QJsonArray models;
     QStringList lines;
     Errors warnings;
+    const QString wantedFamily = squashed(command.value("family"));
+    const ComputeDevice device = localComputeDevice();
+    const ModelSpeeds speeds;
     for (const DeclaredPortType *declared : std::as_const(types)) {
-        for (ListedModel model : listDiskModels(library, declared->type, hashes)) {
+        const QList<ListedModel> disk = listDiskModels(library, declared->type, hashes);
+        // Family and Recommended (#370): the same marks the pickers show.
+        QList<MarkedFile> files;
+        for (const ListedModel &model : disk)
+            files.append({model.path, model.size});
+        const QHash<QString, ModelMark> marks =
+            markModels(declared->type.toString(), files, RecommendContext{device, 0, &speeds}, ModelShapes::shared());
+        for (ListedModel model : disk) {
+            const ModelMark mark = marks.value(model.path);
+            if (!wantedFamily.isEmpty() && squashed(mark.family) != wantedFamily)
+                continue;
             if (!model.handle.contains("hash") && command.has("hash")) {
                 // A file over 1 GB is told on stderr every tenth too, so a long read shows it is moving.
                 context.log(QStringLiteral("Hashing %1 (%2)").arg(model.path, sizeText(model.size)));
@@ -104,6 +128,10 @@ Reply modelList(const Command &command, Context &context) {
                               {"folder", model.folder},    {"size", model.size},
                               {"hashed", hashed},
                               {"origin", fromDefault ? settingOriginName(SettingOrigin::Default) : settingOriginName(SettingOrigin::Own)}};
+            entry.insert("family", mark.family.isEmpty() ? QJsonValue() : QJsonValue(mark.family));
+            entry.insert("recommended", mark.recommended);
+            if (mark.recommended)
+                entry.insert("reason", mark.reason);
             if (hashed)
                 entry.insert("handle", model.handle);
             models.append(entry);
@@ -111,11 +139,13 @@ Reply modelList(const Command &command, Context &context) {
                          .arg(declared->type.toString(), model.name,
                               hashed ? model.handle.value("hash").toString().left(19) + QStringLiteral("…")
                                      : QStringLiteral("(not hashed: --hash)"),
-                              model.path + (fromDefault ? QStringLiteral("  [inherited from Default]") : QString()));
+                              model.path + (fromDefault ? QStringLiteral("  [inherited from Default]") : QString()) +
+                                  (mark.recommended ? QStringLiteral("  [%1]").arg(mark.reason) : QString()));
         }
     }
 
-    for (const ListedModel &model : offered(command.has("type") ? types.first()->type.toString() : QString())) {
+    // Providers' models have no family: `--family` is about files.
+    for (const ListedModel &model : wantedFamily.isEmpty() ? offered(command.has("type") ? types.first()->type.toString() : QString()) : QList<ListedModel>()) {
         QJsonObject entry{{"source", "provider"},
                           {"type", model.handle.value("resource").toString()},
                           {"provider", model.provider},

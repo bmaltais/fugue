@@ -77,8 +77,9 @@ private slots:
         QCOMPARE(modelFamily("fugue/diffusion-model", "Wan2.2-I2V-A14B-LowNoise-Q4_K_S.gguf"), QStringLiteral("Wan 2.2"));
         QCOMPARE(modelFamily("fugue/seedvr2-model", "seedvr2_7b_int8_convrot.safetensors"), QStringLiteral("SeedVR2"));
         QCOMPARE(modelFamily("fugue/upscale-model", "RealESRGAN_x4plus.safetensors"), QStringLiteral("Real-ESRGAN"));
-        // A text encoder is no family even when its name says one; an unknown diffusion model has none.
-        QVERIFY(modelFamily("fugue/text-encoder", "Qwen3-8B-Q8_0.gguf").isEmpty());
+        // A text encoder has a picker family (#370) but is never one of a template's (modelFamilies, below); a VAE
+        // and an unknown diffusion model have none.
+        QCOMPARE(modelFamily("fugue/text-encoder", "Qwen3-8B-Q8_0.gguf"), QStringLiteral("Qwen3 8B"));
         QVERIFY(modelFamily("fugue/vae", "z-image-vae.safetensors").isEmpty());
         QVERIFY(modelFamily("fugue/diffusion-model", "mystery.gguf").isEmpty());
     }
