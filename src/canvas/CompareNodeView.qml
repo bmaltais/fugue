@@ -36,6 +36,7 @@ CompareView {
     onImageScaleChanged: refreshDetail()
     onZoomChanged: refreshDetail()
     onActualChanged: refreshDetail()
+    onActualBChanged: refreshDetail()
     onSizeAChanged: refreshDetail()
     onSizeBChanged: refreshDetail()
     sourceA: picture("a")
@@ -45,6 +46,25 @@ CompareView {
     sizeB: compare.b ? Qt.size(compare.b.width, compare.b.height) : Qt.size(0, 0)
     labelA: compare.labelA || "A"
     labelB: compare.labelB || "B"
+
+    // Hold-to-peek (#420): Z held shows 100% of the larger picture at the pointer; the model keeps the view to give back.
+    // Called by the Graph's and the large view's keys, which ignore autorepeat; `peeking` makes a repeat harmless anyway.
+    property bool peeking: false
+    property real peekedAt: 0
+    function peekDown() {
+        if (peeking || single)
+            return
+        peeking = true
+        peekedAt = Date.now()
+        canvasModel.comparePeekBegin(nodeId, pointerImagePoint())
+    }
+    // Z released, or the keys lost (focus, window): a long hold gives the view back, a tap is the `1` key.
+    function peekUp(cancel) {
+        if (!peeking)
+            return
+        peeking = false
+        canvasModel.comparePeekEnd(nodeId, cancel ? 1e9 : Date.now() - peekedAt)
+    }
 
     onViewStateChanged: apply(viewState)
     Component.onCompleted: { apply(viewState); refreshDetail() }

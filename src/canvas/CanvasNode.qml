@@ -506,7 +506,11 @@ Item {
                         viewState: node.compareView
                         look: node.look
                         wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
-                        onPressed: node.canvasModel.select([node.nodeId])
+                        zoomChips: true // Fit and 100% on hover (#420)
+                        onPressed: {
+                            node.canvasModel.select([node.nodeId])
+                            node.canvasView.forceActiveFocus() // the viewer took the focus; the Graph's keys are the node's
+                        }
                         onActivated: node.canvasView.openCompare(node.nodeId)
                         opacity: node.thumbnailDim ? 0.5 : 1
                     }

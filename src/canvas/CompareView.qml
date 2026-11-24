@@ -13,7 +13,7 @@ import Fugue
 // Modes:  "slider" (a divider, A one side, B the other; the default and the primary), "slider_horizontal",
 //         "side_by_side", "flip" (A over B, click to flip) and "difference".
 // View:   mode, position (the divider, 0..1), showB (flip), zoom (1 = fit, up to 64), actual (one
-//         image pixel to one screen pixel, which beats zoom), centerX and centerY (the point of the
+//         image pixel to one screen pixel, which beats zoom), actualB (that picture is B, the larger one: #420), centerX and centerY (the point of the
 //         image at the middle, 0..1). Zoom and pan are one transform for both images (linked).
 //         Pixels are shown as they are (nearest-neighbour) once enlarged past the file's own.
 // "single" is one picture, A alone, for the large view of any node's image (#73): a drag pans (once
@@ -43,6 +43,7 @@ Item {
     property bool showB: false
     property real zoom: 1
     property bool actual: false
+    property bool actualB: false   // 100% of B (when B is the larger picture), else of A
     property real centerX: 0.5
     property real centerY: 0.5
 
@@ -51,6 +52,7 @@ Item {
     property bool hoverWipe: true  // the divider follows the pointer, as well as being dragged
     property bool chrome: true     // the labels and the size notice
     property bool showZoom: false  // the zoom in percent after the size notice
+    property bool zoomChips: false // Fit and 100% on the face while the pointer is over it (#420)
     property bool showSize: true   // the size notice when the sizes agree (the Canvas view says it in its status line); a mismatch is always said
     property int wheelModifiers: Qt.NoModifier // held to zoom with the wheel (the node's face asks for Alt)
     property color background: look.well
@@ -61,15 +63,20 @@ Item {
     readonly property bool differs: sizeA.width > 0 && sizeB.width > 0
                                     && (sizeA.width !== sizeB.width || sizeA.height !== sizeB.height)
     // One image pixel is `imageScale` screen pixels, so the zoom in percent is that.
+    // 100% is of B: B is larger, and the view asked for it (CompareDetail, engine/compare_scale.h).
+    readonly property bool actualOfB: actual && actualB && CompareDetail.bIsLarger(sizeA, sizeB)
     readonly property string zoomText: qsTr("%1%").arg(Math.round(imageScale * 100))
-    readonly property string sizeNotice: differs
+    readonly property string sizeNotice: differs && actual && CompareDetail.bIsLarger(sizeA, sizeB)
+        ? (actualOfB ? qsTr("100% of B · %1 × %2").arg(sizeB.width).arg(sizeB.height)
+                     : qsTr("100% of A · %1 × %2").arg(sizeA.width).arg(sizeA.height))
+        : differs
         ? qsTr("A %1 × %2, B %3 × %4: B fitted to A").arg(sizeA.width).arg(sizeA.height).arg(sizeB.width).arg(sizeB.height)
         : sizeA.width > 0 ? (showZoom ? qsTr("%1 × %2 · %3").arg(sizeA.width).arg(sizeA.height).arg(zoomText)
                                       : qsTr("%1 × %2").arg(sizeA.width).arg(sizeA.height)) : ""
 
     // The whole state a person changes.
     readonly property var current: ({mode: mode, position: position, showB: showB, zoom: zoom,
-                                     actual: actual, centerX: centerX, centerY: centerY})
+                                     actual: actual, actualB: actualB, centerX: centerX, centerY: centerY})
     signal viewChanged(var current)
     signal pressed // a press on the picture (the node's face selects the node)
     signal activated // a double click on it (the node's face opens the large view)
@@ -80,6 +87,7 @@ Item {
         if (changes.showB !== undefined) showB = changes.showB
         if (changes.zoom !== undefined) zoom = Math.max(1, Math.min(64, changes.zoom))
         if (changes.actual !== undefined) actual = changes.actual
+        if (changes.actualB !== undefined) actualB = changes.actualB
         if (changes.centerX !== undefined) centerX = Math.max(0, Math.min(1, changes.centerX))
         if (changes.centerY !== undefined) centerY = Math.max(0, Math.min(1, changes.centerY))
         viewChanged(current)
@@ -91,21 +99,23 @@ Item {
         if (v.showB !== undefined) showB = v.showB
         if (v.zoom !== undefined) zoom = v.zoom
         if (v.actual !== undefined) actual = v.actual
+        if (v.actualB !== undefined) actualB = v.actualB
         if (v.centerX !== undefined) centerX = v.centerX
         if (v.centerY !== undefined) centerY = v.centerY
     }
     function nextMode() { if (!single) setView({mode: modes[(modes.indexOf(mode) + 1) % modes.length]}) }
     // Flip: A over B. From another mode it enters the flip mode at A; in it, it shows the other.
     function flip() { if (!single) setView(mode === "flip" ? {showB: !showB} : {mode: "flip", showB: false}) }
-    function fit() { setView({zoom: 1, actual: false, centerX: 0.5, centerY: 0.5}) }
-    function actualSize() { setView({actual: true}) }
+    function fit() { setView({zoom: 1, actual: false, actualB: false, centerX: 0.5, centerY: 0.5}) }
+    // 100% of the larger picture; pressed again with the sizes differing, of the other (#420).
+    function actualSize() { setView(CompareDetail.nextActual(sizeA, sizeB, actual, actualB)) }
     // Zooms by `factor` keeping the image point under (x, y) of the view where it is.
     function zoomAt(x, y, factor) {
         const before = imageScale
         const target = Math.max(before * factor, fitScale)
         const next = Math.min(target, fitScale * 64)
         const p = pointAt(x, y)
-        setView({zoom: next / fitScale, actual: false})
+        setView({zoom: next / fitScale, actual: false, actualB: false})
         // Put the image point back under the pointer.
         const o = panelFor(x)
         setView({centerX: p.x - (x - o.cx) / (aw * imageScale), centerY: p.y - (y - o.cy) / (ah * imageScale)})
@@ -121,7 +131,7 @@ Item {
     // A panel is the region one image fills: all of the view, or half of it side by side.
     readonly property real panelW: paired ? width / 2 : width
     readonly property real fitScale: Math.min(panelW / aw, height / ah)
-    readonly property real imageScale: actual ? 1 : fitScale * zoom
+    readonly property real imageScale: actual ? CompareDetail.actualScale(sizeA, sizeB, actualB) : fitScale * zoom
     // The panel of the image under x: its center on screen.
     function panelFor(x) {
         const right = paired && x >= width / 2
@@ -307,6 +317,45 @@ Item {
         y: view.height - height - view.look.unit
         text: view.showSize || view.differs ? view.sizeNotice : ""
         color: view.differs ? Qt.rgba(0.55, 0.3, 0, 0.85) : Qt.rgba(0, 0, 0, 0.6)
+    }
+
+    // Fit and 100% on the face (#420), over the pointer's picture so a press on them is theirs, not the divider's.
+    // Only while the pointer is over the view, and not on a face too small to hold them beside the labels.
+    HoverHandler { id: hover; enabled: view.interactive }
+    // The image point (0..1 of A's frame) under the pointer, or (-1, -1) when the pointer is not over the view.
+    function pointerImagePoint() {
+        if (!hover.hovered)
+            return Qt.point(-1, -1)
+        return pointAt(hover.point.position.x, hover.point.position.y)
+    }
+    Row {
+        objectName: "zoomChips"
+        visible: view.zoomChips && view.chrome && hover.hovered && view.width >= 24 * view.look.unit
+        anchors.right: parent.right
+        anchors.rightMargin: view.look.unit
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: view.look.unit
+        spacing: view.look.unit / 2
+        z: 1
+        Repeater {
+            model: [{id: "fit", text: qsTr("Fit")}, {id: "actual", text: qsTr("100%")}]
+            delegate: Chip {
+                id: zoomChip
+                required property var modelData
+                objectName: "zoomChip-" + modelData.id
+                readonly property bool on: modelData.id === "fit" ? !view.actual && view.zoom === 1 : view.actual
+                text: modelData.text
+                visible: true
+                color: on ? Qt.rgba(0.1, 0.35, 0.65, 0.85) : Qt.rgba(0, 0, 0, 0.6)
+                Accessible.role: Accessible.Button
+                Accessible.name: text
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: zoomChip.modelData.id === "fit" ? view.fit() : view.actualSize()
+                }
+            }
+        }
     }
 
     // The arrow keys move the divider, 1% a press and 10% with Shift (img-comparison-slider's

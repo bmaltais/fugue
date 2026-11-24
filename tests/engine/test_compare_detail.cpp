@@ -5,6 +5,7 @@
 #include <QtTest>
 
 #include "engine/compare_detail.h"
+#include "engine/compare_scale.h"
 
 using namespace fugue::compare;
 
@@ -31,6 +32,38 @@ private slots:
     void smallFilesAlwaysDrawTheCopy() {
         QVERIFY(!useFile(8, copyWidthOf(400), 400, true)); // the file is its own copy
         QVERIFY(!useFile(8, 0, 0, false));     // no size yet
+    }
+
+    // 100% follows the larger picture (#420): a 3x restore B against its original A.
+    void hundredPercentIsTheLargerPicturesAndTogglesWhenTheSizesDiffer() {
+        QCOMPARE(actualScale(1024, 1024, 3072, 3072, true), 3.0);  // B's real pixels: A's frame at 3x
+        QCOMPARE(actualScale(1024, 1024, 3072, 3072, false), 1.0); // 100% of A
+        QCOMPARE(actualScale(1024, 512, 3072, 3072, true), 6.0);   // B is cropped to A's shape: the larger ratio covers
+        QCOMPARE(actualScale(1024, 1024, 512, 512, true), 1.0);    // B smaller: A stays the 100%
+        QCOMPARE(actualScale(1024, 1024, 1024, 1024, true), 1.0);  // equal
+        QCOMPARE(actualScale(1024, 1024, 0, 0, true), 1.0);        // no B (a single picture)
+
+        // From Fit: B; pressed again: A; again: B.
+        Actual v = nextActual(1024, 1024, 3072, 3072, false, false);
+        QVERIFY(v.actual && v.ofB);
+        v = nextActual(1024, 1024, 3072, 3072, true, v.ofB);
+        QVERIFY(v.actual && !v.ofB);
+        v = nextActual(1024, 1024, 3072, 3072, true, v.ofB);
+        QVERIFY(v.actual && v.ofB);
+        // B the same size or smaller: always A.
+        for (double side : {512.0, 1024.0}) {
+            v = nextActual(1024, 1024, side, side, false, false);
+            QVERIFY(v.actual && !v.ofB);
+            v = nextActual(1024, 1024, side, side, true, false);
+            QVERIFY(v.actual && !v.ofB);
+        }
+        // Hold-to-peek: B's 100% when B is larger, else A's; under 200 ms is a tap.
+        QVERIFY(peekTarget(1024, 1024, 3072, 3072).ofB && !peekTarget(1024, 1024, 512, 512).ofB);
+        QVERIFY(isTap(150) && !isTap(200));
+        // The detail rule at 100% of B shows the file one to one, so it loads the files.
+        const double shown = actualScale(512, 512, 3072, 3072, true) * 512 / 3072;
+        QCOMPARE(shown, 1.0);
+        QVERIFY(useFile(shown, copyWidthOf(3072), 3072, false));
     }
 };
 

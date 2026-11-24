@@ -339,6 +339,8 @@
   "&View": "&View",
   "1 of %1": "1 of %1",
   "100%": "100%",
+  "100% of B · %1 × %2": "100% of B · %1 × %2",
+  "100% of A · %1 × %2": "100% of A · %1 × %2",
   "Actual size (1)": "Actual size (1)",
   "A %1 × %2, B %3 × %4: B fitted to A": "A %1 × %2, B %3 × %4: B fitted to A",
   "A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.": "A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.",

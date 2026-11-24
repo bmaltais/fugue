@@ -254,6 +254,78 @@ private slots:
         QVERIFY(view.width() > 0);
     }
 
+    // 100% follows the larger picture (#420): B is 3x A, so the first press is of B, the second of A, the third of B.
+    void hundredPercentFollowsTheLargerPicture() {
+        QTemporaryDir files;
+        RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 48, 30, Qt::blue)));
+        QVERIFY(r.app.open());
+        r.run();
+        r.app.model.select({"cmp"});
+        const auto view = [&](const char *key) { return r.app.model.compareView("cmp").value(key).toBool(); };
+        QVERIFY(r.app.commands.trigger("compare.actual"));
+        QVERIFY(view("actual") && view("actualB"));
+        QVERIFY(r.app.commands.trigger("compare.actual"));
+        QVERIFY(view("actual") && !view("actualB"));
+        QVERIFY(r.app.commands.trigger("compare.actual"));
+        QVERIFY(view("actual") && view("actualB"));
+        QVERIFY(r.app.commands.trigger("compare.fit"));
+        QVERIFY(!view("actual") && !view("actualB"));
+
+        // Hold-to-peek: begin goes to 100% of B centered on the pointer; a long hold gives the view back.
+        const auto center = [&](const char *key) { return r.app.model.compareView("cmp").value(key).toDouble(); };
+        r.app.model.comparePeekBegin("cmp", QPointF(0.25, 0.75));
+        QVERIFY(view("actual") && view("actualB"));
+        QCOMPARE(center("centerX"), 0.25);
+        QCOMPARE(center("centerY"), 0.75);
+        r.app.model.comparePeekBegin("cmp", QPointF(0.9, 0.9)); // key autorepeat: nothing
+        QCOMPARE(center("centerX"), 0.25);
+        r.app.model.comparePeekEnd("cmp", 600);
+        QVERIFY(!view("actual") && !view("actualB"));
+        QCOMPARE(center("centerX"), 0.5);
+        r.app.model.comparePeekEnd("cmp", 600); // a release with no press: nothing
+        QVERIFY(!view("actual"));
+        // A tap is the `1` key: 100% of B with the old center; a tap from 100% of B is 100% of A.
+        r.app.model.comparePeekBegin("cmp", QPointF(0.25, 0.75));
+        r.app.model.comparePeekEnd("cmp", 80);
+        QVERIFY(view("actual") && view("actualB"));
+        QCOMPARE(center("centerX"), 0.5);
+        r.app.model.comparePeekBegin("cmp", QPointF(-1, -1)); // pointer not over the view: the center stays
+        QVERIFY(view("actual") && view("actualB") && center("centerX") == 0.5);
+        r.app.model.comparePeekEnd("cmp", 80);
+        QVERIFY(view("actual") && !view("actualB"));
+        // A hold from 100% of A gives 100% of A back.
+        r.app.model.comparePeekBegin("cmp", QPointF(0.3, 0.3));
+        QVERIFY(view("actualB"));
+        r.app.model.comparePeekEnd("cmp", 900);
+        QVERIFY(view("actual") && !view("actualB"));
+        QCOMPARE(r.app.model.undoStack()->count(), 0);
+    }
+
+    // The compare context follows the selection, not the result: a node selected before its first run has the keys.
+    void theCompareKeysWorkBeforeTheFirstRun() {
+        QTemporaryDir files;
+        RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 16, 10, Qt::blue)));
+        QVERIFY(r.app.open());
+        r.app.model.select({"cmp"});
+        QVERIFY(r.app.commands.contextActive("compare"));
+        QVERIFY(r.app.commands.trigger("compare.flip"));
+        QCOMPARE(r.app.model.compareView("cmp").value("mode").toString(), QStringLiteral("flip"));
+    }
+
+    // Equal sizes: 100% stays A's and never toggles.
+    void hundredPercentOfEqualPicturesStaysA() {
+        QTemporaryDir files;
+        RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 16, 10, Qt::blue)));
+        QVERIFY(r.app.open());
+        r.run();
+        r.app.model.select({"cmp"});
+        for (int press = 0; press < 2; ++press) {
+            QVERIFY(r.app.commands.trigger("compare.actual"));
+            QVERIFY(r.app.model.compareView("cmp").value("actual").toBool());
+            QVERIFY(!r.app.model.compareView("cmp").value("actualB").toBool());
+        }
+    }
+
     // The keys belong to the node: with no Compare Images selected they are not taken.
     void theKeysApplyOnlyWithACompareNodeSelected() {
         QTemporaryDir files;

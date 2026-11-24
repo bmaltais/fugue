@@ -45,13 +45,30 @@ Popup {
     exit: null
     closePolicy: Popup.CloseOnEscape
     background: PopupSurface { look: root.look }
+    onClosed: if (zoomable && zoomable.peekUp) zoomable.peekUp(true)
+    onActiveFocusChanged: if (!activeFocus && zoomable && zoomable.peekUp) zoomable.peekUp(true)
 
     contentItem: Column {
         id: column
         spacing: 2 * root.look.unit
         focus: true
-        Keys.onReleased: event => root.keyReleased(event)
+        Keys.onReleased: event => {
+            // Z held peeks at 100% of the larger picture (a viewer with peekDown: Compare Images, #420).
+            if (event.key === Qt.Key_Z && root.zoomable && root.zoomable.peekUp) {
+                if (!event.isAutoRepeat)
+                    root.zoomable.peekUp(false)
+                event.accepted = true
+                return
+            }
+            root.keyReleased(event)
+        }
         Keys.onPressed: event => {
+            if (event.key === Qt.Key_Z && !(event.modifiers & ~Qt.ShiftModifier) && root.zoomable && root.zoomable.peekDown) {
+                if (!event.isAutoRepeat)
+                    root.zoomable.peekDown()
+                event.accepted = true
+                return
+            }
             if (!root.zoomable || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
                 root.keyPressed(event)
                 return
