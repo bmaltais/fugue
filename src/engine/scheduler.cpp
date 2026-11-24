@@ -962,8 +962,28 @@ private:
         return used;
     }
 
-    // The model handle of the nearest node upstream of `n` (itself first, then its dependencies
-    // breadth first) that selected one, or empty.
+    // The model a node made its result with, as a handle, or empty: the model a provider selected
+    // (a frozen one has none selected, but its result names it in `model`), else the diffusion model
+    // a loader was given (Load Models), typed in or linked. A VAE, text encoder, LoRA or upscaler is
+    // never "the model": only the diffusion one (the file ComfyUI's label is made of).
+    static QJsonObject modelOf(const NodeRun &n) {
+        if (n.selection && !n.selection->model.handle.isEmpty())
+            return n.selection->model.handle;
+        const QString diffusion = QStringLiteral("diffusion_model");
+        const auto isHandle = [](const QJsonObject &handle) { return handle.value("resource").isString(); };
+        if (n.inputs.contains(diffusion) && n.inputs.value(diffusion).kind() == Value::Kind::Json &&
+            isHandle(n.inputs.value(diffusion).json().toObject()))
+            return n.inputs.value(diffusion).json().toObject();
+        if (n.node && n.node->inputs.contains(diffusion) && n.node->inputs.value(diffusion).kind() == InputValue::Kind::Resource)
+            return n.node->inputs.value(diffusion).handle();
+        const Value made = n.outputs.value(QStringLiteral("model"));
+        if (n.providerKernel && made.kind() == Value::Kind::Json && isHandle(made.json().toObject()))
+            return made.json().toObject();
+        return {};
+    }
+
+    // The model of the nearest node upstream of `n` (itself first, then its dependencies breadth
+    // first) that has one, or empty.
     QJsonObject nearestModel(const NodeRun &n) const {
         QStringList queue{n.path};
         QSet<QString> seen;
@@ -971,9 +991,9 @@ private:
             if (seen.contains(queue.at(i)))
                 continue;
             seen.insert(queue.at(i));
-            const NodeRun &node = m_nodes.constFind(queue.at(i)).value();
-            if (node.selection && !node.selection->model.handle.isEmpty())
-                return node.selection->model.handle;
+            const NodeRun &node = *m_nodes.constFind(queue.at(i));
+            if (const QJsonObject model = modelOf(node); !model.isEmpty())
+                return model;
             queue += node.dependencies;
         }
         return {};

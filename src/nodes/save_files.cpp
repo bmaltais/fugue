@@ -56,6 +56,7 @@ QString modelLabel(const QJsonObject &handle) {
     static const QStringList extensions{"gguf", "safetensors", "sft", "ckpt", "pt", "pth", "bin", "onnx"};
     if (const qsizetype dot = name.lastIndexOf(QLatin1Char('.')); dot > 0 && extensions.contains(name.mid(dot + 1).toLower()))
         name.truncate(dot);
+    name.removeIf([](QChar c) { return c.category() == QChar::Other_Control; });
     for (QChar &c : name)
         if (!c.isLetterOrNumber() && !QStringLiteral("._-+() ").contains(c))
             c = QLatin1Char('_');
@@ -72,6 +73,10 @@ Result<QString> expandSaveName(const QString &typed, const QDateTime &now, const
     name.replace(QStringLiteral("{model}"), model);
     if (name.contains(QLatin1Char('\\')))
         return badName(name, QStringLiteral("a backslash is not allowed"));
+    for (const QChar c : std::as_const(name))
+        if (c.category() == QChar::Other_Control)
+            return badName(QStringLiteral("(a name with a control character)"),
+                           QStringLiteral("a control character is not allowed"));
     const QStringList parts = name.split(QLatin1Char('/'));
     for (qsizetype i = 0; i < parts.size(); ++i) {
         const QString &part = parts.at(i);
@@ -100,27 +105,44 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
     if (!base)
         return base.errors();
     const qsizetype slash = relative->lastIndexOf(QLatin1Char('/'));
-    QString folder = base.value();
+    const auto checked = [&](const QString &folder, const QString &input) -> Result<QString> {
+        if (!context.roots)
+            return folder;
+        // Write into the path that was checked.
+        return context.roots->checkWrite(folder, input);
+    };
+    const Result<QString> baseOk = checked(base.value(), QStringLiteral("folder"));
+    if (!baseOk)
+        return baseOk.errors();
+    QString folder = baseOk.value();
     if (slash >= 0) {
         // The subfolders as the system resolves them: a link inside the folder that leads out
         // is judged by where it leads.
-        folder = canonicalPath(folder + QLatin1Char('/') + relative->left(slash));
-        if (!isInside(folder, base.value()))
+        const QString wanted = canonicalPath(base.value() + QLatin1Char('/') + relative->left(slash));
+        if (wanted.isEmpty())
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
+                                  QStringLiteral("\"%1\" goes through links that loop.").arg(relative.value()),
+                                  QStringLiteral("Use another name."));
+        if (!isInside(wanted, base.value()))
             return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("name"),
                                   QStringLiteral("\"%1\" leads out of the folder %2.").arg(relative.value(), base.value()),
                                   QStringLiteral("A name's folders stay inside the folder the file is saved in."));
+        const Result<QString> subOk = checked(wanted, QStringLiteral("name"));
+        if (!subOk)
+            return subOk.errors();
+        folder = subOk.value();
     }
-    if (context.roots) {
-        // Write into the path that was checked.
-        const Result<QString> writable = context.roots->checkWrite(folder, QStringLiteral("folder"));
-        if (!writable)
-            return writable.errors();
-        folder = writable.value();
-    }
-    if (Errors made = makeFolder(folder); !made.isEmpty()) {
+    if (Errors made = makeFolder(baseOk.value()); !made.isEmpty()) {
         made.first().input = QStringLiteral("folder");
         made.first().hint = QStringLiteral("Pick another folder in the node.");
         return made;
+    }
+    if (folder != baseOk.value()) {
+        if (Errors made = makeFolder(folder); !made.isEmpty()) {
+            made.first().input = QStringLiteral("name");
+            made.first().hint = QStringLiteral("Use another name: a folder in it may be a file already.");
+            return made;
+        }
     }
     return SaveLocation{folder, relative->mid(slash + 1)};
 }
@@ -144,7 +166,18 @@ Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &em
 }
 
 QString numberedName(const QString &name, int n, const QString &extension) {
-    return n == 1 ? QStringLiteral("%1.%2").arg(name, extension) : QStringLiteral("%1-%2.%3").arg(name).arg(n).arg(extension);
+    if (n == 1)
+        return QStringLiteral("%1.%2").arg(name, extension);
+    // The suffix takes room from the name: a name that fits (255 bytes) with no suffix would not
+    // with `-100000`, so its end is cut (at a character) to make the numbered one fit too.
+    const QString tail = QStringLiteral("-%1.%2").arg(n).arg(extension);
+    QString stem = name;
+    const qsizetype room = 255 - QFile::encodeName(tail).size();
+    while (!stem.isEmpty() && QFile::encodeName(stem).size() > room)
+        stem.chop(1);
+    if (!stem.isEmpty() && stem.back().isHighSurrogate())
+        stem.chop(1);
+    return stem + tail;
 }
 
 Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const QString &name, const QString &extension) {
