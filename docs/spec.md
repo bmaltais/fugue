@@ -3555,6 +3555,17 @@ hole is the mask at or above 128. The group `remove-object` 1.0.0 is Grow Mask (
 Fill. It is the pre-fill of the Remove action (`inpaint-workflows/remove-lama`: LaMa Fill where Fill Masked was, the same
 Klein pass after). MAT (Places512, "research purposes only") is not offered. `onnx_node.py` is now copied in three packs.
 
+Built (#347, Klein DA 8): **Depth Estimate**, `examples/packs/io.github.bmaltais.fugue-depth` 1.0.0, Depth Anything V2 through ONNX Runtime
+(guide: the pack's README). One persistent command node, `depth-estimate` 1.0.0, in `Image/Analyze`: inputs `image`, `model`
+(optional; `.../depth-anything-model`, extension `.onnx`, folder `depth-anything`), `resolution` (default 832, the shorter
+side the picture is looked at, rounded to a multiple of 14 as Depth Anything V2's own `lower_bound` resize does) and the advanced
+`device`; output `depth`, an 8-bit RGB PNG of the picture's size, min-max stretched, **near light** (the model's value is
+largest for the nearest part; ControlNet's depth preprocessors give the same), a flat scene black. The catalog offers only
+**Depth Anything V2 Small** (Apache-2.0; ONNX export `onnx-community/depth-anything-v2-small`, pinned to a commit, sha256 and
+size checked 2026-11-23). Base, Large and Giant are CC-BY-NC-4.0 (the ComfyUI workflow's default is Large): never fetched, a
+user may put their own ONNX file in the models folder. The template `flux2-klein-9b-da-edit` uses it as a bypassed Depth Estimate node that replaces Image 1 as the first reference when turned on (what the workflow's AnySwitch does; a bypassed
+node gives its input through, 3.5, so off is exactly the template without it).
+
 Built (#178, second pack): **Segment by Points or Box**, `examples/packs/io.github.bmaltais.fugue-segment` (guide:
 [masking.md](masking.md#select-an-object-by-points-or-a-box)), SAM 2.1 through ONNX Runtime. One persistent command node,
 `segment` 1.0.0, in `Image/Mask`: inputs `image`, `model` (optional; `.../sam2-model`, extension `.zip`, folder `sam2`), the
