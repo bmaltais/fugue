@@ -411,6 +411,7 @@ private:
     Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;
     ReadinessSheet *m_readiness;
+    QString m_readyTabId; // the tab the Get ready sheet was opened for
     ModelSource m_source; // empty: listOfferedModels
     QList<ListedModel> m_served; // what the providers offered at the last loadHostModels()
     // "<pack id> <version>" the person answered "not now" for: a reload does not ask again.

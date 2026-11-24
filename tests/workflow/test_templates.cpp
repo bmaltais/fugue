@@ -846,6 +846,10 @@ private slots:
             response.hold = hold;
             return response;
         });
+        server.on("GET", "/last.gguf", [&](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, "the last model", "application/octet-stream"};
+        });
+        makeTemplateNeeding(f.bundled.filePath("last"), "Last", "the last model", QString::fromLatin1(server.origin() + "/last.gguf"), "last.gguf");
         makeTemplateNeeding(f.bundled.filePath("gen"), "Gen", bytes, QString::fromLatin1(server.origin() + "/m.gguf"));
         makeTemplateNeeding(f.bundled.filePath("more"), "More", other,
                             QString::fromLatin1(server.origin() + "/other.gguf"), "other.gguf");
@@ -961,6 +965,19 @@ private slots:
         workflows.downloads()->cancel();
         QTRY_VERIFY(!workflows.downloads()->busy());
         QVERIFY2(!workflows.notice().contains("Downloaded"), qPrintable(workflows.notice()));
+
+        // One click (#419 follow-up): the button reads Install, and when everything is ready the sheet closes by itself and
+        // the template it was for is the tab shown, even when the person looked at another tab meanwhile.
+        QVERIFY(workflows.openTemplateById("last"));
+        const int lastTab = workflows.current();
+        QTRY_VERIFY(window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "getReadyAll") && item(window->contentItem(), "getReadyAll")->isVisible());
+        QCOMPARE(item(window->contentItem(), "getReadyAll")->property("text").toString(), QString("Install"));
+        workflows.setCurrent(0);
+        click(item(window->contentItem(), "getReadyAll"));
+        QTRY_VERIFY(!window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
+        QCOMPARE(workflows.current(), lastTab);
+        QCOMPARE(workflows.tabs().at(lastTab).toMap().value("title").toString(), QString("Last"));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
         forgetDownloads();
     }

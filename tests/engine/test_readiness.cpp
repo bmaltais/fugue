@@ -36,9 +36,12 @@ void write(const QString &path, const QByteArray &bytes) {
 void writeJson(const QString &path, const QJsonObject &object) { write(path, QJsonDocument(object).toJson()); }
 
 // A pack folder `root/<id>` with one command node and a setup.
-QString makePack(const QString &root, const QString &id, const QJsonObject &setup) {
+QString makePack(const QString &root, const QString &id, const QJsonObject &setup, const QString &modelType = {}) {
     const QString dir = root + "/" + id;
     QJsonObject pack{{"manifest", 1}, {"id", id}, {"version", "1.0.0"}, {"name", "Segment"}, {"nodes", QJsonArray{"tool"}}};
+    if (!modelType.isEmpty())
+        pack["types"] = QJsonArray{QJsonObject{{"id", id + "/" + modelType}, {"version", 1}, {"kind", "resource"}, {"name", "A model"},
+                                               {"extensions", QJsonArray{".safetensors"}}, {"folders", QJsonArray{modelType + "s"}}}};
     pack["setup"] = setup;
     writeJson(dir + "/pack.json", pack);
     writeJson(dir + "/tool/node.json",
@@ -158,6 +161,45 @@ private slots:
         QVERIFY(m_trust->isTrusted("io.test.segment", "1.0.0"));                 // and it is trusted, from the same yes
         QCOMPARE(QFileInfo(models() + "/loras/a.safetensors").size(), qint64(m_bytes.size()));
         QVERIFY(QFileInfo(models() + "/loras/b.safetensors").isFile());
+    }
+
+    // #418: a model whose type the pack of the same plan declares is a row of the list, and the one yes covers it.
+    void aModelOfAPacksTypeIsDownloadedInTheSameRun() {
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true"), "onnx");
+        QJsonObject wanted = model("a.safetensors", m_bytes, "/a.safetensors", m_bytes.size());
+        wanted["resource"] = "io.test.segment/onnx";
+        const ReadinessPlan plan = buildReadinessPlan(request(folder, {wanted}), env());
+        QVERIFY(plan.problems.isEmpty());
+        QCOMPARE(plan.models.size(), 1);
+        QVERIFY(plan.models.at(0).deferred);
+        QCOMPARE(plan.models.at(0).typeFrom, QString("Segment"));
+        QCOMPARE(plan.downloadBytes, qint64(m_bytes.size())); // in the totals
+        QVERIFY(plan.lines().join("\n").contains("type from Segment"));
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY2(outcome.ok, outcome.errors.isEmpty() ? "" : qPrintable(outcome.errors.first().message));
+        QVERIFY(outcome.errors.isEmpty());
+        QCOMPARE(QFileInfo(models() + "/onnxs/a.safetensors").size(), qint64(m_bytes.size()));
+    }
+
+    void aTypeThePackDoesNotDeclareAfterInstallIsAClearError() {
+        // A git pack is not read before the yes, so its type is only found missing after the install.
+        const QString source = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true"), "other");
+        QJsonObject wanted = model("a.safetensors", m_bytes, "/a.safetensors", -1);
+        wanted["resource"] = "io.test.segment/onnx";
+        ReadinessRequest r = request(m_dir.filePath("x"), {wanted});
+        r.packs.first().source = PackSource{PackSource::Kind::Git, "https://example.invalid/segment.git", "v1", {}};
+        const ReadinessPlan plan = buildReadinessPlan(r, env());
+        QVERIFY(plan.models.at(0).deferred);
+        int calls = 0;
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.fetch = fetcher(source, &calls);
+        const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY(!outcome.ok);
+        QCOMPARE(outcome.failedRow, 1);
+        QCOMPARE(outcome.errors.first().code, QString("pack_invalid"));
+        QVERIFY(outcome.errors.first().message.contains("does not declare the model type io.test.segment/onnx"));
+        QVERIFY(m_server->requests().isEmpty());
     }
 
     void aFailedSetupLeavesNothingAndStartsNoDownload() {
