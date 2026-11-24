@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "engine/omarchy_provider.h"
+#include "engine/paths.h"
 
 using namespace fugue;
 
@@ -50,6 +51,14 @@ private slots:
             for (const QString &mine : defaults)
                 QVERIFY2(value != mine && !value.startsWith(mine + '/'), qPrintable(QStringLiteral("%1=%2").arg(name, value)));
         }
+    }
+
+    // The GPU lock lives in the runtime folder and is shared across roots by design (spec 1.4.2), so
+    // with the owner's /run/user/<uid> a test's CPU-only `fugue run` waited behind a real GPU run on
+    // the machine and timed out (test_basic_cli under load, 2026-11-23).
+    void theGpuLockIsNotTheOwners() {
+        const QString owner = QStringLiteral("/run/user/%1").arg(::getuid());
+        QVERIFY2(!gpuLockPath().startsWith(owner + '/'), qPrintable(gpuLockPath()));
     }
 };
 
