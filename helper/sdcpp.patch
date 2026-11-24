@@ -1242,7 +1242,20 @@ diff --git i/src/dgl/ops/sampling.cpp w/src/dgl/ops/sampling.cpp
 index f040539..e46a8e7 100644
 --- i/src/dgl/ops/sampling.cpp
 +++ w/src/dgl/ops/sampling.cpp
-@@ -74,6 +74,7 @@ namespace sd::dgl::ops {
+@@ -58,6 +58,12 @@ namespace sd::dgl::ops {
+         validate_mask(input, options);
+         const int64_t sampling_start = ggml_time_ms();
+         LOG_INFO("sampling started: method=%s, steps=%zu", options.method.c_str(), sigmas.size() - 1);
++        {   // the schedule that runs, for checking a cut of it against another implementation's
++            std::string schedule;
++            for (const float sigma : sigmas)
++                schedule += (schedule.empty() ? "" : ", ") + std::to_string(sigma);
++            LOG_INFO("sampling sigmas: %s", schedule.c_str());
++        }
+         auto& model                  = prediction_run.dit();
+         const auto& parameterization = prediction_run.parameterization();
+         sd::ParallelScope tensor_scope(model.tensor_executor.get());
+@@ -74,6 +80,7 @@ namespace sd::dgl::ops {
              step.solver_index   = index;
              step.completes_step = index > 0 || (terminal_zero && index < 0 && step.index == static_cast<int>(sigmas.size() - 1));
              step.mask_input     = options.mask_input;

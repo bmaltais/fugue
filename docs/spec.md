@@ -3244,6 +3244,28 @@ for the model), the target takes time index 0, the references start at 1 (`rope.
 and each takes `index * ref_index_scale` with the scale 10 for FLUX.2 (`flux.hpp`, the flux2 config), so the
 references get 10, 20, 30 in the order they are sent, as ComfyUI's ReferenceLatent does. No change was needed.
 
+**Denoise mode (#359, 2026-11-23; the engine at 3b12781f).** The Sampler's advanced `denoise_mode` (1.4.0) is `noise_level`
+or `schedule_cut`, unset by default; unset or `noise_level` sends what it always did. With `schedule_cut`, a start latent
+and 0 < denoise < 1, the kernel sends ComfyUI's reading (`src/nodes/denoise_cut.h`, shared with Detail Regions later):
+N = int(steps / denoise) in double (6 steps at 0.6 give 10; a float gives 9), `sample.steps` = N, `strength` =
+(steps - 0.5) / N and `sample.args` = `strength_as_noise_level=false`. The engine's `slice_sigmas_by_strength`
+(`image_helpers.dgl`) keeps the last `min(floor(N * strength) + 1, N)` steps, exactly `steps` of them; the half step keeps
+the cut off an integer so the helper's float strength cannot drop one. `strengthSampleArgs` leaves a request that names the
+reading alone. An Empty Latent keeps its steps; denoise 0 in this mode is an input error; a video latent refuses the mode
+(Wan's high-noise split counts steps). The live preview is paced by the steps that run, not by N (`sampledSteps` in
+`strength_args.h`). The patch logs the schedule that runs (`sampling sigmas: ...`). Checked on an RTX 3090 (FLUX.2 Klein 4B
+Q8_0, 256 x 256, 6 steps, `flow_shift` 2.02, euler), schedule_cut, sigmas as logged:
+
+| Scheduler | Denoise | Fugue (logged) | ComfyUI (#341) |
+|---|---|---|---|
+| simple | 0.5 | 0.8829, 0.8436, 0.7908, 0.7153, 0.6018, 0.4087, 0 | 0.8829, 0.8434, 0.7904, 0.7153, 0.6013, 0.4068, 0 |
+| simple | 0.75 | 0.9577, 0.9263, 0.8829, 0.8189, 0.7153, 0.5185, 0 | not measured |
+| discrete | 0.5 | 0.8629, 0.8120, 0.7394, 0.6275, 0.4325, 0.0075, 0 | 0.8629, 0.8119, 0.7392, 0.6272, 0.4319, 0.0056, 0 |
+| discrete | 0.75 | 0.9497, 0.9097, 0.8500, 0.7516, 0.5585, 0.0075, 0 | not measured |
+
+The differences are those of denoise 1 (the engine's 1000-point table against ComfyUI's 10000; last discrete sigma 0.0075
+against 0.0056).
+
 ### 14.4 Masking and inpainting (#167)
 
 Built: everything in #167 is built. The pieces are the issues at the end of this section, and each says here what shipped
