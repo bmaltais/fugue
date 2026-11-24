@@ -345,6 +345,8 @@ private:
     QString untitledName() const;
     void setNotice(const QString &text);
     void analyze(const Document &document, const QString &title);
+    // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
+    void offerReadiness();
     // What the banner offers to download: its button's text, the models, and where they may go.
     struct DownloadOffer {
         QString text;

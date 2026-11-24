@@ -139,6 +139,7 @@
   "Not done: %1. Get ready again to retry; it lists only what is left.": "Not done: %1. Get ready again to retry; it lists only what is left.",
   "Pick a folder for models": "Pick a folder for models",
   "Pick a folder…": "Pick a folder…",
+  "Reading the pack…": "Reading the pack…",
   "Reads the canvas you last used in the Canvas view, else the newest. Choosing a canvas below pins this node to it.": "Reads the canvas you last used in the Canvas view, else the newest. Choosing a canvas below pins this node to it.",
   "Remove every guide of this canvas": "Remove every guide of this canvas",
   "Rotate": "Rotate",

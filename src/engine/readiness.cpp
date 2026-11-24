@@ -89,6 +89,23 @@ ReadinessRequest requestFor(const Document &document, const Registry &registry, 
     return request;
 }
 
+bool ReadinessPlan::resolving() const {
+    return std::any_of(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.pending; });
+}
+
+void ReadinessPlan::recount() {
+    environmentBytes = 0;
+    unknownEnvironments = 0;
+    for (const ReadinessPack &row : std::as_const(packs)) {
+        if (!row.hasEnvironment())
+            continue;
+        if (row.pack.setupSize >= 0)
+            environmentBytes += row.pack.setupSize;
+        else
+            ++unknownEnvironments;
+    }
+}
+
 int ReadinessPlan::installCount() const {
     return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.installs(); }));
 }
@@ -191,6 +208,16 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
                                          QStringLiteral("Install it with `fugue pack add <folder|git-url>`."));
                 continue;
             }
+            if (env.deferGit && want.source.kind == PackSource::Kind::Git) {
+                ReadinessPack row;
+                row.pending = true;
+                row.pack.id = want.id;
+                row.pack.version = want.version;
+                row.pack.name = want.name;
+                row.pack.source = want.source;
+                plan.packs.append(row);
+                continue;
+            }
             const Result<PackSummary> summary = previewPack(want.source, env.packsDir, prompts);
             if (!summary) {
                 Error e = summary.error();
@@ -220,14 +247,7 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
             break;
         }
     }
-    for (const ReadinessPack &row : std::as_const(plan.packs)) {
-        if (!row.hasEnvironment())
-            continue;
-        if (row.pack.setupSize >= 0)
-            plan.environmentBytes += row.pack.setupSize;
-        else
-            ++plan.unknownEnvironments;
-    }
+    plan.recount();
 
     // Models: the missing ones with a source, all into one folder (a root of one kind takes them only when all are that kind).
     ModelLibrary library = env.library;
@@ -324,6 +344,11 @@ QString rowName(const ReadinessPlan &plan, int index) {
 
 ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) {
     ReadinessOutcome outcome;
+    if (plan.resolving()) {
+        outcome.errors << makeError(QStringLiteral("usage"), QStringLiteral("A pack of the list has not been read yet, so nothing was done."));
+        outcome.failedRow = 0;
+        return outcome;
+    }
     const Reporter report{run};
     const int total = plan.rowCount();
     QList<RowState> states(total, RowState::Waiting);

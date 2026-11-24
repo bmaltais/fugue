@@ -25,6 +25,7 @@
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
 #include "engine/embed.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
@@ -120,6 +121,51 @@ class TestWorkflows : public QObject {
     Q_OBJECT
 
 private slots:
+    // #379: a workflow that needs a pack from git opens the Get ready sheet by itself; the clone runs off the window's thread,
+    // the row reads "pending" until it is done and the yes waits; closing during a clone leaves no staging folder.
+    void aGitPacksRowIsReadOffTheWindowsThreadAndCloseCleansUp() {
+        Fixture f;
+        const QString repo = f.file("repo");
+        const QString id = "io.example.gitpack";
+        QDir().mkpath(repo + "/tool");
+        const auto put = [](const QString &path, const QByteArray &bytes) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(bytes);
+        };
+        put(repo + "/pack.json", QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id}, {"version", "1.0.0"}, {"name", "Git pack"},
+                                                           {"nodes", QJsonArray{"tool"}},
+                                                           {"setup", QJsonObject{{"command", QJsonArray{"true"}}, {"size", 27000000}}}}).toJson());
+        put(repo + "/tool/node.json", QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id + "/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
+                                                                {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                                                                {"inputs", QJsonArray{}}, {"outputs", QJsonArray{}}}).toJson());
+        put(repo + "/tool/run.sh", "#!/bin/sh\n");
+        const auto git = [&](const QStringList &args) {
+            QProcess process;
+            process.setWorkingDirectory(repo);
+            process.start("git", QStringList{"-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"} + args);
+            return process.waitForFinished(60000) && process.exitCode() == 0;
+        };
+        QVERIFY(git({"init", "-q"}) && git({"add", "."}) && git({"commit", "-q", "-m", "x"}) && git({"tag", "v1"}));
+        QVERIFY(write(f.file("needs.fugue"),
+                      QJsonDocument(QJsonObject{{"fugue", 1},
+                                                {"requires", QJsonObject{{"packs", QJsonObject{{id, QJsonObject{{"version", "1.0.0"}, {"source", "file://" + repo}, {"ref", "v1"}}}}}}},
+                                                {"graph", QJsonObject{{"nodes", QJsonObject{{"t", QJsonObject{{"type", id + "/tool"}, {"version", "1.0.0"}, {"inputs", QJsonObject{}}}}}}}}}).toJson()));
+        QVERIFY(f.workflows->openPath(f.file("needs.fugue")));
+        ReadinessSheet *sheet = f.workflows->readiness();
+        QVERIFY(sheet->isOpen()); // by itself
+        QVERIFY(sheet->view().value("resolving").toBool());
+        QTRY_VERIFY(!sheet->view().value("resolving").toBool());
+        const QVariantMap row = sheet->view().value("packs").toList().first().toMap();
+        QCOMPARE(row.value("setup").toString(), QString("true"));
+        QVERIFY(!QFileInfo::exists(packsDir() + "/" + id)); // nothing before the yes
+
+        sheet->show(); // read again, and closed before it is done
+        sheet->close();
+        QVERIFY(!sheet->isOpen());
+        QCOMPARE(QDir(packsDir()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList());
+    }
+
     void contentHashIgnoresViewRequirementsAndRunButNotLayout() {
         Document a = Document::load(textNode).value();
         Document b = a;

@@ -63,9 +63,12 @@ struct ReadinessPack {
     Action action = Action::Install;
     PackSummary pack;   // what is shown and approved: for an install as it was previewed
     QString folderName; // Trust: the installed folder's name, which `trustPack` takes
+    // A git pack that is still being read (cloned to a staging folder to show its setup command): `pack` holds only what the
+    // workflow records (id, version, name, source). Not part of what may be approved until resolved.
+    bool pending = false;
 
     bool installs() const { return action == Action::Install; }
-    bool hasEnvironment() const { return installs() && !pack.setupCommand.isEmpty(); }
+    bool hasEnvironment() const { return installs() && !pending && !pack.setupCommand.isEmpty(); }
 };
 
 struct ReadinessModel {
@@ -93,6 +96,10 @@ struct ReadinessPlan {
     // pack that did not preview. Warnings, not part of the one yes.
     Errors problems;
 
+    // True while a pack row is still being read: the plan may be shown but not run.
+    bool resolving() const;
+    // The environment totals again, after a pending row was filled in (the builder calls it too).
+    void recount();
     int installCount() const;
     int trustOnlyCount() const;
     int environmentCount() const;
@@ -120,8 +127,11 @@ struct ReadinessEnv {
     const ModelCatalog *catalog = nullptr; // for a model's license; may be null
     // Free bytes where a folder is (a folder that does not exist yet counts as its parent); default QStorageInfo.
     std::function<qint64(const QString &)> freeSpace;
-    // What a git pack prints while it is previewed. May be null.
+    // What a git pack prints while it is previewed, and `cancelled` to stop it. May be null.
     PackPrompts prompts;
+    // Leave a git pack's preview (a clone) to the caller: its row is `pending`, filled in later (previewPack) so a window
+    // never waits on the network. Folders are always read at once.
+    bool deferGit = false;
 };
 
 ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const ReadinessEnv &env);

@@ -107,10 +107,11 @@ Question {
                             }
                             Label {
                                 color: packRow.modelData.state === "failed" ? sheet.look.error : sheet.look.label
-                                text: sheet.stateText(packRow.modelData.state)
+                                text: packRow.modelData.pending ? qsTr("Reading the pack…") : sheet.stateText(packRow.modelData.state)
                             }
                             ToolButton {
                                 objectName: "getReadyDetails-" + packRow.modelData.id
+                                visible: !packRow.modelData.pending
                                 text: sheet.expanded[packRow.key] ? qsTr("Hide details") : qsTr("Details")
                                 focusPolicy: Qt.NoFocus
                                 onClicked: sheet.toggle(packRow.key)
@@ -261,7 +262,7 @@ Question {
             ThemedButton {
                 objectName: "getReadyAll"
                 visible: sheet.phase === "review" && !sheet.view.empty
-                enabled: !sheet.view.lowSpace
+                enabled: !sheet.view.lowSpace && !sheet.view.resolving
                 highlighted: true
                 text: sheet.view.packs.length > 0 ? qsTr("Install and trust all") : qsTr("Download all")
                 onClicked: sheet.sheetModel.start()

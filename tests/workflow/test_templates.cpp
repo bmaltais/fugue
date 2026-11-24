@@ -823,6 +823,12 @@ private slots:
         QTRY_VERIFY(item(window->contentItem(), "getReady") && item(window->contentItem(), "getReady")->isVisible());
         QVERIFY(!item(window->contentItem(), "downloadModels"));
         QVERIFY(!item(window->contentItem(), "downloadInto"));
+        // The sheet opened by itself, and did nothing: Cancel closes it, and the banner's button opens it again.
+        QTRY_VERIFY(window->findChild<QObject *>("getReadySheet") && window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
+        QCOMPARE(server.requestsTo("GET", "/other.gguf").size(), 0);
+        click(item(window->contentItem(), "getReadyCancel"));
+        QTRY_VERIFY(!window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
+        QCOMPARE(server.requestsTo("GET", "/other.gguf").size(), 0);
         click(item(window->contentItem(), "getReady"));
         QTRY_VERIFY(window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
         QTRY_VERIFY(item(window->contentItem(), "getReadyDestination") && item(window->contentItem(), "getReadyDestination")->isVisible());

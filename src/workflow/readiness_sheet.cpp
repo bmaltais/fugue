@@ -43,6 +43,7 @@ ReadinessSheet::ReadinessSheet(const Registry *registry, QString trustPath, Requ
 }
 
 ReadinessSheet::~ReadinessSheet() {
+    stopPreview();
     if (m_thread) {
         m_cancel = true;
         m_thread->wait();
@@ -78,10 +79,79 @@ void ReadinessSheet::rebuild() {
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
+    env.deferGit = true; // a clone never runs on the window's thread
+    stopPreview();
+    ++m_generation;
     m_plan = buildReadinessPlan(m_request(), env);
     m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
     m_details = QStringList(m_plan.rowCount());
     m_fractions = QList<double>(m_plan.rowCount(), 0.0);
+    if (m_plan.resolving())
+        startPreview();
+}
+
+void ReadinessSheet::stopPreview() {
+    if (!m_preview)
+        return;
+    m_previewCancel = true;
+    m_preview->wait();
+    delete m_preview;
+    m_preview = nullptr;
+}
+
+void ReadinessSheet::startPreview() {
+    QList<QPair<QString, PackSource>> work;
+    for (const ReadinessPack &row : std::as_const(m_plan.packs))
+        if (row.pending)
+            work.append({row.pack.id, row.pack.source});
+    m_previewCancel = false;
+    const int generation = m_generation;
+    const QString folder = packsDir();
+    QPointer<ReadinessSheet> self(this);
+    std::atomic<bool> *cancel = &m_previewCancel; // the destructor waits for the thread
+    m_preview = QThread::create([self, work, generation, folder, cancel] {
+        for (const auto &[id, source] : work) {
+            PackPrompts prompts;
+            prompts.cancelled = [cancel] { return cancel->load(); };
+            const Result<PackSummary> summary = previewPack(source, folder, prompts);
+            if (cancel->load() || !self)
+                return;
+            const bool ok = summary.ok();
+            const PackSummary value = ok ? summary.value() : PackSummary();
+            const Errors errors = ok ? Errors() : summary.errors();
+            QMetaObject::invokeMethod(self.data(), [self, generation, id = id, ok, value, errors] {
+                if (self)
+                    self->resolved(generation, id, ok, value, errors);
+            }, Qt::QueuedConnection);
+        }
+    });
+    m_preview->start();
+}
+
+void ReadinessSheet::resolved(int generation, const QString &id, bool ok, const PackSummary &summary, const Errors &errors) {
+    if (generation != m_generation)
+        return;
+    for (int i = 0; i < m_plan.packs.size(); ++i) {
+        if (!m_plan.packs.at(i).pending || m_plan.packs.at(i).pack.id != id)
+            continue;
+        if (ok) {
+            m_plan.packs[i].pack = summary;
+            m_plan.packs[i].pending = false;
+        } else {
+            // It cannot be installed: a line saying why, and the row goes (the rest of the list is unchanged).
+            for (Error e : errors) {
+                e.severity = Error::Severity::Warning;
+                m_plan.problems << e;
+            }
+            m_plan.packs.removeAt(i);
+            m_states.removeAt(i);
+            m_details.removeAt(i);
+            m_fractions.removeAt(i);
+        }
+        break;
+    }
+    m_plan.recount();
+    publish();
 }
 
 void ReadinessSheet::show() {
@@ -99,6 +169,8 @@ void ReadinessSheet::show() {
 void ReadinessSheet::close() {
     if (m_thread)
         return;
+    stopPreview(); // a pack being read is dropped with its staging folder
+    ++m_generation;
     m_open = false;
     publish();
 }
@@ -146,7 +218,7 @@ void ReadinessSheet::pickDestination(const QString &folder) {
 }
 
 void ReadinessSheet::start() {
-    if (m_thread || m_phase != QLatin1String("review") || m_plan.empty())
+    if (m_thread || m_phase != QLatin1String("review") || m_plan.empty() || m_plan.resolving())
         return;
     m_cancel = false;
     m_phase = QStringLiteral("running");
@@ -246,7 +318,7 @@ void ReadinessSheet::publish() {
         QString from = p.source.location;
         if (!p.source.ref.isEmpty())
             from += tr(" at %1").arg(p.source.ref);
-        packs << QVariantMap{{"id", p.id}, {"name", p.name.isEmpty() ? p.id : p.name}, {"version", p.version}, {"install", row.installs()},
+        packs << QVariantMap{{"id", p.id}, {"name", p.name.isEmpty() ? p.id : p.name}, {"version", p.version}, {"install", row.installs()}, {"pending", row.pending},
                              {"source", from}, {"runtime", p.runtimeKinds.join(QStringLiteral(", "))},
                              {"permissions", p.permissions.isEmpty() ? tr("nothing (network, files, GPU)") : p.permissions.join(QStringLiteral(", "))},
                              {"setup", row.hasEnvironment() ? displayCommand(p.setupCommand) : QString()},
@@ -282,6 +354,7 @@ void ReadinessSheet::publish() {
         problems << (problem.hint.isEmpty() ? problem.message : problem.message + QLatin1Char(' ') + problem.hint);
     view["problems"] = problems;
     view["empty"] = m_plan.empty();
+    view["resolving"] = m_plan.resolving();
     view["ok"] = m_ok;
     view["message"] = m_message;
     view["retry"] = m_retry;

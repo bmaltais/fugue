@@ -74,6 +74,10 @@ signals:
 
 private:
     void rebuild();
+    // Reads the git packs still pending (a clone each) on a thread of its own; resolved() takes each result.
+    void startPreview();
+    void stopPreview(); // cancels it, waits (git is killed at once), and its staging folders are gone
+    void resolved(int generation, const QString &id, bool ok, const PackSummary &summary, const Errors &errors);
     void publish();
     void setRow(int row, RowState state, const QString &detail);
     void ended(const ReadinessOutcome &outcome);
@@ -92,6 +96,9 @@ private:
     QList<double> m_fractions;
     QVariantMap m_view;
     QThread *m_thread = nullptr;
+    QThread *m_preview = nullptr;
+    int m_generation = 0; // a result of an older plan is ignored
+    std::atomic<bool> m_previewCancel{false};
     std::atomic<bool> m_cancel{false};
 };
 

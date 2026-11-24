@@ -204,6 +204,23 @@ private slots:
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
     }
 
+    // #379: a window never waits on a clone: a git pack's row is pending until it is read, and a pending plan does not run.
+    void aGitPackIsLeftPendingWhenAskedAndAPendingPlanDoesNotRun() {
+        ReadinessRequest r = request(m_dir.filePath("x"), {});
+        r.packs.first().source = PackSource{PackSource::Kind::Git, "file:///nowhere/pack.git", "v1", {}};
+        ReadinessEnv e = env();
+        e.deferGit = true;
+        const ReadinessPlan plan = buildReadinessPlan(r, e);
+        QCOMPARE(plan.packs.size(), 1);
+        QVERIFY(plan.packs.first().pending);
+        QVERIFY(plan.resolving());
+        QVERIFY(plan.problems.isEmpty()); // nothing was cloned, so nothing failed yet
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY(!outcome.ok);
+        QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
+    }
+
     void anInstalledPackThatIsNotTrustedIsTrustedByTheSameYes() {
         const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true"));
         PackPrompts yes;

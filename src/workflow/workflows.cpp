@@ -477,6 +477,7 @@ bool Workflows::openPath(const QString &pathOrUrl) {
     addTab(document, fromImage ? QString() : info.absoluteFilePath(),
            fromImage ? info.completeBaseName() : info.fileName(), false, true);
     analyze(document, m_tabs[size_t(m_current)].title);
+    offerReadiness();
     return true;
 }
 
@@ -681,6 +682,7 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     if (!fromPackage)
         m_tabs[size_t(m_current)].carried = chosen.carriedPacks;
     analyze(document.value(), chosen.title);
+    offerReadiness();
     return true;
 }
 
@@ -1062,6 +1064,13 @@ void Workflows::setDownloadRoot(const QString &root) {
         return;
     }
     refreshMissing(false); // the line names the folders they go in
+}
+
+void Workflows::offerReadiness() {
+    // Opened but not ready: the Get ready sheet opens by itself (one yes covers the packs, trust, environments and models).
+    // Nothing happens before that yes; Cancel leaves the banner's Get ready… button to open it again.
+    if (getReadyOffer())
+        m_readiness->show();
 }
 
 void Workflows::analyze(const Document &document, const QString &title) {
