@@ -17,6 +17,23 @@ CompareView {
         const p = compare[which]
         return p ? (full && p.fileUrl ? p.fileUrl : p.url) : ""
     }
+    // The file of a copy, for the face once zoomed in (#371); empty where the picture already is the file.
+    function file(which) {
+        const p = compare[which]
+        return p && !full && p.fileUrl ? p.fileUrl : ""
+    }
+    fileA: file("a")
+    fileB: file("b")
+    fileDifference: file("difference")
+    // Decided on a change, not bound, because the rule remembers its last answer (CompareDetail.useFile).
+    function refreshDetail() {
+        detail = !full && sizeA.width > 0
+                 && CompareDetail.useFile(imageScale, sizeA.width, !actual && zoom <= 1.001, detail)
+    }
+    onImageScaleChanged: refreshDetail()
+    onZoomChanged: refreshDetail()
+    onActualChanged: refreshDetail()
+    onSizeAChanged: refreshDetail()
     sourceA: picture("a")
     sourceB: picture("b")
     sourceDifference: picture("difference")
@@ -26,6 +43,6 @@ CompareView {
     labelB: compare.labelB || "B"
 
     onViewStateChanged: apply(viewState)
-    Component.onCompleted: apply(viewState)
+    Component.onCompleted: { apply(viewState); refreshDetail() }
     onViewChanged: current => canvasModel.setCompareView(nodeId, current)
 }
