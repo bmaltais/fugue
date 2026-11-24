@@ -16,7 +16,7 @@ bin/build test_menus        # one test program; run it with ctest -R test_menus 
 tree and untracked files) can affect, prints the list, builds only those and runs them. A test file maps to
 itself; `src/<area>/` to `tests/<area>/`, the tests that include the changed header and, for a `.qml` file,
 the tests that name it, plus `qmllint`; a change to the engine, the CLI or the nodes also runs the tests that
-start the built `fugue` (`tests/cli`, `tests/nodes`). A shared file (build files, resources, `Main.qml`,
+start the built `fugue` (`tests/cli`, `tests/nodes`); any change under `src/` also runs `fugue_tests`, the English-catalog check that fails on a new `tr()`/`qsTr()` string missing from `src/i18n/en.json`. A shared file (build files, resources, `Main.qml`,
 core headers, test helpers, templates) runs the whole suite, and a change no test covers (documentation) runs
 nothing. It errs towards running more. Run the whole suite before you merge.
 

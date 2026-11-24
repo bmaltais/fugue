@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+
+# bin/worktree <slug> [branch]: a worktree ../fugue-<slug> on a new branch (default <slug>) off the
+# freshly fetched origin/main, with the templates submodule checked out (an empty one fails six tests).
+# It works from any checkout, also one with uncommitted edits, because it never touches the current one.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+slug=${1:?usage: bin/worktree <slug> [branch]}
+branch=${2:-$slug}
+dir="$(dirname "$root")/fugue-$slug"
+[[ ! -e $dir ]] || { echo "bin/worktree: $dir exists" >&2; exit 1; }
+git -C "$root" fetch -q origin main
+git -C "$root" worktree add -q "$dir" -b "$branch" origin/main
+git -C "$dir" submodule update --init templates
+echo "$dir (branch $branch, at $(git -C "$dir" rev-parse --short HEAD))"
