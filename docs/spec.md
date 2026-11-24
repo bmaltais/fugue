@@ -3377,7 +3377,10 @@ so a pack's node gets it too:
   taken in (11.10). One predicate says which inputs hold such files, for all three
   (`InputSpec::holdsInputFile`, shipped #174: widget `file`, `mask` or (#181) `paint`; `forEachFileLiteral`, the
   scheduler's path resolution, read-root check and content hash, and the share copy's path kind use
-  it too, so a mask is keyed by its bytes like a picture).
+  it too, so a mask is keyed by its bytes like a picture). A group instance's literal input counts as an input
+  file when its exposed input feeds one (through nested groups; an unwired input, a missing definition or a
+  cycle is not one), so a picture given to a group's `file` input is saved, packaged and taken in like a Load
+  Image's (#372).
 - Widget field: an input of widget `mask` names, in `over`, the image input it is painted over
   (6.1); Load Image's paints over its own file.
 
@@ -4069,7 +4072,7 @@ Building M4 made these further choices.
 | Text Encode takes an edit's reference pictures and carries them on its conditioning (`meta.references`) to the Sampler, which sends them again (#88). stable-diffusion.cpp's flux2 preset gives references to the model, not the text encoder, but every stage of one generation must send the same options (the guidance sets an edit makes are chosen at encode), so both stages send `ref_images`. ComfyUI attaches reference latents to the conditioning (ReferenceLatent) on the positive and negative branch, after a VAE Encode of each: one wire here does all of it. The Sampler's cache follows the pictures, since the conditioning's descriptor holds them. The encode VAE-encodes them too, unused (a few hundred ms) | 14.3 | high |
 | Templates (#83) are a separate repo, `bmaltais/fugue-workflows` (private, like Fugue), bundled as a submodule at a pinned commit: the owner's call (2026-11-20), so templates can be published and contributed apart from the app. ComfyUI ships its templates as a pip package pinned by version | 11.10 | high |
 | A template is a folder with no index: ComfyUI's `index.json` must be kept in step with the files by a sync script and CI. A template's models and node versions come from its workflow, not from fields written again (ComfyUI repeats the models in the index and on each node) | 11.10 | high |
-| Templates carry sample pictures (`inputs/`), as ComfyUI's repo does (`input/`); opening one takes them into the inputs folder, so an edit template runs as it opens (owner, 2026-11-20). Packs are not carried: a copy would replace the installed version of the pack; side-by-side versions are #90 | 11.10 | high |
+| Templates carry sample pictures (`inputs/`), as ComfyUI's repo does (`input/`); opening one takes them into the inputs folder, so an edit template runs as it opens (owner, 2026-11-20); this includes a picture given to a group instance's input (#372). Packs are not carried: a copy would replace the installed version of the pack; side-by-side versions are #90 | 11.10 | high |
 | A template made by a newer Fugue is left out, judged by its nodes' versions (3.6), not by `requires.fugue`: a node at the same major and the same or older minor runs as made | 11.10 | medium-high |
 | The person's own templates folder is `~/Documents/Fugue/templates`, beside where workflows are suggested; there a plain `.fugue` is a template too. ComfyUI has none (custom nodes' `example_workflows` only) | 11.10 | medium-high |
 | A template's sources are exact: each URL's file has the recorded sha256 (Hugging Face's LFS oid). The FLUX.2 Klein 9B templates name unsloth's current Q8 file, not the older build first checked on the 3090, whose bytes only unofficial mirrors still hold (owner, 2026-11-20) | 11.10 | high |

@@ -350,6 +350,55 @@ private slots:
         QCOMPARE(document.graph.nodes.value("p").inputs.value("paint").literal().toString(), where + "/inputs/p.ora");
     }
 
+    // #372: a picture given to a group instance's input is taken in like a Load Image's, through one
+    // group or a group in a group; an input wired to no file input, a missing definition and a group that
+    // contains itself are left alone.
+    void aGroupInstancesPictureIsTakenIn() {
+        Pictures p;
+        QTemporaryDir folder;
+        QVERIFY(QDir().mkpath(folder.filePath("inputs")));
+        const QString root = QDir(folder.path()).canonicalPath();
+        const QByteArray png = encoded(picture(), "PNG");
+        QVERIFY(write(root + "/inputs/a.png", png));
+        QVERIFY(write(root + "/inputs/b.png", png));
+        QVERIFY(write(root + "/inputs/c.png", png));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Result<Document> loaded = Document::load(QByteArray(R"({"fugue": 1, "graph": {"nodes": {
+            "one": {"type": "local/ref", "version": "1.0.0", "inputs": {"file": "inputs/a.png", "note": "inputs/c.png"}},
+            "two": {"type": "local/outer", "version": "1.0.0", "inputs": {"pic": "inputs/b.png"}},
+            "gone": {"type": "local/missing", "version": "1.0.0", "inputs": {"file": "inputs/c.png"}},
+            "loop": {"type": "local/loop", "version": "1.0.0", "inputs": {"file": "inputs/c.png"}}}},
+          "groups": {
+            "local/ref": {"version": "1.0.0", "name": "Ref",
+              "inputs": [{"name": "file", "targets": ["load.file"]}, {"name": "note", "targets": ["t.text"]}],
+              "outputs": [], "nodes": {"load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {}},
+                                       "t": {"type": "fugue/text", "version": "1.0.0", "inputs": {}}}},
+            "local/outer": {"version": "1.0.0", "name": "Outer",
+              "inputs": [{"name": "pic", "targets": ["inner.file"]}],
+              "outputs": [], "nodes": {"inner": {"type": "local/ref", "version": "1.0.0", "inputs": {}}}},
+            "local/loop": {"version": "1.0.0", "name": "Loop",
+              "inputs": [{"name": "file", "targets": ["me.file"]}],
+              "outputs": [], "nodes": {"me": {"type": "local/loop", "version": "1.0.0", "inputs": {}}}}}})"));
+        QVERIFY2(loaded.ok(), qPrintable(loaded.errors().isEmpty() ? QString() : loaded.errors().first().message));
+        Document document = loaded.value();
+        makeInputsAbsolute(document, registry, root + "/flow.fugue");
+        const auto text = [&](const char *node, const char *input) {
+            return document.graph.nodes.value(node).inputs.value(input).literal().toString();
+        };
+        QCOMPARE(text("one", "file"), root + "/inputs/a.png");
+        QCOMPARE(text("two", "pic"), root + "/inputs/b.png");
+        QCOMPARE(text("one", "note"), QString("inputs/c.png"));
+        QCOMPARE(text("gone", "file"), QString("inputs/c.png"));
+        QCOMPARE(text("loop", "file"), QString("inputs/c.png"));
+        const Errors errors = takeInputsFrom(document, registry, root);
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        QVERIFY(text("one", "file").startsWith(p.inputs() + "/"));
+        QVERIFY(text("two", "pic").startsWith(p.inputs() + "/"));
+        QCOMPARE(read(text("one", "file")), png);
+        QCOMPARE(read(text("two", "pic")), png);
+    }
+
     void aTemplatesPaintFileIsTakenIn() {
         Pictures p;
         QTemporaryDir folder;
