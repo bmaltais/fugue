@@ -21,6 +21,7 @@
 #include "engine/file_inputs.h"
 #include "engine/file_roots.h"
 #include "engine/ids.h"
+#include "engine/model_family.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 
@@ -40,6 +41,44 @@ Error problem(const QString &message, const QString &hint = {}) {
 Error named(const QString &id, Error error) {
     error.message = QStringLiteral("Template %1: %2").arg(id, error.message);
     return error;
+}
+
+// template.json's `source` (#369): the strings of name, author, url and note that are there. What is not
+// as 11.10 says (not an object, a field that is not text, a url that is not http or https) is left out
+// and said in `problems`, so a template with a bad link is still listed, with no link.
+QJsonObject sourceOf(const QString &id, const QJsonObject &about, Errors *problems) {
+    const QJsonValue raw = about.value(QStringLiteral("source"));
+    if (raw.isUndefined())
+        return {};
+    const auto bad = [&](const QString &what) {
+        if (problems)
+            problems->append(problem(QStringLiteral("Template %1: %2 in %3.").arg(id, what, kAbout)));
+    };
+    if (!raw.isObject()) {
+        bad(QStringLiteral("source must be an object with name, author, url and note"));
+        return {};
+    }
+    QJsonObject out;
+    const QJsonObject object = raw.toObject();
+    for (const QString &key : {QStringLiteral("name"), QStringLiteral("author"), QStringLiteral("url"), QStringLiteral("note")}) {
+        const QJsonValue value = object.value(key);
+        if (value.isUndefined())
+            continue;
+        const QString text = value.toString().trimmed();
+        if (!value.isString()) {
+            bad(QStringLiteral("source.%1 must be text").arg(key));
+        } else if (key == QLatin1String("url") && !text.isEmpty()
+                   && !text.startsWith(QLatin1String("https://")) && !text.startsWith(QLatin1String("http://"))) {
+            bad(QStringLiteral("source.url must be an http or https address"));
+        } else if (!text.isEmpty()) {
+            out.insert(key, text);
+        }
+    }
+    for (auto it = object.begin(); it != object.end(); ++it)
+        if (it.key() != QLatin1String("name") && it.key() != QLatin1String("author")
+            && it.key() != QLatin1String("url") && it.key() != QLatin1String("note"))
+            bad(QStringLiteral("source has an unknown field %1").arg(it.key()));
+    return out;
 }
 
 // A JSON object file, or why it is not one (13.3's codes: permission_denied, invalid_json,
@@ -295,7 +334,9 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             t.categoryTitle = category != categories.end() && !category->second.isEmpty() ? category->second : t.category;
             for (const QJsonValue tag : about.value(QStringLiteral("tags")).toArray())
                 t.tags << tag.toString();
+            t.source = sourceOf(t.id, about, problems);
             t.models = document->models();
+            t.families = modelFamilies(t.models);
             if (entry.isDir()) // not a loose .fugue file: its folder is the person's own
                 t.carriedPacks = carriedPacksOf(t.id, t.folder, document->requirements, problems);
             found.append({t, category != categories.end() ? category->first : int(categories.size())});

@@ -25,6 +25,9 @@ Popup {
     property string category: ""
     // Only the templates whose models are all here or on a paired host (#164).
     property bool readyOnly: false
+    // "" is every source, else a source's name (template.json's `source.name`, #369); the same for a model family.
+    property string source: ""
+    property string family: ""
 
     parent: Overlay.overlay
     anchors.centerIn: Overlay.overlay
@@ -47,6 +50,8 @@ Popup {
         App.workflows.loadHostModels()
         templates = App.workflows.templates()
         search.text = ""
+        source = ""
+        family = ""
         if (category !== "" && !categories.some(c => c.id === category))
             category = ""
     }
@@ -80,19 +85,51 @@ Popup {
         return list
     }
 
-    // The templates of the tab, narrowed by every word typed (title, description, tags,
-    // category) and by Ready to run; in list() order, except that within a category the ones
-    // ready to run come first (#164).
+    // Whether a template passes the tab, Ready to run, the search and the two drop-downs, except
+    // the one named by `skip` ("source" or "family"): the counts of a drop-down say what choosing
+    // each of its entries would leave.
+    function passes(t, skip) {
+        if (category === "own" ? !t.own : category !== "" && (t.own || t.category !== category))
+            return false
+        if (readyOnly && !t.ready)
+            return false
+        if (skip !== "source" && source !== "" && t.source.name !== source)
+            return false
+        if (skip !== "family" && family !== "" && t.families.indexOf(family) < 0)
+            return false
+        return App.workflows.templateMatches(search.text, t)
+    }
+
+    // One drop-down's entries: "All" first, then each value the templates have, with its count.
+    function options(all, skip, valuesOf) {
+        const counts = {}
+        const order = []
+        let total = 0
+        for (const t of templates) {
+            const here = passes(t, skip)
+            if (here)
+                ++total
+            for (const v of valuesOf(t)) {
+                if (!(v in counts)) {
+                    counts[v] = 0
+                    order.push(v)
+                }
+                if (here)
+                    ++counts[v]
+            }
+        }
+        order.sort((a, b) => a.localeCompare(b))
+        return [{ value: "", text: qsTr("%1 (%2)").arg(all).arg(total) }]
+            .concat(order.map(v => ({ value: v, text: qsTr("%1 (%2)").arg(v).arg(counts[v]) })))
+    }
+    readonly property var sourceOptions: options(qsTr("All sources"), "source", t => t.source.name ? [t.source.name] : [])
+    readonly property var familyOptions: options(qsTr("All model families"), "family", t => t.families)
+
+    // The templates of the tab, narrowed by the search (every word: title, description, tags,
+    // category, id, source, family; tag:, source:, family:), the two drop-downs and Ready to run;
+    // in list() order, except that within a category the ones ready to run come first (#164).
     readonly property var shown: {
-        const words = search.text.toLowerCase().split(/\s+/).filter(w => w.length > 0)
-        const found = templates.filter(t => {
-            if (category === "own" ? !t.own : category !== "" && (t.own || t.category !== category))
-                return false
-            if (readyOnly && !t.ready)
-                return false
-            const text = [t.title, t.description, t.categoryTitle].concat(t.tags).join(" ").toLowerCase()
-            return words.every(w => text.indexOf(w) >= 0)
-        })
+        const found = templates.filter(t => passes(t, ""))
         // A stable partition inside each run of one category: the list comes grouped by it.
         const out = []
         let from = 0
@@ -200,6 +237,30 @@ Popup {
                 Keys.onReturnPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
                 Keys.onEnterPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
             }
+            // The two filters (#369), one drop-down each with the count a choice would leave; a drop-down
+            // is there only when some template has a source, or a family, to choose.
+            ComboBox {
+                id: sourceBox
+                objectName: "templatesSource"
+                visible: dialog.sourceOptions.length > 1
+                model: dialog.sourceOptions
+                textRole: "text"
+                valueRole: "value"
+                currentIndex: Math.max(0, dialog.sourceOptions.findIndex(o => o.value === dialog.source))
+                Accessible.name: qsTr("Source")
+                onActivated: dialog.source = dialog.sourceOptions[currentIndex].value
+            }
+            ComboBox {
+                id: familyBox
+                objectName: "templatesFamily"
+                visible: dialog.familyOptions.length > 1
+                model: dialog.familyOptions
+                textRole: "text"
+                valueRole: "value"
+                currentIndex: Math.max(0, dialog.familyOptions.findIndex(o => o.value === dialog.family))
+                Accessible.name: qsTr("Model family")
+                onActivated: dialog.family = dialog.familyOptions[currentIndex].value
+            }
             // The filter chip: a toggle, its state said by the check and the accent edge as well as the fill.
             Rectangle {
                 id: readyChip
@@ -258,7 +319,7 @@ Popup {
                 readonly property int room: width - (ScrollBar.vertical as FugueScrollBar).breadth
                 readonly property int columns: Math.max(1, Math.floor(room / (56 * dialog.u)))
                 cellWidth: Math.floor(room / columns)
-                cellHeight: cellWidth * 10 / 16 + 25 * dialog.u
+                cellHeight: cellWidth * 10 / 16 + 30 * dialog.u
                 Keys.onReturnPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                 Keys.onEnterPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
 
@@ -356,6 +417,31 @@ Popup {
                                 elide: Text.ElideRight
                                 color: dialog.look.label
                                 font.pixelSize: dialog.look.captionSize
+                            }
+                            Text {
+                                id: sourceLine
+                                objectName: "templateSource-" + cell.modelData.id
+                                readonly property var info: cell.modelData.source
+                                readonly property string link: info.url ? info.url : ""
+                                Layout.fillWidth: true
+                                visible: !!info.name || !!info.author
+                                text: info.name && info.author ? qsTr("Based on %1 by %2").arg(info.name).arg(info.author)
+                                      : info.name ? qsTr("Based on %1").arg(info.name)
+                                      : qsTr("Workflow by %1").arg(info.author ? info.author : "")
+                                elide: Text.ElideRight
+                                color: link !== "" ? dialog.look.accent : dialog.look.label
+                                font.pixelSize: dialog.look.captionSize
+                                font.underline: link !== "" && sourceHover.hovered
+                                ToolTip.visible: sourceHover.hovered && (link !== "" || !!info.note)
+                                ToolTip.delay: App.theme.look.tooltipDelay
+                                ToolTip.text: [info.note ? info.note : "", link].filter(t => t !== "").join("\n")
+                                HoverHandler { id: sourceHover; cursorShape: sourceLine.link !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                                // Its own press target, as the download button: a click here opens the page, not the template.
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: sourceLine.link !== ""
+                                    onClicked: Qt.openUrlExternally(sourceLine.link)
+                                }
                             }
                             RowLayout {
                                 id: statusRow

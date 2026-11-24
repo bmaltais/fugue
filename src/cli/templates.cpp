@@ -51,6 +51,8 @@ Reply templateList(const Command &, Context &context) {
                                   {"description", t.description},
                                   {"category", t.category},
                                   {"tags", QJsonArray::fromStringList(t.tags)},
+                                  {"source", t.source},
+                                  {"families", QJsonArray::fromStringList(t.families)},
                                   {"own", t.own},
                                   {"inherited", t.inherited},
                                   {"origin", t.inherited ? QStringLiteral("inherited from Default") : t.own ? QStringLiteral("own") : QStringLiteral("bundled")},
