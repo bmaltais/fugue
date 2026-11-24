@@ -412,6 +412,57 @@ private slots:
             QFile::copy(image, qEnvironmentVariable("FUGUE_REAL_HELPER_KEEP"));
     }
 
+    // A LoRA on a model already loaded without it, as the window does: sample without the LoRA,
+    // then encode and sample with it, on one helper. By hand on a GPU, as the test above, with
+    // FUGUE_REAL_HELPER_LORA naming the LoRA file. FLUX.2 Klein 9B INT8 ConvRot with a LoKr over
+    // every block once failed the second sample ("diffusion output shape [] does not match
+    // input"): the engine merged the LoRA into the resident INT8 weights, which keeps an unmerged
+    // copy of them on the GPU, and the merge ran out of room. FUGUE_REAL_HELPER_KEEP keeps the picture.
+    void aRealHelperAppliesALoraToAWarmModel() {
+        const QString program = qEnvironmentVariable("FUGUE_REAL_HELPER");
+        const QString requestFile = qEnvironmentVariable("FUGUE_REAL_HELPER_REQUEST");
+        const QString lora = qEnvironmentVariable("FUGUE_REAL_HELPER_LORA");
+        if (program.isEmpty() || requestFile.isEmpty() || lora.isEmpty())
+            QSKIP("set FUGUE_REAL_HELPER, _REQUEST and _LORA to run the real helper");
+        QFile file(requestFile);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QJsonObject params = QJsonDocument::fromJson(file.readAll()).object();
+        auto helper = provider(60, program);
+        const auto stage = [&](const QString &capability, const QJsonObject &inputs, const QString &output,
+                               bool withLora) -> QString {
+            JobRequest request;
+            request.capability = capability;
+            request.params = params;
+            request.params.insert("seed", 42);
+            if (withLora && capability != QLatin1String("latent.decode"))
+                request.params.insert("loras", QJsonArray{QJsonObject{{"path", lora}, {"multiplier", 1.0}}});
+            request.inputs = inputs;
+            request.outputDir = m_dir.filePath(capability + (withLora ? "-lora" : ""));
+            QDir().mkpath(request.outputDir);
+            QString job;
+            const JobStatus status = run(*helper, request, &job, nullptr, 600000);
+            if (status.state != QLatin1String("done"))
+                return QStringLiteral("failed: ") + status.error.message;
+            const auto result = await<JobResult>([&](Reply<JobResult> reply) { helper->result(job, std::move(reply)); });
+            return result->outputs.value(output).toObject().value("path").toString();
+        };
+        const auto path = [](const QString &name) { return QJsonObject{{"path", name}}; };
+        const QString plain = stage("text.encode", {}, "conditioning", false);
+        QVERIFY2(QFileInfo::exists(plain), qPrintable(plain));
+        const QString warm = stage("latent.sample", {{"conditioning", path(plain)}}, "latent", false);
+        QVERIFY2(QFileInfo::exists(warm), qPrintable(warm));
+        const qint64 pid = helper->pid();
+        const QString conditioning = stage("text.encode", {}, "conditioning", true);
+        QVERIFY2(QFileInfo::exists(conditioning), qPrintable(conditioning));
+        const QString latent = stage("latent.sample", {{"conditioning", path(conditioning)}}, "latent", true);
+        QVERIFY2(QFileInfo::exists(latent), qPrintable(latent));
+        const QString image = stage("latent.decode", {{"latent", path(latent)}}, "image", true);
+        QVERIFY2(QFileInfo::exists(image), qPrintable(image));
+        QCOMPARE(helper->pid(), pid); // the same helper: the LoRA met the loaded model
+        if (qEnvironmentVariableIsSet("FUGUE_REAL_HELPER_KEEP"))
+            QFile::copy(image, qEnvironmentVariable("FUGUE_REAL_HELPER_KEEP"));
+    }
+
     // #173, spec 14.4: staged inpainting equals one `generate` run, byte for byte. By hand on a
     // GPU, as the test above: the stages through the provider (text.encode, latent.encode of the
     // picture, latent.sample with the mask, the picture and the start latent, latent.decode), then
