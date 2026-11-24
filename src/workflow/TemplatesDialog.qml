@@ -19,6 +19,8 @@ Popup {
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
+    // A narrow window: the category list gives up width to the cards.
+    readonly property bool compact: width < 220 * u
     // Read again each time it opens: templates and model folders change outside Fugue.
     property var templates: []
     // "" is every template, "own" the person's own, else a category id.
@@ -188,7 +190,7 @@ Popup {
 
             // The categories, and where the person's own templates go.
             ColumnLayout {
-                Layout.preferredWidth: 44 * dialog.u
+                Layout.preferredWidth: (dialog.compact ? 32 : 44) * dialog.u
                 Layout.fillWidth: false
                 Layout.fillHeight: true
                 Layout.margins: 4 * dialog.u
@@ -217,7 +219,7 @@ Popup {
                         Accessible.name: modelData.title
                         Accessible.selected: current
                         activeFocusOnTab: true
-                        border.width: activeFocus ? 1 : 0
+                        border.width: activeFocus ? 2 : 0
                         border.color: dialog.look.accent
                         Keys.onSpacePressed: dialog.category = modelData.id
                         Keys.onReturnPressed: dialog.category = modelData.id
@@ -244,7 +246,7 @@ Popup {
                     text: qsTr("Your own templates go in %1").arg(App.workflows.ownTemplatesFolder())
                     wrapMode: Text.Wrap
                     color: dialog.look.label
-                    font.pixelSize: dialog.look.captionSize
+                    font.pixelSize: dialog.look.labelSize
                 }
             }
             Rectangle { Layout.fillHeight: true; implicitWidth: 1; color: dialog.look.hairline }
@@ -255,14 +257,17 @@ Popup {
                 Layout.margins: 4 * dialog.u
                 spacing: 4 * dialog.u
 
-                RowLayout {
+                // The search takes what the filters leave; in a narrow window the filters wrap under it.
+                Flow {
+                    id: filterRow
                     Layout.fillWidth: true
                     spacing: 2 * dialog.u
+                    readonly property real others: (sourceBox.visible ? sourceBox.width + spacing : 0)
+                                                   + (familyBox.visible ? familyBox.width + spacing : 0) + readyChip.width + spacing
                 // Fugue's well, as the settings' fields and the drop-downs: 7u high, the accent edge while focused.
                 Rectangle {
-                    Layout.fillWidth: true
-                    implicitWidth: 40 * dialog.u
-                    implicitHeight: 7 * dialog.u
+                    width: filterRow.width - filterRow.others >= 28 * dialog.u ? filterRow.width - filterRow.others : filterRow.width
+                    height: 7 * dialog.u
                     radius: dialog.look.smallCorner
                     color: dialog.look.well
                     border.width: 1
@@ -319,11 +324,11 @@ Popup {
                 Rectangle {
                     id: readyChip
                     objectName: "templatesReadyOnly"
-                    implicitWidth: chipRow.implicitWidth + 4 * dialog.u
-                    implicitHeight: 7 * dialog.u
+                    width: chipRow.implicitWidth + 4 * dialog.u
+                    height: 7 * dialog.u
                     radius: height / 2
                     color: dialog.readyOnly ? dialog.look.selectedRow : chipHover.hovered ? dialog.look.well : "transparent"
-                    border.width: 1
+                    border.width: activeFocus ? 2 : 1
                     border.color: dialog.readyOnly || activeFocus ? dialog.look.accent : dialog.look.hairlineStrong
                     activeFocusOnTab: true
                     Accessible.role: Accessible.CheckBox
@@ -373,7 +378,14 @@ Popup {
                     readonly property int room: width - (ScrollBar.vertical as FugueScrollBar).breadth
                     readonly property int columns: Math.max(1, Math.floor(room / (56 * dialog.u)))
                     cellWidth: Math.floor(room / columns)
-                    cellHeight: cellWidth * 10 / 16 + 30 * dialog.u
+                    // Every card is the same height: the picture, a title of up to two lines, the description in what is left
+                    // (up to four lines, at least two) and the foot (what is missing, then Download) at the bottom.
+                    FontMetrics { id: titleMetrics; font.pixelSize: dialog.look.textSize; font.weight: Font.DemiBold }
+                    FontMetrics { id: bodyMetrics; font.pixelSize: dialog.look.labelSize }
+                    readonly property real lineHeight: bodyMetrics.height
+                    readonly property real footHeight: 2 * bodyMetrics.height + 8 * dialog.u
+                    cellHeight: Math.ceil((cellWidth - 6 * dialog.u) * 10 / 16 + 8 * dialog.u + 3 * dialog.u
+                                          + 2 * titleMetrics.height + 4 * bodyMetrics.height + footHeight)
                     Keys.onReturnPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                     Keys.onEnterPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                     Keys.onSpacePressed: if (currentIndex >= 0) dialog.showDetails(dialog.shown[currentIndex].id)
@@ -399,7 +411,7 @@ Popup {
                             radius: dialog.look.corner
                             color: cardHover.hovered || (grid.activeFocus && grid.currentIndex === cell.index)
                                    ? dialog.look.well : "transparent"
-                            border.width: grid.activeFocus && grid.currentIndex === cell.index ? 1 : 0
+                            border.width: grid.activeFocus && grid.currentIndex === cell.index ? 2 : 0
                             border.color: dialog.look.accent
                             Accessible.role: Accessible.Button
                             Accessible.name: cell.modelData.title
@@ -408,7 +420,9 @@ Popup {
                             TapHandler {
                                 // The info chip sits over the card and shows the details instead.
                                 onTapped: eventPoint => {
-                                    if (infoChip.contains(infoChip.mapFromItem(card, eventPoint.position)))
+                                    // The chip's press target reaches 4px beyond it (a 28px target for a 20px chip).
+                                    const at = infoChip.mapFromItem(card, eventPoint.position)
+                                    if (at.x >= -4 && at.y >= -4 && at.x <= infoChip.width + 4 && at.y <= infoChip.height + 4)
                                         return
                                     grid.currentIndex = cell.index
                                     dialog.openTemplate(cell.modelData.id)
@@ -462,8 +476,9 @@ Popup {
                                         ToolTip.delay: App.theme.look.tooltipDelay
                                         ToolTip.text: qsTr("About this template")
                                         // Its own press target (an exclusive grab, so the card's tap does not follow): the details, not the template.
-                                        HoverHandler { id: infoHover; cursorShape: Qt.PointingHandCursor }
+                                        HoverHandler { id: infoHover; margin: 4; cursorShape: Qt.PointingHandCursor }
                                         TapHandler {
+                                            margin: 4
                                             gesturePolicy: TapHandler.ReleaseWithinBounds
                                             onTapped: dialog.showDetails(cell.modelData.id, cell.index)
                                         }
@@ -503,50 +518,48 @@ Popup {
                                         }
                                     }
                                 }
+                                // The whole title, up to two lines (the details have the rest).
                                 Text {
+                                    id: titleText
+                                    objectName: "templateTitle-" + cell.modelData.id
                                     Layout.fillWidth: true
                                     text: cell.modelData.title
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
                                     elide: Text.ElideRight
                                     color: dialog.look.text
                                     font.pixelSize: dialog.look.textSize
                                     font.weight: Font.DemiBold
+                                    ToolTip.visible: titleHover.hovered && truncated
+                                    ToolTip.delay: App.theme.look.tooltipDelay
+                                    ToolTip.text: cell.modelData.title
+                                    HoverHandler { id: titleHover }
                                 }
-                                Text {
+                                // The description takes the room the title and the foot leave, as many lines as fit.
+                                Item {
+                                    id: descriptionSlot
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    text: cell.modelData.description
-                                    wrapMode: Text.Wrap
-                                    maximumLineCount: 2
-                                    elide: Text.ElideRight
-                                    color: dialog.look.label
-                                    font.pixelSize: dialog.look.captionSize
-                                }
-                                Text {
-                                    id: sourceLine
-                                    objectName: "templateSource-" + cell.modelData.id
-                                    readonly property var info: cell.modelData.source
-                                    readonly property string link: info.url ? info.url : ""
-                                    Layout.fillWidth: true
-                                    visible: !!info.name || !!info.author
-                                    text: info.name && info.author ? qsTr("Based on %1 by %2").arg(info.name).arg(info.author)
-                                          : info.name ? qsTr("Based on %1").arg(info.name)
-                                          : qsTr("Workflow by %1").arg(info.author ? info.author : "")
-                                    elide: Text.ElideRight
-                                    color: link !== "" ? dialog.look.accent : dialog.look.label
-                                    font.pixelSize: dialog.look.captionSize
-                                    font.underline: link !== "" && sourceHover.hovered
-                                    ToolTip.visible: sourceHover.hovered && (link !== "" || !!info.note)
-                                    ToolTip.delay: App.theme.look.tooltipDelay
-                                    ToolTip.text: [info.note ? info.note : "", link].filter(t => t !== "").join("\n")
-                                    HoverHandler { id: sourceHover; cursorShape: sourceLine.link !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                                    // Its own press target, as the download button: a click here opens the page, not the template.
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        enabled: sourceLine.link !== ""
-                                        onClicked: Qt.openUrlExternally(sourceLine.link)
+                                    Layout.preferredHeight: 0
+                                    clip: true
+                                    Text {
+                                        objectName: "templateDescription-" + cell.modelData.id
+                                        anchors { left: parent.left; right: parent.right; top: parent.top }
+                                        text: cell.modelData.description
+                                        wrapMode: Text.Wrap
+                                        maximumLineCount: Math.max(2, Math.min(4, Math.floor(descriptionSlot.height / grid.lineHeight)))
+                                        elide: Text.ElideRight
+                                        color: dialog.look.label
+                                        font.pixelSize: dialog.look.labelSize
+                                        // Cut off at the card's size: the whole text on hover (the details have it too).
+                                        ToolTip.visible: descriptionHover.hovered && truncated
+                                        ToolTip.delay: App.theme.look.tooltipDelay
+                                        ToolTip.text: cell.modelData.description
+                                        HoverHandler { id: descriptionHover }
                                     }
                                 }
-                                RowLayout {
+                                // The foot: what is missing, and under it the download. It is always there, so cards line up.
+                                ColumnLayout {
                                     id: statusRow
                                     readonly property var downloads: App.workflows.downloads
                                     readonly property bool downloading: downloads.busy
@@ -554,18 +567,21 @@ Popup {
                                     readonly property bool failed: !downloads.busy
                                                                    && downloads.failedWhat === "template:" + cell.modelData.id
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 7 * dialog.u
+                                    Layout.alignment: Qt.AlignBottom
+                                    Layout.topMargin: dialog.u
                                     visible: cell.modelData.status !== "" || downloading || failed
-                                    spacing: dialog.u
+                                    spacing: 0
                                     Text {
                                         objectName: "templateStatus-" + cell.modelData.id
                                         Layout.fillWidth: true
                                         text: statusRow.downloading
                                               ? [statusRow.downloads.label, statusRow.downloads.progressText].filter(t => t !== "").join(" · ")
                                               : statusRow.failed ? statusRow.downloads.failure : cell.modelData.status
+                                        wrapMode: Text.Wrap
+                                        maximumLineCount: 2
                                         elide: Text.ElideRight
                                         color: statusRow.downloading ? dialog.look.label : dialog.look.error
-                                        font.pixelSize: dialog.look.captionSize
+                                        font.pixelSize: dialog.look.labelSize
                                         // Which files and where each goes, or the whole failure, on hover.
                                         ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
                                         ToolTip.delay: App.theme.look.tooltipDelay
@@ -578,10 +594,9 @@ Popup {
                                     // Its own press target: a click here does not open the template.
                                     ThemedButton {
                                         objectName: "templateDownload-" + cell.modelData.id
-                                        // Destructive: Cancel stands apart, twice the row's gap before it.
-                                        Layout.leftMargin: statusRow.downloading ? dialog.u : 0
+                                        Layout.topMargin: dialog.u
+                                        Layout.alignment: Qt.AlignLeft
                                         visible: statusRow.downloading || (cell.modelData.download !== "" && !statusRow.downloads.busy)
-                                        flat: true
                                         danger: statusRow.downloading
                                         text: statusRow.downloading ? qsTr("Cancel")
                                               : cell.modelData.downloadSize !== "" ? qsTr("Download %1").arg(cell.modelData.downloadSize)

@@ -70,7 +70,9 @@ Rectangle {
 
             ColumnLayout {
                 id: body
-                width: scroll.width - (scroll.ScrollBar.vertical as FugueScrollBar).breadth
+                x: Math.max(0, Math.floor((scroll.width - width) / 2))
+                // A readable line (about 90 characters), not the sheet's whole width.
+                width: Math.min(scroll.width - (scroll.ScrollBar.vertical as FugueScrollBar).breadth, 150 * sheet.u)
                 spacing: 3 * sheet.u
 
                 Text {

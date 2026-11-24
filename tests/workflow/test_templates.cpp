@@ -647,8 +647,14 @@ private slots:
         QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
 
         // The source line and the two drop-downs (#369): counts say what a choice leaves; a choice narrows the cards.
-        QCOMPARE(item(window->contentItem(), "templateSource-gen")->property("text").toString(), QString("Based on Ann's flow by Ann"));
-        QVERIFY(!item(window->contentItem(), "templateSource-talk")->isVisible());
+        // (The card no longer carries the source line: it is on the details, so every card has the same height.)
+        QVERIFY(!item(window->contentItem(), "templateSource-gen"));
+        QObject *sourceDialog = window->findChild<QObject *>("templatesDialog");
+        QVERIFY(QMetaObject::invokeMethod(sourceDialog, "showDetails", Q_ARG(QVariant, "gen"), Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(item(window->contentItem(), "templateDetailsSource")->property("text").toString(), QString("Based on Ann's flow by Ann"));
+        QVERIFY(QMetaObject::invokeMethod(sourceDialog, "showDetails", Q_ARG(QVariant, "talk"), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(!item(window->contentItem(), "templateDetailsSource")->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(sourceDialog, "closeDetails"));
         QObject *dialog = window->findChild<QObject *>("templatesDialog");
         const auto labels = [&](const char *property) {
             QStringList out;
