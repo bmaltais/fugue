@@ -99,6 +99,7 @@
     "other": "download %n models, %1"
   },
   "Download all": "Download all",
+  "Download models into": "Download models into",
   "downloads %1": "downloads %1",
   "Everything is ready.": "Everything is ready.",
   "Expand by": "Expand by",
@@ -854,6 +855,7 @@
   "Waiting for the GPU": "Waiting for the GPU",
   "Waiting, %1": "Waiting, %1",
   "What runs a model, tried top to bottom. An empty address is the module's own (this machine for Omarchy).": "What runs a model, tried top to bottom. An empty address is the module's own (this machine for Omarchy).",
+  "Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders above.": "Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders above.",
   "Where Save Image writes. A Save node's own folder is inside it.": "Where Save Image writes. A Save node's own folder is inside it.",
   "Where images pasted or dropped into Load Image are kept. By default inside the output folder.": "Where images pasted or dropped into Load Image are kept. By default inside the output folder.",
   "Window rounding": "Window rounding",
