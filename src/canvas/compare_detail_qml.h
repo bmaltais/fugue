@@ -18,8 +18,8 @@ class CompareDetail : public QObject {
 public:
     explicit CompareDetail(QObject *parent = nullptr) : QObject(parent) {}
 
-    Q_INVOKABLE bool useFile(double shownScale, double fileWidth, bool atFit, bool wasFile) const {
-        return compare::useFile(shownScale, compare::copyWidthOf(fileWidth), fileWidth, atFit, wasFile);
+    Q_INVOKABLE bool useFile(double shownScale, double fileWidth, bool wasFile) const {
+        return compare::useFile(shownScale, compare::copyWidthOf(fileWidth), fileWidth, wasFile);
     }
 };
 

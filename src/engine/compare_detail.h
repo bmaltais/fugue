@@ -20,10 +20,11 @@ inline double copyPixelScale(double shownScale, double copyWidth, double fileWid
 }
 
 // True when the face should draw the file. `wasFile` is what it drew a moment ago: the file is taken above 1.1
-// screen pixels per copy pixel and let go below 0.9, so a zoom resting at the threshold does not flip.
-// `atFit` (the node's own fit, nothing zoomed) always draws the copy, and a file no wider than its copy is the copy.
-inline bool useFile(double shownScale, double copyWidth, double fileWidth, bool atFit, bool wasFile) {
-    if (atFit || fileWidth <= copyWidth || copyWidth <= 0)
+// screen pixels per copy pixel and let go below 0.9, so a zoom resting at the threshold does not flip. This holds at
+// the node's own fit too: a large face stretches a 512 px copy as much as a zoom does (the owner saw a soft SeedVR2
+// compare, 2026-11-24). A file no wider than its copy is the copy.
+inline bool useFile(double shownScale, double copyWidth, double fileWidth, bool wasFile) {
+    if (fileWidth <= copyWidth || copyWidth <= 0)
         return false;
     const double covers = copyPixelScale(shownScale, copyWidth, fileWidth);
     return wasFile ? covers >= 0.9 : covers > 1.1;
