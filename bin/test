@@ -6,10 +6,20 @@ set -euo pipefail
 # `bin/test -j1` runs them in turn, the last -j wins. The build before it follows CMAKE_BUILD_PARALLEL_LEVEL
 # (bin/build). `bin/test --changed [base]` builds and runs only the tests the change since base
 # (default origin/main) can affect, chosen by bin/test-select, and says which; a shared file (build files,
-# resources, core headers) makes it the whole suite. Plain `bin/test` is always the whole suite.
+# resources, core headers) makes it the whole suite. `bin/test test_a test_b [ctest args]` builds and runs
+# only those tests (and their shards). Plain `bin/test` is always the whole suite.
 root="$(cd "$(dirname "$0")/.." && pwd)"
 changed=0
 base=origin/main
+named=()
+while [[ ${1:-} == test_* || ${1:-} == qmllint ]]; do
+  named+=("$1")
+  shift
+done
+if ((${#named[@]})) && [[ ${1:-} == --changed ]]; then
+  echo "bin/test: give test names or --changed, not both" >&2
+  exit 2
+fi
 if [[ ${1:-} == --changed ]]; then
   changed=1
   shift
@@ -39,6 +49,11 @@ if ((changed)); then
       for name in "${pick[@]:1}"; do [[ $name == qmllint ]] || selected+=("$name"); done
       echo "bin/test --changed: ${#pick[@]} tests: ${pick[*]:1}" ;;
   esac
+fi
+if ((${#named[@]})); then
+  narrow=1
+  pick=(tests "${named[@]}")
+  for name in "${named[@]}"; do [[ $name == qmllint ]] || selected+=("$name"); done
 fi
 if ((narrow)); then
   "$root/bin/build" "${selected[@]:-fugue}" # qmllint alone needs only the app's QML module
