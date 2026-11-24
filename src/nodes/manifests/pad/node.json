@@ -87,7 +87,8 @@
       "type": "image",
       "role": "mask",
       "label": "Keep mask",
-      "optional": true
+      "optional": true,
+      "description": "Optional: white marks the part of the picture to keep, as ComfyUI's ImagePadForOutpaintMasked does. With it, Feathering is not applied."
     },
     {
       "name": "fill",
@@ -99,7 +100,8 @@
         "edge",
         "gray",
         "transparent"
-      ]
+      ],
+      "description": "What the new area starts as: edge-blur (the picture's edges stretched outward and blurred, best for most outpaints), edge (stretched, not blurred), gray (ComfyUI's ImagePadForOutpaint), or transparent."
     },
     {
       "name": "feathering",
@@ -110,7 +112,8 @@
       "max": 16384,
       "step": 1,
       "integer": true,
-      "advanced": true
+      "advanced": true,
+      "description": "Softens the mask's edge this many pixels into the original picture, on the padded sides, so the seam can blend. It changes only the Mask output, not the padded picture, and shows in the result only near the seam. A Sampler with Soft mask on uses the soft edge; otherwise the mask is rounded and the redrawn strip just grows a little. Ignored with a Keep mask."
     },
     {
       "name": "blur",
@@ -121,7 +124,8 @@
       "max": 512,
       "step": 1,
       "integer": true,
-      "advanced": true
+      "advanced": true,
+      "description": "How much the stretched edges are blurred, in pixels. Only with Fill edge-blur; other fills ignore it."
     }
   ],
   "outputs": [
