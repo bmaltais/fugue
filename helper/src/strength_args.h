@@ -11,6 +11,7 @@
 // close to even and whose strength people know as a step fraction, keeps the library's reading.
 #pragma once
 
+#include <algorithm>
 #include <string>
 
 namespace fugue_helper {
@@ -34,6 +35,19 @@ inline std::string strengthSampleArgs(const std::string &args, const std::string
         return args;
     const std::string reading = "strength_as_noise_level=true,force_first_sigma=true";
     return args.empty() ? reading : args + "," + reading;
+}
+
+// How many steps a sampling call really runs, for what counts them (the live preview's interval): the
+// request's `steps`, or, when strength below 1 is read as a step fraction (the request names
+// strength_as_noise_level=false, or the model is of the Stable Diffusion kind), the last
+// min(floor(steps * strength) + 1, steps) of them, as the engine's slice_sigmas_by_strength keeps. A
+// schedule cut (#359) asks for a longer schedule than it runs, so the preview must not be paced by it.
+inline int sampledSteps(int steps, const std::string &args, const std::string &version, double strength) {
+    const bool named = args.find("strength_as_noise_level=false") != std::string::npos;
+    const bool fraction = named || (args.find("strength_as_noise_level") == std::string::npos && strengthIsStepFraction(version));
+    if (strength >= 1.0 || !fraction)
+        return steps;
+    return std::max(1, std::min(static_cast<int>(steps * static_cast<float>(strength)) + 1, steps));
 }
 
 } // namespace fugue_helper

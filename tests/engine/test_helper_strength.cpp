@@ -39,6 +39,14 @@ private slots:
         // A request that chose a reading itself is not overridden.
         QCOMPARE(strengthSampleArgs("strength_as_noise_level=false", "Flux.2 klein", 0.5), std::string("strength_as_noise_level=false"));
     }
+
+    // The preview is paced by the steps that run, not by the longer schedule a cut asks for (#359).
+    void theStepsThatRunAreCountedForThePreview() {
+        QCOMPARE(sampledSteps(10, "strength_as_noise_level=false", "Flux.2 klein", 0.55), 6);
+        QCOMPARE(sampledSteps(10, "", "Flux.2 klein", 0.55), 10); // a noise level: the library's own count
+        QCOMPARE(sampledSteps(20, "", "SDXL", 0.5), 11);
+        QCOMPARE(sampledSteps(20, "", "SDXL", 1.0), 20);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestHelperStrength)
