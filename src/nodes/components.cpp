@@ -1145,6 +1145,13 @@ public:
                 return kept.errors();
             NodeContext stage = context;
             stage.inputs = inputsFor(context, encoded ? QStringLiteral("encode") : QStringLiteral("sample"), step, state);
+            if (encoded) { // the latent is of the crop, at the size VAE Encode read it
+                const Result<MediaHandle> crop = MediaHandle::probe(
+                    MediaType::Image, QDir(context.workDir).filePath(QStringLiteral("crop-%1.png").arg(pos)), *context.hashes);
+                if (!crop)
+                    return crop.errors();
+                stage.inputs.insert(QStringLiteral("image"), Value(crop.value()));
+            }
             Result<Values> made = encoded ? VaeEncodeKernel().outputs(stage, selection, kept.value())
                                           : SamplerKernel().outputs(stage, selection, kept.value());
             if (!made)
@@ -1324,10 +1331,8 @@ private:
     // The inputs the stage's own node would have got.
     static Values inputsFor(const NodeContext &context, const QString &stage, const DetailStep &step, const QJsonObject &state) {
         Values inputs{{QStringLiteral("model"), context.input(QStringLiteral("model"))}};
-        if (stage == QLatin1String("encode")) {
-            inputs.insert(QStringLiteral("image"), context.input(QStringLiteral("image"))); // replaced by the caller
-            return inputs;
-        }
+        if (stage == QLatin1String("encode"))
+            return inputs; // the caller adds the crop as `image`
         inputs.insert(QStringLiteral("conditioning"), context.input(QStringLiteral("conditioning")));
         inputs.insert(QStringLiteral("latent"), Value(state.value(QStringLiteral("latent")).toObject()));
         inputs.insert(QStringLiteral("seed"), Value(step.seed));

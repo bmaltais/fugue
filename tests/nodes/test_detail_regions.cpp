@@ -195,7 +195,7 @@ private slots:
         const MediaHandle image = flat(rig.hashes, rig.dir.filePath("in.png"), 256, 256, 90);
         // Box 1 is too small to redraw; boxes 0 and 2 overlap, so box 2's crop holds box 0's paste.
         NodeContext context = rig.context(image, "20 20 100 100\n5 5 6 6\n80 80 160 160\n", {{"seed", Value(776)}, {"seed_shift", Value(2)},
-                                                                                              {"padding", Value(8)}, {"target_size", Value(256)},
+                                                                                              {"padding", Value(8)}, {"target_size", Value(192)},
                                                                                               {"feather", Value(4)}, {"steps", Value(4)}, {"denoise", Value(0.3)}});
         QStringList sequence;
         QList<QJsonObject> samples;
@@ -212,10 +212,10 @@ private slots:
                 QVERIFY(crop);
                 const Result<Pixels> pixels = pixelsOf(Value(crop.value()), "image");
                 QVERIFY(pixels);
-                // Box 2 is the 96 x 96 crop 72..168 (80..160 and 8 of padding), scaled to 256: its top left corner
+                // Box 2 is the 96 x 96 crop 72..168 (80..160 and 8 of padding), scaled to 192: its top left corner
                 // lies inside box 0's redraw (red 200), its bottom right outside it (90).
                 secondCropGray = pixels->at(10, 10, 0) * 255.0;
-                QCOMPARE(pixels->width, 256); // redrawn at the target
+                QCOMPARE(pixels->width, 192); // redrawn at the target
             }
             progressEnd = job->progressFrom + job->progressSpan;
             const JobResult result = finished(job.value(), context.workDir, 200);
@@ -234,6 +234,8 @@ private slots:
         const double cut = 3.5 / 13;
         for (const QJsonObject &sample : samples) {
             QCOMPARE(sample.value("sample.steps").toInt(), 13);
+            QCOMPARE(sample.value("width").toInt(), 192); // the crop's size, not the picture's
+            QCOMPARE(sample.value("height").toInt(), 192);
             QVERIFY(std::fabs(sample.value("strength").toDouble() - cut) < 1e-6);
             QCOMPARE(sample.value("sample.args").toString(), QStringLiteral("strength_as_noise_level=false"));
             QCOMPARE(sample.value("sample.method").toString(), QStringLiteral("euler"));
