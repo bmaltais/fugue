@@ -38,4 +38,5 @@ targets=()
 if (($#)); then
   targets=(--target "$@")
 fi
-cmake --build "$root/build" -j"$(nproc)" "${targets[@]}"
+# CMAKE_BUILD_PARALLEL_LEVEL caps the compiles (a quieter machine); unset, one per core.
+cmake --build "$root/build" -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}" "${targets[@]}"
