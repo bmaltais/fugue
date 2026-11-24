@@ -201,6 +201,19 @@ Reply packAdd(const Command &command, Context &context) {
     return reply;
 }
 
+ReadinessPlan readinessPlanFor(const ReadinessRequest &request, Context &context) {
+    FileHashes hashes(FileHashes::defaultPath());
+    TrustStore trust;
+    const ModelCatalog catalog = ModelCatalog::load();
+    ReadinessEnv env{ModelLibrary::current(&context.registry)};
+    env.registry = &context.registry;
+    env.hashes = &hashes;
+    env.trust = &trust;
+    env.packsDir = packsDir();
+    env.catalog = &catalog;
+    return buildReadinessPlan(request, env);
+}
+
 namespace {
 
 // Shows the plan, asks once on a terminal, runs it (#379). With no terminal it is needs_confirmation.

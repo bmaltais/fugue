@@ -7,6 +7,7 @@
 #include "engine/canvas_export.h"
 #include "engine/error.h"
 #include "engine/node_kernel.h"
+#include "engine/readiness.h"
 #include "engine/registry.h"
 
 namespace fugue::cli {
@@ -80,6 +81,13 @@ Reply packTrust(const Command &command, Context &context);
 Reply templatePrepare(const Command &command, Context &context);
 Reply workflowPrepare(const Command &command, Context &context);
 
+// app.cpp: the `app` commands (#392, spec 4.9): the apps of this machine, what one takes, and a run of one.
+Reply appList(const Command &command, Context &context);
+Reply appInfo(const Command &command, Context &context);
+Reply appRun(const Command &command, Context &context);
+// packs.cpp: the list of what a workflow still needs (packs, trust, models), the one `prepare` shows; nothing is changed.
+ReadinessPlan readinessPlanFor(const ReadinessRequest &request, Context &context);
+
 // cache.cpp: `cache status` and `cache clear` (10.6).
 Reply cacheStatus(const Command &command, Context &context);
 Reply cacheClear(const Command &command, Context &context);
@@ -103,6 +111,9 @@ Reply canvasExport(const Command &command, Context &context);
 Reply canvasBatch(const Command &command, Context &context); // canvas_batch.cpp (#250)
 Reply canvasAct(const Command &command, Context &context);     // canvas_act.cpp (#231 slice 10): run a canvas action, or list them
 Reply canvasActions(const Command &command, Context &context);
+// A model picked by its file name (or file name), as the task bar's picker does; `usage` lists the names there are. Shared by
+// `canvas act --set model=` and `app run --input model=`.
+Result<QJsonObject> modelByName(const PortType &type, const QString &word, Context &context);
 // The picture options of `canvas export` and `canvas batch` (--format, --quality, --scale, --size, --width, --height,
 // --background, --lossless); `out` is the file named, whose extension gives the format when --format is not given.
 Result<canvas::PictureExport> pictureOptions(const Command &command, const QString &out);
