@@ -295,8 +295,10 @@ Klein 9B INT8 ConvRot on an RTX 3090, warm (models loaded), 6 steps at 1024x1024
 | `dgl/models/vae.*` | A VAE keeps its encodes of the same pixels (content hashes, shape, posterior, tiling; at most 32 latents and 256 MB, dropped when its weights change or the context goes), only where the encode does not use the RNG (the FLUX.2 VAE). An edit's references are encoded once, not for every seed: -0.7 s a warm edit job | identical | yes |
 
 SageAttention: on CUDA the helper adds `"sage_attn": true` to every context that does not set it
-(`withDefaults` in `src/main.cpp`), so the DiT uses SageAttention where its kernel applies and flash
-attention elsewhere. Text to image 3.38 s -> 3.20 s, edit 18.5 s -> 16.2 s; against flash attention
+(`withDefaults` in `src/main.cpp`). The patch (`core/ggml_extend.cpp`) takes SageAttention only where
+it beats flash attention: no mask, a head of 64 or 128, and no K/V range scaling (Z-Image scales K
+and V and was 3% slower a step with it, so it keeps flash attention and its pictures are unchanged);
+elsewhere flash attention as before. Text to image 3.38 s -> 3.20 s, edit 18.5 s -> 16.2 s; against flash attention
 the pictures are 33-40 dB PSNR apart and look the same. A request that sends `"sage_attn": false` in
 its context keeps flash attention.
 
