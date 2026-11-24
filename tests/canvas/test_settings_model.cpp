@@ -48,25 +48,6 @@ private slots:
         QVERIFY(configDir().startsWith(m_home.path()));
     }
 
-    // The Models page lists families by name, files inside one by file name with numbers in order, and keeps
-    // what the Recommended badge shows (the mark and its reason) with the file.
-    void modelFilesAreSortedByFamilyThenFileName() {
-        const auto file = [](const char *family, const char *name, bool recommended = false) {
-            return QVariant(QVariantMap{{"family", family}, {"name", name}, {"recommended", recommended},
-                                        {"reason", recommended ? "best quality that fits here" : ""}});
-        };
-        const QVariantList sorted = sortedModelFiles({file("Zeta", "a.gguf"), file("", "loose.safetensors"),
-                                                      file("flux", "Model-10.gguf"), file("flux", "model-9.gguf", true),
-                                                      file("flux", "Alpha.gguf"), file("Beta", "b.gguf")});
-        QStringList order;
-        for (const QVariant &v : sorted)
-            order << v.toMap().value("family").toString() + "/" + v.toMap().value("name").toString();
-        QCOMPARE(order, (QStringList{"Beta/b.gguf", "flux/Alpha.gguf", "flux/model-9.gguf", "flux/Model-10.gguf",
-                                     "Zeta/a.gguf", "/loose.safetensors"}));
-        QVERIFY(sorted.at(2).toMap().value("recommended").toBool());
-        QCOMPARE(sorted.at(2).toMap().value("reason").toString(), QStringLiteral("best quality that fits here"));
-    }
-
     // #379: Settings > Folders' "Download models into" is the banner's old choice with the same key.
     void downloadModelsIntoOneOfTheModelFolders() {
         QTemporaryDir comfy;

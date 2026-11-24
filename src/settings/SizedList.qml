@@ -6,13 +6,11 @@ import Fugue
 // A list of things with a size, and an action on each: a row has a title, a line under it, its
 // size, a bar of its share of the biggest, and one button. Generic: the Cache page lists kinds of
 // cache with Clear, and anything else with a size and a verb can use it.
-//   model: [{title, detail, size (text), bytes (number, for the bar), actionText, actionEnabled, badge (optional text)}]
-// A row with a `badge` shows it as an accent chip after its title; `bar: false` leaves the share bar out.
+//   model: [{title, detail, size (text), bytes (number, for the bar), actionText, actionEnabled}]
 // It only reports `actionClicked(index)`; what the action does is the page's.
 ColumnLayout {
     id: list
     property var model: []
-    property bool bar: true // the share-of-the-biggest bar under each row
     property string name: "sized" // objectName prefix: <name>-<index>, <name>-action-<index>
     signal actionClicked(int index)
     readonly property CanvasLook look: App.theme.look
@@ -34,7 +32,6 @@ ColumnLayout {
             border.width: 1
             border.color: list.look.hairline
             Rectangle { // the share of the biggest, under the text
-                visible: list.bar
                 x: 1
                 y: parent.height - height - 1
                 height: 2
@@ -51,33 +48,13 @@ ColumnLayout {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
-                    RowLayout {
+                    Text {
                         Layout.fillWidth: true
-                        spacing: 2 * list.u
-                        Text {
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            text: row.modelData.title
-                            color: list.look.text
-                            font.pixelSize: list.look.textSize
-                            font.weight: Font.DemiBold
-                        }
-                        Rectangle {
-                            objectName: list.name + "-badge-" + row.index
-                            visible: (row.modelData.badge || "") !== ""
-                            implicitWidth: badgeText.implicitWidth + 3 * list.u
-                            implicitHeight: badgeText.implicitHeight + list.u
-                            radius: list.look.smallCorner
-                            color: list.look.accent
-                            Text {
-                                id: badgeText
-                                anchors.centerIn: parent
-                                text: row.modelData.badge || ""
-                                color: list.look.accentForeground
-                                font.pixelSize: list.look.captionSize
-                                font.weight: Font.DemiBold
-                            }
-                        }
+                        elide: Text.ElideRight
+                        text: row.modelData.title
+                        color: list.look.text
+                        font.pixelSize: list.look.textSize
+                        font.weight: Font.DemiBold
                     }
                     Text {
                         Layout.fillWidth: true
