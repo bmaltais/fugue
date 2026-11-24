@@ -1100,9 +1100,9 @@ struct DetailStep {
 // Sampler and VAE Decode nodes send, made by those kernels) as a node of several jobs
 // (ProviderKernel::next), and pastes each result back before the next box is cut, so a box sees
 // the picture as the one before left it. What stays between the jobs is in the node's folder:
-// detail.json (the box being done and its stage), canvas.png (the picture so far) and the stage
-// files. A box list with nothing to do asks for no job (an empty capability) and gives the
-// picture back as it came.
+// detail.json (the box being done, its stage and the crop sent), canvas.png (the picture so far,
+// 16 bits) and the stage files. A box list with nothing to do asks for no job (an empty
+// capability), keeps nothing and gives the picture back as it came.
 class DetailRegionsKernel : public StageKernel {
 public:
     DetailRegionsKernel() : StageKernel(QStringLiteral("latent.sample")) {}
@@ -1111,43 +1111,48 @@ public:
         const Result<QList<DetailStep>> steps = plan(context);
         if (!steps)
             return steps.errors();
-        QDir(context.workDir).mkpath(QStringLiteral("."));
-        if (steps->isEmpty()) { // nothing to redraw: no model call, the picture as it is
-            save(context, {{"done", true}});
+        if (steps->isEmpty()) // nothing to redraw: no model call, the picture as it is
             return JobRequest();
-        }
-        QFile::remove(canvasPath(context));
-        save(context, {{"pos", 0}, {"phase", "encode"}});
-        return encodeJob(context, selection, steps.value(), 0);
+        QDir(context.workDir).mkpath(QStringLiteral("."));
+        clean(context, true); // a retry after out_of_memory starts over
+        const Result<Pixels> canvas = canvasPixels(context);
+        if (!canvas)
+            return canvas.errors();
+        QJsonObject state{{"pos", 0}, {"phase", "encode"}};
+        Result<JobRequest> job = encodeJob(context, selection, steps.value(), 0, canvas.value(), state);
+        if (!job)
+            return job.errors();
+        if (const std::optional<Error> failed = save(context, state))
+            return *failed;
+        return job;
     }
 
     Result<std::optional<JobRequest>> next(const NodeContext &context, const Selection &selection, const JobResult &result) override {
-        QJsonObject state = load(context);
-        if (state.value(QStringLiteral("done")).toBool())
-            return std::optional<JobRequest>();
-        if (context.cancelled && context.cancelled())
-            return makeError(QStringLiteral("cancelled"), QStringLiteral("The run was cancelled."));
         const Result<QList<DetailStep>> steps = plan(context);
         if (!steps)
             return steps.errors();
-        const int pos = state.value(QStringLiteral("pos")).toInt();
+        if (steps->isEmpty())
+            return std::optional<JobRequest>();
+        if (context.cancelled && context.cancelled())
+            return makeError(QStringLiteral("cancelled"), QStringLiteral("The run was cancelled."));
+        QJsonObject state = load(context);
+        const int pos = state.value(QStringLiteral("pos")).toInt(-1);
         const QString phase = state.value(QStringLiteral("phase")).toString();
-        if (pos >= steps->size())
-            return makeError(QStringLiteral("internal"), QStringLiteral("Detail Regions lost its place."));
+        if (pos < 0 || pos >= steps->size())
+            return makeError(QStringLiteral("node_failed"), QStringLiteral("Detail Regions lost its place: its state file is gone."));
         const DetailStep &step = steps->at(pos);
 
         if (phase == QLatin1String("encode") || phase == QLatin1String("sample")) {
             // The stage's latent, kept under its own name: the next stage writes `latent` again.
             const bool encoded = phase == QLatin1String("encode");
-            const Result<JobResult> kept = keep(result, QStringLiteral("latent"), context, encoded ? QStringLiteral("latent-encoded.bin")
-                                                                                                   : QStringLiteral("latent-sampled.bin"));
+            const Result<JobResult> kept = keep(result, QStringLiteral("latent"), context,
+                                                encoded ? QStringLiteral("latent-encoded.bin") : QStringLiteral("latent-sampled.bin"));
             if (!kept)
                 return kept.errors();
             NodeContext stage = context;
             stage.inputs = inputsFor(context, encoded ? QStringLiteral("encode") : QStringLiteral("sample"), step, state);
             if (encoded) { // the latent is of the crop, at the size VAE Encode read it
-                const Result<MediaHandle> crop = MediaHandle::probe(
-                    MediaType::Image, QDir(context.workDir).filePath(QStringLiteral("crop-%1.png").arg(pos)), *context.hashes);
+                const Result<MediaHandle> crop = MediaHandle::fromJson(state.value(QStringLiteral("crop")).toObject());
                 if (!crop)
                     return crop.errors();
                 stage.inputs.insert(QStringLiteral("image"), Value(crop.value()));
@@ -1160,7 +1165,8 @@ public:
             if (!encoded)
                 QFile::remove(QDir(context.workDir).filePath(QStringLiteral("latent-encoded.bin")));
             state.insert(QStringLiteral("phase"), encoded ? QStringLiteral("sample") : QStringLiteral("decode"));
-            save(context, state);
+            if (const std::optional<Error> failed = save(context, state))
+                return *failed;
             Result<JobRequest> job = encoded ? sampleJob(context, selection, step, state, steps->size(), pos)
                                              : decodeJob(context, selection, state, steps->size(), pos);
             if (!job)
@@ -1169,45 +1175,34 @@ public:
         }
 
         // The decoded crop goes back into the picture.
-        const QString decoded = QDir(context.workDir).filePath(QStringLiteral("decoded.png"));
         const Result<QString> file = written(result, QStringLiteral("image"));
         if (!file)
             return file.errors();
-        QFile::remove(decoded);
-        if (!QFile::rename(file.value(), decoded))
-            return makeError(QStringLiteral("node_failed"), QStringLiteral("Cannot move %1.").arg(file.value()));
-        const Result<MediaHandle> handle = MediaHandle::probe(MediaType::Image, decoded, *context.hashes);
-        if (!handle)
-            return handle.errors();
-        const Result<Pixels> redrawn = pixelsOf(Value(handle.value()), QStringLiteral("image"));
+        const Result<Pixels> redrawn = readPixels(file.value());
         if (!redrawn)
             return redrawn.errors();
         Result<Pixels> canvas = canvasPixels(context);
         if (!canvas)
             return canvas.errors();
         Pixels &picture = canvas.value();
-        if (step.crop.x + step.crop.width > picture.width || step.crop.y + step.crop.height > picture.height)
-            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("image"),
-                                  QStringLiteral("The picture is not the size the boxes were found on."));
-        pasteFeathered(picture, step.crop,
-                       resample(redrawn.value(), step.crop.width, step.crop.height, ResizeMethod::Bicubic),
+        pasteFeathered(picture, step.crop, resample(redrawn.value(), step.crop.width, step.crop.height, ResizeMethod::Bicubic),
                        toInt(context.input(QStringLiteral("feather"))));
         const Result<QString> wrote = writePixels(picture, canvasPath(context), true);
         if (!wrote)
             return wrote.errors();
-        for (const char *name : {"decoded.png", "latent-sampled.bin"})
-            QFile::remove(QDir(context.workDir).filePath(QLatin1String(name)));
+        QFile::remove(file.value());
+        QFile::remove(QDir(context.workDir).filePath(QStringLiteral("latent-sampled.bin")));
         if (context.progress)
             context.progress(double(pos + 1) / steps->size(), QStringLiteral("detail"),
                              QStringLiteral("box %1 of %2").arg(pos + 1).arg(steps->size()));
-        if (pos + 1 >= steps->size()) {
-            save(context, {{"done", true}});
+        if (pos + 1 >= steps->size())
             return std::optional<JobRequest>();
-        }
-        save(context, {{"pos", pos + 1}, {"phase", "encode"}});
-        Result<JobRequest> job = encodeJob(context, selection, steps.value(), pos + 1);
+        QJsonObject nextState{{"pos", pos + 1}, {"phase", "encode"}};
+        Result<JobRequest> job = encodeJob(context, selection, steps.value(), pos + 1, picture, nextState);
         if (!job)
             return job.errors();
+        if (const std::optional<Error> failed = save(context, nextState))
+            return *failed;
         return std::optional<JobRequest>(job.value());
     }
 
@@ -1224,24 +1219,21 @@ public:
             note.severity = Error::Severity::Warning;
             warnings << note;
         }
-        if (steps->isEmpty())
+        if (steps->isEmpty()) {
+            clean(context, true);
             return Result<Values>(Values{{QStringLiteral("image"), context.input(QStringLiteral("image"))}}, warnings);
+        }
         Result<Pixels> canvas = canvasPixels(context);
         if (!canvas)
             return canvas.errors();
         Result<Values> image = imageOutput(std::move(canvas.value()));
-        abandon(context);
+        clean(context, true);
         if (!image)
             return image.errors();
         return Result<Values>(image.value(), warnings);
     }
 
-    void abandon(const NodeContext &context) override {
-        for (const char *name : {"canvas.png", "detail.json", "decoded.png", "latent-encoded.bin", "latent-sampled.bin"})
-            QFile::remove(QDir(context.workDir).filePath(QLatin1String(name)));
-        for (const QString &name : QDir(context.workDir).entryList({QStringLiteral("crop-*.png")}, QDir::Files))
-            QFile::remove(QDir(context.workDir).filePath(name));
-    }
+    void abandon(const NodeContext &context) override { clean(context, true); }
 
 private:
     // Each box's share of the node's bar, and where each of its three jobs sits in it.
@@ -1251,26 +1243,50 @@ private:
         return job;
     }
 
-    static QString canvasPath(const NodeContext &context) { return QDir(context.workDir).filePath(QStringLiteral("canvas.png")); }
+    static QString inFolder(const NodeContext &context, const QString &name) { return QDir(context.workDir).filePath(name); }
+    static QString canvasPath(const NodeContext &context) { return inFolder(context, QStringLiteral("canvas.png")); }
+
+    // Everything the node leaves in its folder besides results: its own files, and the converted
+    // references and the files of a job cut short that the stages leave.
+    static void clean(const NodeContext &context, bool helperFiles) {
+        for (const char *name : {"canvas.png", "detail.json", "decoded.png", "latent-encoded.bin", "latent-sampled.bin"})
+            QFile::remove(inFolder(context, QLatin1String(name)));
+        if (helperFiles)
+            for (const char *name : {"latent.bin", "image.png"})
+                QFile::remove(inFolder(context, QLatin1String(name)));
+        for (const QString &name : QDir(context.workDir).entryList({QStringLiteral("crop-*.png"), QStringLiteral("reference-*.png")}, QDir::Files))
+            QFile::remove(inFolder(context, name));
+    }
 
     static QJsonObject load(const NodeContext &context) {
-        QFile file(QDir(context.workDir).filePath(QStringLiteral("detail.json")));
+        QFile file(inFolder(context, QStringLiteral("detail.json")));
         return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
     }
-    static void save(const NodeContext &context, const QJsonObject &state) {
-        QFile file(QDir(context.workDir).filePath(QStringLiteral("detail.json")));
-        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            file.write(QJsonDocument(state).toJson(QJsonDocument::Compact));
+    // An error when the state cannot be kept: the next job could not find its place.
+    static std::optional<Error> save(const NodeContext &context, const QJsonObject &state) {
+        QFile file(inFolder(context, QStringLiteral("detail.json")));
+        const QByteArray bytes = QJsonDocument(state).toJson(QJsonDocument::Compact);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(bytes) != bytes.size() || !file.flush())
+            return makeError(QStringLiteral("node_failed"), QStringLiteral("Cannot write %1: %2").arg(file.fileName(), file.errorString()));
+        return std::nullopt;
+    }
+
+    // A picture file as pixels, with no media handle (no hash of a file made a moment ago).
+    static Result<Pixels> readPixels(const QString &path) {
+        if (!initVips())
+            return vipsUnavailable();
+        try {
+            return pixelsFromImage(vips::VImage::new_from_file(QFile::encodeName(path).constData()), QStringLiteral("image"));
+        } catch (const vips::VError &error) {
+            return vipsError(error, QStringLiteral("media_unreadable"));
+        }
     }
 
     // The picture so far: the canvas, or the input before the first paste.
     static Result<Pixels> canvasPixels(const NodeContext &context) {
         if (!QFileInfo::exists(canvasPath(context)))
             return pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
-        const Result<MediaHandle> handle = MediaHandle::probe(MediaType::Image, canvasPath(context), *context.hashes);
-        if (!handle)
-            return handle.errors();
-        return pixelsOf(Value(handle.value()), QStringLiteral("image"));
+        return readPixels(canvasPath(context));
     }
 
     // `output` of a finished job moved to `name` in the node's folder, and the result saying so.
@@ -1278,7 +1294,7 @@ private:
         const Result<QString> file = written(result, output);
         if (!file)
             return file.errors();
-        const QString to = QDir(context.workDir).filePath(name);
+        const QString to = inFolder(context, name);
         QFile::remove(to);
         if (!QFile::rename(file.value(), to))
             return makeError(QStringLiteral("node_failed"), QStringLiteral("Cannot move %1.").arg(file.value()));
@@ -1313,15 +1329,15 @@ private:
         QList<DetailStep> steps;
         for (size_t i = 0; i < boxes->size(); ++i) {
             const Corners &box = boxes->at(i);
-            const std::optional<CropBox> crop = detailCrop(box, padding, image.width(), image.height());
-            if (!crop)
+            const std::optional<CropBox> padded = detailCrop(box, padding, image.width(), image.height());
+            if (!padded)
                 continue;
             DetailStep step;
             step.index = int(i);
-            step.crop = *crop;
-            step.size = detailSize(*crop, target, kSizeStep);
+            step.crop = widenThin(*padded, target, image.width(), image.height());
+            step.size = detailSize(step.crop, target, kSizeStep);
             step.denoise = scaledDenoise(context.input(QStringLiteral("denoise")).number(), scale,
-                                         std::fabs(box.x2 - box.x1) * std::fabs(box.y2 - box.y1), double(image.width()) * image.height());
+                                         clampedArea(box, image.width(), image.height()), double(image.width()) * image.height());
             step.seed = detailSeed(seed, shift, int(i));
             steps.append(step);
         }
@@ -1347,16 +1363,12 @@ private:
         return inputs;
     }
 
-    // The job that encodes box `pos`: the padded crop at its size, from the picture so far.
-    Result<JobRequest> encodeJob(const NodeContext &context, const Selection &selection, const QList<DetailStep> &steps, int pos) {
+    // The job that encodes box `pos`: the padded crop at its size, cut from `canvas` (the picture so
+    // far, in memory). The crop's handle goes into `state` for the stage's outputs.
+    Result<JobRequest> encodeJob(const NodeContext &context, const Selection &selection, const QList<DetailStep> &steps, int pos,
+                                 const Pixels &canvas, QJsonObject &state) {
         const DetailStep &step = steps.at(pos);
-        const Result<Pixels> canvas = canvasPixels(context);
-        if (!canvas)
-            return canvas.errors();
-        if (step.crop.x + step.crop.width > canvas->width || step.crop.y + step.crop.height > canvas->height)
-            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("image"),
-                                  QStringLiteral("The picture is not the size the boxes were found on."));
-        Pixels crop = cutBox(canvas.value(), step.crop);
+        Pixels crop = cutBox(canvas, step.crop);
         if (crop.channels != 3) { // the model draws colour only: the alpha stays with the picture
             Pixels rgb(crop.width, crop.height, 3);
             for (int y = 0; y < crop.height; ++y)
@@ -1366,13 +1378,14 @@ private:
             crop = std::move(rgb);
         }
         const Pixels scaled = resample(crop, step.size.width, step.size.height, ResizeMethod::Bicubic);
-        const QString file = QDir(context.workDir).filePath(QStringLiteral("crop-%1.png").arg(pos));
+        const QString file = inFolder(context, QStringLiteral("crop-%1.png").arg(pos));
         const Result<QString> wrote = writePixels(scaled, file, false);
         if (!wrote)
             return wrote.errors();
         const Result<MediaHandle> handle = MediaHandle::probe(MediaType::Image, file, *context.hashes);
         if (!handle)
             return handle.errors();
+        state.insert(QStringLiteral("crop"), handle->toJson());
         NodeContext stage = context;
         stage.inputs = inputsFor(context, QStringLiteral("encode"), step, {});
         stage.inputs.insert(QStringLiteral("image"), Value(handle.value()));

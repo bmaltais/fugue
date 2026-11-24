@@ -35,6 +35,16 @@ constexpr int kMinCropSide = 16;
 // is smaller than kMinCropSide on a side.
 std::optional<CropBox> detailCrop(const Corners &box, int padding, int imageWidth, int imageHeight);
 
+// The crop's short side once its long side is scaled to `targetSize` is never under kMinShortSide:
+// a thinner crop is grown on its short side, inside the picture (about its middle, moved in at an
+// edge), so it keeps its shape instead of being stretched. A picture too small to grow it into
+// leaves the crop as it is (detailSize then stretches it).
+constexpr int kMinShortSide = 64;
+CropBox widenThin(const CropBox &crop, int targetSize, int imageWidth, int imageHeight);
+
+// The area of the box's corners as given (not rounded, not padded) that lies inside the picture.
+double clampedArea(const Corners &box, int imageWidth, int imageHeight);
+
 // The size a crop is redrawn at: the long side `targetSize` and the short side in the crop's
 // shape, each a multiple of `multiple` (the short side at least 64, never below one step).
 CropSize detailSize(const CropBox &crop, int targetSize, int multiple);
@@ -52,12 +62,19 @@ double scaledDenoise(double base, DenoiseScale scale, double boxArea, double ima
 std::int64_t detailSeed(std::int64_t seed, std::int64_t shift, int index);
 
 // The weight of each pixel of a crop of width x height when it is pasted: 1 inside, and on each of
-// the four edges a linear ramp from 0 at the edge to 1, `f` pixels long, f = min(feather, height /
-// 2, width / 2). The ramps of two edges multiply in a corner. One channel.
-Pixels featherWeights(int width, int height, int feather);
+// each of the `edges` that is ramped a linear ramp from 0 at the edge to 1, `f` pixels long, f =
+// min(feather, height / 2, width / 2). The ramps of two edges multiply in a corner. One channel.
+struct FeatherEdges {
+    bool left = true;
+    bool top = true;
+    bool right = true;
+    bool bottom = true;
+};
+Pixels featherWeights(int width, int height, int feather, FeatherEdges edges = {});
 
-// `redrawn` (the crop's size) laid over `canvas` at `box` through featherWeights. Only the first
-// `redrawn.channels` channels of the canvas change: an alpha channel of the picture is kept.
+// `redrawn` (the crop's size) laid over `canvas` at `box` through featherWeights, ramped only on the
+// edges of the box that are not the picture's own border. Only the first three channels (colour)
+// of the canvas change: an alpha channel of the picture is kept, whatever `redrawn` holds.
 void pasteFeathered(Pixels &canvas, const CropBox &box, const Pixels &redrawn, int feather);
 
 } // namespace fugue::nodes
