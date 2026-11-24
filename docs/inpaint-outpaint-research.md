@@ -401,7 +401,8 @@ count. Same start picture, mean absolute difference to it (0 to 1):
 | 0.9 | n/a | n/a | 0.039 (4 steps), 0.049 (8 steps) |
 
 The scale is now continuous and ordered, and 0.5 and 0.75 are lighter than the table below, which was measured with
-the step reading. Below the schedule's lowest sigma (0.51 at 8 steps, 0.72 at 4) the pass is one step from the exact sigma.
+the step reading. Below the schedule's second-lowest nonzero sigma the pass is one step from the exact sigma (corrected in #359: this said the
+lowest sigma, 0.51 at 8 steps and 0.72 at 4. Klein's 4-step schedule 1.0, 0.9674, 0.9081, 0.7672, 0 has 0.9081 there, so 0.9 runs `[0.9, 0]`).
 
 **Refine presets re-measured (#271, 2026-11-23).** Klein 4B Q8, 4 steps, guidance 1, seed 42, reference on, Blend 16,
 the helper built from `main` with #244 (the CUDA helper of `~/github/fugue` predates it and reads strength as a step
@@ -427,7 +428,7 @@ picture, which is the person's to write. Montages (kept outside the repo): `shee
 
 **Presets: light 0.55, default 0.7, restyle 0.9** (the old 0.5 light and 0.75 restyle were step-fraction numbers; on the
 noise-level scale 0.75 is a gentle pass and the old restyle sits near 0.9). 0.9 rather than 0.95 because 0.95 on the whole cat starts to repaint color.
-**Low strength.** Below 0.72 (4 steps) the pass is one step from the exact sigma: it ran without error at 0.15 and
+**Low strength.** Below the second-lowest nonzero sigma (see 4.7 above; it was given as 0.72 at 4 steps) the pass is one step from the exact sigma: it ran without error at 0.15 and
 gave the VAE-round-trip result, indistinguishable from 0.3 and 0.4. Nothing below about 0.4 is useful, but it is
 harmless and it is not enforced in code; the presets sit above it, so the minimum is left alone.
 

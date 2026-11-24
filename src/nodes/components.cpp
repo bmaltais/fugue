@@ -51,6 +51,7 @@
 #include "engine/model_library.h"
 #include "engine/model_shape.h"
 #include "engine/vips.h"
+#include "nodes/denoise_cut.h"
 #include "nodes/image_cover.h"
 
 namespace fugue::nodes {
@@ -814,6 +815,8 @@ bool sameClip(const LatentMeta &a, const LatentMeta &b) {
     return a.width == b.width && a.height == b.height && a.frames == b.frames && a.fps == b.fps;
 }
 
+constexpr const char *kScheduleCut = "schedule_cut";
+
 class SamplerKernel : public StageKernel {
 public:
     SamplerKernel() : StageKernel(QStringLiteral("latent.sample")) {}
@@ -824,10 +827,26 @@ public:
             return files.errors();
         const Value latent = context.input(QStringLiteral("latent"));
         const LatentMeta from = LatentMeta::of(latent);
+        const int steps = int(context.input(QStringLiteral("steps")).number());
+        const double denoise = context.input(QStringLiteral("denoise")).number();
+        // The schedule cut applies to a start latent only: an Empty Latent keeps its steps.
+        std::optional<DenoiseCut> cut;
+        if (context.input(QStringLiteral("denoise_mode")).text() == QLatin1String(kScheduleCut)) {
+            if (from.isVideo())
+                return makeInputError(QStringLiteral("node_failed"), QStringLiteral("denoise_mode"),
+                                      QStringLiteral("A video Sampler has no schedule cut: Wan's high-noise split counts steps."),
+                                      QStringLiteral("Leave Denoise mode unset, or use noise_level."));
+            if (!from.empty && denoise <= 0.0)
+                return makeInputError(QStringLiteral("node_failed"), QStringLiteral("denoise"),
+                                      QStringLiteral("A schedule cut at denoise 0 has no step to run."),
+                                      QStringLiteral("Raise Denoise above 0, or keep the picture as it is without a Sampler."));
+            if (!from.empty)
+                cut = denoiseCut(steps, denoise);
+        }
         QJsonObject params{{"width", from.width},
                            {"height", from.height},
                            {"seed", context.input(QStringLiteral("seed")).json().toInteger()},
-                           {"sample.steps", int(context.input(QStringLiteral("steps")).number())},
+                           {"sample.steps", steps},
                            {"sample.guidance.txt_cfg", context.input(QStringLiteral("guidance")).number()}};
         if (from.isVideo()) {
             params.insert(QStringLiteral("video_frames"), from.frames);
@@ -891,7 +910,12 @@ public:
         }
         if (!from.empty) { // redrawn from a latent, by the amount denoise sets
             request.inputs.insert(QStringLiteral("init_latent"), fileOf(latent));
-            request.params.insert(QStringLiteral("strength"), context.input(QStringLiteral("denoise")).number());
+            request.params.insert(QStringLiteral("strength"), denoise);
+            if (cut) { // ComfyUI's reading: a longer schedule, of which the last `steps` are run
+                request.params.insert(QStringLiteral("sample.steps"), cut->steps);
+                request.params.insert(QStringLiteral("strength"), cut->strength);
+                request.params.insert(QStringLiteral("sample.args"), QStringLiteral("strength_as_noise_level=false"));
+            }
         }
         return request;
     }

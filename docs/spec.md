@@ -3220,7 +3220,7 @@ denoise 1, `simple` with shift 2.02 equals ComfyUI's `simple` to 5e-4 and `discr
 the engine's 1000). Denoise below 1 does not match: ComfyUI cuts the last `steps + 1` sigmas of an
 `int(steps / denoise)`-step schedule; the helper starts at the noise level `denoise` on the `steps`-step
 schedule (strength_args.h, #244), and on a 4 to 6 step schedule, crowded near 1, that leaves one or two steps. The table
-is on #341. Not yet changed: an opt-in helper reading of denoise as ComfyUI's cut.
+is on #341. The opt-in reading is the Sampler's `denoise_mode` (below).
 
 **Reference size (#342, 2026-11-23; the engine at 3b12781f).** Text Encode 1.1.0 has an advanced `reference_size`:
 `auto` (the default) or `exact`. At the pin the engine sizes every reference itself before the VAE, in
