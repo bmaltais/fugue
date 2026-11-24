@@ -711,14 +711,17 @@ private slots:
         QVERIFY(!QFileInfo::exists(dataDir() + "/models/diffusion-model/m.gguf")); // nothing before the yes
 
         sheet->pickDestination(picked.path());
-        QCOMPARE(currentSettings().downloadFolder, picked.path());
-        QVERIFY(currentSettings().modelPaths.contains(picked.path()));
-        QCOMPARE(currentSettings().modelFolderKinds.value(picked.path()), ModelLibrary::kLayout);
-        QCOMPARE(sheet->view().value("destination").toString(), picked.path());
+        // Chosen on the sheet, but nothing is written before the yes.
+        QVERIFY(currentSettings().downloadFolder.isEmpty());
+        QVERIFY(!currentSettings().modelPaths.contains(picked.path()));
+        QCOMPARE(sheet->view().value("destination").toString(), QFileInfo(picked.path()).canonicalFilePath());
         QCOMPARE(sheet->view().value("destinations").toList().size(), 2);
 
         sheet->start();
         QTRY_COMPARE(sheet->phase(), QString("finished"));
+        QCOMPARE(currentSettings().downloadFolder, QFileInfo(picked.path()).canonicalFilePath());
+        QVERIFY(currentSettings().modelPaths.contains(QFileInfo(picked.path()).canonicalFilePath()));
+        QCOMPARE(currentSettings().modelFolderKinds.value(QFileInfo(picked.path()).canonicalFilePath()), ModelLibrary::kLayout);
         QVERIFY2(sheet->view().value("ok").toBool(), qPrintable(sheet->view().value("message").toString()));
         QCOMPARE(readFile(picked.filePath("diffusion-model/m.gguf")), bytes);
         QVERIFY(sheet->waitIdle());

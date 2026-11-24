@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -167,7 +168,7 @@ private slots:
         QVERIFY(!outcome.ok);
         QCOMPARE(outcome.failedRow, 0);
         QCOMPARE(outcome.errors.first().code, QString("setup_failed"));
-        QCOMPARE(QDir(packs()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList());
+        QCOMPARE(QDir(packs()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot), QStringList()); // only the plan's own staging copy is hidden here
         QVERIFY(!m_trust->isTrusted("io.test.segment", "1.0.0"));
         QVERIFY(m_server->requests().isEmpty());
         QCOMPARE(outcome.retry.size(), 2); // the pack and the model are what a second run does
@@ -193,32 +194,116 @@ private slots:
         QCOMPARE(outcome.retry, (QStringList{"download a.safetensors", "download b.safetensors"}));
     }
 
-    void aPackThatChangedSinceItWasShownIsRefused() {
-        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true"));
-        const ReadinessPlan plan = buildReadinessPlan(request(folder, {}), env());
-        makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch evil")); // another setup command
+    // Review of #379: free space is checked before each download, not only when the list was shown.
+    void aDownloadThatNoLongerFitsIsNotStarted() {
+        const ReadinessPlan plan = buildReadinessPlan(request(makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true")),
+                                                              {model("a.safetensors", m_bytes, "/a.safetensors", m_bytes.size())}), env());
         ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.freeSpace = [](const QString &) { return qint64(10); }; // the disk filled since the list was shown
         const ReadinessOutcome outcome = runReadinessPlan(plan, run);
         QVERIFY(!outcome.ok);
-        QCOMPARE(outcome.errors.first().code, QString("pack_invalid"));
-        QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
+        QCOMPARE(outcome.failedRow, 1);
+        QVERIFY(outcome.errors.first().message.contains("not enough free space"));
+        QVERIFY(m_server->requests().isEmpty());
     }
 
-    // #379: a window never waits on a clone: a git pack's row is pending until it is read, and a pending plan does not run.
-    void aGitPackIsLeftPendingWhenAskedAndAPendingPlanDoesNotRun() {
-        ReadinessRequest r = request(m_dir.filePath("x"), {});
-        r.packs.first().source = PackSource{PackSource::Kind::Git, "file:///nowhere/pack.git", "v1", {}};
-        ReadinessEnv e = env();
-        e.deferGit = true;
-        const ReadinessPlan plan = buildReadinessPlan(r, e);
-        QCOMPARE(plan.packs.size(), 1);
-        QVERIFY(plan.packs.first().pending);
-        QVERIFY(plan.resolving());
-        QVERIFY(plan.problems.isEmpty()); // nothing was cloned, so nothing failed yet
+    // What is installed is the copy the list showed: the source changing afterwards changes nothing.
+    void theInstalledPackIsTheCopyTheListShowed() {
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch shown"));
+        const ReadinessPlan plan = buildReadinessPlan(request(folder, {}), env());
+        makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch evil")); // another setup command, after the list
         ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
         const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY(outcome.ok);
+        QVERIFY(QFileInfo::exists(packs() + "/io.test.segment/shown"));
+        QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment/evil"));
+    }
+
+    // Review of #379: nothing is fetched before the yes. A git pack's row shows what the workflow records.
+    ReadinessRequest gitRequest(const QString &location) const {
+        ReadinessRequest r = request(m_dir.filePath("x"), {});
+        r.packs.first().source = PackSource{PackSource::Kind::Git, location, "v1", {}};
+        return r;
+    }
+    // A fetcher that copies `folder` in, counting its calls: nothing reaches a network.
+    std::function<Result<QString>(const PackSource &, const QString &)> fetcher(const QString &folder, int *calls) const {
+        return [folder, calls](const PackSource &, const QString &work) -> Result<QString> {
+            ++*calls;
+            QProcess::execute("cp", {"-r", folder, work});
+            return QString("abc123");
+        };
+    }
+
+    void aGitPackIsNotFetchedBeforeTheYes() {
+        int calls = 0;
+        ReadinessEnv e = env();
+        e.prompts.fetch = fetcher(makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true")), &calls);
+        const ReadinessPlan plan = buildReadinessPlan(gitRequest("https://example.com/p.git"), e);
+        QCOMPARE(plan.packs.size(), 1);
+        QVERIFY(plan.packs.first().pending);
+        QCOMPARE(calls, 0);
+        QVERIFY(plan.problems.isEmpty());
+        QCOMPARE(QDir(packs()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList()); // no staging either
+        QVERIFY(plan.lines().join("\n").contains("Details after download"));
+    }
+
+    void afterTheYesOnlyHttpsIsFetchedAndMorePermissionsAskOnce() {
+        int calls = 0;
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true")); // declares network
+        // A source that is not https is refused without a fetch.
+        ReadinessPlan plan = buildReadinessPlan(gitRequest("file:///somewhere/p.git"), env());
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.fetch = fetcher(folder, &calls);
+        ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY(!outcome.ok);
+        QCOMPARE(calls, 0);
+        QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
+
+        // https: fetched after the yes; it declares network, which was not shown, so it asks; No skips that row alone.
+        plan = buildReadinessPlan(gitRequest("https://example.com/p.git"), env());
+        QStringList asked;
+        run.allowMore = [&](const PackSummary &, const QStringList &permissions) { asked = permissions; return false; };
+        outcome = runReadinessPlan(plan, run);
+        QCOMPARE(calls, 1);
+        QCOMPARE(asked, QStringList{"network"});
         QVERIFY(!outcome.ok);
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
+        QCOMPARE(QDir(packs()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList()); // staging gone
+
+        // Allowed: installed from that clone, trusted, no further question.
+        int questions = 0;
+        run.allowMore = [&](const PackSummary &, const QStringList &) { ++questions; return true; };
+        outcome = runReadinessPlan(plan, run);
+        QVERIFY(outcome.ok);
+        QCOMPARE(questions, 1);
+        QVERIFY(m_trust->isTrusted("io.test.segment", "1.0.0"));
+    }
+
+    void aPackThatIsNotTheOneNamedIsRefused() {
+        int calls = 0;
+        const QString other = makePack(m_dir.filePath("source"), "io.test.other", setupOf("true"));
+        // Fetched after the yes: another id than the workflow names.
+        const ReadinessPlan git = buildReadinessPlan(gitRequest("https://example.com/p.git"), env());
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.fetch = fetcher(other, &calls);
+        run.allowMore = [](const PackSummary &, const QStringList &) { return true; };
+        const ReadinessOutcome outcome = runReadinessPlan(git, run);
+        QVERIFY(!outcome.ok);
+        QCOMPARE(outcome.errors.first().code, QString("pack_invalid"));
+        QVERIFY(!QFileInfo::exists(packs() + "/io.test.other"));
+        // A folder: refused when the plan is built.
+        const ReadinessPlan folder = buildReadinessPlan(request(other, {}), env());
+        QVERIFY(folder.packs.isEmpty());
+        QCOMPARE(folder.problems.size(), 1);
+    }
+
+    void aPackWithASymbolicLinkIsRefused() {
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true"));
+        QVERIFY(QFile::link("/etc/passwd", folder + "/tool/leak"));
+        const ReadinessPlan plan = buildReadinessPlan(request(folder, {}), env());
+        QVERIFY(plan.packs.isEmpty());
+        QVERIFY(!plan.problems.isEmpty());
+        QVERIFY(plan.problems.first().message.contains("symbolic link") || plan.problems.first().hint.contains("symbolic"));
     }
 
     void anInstalledPackThatIsNotTrustedIsTrustedByTheSameYes() {

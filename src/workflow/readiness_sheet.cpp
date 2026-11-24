@@ -29,6 +29,17 @@ QString stateName(RowState state) {
     return {};
 }
 
+QString packSummaryLine(const ReadinessPack &row, const QString &from) {
+    const PackSummary &p = row.pack;
+    QStringList parts;
+    if (!from.isEmpty() && row.installs())
+        parts << ReadinessSheet::tr("from %1").arg(from);
+    parts << ReadinessSheet::tr("declares %1").arg(p.permissions.isEmpty() ? ReadinessSheet::tr("nothing") : p.permissions.join(QStringLiteral(", ")));
+    if (row.hasEnvironment())
+        parts << ReadinessSheet::tr("runs %1").arg(displayCommand(p.setupCommand));
+    return parts.join(QStringLiteral(" · "));
+}
+
 QString joinParts(const QStringList &parts) {
     if (parts.size() < 2)
         return parts.join(QString());
@@ -43,7 +54,6 @@ ReadinessSheet::ReadinessSheet(const Registry *registry, QString trustPath, Requ
 }
 
 ReadinessSheet::~ReadinessSheet() {
-    stopPreview();
     if (m_thread) {
         m_cancel = true;
         m_thread->wait();
@@ -58,105 +68,47 @@ QString ReadinessSheet::rootTitle(const QString &root, const QString &own) {
     return root.startsWith(home + QLatin1Char('/')) ? QLatin1Char('~') + root.mid(home.size()) : root;
 }
 
-bool ReadinessSheet::needed() const {
-    FileHashes hashes(FileHashes::defaultPath());
-    TrustStore trust(m_trustPath);
-    ReadinessEnv env{ModelLibrary::current(m_registry)};
-    env.registry = m_registry;
-    env.hashes = &hashes;
-    env.trust = &trust;
-    env.packsDir = packsDir();
-    return !buildReadinessPlan(m_request(), env).empty();
+ModelLibrary ReadinessSheet::library() const {
+    Settings settings = currentSettings();
+    if (!m_picked.isEmpty() && !ModelLibrary::roots(settings).contains(m_picked)) {
+        settings.modelPaths << m_picked;
+        settings.modelFolderKinds.insert(m_picked, ModelLibrary::kLayout);
+    }
+    ModelLibrary library(ModelLibrary::roots(settings), m_registry, ModelLibrary::rootKinds(settings));
+    QStringList inherited;
+    for (const SearchPath &root : ModelLibrary::taggedRoots(settings))
+        if (root.inherited)
+            inherited << root.path;
+    library.setInheritedRoots(inherited);
+    if (!settings.downloadFolder.isEmpty())
+        library.setDownloadRoot(QDir::cleanPath(expandHome(settings.downloadFolder)));
+    if (!m_destination.isEmpty())
+        library.setDownloadRoot(m_destination);
+    return library;
 }
 
 void ReadinessSheet::rebuild() {
     FileHashes hashes(FileHashes::defaultPath());
     TrustStore trust(m_trustPath);
     const ModelCatalog catalog = ModelCatalog::load();
-    ReadinessEnv env{ModelLibrary::current(m_registry)};
+    ReadinessEnv env{library()};
     env.registry = m_registry;
     env.hashes = &hashes;
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
-    env.deferGit = true; // a clone never runs on the window's thread
-    stopPreview();
-    ++m_generation;
     m_plan = buildReadinessPlan(m_request(), env);
     m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
     m_details = QStringList(m_plan.rowCount());
     m_fractions = QList<double>(m_plan.rowCount(), 0.0);
-    if (m_plan.resolving())
-        startPreview();
-}
-
-void ReadinessSheet::stopPreview() {
-    if (!m_preview)
-        return;
-    m_previewCancel = true;
-    m_preview->wait();
-    delete m_preview;
-    m_preview = nullptr;
-}
-
-void ReadinessSheet::startPreview() {
-    QList<QPair<QString, PackSource>> work;
-    for (const ReadinessPack &row : std::as_const(m_plan.packs))
-        if (row.pending)
-            work.append({row.pack.id, row.pack.source});
-    m_previewCancel = false;
-    const int generation = m_generation;
-    const QString folder = packsDir();
-    QPointer<ReadinessSheet> self(this);
-    std::atomic<bool> *cancel = &m_previewCancel; // the destructor waits for the thread
-    m_preview = QThread::create([self, work, generation, folder, cancel] {
-        for (const auto &[id, source] : work) {
-            PackPrompts prompts;
-            prompts.cancelled = [cancel] { return cancel->load(); };
-            const Result<PackSummary> summary = previewPack(source, folder, prompts);
-            if (cancel->load() || !self)
-                return;
-            const bool ok = summary.ok();
-            const PackSummary value = ok ? summary.value() : PackSummary();
-            const Errors errors = ok ? Errors() : summary.errors();
-            QMetaObject::invokeMethod(self.data(), [self, generation, id = id, ok, value, errors] {
-                if (self)
-                    self->resolved(generation, id, ok, value, errors);
-            }, Qt::QueuedConnection);
-        }
-    });
-    m_preview->start();
-}
-
-void ReadinessSheet::resolved(int generation, const QString &id, bool ok, const PackSummary &summary, const Errors &errors) {
-    if (generation != m_generation)
-        return;
-    for (int i = 0; i < m_plan.packs.size(); ++i) {
-        if (!m_plan.packs.at(i).pending || m_plan.packs.at(i).pack.id != id)
-            continue;
-        if (ok) {
-            m_plan.packs[i].pack = summary;
-            m_plan.packs[i].pending = false;
-        } else {
-            // It cannot be installed: a line saying why, and the row goes (the rest of the list is unchanged).
-            for (Error e : errors) {
-                e.severity = Error::Severity::Warning;
-                m_plan.problems << e;
-            }
-            m_plan.packs.removeAt(i);
-            m_states.removeAt(i);
-            m_details.removeAt(i);
-            m_fractions.removeAt(i);
-        }
-        break;
-    }
-    m_plan.recount();
-    publish();
 }
 
 void ReadinessSheet::show() {
     if (m_thread)
         return;
+    m_destination.clear();
+    m_picked.clear();
+    m_question.clear();
     rebuild();
     m_phase = QStringLiteral("review");
     m_message.clear();
@@ -169,8 +121,6 @@ void ReadinessSheet::show() {
 void ReadinessSheet::close() {
     if (m_thread)
         return;
-    stopPreview(); // a pack being read is dropped with its staging folder
-    ++m_generation;
     m_open = false;
     publish();
 }
@@ -185,10 +135,7 @@ void ReadinessSheet::cancel() {
 void ReadinessSheet::changeDestination(const QString &root) {
     if (m_thread || m_phase != QLatin1String("review") || !m_plan.destinations.contains(root))
         return;
-    const ModelLibrary library = ModelLibrary::current(m_registry);
-    // Fugue's own folder is the default: no key.
-    changeSetting(settingsPath(), QStringLiteral("download_folder"),
-                  root == library.roots().value(0) ? QJsonValue(QJsonValue::Undefined) : QJsonValue(root));
+    m_destination = root; // written at the yes
     rebuild();
     publish();
 }
@@ -197,28 +144,27 @@ void ReadinessSheet::pickDestination(const QString &folder) {
     if (m_thread || m_phase != QLatin1String("review"))
         return;
     const QUrl url(folder);
-    const QString path = QDir::cleanPath(url.isLocalFile() ? url.toLocalFile() : folder);
+    const QString typed = url.isLocalFile() ? url.toLocalFile() : folder;
+    const QString path = QFileInfo(typed).canonicalFilePath(); // links and ".." resolved before it is compared or kept
     if (path.isEmpty() || !QFileInfo(path).isDir())
         return;
-    const Settings settings = currentSettings();
-    // A folder Fugue downloads into must be one it searches: it joins the model folders, in ComfyUI's layout.
-    if (!ModelLibrary::roots(settings).contains(path)) {
-        QStringList paths = settings.modelPaths;
-        paths << path;
-        if (hasErrors(changeSetting(settingsPath(), QStringLiteral("model_paths"), QJsonArray::fromStringList(paths))))
-            return;
-        QJsonObject kinds;
-        for (auto it = settings.modelFolderKinds.cbegin(); it != settings.modelFolderKinds.cend(); ++it)
-            kinds.insert(it.key(), it.value());
-        kinds.insert(path, ModelLibrary::kLayout);
-        changeSetting(settingsPath(), QStringLiteral("model_folder_kinds"), kinds);
+    m_picked.clear();
+    for (const QString &root : ModelLibrary::roots(currentSettings()))
+        if (QFileInfo(root).canonicalFilePath() == path)
+            m_destination = root;
+    if (m_destination.isEmpty() || QFileInfo(m_destination).canonicalFilePath() != path) {
+        m_picked = path;
+        m_destination = path;
     }
     rebuild();
-    changeDestination(path);
+    publish();
 }
 
 void ReadinessSheet::start() {
-    if (m_thread || m_phase != QLatin1String("review") || m_plan.empty() || m_plan.resolving())
+    if (m_thread || m_phase != QLatin1String("review") || m_plan.empty() || m_plan.lowSpace())
+        return;
+    // The yes also makes the folder choice the settings': a picked folder joins the model folders (ComfyUI layout) and the\n    // folder becomes download_folder. Nothing was written before this.
+    if (!savePlacement())
         return;
     m_cancel = false;
     m_phase = QStringLiteral("running");
@@ -226,8 +172,9 @@ void ReadinessSheet::start() {
     const ReadinessPlan plan = m_plan;
     const QString trustPath = m_trustPath;
     QPointer<ReadinessSheet> self(this);
+    std::atomic<bool> *cancel = &m_cancel; // the destructor waits for the thread
     // The packs' git and setup commands, and the downloads' event loop, block: a thread of their own.
-    m_thread = QThread::create([self, plan, trustPath] {
+    m_thread = QThread::create([self, plan, trustPath, cancel] {
         TrustStore trust(trustPath);
         FileHashes hashes(FileHashes::defaultPath());
         ReadinessRun run(packsDir(), &trust, &hashes);
@@ -246,7 +193,10 @@ void ReadinessSheet::start() {
                 }
             });
         };
-        run.cancelled = [self] { return !self || self->m_cancel.load(); };
+        run.cancelled = [cancel] { return cancel->load(); };
+        run.allowMore = [self](const PackSummary &pack, const QStringList &permissions) {
+            return self && self->askMore(pack, permissions);
+        };
         const ReadinessOutcome outcome = runReadinessPlan(plan, run);
         tell([outcome](ReadinessSheet &sheet) { sheet.ended(outcome); });
     });
@@ -255,6 +205,57 @@ void ReadinessSheet::start() {
         m_thread = nullptr;
     });
     m_thread->start();
+}
+
+bool ReadinessSheet::savePlacement() {
+    Errors errors;
+    const Settings settings = currentSettings();
+    if (!m_picked.isEmpty() && !ModelLibrary::roots(settings).contains(m_picked)) {
+        QStringList paths = settings.modelPaths;
+        paths << m_picked;
+        errors += changeSetting(settingsPath(), QStringLiteral("model_paths"), QJsonArray::fromStringList(paths));
+        QJsonObject kinds;
+        for (auto it = settings.modelFolderKinds.cbegin(); it != settings.modelFolderKinds.cend(); ++it)
+            kinds.insert(it.key(), it.value());
+        kinds.insert(m_picked, ModelLibrary::kLayout);
+        errors += changeSetting(settingsPath(), QStringLiteral("model_folder_kinds"), kinds);
+    }
+    if (!m_destination.isEmpty() && !hasErrors(errors)) {
+        // Fugue's own folder is the default: no key.
+        const bool own = m_destination == ModelLibrary::roots(settings).value(0);
+        errors += changeSetting(settingsPath(), QStringLiteral("download_folder"), own ? QJsonValue(QJsonValue::Undefined) : QJsonValue(m_destination));
+    }
+    if (hasErrors(errors)) {
+        m_message = tr("Could not remember the folder: %1").arg(errors.first().message);
+        publish();
+        return false;
+    }
+    m_message.clear();
+    return true;
+}
+
+// From the running thread: asks, on the sheet, whether a pack fetched after the yes may have the access it declares, and waits.
+bool ReadinessSheet::askMore(const PackSummary &pack, const QStringList &permissions) {
+    {
+        QMutexLocker lock(&m_mutex);
+        m_answer = -1;
+    }
+    const QVariantMap question{{"pack", pack.name.isEmpty() ? pack.id : pack.name},
+                               {"text", tr("%1 also wants %2 access. Allow it, or skip this pack?").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", ")))}};
+    QMetaObject::invokeMethod(this, [this, question] { m_question = question; publish(); }, Qt::QueuedConnection);
+    QMutexLocker lock(&m_mutex);
+    while (m_answer < 0 && !m_cancel.load())
+        m_asked.wait(&m_mutex, 100);
+    const bool allowed = m_answer == 1;
+    lock.unlock();
+    QMetaObject::invokeMethod(this, [this] { m_question.clear(); publish(); }, Qt::QueuedConnection);
+    return allowed;
+}
+
+void ReadinessSheet::answer(bool allow) {
+    QMutexLocker lock(&m_mutex);
+    m_answer = allow ? 1 : 0;
+    m_asked.wakeAll();
 }
 
 void ReadinessSheet::setRow(int row, RowState state, const QString &detail) {
@@ -269,10 +270,14 @@ void ReadinessSheet::setRow(int row, RowState state, const QString &detail) {
 
 void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
     m_phase = QStringLiteral("finished");
-    m_ok = outcome.ok;
+    m_ok = outcome.ok && m_plan.problems.isEmpty();
     m_retry = outcome.retry;
-    if (outcome.ok)
+    if (outcome.ok && !m_plan.problems.isEmpty())
+        m_message = tr("Done, but not everything could be made ready: the lines above say what is left.");
+    else if (outcome.ok)
         m_message = tr("Everything is ready.");
+    else if (!outcome.cancelled && outcome.failedRow < 0)
+        m_message = tr("Some rows were skipped, so it is not everything: they are listed below.");
     else if (outcome.cancelled)
         m_message = tr("Stopped. Nothing half-done is left: what is not done yet is listed below.");
     else {
@@ -310,7 +315,8 @@ void ReadinessSheet::publish() {
                             .arg((m_plan.unknownSizes ? tr("at least ") : QString()) + ModelDownloads::sizeText(m_plan.downloadBytes))
                       : tr("download %n models", nullptr, n));
     }
-    view["headline"] = parts.isEmpty() ? tr("There is nothing to get ready.") : tr("Fugue will %1.").arg(joinParts(parts));
+    view["headline"] = parts.isEmpty() ? (m_plan.problems.isEmpty() ? tr("There is nothing to get ready.") : tr("Nothing here can be made ready from this machine."))
+                                       : tr("Fugue will %1.").arg(joinParts(parts));
     QVariantList packs;
     for (int i = 0; i < m_plan.packs.size(); ++i) {
         const ReadinessPack &row = m_plan.packs.at(i);
@@ -319,6 +325,8 @@ void ReadinessSheet::publish() {
         if (!p.source.ref.isEmpty())
             from += tr(" at %1").arg(p.source.ref);
         packs << QVariantMap{{"id", p.id}, {"name", p.name.isEmpty() ? p.id : p.name}, {"version", p.version}, {"install", row.installs()}, {"pending", row.pending},
+                             {"summary", row.pending ? tr("From %1 · details after the download").arg(from.isEmpty() ? tr("its recorded source") : from)
+                                                     : packSummaryLine(row, from)},
                              {"source", from}, {"runtime", p.runtimeKinds.join(QStringLiteral(", "))},
                              {"permissions", p.permissions.isEmpty() ? tr("nothing (network, files, GPU)") : p.permissions.join(QStringLiteral(", "))},
                              {"setup", row.hasEnvironment() ? displayCommand(p.setupCommand) : QString()},
@@ -354,7 +362,7 @@ void ReadinessSheet::publish() {
         problems << (problem.hint.isEmpty() ? problem.message : problem.message + QLatin1Char(' ') + problem.hint);
     view["problems"] = problems;
     view["empty"] = m_plan.empty();
-    view["resolving"] = m_plan.resolving();
+    view["question"] = m_question;
     view["ok"] = m_ok;
     view["message"] = m_message;
     view["retry"] = m_retry;

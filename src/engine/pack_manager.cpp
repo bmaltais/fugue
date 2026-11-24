@@ -42,13 +42,6 @@ Result<bool> ask(const std::function<Answer(const PackSummary &)> &prompt, const
     return answer == Answer::Yes;
 }
 
-bool looksLikeGitUrl(const QString &text) {
-    static const QRegularExpression scp(QStringLiteral("^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^ ]+$"));
-    for (const char *scheme : {"https://", "ssh://", "git://", "file://"})
-        if (text.startsWith(QLatin1String(scheme)))
-            return true;
-    return scp.match(text).hasMatch();
-}
 
 // Safe as a folder name; whether it is a good pack id is the loader's check (summarizePack).
 // A folder name may end in @<major> (6.6).
@@ -190,6 +183,29 @@ QString makeStaging(const QString &packsDir) {
     return QDir().mkpath(staging) ? staging : QString();
 }
 
+// The bytes under a folder, links not followed.
+qint64 treeBytes(const QString &folder) {
+    qint64 total = 0;
+    QDirIterator it(folder, QDir::NoDotAndDotDot | QDir::AllEntries | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        if (it.fileInfo().isFile() && !it.fileInfo().isSymLink())
+            total += it.fileInfo().size();
+    }
+    return total;
+}
+
+// The first symbolic link under a folder (the .git folder aside), or empty.
+QString firstSymlink(const QString &folder) {
+    QDirIterator it(folder, QDir::NoDotAndDotDot | QDir::AllEntries | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        if (it.fileInfo().isSymLink())
+            return it.filePath();
+    }
+    return {};
+}
+
 struct CopyBudget {
     qint64 bytes = 0;
     int files = 0;
@@ -212,11 +228,9 @@ bool copyTree(const QString &from, const QString &to, QString *problem, CopyBudg
             return false;
         }
         if (info.isSymLink()) {
-            // Copied as the link it is: the loader refuses symbolic node folders.
-            if (!QFile::link(QFile::symLinkTarget(info.filePath()), target)) {
-                *problem = QStringLiteral("cannot copy the link %1").arg(info.filePath());
-                return false;
-            }
+            // A link could lead out of the pack, to a file the person never saw: a pack holds none.
+            *problem = QStringLiteral("it holds a symbolic link (%1)").arg(info.filePath());
+            return false;
         } else if (info.isDir()) {
             if (!copyTree(info.filePath(), target, problem, budget))
                 return false;
@@ -276,6 +290,11 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
         CopyBudget budget;
         if (!copyTree(from, work, &problem, budget))
             return cleanFail(fail(QStringLiteral("permission_denied"), QStringLiteral("Copying the pack failed: %1.").arg(problem)));
+    } else if (prompts.fetch) {
+        const Result<QString> fetched = prompts.fetch(wanted, work);
+        if (!fetched)
+            return cleanFail(fetched.error());
+        staged.source.commit = fetched.value();
     } else {
         // Only the schemes of looksLikeGitUrl run (git's other transports, `ext::` and the
         // remote helpers, are off), and `--` ends the options.
@@ -288,6 +307,9 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
         if (!cloned.ok)
             return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("git could not clone %1.").arg(wanted.location),
                                   cloned.output.trimmed().isEmpty() ? QStringLiteral("Is git installed, and is the address right?") : cloned.output.trimmed()));
+        if (prompts.maxCloneBytes > 0 && treeBytes(work) > prompts.maxCloneBytes)
+            return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("%1 is larger than a pack may be (%2 MB).").arg(wanted.location).arg(prompts.maxCloneBytes / 1000000),
+                                  QStringLiteral("A pack is a few files; this address holds more.")));
         // A pin is a tag or a commit, never a branch: a branch moves under the user's feet.
         const bool isTag = runProgram(QStringLiteral("git"), {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("--quiet"),
                                                               QStringLiteral("refs/tags/%1^{commit}").arg(wanted.ref)}, work, nullptr, true).ok;
@@ -305,6 +327,13 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
         staged.source.commit = head.output.trimmed();
         QDir(work + QStringLiteral("/.git")).removeRecursively();
     }
+    if (wanted.kind == PackSource::Kind::Git) {
+        if (prompts.maxCloneBytes > 0 && treeBytes(work) > prompts.maxCloneBytes)
+            return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("%1 is larger than a pack may be (%2 MB).").arg(wanted.location).arg(prompts.maxCloneBytes / 1000000)));
+        if (const QString link = firstSymlink(work); !link.isEmpty())
+            return cleanFail(fail(QStringLiteral("pack_invalid"), QStringLiteral("The pack holds a symbolic link (%1).").arg(link),
+                                  QStringLiteral("A pack holds no links: they could lead out of it.")));
+    }
     // The pack is `work`, to be named after its id.
     const Result<QJsonObject> json = readPackJson(work);
     if (!json)
@@ -321,6 +350,25 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
 }
 
 } // namespace
+
+bool looksLikeGitUrl(const QString &text) {
+    static const QRegularExpression scp(QStringLiteral("^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^ ]+$"));
+    for (const char *scheme : {"https://", "ssh://", "git://", "file://"})
+        if (text.startsWith(QLatin1String(scheme)))
+            return true;
+    return scp.match(text).hasMatch();
+}
+
+bool samePack(const PackSummary &shown, const PackSummary &now) {
+    return shown.id == now.id && shown.version == now.version && shown.setupCommand == now.setupCommand
+           && shown.permissions == now.permissions && shown.runtimeKinds == now.runtimeKinds && shown.nodes == now.nodes
+           && (shown.source.commit.isEmpty() || shown.source.commit == now.source.commit);
+}
+
+PreparedPack::~PreparedPack() {
+    if (!staging.isEmpty())
+        QDir(staging).removeRecursively();
+}
 
 QString displayCommand(const QStringList &command) {
     static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_@%+=:,./-]+$"));
@@ -482,25 +530,50 @@ Error inheritedRefusal(const QString &folderName, const QString &inheritedFolder
 
 } // namespace
 
-Result<PackSummary> previewPack(const PackSource &source, const QString &packsDir, const PackPrompts &prompts) {
+Result<std::shared_ptr<PreparedPack>> preparePack(const PackSource &source, const QString &packsDir, const PackPrompts &prompts) {
     if (hasControl(source.location) || hasControl(source.ref))
         return fail(QStringLiteral("usage"), QStringLiteral("The address or the ref has control characters."));
-    if (source.kind == PackSource::Kind::Path) {
-        Result<PackSummary> summary = summarizePack(source.location);
-        if (summary)
-            summary->source = PackSource{PackSource::Kind::Path, realPath(source.location), {}, {}};
-        return summary;
+    if (source.kind == PackSource::Kind::Git) {
+        if (!looksLikeGitUrl(source.location))
+            return fail(QStringLiteral("usage"), QStringLiteral("%1 is not a git address.").arg(source.location),
+                        QStringLiteral("Use https://, ssh://, git:// or file://."));
+        if (source.ref.isEmpty() || source.ref.startsWith('-'))
+            return fail(QStringLiteral("usage"), QStringLiteral("A git pack must be pinned to a tag or a commit."), QStringLiteral("Add a ref."));
     }
-    if (source.ref.isEmpty() || source.ref.startsWith('-'))
-        return fail(QStringLiteral("usage"), QStringLiteral("A git pack must be pinned to a tag or a commit."), QStringLiteral("Add a ref."));
-    const Result<Staged> staged = stage(source, packsDir, prompts);
+    PackSource wanted = source;
+    if (wanted.kind == PackSource::Kind::Path)
+        wanted.location = realPath(wanted.location);
+    Result<Staged> staged = stage(wanted, packsDir, prompts);
     if (!staged)
         return staged.errors();
+    auto prepared = std::make_shared<PreparedPack>();
+    prepared->staging = staged->staging;
+    prepared->folder = staged->folder;
+    prepared->source = staged->source;
     Result<PackSummary> summary = summarizePack(staged->folder);
-    if (summary)
-        summary->source = staged->source;
-    QDir(staged->staging).removeRecursively();
-    return summary;
+    if (!summary)
+        return summary.errors();
+    summary->source = staged->source;
+    const int major = Version::parse(summary->version)->major; // summarizePack loaded it
+    if (inSearchPaths(summary->id, major, packsDir))
+        return Error(fail(QStringLiteral("pack_exists"),
+                          QStringLiteral("The pack %1 is already installed at major version %2.").arg(summary->id).arg(major),
+                          QStringLiteral("`fugue pack update %1` fetches it again; `fugue pack remove %1` removes it. "
+                                         "Another major version installs beside it.").arg(summary->id)));
+    summary->folder = targetFolder(summary->id, major, packsDir);
+    prepared->summary = *summary;
+    return prepared;
+}
+
+Result<PackAdded> installPrepared(const std::shared_ptr<PreparedPack> &prepared, const QString &packsDir, TrustStore &trust,
+                                  const PackPrompts &prompts) {
+    const Result<bool> yes = ask(prompts.install, prepared->summary, QStringLiteral("Installing a pack"));
+    if (!yes)
+        return yes.errors();
+    if (!*yes)
+        return Error(fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not installed.")));
+    const Staged staged{prepared->staging, prepared->folder, prepared->source};
+    return install(staged, prepared->summary, packsDir, prepared->summary.folder, prompts, false, trust);
 }
 
 Result<PackAdded> addPack(const QString &location, const QString &ref, const QString &packsDir, TrustStore &trust,
@@ -527,31 +600,10 @@ Result<PackAdded> addPack(const QString &location, const QString &ref, const QSt
                     QStringLiteral("Use a folder, or https://, ssh://, git:// or file:// with --ref."));
     }
 
-    Result<Staged> staged = stage(source, packsDir, prompts);
-    if (!staged)
-        return staged.errors();
-    const auto done = [&](Result<PackAdded> result) {
-        QDir(staged->staging).removeRecursively();
-        return result;
-    };
-    Result<PackSummary> summary = summarizePack(staged->folder);
-    if (!summary)
-        return done(summary.errors());
-    summary->source = staged->source;
-    const int major = Version::parse(summary->version)->major; // summarizePack loaded it
-    if (inSearchPaths(summary->id, major, packsDir))
-        return done(Error(fail(QStringLiteral("pack_exists"),
-                               QStringLiteral("The pack %1 is already installed at major version %2.").arg(summary->id).arg(major),
-                               QStringLiteral("`fugue pack update %1` fetches it again; `fugue pack remove %1` removes it. "
-                                              "Another major version installs beside it.").arg(summary->id))));
-    const QString target = targetFolder(summary->id, major, packsDir);
-    summary->folder = target;
-    const Result<bool> yes = ask(prompts.install, *summary, QStringLiteral("Installing a pack"));
-    if (!yes)
-        return done(yes.errors());
-    if (!*yes)
-        return done(Error(fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not installed."))));
-    return done(install(*staged, *summary, packsDir, target, prompts, false, trust));
+    const Result<std::shared_ptr<PreparedPack>> prepared = preparePack(source, packsDir, prompts);
+    if (!prepared)
+        return prepared.errors();
+    return installPrepared(*prepared, packsDir, trust, prompts);
 }
 
 Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, const QString &packsDir, TrustStore &trust,

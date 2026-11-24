@@ -123,7 +123,7 @@ class TestWorkflows : public QObject {
 private slots:
     // #379: a workflow that needs a pack from git opens the Get ready sheet by itself; the clone runs off the window's thread,
     // the row reads "pending" until it is done and the yes waits; closing during a clone leaves no staging folder.
-    void aGitPacksRowIsReadOffTheWindowsThreadAndCloseCleansUp() {
+    void aGitPackOpensTheSheetAndFetchesNothingBeforeTheYes() {
         Fixture f;
         const QString repo = f.file("repo");
         const QString id = "io.example.gitpack";
@@ -154,13 +154,12 @@ private slots:
         QVERIFY(f.workflows->openPath(f.file("needs.fugue")));
         ReadinessSheet *sheet = f.workflows->readiness();
         QVERIFY(sheet->isOpen()); // by itself
-        QVERIFY(sheet->view().value("resolving").toBool());
-        QTRY_VERIFY(!sheet->view().value("resolving").toBool());
+        // Nothing was fetched: no clone, no staging folder, and the row shows what the workflow records.
+        QCOMPARE(QDir(packsDir()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList());
         const QVariantMap row = sheet->view().value("packs").toList().first().toMap();
-        QCOMPARE(row.value("setup").toString(), QString("true"));
-        QVERIFY(!QFileInfo::exists(packsDir() + "/" + id)); // nothing before the yes
-
-        sheet->show(); // read again, and closed before it is done
+        QVERIFY(row.value("pending").toBool());
+        QVERIFY(row.value("summary").toString().contains("details after the download"));
+        QVERIFY(row.value("summary").toString().contains("file://"));
         sheet->close();
         QVERIFY(!sheet->isOpen());
         QCOMPARE(QDir(packsDir()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList());

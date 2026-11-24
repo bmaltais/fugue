@@ -8,6 +8,8 @@
 
 #include <unistd.h>
 
+#include <memory>
+
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/model_catalog.h"
@@ -172,11 +174,14 @@ Reply packAdd(const Command &command, Context &context) {
     TrustStore trust;
     // One question for the install, its setup command (shown in the same list) and the trust (#379).
     PackPrompts prompts = terminalPrompts(context);
-    prompts.install = [](const PackSummary &pack) {
+    auto shown = std::make_shared<PackSummary>();
+    prompts.install = [shown](const PackSummary &pack) {
+        *shown = pack;
         return prompt(pack, QStringLiteral("Install this pack%1 and trust it?").arg(pack.setupCommand.isEmpty() ? QString() : QStringLiteral(", run its setup")));
     };
     prompts.runSetup = [](const PackSummary &) { return Answer::Yes; }; // shown above, covered by that yes
-    prompts.trust = [](const PackSummary &) { return Answer::Yes; };
+    // Trusted only if, after the setup, it is still the pack that was shown.
+    prompts.trust = [shown](const PackSummary &now) { return samePack(*shown, now) ? Answer::Yes : Answer::No; };
     const Result<PackAdded> added = addPack(command.positionals.at(0), command.value("ref"), packsDir(), trust, prompts);
     if (!added)
         return Reply::failure(added.errors());
@@ -186,7 +191,10 @@ Reply packAdd(const Command &command, Context &context) {
     // Beside another major of the pack its folder is <id>@<major>, which the pack commands take.
     const Result<PackSummary> trusted = trustPack(QFileInfo(added->pack.folder).fileName(), packsDir(), trust, prompts);
     if (!trusted)
-        return Reply::failure(trusted.errors());
+        return Reply::failure(trusted.errors().first().code == QLatin1String("cancelled")
+                                  ? Errors{makeError(QStringLiteral("pack_invalid"), QStringLiteral("The pack changed while it was set up, so it was installed but not trusted."),
+                                                     QStringLiteral("Look at it, then `fugue pack trust %1`.").arg(added->pack.id))}
+                                  : trusted.errors());
     text += QStringLiteral(" Trusted it.");
     Reply reply = Reply::success(addedJson(*added), text);
     reply.errors = added.warnings();
@@ -207,17 +215,27 @@ Reply prepare(const ReadinessRequest &request, Context &context, const QString &
     env.packsDir = packsDir();
     env.catalog = &catalog;
     env.prompts.log = [&context](const QString &line) { context.log(QStringLiteral("  ") + line); };
-    const ReadinessPlan plan = buildReadinessPlan(request, env);
-    Reply reply = Reply::success(QJsonObject{{"plan", plan.toJson()}, {"ready", plan.empty()}},
-                                 plan.empty() ? QStringLiteral("%1 is ready.").arg(what) : plan.lines().join(QLatin1Char('\n')));
-    for (Error problem : plan.problems)
-        reply.errors.append(problem);
-    if (plan.empty())
-        return reply;
-    if (!onTerminal())
-        return Reply::failure(Error(makeError(QStringLiteral("needs_confirmation"),
-                                              QStringLiteral("Getting %1 ready needs a person to agree, and there is no terminal to ask on.").arg(what),
-                                              QStringLiteral("The list is: %1 Run the same command in a terminal; no flag answers for the person.").arg(plan.headline()))));
+    const ReadinessPlan plan = buildReadinessPlan(request, env); // reads folders only: no network before the yes
+    // Problems are not "ready": what cannot be done is said and the exit is non-zero.
+    const auto problemErrors = [&plan] {
+        Errors errors;
+        for (Error problem : plan.problems) {
+            problem.severity = Error::Severity::Error;
+            errors.append(problem);
+        }
+        return errors;
+    };
+    if (plan.empty()) {
+        if (!plan.problems.isEmpty())
+            return Reply::failure(problemErrors());
+        return Reply::success(QJsonObject{{"plan", plan.toJson()}, {"ready", true}}, QStringLiteral("%1 is ready.").arg(what));
+    }
+    if (!onTerminal()) {
+        Error error = makeError(QStringLiteral("needs_confirmation"),
+                                QStringLiteral("Getting %1 ready needs a person to agree, and there is no terminal to ask on.").arg(what),
+                                QStringLiteral("The list is: %1 Run the same command in a terminal; no flag answers for the person.").arg(plan.headline()));
+        return Reply::failure(Errors{error} + problemErrors());
+    }
     for (const QString &line : plan.lines())
         say(line);
     if (plan.lowSpace())
@@ -227,6 +245,10 @@ Reply prepare(const ReadinessRequest &request, Context &context, const QString &
         return Reply::failure(makeError(QStringLiteral("cancelled"), QStringLiteral("Nothing was changed.")));
     ReadinessRun run{packsDir(), &trust, &hashes};
     run.log = env.prompts.log;
+    run.allowMore = [](const PackSummary &pack, const QStringList &permissions) {
+        say(QStringLiteral("  %1 also wants %2 access.").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", "))));
+        return yesNo(QStringLiteral("Allow it? (no skips this pack)")) == Answer::Yes;
+    };
     run.onRow = [&plan](int row, RowState state, const QString &detail) {
         if (state != RowState::Done && state != RowState::Failed)
             return;
@@ -237,11 +259,15 @@ Reply prepare(const ReadinessRequest &request, Context &context, const QString &
     const ReadinessOutcome outcome = runReadinessPlan(plan, run);
     if (!outcome.ok) {
         Errors errors = outcome.errors;
+        if (errors.isEmpty() && !outcome.cancelled)
+            errors << makeError(QStringLiteral("cancelled"), QStringLiteral("Some rows were skipped."));
         if (errors.isEmpty())
             errors << makeError(QStringLiteral("cancelled"), QStringLiteral("Stopped."));
         errors.first().hint = QStringLiteral("Not done: %1. Run the same command again; it lists only what is still missing.").arg(outcome.retry.join(QStringLiteral(", ")));
         return Reply::failure(errors);
     }
+    if (!plan.problems.isEmpty())
+        return Reply::failure(problemErrors());
     return Reply::success(QJsonObject{{"plan", plan.toJson()}, {"ready", true}, {"done", outcome.done}},
                           QStringLiteral("%1 is ready.").arg(what));
 }
@@ -261,14 +287,14 @@ Reply templatePrepare(const Command &command, Context &context) {
     const Result<Document> document = Document::loadFile(chosen->workflow);
     if (!document)
         return Reply::failure(document.errors());
-    return prepare(requestFor(*document, context.registry, chosen->carriedPacks), context, chosen->title);
+    return prepare(requestFor(*document, context.registry, chosen->carriedPacks, chosen->folder), context, chosen->title);
 }
 
 Reply workflowPrepare(const Command &command, Context &context) {
     const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
         return Reply::failure(document.errors());
-    return prepare(requestFor(*document, context.registry, {}), context, QFileInfo(command.positionals.at(0)).fileName());
+    return prepare(requestFor(*document, context.registry, {}, QFileInfo(command.positionals.at(0)).absolutePath()), context, QFileInfo(command.positionals.at(0)).fileName());
 }
 
 Reply packRemove(const Command &command, Context &context) {

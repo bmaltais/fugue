@@ -193,6 +193,20 @@ private slots:
         QVERIFY(QFileInfo(packs() + "/io.example.setup/made it").exists());
     }
 
+    // Review of #379: what cannot be made ready is not "ready": the problems are reported with a non-zero exit.
+    void prepareWithProblemsIsNotReady() {
+        const QString workflow = m_dir.filePath("nosource.fugue");
+        write(workflow, QJsonDocument(QJsonObject{
+            {"fugue", 1},
+            {"requires", QJsonObject{{"packs", QJsonObject{{"io.example.tools", QJsonObject{{"version", "1.0.0"}}}}}}},
+            {"graph", QJsonObject{{"nodes", QJsonObject{{"t", QJsonObject{{"type", "io.example.tools/tool"}, {"version", "1.0.0"},
+                                                                             {"inputs", QJsonObject{}}}}}}}}}).toJson());
+        const Outcome outcome = fugue({"workflow", "prepare", workflow, "--json"});
+        QCOMPARE(outcome.exitCode, 1);
+        QVERIFY(!outcome.json().value("ok").toBool());
+        QVERIFY(outcome.out.contains("pack_source_unknown"));
+    }
+
     // #379: `workflow prepare` lists what a workflow needs and asks once; with no terminal it is needs_confirmation.
     void prepareListsAndAsksOnce() {
         const QString source = makePack(m_dir.filePath("source3"), "io.example.tools", "1.0.0");

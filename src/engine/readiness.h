@@ -24,6 +24,7 @@
 #include <QStringList>
 
 #include <functional>
+#include <memory>
 
 #include "engine/error.h"
 #include "engine/model_download.h"
@@ -56,16 +57,22 @@ struct ReadinessRequest {
 
 // The packs a document uses (TrustStore::packsUsed), each with where to get it: the carried pack's
 // folder, else `requires.packs`' source and ref. A pack with neither has no source.
-ReadinessRequest requestFor(const Document &document, const Registry &registry, const QList<CarriedPack> &carried = {});
+// A relative folder source is read against `baseFolder` (the workflow's or the template's folder), never the working directory;
+// a source that is neither a folder nor a git address gives no source.
+ReadinessRequest requestFor(const Document &document, const Registry &registry, const QList<CarriedPack> &carried = {},
+                            const QString &baseFolder = {});
 
 struct ReadinessPack {
     enum class Action { Install, Trust }; // Trust: installed here already, not trusted yet
     Action action = Action::Install;
     PackSummary pack;   // what is shown and approved: for an install as it was previewed
     QString folderName; // Trust: the installed folder's name, which `trustPack` takes
-    // A git pack that is still being read (cloned to a staging folder to show its setup command): `pack` holds only what the
-    // workflow records (id, version, name, source). Not part of what may be approved until resolved.
+    // A git pack: before the yes nothing is fetched, so `pack` holds only what the workflow records (id, version, name, source)
+    // and the row says its details come after the download. After the yes it is cloned (https only, size capped), checked
+    // against that record, and installed from that clone.
     bool pending = false;
+    // A folder pack, copied to a staging folder when the plan was built; what is installed is that copy.
+    std::shared_ptr<PreparedPack> prepared;
 
     bool installs() const { return action == Action::Install; }
     bool hasEnvironment() const { return installs() && !pending && !pack.setupCommand.isEmpty(); }
@@ -96,9 +103,7 @@ struct ReadinessPlan {
     // pack that did not preview. Warnings, not part of the one yes.
     Errors problems;
 
-    // True while a pack row is still being read: the plan may be shown but not run.
-    bool resolving() const;
-    // The environment totals again, after a pending row was filled in (the builder calls it too).
+    // The environment totals again (the builder calls it).
     void recount();
     int installCount() const;
     int trustOnlyCount() const;
@@ -127,11 +132,8 @@ struct ReadinessEnv {
     const ModelCatalog *catalog = nullptr; // for a model's license; may be null
     // Free bytes where a folder is (a folder that does not exist yet counts as its parent); default QStorageInfo.
     std::function<qint64(const QString &)> freeSpace;
-    // What a git pack prints while it is previewed, and `cancelled` to stop it. May be null.
+    // What a folder pack's copy prints and `cancelled` to stop it. May be null.
     PackPrompts prompts;
-    // Leave a git pack's preview (a clone) to the caller: its row is `pending`, filled in later (previewPack) so a window
-    // never waits on the network. Folders are always read at once.
-    bool deferGit = false;
 };
 
 ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const ReadinessEnv &env);
@@ -154,6 +156,13 @@ struct ReadinessRun {
     std::function<bool()> cancelled;
     int retries = 5;
     int retryDelayMs = 2000;
+    // Brings a git pack in (tests: nothing reaches a network); null runs git.
+    std::function<Result<QString>(const PackSource &, const QString &)> fetch;
+    // A pack that was cloned after the yes declares more than the list could show (its permissions): asked once, for that
+    // row only. False skips the row. Null refuses.
+    std::function<bool(const PackSummary &pack, const QStringList &permissions)> allowMore;
+    // Free bytes where a folder is; default QStorageInfo. Checked before each download.
+    std::function<qint64(const QString &)> freeSpace;
 };
 
 struct ReadinessOutcome {

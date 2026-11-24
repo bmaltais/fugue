@@ -161,7 +161,8 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     m_readiness = new ReadinessSheet(m_registry, locations.trustPath,
                                      [this] {
                                          return m_current < 0 ? ReadinessRequest()
-                                                              : requestFor(documentOf(m_current), *m_registry, m_tabs[size_t(m_current)].carried);
+                                                              : requestFor(documentOf(m_current), *m_registry, m_tabs[size_t(m_current)].carried,
+                                                                        m_tabs[size_t(m_current)].path.isEmpty() ? QString() : QFileInfo(m_tabs[size_t(m_current)].path).absolutePath());
                                      },
                                      this);
     // What was installed, trusted or downloaded changes what the banner lacks (the registry reload does the same for packs).

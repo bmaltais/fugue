@@ -998,9 +998,18 @@ holding that node's `node.json`.
   **ReadinessPlan** (`engine/readiness.h`), built from the workflow's nodes and `requires`, a template's carried packs and a package's
   contents. The window's "Get ready" sheet ([11.10](#1110-templates)) and `fugue template prepare` / `fugue workflow prepare` show that
   same plan and run it with the same executor: one yes covers each pack's install, its trust, its setup command and the model downloads.
-  Nothing happens without that yes, a pack **update** or a pack that declares **more** than the person saw
-  still asks on its own, and the executor refuses a pack that differs from the one the list showed (another version, setup command or
-  permissions: `pack_invalid`).
+  Nothing happens without that yes, a pack **update** still asks on its own, and the executor refuses a pack that differs from the one
+  the list showed (another version, setup command or permissions: `pack_invalid`).
+  **Before the yes nothing is fetched or written**: a folder pack (carried, or a local source resolved against the workflow's own
+  folder) is copied to a staging folder, read in full (it must load, hold no symbolic link, and be the id and major the workflow
+  names), and the yes installs that same copy; a git pack's row shows only what the workflow records (id, version, source, pinned
+  ref) and "details after the download". **After the yes** a git pack from a workflow or package is cloned over https only (ssh, git
+  and file only when a person types them into `pack add` or Settings > Packs), at most 200 MB, checked against the id and major the
+  workflow names, and if it declares permissions (network, files, GPU) that the list could not show it asks once, for that row alone
+  (**Allow** or **Skip**). A pack installed but not trusted is removed again, and the list says so. Free space is checked before each
+  download. A list with problems (a pack with no source, a folder that is the wrong pack) is not "ready": the problems are reported
+  and `prepare` exits non-zero. Folders chosen on the sheet (a picked model folder, **Models go into**) are written to the settings
+  at the yes, not before.
 - Updates are explicit and pinned. Nothing updates on its own. `pack update` fetches the pack
   again at the same ref, or at `--ref`, shows the new version and asks; a pack already at that
   commit is left alone. A new version asks for trust again. A pack that was copied in by hand

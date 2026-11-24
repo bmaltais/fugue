@@ -107,7 +107,7 @@ Question {
                             }
                             Label {
                                 color: packRow.modelData.state === "failed" ? sheet.look.error : sheet.look.label
-                                text: packRow.modelData.pending ? qsTr("Reading the pack…") : sheet.stateText(packRow.modelData.state)
+                                text: sheet.stateText(packRow.modelData.state)
                             }
                             ToolButton {
                                 objectName: "getReadyDetails-" + packRow.modelData.id
@@ -116,6 +116,13 @@ Question {
                                 focusPolicy: Qt.NoFocus
                                 onClicked: sheet.toggle(packRow.key)
                             }
+                        }
+                        Label {
+                            objectName: "getReadySummary-" + packRow.modelData.id
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: sheet.look.label
+                            text: packRow.modelData.summary
                         }
                         Label {
                             visible: sheet.expanded[packRow.key] === true
@@ -231,13 +238,37 @@ Question {
                 text: modelData
             }
         }
+        // A pack fetched after the yes declares access the list could not show: asked once, for that row alone.
+        ColumnLayout {
+            objectName: "getReadyQuestion"
+            visible: sheet.view.question.text !== undefined
+            Layout.fillWidth: true
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.bold: true
+                text: sheet.view.question.text ?? ""
+            }
+            QuestionAnswers {
+                ThemedButton {
+                    objectName: "getReadySkip"
+                    text: qsTr("Skip")
+                    onClicked: sheet.sheetModel.answer(false)
+                }
+                ThemedButton {
+                    objectName: "getReadyAllow"
+                    text: qsTr("Allow")
+                    onClicked: sheet.sheetModel.answer(true)
+                }
+            }
+        }
         Label {
             objectName: "getReadyMessage"
-            visible: sheet.phase === "finished"
+            visible: sheet.view.message !== ""
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: sheet.view.ok ? sheet.look.text : sheet.look.error
-            text: sheet.view.message + (sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Get ready again to retry; it lists only what is left.").arg(sheet.view.retry.join(", ")))
+            text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Get ready again to retry; it lists only what is left.").arg(sheet.view.retry.join(", ")))
         }
 
         QuestionAnswers {
@@ -262,7 +293,7 @@ Question {
             ThemedButton {
                 objectName: "getReadyAll"
                 visible: sheet.phase === "review" && !sheet.view.empty
-                enabled: !sheet.view.lowSpace && !sheet.view.resolving
+                enabled: !sheet.view.lowSpace
                 highlighted: true
                 text: sheet.view.packs.length > 0 ? qsTr("Install and trust all") : qsTr("Download all")
                 onClicked: sheet.sheetModel.start()

@@ -9,9 +9,11 @@
 // QML only shows and answers. Nothing is installed, trusted, set up or downloaded unless start() is called, which the
 // sheet's "Install and trust all" button does.
 
+#include <QMutex>
 #include <QObject>
 #include <QString>
 #include <QThread>
+#include <QWaitCondition>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -19,6 +21,7 @@
 #include <atomic>
 #include <functional>
 
+#include "engine/model_library.h"
 #include "engine/readiness.h"
 
 namespace fugue {
@@ -46,8 +49,6 @@ public:
     bool isOpen() const { return m_open; }
     QString phase() const { return m_phase; }
     QVariantMap view() const { return m_view; }
-    // True when there is something to get ready for the shown workflow (a plan with rows), read now.
-    bool needed() const;
 
     // Builds the list and opens the sheet; with nothing to do it says so.
     Q_INVOKABLE void show();
@@ -56,10 +57,13 @@ public:
     // Stops a run (the rows not done stay undone); closes a review.
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void close();
-    // Models go into `root`, one of the choices: remembered as the settings' download_folder.
+    // Models go into `root`, one of the choices. Only the list changes: the settings are written at the yes, not before.
     Q_INVOKABLE void changeDestination(const QString &root);
-    // A folder picked (a path or file URL): added to the model folders as a ComfyUI-layout root, then used.
+    // A folder picked (a path or file URL): offered as a ComfyUI-layout model folder and chosen. At the yes it is added to the
+    // model folders and becomes the settings' download_folder; before that nothing is written.
     Q_INVOKABLE void pickDestination(const QString &folder);
+    // The person's answer to the question a pack asks mid-run (view.question): Allow or Skip.
+    Q_INVOKABLE void answer(bool allow);
     // A model folder as the sheet and Settings > Folders name it: "Fugue's models folder" for `own`, else the path with ~.
     static QString rootTitle(const QString &root, const QString &own);
     // For the tests: waits for a run to end.
@@ -74,10 +78,11 @@ signals:
 
 private:
     void rebuild();
-    // Reads the git packs still pending (a clone each) on a thread of its own; resolved() takes each result.
-    void startPreview();
-    void stopPreview(); // cancels it, waits (git is killed at once), and its staging folders are gone
-    void resolved(int generation, const QString &id, bool ok, const PackSummary &summary, const Errors &errors);
+    // The model folders as the settings have them, with a folder picked here and the one chosen, not yet written.
+    ModelLibrary library() const;
+    // Writes the folder choice (a picked model folder, download_folder) at the yes.
+    bool savePlacement();
+    bool askMore(const PackSummary &pack, const QStringList &permissions);
     void publish();
     void setRow(int row, RowState state, const QString &detail);
     void ended(const ReadinessOutcome &outcome);
@@ -96,9 +101,12 @@ private:
     QList<double> m_fractions;
     QVariantMap m_view;
     QThread *m_thread = nullptr;
-    QThread *m_preview = nullptr;
-    int m_generation = 0; // a result of an older plan is ignored
-    std::atomic<bool> m_previewCancel{false};
+    QString m_destination; // chosen with Change…, not yet written
+    QString m_picked;      // a folder picked with Pick a folder…, not yet a model folder
+    QVariantMap m_question;
+    QMutex m_mutex;
+    QWaitCondition m_asked;
+    int m_answer = -1;
     std::atomic<bool> m_cancel{false};
 };
 
