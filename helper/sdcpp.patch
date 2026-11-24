@@ -2194,20 +2194,6 @@ diff --git i/src/core/ggml_runner.cpp w/src/core/ggml_runner.cpp
      runner_ctx.conv3d_direct_enabled = conv3d_direct_enabled;
      runner_ctx.circular_x_enabled    = circular_x_enabled;
      runner_ctx.circular_y_enabled    = circular_y_enabled;
-diff --git i/src/model/vae/vae.hpp w/src/model/vae/vae.hpp
---- i/src/model/vae/vae.hpp
-+++ w/src/model/vae/vae.hpp
-@@ -177,7 +177,9 @@ public:
-         ggml_backend_t backend,
-         const std::string& weight_prefix                    = "",
-         std::shared_ptr<RunnerWeightManager> weight_manager = nullptr)
--        : version(version), weight_prefix(weight_prefix), GGMLRunner(backend, weight_manager) {}
-+        : version(version), weight_prefix(weight_prefix), GGMLRunner(backend, weight_manager) {
-+        fast_conv2d_enabled = true;  // a VAE's direct 2D convolutions may run as sd.conv2d_f16 (Fugue #382)
-+    }
- 
-     int get_scale_factor() {
-         return sd::vae::spatial_scale(version);
 diff --git i/src/core/cuda/conv2d_f16.cu w/src/core/cuda/conv2d_f16.cu
 new file mode 100644
 --- /dev/null
@@ -2598,13 +2584,14 @@ diff --git i/src/model/common/block.hpp w/src/model/common/block.hpp
 diff --git i/src/model/vae/auto_encoder_kl.hpp w/src/model/vae/auto_encoder_kl.hpp
 --- i/src/model/vae/auto_encoder_kl.hpp
 +++ w/src/model/vae/auto_encoder_kl.hpp
-@@ -749,6 +749,10 @@ struct AutoEncoderKL : public VAE {
+@@ -749,6 +749,11 @@ struct AutoEncoderKL : public VAE {
                                 const sd::Tensor<float>& z,
                                 bool decode_graph) override {
          GGML_ASSERT(!decode_only || decode_graph);
-+        // Fugue #382: sd.conv2d_f16 for decoding only. Encoding with it is 0.20 -> 0.12 s a 1024x1024
-+        // picture, but an edit's reference latents feed the DiT, which turns the small difference
-+        // into 37-38 dB on the edited picture; the encoder keeps ggml's convolution until that is chosen.
++        // Fugue #382: sd.conv2d_f16 for this VAE's decoding only (FLUX.1/2, Z-Image, SD: AutoEncoderKL;
++        // other VAEs keep ggml's convolution). Encoding with it is 0.20 -> 0.12 s a 1024x1024 picture,
++        // but an edit's reference latents feed the DiT, which turns the small difference into 37-38 dB
++        // on the edited picture; the encoder keeps ggml's convolution until that is chosen.
 +        fast_conv2d_enabled = decode_graph;
          auto get_graph = [&]() -> ggml_cgraph* {
              return build_graph(z, decode_graph);
