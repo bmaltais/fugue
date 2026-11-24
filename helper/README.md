@@ -6,7 +6,7 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | File | What it is |
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
-| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/api/fugue_stages.h`), the stage runs (`src/api/fugue_stage.cpp`: the cut of a rendered program, the `fugue::` built-ins, the reader of a clip's YUV4MPEG2), one hook each in `generate_images` and `generate_video`, and the opt-in soft-mask blend (see The seam) |
+| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/api/fugue_stages.h`), the stage runs (`src/api/fugue_stage.cpp`: the cut of a rendered program, the `fugue::` built-ins, the reader of a clip's YUV4MPEG2), one hook each in `generate_images` and `generate_video`, and the opt-in soft-mask blend (see The seam), and `ref_image_args` (`resize_before_vae=false` keeps each edit reference at its own size; `generation_image.cpp`) |
 | `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider) and `fugue-helper --serve-http` (the same over HTTP, for a paired host); the formats are at its top |
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |

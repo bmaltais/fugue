@@ -3222,6 +3222,25 @@ the engine's 1000). Denoise below 1 does not match: ComfyUI cuts the last `steps
 schedule (strength_args.h, #244), and on a 4 to 6 step schedule, crowded near 1, that leaves one or two steps. The table
 is on #341. Not yet changed: an opt-in helper reading of denoise as ComfyUI's cut.
 
+**Reference size (#342, 2026-11-23; the engine at 3b12781f).** Text Encode 1.1.0 has an advanced `reference_size`:
+`auto` (the default) or `exact`. At the pin the engine sizes every reference itself before the VAE, in
+`src/api/generation_image.cpp` (`reference_pixels`): to at most 1 MP and the output's area, aspect kept, each side
+rounded to a multiple of 16 (32 for Qwen-Image). The option `ref_image_args` that the older engine had
+(`image.cpp`, `resize_before_vae`) is gone with the DGL move, so the stage patch adds it back as the one setting
+`ref_image_args = "resize_before_vae=false"` (anything else but `resize_before_vae=true` is `input_invalid`): the
+reference then keeps the size the graph gave it, whatever the model. Text Encode sends it with `ref_images` when
+`exact`, and puts `reference_size` on the conditioning's descriptor, so the Sampler sends the same value (a request
+with `auto` or unset carries no `ref_image_args`, so it is as before). `exact` needs sides that are multiples of 16 (Resize to
+Megapixels gives that); the engine does not round them. The helper logs each reference's size before and after at
+the VAE (`reference N: WxH -> WxH`). Checked on the RTX 3090 (FLUX.2 Klein 9B Q8_0, 256 x 256, 4 steps, references
+320x192, 256x256 and 192x320): `exact` reached the VAE as 320x192, 256x256 and 192x320, in the encode and the
+sample; `auto` gave 656x400, 512x512 and 400x656 at the encode (no output size, so a megapixel) and 336x192, 256x256
+and 192x336 at the sample. **Reference indices.** FLUX.2 (`sd_version_is_flux2`) sets `ref_index_mode = increase`
+on the predictor (`generation_image.cpp`, the `increase` list in `image_references`, and `flux.hpp` forces it again
+for the model), the target takes time index 0, the references start at 1 (`rope.hpp`, `gen_flux_ids`, `x_index + 1`)
+and each takes `index * ref_index_scale` with the scale 10 for FLUX.2 (`flux.hpp`, the flux2 config), so the
+references get 10, 20, 30 in the order they are sent, as ComfyUI's ReferenceLatent does. No change was needed.
+
 ### 14.4 Masking and inpainting (#167)
 
 Built: everything in #167 is built. The pieces are the issues at the end of this section, and each says here what shipped

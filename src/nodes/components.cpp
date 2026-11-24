@@ -404,6 +404,18 @@ Result<QJsonArray> refImages(const QList<MediaHandle> &references, const QString
     return sent;
 }
 
+// How the engine sizes the references before the VAE: "auto" is its own (each scaled to at most a
+// megapixel and the output's area, to a multiple of 16), "exact" keeps each at the size the graph
+// gave it (the engine's ref_image_args). Text Encode's input; the conditioning carries it to the
+// Sampler, so both stages send the same one. Auto sends nothing: the request is as it was.
+constexpr auto kExactReferences = "exact";
+constexpr auto kExactReferenceArgs = "resize_before_vae=false";
+
+void sendReferenceSize(QJsonObject &params, const QString &size) {
+    if (size == QLatin1String(kExactReferences))
+        params.insert(QStringLiteral("ref_image_args"), QLatin1String(kExactReferenceArgs));
+}
+
 // The references a conditioning carries (Text Encode puts them in its descriptor, as ComfyUI's
 // ReferenceLatent puts reference latents on a conditioning). Each must still be the picture
 // Text Encode had: a cached conditioning can outlive a file it names.
@@ -727,6 +739,7 @@ public:
             if (!sent)
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
+            sendReferenceSize(params, context.input(QStringLiteral("reference_size")).text());
         }
         JobRequest request = job(*files, params, true);
         // An image-to-video model makes its start from the first frame in the encode (Wan 2.2 I2V's
@@ -767,6 +780,8 @@ public:
             for (const MediaHandle &image : references)
                 carried.append(image.toJson());
             descriptor.insert(QStringLiteral("references"), carried);
+            if (const QString size = context.input(QStringLiteral("reference_size")).text(); size == QLatin1String(kExactReferences))
+                descriptor.insert(QStringLiteral("reference_size"), size);
         }
         return Values{{QStringLiteral("conditioning"), Value(dataHandle(kConditioningType, path.value(), descriptor))}};
     }
@@ -834,6 +849,8 @@ public:
             if (!sent)
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
+            sendReferenceSize(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta"))
+                                          .toObject().value(QStringLiteral("reference_size")).toString());
         }
         // The first frame of an image-to-video conditioning, for the clip it was encoded for.
         const Result<CarriedFrame> carried = firstFrameOf(context.input(QStringLiteral("conditioning")), *context.hashes);
