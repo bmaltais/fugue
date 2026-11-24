@@ -17,13 +17,13 @@ from the start latent otherwise. White is redrawn from the first step, black nev
 the last quarter of the steps. The paper's map is the inverse (`mu = 1 - m`, mask `mu < (k - t) / k`,
 `t = k - 1 - i`), so the test is the paper's.
 
-- `src/pipeline/image.cpp`: the mask is not rounded when `soft_mask` is on (still rounded for an inpaint
-  model, whose mask is a conditioning channel it was trained to see as 0 or 1).
-- `src/pipeline/diffusion_engine.cpp`: the existing replacement
-  `denoised * m + init * (1 - m)` goes through one lambda; when `soft_mask` is off it is that same
-  expression, so output is byte-identical to before. When on, `m` is replaced by a 0/1 mask for the step.
-- `sample()` gains a trailing defaulted `bool soft_mask`; the option is in `config.h` and `options.cpp`.
-  The CLI flag name is up to you (for example `--soft-mask`).
+- The generation templates: `mask_pixels` is not thresholded when `soft_mask` is on (still thresholded for
+  an inpaint model, whose mask is a conditioning channel it was trained to see as 0 or 1).
+- `src/dgl/models/diffusion_prediction.h`: `blend_mask`, the existing replacement
+  `latent * m + base * (1 - m)`, is that same expression when `soft_mask` is off, so output is
+  byte-identical to before. When on, `m` is replaced by a 0/1 mask for the step.
+- The DGL `sample` built-in gains a defaulted `soft_mask` argument; the option is in `config.h` and
+  `options.cpp`. The CLI flag name is up to you (for example `--soft-mask`).
 
 No new dependency, nothing changes when the option is off. A hard mask gives the same picture on or
 off, since 1 passes `m > (k - 1 - i) / k` at every step and 0 never does.

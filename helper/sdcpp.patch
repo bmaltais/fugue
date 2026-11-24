@@ -1,376 +1,537 @@
-diff --git i/src/api/options.cpp w/src/api/options.cpp
-index 591cce3..5f4dc36 100644
---- i/src/api/options.cpp
-+++ w/src/api/options.cpp
-@@ -502,6 +502,21 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
-     hires.choice("hires.upscaler", &sd::HiresConfig::upscaler, parse_hires_upscaler, SD_HIRES_UPSCALER_COUNT);
- }
- 
-+static void add_fugue_specs(std::vector<ParamSpec>& specs) {
-+    using namespace sd::api;
-+    ParamGroup fugue(specs, Image | Video, [](sd::OptConfig& config) { return std::tie(config.image.fugue, config.video.fugue); });
-+
-+    fugue.string("fugue.init_latent_in", &sd::FugueStageConfig::init_latent_in);
-+    fugue.string("fugue.init_latent_out", &sd::FugueStageConfig::init_latent_out);
-+    fugue.string("fugue.cond_in", &sd::FugueStageConfig::cond_in);
-+    fugue.string("fugue.cond_out", &sd::FugueStageConfig::cond_out);
-+    fugue.string("fugue.latent_in", &sd::FugueStageConfig::latent_in);
-+    fugue.string("fugue.latent_out", &sd::FugueStageConfig::latent_out);
-+    fugue.string("fugue.stop_after", &sd::FugueStageConfig::stop_after);
-+    fugue.string("fugue.init_video", &sd::FugueStageConfig::init_video);
-+    fugue.boolean("fugue.soft_mask", &sd::FugueStageConfig::soft_mask);
-+}
-+
- static void add_tiling_specs(std::vector<ParamSpec>& specs) {
-     using namespace sd::api;
-     ParamGroup tiling(specs, Image | Video | ADetail, [](sd::OptConfig& config) { return std::tie(config.image.vae_tiling_params, config.video.vae_tiling_params); });
-@@ -547,6 +562,7 @@ static std::vector<ParamSpec> make_specs() {
-     add_sampling_specs(specs);
-     add_cache_specs(specs);
-     add_hires_specs(specs);
-+    add_fugue_specs(specs);
-     add_tiling_specs(specs);
-     add_postprocess_specs(specs);
-     return specs;
-diff --git i/src/config.h w/src/config.h
-index 7331ccc..e609702 100644
---- i/src/config.h
-+++ w/src/config.h
-@@ -172,6 +172,25 @@ namespace sd {
-         ContextConfig();
-     };
- 
-+    // Fugue's stage split (pipeline/fugue_stages.h): files generate_image and generate_video read in
-+    // place of a stage or write after one, and the stage they stop after ("init", "cond" or
-+    // "sample"; a video's "init" is the encode of init_video).
-+    struct FugueStageConfig {
-+        const char* init_latent_in{};
-+        const char* init_latent_out{};
-+        const char* cond_in{};
-+        const char* cond_out{};
-+        const char* latent_in{};
-+        const char* latent_out{};
-+        const char* stop_after{};
-+        // A video to redraw (video-to-video): a YUV4MPEG2 file of the request's size and length,
-+        // which generate_video encodes with the VAE. Off: upstream.
-+        const char* init_video{};
-+        // Differential diffusion (arXiv 2306.00950): an image mask keeps its values between 0 and 1
-+        // and sets how late each latent cell is released from the start latent. Off: upstream.
-+        bool soft_mask{};
-+    };
-+
-     struct ImageConfig {
-         const sd_lora_t* loras{};
-         uint32_t lora_count{};
-@@ -203,6 +222,7 @@ namespace sd {
-         bool circular_y{};
-         sd::ImagePreprocessConfig image_preprocess{};
-         enum sd_control_type_t control_type {};
-+        sd::FugueStageConfig fugue{};
- 
-         ImageConfig();
-     };
-@@ -240,6 +260,7 @@ namespace sd {
-         bool circular_y{};
-         sd::ImagePreprocessConfig image_preprocess{};
-         const char* ref_image_args{};
-+        sd::FugueStageConfig fugue{};
- 
-         VideoConfig();
-     };
-diff --git i/src/extensions/generation_extension.h w/src/extensions/generation_extension.h
-index 018092e..1c15a4c 100644
---- i/src/extensions/generation_extension.h
-+++ w/src/extensions/generation_extension.h
-@@ -14,6 +14,7 @@
- #include "model/diffusion/model.hpp"
- #include "model_loader.h"
- #include "model_manager.h"
-+#include "pipeline/fugue_stages.h"
- #include "stable-diffusion.h"
- 
- struct GenerationExtensionInitContext {
-@@ -56,6 +57,12 @@ struct GenerationExtension {
-     virtual bool prepare_condition(GenerationExtensionConditionContext&) {
-         return false;
-     }
-+    // Fugue's stage split: the state prepare_condition() set, written with the conditioning
-+    // and read back in place of calling it.
-+    virtual void save_condition(fugue_stages::File&) const {}
-+    virtual bool load_condition(fugue_stages::File&) {
-+        return true;
-+    }
-     virtual const SDCondition& before_condition(int step,
-                                                 const SDCondition& condition) const {
-         return condition;
-diff --git i/src/extensions/photomaker_extension.cpp w/src/extensions/photomaker_extension.cpp
-index 59b9a2c..df15e7e 100644
---- i/src/extensions/photomaker_extension.cpp
-+++ w/src/extensions/photomaker_extension.cpp
-@@ -308,6 +308,31 @@ struct PhotoMakerExtension : public GenerationExtension {
-         return true;
-     }
- 
-+    void save_condition(fugue_stages::File& f) const override {
-+        if (id_condition.empty() || start_merge_step == -1) {
-+            return;
-+        }
-+        fugue_stages::put_cond(f, "photomaker.id_condition", id_condition);
-+        f.meta["photomaker.start_merge_step"] = std::to_string(start_merge_step);
-+    }
-+
-+    bool load_condition(fugue_stages::File& f) override {
-+        reset_runtime_condition();
-+        auto it = f.meta.find("photomaker.start_merge_step");
-+        if (it == f.meta.end()) {
-+            return true;
-+        }
-+        if (!enabled) {
-+            return f.fail("the conditioning uses PhotoMaker, which this context did not load");
-+        }
-+        try {
-+            start_merge_step = std::stoi(it->second);
-+        } catch (...) {
-+            return f.fail("bad photomaker.start_merge_step");
-+        }
-+        return fugue_stages::get_cond(f, "photomaker.id_condition", id_condition);
-+    }
-+
-     const SDCondition& before_condition(int step,
-                                         const SDCondition& condition) const override {
-         if (!id_condition.empty() && start_merge_step != -1 && step > start_merge_step) {
-diff --git i/src/extensions/pulid_extension.cpp w/src/extensions/pulid_extension.cpp
-index fa660c3..6809531 100644
---- i/src/extensions/pulid_extension.cpp
-+++ w/src/extensions/pulid_extension.cpp
-@@ -107,6 +107,26 @@ struct PuLIDExtension : public GenerationExtension {
-         return false;  // PuLID does not modify the conditioning
-     }
- 
-+    void save_condition(fugue_stages::File& f) const override {
-+        if (!enabled || id_embedding.empty()) {
-+            return;
-+        }
-+        fugue_stages::put(f, "pulid.id_embedding", id_embedding);
-+        fugue_stages::put_float(f, "pulid.id_weight", id_weight);
-+    }
-+
-+    bool load_condition(fugue_stages::File& f) override {
-+        reset_runtime_condition();
-+        if (f.blobs.count("pulid.id_embedding") == 0) {
-+            return true;
-+        }
-+        if (!enabled) {
-+            return f.fail("the conditioning uses PuLID, which this context did not load");
-+        }
-+        return fugue_stages::get(f, "pulid.id_embedding", id_embedding) &&
-+               fugue_stages::get_float(f, "pulid.id_weight", id_weight);
-+    }
-+
-     void before_diffusion(DiffusionParams& params, int /*step*/) const override {
-         if (!enabled || id_embedding.empty()) {
-             return;
-diff --git i/src/pipeline/diffusion_engine.cpp w/src/pipeline/diffusion_engine.cpp
-index c2ae6b8..842f6fd 100644
---- i/src/pipeline/diffusion_engine.cpp
-+++ w/src/pipeline/diffusion_engine.cpp
-@@ -2370,7 +2370,8 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-                                               float frame_rate,
-                                               const sd::CacheConfig* cache_params,
-                                               bool preview_final_step,
--                                              const sd::Tensor<float>& video_positions) {
-+                                              const sd::Tensor<float>& video_positions,
-+                                              bool soft_mask) {
-     struct RunnerEndOnExit {
-         GGMLRunner* runner = nullptr;
-         ~RunnerEndOnExit() {
-@@ -2484,6 +2485,25 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-                                                         : sampling_init_latent;
-     sd::Tensor<float> denoised                    = x_t;
- 
-+    // Puts the start latent back where the mask holds it. Off, a latent cell is redrawn or held for
-+    // the whole run (upstream). fugue.soft_mask, differential diffusion (arXiv 2306.00950, Algorithm 1):
-+    // the mask is a change map, and a cell with value m is held until the step where the fraction
-+    // of steps left, t / k, falls below m. The paper's map is 1 for no change and its test is
-+    // map < (k - t) / k, which is m > t / k for m = 1 - map. Step i is t = k - 1 - i.
-+    const int soft_steps = static_cast<int>(sigmas.size()) - 1;
-+    auto blend_start_latent = [&](sd::Tensor<float>& denoised_latent, int step) {
-+        if (!soft_mask || soft_steps < 1) {
-+            denoised_latent = denoised_latent * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
-+            return;
-+        }
-+        const float threshold = static_cast<float>(soft_steps - 1 - std::min(std::abs(step), soft_steps - 1)) / soft_steps;
-+        sd::Tensor<float> released = denoise_mask;
-+        for (float& value : released.values()) {
-+            value = value > threshold ? 1.f : 0.f;
-+        }
-+        denoised_latent = denoised_latent * released + sampling_init_latent * (1.0f - released);
-+    };
-+
-     auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::guidance::GuiderOutput {
-         if (get_cancel_flag() == SD_CANCEL_ALL) {
-             LOG_VERBOSE("cancelling generation");
-@@ -2543,7 +2563,7 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-         if (cache_runtime.spectrum_enabled && cache_runtime.spectrum.should_predict()) {
-             cache_runtime.spectrum.predict(&denoised);
-             if (apply_denoise_mask) {
--                denoised = denoised * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
-+                blend_start_latent(denoised, step);
-             }
-             if (preview_needed && sd_should_preview_denoised()) {
-                 preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
-@@ -2916,7 +2936,7 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-             cache_runtime.spectrum.update(denoised);
-         }
-         if (apply_denoise_mask) {
--            denoised = denoised * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
-+            blend_start_latent(denoised, step);
-         }
-         if (preview_needed && sd_should_preview_denoised()) {
-             preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
-diff --git i/src/pipeline/diffusion_engine.h w/src/pipeline/diffusion_engine.h
-index ae05dc9..9a081e0 100644
---- i/src/pipeline/diffusion_engine.h
-+++ w/src/pipeline/diffusion_engine.h
-@@ -487,7 +487,8 @@ public:
-                              float frame_rate,
-                              const sd::CacheConfig* cache_params,
-                              bool preview_final_step,
--                             const sd::Tensor<float>& video_positions = {});
-+                             const sd::Tensor<float>& video_positions = {},
-+                             bool soft_mask = false);
- 
-     int get_vae_scale_factor();
- 
-diff --git i/src/pipeline/fugue_stage_io.h w/src/pipeline/fugue_stage_io.h
+diff --git i/src/api/fugue_stage.cpp w/src/api/fugue_stage.cpp
 new file mode 100644
-index 0000000..75fbb74
+index 0000000..fc07e52
 --- /dev/null
-+++ w/src/pipeline/fugue_stage_io.h
-@@ -0,0 +1,177 @@
-+// Fugue's stage split, shared by generate_image and generate_video (spec 8.10): the conditioning
-+// and latent files a stage writes after it ran or reads in place of running it. The file layout is
-+// fugue_stages.h.
-+#ifndef __SD_PIPELINE_FUGUE_STAGE_IO_H__
-+#define __SD_PIPELINE_FUGUE_STAGE_IO_H__
++++ w/src/api/fugue_stage.cpp
+@@ -0,0 +1,657 @@
++#include "api/fugue_stage.h"
 +
 +#include <algorithm>
 +#include <cstdio>
-+#include <string>
-+#include <vector>
++#include <set>
++#include <sstream>
 +
-+#include "diffusion_engine.h"
-+#include "extensions/generation_extension.h"
-+#include "fugue_stages.h"
-+#include "generation.h"
-+#include "request.h"
++#include "api/fugue_stages.h"
++#include "api/generation_program.h"
++#include "api/result.h"
++#include "api/tensor.h"
++#include "core/util.h"
++#include "dgl/bindings/arguments.h"
++#include "dgl/bindings/condition.h"
++#include "dgl/models/denoising_parameterization.h"
++#include "dgl/ops/predictor.h"
++#include "dgl/syntax/syntax.h"
++#include "model/vae/geometry.hpp"
++#include "runtime/denoiser.hpp"
 +
-+namespace sd::pipeline {
++namespace sd::api::fugue_stage {
 +
-+    // Fugue's stage split (fugue_stages.h): conditioning and latents written after a stage of
-+    // generate_image, or read in place of running it.
-+    inline bool fugue_fail(const fugue_stages::File& f, const char* what, const char* path) {
-+        LOG_ERROR("fugue: %s '%s': %s", what, path, f.error.empty() ? "cannot write" : f.error.c_str());
-+        return false;
++    using Replacements = std::map<std::string, std::vector<std::string>>;
++
++    [[noreturn]] static void refuse(const std::string& why) {
++        throw dgl::Error(SD_STATUS_INVALID_ARGUMENT, "fugue: " + why);
 +    }
 +
-+    inline bool fugue_check_kind(fugue_stages::File& f, StableDiffusionGGML* sd, const char* kind) {
-+        if (f.meta["kind"] != kind) {
-+            return f.fail(std::string("not a ") + kind + " file");
-+        }
-+        if (f.meta["version"] != sd_version_name(sd->version)) {
-+            return f.fail("made for " + f.meta["version"] + ", not " + sd_version_name(sd->version));
-+        }
-+        return true;
++    static std::string quoted(const std::string& value) {
++        return literal(nlohmann::json(value));
 +    }
 +
-+    inline bool fugue_save_cond(StableDiffusionGGML* sd, const ImageGenerationEmbeds& embeds, const char* path) {
-+        fugue_stages::File f;
-+        f.meta["kind"]    = "fugue/conditioning";
-+        f.meta["version"] = sd_version_name(sd->version);
-+        fugue_stages::put_cond(f, "cond", embeds.cond);
-+        fugue_stages::put_cond(f, "uncond", embeds.uncond);
-+        fugue_stages::put_cond(f, "img_uncond", embeds.img_uncond);
-+        if (!sd->ip_adapter_tokens.empty()) {
-+            fugue_stages::put(f, "ip_adapter.tokens", sd->ip_adapter_tokens);
-+            fugue_stages::put(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens);
-+            fugue_stages::put_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
-+        }
-+        for (const auto& extension : sd->generation_extensions) {
-+            extension->save_condition(f);
-+        }
-+        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write conditioning", path);
++    static void collect_references(const dgl::Expr& expr, std::set<std::string>& names) {
++        if (expr.form == dgl::Expr::Form::Reference)
++            names.insert(expr.name.substr(0, expr.name.find('.')));
++        for (const auto& [name, argument] : expr.arguments)
++            if (argument)
++                collect_references(*argument, names);
++        for (const auto& statement : expr.body)
++            if (statement.value)
++                collect_references(*statement.value, names);
 +    }
 +
-+    inline bool fugue_load_cond(StableDiffusionGGML* sd, ImageGenerationEmbeds& embeds, const char* path) {
-+        fugue_stages::File f;
-+        sd->reset_generation_extensions();
-+        sd->ip_adapter_tokens        = {};
-+        sd->ip_adapter_uncond_tokens = {};
-+        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/conditioning") &&
-+                  fugue_stages::get_cond(f, "cond", embeds.cond) && fugue_stages::get_cond(f, "uncond", embeds.uncond) &&
-+                  fugue_stages::get_cond(f, "img_uncond", embeds.img_uncond) &&
-+                  fugue_stages::get(f, "ip_adapter.tokens", sd->ip_adapter_tokens) &&
-+                  fugue_stages::get(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens) &&
-+                  fugue_stages::get_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
-+        if (ok && !sd->ip_adapter_tokens.empty() && sd->ip_adapter == nullptr) {
-+            ok = f.fail("the conditioning uses IP-Adapter, which this context did not load");
-+        }
-+        for (const auto& extension : sd->generation_extensions) {
-+            ok = ok && extension->load_condition(f);
-+        }
-+        return ok || fugue_fail(f, "cannot read conditioning", path);
++    static std::vector<std::string> split_lines(const std::string& source) {
++        std::vector<std::string> lines;
++        std::istringstream in(source);
++        for (std::string line; std::getline(in, line);)
++            lines.push_back(line);
++        return lines;
 +    }
 +
-+    // `video_frames` > 0 for a video latent: its frame count and rate go to the descriptor too.
-+    inline bool fugue_save_latents(StableDiffusionGGML* sd,
-+                                   const std::vector<sd::Tensor<float>>& latents,
-+                                   const GenerationRequest& request,
-+                                   const char* path,
-+                                   int video_frames = 0,
-+                                   int video_fps    = 0) {
-+        fugue_stages::File f;
-+        f.meta["kind"]    = "fugue/latent";
-+        f.meta["version"] = sd_version_name(sd->version);
++    static size_t main_line(const std::vector<std::string>& lines) {
++        for (size_t i = 0; i < lines.size(); ++i)
++            if (lines[i].rfind("fn main(", 0) == 0)
++                return i;
++        refuse("the rendered program has no main");
++    }
++
++    // A rendered program: one statement per line in main (the templates are written so).
++    class Rendered {
++    public:
++        explicit Rendered(const std::string& source)
++            : lines_(split_lines(source)), main_(main_line(lines_)), syntax_(dgl::parse_syntax(source, true)) {
++            for (const auto& statement : syntax_.entry.body) {
++                if (!statement.value || static_cast<size_t>(statement.value->line - 1) <= main_)
++                    continue;
++                if (statement.form == dgl::Statement::Form::Return)
++                    returned_ = &statement;
++                else if (statement.form == dgl::Statement::Form::Binding)
++                    bound_.insert(statement.name);
++            }
++            if (!returned_)
++                refuse("the rendered program returns nothing");
++        }
++
++        bool has(const std::string& name) const { return bound_.count(name) != 0; }
++
++        const char* either(const char* first, const char* second) const {
++            if (has(first))
++                return first;
++            if (has(second))
++                return second;
++            refuse(std::string("the program has neither '") + first + "' nor '" + second + "'");
++        }
++
++        // The right-hand side of a binding.
++        std::string value_of(const std::string& name) const {
++            for (const auto& statement : syntax_.entry.body)
++                if (statement.name == name && statement.value && static_cast<size_t>(statement.value->line - 1) > main_) {
++                    const auto& line = lines_[statement.value->line - 1];
++                    const auto equal = line.find(" = ");
++                    if (equal == std::string::npos)
++                        break;
++                    return line.substr(equal + 3);
++                }
++            refuse("the program has no value '" + name + "'");
++        }
++
++        // The name the program returns as its latent.
++        std::string result_latent() const {
++            for (const auto& [name, value] : returned_->value->arguments)
++                if (name == "latent" && value && value->form == dgl::Expr::Form::Reference)
++                    return value->name;
++            refuse("the program returns no latent");
++        }
++
++        // Replaces statements, returns `result` (empty: what the program returns), and keeps only
++        // the statements that result depends on.
++        void cut(GenerationProgram& program, const Replacements& replace, const std::string& result) const {
++            for (const auto& [name, lines] : replace)
++                if (!has(name))
++                    refuse("the program has no value '" + name + "'");
++            std::vector<std::string> body;
++            for (const auto& statement : syntax_.entry.body) {
++                if (!statement.value || static_cast<size_t>(statement.value->line - 1) <= main_ ||
++                    statement.form == dgl::Statement::Form::Return)
++                    continue;
++                const auto replaced = replace.find(statement.name);
++                if (replaced != replace.end())
++                    body.insert(body.end(), replaced->second.begin(), replaced->second.end());
++                else
++                    body.push_back(lines_[statement.value->line - 1]);
++            }
++            const size_t return_at   = static_cast<size_t>(returned_->value->line - 1);
++            const std::string ending = result.empty() ? lines_[return_at] : "    return " + result;
++            std::string head, tail;
++            for (size_t i = 0; i < main_; ++i)
++                head += lines_[i] + "\n";
++            for (size_t i = return_at + 2; i < lines_.size(); ++i)
++                tail += lines_[i] + "\n";
++            const auto main_with = [&](const std::vector<std::string>& parameters, const std::vector<std::string>& statements) {
++                std::string text = head + "fn main(";
++                for (size_t i = 0; i < parameters.size(); ++i)
++                    text += (i ? ", " : "") + parameters[i];
++                text += ") {\n";
++                for (const auto& line : statements)
++                    text += line + "\n";
++                return text + ending + "\n}\n" + tail;
++            };
++
++            const auto candidate       = main_with(syntax_.entry.parameters, body);
++            const auto candidate_lines = split_lines(candidate);
++            const size_t candidate_main = main_line(candidate_lines);
++            const auto parsed          = dgl::parse_syntax(candidate, true);
++            std::set<std::string> needed;
++            std::vector<size_t> kept;
++            for (auto statement = parsed.entry.body.rbegin(); statement != parsed.entry.body.rend(); ++statement) {
++                if (!statement->value || static_cast<size_t>(statement->value->line - 1) <= candidate_main)
++                    continue;
++                if (statement->form == dgl::Statement::Form::Return) {
++                    collect_references(*statement->value, needed);
++                } else if (statement->form == dgl::Statement::Form::Binding && needed.count(statement->name)) {
++                    needed.erase(statement->name);
++                    collect_references(*statement->value, needed);
++                    kept.push_back(static_cast<size_t>(statement->value->line - 1));
++                }
++            }
++            std::reverse(kept.begin(), kept.end());
++            std::vector<std::string> statements;
++            for (const size_t line : kept)
++                statements.push_back(candidate_lines[line]);
++            std::vector<std::string> parameters;
++            for (const auto& parameter : syntax_.entry.parameters)
++                if (needed.count(parameter))
++                    parameters.push_back(parameter);
++            for (auto input = program.inputs.begin(); input != program.inputs.end();)
++                input = needed.count(input->first) ? std::next(input) : program.inputs.erase(input);
++            program.source = main_with(parameters, statements);
++        }
++
++    private:
++        std::vector<std::string> lines_;
++        size_t main_;
++        dgl::Syntax syntax_;
++        std::set<std::string> bound_;
++        const dgl::Statement* returned_ = nullptr;
++    };
++
++    static fugue_stages::File read_stage(const std::string& path, const char* kind, const std::string& version) {
++        require_file_access(path, SD_DGL_FILE_READ);
++        fugue_stages::File file;
++        if (!fugue_stages::read_file(path, file))
++            refuse("cannot read '" + path + "': " + file.error);
++        if (file.meta["kind"] != kind)
++            refuse("'" + path + "' is not a " + kind + " file");
++        if (file.meta["version"] != version)
++            refuse("'" + path + "' was made for " + file.meta["version"] + ", not " + version);
++        return file;
++    }
++
++    static std::vector<sd::Tensor<float>> read_latents(const std::string& path, const std::string& version) {
++        auto file = read_stage(path, "fugue/latent", version);
++        std::vector<sd::Tensor<float>> latents;
++        if (!fugue_stages::get_list(file, "latent", latents))
++            refuse("cannot read latent '" + path + "': " + file.error);
++        if (latents.empty())
++            refuse("no latent in '" + path + "'");
++        for (const auto& latent : latents)
++            if (latent.empty())
++                refuse("an empty latent in '" + path + "'");
++        return latents;
++    }
++
++    struct LatentSize {
++        int width  = 0;
++        int height = 0;
++        int frames = 0;
++        int fps    = 0;
++    };
++
++    static void save_latents(const std::string& path, const std::vector<sd::Tensor<float>>& latents, const std::string& version, const LatentSize& size) {
++        require_file_access(path, SD_DGL_FILE_WRITE);
++        fugue_stages::File file;
++        file.meta["kind"]    = "fugue/latent";
++        file.meta["version"] = version;
 +        // The image size, for Fugue's latent descriptor (spec 2.6); decoding reads the tensor's shape.
-+        f.meta["width"]   = std::to_string(request.width);
-+        f.meta["height"]  = std::to_string(request.height);
-+        if (video_frames > 0) {
-+            f.meta["frames"] = std::to_string(video_frames);
-+            f.meta["fps"]    = std::to_string(video_fps);
++        file.meta["width"]  = std::to_string(size.width);
++        file.meta["height"] = std::to_string(size.height);
++        if (size.frames > 0) {
++            file.meta["frames"] = std::to_string(size.frames);
++            file.meta["fps"]    = std::to_string(size.fps);
 +        }
-+        fugue_stages::put_list(f, "latent", latents);
-+        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write latent", path);
++        fugue_stages::put_list(file, "latent", latents);
++        if (!fugue_stages::write_file(path, file))
++            refuse("cannot write latent '" + path + "'");
 +    }
 +
-+    inline bool fugue_load_latents(StableDiffusionGGML* sd, std::vector<sd::Tensor<float>>& latents, const char* path) {
-+        fugue_stages::File f;
-+        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/latent") &&
-+                  fugue_stages::get_list(f, "latent", latents);
-+        for (const auto& latent : latents) {
-+            ok = ok && (!latent.empty() || f.fail("an empty latent"));
++    static void save_conditions(const std::string& path, const dgl::Value& value, const std::string& version) {
++        require_file_access(path, SD_DGL_FILE_WRITE);
++        fugue_stages::File file;
++        file.meta["kind"]    = "fugue/conditioning";
++        file.meta["version"] = version;
++        fugue_stages::put_cond(file, "cond", dgl::read_condition(value.fields.at("fugue_positive").fields));
++        fugue_stages::put_cond(file, "uncond", dgl::read_condition(value.fields.at("fugue_negative").fields));
++        const auto unconditional = value.fields.find("fugue_unconditional");
++        if (unconditional != value.fields.end())
++            fugue_stages::put_cond(file, "img_uncond", dgl::read_condition(unconditional->second.fields));
++        if (!fugue_stages::write_file(path, file))
++            refuse("cannot write conditioning '" + path + "'");
++    }
++
++    static int field_int(const dgl::Value& value, const char* name) {
++        return static_cast<int>(value.fields.at(name).scalar.get<int64_t>());
++    }
++
++    static LatentSize result_size(const dgl::Value& value) {
++        LatentSize size{field_int(value, "fugue_width"), field_int(value, "fugue_height")};
++        if (value.fields.count("fugue_frames")) {
++            size.frames = field_int(value, "fugue_frames");
++            size.fps    = field_int(value, "fugue_fps");
 +        }
-+        ok = ok && (!latents.empty() || f.fail("no latent"));
-+        return ok || fugue_fail(f, "cannot read latent", path);
++        return size;
++    }
++
++    static const sd::Tensor<float>& result_latent(const dgl::Value& value) {
++        return dgl::read_tensor<float>(value.fields.at("fugue_latent"));
++    }
++
++    static void check_stop(const std::string& stop) {
++        if (!stop.empty() && stop != "init" && stop != "cond" && stop != "sample")
++            refuse("unknown stage '" + stop + "' to stop after; use init, cond or sample");
++    }
++
++    // The statements that read the conditioning file in place of the encode.
++    static void read_conditions(Replacements& replace, const Rendered& rendered, const std::string& path, const std::string& version) {
++        const auto load = [&](const char* set) {
++            return "fugue::load_condition(" + quoted(path) + ", " + quoted(set) + ", " + quoted(version) + ")";
++        };
++        const std::string positive = rendered.either("positive", "positive_text");
++        const std::string negative = rendered.either("negative", "negative_text");
++        replace[positive]          = {"    " + positive + " = " + load("cond")};
++        replace[negative]          = {"    " + negative + " = " + load("uncond")};
++        if (rendered.has("unconditional_text"))
++            replace["unconditional_text"] = {"    unconditional_text = " + load("img_uncond")};
++    }
++
++    static std::string conditions_result(const Rendered& rendered) {
++        std::string result = std::string("{fugue_positive = ") + rendered.either("positive", "positive_text") +
++                             ", fugue_negative = " + rendered.either("negative", "negative_text");
++        if (rendered.has("unconditional_text"))
++            result += ", fugue_unconditional = unconditional_text";
++        return result + "}";
++    }
++
++    struct NoiseLevel {
++        bool enabled     = false;
++        bool force_first = false;
++    };
++
++    static NoiseLevel noise_level(const char* args) {
++        NoiseLevel reading;
++        for (const auto& [key, value] : parse_key_value_args(args, "img2img arg")) {
++            bool flag = false;
++            if (key != "strength_as_noise_level" && key != "force_first_sigma")
++                continue;
++            if (!parse_strict_bool(value, flag)) {
++                LOG_WARN("ignoring invalid img2img sample arg '%s=%s'", key.c_str(), value.c_str());
++                continue;
++            }
++            (key == "strength_as_noise_level" ? reading.enabled : reading.force_first) = flag;
++        }
++        return reading;
++    }
++
++    static bool any_option(const FugueStageConfig& fugue) {
++        return fugue.init_latent_in || fugue.init_latent_out || fugue.cond_in || fugue.cond_out || fugue.latent_in ||
++               fugue.latent_out || fugue.stop_after || fugue.init_video || fugue.soft_mask;
++    }
++
++    bool wanted(const ImageConfig& image) {
++        return any_option(image.fugue) || (image.init_image.data && image.strength < 1.f && noise_level(image.sample_params.extra_sample_args).enabled);
++    }
++
++    bool wanted(const VideoConfig& video) {
++        return any_option(video.fugue);
++    }
++
++    // The sampling options of the patch: the noise-level reading of strength and the soft mask.
++    static void sampling_edits(Replacements& replace, const Rendered& rendered, const ImageConfig& image, bool inpaint) {
++        if (image.strength < 1.f && rendered.has("sigmas") && rendered.value_of("sigmas").rfind("slice_sigmas_by_strength(", 0) == 0) {
++            const auto reading = noise_level(image.sample_params.extra_sample_args);
++            if (reading.enabled)
++                replace["sigmas"] = {std::string("    sigmas = fugue::noise_level_sigmas(pos, full_sigmas, strength, force_first = ") +
++                                     (reading.force_first ? "true" : "false") + ")"};
++        }
++        // An inpaint model reads the mask as a channel it was trained to see as 0 or 1.
++        if (!image.fugue.soft_mask || !image.mask_image.data || inpaint)
++            return;
++        const auto mask             = rendered.value_of("mask_pixels");
++        const std::string threshold = "tensor::threshold(";
++        const std::string closing   = ", threshold = 0.5)";
++        if (mask.rfind(threshold, 0) != 0 || mask.size() <= threshold.size() + closing.size() ||
++            mask.compare(mask.size() - closing.size(), closing.size(), closing) != 0)
++            refuse("fugue.soft_mask: this program does not round its mask where expected");
++        replace["mask_pixels"] = {"    mask_pixels = " + mask.substr(threshold.size(), mask.size() - threshold.size() - closing.size())};
++        for (const char* name : {"latent", "hires_latent"}) {
++            if (!rendered.has(name))
++                continue;
++            const auto call = rendered.value_of(name);
++            if (call.find("sample(") != std::string::npos && call.back() == ')')
++                replace[name] = {"    " + std::string(name) + " = " + call.substr(0, call.size() - 1) + ", soft_mask = true)"};
++        }
++    }
++
++    static std::string size_fields(bool video) {
++        return video ? ", fugue_width = width, fugue_height = height, fugue_frames = frames, fugue_fps = fps"
++                     : ", fugue_width = width, fugue_height = height";
++    }
++
++    sd_status_t run_image(GenerationContext& context, std::shared_ptr<sd_opt_t> options, OptConfig config, int64_t seed, sd_result_t** out) {
++        const std::string stop = text(config.image.fugue.stop_after);
++        check_stop(stop);
++        const auto& definition = context.model.definition(context);
++        const std::string version = sd_version_name(definition.version);
++        const bool inpaint        = sd_version_is_inpaint(definition.version);
++        if (config.image.fugue.init_latent_in && inpaint)
++            refuse(version + " cannot start from a latent alone; give it the image");
++        // A start latent without a picture still takes the image-to-image flow; the blank picture
++        // is cut away with the encode it would go through.
++        api::TensorRef blank;
++        if (config.image.fugue.init_latent_in && !config.image.init_image.data) {
++            blank = allocate_tensor(SD_TENSOR_U8, {3, config.image.width, config.image.height});
++            const auto set = sd_opt_set_tensor(options.get(), "init_image", blank.get());
++            if (set != SD_STATUS_OK)
++                return set;
++            const auto status = resolve(options.get(), Image, config);
++            if (status != SD_STATUS_OK)
++                return status;
++        }
++        const auto& fugue = config.image.fugue;
++        std::vector<sd::Tensor<float>> sampled_in;
++        if (fugue.latent_in)
++            sampled_in = read_latents(fugue.latent_in, version);
++        const bool single = stop == "init" || stop == "cond";
++        const int runs    = fugue.latent_in ? static_cast<int>(sampled_in.size()) : single ? 1
++                                                                                           : config.image.batch_count;
++        auto result = std::make_unique<sd_result_t>();
++        std::vector<sd::Tensor<float>> sampled;
++        LatentSize size;
++        for (int i = 0; i < runs; ++i) {
++            if (context.cancellation.load() == SD_CANCEL_NEW_LATENTS)
++                break;
++            auto program = image_program(context, config.image, options.get(), int64_t((uint64_t(seed) + uint64_t(i)) & INT64_MAX));
++            const Rendered rendered(program.source);
++            Replacements replace;
++            std::string returned;
++            if (stop == "init") {
++                returned = std::string("{fugue_latent = ") + rendered.either("image_base", "base") + size_fields(false) + "}";
++            } else if (stop == "cond") {
++                returned = conditions_result(rendered);
++            } else if (fugue.latent_in) {
++                const auto latent = rendered.result_latent();
++                replace[latent]   = {"    " + latent + " = fugue::load_latent(" + quoted(fugue.latent_in) + ", " + quoted(version) + ", index = " + std::to_string(i) + ")"};
++            } else {
++                sampling_edits(replace, rendered, config.image, inpaint);
++                if (fugue.cond_in)
++                    read_conditions(replace, rendered, fugue.cond_in, version);
++                if (fugue.init_latent_in) {
++                    const std::string start = rendered.either("image_base", "base");
++                    replace[start]          = {"    " + start + " = fugue::load_latent(" + quoted(fugue.init_latent_in) + ", " + quoted(version) + ", width = width, height = height)"};
++                }
++                if (stop == "sample")
++                    returned = "{fugue_latent = " + rendered.result_latent() + size_fields(false) + "}";
++            }
++            rendered.cut(program, replace, returned);
++            auto value = execute_program(context, program);
++            if (stop == "init") {
++                if (!fugue.init_latent_out)
++                    refuse("stopping after init writes init_latent_out");
++                save_latents(fugue.init_latent_out, {result_latent(value)}, version, result_size(value));
++            } else if (stop == "cond") {
++                if (!fugue.cond_out)
++                    refuse("stopping after cond writes cond_out");
++                save_conditions(fugue.cond_out, value, version);
++            } else if (stop == "sample") {
++                sampled.push_back(result_latent(value));
++                size = result_size(value);
++            } else {
++                append_program_image(*result, value, program.source);
++            }
++        }
++        if (stop == "sample") {
++            if (!fugue.latent_out)
++                refuse("stopping after sample writes latent_out");
++            if (sampled.empty())
++                throw dgl::Error(SD_STATUS_CANCELLED, "generation cancelled before the next image");
++            save_latents(fugue.latent_out, sampled, version, size);
++        } else if (stop.empty() && result->images.empty()) {
++            throw dgl::Error(SD_STATUS_CANCELLED, "generation cancelled before the next image");
++        }
++        context.check_cancelled();
++        *out = result.release();
++        return SD_STATUS_OK;
++    }
++
++    sd_status_t run_video(GenerationContext& context, std::shared_ptr<sd_opt_t> options, const OptConfig& config, int64_t seed, sd_result_t** out) {
++        const auto& video = config.video;
++        const auto& fugue = video.fugue;
++        const std::string stop = text(fugue.stop_after);
++        check_stop(stop);
++        const auto& definition    = context.model.definition(context);
++        const std::string version = sd_version_name(definition.version);
++        if (fugue.init_latent_out && !fugue.init_video)
++            refuse("a video's init latent is made from init_video");
++        if (fugue.init_latent_in && fugue.init_video)
++            refuse("init_video and init_latent_in both start the clip");
++        if (video.hires.enabled || sd_version_is_ltxav(definition.version) || sd_version_is_minimax_h3(definition.version) ||
++            definition.version == VERSION_WAN2_2_S2V)
++            refuse(version + " cannot run in stages (latent upscale or audio)");
++
++        auto program = video_program(context, video, options.get(), seed);
++        const Rendered rendered(program.source);
++        Replacements replace;
++        std::string returned;
++        const std::string latent = rendered.result_latent();
++        if (fugue.latent_in) {
++            if (read_latents(fugue.latent_in, version).size() != 1)
++                refuse(std::string("the latent '") + fugue.latent_in + "' does not hold one latent");
++            replace[latent] = {"    " + latent + " = fugue::load_latent(" + quoted(fugue.latent_in) + ", " + quoted(version) + ")"};
++        } else {
++            std::vector<std::string> start;
++            if (fugue.init_video) {
++                start = {"    fugue_clip = fugue::load_clip(" + quoted(fugue.init_video) + ", width, height, frames)",
++                         "    fugue_clip_rng = make_rng(rng_type, seed = seed)",
++                         "    fugue_start = vae_to_dit_latents(vae, vae_encode(vae, fugue_clip, rng = fugue_clip_rng" + program.vae_options + "))"};
++            } else if (fugue.init_latent_in) {
++                start = {"    fugue_start = fugue::load_latent(" + quoted(fugue.init_latent_in) + ", " + quoted(version) + ", width = width, height = height, frames = frames)"};
++            }
++            if (!start.empty()) {
++                start.push_back("    base = fugue_start");
++                replace["base"] = start;
++            }
++            if (stop == "init") {
++                if (!fugue.init_video)
++                    refuse("a video's init stage encodes init_video");
++                returned = "{fugue_latent = fugue_start" + size_fields(true) + "}";
++            } else if (stop == "cond") {
++                returned = conditions_result(rendered);
++            } else {
++                if (fugue.cond_in)
++                    read_conditions(replace, rendered, fugue.cond_in, version);
++                // Redraw by `strength` as image to image does: sampling starts part way down the
++                // schedule, so the first sigmas (the high-noise pass first) are dropped.
++                if (!start.empty() && video.strength < 1.f) {
++                    replace["sigmas"] = {"    fugue_schedule = " + rendered.value_of("sigmas"),
++                                         "    fugue_steps = tensor::numel(fugue_schedule) - 1",
++                                         "    sigmas = fugue_schedule[fugue_steps - math::min(math::floor(fugue_steps * " + literal(double(video.strength)) + "), fugue_steps - 1):]"};
++                    if (rendered.has("split") && rendered.value_of("split").find("high_noise_steps") != std::string::npos)
++                        replace["split"] = {"    split = math::min(0 - math::min(0 - (high_noise_steps - (fugue_steps + 1 - tensor::numel(sigmas))), 0), tensor::numel(sigmas) - 1)"};
++                }
++                if (stop == "sample")
++                    returned = "{fugue_latent = " + latent + size_fields(true) + "}";
++            }
++        }
++        rendered.cut(program, replace, returned);
++        auto value  = execute_program(context, program);
++        auto result = std::make_unique<sd_result_t>();
++        if (stop == "init") {
++            if (!fugue.init_latent_out)
++                refuse("stopping after init writes init_latent_out");
++            save_latents(fugue.init_latent_out, {result_latent(value)}, version, result_size(value));
++        } else if (stop == "cond") {
++            if (!fugue.cond_out)
++                refuse("stopping after cond writes cond_out");
++            save_conditions(fugue.cond_out, value, version);
++        } else if (stop == "sample") {
++            if (!fugue.latent_out)
++                refuse("stopping after sample writes latent_out");
++            save_latents(fugue.latent_out, {result_latent(value)}, version, result_size(value));
++        } else {
++            set_program_video(*result, value, program.source);
++        }
++        context.check_cancelled();
++        *out = result.release();
++        return SD_STATUS_OK;
 +    }
 +
 +    // A clip to redraw (video-to-video): a YUV4MPEG2 file (4:2:0, the layout the helper writes a
 +    // decoded video in) as the VAE's input, [W, H, frames, 3, 1] in 0..1 with the full-range BT.601
 +    // matrix the helper writes it with. Its size and length must be the request's.
-+    inline sd::Tensor<float> fugue_read_y4m(const char* path, int width, int height, int frames) {
-+        FILE* in = std::fopen(path, "rb");
-+        if (in == nullptr) {
-+            LOG_ERROR("fugue: cannot read video '%s'", path);
-+            return {};
-+        }
-+        const auto close = [&]() { std::fclose(in); };
++    static sd::Tensor<float> read_y4m(const std::string& path, int width, int height, int frames) {
++        std::unique_ptr<FILE, int (*)(FILE*)> in(std::fopen(path.c_str(), "rb"), std::fclose);
++        if (!in)
++            refuse("cannot read video '" + path + "'");
 +        char line[512];
++        if (!std::fgets(line, sizeof line, in.get()) || std::string(line).rfind("YUV4MPEG2", 0) != 0)
++            refuse("'" + path + "' is not a YUV4MPEG2 file");
 +        int w = 0, h = 0;
-+        if (std::fgets(line, sizeof line, in) == nullptr || std::string(line).rfind("YUV4MPEG2", 0) != 0) {
-+            LOG_ERROR("fugue: '%s' is not a YUV4MPEG2 file", path);
-+            close();
-+            return {};
-+        }
 +        bool is420 = true;
 +        for (const char* p = line; *p != '\0'; ++p) {
 +            if (*p != ' ')
@@ -382,66 +543,174 @@ index 0000000..75fbb74
 +            else if (p[1] == 'C')
 +                is420 = std::string(p + 2).rfind("420", 0) == 0;
 +        }
-+        if (!is420 || w != width || h != height) {
-+            LOG_ERROR("fugue: the video '%s' must be 4:2:0 and %dx%d, not %dx%d", path, width, height, w, h);
-+            close();
-+            return {};
-+        }
++        if (!is420 || w != width || h != height)
++            refuse("the video '" + path + "' must be 4:2:0 and " + std::to_string(width) + "x" + std::to_string(height));
 +        const int64_t cw = (w + 1) / 2, ch = (h + 1) / 2;
 +        std::vector<unsigned char> y(static_cast<size_t>(w) * h), u(static_cast<size_t>(cw * ch)), v(static_cast<size_t>(cw * ch));
 +        sd::Tensor<float> video({width, height, frames, 3, 1});
-+        float* out         = video.data();
++        float* out          = video.data();
 +        const int64_t plane = static_cast<int64_t>(width) * height;
 +        for (int f = 0; f < frames; ++f) {
-+            if (std::fgets(line, sizeof line, in) == nullptr || std::string(line).rfind("FRAME", 0) != 0 ||
-+                std::fread(y.data(), 1, y.size(), in) != y.size() || std::fread(u.data(), 1, u.size(), in) != u.size() ||
-+                std::fread(v.data(), 1, v.size(), in) != v.size()) {
-+                LOG_ERROR("fugue: the video '%s' has fewer than the %d frames the request says", path, frames);
-+                close();
-+                return {};
-+            }
++            if (!std::fgets(line, sizeof line, in.get()) || std::string(line).rfind("FRAME", 0) != 0 ||
++                std::fread(y.data(), 1, y.size(), in.get()) != y.size() || std::fread(u.data(), 1, u.size(), in.get()) != u.size() ||
++                std::fread(v.data(), 1, v.size(), in.get()) != v.size())
++                refuse("the video '" + path + "' has fewer than the " + std::to_string(frames) + " frames the request says");
 +            for (int j = 0; j < height; ++j)
 +                for (int i = 0; i < width; ++i) {
 +                    const float Y = y[static_cast<size_t>(j) * w + i];
 +                    const float U = u[static_cast<size_t>(j / 2) * cw + i / 2] - 128.f;
 +                    const float V = v[static_cast<size_t>(j / 2) * cw + i / 2] - 128.f;
 +                    const float r = Y + 1.402f * V, g = Y - 0.344136f * U - 0.714136f * V, b = Y + 1.772f * U;
-+                    const int64_t at = static_cast<int64_t>(j) * width + i;
++                    const int64_t at                   = static_cast<int64_t>(j) * width + i;
 +                    out[(0 * frames + f) * plane + at] = std::clamp(r, 0.f, 255.f) / 255.f;
 +                    out[(1 * frames + f) * plane + at] = std::clamp(g, 0.f, 255.f) / 255.f;
 +                    out[(2 * frames + f) * plane + at] = std::clamp(b, 0.f, 255.f) / 255.f;
 +                }
 +        }
 +        // More frames than the request's would be cut silently: say so.
-+        if (std::fgets(line, sizeof line, in) != nullptr && std::string(line).rfind("FRAME", 0) == 0) {
-+            LOG_ERROR("fugue: the video '%s' has more than the %d frames the request says", path, frames);
-+            close();
-+            return {};
-+        }
-+        close();
++        if (std::fgets(line, sizeof line, in.get()) && std::string(line).rfind("FRAME", 0) == 0)
++            refuse("the video '" + path + "' has more than the " + std::to_string(frames) + " frames the request says");
 +        return video;
 +    }
 +
-+}  // namespace sd::pipeline
++    static dgl::Value load_condition(dgl::Values& args, dgl::RunState&) {
++        const auto path = dgl::get_string(args, "path");
++        const auto set  = dgl::get_string(args, "set");
++        auto file       = read_stage(path, "fugue/conditioning", dgl::get_string(args, "version"));
++        // An older encode could leave adapter state here, which this engine's generation API cannot
++        // apply: refuse it rather than sample without the adapter.
++        for (const auto& [name, blob] : file.blobs)
++            for (const char* adapter : {"ip_adapter.", "pulid.", "photomaker."})
++                if (name.rfind(adapter, 0) == 0)
++                    refuse("the conditioning '" + path + "' uses " + adapter + "*, which this engine's generation API no longer takes");
++        SDCondition condition;
++        if (!fugue_stages::get_cond(file, set, condition))
++            refuse("cannot read conditioning '" + path + "': " + file.error);
++        // With a guidance of 1 an older encode left the negative empty: it is the positive.
++        if (condition.empty() && set == "uncond" && !fugue_stages::get_cond(file, "cond", condition))
++            refuse("cannot read conditioning '" + path + "': " + file.error);
++        if (condition.empty())
++            refuse("the conditioning '" + path + "' has no '" + set + "' set");
++        return dgl::condition_value(std::move(condition));
++    }
 +
-+#endif  // __SD_PIPELINE_FUGUE_STAGE_IO_H__
-diff --git i/src/pipeline/fugue_stages.h w/src/pipeline/fugue_stages.h
++    static dgl::Value load_latent(dgl::Values& args, dgl::RunState&) {
++        const auto path = dgl::get_string(args, "path");
++        auto file       = read_stage(path, "fugue/latent", dgl::get_string(args, "version"));
++        const auto number = [&](const char* key) {
++            const auto found = file.meta.find(key);
++            return found == file.meta.end() ? 0 : std::atoi(found->second.c_str());
++        };
++        const auto fits = [&](const char* key, const char* meta) {
++            const auto wanted = dgl::get_int(args, key);
++            return wanted == 0 || number(meta) == 0 || number(meta) == wanted;
++        };
++        if (!fits("width", "width") || !fits("height", "height") || !fits("frames", "frames"))
++            refuse("the latent '" + path + "' does not fit this request's size");
++        std::vector<sd::Tensor<float>> latents;
++        if (!fugue_stages::get_list(file, "latent", latents))
++            refuse("cannot read latent '" + path + "': " + file.error);
++        const auto index = dgl::get_int(args, "index");
++        if (index < 0 || index >= static_cast<int64_t>(latents.size()) || latents[static_cast<size_t>(index)].empty())
++            refuse("the latent '" + path + "' has no item " + std::to_string(index));
++        return dgl::tensor_value(std::move(latents[static_cast<size_t>(index)]));
++    }
++
++    static dgl::Value load_clip(dgl::Values& args, dgl::RunState&) {
++        const auto path = dgl::get_string(args, "path");
++        require_file_access(path, SD_DGL_FILE_READ);
++        return dgl::tensor_value(read_y4m(path, int(dgl::get_int(args, "width")), int(dgl::get_int(args, "height")), int(dgl::get_int(args, "frames"))));
++    }
++
++    // Strength as a noise level (the option upstream's pipeline had before DGL): the schedule from
++    // the first sigma at or below the level, with the level itself as the first one when asked.
++    static dgl::Value noise_level_sigmas(dgl::Values& args, dgl::RunState&) {
++        const auto predict      = dgl::object<dgl::ops::Predictor>(args, "predict");
++        const auto* denoiser    = dgl::ops::schedule_predictor(*predict).resolved_parameterization().native();
++        const auto& full        = dgl::sigma_tensor(args, "sigmas").values();
++        const float target      = const_cast<Denoiser*>(denoiser)->noise_level_to_sigma(float(dgl::get_number(args, "strength")));
++        size_t start            = 0;
++        for (size_t i = 0; i < full.size(); ++i)
++            if (full[i] <= target) {
++                start = i;
++                break;
++            }
++        start = std::min(start, full.size() - 2);  // Leave at least one step
++        std::vector<float> sigmas(full.begin() + static_cast<std::ptrdiff_t>(start), full.end());
++        if (target > 0 && dgl::get_bool(args, "force_first") && target > sigmas[1])
++            sigmas[0] = target;
++        return dgl::tensor_value(sd::Tensor<float>::from_vector(std::move(sigmas)));
++    }
++
++    void register_operations(dgl::Registry& registry) {
++        using dgl::Kind;
++        registry["fugue::load_condition"] = dgl::make_operation(
++            {dgl::required("path", Kind::String), dgl::required("set", Kind::String), dgl::required("version", Kind::String)},
++            dgl::condition_signature(), load_condition);
++        registry["fugue::load_latent"] = dgl::make_operation(
++            {dgl::required("path", Kind::String), dgl::required("version", Kind::String), dgl::integer("index", 0, INT32_MAX, 0),
++             dgl::integer("width", 0, INT32_MAX, 0), dgl::integer("height", 0, INT32_MAX, 0), dgl::integer("frames", 0, INT32_MAX, 0)},
++            {Kind::Tensor}, load_latent);
++        registry["fugue::load_clip"] = dgl::make_operation(
++            {dgl::required("path", Kind::String), dgl::integer("width", 1, INT32_MAX), dgl::integer("height", 1, INT32_MAX), dgl::integer("frames", 1, INT32_MAX)},
++            {Kind::Tensor}, load_clip);
++        registry["fugue::noise_level_sigmas"] = dgl::make_operation(
++            {dgl::required("predict", Kind::Predictor), dgl::required("sigmas", Kind::Tensor), dgl::number("strength", 0, 1),
++             dgl::optional("force_first", Kind::Boolean, false)},
++            {Kind::Tensor}, noise_level_sigmas);
++    }
++
++}  // namespace sd::api::fugue_stage
+diff --git i/src/api/fugue_stage.h w/src/api/fugue_stage.h
 new file mode 100644
-index 0000000..2febfec
+index 0000000..26f64b1
 --- /dev/null
-+++ w/src/pipeline/fugue_stages.h
++++ w/src/api/fugue_stage.h
+@@ -0,0 +1,27 @@
++// Fugue's stage split on the DGL engine (github.com/bmaltais/fugue, helper/sdcpp.patch): encode,
++// sample and decode run as separate calls. The library renders the whole program of a request as
++// always; this module cuts it at named values, replacing what a stage reads from a file and keeping
++// only the statements the stage's result needs. A request without a `fugue.*` option, or the
++// noise-level reading of strength, never comes here.
++#ifndef __SD_API_FUGUE_STAGE_H__
++#define __SD_API_FUGUE_STAGE_H__
++
++#include <memory>
++
++#include "api/generation.h"
++#include "dgl/registry.h"
++
++namespace sd::api::fugue_stage {
++
++    bool wanted(const ImageConfig& image);
++    bool wanted(const VideoConfig& video);
++
++    sd_status_t run_image(GenerationContext& context, std::shared_ptr<sd_opt_t> options, OptConfig config, int64_t seed, sd_result_t** out);
++    sd_status_t run_video(GenerationContext& context, std::shared_ptr<sd_opt_t> options, const OptConfig& config, int64_t seed, sd_result_t** out);
++
++    // The fugue:: built-ins the cut programs call.
++    void register_operations(dgl::Registry& registry);
++
++}  // namespace sd::api::fugue_stage
++
++#endif  // __SD_API_FUGUE_STAGE_H__
+diff --git i/src/api/fugue_stages.h w/src/api/fugue_stages.h
+new file mode 100644
+index 0000000..e78fbb7
+--- /dev/null
++++ w/src/api/fugue_stages.h
 @@ -0,0 +1,316 @@
 +// Fugue's stage split (github.com/bmaltais/fugue, helper/sdcpp.patch): the files that carry
-+// conditioning and latents between the stages of generate_image, so encode, sample and decode
++// conditioning and latents between the stages of a generation, so encode, sample and decode
 +// can run as separate calls. The `fugue.*` image options (src/api/options.cpp) choose what is
-+// read, written and where generate_image stops.
++// read, written and where a run stops (api/fugue_stage.cpp).
 +//
 +// A file is in the safetensors layout: an 8-byte header length, a JSON header, raw tensors.
 +// Every list field records its length in the metadata, so an empty tensor inside a list keeps
 +// its place (it is stored with shape [0]); a tensor is read back only as the type it was stored
 +// as.
-+#ifndef __SD_PIPELINE_FUGUE_STAGES_H__
-+#define __SD_PIPELINE_FUGUE_STAGES_H__
++#ifndef __SD_API_FUGUE_STAGES_H__
++#define __SD_API_FUGUE_STAGES_H__
 +
 +#include <cstdint>
 +#include <cstring>
@@ -746,378 +1015,246 @@ index 0000000..2febfec
 +
 +}  // namespace fugue_stages
 +
-+#endif  // __SD_PIPELINE_FUGUE_STAGES_H__
-diff --git i/src/pipeline/image.cpp w/src/pipeline/image.cpp
-index f2cdcea..a240848 100644
---- i/src/pipeline/image.cpp
-+++ w/src/pipeline/image.cpp
-@@ -10,6 +10,8 @@
++#endif  // __SD_API_FUGUE_STAGES_H__
+diff --git i/src/api/generation.cpp w/src/api/generation.cpp
+index ba267c5..567b9ce 100644
+--- i/src/api/generation.cpp
++++ w/src/api/generation.cpp
+@@ -5,6 +5,7 @@
+ #include <filesystem>
+ #include <random>
  
- #include "core/rng.hpp"
- #include "diffusion_engine.h"
-+#include "extensions/generation_extension.h"
-+#include "fugue_stage_io.h"
- #include "model/vae/vae.hpp"
- #include "pipeline/image_upscale.h"
- #include "request.h"
-@@ -197,7 +199,7 @@ namespace sd::pipeline {
-         sd::Tensor<float> mask_image_tensor;
-         int image_channels = sd->get_image_channels();
++#include "api/fugue_stage.h"
+ #include "api/generation_program.h"
+ #include "api/result.h"
+ #include "api/tensor.h"
+@@ -229,6 +230,8 @@ namespace sd::api {
+             return status;
+         context.check_cancelled();
+         const auto seed = resolved_seed(config.image.seed);
++        if (fugue_stage::wanted(config.image))
++            return fugue_stage::run_image(context, snapshot, config, seed, out);
+         auto result     = std::make_unique<sd_result_t>();
+         for (int i = 0; i < config.image.batch_count; ++i) {
+             if (context.cancellation.load() == SD_CANCEL_NEW_LATENTS)
+@@ -251,6 +254,8 @@ namespace sd::api {
+         const auto status = resolve(snapshot.get(), Video, config);
+         if (status != SD_STATUS_OK)
+             return status;
++        if (fugue_stage::wanted(config.video))
++            return fugue_stage::run_video(context, snapshot, config, resolved_seed(config.video.seed), out);
+         auto program = video_program(context, config.video, snapshot.get(), resolved_seed(config.video.seed));
+         auto value   = execute_program(context, program);
+         auto result  = std::make_unique<sd_result_t>();
+diff --git i/src/api/generation.h w/src/api/generation.h
+index 09f3c44..a0f460f 100644
+--- i/src/api/generation.h
++++ w/src/api/generation.h
+@@ -65,6 +65,7 @@ namespace sd::api {
+     struct GenerationProgram {
+         std::string source;
+         dgl::Values inputs;
++        std::string vae_options;  // Fugue's stage split: the VAE run options of this program
+     };
  
--        if (sd_img_gen_params->init_image.data != nullptr) {
-+        if (sd_img_gen_params->init_image.data != nullptr || sd_img_gen_params->fugue.init_latent_in != nullptr) {
-             LOG_INFO("IMG2IMG");
- 
-             if (request->strength < 1.f) {
-@@ -255,13 +257,19 @@ namespace sd::pipeline {
-                 plan->sample_steps = static_cast<int>(plan->sigmas.size() - 1);
-             }
- 
--            init_image_tensor = ensure_image_tensor_channels(sd_image_to_tensor(sd_img_gen_params->init_image, request->width, request->height),
--                                                             image_channels);
-+            if (sd_img_gen_params->init_image.data != nullptr) {
-+                init_image_tensor = ensure_image_tensor_channels(sd_image_to_tensor(sd_img_gen_params->init_image, request->width, request->height),
-+                                                                 image_channels);
-+            }
-         }
- 
-         if (sd_img_gen_params->mask_image.data != nullptr) {
-             mask_image_tensor = sd_image_to_tensor(sd_img_gen_params->mask_image, request->width, request->height);
--            mask_image_tensor = sd::ops::round(mask_image_tensor);
-+            // fugue.soft_mask keeps the values for differential diffusion, except for an inpaint model,
-+            // which reads the mask as a channel it was trained to see as 0 or 1.
-+            if (!sd_img_gen_params->fugue.soft_mask || sd_version_is_inpaint(sd->version)) {
-+                mask_image_tensor = sd::ops::round(mask_image_tensor);
-+            }
-         }
- 
-         if (sd_img_gen_params->control_image.data != nullptr) {
-@@ -974,20 +982,81 @@ namespace sd::pipeline {
-             return false;
-         }
-         ImageGenerationLatents latents = std::move(*latents_opt);
--
--        auto embeds_opt = prepare_image_generation_embeds(sd,
--                                                          sd_img_gen_params,
--                                                          &request,
--                                                          &plan,
--                                                          &latents,
--                                                          ref_image_params);
--        if (!embeds_opt.has_value()) {
-+        const sd::FugueStageConfig& fugue = sd_img_gen_params->fugue;
-+        const std::string stop_after      = SAFE_STR(fugue.stop_after);
-+        if (!stop_after.empty() && stop_after != "init" && stop_after != "cond" && stop_after != "sample") {
-+            LOG_ERROR("fugue: unknown stage '%s' to stop after; use init, cond or sample", stop_after.c_str());
-             return false;
-         }
--        ImageGenerationEmbeds embeds = std::move(*embeds_opt);
-+        if (fugue.init_latent_out != nullptr) {
-+            if (!fugue_save_latents(sd, {latents.init_latent}, request, fugue.init_latent_out))
-+                return false;
-+        }
-+        if (fugue.init_latent_in != nullptr) {
-+            // An inpaint model builds its extra input from the init image, before this point.
-+            if (sd_version_is_inpaint(sd->version)) {
-+                LOG_ERROR("fugue: %s cannot start from a latent alone; give it the image", sd_version_name(sd->version));
-+                return false;
-+            }
-+            std::vector<sd::Tensor<float>> loaded;
-+            if (!fugue_load_latents(sd, loaded, fugue.init_latent_in))
-+                return false;
-+            if (loaded.size() != 1) {
-+                LOG_ERROR("fugue: the init latent '%s' holds %zu latents, not one", fugue.init_latent_in, loaded.size());
-+                return false;
-+            }
-+            if (loaded[0].shape() != latents.init_latent.shape()) {
-+                LOG_ERROR("fugue: the init latent '%s' does not fit a %dx%d image", fugue.init_latent_in, request.width, request.height);
-+                return false;
-+            }
-+            latents.init_latent = std::move(loaded[0]);
-+        }
-+        if (stop_after == "init") {
-+            return true;
-+        }
-+
-+        ImageGenerationEmbeds embeds;
-+        if (fugue.cond_in != nullptr) {
-+            if (!fugue_load_cond(sd, embeds, fugue.cond_in))
-+                return false;
-+            // An inpaint model's masked picture is part of its conditioning (c_concat), which the
-+            // encode made without this call's picture and mask. Set it from this call's latents, as
-+            // prepare_image_generation_embeds does in a single run.
-+            if (sd_version_is_inpaint(sd->version) && ref_image_params.pass_to_dit) {
-+                embeds.cond.c_concat = latents.concat_latent;
-+                if (!embeds.uncond.empty()) {
-+                    embeds.uncond.c_concat = latents.concat_latent;
-+                }
-+                if (!embeds.img_uncond.empty()) {
-+                    embeds.img_uncond.c_concat = latents.img_uncond_concat_latent;
-+                }
-+            }
-+        } else if (fugue.latent_in == nullptr) {
-+            auto embeds_opt = prepare_image_generation_embeds(sd,
-+                                                              sd_img_gen_params,
-+                                                              &request,
-+                                                              &plan,
-+                                                              &latents,
-+                                                              ref_image_params);
-+            if (!embeds_opt.has_value()) {
-+                return false;
-+            }
-+            embeds = std::move(*embeds_opt);
-+        }
-+        if (fugue.cond_out != nullptr) {
-+            if (!fugue_save_cond(sd, embeds, fugue.cond_out))
-+                return false;
-+        }
-+        if (stop_after == "cond") {
-+            return true;
-+        }
-         std::vector<sd::Tensor<float>> final_latents;
-+        if (fugue.latent_in != nullptr) {
-+            if (!fugue_load_latents(sd, final_latents, fugue.latent_in))
-+                return false;
-+        }
-         int64_t denoise_start = ggml_time_ms();
--        for (int b = 0; b < request.batch_count; b++) {
-+        for (int b = 0; b < request.batch_count && fugue.latent_in == nullptr; b++) {
-             sd_cancel_mode_t cancel = sd->get_cancel_flag();
-             if (cancel == SD_CANCEL_ALL) {
-                 LOG_ERROR("cancelling generation");
-@@ -1032,7 +1101,9 @@ namespace sd::pipeline {
-                                                0,
-                                                static_cast<float>(request.fps),
-                                                request.cache_params,
--                                               true);
-+                                               true,
-+                                               {},
-+                                               sd_img_gen_params->fugue.soft_mask);
-             int64_t sampling_end  = ggml_time_ms();
-             if (!x_0.empty()) {
-                 LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
-@@ -1055,7 +1126,7 @@ namespace sd::pipeline {
-             return false;
-         }
- 
--        if (request.hires.enabled && request.hires.target_width > 0) {
-+        if (request.hires.enabled && request.hires.target_width > 0 && fugue.latent_in == nullptr) {
-             if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
-                 LOG_ERROR("cancelling generation before hires fix");
-                 return false;
-@@ -1179,7 +1250,9 @@ namespace sd::pipeline {
-                                                         0,
-                                                         static_cast<float>(request.fps),
-                                                         request.cache_params,
--                                                        false);
-+                                                        false,
-+                                                        {},
-+                                                        sd_img_gen_params->fugue.soft_mask);
-                 int64_t hires_sample_end   = ggml_time_ms();
-                 if (!x_0.empty()) {
-                     LOG_INFO("hires sampling %d/%d completed, taking %.2fs",
-@@ -1201,6 +1274,13 @@ namespace sd::pipeline {
- 
-             final_latents = std::move(hires_final_latents);
-         }
-+        if (fugue.latent_out != nullptr) {
-+            if (!fugue_save_latents(sd, final_latents, request, fugue.latent_out))
-+                return false;
-+        }
-+        if (stop_after == "sample") {
-+            return true;
-+        }
- 
-         int num_images = 0;
-         auto result    = decode_image_outputs(sd, request, final_latents, &num_images);
-diff --git i/src/pipeline/video.cpp w/src/pipeline/video.cpp
-index 529bbb6..c1ac521 100644
---- i/src/pipeline/video.cpp
-+++ w/src/pipeline/video.cpp
-@@ -1,3 +1,4 @@
-+#include "api/result.h"
- #include "core/option_types.h"
- #include "generation.h"
- #include "generation_info.h"
-@@ -12,6 +13,7 @@
- #include "core/rng.hpp"
- #include "core/rng_philox.hpp"
- #include "diffusion_engine.h"
-+#include "fugue_stage_io.h"
- #include "model/diffusion/minimax_h3.hpp"
- #include "model/upscaler/h3_latent_upscaler.hpp"
- #include "model/upscaler/ltx_latent_upscaler.hpp"
-@@ -1902,6 +1904,85 @@ namespace sd::pipeline {
-             return false;
-         sd->reset_generation_extensions();
- 
-+        // Fugue's stage split (fugue_stage_io.h): encode stops after the conditioning, sample reads
-+        // it and stops after the latent, decode reads the latent. Video has no init stage.
-+        const sd::FugueStageConfig& fugue = sd_vid_gen_params->fugue;
-+        const std::string stop_after      = SAFE_STR(fugue.stop_after);
-+        const bool staged                 = fugue.cond_in != nullptr || fugue.cond_out != nullptr || fugue.latent_in != nullptr ||
-+                            fugue.latent_out != nullptr || fugue.init_latent_in != nullptr || fugue.init_latent_out != nullptr ||
-+                            !stop_after.empty();
-+        if (!stop_after.empty() && stop_after != "init" && stop_after != "cond" && stop_after != "sample") {
-+            LOG_ERROR("fugue: unknown stage '%s' to stop after for a video; use init, cond or sample", stop_after.c_str());
-+            return false;
-+        }
-+        if (fugue.init_latent_out != nullptr && fugue.init_video == nullptr) {
-+            LOG_ERROR("fugue: a video's init latent is made from init_video");
-+            return false;
-+        }
-+        if (fugue.init_latent_in != nullptr && fugue.init_video != nullptr) {
-+            LOG_ERROR("fugue: init_video and init_latent_in both start the clip");
-+            return false;
-+        }
-+        if ((staged || fugue.init_video != nullptr) && (latent_upscale_enabled || sd_version_is_ltxav(sd->version) || sd_version_is_minimax_h3(sd->version) ||
-+                       sd->version == VERSION_WAN2_2_S2V)) {
-+            LOG_ERROR("fugue: %s cannot run in stages (latent upscale or audio)", sd_version_name(sd->version));
-+            return false;
-+        }
-+        const auto stage_done = [&]() {
-+            if (info_out)
-+                *info_out = info;
-+            return true;
-+        };
-+        if (fugue.latent_in != nullptr) {
-+            std::vector<sd::Tensor<float>> loaded;
-+            if (!fugue_load_latents(sd, loaded, fugue.latent_in))
-+                return false;
-+            if (loaded.size() != 1) {
-+                LOG_ERROR("fugue: the latent '%s' holds %zu latents, not one", fugue.latent_in, loaded.size());
-+                return false;
-+            }
-+            auto decoded = decode_video_outputs(sd, request, loaded[0], num_frames_out);
-+            if (decoded == nullptr)
-+                return false;
-+            if (info_out)
-+                *info_out = info;
-+            if (frames_out != nullptr) {
-+                *frames_out = decoded;
-+            } else {
-+                sd::free_images(decoded, num_frames_out != nullptr ? *num_frames_out : 0);
-+            }
-+            LOG_INFO("generate_video (decode) completed in %.2fs", (ggml_time_ms() - t0) * 1.0f / 1000);
-+            return true;
-+        }
-+
-+        // Video to video: the clip to redraw is encoded here (the init stage, or `generate`), or
-+        // read from the latent that stage wrote. Off: nothing below runs.
-+        sd::Tensor<float> start_latent;
-+        if (fugue.init_video != nullptr) {
-+            auto clip = fugue_read_y4m(fugue.init_video, request.width, request.height, request.frames);
-+            if (clip.empty())
-+                return false;
-+            start_latent = sd->encode_first_stage(clip);
-+            if (start_latent.empty()) {
-+                LOG_ERROR("fugue: failed to encode the video '%s'", fugue.init_video);
-+                return false;
-+            }
-+            if (fugue.init_latent_out != nullptr &&
-+                !fugue_save_latents(sd, {start_latent}, request, fugue.init_latent_out, request.frames, request.fps))
-+                return false;
-+            if (stop_after == "init")
-+                return stage_done();
-+        } else if (fugue.init_latent_in != nullptr) {
-+            std::vector<sd::Tensor<float>> loaded;
-+            if (!fugue_load_latents(sd, loaded, fugue.init_latent_in))
-+                return false;
-+            if (loaded.size() != 1) {
-+                LOG_ERROR("fugue: the init latent '%s' holds %zu latents, not one", fugue.init_latent_in, loaded.size());
-+                return false;
-+            }
-+            start_latent = std::move(loaded[0]);
-+        }
-+
-         SamplePlan plan(sd, sd_vid_gen_params, request);
-         sd->generation_progress.report("preparing", "inputs");
-         auto latent_inputs_opt = prepare_video_generation_latents(sd, sd_vid_gen_params, &request, ref_image_params);
-@@ -1909,16 +1990,49 @@ namespace sd::pipeline {
-             return false;
-         }
-         ImageGenerationLatents latents = std::move(*latent_inputs_opt);
-+        if (!start_latent.empty()) {
-+            if (start_latent.shape() != latents.init_latent.shape()) {
-+                LOG_ERROR("fugue: the start video does not fit a %dx%d clip of %d frames for %s",
-+                          request.width, request.height, request.frames, sd_version_name(sd->version));
-+                return false;
-+            }
-+            latents.init_latent = std::move(start_latent);
-+            // Redraw by `strength` as image to image does: sampling starts part way down the
-+            // schedule, so the first sigmas (the high-noise pass first) are dropped.
-+            if (request.strength < 1.f) {
-+                const int steps  = plan.high_noise_sample_steps + plan.sample_steps;
-+                int t_enc        = static_cast<int>(steps * request.strength);
-+                t_enc            = std::min(t_enc, steps - 1);
-+                const int drop   = steps - t_enc;
-+                plan.sigmas.erase(plan.sigmas.begin(), plan.sigmas.begin() + drop);
-+                plan.high_noise_sample_steps = std::max(0, plan.high_noise_sample_steps - drop);
-+                plan.sample_steps            = static_cast<int>(plan.sigmas.size()) - 1 - plan.high_noise_sample_steps;
-+                LOG_INFO("fugue: video to video, %d of %d steps", t_enc, steps);
-+            }
-+        }
- 
--        auto embeds_opt = prepare_video_generation_embeds(sd,
--                                                          sd_vid_gen_params,
--                                                          request,
--                                                          latents,
--                                                          ref_image_params);
--        if (!embeds_opt) {
--            return false;
-+        ImageGenerationEmbeds embeds;
-+        if (fugue.cond_in != nullptr) {
-+            if (!fugue_load_cond(sd, embeds, fugue.cond_in))
-+                return false;
-+        } else {
-+            auto embeds_opt = prepare_video_generation_embeds(sd,
-+                                                              sd_vid_gen_params,
-+                                                              request,
-+                                                              latents,
-+                                                              ref_image_params);
-+            if (!embeds_opt) {
-+                return false;
-+            }
-+            embeds = std::move(*embeds_opt);
-+        }
-+        if (fugue.cond_out != nullptr) {
-+            if (!fugue_save_cond(sd, embeds, fugue.cond_out))
-+                return false;
-+        }
-+        if (stop_after == "cond") {
-+            return stage_done();
-         }
--        ImageGenerationEmbeds embeds = std::move(*embeds_opt);
-         if (latent_upscale_enabled) {
-             LOG_INFO("generate_video %dx%dx%d -> video latent spatial upscale",
-                      request.width,
-@@ -2027,6 +2141,14 @@ namespace sd::pipeline {
-         }
-         LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
- 
-+        if (fugue.latent_out != nullptr) {
-+            if (!fugue_save_latents(sd, {final_latent}, request, fugue.latent_out, request.frames, request.fps))
-+                return false;
-+        }
-+        if (stop_after == "sample") {
-+            return stage_done();
-+        }
-+
-         if (latent_upscale_enabled) {
-             if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
-                 LOG_ERROR("cancelling generation before latent upscale");
-diff --git i/src/stable-diffusion.cpp w/src/stable-diffusion.cpp
-index acc3672..f7ad89c 100644
---- i/src/stable-diffusion.cpp
-+++ w/src/stable-diffusion.cpp
-@@ -75,6 +75,11 @@ static sd_status_t run_image(sd_ctx_t* ctx, const sd::ImageConfig* params, sd::I
-         sd::free_images(images, count);
-         throw;
+     dgl::Value execute_program(GenerationContext& context, const GenerationProgram& program, const dgl::Graph* compiled = nullptr);
+diff --git i/src/api/generation_program.cpp w/src/api/generation_program.cpp
+index f3b87be..4a1c4ae 100644
+--- i/src/api/generation_program.cpp
++++ w/src/api/generation_program.cpp
+@@ -319,6 +319,7 @@ namespace sd::api {
+         fields["variables"] = variables(values);
+         fields["inputs"]    = input_names(program);
+         program.source      = request.render(fields.at("entry"));
++        program.vae_options = axes;
+         return program;
      }
-+    // Fugue's stage split (pipeline/fugue_stages.h): a call that stops after a stage makes no image.
-+    if (count == 0 && params->fugue.stop_after != nullptr) {
-+        *result_out = static_cast<sd::ImageGenerationResult*>(calloc(1, sizeof(sd::ImageGenerationResult)));
-+        return *result_out ? SD_STATUS_OK : sd::api::error(SD_STATUS_OUT_OF_MEMORY, nullptr, "could not allocate image result");
-+    }
-     return sd::make_image_generation_result(images, count, infos, result_out) ? SD_STATUS_OK
-                                                                               : sd::api::error(SD_STATUS_OUT_OF_MEMORY, nullptr, "could not allocate image result");
+ 
+diff --git i/src/api/options.cpp w/src/api/options.cpp
+index 5ec536a..f87cce4 100644
+--- i/src/api/options.cpp
++++ w/src/api/options.cpp
+@@ -447,6 +447,21 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
+     hires.array("hires.sigmas", &sd::HiresConfig::custom_sigmas, &sd::HiresConfig::custom_sigmas_count, valid_sigmas, "hires sigmas require at least two strictly decreasing nonnegative entries ending in zero, or an empty array");
  }
+ 
++static void add_fugue_specs(std::vector<ParamSpec>& specs) {
++    using namespace sd::api;
++    ParamGroup fugue(specs, Image | Video, [](sd::OptConfig& config) { return std::tie(config.image.fugue, config.video.fugue); });
++
++    fugue.string("fugue.init_latent_in", &sd::FugueStageConfig::init_latent_in);
++    fugue.string("fugue.init_latent_out", &sd::FugueStageConfig::init_latent_out);
++    fugue.string("fugue.cond_in", &sd::FugueStageConfig::cond_in);
++    fugue.string("fugue.cond_out", &sd::FugueStageConfig::cond_out);
++    fugue.string("fugue.latent_in", &sd::FugueStageConfig::latent_in);
++    fugue.string("fugue.latent_out", &sd::FugueStageConfig::latent_out);
++    fugue.string("fugue.stop_after", &sd::FugueStageConfig::stop_after);
++    fugue.string("fugue.init_video", &sd::FugueStageConfig::init_video);
++    fugue.boolean("fugue.soft_mask", &sd::FugueStageConfig::soft_mask);
++}
++
+ static void add_tiling_specs(std::vector<ParamSpec>& specs) {
+     using namespace sd::api;
+     ParamGroup tiling(specs, Image | Video, [](sd::OptConfig& config) { return std::tie(config.image.vae_tiling_params, config.video.vae_tiling_params); });
+@@ -489,6 +504,7 @@ static std::vector<ParamSpec> make_specs() {
+     add_sampling_specs(specs);
+     add_cache_specs(specs);
+     add_hires_specs(specs);
++    add_fugue_specs(specs);
+     add_tiling_specs(specs);
+     add_postprocess_specs(specs);
+     return specs;
+diff --git i/src/config.h w/src/config.h
+index 5319863..06461a2 100644
+--- i/src/config.h
++++ w/src/config.h
+@@ -140,6 +140,25 @@ namespace sd {
+         int custom_sigmas_count{};
+     };
+ 
++    // Fugue's stage split (api/fugue_stage.h): files generate_images and generate_video read in
++    // place of a stage or write after one, and the stage they stop after ("init", "cond" or
++    // "sample"; a video's "init" is the encode of init_video).
++    struct FugueStageConfig {
++        const char* init_latent_in{};
++        const char* init_latent_out{};
++        const char* cond_in{};
++        const char* cond_out{};
++        const char* latent_in{};
++        const char* latent_out{};
++        const char* stop_after{};
++        // A video to redraw (video-to-video): a YUV4MPEG2 file of the request's size and length,
++        // which the video program encodes with the VAE. Off: upstream.
++        const char* init_video{};
++        // Differential diffusion (arXiv 2306.00950): an image mask keeps its values between 0 and 1
++        // and sets how late each latent cell is released from the start latent. Off: upstream.
++        bool soft_mask{};
++    };
++
+     struct ImageConfig {
+         const sd_lora_t* loras{};
+         uint32_t lora_count{};
+@@ -165,6 +184,7 @@ namespace sd {
+         bool circular_x{};
+         bool circular_y{};
+         enum sd_control_type_t control_type {};
++        sd::FugueStageConfig fugue{};
+ 
+         ImageConfig();
+     };
+@@ -200,6 +220,7 @@ namespace sd {
+         HiresConfig hires{};
+         bool circular_x{};
+         bool circular_y{};
++        sd::FugueStageConfig fugue{};
+ 
+         VideoConfig();
+     };
+diff --git i/src/dgl/bindings/arguments.cpp w/src/dgl/bindings/arguments.cpp
+index 5908d0b..8e691e7 100644
+--- i/src/dgl/bindings/arguments.cpp
++++ w/src/dgl/bindings/arguments.cpp
+@@ -84,6 +84,7 @@ namespace sd::dgl {
+             options.denoise_mask = &float_tensor(args, "denoise_mask");
+         }
+         options.mask_input = get_bool(args, "mask_input");
++        options.soft_mask  = args.count("soft_mask") && get_bool(args, "soft_mask");
+         options.extra_args = get_string(args, "extra_args");
+         if (args.count("finish"))
+             options.finish = get_bool(args, "finish");
+diff --git i/src/dgl/bindings/registration.cpp w/src/dgl/bindings/registration.cpp
+index 6a066ef..57fbd98 100644
+--- i/src/dgl/bindings/registration.cpp
++++ w/src/dgl/bindings/registration.cpp
+@@ -4,6 +4,7 @@
+ #include <limits>
+ 
+ #include "core/util.h"
++#include "api/fugue_stage.h"
+ #include "dgl/bindings/audio.h"
+ #include "dgl/bindings/component_loader.h"
+ #include "dgl/bindings/components.h"
+@@ -616,6 +617,7 @@ namespace sd::dgl {
+             required("start", Kind::Tensor), required("sigmas", Kind::Tensor), required("predict", Kind::Predictor),
+             required("rng", Kind::Rng), choice("method", std::move(sample_methods), "euler"), number("eta", 0, 100, 1),
+             optional("base", Kind::Tensor), optional("denoise_mask", Kind::Tensor), optional("mask_input", Kind::Boolean, false),
++            optional("soft_mask", Kind::Boolean, false),
+             optional("extra_args", Kind::String, ""),
+             optional("finish", Kind::Boolean),
+             optional("cache", Kind::Dict), optional("observer", Kind::SamplingObserver)};
+@@ -742,6 +744,7 @@ namespace sd::dgl {
+         register_latent_operations(registry);
+         register_video_restoration_operations(registry);
+         register_detailer_operations(registry);
++        api::fugue_stage::register_operations(registry);
+         for (const auto* name : {"latent_shape", "audio_latent_shape", "make_sigmas", "t_to_sigma", "denoiser_scalings", "relayvsr::latent_shape",
+                                  "add_noise", "vae_to_dit_latents", "dit_to_vae_latents", "list::replace", "zero_out"})
+             if (auto found = registry.find(name); found != registry.end())
+diff --git i/src/dgl/models/diffusion_prediction.h w/src/dgl/models/diffusion_prediction.h
+index 8b3330e..3109d2a 100644
+--- i/src/dgl/models/diffusion_prediction.h
++++ w/src/dgl/models/diffusion_prediction.h
+@@ -1,6 +1,7 @@
+ #ifndef __SD_DGL_MODELS_DIFFUSION_PREDICTION_H__
+ #define __SD_DGL_MODELS_DIFFUSION_PREDICTION_H__
+ 
++#include <algorithm>
+ #include <cstdint>
+ #include <functional>
+ #include <limits>
+@@ -59,6 +60,7 @@ namespace sd::dgl::models {
+         float lookahead_sigma                       = std::numeric_limits<float>::quiet_NaN();
+         float semantic_sigma                        = std::numeric_limits<float>::quiet_NaN();
+         bool mask_input                             = false;
++        bool soft_mask                              = false;
+         sd_sample::SampleStepCacheDispatcher* cache = nullptr;
+         std::vector<const ControlBinding*> controls;
+         std::function<UNetControls(const Tensor<float>&, const Tensor<float>&, const SDCondition&)> compute_controls;
+@@ -68,8 +70,22 @@ namespace sd::dgl::models {
+         uint64_t qwen_prefix_id                             = 0;
+ 
+         void blend_mask(Tensor<float>& latent) const {
+-            if (!mask.empty())
++            if (mask.empty())
++                return;
++            if (!soft_mask || schedule_size < 2) {
+                 latent = latent * mask + base * (1.f - mask);
++                return;
++            }
++            // fugue.soft_mask, differential diffusion (arXiv 2306.00950, Algorithm 1): the mask is a
++            // change map, and a cell with value m is held until the step where the fraction of
++            // steps left, t / k, falls below m. The paper's map is 1 for no change and its test is
++            // map < (k - t) / k, which is m > t / k for m = 1 - map. Step i is t = k - 1 - i.
++            const int steps       = static_cast<int>(schedule_size) - 1;
++            const float threshold = static_cast<float>(steps - 1 - std::min(index, steps - 1)) / steps;
++            sd::Tensor<float> released = mask;
++            for (float& value : released.values())
++                value = value > threshold ? 1.f : 0.f;
++            latent = latent * released + base * (1.f - released);
+         }
+     };
+ 
+diff --git i/src/dgl/ops/sampling.cpp w/src/dgl/ops/sampling.cpp
+index f040539..e46a8e7 100644
+--- i/src/dgl/ops/sampling.cpp
++++ w/src/dgl/ops/sampling.cpp
+@@ -74,6 +74,7 @@ namespace sd::dgl::ops {
+             step.solver_index   = index;
+             step.completes_step = index > 0 || (terminal_zero && index < 0 && step.index == static_cast<int>(sigmas.size() - 1));
+             step.mask_input     = options.mask_input;
++            step.soft_mask      = options.soft_mask;
+             const auto target   = static_cast<size_t>(step.index);
+             if (target < sigmas.size())
+                 step.target_sigma = sigmas[target];
+diff --git i/src/dgl/ops/sampling.h w/src/dgl/ops/sampling.h
+index 9cf837d..623107c 100644
+--- i/src/dgl/ops/sampling.h
++++ w/src/dgl/ops/sampling.h
+@@ -29,6 +29,7 @@ namespace sd::dgl {
+             const sd::Tensor<float>* base         = nullptr;
+             const sd::Tensor<float>* denoise_mask = nullptr;
+             bool mask_input                       = false;
++            bool soft_mask                        = false;  // Fugue: differential diffusion
+             std::string extra_args;
+             std::optional<bool> finish;
+             std::optional<CacheConfig> cache;
