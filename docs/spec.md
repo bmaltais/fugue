@@ -989,8 +989,18 @@ holding that node's `node.json`.
   this same question and trusted by the same one ([6.7](#67-trust)), never silently, and what
   ships with Fugue does not matter. Installing beside another major needs no replace (above).
 - The prompt shows the pack, its version and source, the runtime kinds of its nodes and what
-  they declare ([6.3](#63-the-needs-block)). Installing does not trust: `fugue pack trust <id>`
-  or the first run does ([6.7](#67-trust)).
+  they declare ([6.3](#63-the-needs-block)). On a terminal `fugue pack add` asks **one question**
+  for the install and the trust together (#379: "Install this pack and trust it?"; a pack with a `setup` shows its exact command in the
+  same list, [6.8](#68-per-pack-environments)); a yes does all of it, a no installs nothing. Settings > Packs keeps the install,
+  the setup and the trust as separate actions for one-off changes. Without a terminal `pack add` fails with
+  `needs_confirmation`.
+- **Get ready (#379).** What a template, workflow or package needs (packs, their environments and the models) is one
+  **ReadinessPlan** (`engine/readiness.h`), built from the workflow's nodes and `requires`, a template's carried packs and a package's
+  contents. The window's "Get ready" sheet ([11.10](#1110-templates)) and `fugue template prepare` / `fugue workflow prepare` show that
+  same plan and run it with the same executor: one yes covers each pack's install, its trust, its setup command and the model downloads.
+  Nothing happens without that yes, a pack **update** or a pack that declares **more** than the person saw
+  still asks on its own, and the executor refuses a pack that differs from the one the list showed (another version, setup command or
+  permissions: `pack_changed`).
 - Updates are explicit and pinned. Nothing updates on its own. `pack update` fetches the pack
   again at the same ref, or at `--ref`, shows the new version and asks; a pack already at that
   commit is left alone. A new version asks for trust again. A pack that was copied in by hand
@@ -1005,6 +1015,8 @@ holding that node's `node.json`.
 
 ### 6.7 Trust
 
+- Trust is part of the one yes that installs the pack from the Get ready sheet or `fugue pack add` ([6.6](#66-installing)); it is
+  still stored per pack id and version, and nothing else changes: an update asks again.
 - The first time a node from a pack would run, Fugue shows the pack, its runtime kinds and its
   declared permissions (network, files outside the run folder, GPU), and the user must allow it.
   The decision is stored per pack id and version in `trust.json`; a pack update asks again.
@@ -1022,7 +1034,9 @@ holding that node's `node.json`.
 
 A pack may declare `setup` (for example `uv sync` into a virtual environment inside the pack
 folder). It runs only after the user is shown the exact command and confirms. There is no shared
-environment, so packs cannot conflict with one another.
+environment, so packs cannot conflict with one another. The command is shown in the same list as the install and the trust
+([6.6](#66-installing)), so one yes covers it and nothing asks again at the first run (#379). `setup` may record `size` (bytes it
+downloads, for example 27 MB of ONNX Runtime); the Get ready list shows it and adds it to the disk space it needs.
 
 ### 6.9 Native tier
 
@@ -1596,6 +1610,14 @@ it as a module folder and run it with no code of its own in Fugue.
   Download queues it, on the same line as every other download (the banner shows it), with the
   checks above. When the file is in place its handle is the input's value, as for a file picked
   from disk. Nothing downloads without that answer (6.7: nothing silent).
+- **Where downloads go, and the one yes (#379).** The "Get ready" sheet ([11.10](#1110-templates)) and `fugue template prepare` /
+  `fugue workflow prepare` list the missing models with the packs and environments, each with file, licence (when the catalog has it),
+  size, source host and destination folder, then ask once. The sheet has a **Models go into** row with the current
+  `download_folder` (Fugue's own folder when unset), the free space at that folder against the download size, and **Change…**, which
+  offers the model folders (`model_paths` and Fugue's own) or **Pick a folder…**: a picked folder is added to `model_paths` as a
+  ComfyUI-layout root (Fugue downloads only into folders it searches) and becomes the new `download_folder`. Files still go in the
+  type's subfolder. A destination with too little free space says so before the yes and offers another folder. Settings > Folders has
+  the same setting, "Download models into". Models still download one after another; the first failure stops the rest.
 - Fugue never modifies or deletes a model file.
 
 ### 8.10 GPU memory and the helper

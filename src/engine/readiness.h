@@ -1,0 +1,163 @@
+#pragma once
+
+// Getting a template, workflow or package ready with one approval (spec 6.6, 6.7, 6.8, 8.9, 11.10; #379).
+//
+// A ReadinessPlan is the whole list of what is missing: the packs to install and trust (carried by a
+// template or named by the workflow's `requires.packs`), the environment each one's setup command makes,
+// and the models to download, with the totals and the free space where the models go. It is built once,
+// from a workflow, a template or a package, and the window's "Get ready" sheet and the CLI's `prepare`
+// commands both show that same plan.
+//
+// runReadinessPlan() is the one executor. The person's one yes covers every row: the pack's install, its
+// trust, its setup command and the model downloads, with no second question. It still decides nothing
+// itself: it is only called after a yes, and a pack that changed since the plan showed it (another
+// version, another setup command, other permissions) is refused, so the yes is never stretched to
+// something the person did not read. Each row is all or nothing (a pack is staged and put in place only
+// once it loads and its setup worked, 6.6; a model is written as a `.part` and kept only when its hash
+// matches, 8.9). The first failure stops the run: the rows after it are not started, nothing is half
+// installed, and the outcome says what to run again (a new plan holds only what is still missing).
+
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QList>
+#include <QString>
+#include <QStringList>
+
+#include <functional>
+
+#include "engine/error.h"
+#include "engine/model_download.h"
+#include "engine/model_library.h"
+#include "engine/pack_manager.h"
+#include "engine/templates.h"
+#include "engine/trust_store.h"
+
+namespace fugue {
+
+class Document;
+class FileHashes;
+class ModelCatalog;
+class Registry;
+
+// A pack a workflow needs, and where it can be had.
+struct WantedPack {
+    QString id;
+    QString version; // the workflow's or the carried pack's, may be empty
+    QString name;
+    bool needsInstall = false; // its nodes are not installed here (packsNeeded); else only trust may be missing
+    bool hasSource = false;
+    PackSource source;
+};
+
+struct ReadinessRequest {
+    QList<WantedPack> packs;
+    QJsonArray models; // Document::models()'s form
+};
+
+// The packs a document uses (TrustStore::packsUsed), each with where to get it: the carried pack's
+// folder, else `requires.packs`' source and ref. A pack with neither has no source.
+ReadinessRequest requestFor(const Document &document, const Registry &registry, const QList<CarriedPack> &carried = {});
+
+struct ReadinessPack {
+    enum class Action { Install, Trust }; // Trust: installed here already, not trusted yet
+    Action action = Action::Install;
+    PackSummary pack;   // what is shown and approved: for an install as it was previewed
+    QString folderName; // Trust: the installed folder's name, which `trustPack` takes
+
+    bool installs() const { return action == Action::Install; }
+    bool hasEnvironment() const { return installs() && !pack.setupCommand.isEmpty(); }
+};
+
+struct ReadinessModel {
+    QString name;       // the handle's name
+    QString resource;   // "fugue/diffusion-model"
+    QString license;    // from the catalog when the file is in it, else empty
+    QString licenseUrl;
+    QString host;       // the source's host
+    qint64 size = -1;   // -1: not recorded
+    DownloadTarget target; // the file it becomes
+    QString folder;     // where it goes
+};
+
+struct ReadinessPlan {
+    QList<ReadinessPack> packs;
+    QList<ReadinessModel> models;
+    QString destination;   // the model folder the models go into (settings' download_folder, or Fugue's own)
+    QStringList destinations; // every model folder they may go in (the Change… choices)
+    qint64 downloadBytes = 0;    // the models' sizes that are known
+    int unknownSizes = 0;        // models that do not record a size
+    qint64 environmentBytes = 0; // the setups' sizes that are known
+    int unknownEnvironments = 0;
+    qint64 freeBytes = -1;       // free where the models go; -1 when it cannot be told
+    // What cannot be made ready from here: a pack with no known source, a model with no source, a
+    // pack that did not preview. Warnings, not part of the one yes.
+    Errors problems;
+
+    int installCount() const;
+    int trustOnlyCount() const;
+    int environmentCount() const;
+    bool empty() const { return packs.isEmpty() && models.isEmpty(); }
+    // A row per pack, then per model (the run's row numbers).
+    int rowCount() const { return int(packs.size() + models.size()); }
+    // Disk the whole needs: the models and the environments, as far as sizes are known.
+    qint64 diskBytes() const { return downloadBytes + environmentBytes; }
+    // The models do not fit where they go (needs a known free space).
+    bool lowSpace() const { return freeBytes >= 0 && downloadBytes > freeBytes; }
+    // "Fugue will install 1 pack, set up 1 environment and download 1 model (1.2 GB)".
+    QString headline() const;
+    // The list a terminal shows, one line each.
+    QStringList lines() const;
+    QJsonObject toJson() const;
+};
+
+struct ReadinessEnv {
+    explicit ReadinessEnv(ModelLibrary models) : library(std::move(models)) {}
+    const Registry *registry = nullptr;
+    ModelLibrary library; // the settings in effect (ModelLibrary::current)
+    FileHashes *hashes = nullptr;
+    TrustStore *trust = nullptr;
+    QString packsDir;
+    const ModelCatalog *catalog = nullptr; // for a model's license; may be null
+    // Free bytes where a folder is (a folder that does not exist yet counts as its parent); default QStorageInfo.
+    std::function<qint64(const QString &)> freeSpace;
+    // What a git pack prints while it is previewed. May be null.
+    PackPrompts prompts;
+};
+
+ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const ReadinessEnv &env);
+
+enum class RowState { Waiting, Running, Done, Failed, Skipped };
+
+struct ReadinessRun {
+    ReadinessRun(QString packsFolder, TrustStore *trustStore, FileHashes *fileHashes)
+        : packsDir(std::move(packsFolder)), trust(trustStore), hashes(fileHashes) {}
+    QString packsDir;
+    TrustStore *trust = nullptr;
+    FileHashes *hashes = nullptr;
+    // Called as a row changes: its number (packs, then models), its state and a line (the error on Failed).
+    std::function<void(int row, RowState state, const QString &detail)> onRow;
+    // A model's bytes, as they arrive.
+    std::function<void(int row, qint64 received, qint64 total)> onProgress;
+    // What git and a setup print.
+    std::function<void(const QString &)> log;
+    // True when the person stopped the work; polled while it runs, from the running thread.
+    std::function<bool()> cancelled;
+    int retries = 5;
+    int retryDelayMs = 2000;
+};
+
+struct ReadinessOutcome {
+    bool ok = false;
+    bool cancelled = false;
+    int failedRow = -1;
+    int done = 0;       // rows finished
+    bool packsChanged = false; // a pack was installed or trusted: the node types are to be read again
+    Errors errors;
+    QStringList retry;  // the rows not done, by name: what a second run does
+};
+
+// Runs the plan, blocking, with its own event loop for the downloads: call it from a thread that may
+// block (the CLI's, or a worker's). Packs first, in order, then the models in order.
+ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run);
+
+} // namespace fugue

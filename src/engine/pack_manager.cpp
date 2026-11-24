@@ -376,6 +376,8 @@ Result<PackSummary> summarizePack(const QString &folder) {
     summary.permissions.sort();
     summary.setupCommand = setupCommandOf(*json);
     summary.setupDescription = json->value("setup").toObject().value("description").toString();
+    if (const QJsonValue size = json->value("setup").toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
+        summary.setupSize = qint64(size.toDouble());
     summary.source = readPackSource(folder);
     QStringList shown{summary.name, summary.version, summary.setupDescription};
     shown += summary.setupCommand;
@@ -479,6 +481,27 @@ Error inheritedRefusal(const QString &folderName, const QString &inheritedFolder
 }
 
 } // namespace
+
+Result<PackSummary> previewPack(const PackSource &source, const QString &packsDir, const PackPrompts &prompts) {
+    if (hasControl(source.location) || hasControl(source.ref))
+        return fail(QStringLiteral("usage"), QStringLiteral("The address or the ref has control characters."));
+    if (source.kind == PackSource::Kind::Path) {
+        Result<PackSummary> summary = summarizePack(source.location);
+        if (summary)
+            summary->source = PackSource{PackSource::Kind::Path, realPath(source.location), {}, {}};
+        return summary;
+    }
+    if (source.ref.isEmpty() || source.ref.startsWith('-'))
+        return fail(QStringLiteral("usage"), QStringLiteral("A git pack must be pinned to a tag or a commit."), QStringLiteral("Add a ref."));
+    const Result<Staged> staged = stage(source, packsDir, prompts);
+    if (!staged)
+        return staged.errors();
+    Result<PackSummary> summary = summarizePack(staged->folder);
+    if (summary)
+        summary->source = staged->source;
+    QDir(staged->staging).removeRecursively();
+    return summary;
+}
 
 Result<PackAdded> addPack(const QString &location, const QString &ref, const QString &packsDir, TrustStore &trust,
                           const PackPrompts &prompts) {

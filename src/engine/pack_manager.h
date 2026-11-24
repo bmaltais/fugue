@@ -46,6 +46,7 @@ struct PackSummary {
     QStringList nodes;        // node type ids
     QStringList setupCommand; // empty when the pack has no setup
     QString setupDescription;
+    qint64 setupSize = -1;    // bytes its setup downloads, when pack.json's setup says (`size`); -1 when it does not
     PackSource source;        // empty location when installed by copying into the folder by hand
     QString oldVersion;       // for an update: the version being replaced (empty when it did not load)
     bool updating = false;    // the pack replaces an installed one
@@ -77,6 +78,11 @@ PackSource readPackSource(const QString &packFolder);
 // A summary of the pack at `folder` (an installed or staged one). Reads pack.json and the
 // manifests of its nodes; errors when the pack does not load.
 Result<PackSummary> summarizePack(const QString &folder);
+
+// What `addPack` would ask about the pack at `source`, with nothing installed: a folder is read in
+// place, a git address is cloned into a staging folder that is removed again. For a window or a CLI
+// that shows several things at once and asks once (engine/readiness.h). `source.ref` is required for git.
+Result<PackSummary> previewPack(const PackSource &source, const QString &packsDir, const PackPrompts &prompts = {});
 
 // `fugue pack add`. A folder is copied; a git URL (https, ssh, git, file or user@host:path) is
 // cloned and `ref` checked out. `packsDir` is where the pack goes.
