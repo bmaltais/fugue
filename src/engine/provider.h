@@ -88,7 +88,7 @@ Description parseDescription(const QJsonObject &reply, const QString &defaultEng
 
 // The request of submit (8.8), plus where to put the results.
 struct JobRequest {
-    QString capability;
+    QString capability; // empty (kernel-only, ProviderKernel::request): no job, the node goes straight to next() and outputs()
     QJsonObject model;  // a resource handle; empty means any ready model (8.4)
     QJsonObject params; // the standard parameters of the capability (8.1)
     QJsonObject inputs; // media, as {"path": …} or an array of them

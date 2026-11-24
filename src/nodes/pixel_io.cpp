@@ -15,9 +15,13 @@ Result<Pixels> pixelsOf(const Value &value, const QString &input) {
     const Result<vips::VImage> loaded = value.media().image();
     if (!loaded.ok())
         return Result<Pixels>(loaded.errors());
+    return pixelsFromImage(loaded.value(), input);
+}
+
+Result<Pixels> pixelsFromImage(const vips::VImage &loaded, const QString &input) {
     try {
         initVips();
-        vips::VImage image = loaded.value();
+        vips::VImage image = loaded;
         // Gray (with alpha) becomes RGB (with alpha); more than four bands keep the first three.
         if (image.bands() == 1) {
             image = vips::VImage::bandjoin(std::vector<vips::VImage>{image, image, image});
