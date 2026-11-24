@@ -53,7 +53,7 @@ checkdepends=(
   'jq'
   'noto-fonts'
 )
-_sdcpp=532d2c15c430a785a712b2d94281f04e733008a4
+_sdcpp=3b12781fac1a22eda27ad0f08d0884ef816f24d7
 _ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
 _cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
 _src=${FUGUE_SRC:+file://$FUGUE_SRC}
@@ -65,7 +65,7 @@ source=("$pkgbase::git+$_src${FUGUE_REF:+#$FUGUE_REF}"
         "cutlass-$_cutlass.tar.gz::https://github.com/NVIDIA/cutlass/archive/$_cutlass.tar.gz")
 sha256sums=('SKIP'
             'SKIP'
-            '0278dc8e6e180adc4b43b3ace515eeef870dd76533a34fa1edcfa071ce7d7812'
+            '1122fa32b5e2d5dc376da0220bcd10c741f76eb5a6dad8170d5a6582979dc2a9'
             '8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2'
             '36429479df2ab1cd1c7981c2d34e786106326ccfefc8846f902f76151a65e112')
 

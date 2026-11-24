@@ -38,8 +38,8 @@
 // at the request's width and height (white is redrawn), checked before any model loads. The library
 // rounds it to 0 or 1. Its start picture depends on the model, by sd_get_model_version_name: an
 // inpaint model (INPAINT_VERSIONS below) takes the picture, "image" of a sample, as init_image and
-// ignores a start latent (its masked picture is part of the conditioning; the patch refreshes it
-// when a sample reads the encode's conditioning); any other image model takes the start latent
+// ignores a start latent (its masked picture is a predictor input the sample's program builds from
+// that picture and the mask); any other image model takes the start latent
 // ("init_latent", the one vae_encode made) and ignores "image". A mask with neither, an inpaint
 // model without the picture, is input_invalid.
 //

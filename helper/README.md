@@ -6,10 +6,34 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | File | What it is |
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
-| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/pipeline/fugue_stages.h`) and its reading and writing (`fugue_stage_io.h`, with the reader of a clip's YUV4MPEG2), hooks in `generate_image` and `generate_video` (video to video: `fugue.init_video`, the start latent and the shortened schedule; for an inpaint model, `generate_image` also refreshes `c_concat` when a sample reads its conditioning) |
+| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/api/fugue_stages.h`), the stage runs (`src/api/fugue_stage.cpp`: the cut of a rendered program, the `fugue::` built-ins, the reader of a clip's YUV4MPEG2), one hook each in `generate_images` and `generate_video`, and the opt-in soft-mask blend (see The seam) |
 | `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider) and `fugue-helper --serve-http` (the same over HTTP, for a paired host); the formats are at its top |
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
+
+## The seam
+
+Since upstream's Diffusion Graph Language (6cd0ef1) a generation is a DGL program: C++ renders one from
+`src/api/templates/*.dgl` for the model family and runs its statements in source order. The patch leaves
+the rendering alone and cuts the rendered program (`src/api/fugue_stage.cpp`, reached only by a request
+with a `fugue.*` option or the noise-level reading of strength):
+
+1. A value the stage reads from a file has its statement replaced by a `fugue::` built-in.
+2. The program returns what the stage writes.
+3. Only the statements that result needs are kept (a backward slice over DGL's own parser), so an encode
+   loads no diffusion model and a decode no text encoder.
+
+| Stage | Replaced | Returned |
+| --- | --- | --- |
+| `vae_encode` | nothing (a clip: `base`) | `image_base`, or `base` for a pixel-space model; a clip's latent |
+| `encode` | nothing | `positive`, `negative`, `unconditional_text` when the program has it |
+| `sample` | `positive`, `negative`, `unconditional_text`; `image_base` or `base` from `init_latent` | the program's result latent |
+| `decode` | the result latent | the program's own return |
+
+These names, with `sigmas`, `full_sigmas`, `pos`, `mask_pixels`, `split` and the `latent` field of the
+`return`, are the contract with the templates. A name that is gone is an error naming it, not a wrong
+picture. A start latent with no picture binds a blank `init_image`, so the template takes its image-to-image
+flow, and the cut drops the blank with the encode it would go through.
 
 ## Build
 
@@ -158,9 +182,8 @@ What the helper does with it depends on the model, by `sd_get_model_version_name
 
 - An inpaint model (`SD 1.x Inpaint`, `SD 2.x Inpaint`, `SDXL Inpaint`, `Flux Fill`, `Flex.2`): the
   `sample` needs `"image"` (the picture, as `init_image`) and ignores `init_latent`. The model's
-  masked picture is part of the conditioning (`c_concat`), which the `encode` made without a picture
-  or mask, so the patch refreshes it from the sample's own latents after it reads the conditioning
-  (`generate_image`, after `fugue_load_cond`), as a single run does.
+  masked picture is a predictor input (`concat = inpaint_condition`), which the `sample` program builds
+  from its own picture and mask, as a single run does; the `encode` has neither.
 - Any other image model (FLUX.2 Klein, Qwen-Image Edit, FLUX.1 dev, Z-Image, SDXL, SD 1.5): the
   `sample` needs `init_latent` (the one `vae_encode` made); `image` is ignored. The library puts the
   start latent back outside the mask at every step.
@@ -181,7 +204,7 @@ with the full VAE each time, `tae` uses the tiny autoencoder of the context's `t
 `{"op": "status", ..., "preview": "<output_dir>/preview.png"}` says it is new. Video models, the one-shot
 mode and `--serve-http` make none. The key and the status field are ignored by a helper and a Fugue that do not
 know them. Pin move: `sd_set_preview_callback`, `sd_get_preview_info` and the `U8 [C,W,H]` frames are in
-`stable-diffusion.h` of the pin (checked at `532d2c1`); a `proj` mode that does not know the model's latent
+`stable-diffusion.h` of the pin (checked at `3b12781`); a `proj` mode that does not know the model's latent
 (it logs "No latent to RGB projection known") gives no pictures, and the run is not affected.
 
 ## Upscaling (`image.upscale`)
@@ -220,9 +243,10 @@ scale (0.5 starts at 0.96, 0.75 is a full redraw), so for every model that is no
 adds `strength_as_noise_level=true,force_first_sigma=true` to `sample.args`: strength is the sigma the start picture is
 noised to, the same at any step count (`src/strength_args.h`, tested by `tests/engine/test_helper_strength.cpp`; numbers in
 `docs/inpaint-outpaint-research.md` 4.7). A request that sends either key itself is not changed; a video model is not
-touched. No patch hunk: both options are the library's own at the pin. Re-check at a pin move that they still exist
-(`grep -n strength_as_noise_level src/pipeline/image.cpp`) and that new version names in `src/model/integrations/` are
-not step-fraction models.
+touched. Upstream's DGL engine dropped both options, so the patch keeps them: `fugue_stage.cpp` reads them from
+`sample.args` and replaces the `sigmas` statement with `fugue::noise_level_sigmas`, the old algorithm on the denoiser's
+`noise_level_to_sigma`. Re-check at a pin move that `slice_sigmas_by_strength` is still how the templates trim, and that
+new version names in `src/model/integrations/` are not step-fraction models.
 
 ## Opt-in hunks (not stage seams)
 
@@ -232,8 +256,8 @@ and checked at every pin move.
 
 | Option | What it does | Hunks | Upstream PR |
 | --- | --- | --- | --- |
-| `fugue.soft_mask` (bool, image) | Differential diffusion ([arXiv 2306.00950](https://arxiv.org/abs/2306.00950), written from the paper: its repository has no licence). A mask's gray is a change strength: a latent cell with value `m` is redrawn from step `i` of `k` when `m > (k - 1 - i) / k` and held to the start latent before | `config.h`, `api/options.cpp` (the option); `pipeline/image.cpp` (no rounding of the mask when on, still rounded for an inpaint model); `pipeline/diffusion_engine.cpp` (`blend_start_latent`, called where the start latent is put back; one more defaulted parameter of `sample`) | not sent yet: [the description](../docs/differential-diffusion-upstream.md) is ready for the owner (#179) |
-| `fugue.init_video` (string, video; with `fugue.init_latent_in` / `_out` for a video) | Video to video: a YUV4MPEG2 clip is encoded with the VAE (or its latent is read) and replaces the start latent, and `strength` below 1 drops the first sigmas of the schedule (the high-noise pass of Wan 2.2 first), as image to image does. Not for LTX, MiniMax H3, S2V or a latent upscale | `config.h`, `api/options.cpp` (the option); `pipeline/fugue_stage_io.h` (`fugue_read_y4m`); `pipeline/video.cpp` (the block before `SamplePlan`, and after the latents are prepared) | not sent yet; library `strength` for a video is read by LTX only upstream |
+| `fugue.soft_mask` (bool, image) | Differential diffusion ([arXiv 2306.00950](https://arxiv.org/abs/2306.00950), written from the paper: its repository has no licence). A mask's gray is a change strength: a latent cell with value `m` is redrawn from step `i` of `k` when `m > (k - 1 - i) / k` and held to the start latent before | `config.h`, `api/options.cpp` (the option); `api/fugue_stage.cpp` (no threshold on `mask_pixels` when on, kept for an inpaint model; `soft_mask = true` on `sample`); `dgl/models/diffusion_prediction.h` (`blend_mask`), `dgl/ops/sampling.*`, `dgl/bindings/arguments.cpp`, `registration.cpp` (a defaulted `soft_mask` argument of `sample`) | not sent yet: [the description](../docs/differential-diffusion-upstream.md) is ready for the owner (#179) |
+| `fugue.init_video` (string, video; with `fugue.init_latent_in` / `_out` for a video) | Video to video: a YUV4MPEG2 clip is encoded with the VAE (or its latent is read) and replaces the start latent, and `strength` below 1 drops the first sigmas of the schedule (the high-noise pass of Wan 2.2 first), as image to image does. Not for LTX, MiniMax H3, S2V or a latent upscale | `config.h`, `api/options.cpp` (the option); `api/fugue_stage.cpp` (`read_y4m`, `fugue::load_clip`, `base` and `sigmas` of the Wan program) | not sent yet; library `strength` for a video is read by LTX only upstream |
 
 When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
 
@@ -249,9 +273,10 @@ The pin moves only on purpose (spec 8.10).
    git rebase --onto <new commit> <old commit>   # fix conflicts as in any rebase
    git diff <new commit> > ../fugue/helper/sdcpp.patch
    ```
-   Keep the patch to hooks at the stage seams: no change to sampling or model code, except the opt-in
-   hunks above. Re-read each one against the new commit: the places it edits (`blend_start_latent`'s
-   callers, the mask rounding in `image.cpp`) may have moved or changed.
+   Keep the patch to the cut and its hooks: no change to sampling or model code, except the opt-in
+   hunks above. Re-read each one against the new commit: the template names the cut depends on (The
+   seam), `blend_mask` and the `sample` arguments may have moved or changed. `SDCondition` is guarded by
+   a `static_assert` in `fugue_stages.h`.
 2. Update the commits and hashes in `CMakeLists.txt` and `packaging/PKGBUILD` together.
    `git ls-tree <new commit> ggml thirdparty/cutlass` gives the ggml and CUTLASS commits;
    `curl -sL <tarball URL> | sha256sum` gives each hash.
@@ -260,22 +285,24 @@ The pin moves only on purpose (spec 8.10).
    - Z-Image Turbo, plus one `generate` run with the same request: the pixels must be the same;
    - SDXL with a negative prompt (CLIP conditioning, two sets);
    - image-to-image from a latent (`vae_encode`, then `sample` with `init_latent`);
-   - IP-Adapter, PhotoMaker or PuLID, only when the move changes their code;
+   - IP-Adapter, PhotoMaker or PuLID: at 3b12781 the library's generation API refuses their options (they are DGL-only
+     upstream) and no Fugue node sends them; a conditioning file that holds their state is refused. If a node comes to
+     need one, it needs its own stage work;
    - Wan (T2V) staged: encode, sample and decode as separate processes, and one `generate`
      run of the same request: the frames must be the same;
    - Wan 2.2 I2V the same way, with `"image"` in the encode and the sample and `params.init_image`
      (`{"image": PATH}`) in the `generate` run;
    - Wan video to video: `vae_encode` of a clip (`"video"`), `encode`, `sample` with `"init_latent"` and
      `strength` 0.6, `decode`, against one `generate` with `"init_video"` and the same `strength`: the
-     frames must be the same, and differ from the clip (the `init_video` hunks in `video.cpp`:
-     `generate_video` reads the clip, encodes it, replaces the start latent and drops the first sigmas);
+     frames must be the same, and differ from the clip (`run_video` in `fugue_stage.cpp` reads the clip,
+     encodes it, replaces `base` and drops the first sigmas);
 
    - an inpaint model staged equals one `generate` run: `encode`, `vae_encode` (not used by an inpaint
      model, but the stage runs), `sample` with `"mask"`, `"image"` and `"init_latent"`, `decode`,
      against one `generate` with `params.init_image` and `"mask"`; the pixels must be the same (FLUX.1 Fill
      `fluxFillFP8_v10.safetensors`, SDXL Inpaint as `model_path` plus its `diffusion_model_path`).
-     Without the `c_concat` hook the FLUX.1 Fill pictures differ: that is the check that the hook is
-     still reached. Also staged FLUX.2 Klein 4B with a mask and `init_latent` against `generate`;
+     If the sample stops rebuilding `inpaint_condition` from its picture and mask, the FLUX.1 Fill pictures
+     differ: that is the check that the cut keeps those statements. Also staged FLUX.2 Klein 4B with a mask and `init_latent` against `generate`;
    - soft mask (`fugue.soft_mask`, #179), FLUX.2 Klein 4B with a gradient mask: (1) off, the picture is
      the same as with the hunks' original expression, and a hard mask gives the same picture on or off;
      (2) on, with a gray mask: the picture changes smoothly with the gray (white redrawn, black kept),
@@ -287,6 +314,18 @@ The pin moves only on purpose (spec 8.10).
      `src/main.cpp` and the list above must be the same set.
 
    These need a GPU and model files, so they are run by hand, not in CI.
+
+   Record of the move to 3b12781 (#356, RTX 3090, CUDA). Staged equals `generate`, byte for byte: Z-Image Turbo,
+   Klein 9B, SDXL with a negative prompt, image-to-image (Klein 4B, SDXL), masked Klein 4B and 9B, soft mask, FLUX.1 Fill,
+   SDXL Inpaint, Wan 2.2 T2V, I2V and video to video (which also differs from its clip). Through `--serve`: stages, `proj` and `vae` previews, cancel, upscale.
+   **Not run:** Wan video to video on the old helper (so no old-against-new picture for it); the two `aRealHelper*` provider tests (so the soft-mask guard through them);
+   `smoke-http.sh` and any `--serve-http` job; a `tae` preview with a real `taesd_path` (no such model here); a real
+   out-of-memory; any picture from the Vulkan helper (built only); IP-Adapter, PhotoMaker, PuLID; the refusal of a
+   conditioning file with adapter state (added after the GPU runs).
+   **Accepted by the owner, old against new pictures:** Wan 2.2 T2V (22.0 dB) and I2V (32.3 dB) and SDXL Inpaint
+   (54.1 dB) differ, cause not investigated. SDXL (37.3 dB) and SDXL image-to-image (43.6 dB) differ too. The likely cause, not
+   isolated: upstream now applies CFG after scaling each branch (one SDXL step is byte-identical at CFG 1 and off by 2e-5 at CFG 7). Z-Image, Klein, the masks, FLUX.1 Fill
+   and upscaling are byte-identical to the old helper.
 4. Run the stages once through Fugue's provider, as the app does (`--serve`, models kept loaded):
    ```sh
    FUGUE_REAL_HELPER=$PWD/build-helper-cuda/fugue-helper-cuda \

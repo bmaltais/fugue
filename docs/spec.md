@@ -1667,15 +1667,17 @@ it as a module folder and run it with no code of its own in Fugue.
   decode steps, C++ only. The M0 spike showed the split works
   ([spikes/02](spikes/02-sdcpp-split.md)).
 - Fugue carries the split as its own patch against a pinned stable-diffusion.cpp commit; it does
-  not depend on upstream adopting it. To keep that cheap: the patch stays small: hooks at the
-  existing stage seams and the stage file format, no change to sampling or model code, except opt-in hunks that leave
+  not depend on upstream adopting it. Upstream generates by rendering a Diffusion Graph Language
+  program; the patch cuts that program at named values (`src/api/fugue_stage.cpp`, helper/README.md
+  "The seam"). To keep that cheap: the patch stays small: the cut, one hook per generation call
+  and the stage file format, no change to sampling or model code, except opt-in hunks that leave
   upstream behaviour byte-identical when off, each listed in helper/README.md with its upstream PR and checked at every
   pin move (today: `fugue.soft_mask`, #179, and `fugue.init_video`, #130); the pin moves only on
   purpose; and every move of the pin is checked where the patch can break, not model by model
   (stable-diffusion.cpp tests its families): staged runs of Z-Image (LLM conditioning), of SDXL
   with a negative prompt (CLIP conditioning, two sets) and of image-to-image from a latent, the
-  Z-Image one giving the same pixels as a single run of the same build; IP-Adapter, PhotoMaker or
-  PuLID only when the move changes their code.
+  Z-Image one giving the same pixels as a single run of the same build. IP-Adapter, PhotoMaker and
+  PuLID are DGL-only upstream since 3b12781: the generation API refuses their options and no node sends them.
 - The helper's source is `helper/`: the pin (stable-diffusion.cpp, its ggml and CUTLASS commits,
   with their hashes), the patch `helper/sdcpp.patch`, and `fugue-helper`. `bin/build-helper cuda`
   (or `vulkan`, `cpu`) builds it; `helper/README.md` says how, and how to move the pin. The patch adds image options `fugue.*` that name the files a
@@ -1690,7 +1692,8 @@ it as a module folder and run it with no code of its own in Fugue.
   of the 8.8 protocol over `stdio`, for the `fugue-helper` provider (8.7). Both end with
   `_Exit`, without the exit-time teardown, which NVIDIA's Vulkan driver can crash in.
 - The conditioning file carries everything the encode step leaves for sampling: every field of
-  the conditioning sets, and the state PhotoMaker, PuLID and IP-Adapter set while encoding. A file
+  the conditioning sets (a file from an older helper that holds PhotoMaker, PuLID or IP-Adapter
+  state is refused). A file
   is read only by a model of the version it was written for. Every call VAE-encodes the request's
   images (init, reference, control), so `sample` takes the reference images as `encode` does, and
   a stage with images loads the VAE beside its own component. An inpaint model cannot start from
@@ -1702,21 +1705,19 @@ it as a module folder and run it with no code of its own in Fugue.
   `sd_get_model_version_name`) starts from the picture as `init_image` and ignores a start latent,
   another image model from its start latent (`init_latent`) with the mask applied at every step, and
   ignores the picture. A mask on a video model, an inpaint model without its picture and a mask with
-  neither picture nor latent are `input_invalid`. One patch hook, at the seam where a sample reads
-  its conditioning (after `fugue_load_cond`), sets an inpaint model's `c_concat` (the conditioning's,
-  the unconditional's and the image-unconditional's) from the call's own latents, as
-  `prepare_image_generation_embeds` does in a single run, because the encode had no picture and mask;
-  no sampling or model code changes. The design and what the library does with a mask are in
+  neither picture nor latent are `input_invalid`. An inpaint model's masked picture is a predictor input
+  (`concat`) that the sample's program builds from the call's own picture and mask, as a single run
+  does, because the encode had neither; no sampling or model code changes. The design and what the library does with a mask are in
   [14.4](#144-masking-and-inpainting-167).
 - **Video (#105)** is the same stages on the same capabilities, no parallel path. A context that
   makes video (`sd_ctx_supports_video_generation`: Wan 2.1 and 2.2, as the pin supports them) is run
   with the library's video options and `sd_generate_video`; the patch gives the `fugue.*` options to
   video too (`cond_in`/`_out`, `latent_in`/`_out`, `stop_after` `cond` or `sample`; a video has no
-  `init` stage), shares the file code with the image path (`src/pipeline/fugue_stage_io.h`), and
-  hooks `generate_video` at the same three seams: after the text encode, after the sampling loop
+  `init` stage), shares the file code with the image path (`src/api/fugue_stage.cpp`), and
+  cuts the video program at the same three seams: after the text encode, after the sampling
   (both Wan 2.2 passes, high noise then low), and before the VAE decode. The conditioning file is
-  the same (its `c_concat` and `c_vector` already carry an image-to-video model's extra inputs);
-  the latent file's descriptor gains `frames` and `fps`. `encode` and `sample` take the generation
+  the same (`c_vector` carries Wan 2.1 I2V's CLIP-vision output; the sample rebuilds the
+  image-to-video `concat` from its own picture); the latent file's descriptor gains `frames` and `fps`. `encode` and `sample` take the generation
   options of the video (`video_frames`, `fps`, `width`, `height`, `sample.*`; a Wan 2.2 14B
   context also `high_noise_diffusion_model_path`, its UMT5 as `t5xxl_path`); `decode` writes
   `video.y4m` instead of `image.png`, a YUV4MPEG2 file (4:2:0, one `FRAME` per frame) that every
@@ -1724,16 +1725,16 @@ it as a module folder and run it with no code of its own in Fugue.
   Video turns it into the engine's lossless intermediate (FFV1 in Matroska, [2.4](#24-media-handles)).
   An image-to-video model (Wan 2.2 I2V; Wan 2.2 TI2V from its first frame) is staged with a start
   picture, the job input `image` of `text.encode` and `latent.sample` (the library's `init_image`;
-  an image model refuses it with `input_invalid`): the encode turns it into the conditioning's
-  `c_concat` at the clip's width, height and length, so those are the encode's options too, and the
-  sample sends the same picture so the stages make one generation (TI2V starts its sampling from the
-  frame, which is not in the conditioning). Wan 2.1 I2V's CLIP-vision output is made in the same
+  an image model refuses it with `input_invalid`): the sample turns it into the model's `concat`
+  at the clip's width, height and length, so those are the options of both stages, and the
+  encode and the sample send the same picture so the stages make one generation (TI2V starts its
+  sampling from the frame, which is not in the conditioning). Wan 2.1 I2V's CLIP-vision output is made in the same
   encode.
   Video to video (#130) is the same stages again: `vae_encode` of a video model takes a clip
   (`video`, a YUV4MPEG2 file of the layout `decode` writes) and writes its latent (the opt-in
-  `fugue.init_video`, `fugue_read_y4m` in the patch); the clip's size, rate and length are the
-  file's. A `sample` takes that latent as `init_latent` with `strength`: `generate_video` replaces
-  the start latent and drops the first `(1 - strength)` of the schedule's steps, the high-noise
+  `fugue.init_video`, `read_y4m` in the patch); the clip's size, rate and length are the
+  file's. A `sample` takes that latent as `init_latent` with `strength`: the video program's `base` is
+  replaced by it, and the first `(1 - strength)` of the schedule's steps are dropped, the high-noise
   pass of a Wan 2.2 14B first (only the low-noise model runs when `strength` leaves its steps
   alone), as image to image trims its sigmas; the sampler noises the start latent to the first
   sigma as it does for an image. One `generate` of the same clip (`init_video`) gives the same
@@ -3372,15 +3373,13 @@ out: `image`.
   `sd_get_model_version_name`) the helper passes the picture as `init_image` and no start latent,
   which the patch refuses for them; for any other image model it passes the start latent and not
   the picture. A video model with a mask is `input_invalid`.
-- Patch: one hook where a sample reads its conditioning (`fugue.cond_in`). For an inpaint model
-  the conditioning's `c_concat`, the unconditional's and the image-unconditional's are set from
-  this call's latents, as a single run sets them (`prepare_image_generation_embeds`), because the
-  encode had no picture and mask: stable-diffusion.cpp puts an inpaint model's masked picture in
-  the conditioning, not the latent. No change to sampling code.
+- Patch: where a sample reads its conditioning (`fugue.cond_in`), the program keeps the statements
+  that build an inpaint model's `concat` from this call's picture and mask, as a single run does,
+  because the encode had neither. No change to sampling code.
 - Patch, opt-in: `fugue.soft_mask` (a boolean image option, off by default), differential diffusion
-  (arXiv 2306.00950, written from the paper, Algorithm 1). On: `src/pipeline/image.cpp` does not round
-  the mask to 0 or 1 (still rounded for an inpaint model, which reads it as a channel it was trained on),
-  and the blend that puts the start latent back (`denoised x m + init x (1 - m)`, `diffusion_engine.cpp`)
+  (arXiv 2306.00950, written from the paper, Algorithm 1). On: `src/api/fugue_stage.cpp` removes the
+  threshold on the mask (kept for an inpaint model, which reads it as a channel it was trained on),
+  and the blend that puts the start latent back (`latent x m + base x (1 - m)`, `blend_mask`)
   uses a mask of 0 or 1 made for each step: a latent cell (scaled by "nearest max" as before) is redrawn
   at step i of k when `m > (k - 1 - i) / k`, held to the start latent before. The paper's map `mu` is 1
   for no change and keeps the cell from the model when `mu < (k - t) / k`; with `m = 1 - mu` that is this
@@ -3389,8 +3388,8 @@ out: `image`.
   the same code as before, so the output is byte-identical to upstream. The Sampler's `soft_mask` input
   sets it (a latent with a mask only). Not an option of the library's API: the owner proposes it upstream
   (the description is in [differential-diffusion-upstream.md](differential-diffusion-upstream.md)).
-- What the library does with a mask, read at the pin (532d2c1, `src/pipeline/image.cpp` and
-  `diffusion_engine.cpp`): rounds it to 0 or 1, so a soft mask is hard in the latent; scales it
+- What the library does with a mask, read at the pin (3b12781, `src/api/templates/image_inpaint.dgl`
+  and `blend_mask`): rounds it to 0 or 1, so a soft mask is hard in the latent; scales it
   to the latent by "nearest max", so a latent cell is redrawn when any of its pixels is masked
   (blocks of 8 or 16 pixels); grows it one more cell for an inpaint model; and at each step puts
   the start latent back outside it (`denoised × m + init × (1 − m)`). Every pixel still passes
