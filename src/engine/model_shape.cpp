@@ -380,7 +380,8 @@ ModelShape shapeOf(const Header &header) {
     if (const std::optional<int> in = inputWidth(image)) // a linear layer takes 2x2 patches of the channels
         shape.latentChannels = image->size() == 2 ? (*in % 4 == 0 ? std::optional<int>(*in / 4) : std::nullopt) : in;
     // Qwen-Image 2.1 takes the 64 channels of its VAE as they are, with no 2x2 patching.
-    if (image && image->size() == 2 && shape.latentChannels && hasTensor(shapes, QStringLiteral("txt_in.in_layer.")))
+    if (image && image->size() == 2 && shape.latentChannels && hasTensor(shapes, QStringLiteral("time_text_embed."))
+        && hasTensor(shapes, QStringLiteral("txt_in.in_layer.")))
         shape.latentChannels = inputWidth(image);
     // An inpaint model takes the masked picture in its input beside the noise (14.4), as Wan's
     // image-to-video takes its first frame, and makes the channels its VAE has: SD 1.x, 2.x and SDXL
