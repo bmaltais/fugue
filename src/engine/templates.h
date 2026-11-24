@@ -3,7 +3,9 @@
 // Workflow templates (spec 11.10): ready-to-run workflows the window lists and the CLI copies.
 //
 // A template is a folder:
-//   <id>/template.json   {"title", "description", "category", "tags": [...]}; title required
+//   <id>/template.json   {"title", "description", "category", "tags": [...], "source": {...}}; title required.
+//                        `source` is optional, where the workflow comes from (#369): {"name", "author",
+//                        "url", "note"}, each a string, all optional; a `url` must be http or https.
 //   <id>/workflow.fugue  the workflow; its `requires.models` give each model's `source`
 //   <id>/preview.webp    (or .png, .jpg) what it makes; optional
 //   <id>/inputs/         sample images its Load Image nodes name as `inputs/<name>`; optional
@@ -26,6 +28,7 @@
 // folder may also hold plain .fugue files, each a template named after its file.
 
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -65,6 +68,8 @@ struct Template {
     QString category;      // id
     QString categoryTitle; // as the root's categories.json names it, else the id
     QStringList tags;
+    QJsonObject source;        // template.json's `source`: name, author, url, note (only the valid ones); empty when none
+    QStringList families;      // the model families of its models (engine/model_family.h), read, never written
     bool own = false;
     bool inherited = false;    // the Default project's own template, read-only here (1.4.2); `own` is set too
     QJsonArray models;         // Document::models(): resource, hash, name, source

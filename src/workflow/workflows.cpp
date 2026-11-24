@@ -18,6 +18,7 @@
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/model_places.h"
+#include "engine/template_search.h"
 #include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
@@ -731,6 +732,8 @@ QVariantList Workflows::templates() const {
                                {"category", t.category},
                                {"categoryTitle", t.categoryTitle},
                                {"tags", t.tags},
+                               {"source", t.source.toVariantMap()},
+                               {"families", t.families},
                                {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
                                {"own", t.own},
                                {"missingModels", missing},
@@ -744,6 +747,10 @@ QVariantList Workflows::templates() const {
                                {"status", status.join(QStringLiteral(" · "))}});
     }
     return out;
+}
+
+bool Workflows::templateMatches(const QString &query, const QVariantMap &templ) const {
+    return templateMatchesSearch(query, templ);
 }
 
 QVariantMap Workflows::missingModels(const QJsonArray &models) const {

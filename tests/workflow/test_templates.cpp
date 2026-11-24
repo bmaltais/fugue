@@ -168,6 +168,32 @@ class TestTemplates : public QObject {
     Q_OBJECT
 
 private slots:
+    void readsTheSourceAndTheFamiliesOfTheModelPickers() {
+        Fixture f;
+        const QJsonObject klein{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, 'a')}, {"name", "flux-2-klein-9b-Q8_0.gguf"}};
+        const QJsonObject vae{{"resource", "fugue/vae"}, {"hash", "sha256:" + QString(64, 'b')}, {"name", "flux2-vae.safetensors"}};
+        makeTemplate(f.bundled.filePath("from-da"),
+                     {{"title", "From DA"},
+                      {"source", QJsonObject{{"name", "DA flux2"}, {"author", "DemonAlone"},
+                                             {"url", "https://example.org/da"}, {"note", "ported"}}}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", klein}, {"vae", vae}})}}));
+        // A bad url and a field that is not text are left out and warned; the template stays listed.
+        makeTemplate(f.bundled.filePath("bad"),
+                     {{"title", "Bad"}, {"source", QJsonObject{{"name", "X"}, {"url", "javascript:alert(1)"}, {"note", 3}}}});
+        makeTemplate(f.bundled.filePath("plain"), {{"title", "Plain"}});
+
+        const TemplateLibrary library = f.library();
+        const std::optional<Template> da = library.find("from-da");
+        QCOMPARE(da->source.value("author").toString(), QStringLiteral("DemonAlone"));
+        QCOMPARE(da->source.value("url").toString(), QStringLiteral("https://example.org/da"));
+        QCOMPARE(da->families, QStringList{"FLUX.2 Klein 9B"}); // the VAE is no family
+        const std::optional<Template> bad = library.find("bad");
+        QCOMPARE(bad->source, (QJsonObject{{"name", "X"}}));
+        QCOMPARE(library.problems().size(), 2);
+        QVERIFY(library.find("plain")->source.isEmpty());
+        QVERIFY(library.find("plain")->families.isEmpty());
+    }
+
     void listsTheOwnFirstThenByCategoryOrderThenTitle() {
         Fixture f;
         writeJson(f.bundled.filePath("categories.json"),
@@ -551,9 +577,10 @@ private slots:
         writeJson(f.bundled.filePath("categories.json"),
                   {{"categories", QJsonArray{QJsonObject{{"id", "image"}, {"title", "Image generation"}}}}});
         const QString hash = QStringLiteral("sha256:") + QString(64, u'7');
-        makeTemplate(f.bundled.filePath("gen"), {{"title", "Gen"}, {"category", "image"}, {"description", "Makes one."}},
+        makeTemplate(f.bundled.filePath("gen"), {{"title", "Gen"}, {"category", "image"}, {"description", "Makes one."},
+                                {"source", QJsonObject{{"name", "Ann's flow"}, {"author", "Ann"}, {"url", "https://example.org/a"}}}},
                      workflow({{"models", node("fugue/load-models", {{"diffusion_model",
-                                QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "m.gguf"}}}})}}));
+                                QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z-image-turbo.gguf"}}}})}}));
         makeTemplate(f.bundled.filePath("talk"), {{"title", "Talk"}, {"category", "text"}});
         QTemporaryDir dir;
         QFile shell(dir.filePath("shell.toml"));
@@ -602,6 +629,24 @@ private slots:
         QTRY_VERIFY(!item(window->contentItem(), "templateCard-talk"));
         QQuickItem *all = item(window->contentItem(), "templatesCategory-all");
         QTest::mouseClick(window, Qt::LeftButton, {}, all->mapToScene(QPointF(all->width() / 2, all->height() / 2)).toPoint());
+        QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
+
+        // The source line and the two drop-downs (#369): counts say what a choice leaves; a choice narrows the cards.
+        QCOMPARE(item(window->contentItem(), "templateSource-gen")->property("text").toString(), QString("Based on Ann's flow by Ann"));
+        QVERIFY(!item(window->contentItem(), "templateSource-talk")->isVisible());
+        QObject *dialog = window->findChild<QObject *>("templatesDialog");
+        const auto labels = [&](const char *property) {
+            QStringList out;
+            for (const QVariant &option : dialog->property(property).toList())
+                out << option.toMap().value("text").toString();
+            return out;
+        };
+        QCOMPARE(labels("sourceOptions"), (QStringList{"All sources (2)", "Ann's flow (1)"}));
+        QCOMPARE(labels("familyOptions"), (QStringList{"All model families (2)", "Z-Image (1)"}));
+        QVERIFY(dialog->setProperty("family", "Z-Image"));
+        QTRY_VERIFY(!item(window->contentItem(), "templateCard-talk"));
+        QVERIFY(item(window->contentItem(), "templateCard-gen"));
+        QVERIFY(dialog->setProperty("family", ""));
         QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
 
         QQuickItem *card = item(window->contentItem(), "templateCard-talk");

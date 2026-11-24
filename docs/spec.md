@@ -2210,7 +2210,7 @@ first one (ComfyUI import, after v0.1) is a module.
 Ready-to-run workflows, listed by File > Browse templates (`file.templates`) and `fugue template
 list`, and copied out by opening one or by `fugue workflow new <file> --template <id>` (#83).
 
-- A template is a folder: `template.json` (title, description, category, tags), `workflow.fugue`,
+- A template is a folder: `template.json` (title, description, category, tags, and optionally `source`), `workflow.fugue`,
   a preview (`preview.webp`, `.png` or `.jpg`) and `inputs/`, the sample pictures its Load Image
   nodes name as `inputs/<name>`. A root of templates may hold `categories.json`, the order and
   titles of its categories. Nothing indexes the templates: a root's folders are its templates.
@@ -2232,6 +2232,22 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   `bmaltais/fugue-workflows` repo, a submodule (`templates/`) at the commit a release pins,
   installed to `share/fugue/templates`; `$FUGUE_TEMPLATES` names another. Its CI checks every
   template against Fugue's main branch; Fugue's tests check the pinned ones.
+- **Source and model family (#369).** `template.json` may say where a workflow comes from: `"source": {"name",
+  "author", "url", "note"}`, each optional text; a `url` must be `http://` or `https://`. A field that is not as
+  said, or an unknown one, is left out and is a warning of `fugue template list` (the template stays listed). A
+  card with a name or an author says "Based on <name> by <author>"; with a `url` the line is a link that opens the
+  browser (a click on it does not open the template), and its tooltip shows the note and the address. A template's
+  **model families** are read from its Load Models: each diffusion, SeedVR2, upscale or BiRefNet model's resource
+  type and file name give a family from the one table in `engine/model_family` ("FLUX.2 Klein 9B", "FLUX.2 Klein 4B",
+  "Z-Image", "Qwen-Image", "Wan 2.2", "SeedVR2", ...), the same names the model pickers' family filter uses
+  (#370); nothing is typed in `template.json`, and a text encoder or a VAE is no family. Two drop-downs
+  beside the search, **Source** (by `source.name`) and **Model family**, list each value with the count a choice would
+  leave under the other filters; each is hidden while no template has a source or a family. They reset when the
+  dialog opens.
+- **Search (#369).** Every word typed must match at the start of a word (a letter or digit after a space,
+  hyphen or dot) of the title, description, category, tags, id, source name and author, or families: "da" finds
+  "DA workflow" and no longer "update". `tag:`, `source:` (name or author) and `family:` limit a word to one field; a
+  value with spaces is quoted, `family:"klein 9b"`. `fugue template list` gives `source` and `families` for each.
 - The dialog shows categories, a search over title, description and tags, and cards with the
   preview and what this machine lacks (models, packs; a check, reading no model file). Opening
   one makes a new unsaved tab named after it, its samples taken into the inputs folder as a
@@ -2920,7 +2936,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]` (one question: install, setup and trust), `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` (an `<id>@<major>` where majors of a pack sit side by side) | Packs ([6.6](#66-installing)); `list` says where each comes from (`own`, or `inherited from Default` in a project that inherits `packs`, with the warning of 1.4.2 about what an inherited pack writes). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
 | `fugue template prepare <id>`, `fugue workflow prepare <file>` | Get a template or workflow ready with one question (#379, [6.6](#66-installing)): lists the packs to install and trust, each environment's setup command and size, and the missing models (file, licence, size, host, folder) with the totals and the free space where they go, asks once on a terminal, then runs the list (install, trust, setup, downloads) and stops at the first failure, naming what is left; a rerun lists only that. Nothing is ready to ask: `ready: true`. With no terminal it fails with `needs_confirmation` and prints the list; no flag answers for the person. Reply: `{plan, ready, done?}`. |
-| `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks, and where it comes from (`own`, `inherited from Default`, `bundled`); what is wrong with one is a warning. |
+| `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in), their `families`, the packs it lacks, its `source` (name, author, url, note, as `template.json` gives it, `{}` when none), and where it comes from (`own`, `inherited from Default`, `bundled`); what is wrong with one is a warning. |
 | `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call; an inherited folder is refused as read-only); progress on stderr. Each failure is an error; what arrived stays. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers; each file says which root it is in and whether that is the project's own or inherited from Default (`origin`), and `roots` lists the model folders searched. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
 | `fugue cache status` | What Fugue keeps under `~/.cache/fugue` ([10.6](#106-cache-management), #141): per kind (results, thumbnails including the media browser's, runs) the bytes, files, oldest and limit, and the results per workflow and per node. |

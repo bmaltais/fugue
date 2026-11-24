@@ -161,6 +161,9 @@ public:
     // is on this machine or answering from a paired host; true with no models), `local`, `hosts`
     // and `offlineHosts` (host names). A host's models are those the last loadHostModels() found.
     Q_INVOKABLE QVariantList templates() const;
+    // Whether a template of templates() satisfies what was typed in the Templates window's search
+    // (word starts over title, description, category, tags, id, source, families; `tag:`, `source:`, `family:`).
+    Q_INVOKABLE bool templateMatches(const QString &query, const QVariantMap &templ) const;
     // Where models come from, for the paired hosts' side of templates(): the providers
     // (listOfferedModels) unless a test sets another.
     using ModelSource = std::function<void(const QString &resourceType, const QStringList &capabilities,
