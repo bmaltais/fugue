@@ -10,7 +10,7 @@ import "../canvas"
 // shows its preview, title, description and, when this machine lacks something it needs, what
 // (models, packs), with a Download button for its missing models that have a source (#89), and
 // their progress while they come. Clicking a card, or Enter on it, opens it as a new workflow and
-// closes the dialog; the banner then names each missing model, where to get it and where it goes.
+// closes the dialog; the small "i" on its picture, or I or Space on the focused card, shows its details first; the banner then names each missing model, where to get it and where it goes.
 // Styled as the settings panel: scrim, popup card, level 3 shadow.
 Popup {
     id: dialog
@@ -34,13 +34,10 @@ Popup {
     readonly property var noDetail: ({ title: "", description: "", preview: "", categoryTitle: "", source: {}, families: [], tags: [],
                                        modelList: [], packs: [], inputs: [] })
     function showDetails(id, index) {
-        settle.restart()
         detailId = id
         if (index !== undefined)
             grid.currentIndex = index
     }
-    // A double click on a card opens it: the second click lands on the details, just up, which open the template for a double click's span.
-    Timer { id: settle; interval: 400 }
     // Escape closes the details first, the dialog on the next press (a shortcut, so it holds whatever has the focus).
     Shortcut {
         sequence: "Escape"
@@ -379,7 +376,13 @@ Popup {
                     cellHeight: cellWidth * 10 / 16 + 30 * dialog.u
                     Keys.onReturnPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                     Keys.onEnterPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
-                Keys.onSpacePressed: if (currentIndex >= 0) dialog.showDetails(dialog.shown[currentIndex].id)
+                    Keys.onSpacePressed: if (currentIndex >= 0) dialog.showDetails(dialog.shown[currentIndex].id)
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_I && currentIndex >= 0 && !(event.modifiers & ~Qt.ShiftModifier)) {
+                            dialog.showDetails(dialog.shown[currentIndex].id)
+                            event.accepted = true
+                        }
+                    }
 
                     delegate: Item {
                         id: cell
@@ -402,7 +405,15 @@ Popup {
                             Accessible.name: cell.modelData.title
                             Accessible.description: cell.modelData.description
                             HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: dialog.showDetails(cell.modelData.id, cell.index) }
+                            TapHandler {
+                                // The info chip sits over the card and shows the details instead.
+                                onTapped: eventPoint => {
+                                    if (infoChip.contains(infoChip.mapFromItem(card, eventPoint.position)))
+                                        return
+                                    grid.currentIndex = cell.index
+                                    dialog.openTemplate(cell.modelData.id)
+                                }
+                            }
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -422,6 +433,41 @@ Popup {
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
                                         sourceSize.width: 512
+                                    }
+                                    // About this template: the details, over the picture's corner. A small round
+                                    // chip, dark on a light corner of the picture and light on a dark one, always a little visible and fully on hover or focus of the card.
+                                    Rectangle {
+                                        id: infoChip
+                                        objectName: "templateInfo-" + cell.modelData.id
+                                        anchors { right: parent.right; bottom: parent.bottom; margins: dialog.u }
+                                        width: 6 * dialog.u
+                                        height: width
+                                        radius: width / 2
+                                        // Dark on a light corner, light on a dark one (the picture's own brightness there).
+                                        readonly property bool onLight: cell.modelData.lightCorner === true
+                                        color: Qt.alpha(onLight ? "#ffffff" : "#000000", infoHover.hovered ? 0.85 : 0.6)
+                                        border.width: 1
+                                        border.color: Qt.alpha(onLight ? "#000000" : "#ffffff", 0.25)
+                                        opacity: cardHover.hovered || infoHover.hovered
+                                                 || (grid.activeFocus && grid.currentIndex === cell.index) ? 1 : 0.55
+                                        Behavior on opacity { NumberAnimation { duration: 90 } }
+                                        Accessible.role: Accessible.Button
+                                        Accessible.name: qsTr("About this template")
+                                        Glyph {
+                                            anchors.centerIn: parent
+                                            look: dialog.look
+                                            name: "info"
+                                            color: infoChip.onLight ? "#111111" : "#ffffff"
+                                        }
+                                        ToolTip.visible: infoHover.hovered
+                                        ToolTip.delay: App.theme.look.tooltipDelay
+                                        ToolTip.text: qsTr("About this template")
+                                        // Its own press target (an exclusive grab, so the card's tap does not follow): the details, not the template.
+                                        HoverHandler { id: infoHover; cursorShape: Qt.PointingHandCursor }
+                                        TapHandler {
+                                            gesturePolicy: TapHandler.ReleaseWithinBounds
+                                            onTapped: dialog.showDetails(cell.modelData.id, cell.index)
+                                        }
                                     }
                                     // Where its models are (#164): the same badges as the model pickers, on a
                                     // pill over the preview's corner so the card keeps its height.
@@ -570,7 +616,6 @@ Popup {
         TemplateDetails {
             anchors.fill: parent
             visible: dialog.detail !== null
-            settling: settle.running
             template: dialog.detail ?? dialog.noDetail
             onOpen: dialog.openTemplate(dialog.detailId)
             onCancel: dialog.closeDetails()

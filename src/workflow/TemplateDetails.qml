@@ -21,8 +21,6 @@ Rectangle {
     color: look.popup
     radius: look.popupCorner
     focus: visible
-    // Just after the sheet comes up, a press on it is the second click of a double click on the card: it opens the template.
-    property bool settling: false
     onVisibleChanged: if (visible) forceActiveFocus()
 
     readonly property var source: template.source ? template.source : {}
@@ -234,12 +232,5 @@ Rectangle {
                 onClicked: sheet.open()
             }
         }
-    }
-
-    MouseArea {
-        z: 10
-        anchors.fill: parent
-        enabled: sheet.settling
-        onPressed: sheet.open()
     }
 }

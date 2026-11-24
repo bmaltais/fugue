@@ -9,7 +9,9 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QImage>
 #include <QJsonObject>
+#include <QPainter>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -19,6 +21,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
+#include "workflow/corner_brightness.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
@@ -258,6 +261,50 @@ private slots:
     // 11.10, #118: a template folder may carry the exact pack it needs as packs/<id>/. It is
     // listed as carried (the offer comes from it), and a carried pack that is not what the
     // workflow records, or is not named for its id, is a problem of the bundled templates.
+    // The info button reads on any preview (spec 11.10): its colour follows the brightness of the picture's bottom-right corner.
+    void theInfoButtonFollowsTheBrightnessOfThePreviewsCorner() {
+        QTemporaryDir dir;
+        const auto picture = [&](const QString &name, const QColor &base, const QColor &corner) {
+            QImage image(320, 200, QImage::Format_RGB32);
+            image.fill(base);
+            QPainter(&image).fillRect(QRect(250, 130, 70, 70), corner);
+            const QString path = dir.filePath(name);
+            image.save(path);
+            return path;
+        };
+        const QString white = picture("white.png", Qt::white, Qt::white);
+        const QString black = picture("black.png", Qt::black, Qt::black);
+        QVERIFY(cornerLuminance(white) > 0.99);
+        QVERIFY(cornerLuminance(black) < 0.01);
+        QVERIFY(cornerLuminance(white) > lightCornerThreshold);
+        QVERIFY(cornerLuminance(black) < lightCornerThreshold);
+        // Only the corner counts: a black picture with a white corner is light there, and the reverse.
+        QVERIFY(cornerLuminance(picture("bw.png", Qt::black, Qt::white)) > lightCornerThreshold);
+        QVERIFY(cornerLuminance(picture("wb.png", Qt::white, Qt::black)) < lightCornerThreshold);
+        QVERIFY(cornerLuminance(QUrl::fromLocalFile(white).toString()) > lightCornerThreshold); // a file URL too
+        QCOMPARE(cornerLuminance(dir.filePath("missing.png")), -1.0);
+
+        // The list says it per template; a template with no readable preview gets the dark corner.
+        Fixture f;
+        makeTemplate(f.bundled.filePath("pale"), {{"title", "Pale"}});
+        makeTemplate(f.bundled.filePath("deep"), {{"title", "Deep"}});
+        makeTemplate(f.bundled.filePath("none"), {{"title", "None"}});
+        QVERIFY(QFile::copy(white, f.bundled.filePath("pale/preview.png")));
+        QVERIFY(QFile::copy(black, f.bundled.filePath("deep/preview.png")));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QMap<QString, bool> light;
+        for (const QVariant &t : workflows.templates())
+            light.insert(t.toMap().value("id").toString(), t.toMap().value("lightCorner").toBool());
+        QCOMPARE(light, (QMap<QString, bool>{{"pale", true}, {"deep", false}, {"none", false}}));
+    }
+
     void aTemplateListsThePacksItCarries() {
         Fixture f;
         const QJsonObject recorded{{"packs", QJsonObject{{"io.example.tools", QJsonObject{{"version", "1.2.0"}, {"source", "https://example.com/tools"}}}}}};
@@ -692,29 +739,40 @@ private slots:
         QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
 
         QQuickItem *card = item(window->contentItem(), "templateCard-talk");
-        const QPoint cardCenter = card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint();
-        // A click shows the details and opens nothing; Escape closes them first (the dialog stays), Cancel too.
-        QTest::mouseClick(window, Qt::LeftButton, {}, cardCenter);
-        QTRY_VERIFY(item(window->contentItem(), "templateDetails") && item(window->contentItem(), "templateDetails")->isVisible());
+        // The info button, and I on the focused card, show the details and open nothing; Escape closes them first (the dialog
+        // stays) and the card has the focus again; Cancel too.
+        const auto detailsShown = [&] {
+            QQuickItem *d = item(window->contentItem(), "templateDetails");
+            return d && d->isVisible();
+        };
+        QQuickItem *info = item(window->contentItem(), "templateInfo-talk");
+        QVERIFY(info);
+        QTest::qWait(300); // the cards settle after the filter was cleared: the chip is small, so click where it ends up
+        QTest::mouseClick(window, Qt::LeftButton, {}, info->mapToScene(QPointF(info->width() / 2, info->height() / 2)).toPoint());
+        QTRY_VERIFY(detailsShown());
         QCOMPARE(item(window->contentItem(), "templateDetailsTitle")->property("text").toString(), QString("Talk"));
         QVERIFY(window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
         QTest::keyClick(window, Qt::Key_Escape);
-        QTRY_VERIFY(!item(window->contentItem(), "templateDetails") || !item(window->contentItem(), "templateDetails")->isVisible());
+        QTRY_VERIFY(!detailsShown());
         QVERIFY(window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "templatesGrid")->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_I);
+        QTRY_VERIFY(detailsShown());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!detailsShown());
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(detailsShown());
         // Open, from the details, opens it.
-        QTest::mouseClick(window, Qt::LeftButton, {}, cardCenter);
-        QTRY_VERIFY(item(window->contentItem(), "templateDetails") && item(window->contentItem(), "templateDetails")->isVisible());
         QQuickItem *openButton = item(window->contentItem(), "templateDetailsOpen");
         QTest::mouseClick(window, Qt::LeftButton, {}, openButton->mapToScene(QPointF(openButton->width() / 2, openButton->height() / 2)).toPoint());
         QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Talk"));
         QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
-        // A double click on a card opens it at once.
+        // A click on a card opens it at once.
         QVERIFY(commands.run("file.templates"));
         QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
         card = item(window->contentItem(), "templateCard-gen");
         const QPoint genCenter = card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint();
-        QTest::mouseClick(window, Qt::LeftButton, {}, genCenter); // the details come up under the pointer,
-        QTest::mouseClick(window, Qt::LeftButton, {}, genCenter); // and the second click opens it
+        QTest::mouseClick(window, Qt::LeftButton, {}, genCenter);
         QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Gen"));
         QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
 
