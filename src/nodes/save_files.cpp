@@ -132,19 +132,27 @@ Result<SaveLocation> saveLocation(const NodeContext &context, const QString &ext
             return subOk.errors();
         folder = subOk.value();
     }
-    if (Errors made = makeFolder(baseOk.value()); !made.isEmpty()) {
+    // Opened once, here: from now on the folders are held by descriptor, not by name. The base
+    // is opened (and made) from the root without following a link; the name's subfolders below it.
+    Result<FolderFd> opened = FolderFd::open(baseOk.value(), true);
+    if (!opened) {
+        Errors made = opened.errors();
         made.first().input = QStringLiteral("folder");
         made.first().hint = QStringLiteral("Pick another folder in the node.");
         return made;
     }
     if (folder != baseOk.value()) {
-        if (Errors made = makeFolder(folder); !made.isEmpty()) {
+        // `folder` is inside the base after links were followed, so the way down is the path
+        // between them; a link met there now (one swapped in since) is refused.
+        opened = opened->below(folder.mid(baseOk.value().size() + 1), true);
+        if (!opened) {
+            Errors made = opened.errors();
             made.first().input = QStringLiteral("name");
             made.first().hint = QStringLiteral("Use another name: a folder in it may be a file already.");
             return made;
         }
     }
-    return SaveLocation{folder, relative->mid(slash + 1)};
+    return SaveLocation{folder, relative->mid(slash + 1), std::make_shared<FolderFd>(std::move(opened.value()))};
 }
 
 Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &embed, const QString &what) {
@@ -193,13 +201,13 @@ Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const Q
                      QStringLiteral("Pick another name or folder in the node."));
 }
 
-Result<QString> saveAsNew(const QString &folder, const QString &name, const QString &extension, const QByteArray &bytes) {
-    PartialFile::removeStale(folder); // what a save that died here left behind
-    PartialFile partial(folder, numberedName(name, 1, extension));
-    if (const Errors written = partial.write(bytes, QDir(folder).filePath(numberedName(name, 1, extension)));
+Result<QString> saveAsNew(const SaveLocation &where, const QString &extension, const QByteArray &bytes) {
+    PartialFile::removeStale(*where.dir); // what a save that died here left behind
+    PartialFile partial(*where.dir, numberedName(where.name, 1, extension));
+    if (const Errors written = partial.write(bytes, QDir(where.folder).filePath(numberedName(where.name, 1, extension)));
         hasErrors(written))
         return written;
-    return commitAsNew(partial, folder, name, extension);
+    return commitAsNew(partial, where.folder, where.name, extension);
 }
 
 } // namespace fugue::nodes

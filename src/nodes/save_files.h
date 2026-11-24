@@ -4,6 +4,8 @@
 // and folder inputs checked and resolved the same way, the workflow text a file may carry, and the
 // rule that a save takes the first free numbered name and never overwrites a file.
 
+#include <memory>
+
 #include <QByteArray>
 #include <QDateTime>
 #include <QJsonObject>
@@ -28,16 +30,20 @@ QString modelLabel(const QJsonObject &handle);
 Result<QString> expandSaveName(const QString &name, const QDateTime &now, const QString &model, const QString &extension);
 
 // Where a save writes: `folder` is the resolved, made folder (below) and `name` the file's stem
-// in it (no `/`), after the `name` input's subfolders are made inside it.
+// in it (no `/`), after the `name` input's subfolders are made inside it. `dir` holds that folder
+// open: the file is written and renamed through it, so a link swapped in for the folder or one of
+// its parents after the checks cannot redirect the write (`folder` is for messages and results).
 struct SaveLocation {
     QString folder;
     QString name;
+    std::shared_ptr<FolderFd> dir;
 };
 
 // The `name` and `folder` inputs resolved and checked. The folder is the `folder` input (a
 // relative one is under the output folder and may not leave it), else the output folder, and the
 // name's subfolders go below it; the result is canonical, inside the folder after links are
-// followed (a link below it that leads out is refused), inside the run's write roots, and made.
+// followed (a link below it that leads out is refused), inside the run's write roots, made, and
+// opened as a FolderFd (a link met while opening it is refused).
 Result<SaveLocation> saveLocation(const NodeContext &context, const QString &extension);
 
 // The workflow text a saved `what` ("image", "video", "audio") embeds: the share copy (11.5) with a
@@ -49,11 +55,11 @@ Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &em
 QString numberedName(const QString &name, int n, const QString &extension);
 
 // Gives `partial` (already written whole) the first free numbered name in `folder` and returns its
-// path. The name is claimed in the same step as the file appears, so a save never overwrites a file
+// path (`folder` names it for the result; the file goes through the folder `partial` was made in). The name is claimed in the same step as the file appears, so a save never overwrites a file
 // (it may be the user's), not even one another Save node wrote a moment before.
 Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const QString &name, const QString &extension);
 
-// Writes `bytes` under the first free numbered name in `folder` and returns its path.
-Result<QString> saveAsNew(const QString &folder, const QString &name, const QString &extension, const QByteArray &bytes);
+// Writes `bytes` under the first free numbered name in `where` and returns its path.
+Result<QString> saveAsNew(const SaveLocation &where, const QString &extension, const QByteArray &bytes);
 
 } // namespace fugue::nodes

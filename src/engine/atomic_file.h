@@ -25,6 +25,40 @@ QString writeFailureCode(int error);
 // with writeFailureCode's code, naming the folder and the cause.
 Errors makeFolder(const QString &dir);
 
+// A folder held open by its file descriptor. A file written through it lands in the folder
+// that was opened, whatever is renamed or linked at its path afterwards (a link swapped in
+// by another writer of a shared folder can no longer redirect the write). Every step down
+// the path is opened with O_NOFOLLOW, so a link met on the way is refused, not followed.
+class FolderFd {
+public:
+    // `dir`, an absolute path that is already canonical (no links, no `..`), opened from the root
+    // folder by folder; missing folders are made when `create`. An error with writeFailureCode's
+    // code naming the folder (permission_denied when a link is met).
+    static Result<FolderFd> open(const QString &dir, bool create);
+    // The folders of `relative` (a plain `a/b`, no `.`, `..` or empty part) below this one, opened
+    // the same way. `create` makes the missing ones.
+    Result<FolderFd> below(const QString &relative, bool create) const;
+
+    FolderFd(FolderFd &&other) noexcept;
+    FolderFd &operator=(FolderFd &&other) noexcept;
+    FolderFd(const FolderFd &) = delete;
+    FolderFd &operator=(const FolderFd &) = delete;
+    ~FolderFd();
+
+    int fd() const { return m_fd; }
+    // The path it was opened by: for messages and for the paths handed back to people.
+    const QString &path() const { return m_path; }
+
+private:
+    FolderFd(int fd, QString path) : m_fd(fd), m_path(std::move(path)) {}
+    int m_fd = -1;
+    QString m_path;
+};
+
+// Test seam: called, when set, after a path is judged fine and before FolderFd opens it, with
+// that path, so a test can swap a folder for a link in that gap.
+extern void (*beforeFolderOpen)(const QString &path);
+
 enum class Overwrite {
     Replace, // an existing file at the name is replaced, in the same step
     Never,   // an existing file at the name is kept, even one made a moment ago by another writer
@@ -36,13 +70,17 @@ public:
     // `<dir>/.<name>.fugue-<pid>-<n>.part`, `name` shortened when needed to keep it within 255
     // bytes. Nothing is created until something writes it.
     PartialFile(const QString &dir, const QString &name);
+    // The same in the open folder `dir` (which must outlive this): every step (create, write,
+    // rename, remove) goes through its descriptor, never through a path.
+    PartialFile(const FolderFd &dir, const QString &name);
     // Removes the partial file, unless it was committed.
     ~PartialFile();
     PartialFile(const PartialFile &) = delete;
     PartialFile &operator=(const PartialFile &) = delete;
 
-    // Where to write the content (a program such as ffmpeg may write it itself).
-    QString path() const { return m_path; }
+    // Where to write the content (a program such as ffmpeg may write it itself). For a PartialFile
+    // in a FolderFd this is a /proc/<pid>/fd path that leads through the open folder.
+    QString path() const;
 
     // Writes `bytes` as the whole content. On failure an error naming `what`, with
     // writeFailureCode's code.
@@ -59,9 +97,12 @@ public:
     // minutes. A live writer's file, a fresh one (a writer on another machine sharing the
     // folder) and every other file stay.
     static void removeStale(const QString &dir);
+    static void removeStale(const FolderFd &dir);
 
 private:
-    QString m_path;
+    QString m_path;       // the whole path, or in a FolderFd the folder's path and the name, for messages
+    const FolderFd *m_dir = nullptr;
+    QByteArray m_leaf;    // the partial file's name in m_dir
     bool m_committed = false;
 };
 

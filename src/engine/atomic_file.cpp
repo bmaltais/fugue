@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fcntl.h>
 #include <limits>
+#include <utility>
 #include <signal.h>
 #include <unistd.h>
 
@@ -16,7 +17,11 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
+#include <sys/stat.h>
+
 namespace fugue {
+
+void (*beforeFolderOpen)(const QString &path) = nullptr;
 
 namespace {
 
@@ -67,7 +72,75 @@ QString linkedFile(const QString &path) {
     return info.absoluteFilePath();
 }
 
+// One step into `name` below `parent`: never through a link. A missing folder is made when `create`.
+Result<int> stepInto(int parent, const QByteArray &name, bool create, const QString &shown, const QString &whole) {
+    const int flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+    int fd = ::openat(parent, name.constData(), flags);
+    if (fd < 0 && errno == ENOENT && create && (::mkdirat(parent, name.constData(), 0777) == 0 || errno == EEXIST))
+        fd = ::openat(parent, name.constData(), flags);
+    if (fd >= 0)
+        return fd;
+    const int error = errno;
+    struct stat info {};
+    if (::fstatat(parent, name.constData(), &info, AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(info.st_mode))
+        return makeError(QStringLiteral("permission_denied"),
+                         QStringLiteral("Cannot write in %1: it is a link, which a save does not follow.").arg(shown));
+    return makeError(writeFailureCode(error),
+                     QStringLiteral("Cannot create the folder %1: %2.").arg(whole, QString::fromLocal8Bit(std::strerror(error))));
+}
+
 } // namespace
+
+Result<FolderFd> FolderFd::open(const QString &dir, bool create) {
+    if (beforeFolderOpen)
+        beforeFolderOpen(dir);
+    int fd = ::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0)
+        return makeError(writeFailureCode(errno), QStringLiteral("Cannot open the folder %1.").arg(dir));
+    QString walked;
+    for (const QString &part : dir.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+        walked += QLatin1Char('/') + part;
+        const Result<int> next = stepInto(fd, QFile::encodeName(part), create, walked, dir);
+        ::close(fd);
+        if (!next)
+            return next.errors();
+        fd = next.value();
+    }
+    return FolderFd(fd, dir);
+}
+
+Result<FolderFd> FolderFd::below(const QString &relative, bool create) const {
+    int fd = ::fcntl(m_fd, F_DUPFD_CLOEXEC, 0);
+    if (fd < 0)
+        return makeError(writeFailureCode(errno), QStringLiteral("Cannot open the folder %1.").arg(m_path));
+    QString walked = m_path;
+    for (const QString &part : relative.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+        walked += QLatin1Char('/') + part;
+        const Result<int> next = stepInto(fd, QFile::encodeName(part), create, walked, m_path + QLatin1Char('/') + relative);
+        ::close(fd);
+        if (!next)
+            return next.errors();
+        fd = next.value();
+    }
+    return FolderFd(fd, walked);
+}
+
+FolderFd::FolderFd(FolderFd &&other) noexcept : m_fd(std::exchange(other.m_fd, -1)), m_path(std::move(other.m_path)) {}
+
+FolderFd &FolderFd::operator=(FolderFd &&other) noexcept {
+    if (this != &other) {
+        if (m_fd >= 0)
+            ::close(m_fd);
+        m_fd = std::exchange(other.m_fd, -1);
+        m_path = std::move(other.m_path);
+    }
+    return *this;
+}
+
+FolderFd::~FolderFd() {
+    if (m_fd >= 0)
+        ::close(m_fd);
+}
 
 QString writeFailureCode(int error) {
     if (error == ENOENT || error == ENOTDIR)
@@ -88,6 +161,21 @@ Errors makeFolder(const QString &dir) {
 
 PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
 
+PartialFile::PartialFile(const FolderFd &dir, const QString &name)
+    : m_dir(&dir), m_leaf(QFile::encodeName(partialName(name))) {
+    m_path = QDir(dir.path()).filePath(QFile::decodeName(m_leaf));
+}
+
+QString PartialFile::path() const {
+    if (!m_dir)
+        return m_path;
+    return QStringLiteral("/proc/%1/fd/%2/%3").arg(::getpid()).arg(m_dir->fd()).arg(QFile::decodeName(m_leaf));
+}
+
+void PartialFile::removeStale(const FolderFd &dir) {
+    removeStale(QStringLiteral("/proc/self/fd/%1").arg(dir.fd())); // lists and removes through the descriptor
+}
+
 void PartialFile::removeStale(const QString &dir) {
     static const QRegularExpression ours(QStringLiteral("^\\..*\\.fugue-(\\d+)-\\d+\\.part$"));
     const QDateTime before = QDateTime::currentDateTimeUtc().addSecs(-600);
@@ -107,30 +195,43 @@ void PartialFile::removeStale(const QString &dir) {
 }
 
 PartialFile::~PartialFile() {
-    if (!m_committed)
+    if (m_committed)
+        return;
+    if (m_dir)
+        ::unlinkat(m_dir->fd(), m_leaf.constData(), 0);
+    else
         QFile::remove(m_path);
 }
 
 Errors PartialFile::write(const QByteArray &bytes, const QString &what) const {
     QFile out(m_path);
     errno = 0;
-    if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.flush())
+    bool opened;
+    if (m_dir) {
+        const int fd = ::openat(m_dir->fd(), m_leaf.constData(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0666);
+        opened = fd >= 0 && out.open(fd, QIODevice::WriteOnly, QFile::AutoCloseHandle);
+    } else {
+        opened = out.open(QIODevice::WriteOnly);
+    }
+    if (!opened || out.write(bytes) != bytes.size() || !out.flush())
         return {writeFailed(what, errno != 0 ? errno : EIO)};
     return {};
 }
 
 Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
-    const QByteArray from = QFile::encodeName(m_path);
-    const QByteArray to = QFile::encodeName(target);
+    // In a FolderFd both names are relative to it; otherwise they are whole paths.
+    const QByteArray from = m_dir ? m_leaf : QFile::encodeName(m_path);
+    const QByteArray to = QFile::encodeName(m_dir ? QFileInfo(target).fileName() : target);
+    const int dir = m_dir ? m_dir->fd() : AT_FDCWD;
     if (overwrite == Overwrite::Replace) {
-        if (std::rename(from.constData(), to.constData()) != 0)
+        if (::renameat(dir, from.constData(), dir, to.constData()) != 0)
             return writeFailed(target, errno);
         m_committed = true;
         return true;
     }
     // Claimed in the same step as the move, so a writer that found the name free a moment
     // before cannot take it too.
-    if (::renameat2(AT_FDCWD, from.constData(), AT_FDCWD, to.constData(), RENAME_NOREPLACE) == 0) {
+    if (::renameat2(dir, from.constData(), dir, to.constData(), RENAME_NOREPLACE) == 0) {
         m_committed = true;
         return true;
     }
@@ -139,9 +240,12 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
     if (errno != EINVAL && errno != ENOSYS)
         return writeFailed(target, errno);
     // A filesystem without RENAME_NOREPLACE: a hard link is made only when the name is free.
-    if (::link(from.constData(), to.constData()) != 0)
+    if (::linkat(dir, from.constData(), dir, to.constData(), 0) != 0)
         return errno == EEXIST ? Result<bool>(false) : Result<bool>(writeFailed(target, errno));
-    QFile::remove(m_path);
+    if (m_dir)
+        ::unlinkat(dir, from.constData(), 0);
+    else
+        QFile::remove(m_path);
     m_committed = true;
     return true;
 }

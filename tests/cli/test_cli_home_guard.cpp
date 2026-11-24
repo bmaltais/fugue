@@ -187,7 +187,7 @@ private slots:
         const QString work = QDir(path("work")).canonicalPath();
         static const QRegularExpression writing(R"(O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_TMPFILE)");
         static const QRegularExpression quoted("\"((?:[^\"\\\\]|\\\\.)*)\"");
-        static const QRegularExpression fdPath("(\\d+)<([^>]*)>\"");
+        static const QRegularExpression fdPath("(?:\\d+|AT_FDCWD)<([^>]*)>,\\s*\"");
         QStringList leaks;
         int checked = 0;
         for (const QByteArray &raw : in.readAll().split('\n')) {
@@ -203,7 +203,7 @@ private slots:
             QString target = match.captured(1);
             if (!target.startsWith('/')) {
                 const QRegularExpressionMatch dir = fdPath.match(line); // openat(5</some/dir>, "name", ...)
-                target = (dir.hasMatch() ? dir.captured(2) : work) + '/' + target;
+                target = (dir.hasMatch() ? dir.captured(1) : work) + '/' + target;
             }
             target = QDir::cleanPath(target);
             ++checked;
