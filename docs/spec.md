@@ -3563,8 +3563,7 @@ side the picture is looked at, rounded to a multiple of 14 as Depth Anything V2'
 largest for the nearest part; ControlNet's depth preprocessors give the same), a flat scene black. The catalog offers only
 **Depth Anything V2 Small** (Apache-2.0; ONNX export `onnx-community/depth-anything-v2-small`, pinned to a commit, sha256 and
 size checked 2026-11-23). Base, Large and Giant are CC-BY-NC-4.0 (the ComfyUI workflow's default is Large): never fetched, a
-user may put their own ONNX file in the models folder. The template `flux2-klein-9b-da-edit` uses it as a bypassed Depth Estimate node that replaces Image 1 as the first reference when turned on (what the workflow's AnySwitch does; a bypassed
-node gives its input through, 3.5, so off is exactly the template without it).
+user may put their own ONNX file in the models folder. The template `flux2-klein-9b-da-edit-depth` (a sibling of the pack-free `flux2-klein-9b-da-edit`, so that template does not need the pack and a 99 MB model) carries the pack and the Small model and uses the node to replace Image 1 by its depth picture as the first reference (what the workflow's AnySwitch does); bypass the node (it then gives its input through, 3.5) to use Image 1 itself.
 
 Built (#178, second pack): **Segment by Points or Box**, `examples/packs/io.github.bmaltais.fugue-segment` (guide:
 [masking.md](masking.md#select-an-object-by-points-or-a-box)), SAM 2.1 through ONNX Runtime. One persistent command node,
