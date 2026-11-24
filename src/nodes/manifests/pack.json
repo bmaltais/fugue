@@ -58,6 +58,7 @@
     "repaint-song",
     "resize",
     "resize-megapixels",
+    "restore-image",
     "rotate",
     "sampler",
     "save-audio",
@@ -181,6 +182,31 @@
         "upscale_models",
         "upscaler",
         "ESRGAN"
+      ]
+    },
+    {
+      "id": "fugue/seedvr2-model",
+      "version": 1,
+      "kind": "resource",
+      "name": "SeedVR2 model",
+      "extensions": [
+        ".safetensors"
+      ],
+      "folders": [
+        "seedvr2",
+        "SEEDVR2"
+      ]
+    },
+    {
+      "id": "fugue/seedvr2-vae",
+      "version": 1,
+      "kind": "resource",
+      "name": "SeedVR2 VAE",
+      "extensions": [
+        ".safetensors"
+      ],
+      "folders": [
+        "seedvr2_vae"
       ]
     },
     {

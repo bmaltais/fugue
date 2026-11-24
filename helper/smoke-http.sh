@@ -49,7 +49,7 @@ check "wrong key: 401" 401 "$(code -X POST -H 'Authorization: Bearer nope' -d '{
 check "the 401 body" unauthorized "$(curl -s -X POST -d '{}' "$url/describe" | python3 -c 'import json,sys; print(json.load(sys.stdin)["error"]["code"])')"
 describe="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/describe")"
 check "describe" "1 sdcpp False True" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["protocol"], d["engine"], d["shares_filesystem"], d["free_memory_bytes"] > 0)' "$describe")"
-check "describe capabilities" "text.encode latent.sample latent.decode latent.encode image.upscale" "$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["capabilities"]))' "$describe")"
+check "describe capabilities" "text.encode latent.sample latent.decode latent.encode image.upscale image.restore" "$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["capabilities"]))' "$describe")"
 check "bad JSON: 400" 400 "$(code "${auth[@]}" -X POST -d '{nope' "$url/describe")"
 check "unknown capability: 400" 400 "$(code "${auth[@]}" -X POST -d '{"capability":"x.y"}' "$url/submit")"
 miss='{"capability":"latent.decode","params":{"context":{"vae_path":{"name":"vae/absent.safetensors","size":5}}},"inputs":{"latent":{"data":"AAAA","format":"latent"}}}'
@@ -111,6 +111,7 @@ maskjob() { # base64 mask, request width and height -> the job's error as "code:
 check "a mask of another size than the request" "input_invalid: the mask is 4x4, the request 8x8" "$(maskjob "$mask4" 8)"
 check "a mask that is no image" input_invalid "$(maskjob QUJD 4 | cut -d: -f1)"
 check "... saying so" yes "$(maskjob QUJD 4 | grep -q 'cannot read the mask' && echo yes || echo no)"
-check "a mask of the request's size passes the mask check" no "$(maskjob "$mask4" 4 | grep -q 'mask' && echo yes || echo no)"
+# (the job then stops for want of a picture, an error that names the mask too: only the mask's own errors count)
+check "a mask of the request's size passes the mask check" no "$(maskjob "$mask4" 4 | grep -Eq 'the mask is|cannot read the mask' && echo yes || echo no)"
 
 ((failures == 0)) && echo "all passed" || { echo "$failures failed"; exit 1; }

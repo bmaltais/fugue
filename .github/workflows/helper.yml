@@ -50,5 +50,10 @@ jobs:
       - name: Build
         run: bin/build-helper vulkan
 
+      - name: Check the restore program with the engine's checker
+        run: |
+          cmake --build build-helper-vulkan --target fugue-helper-restore-test
+          ctest --test-dir build-helper-vulkan --output-on-failure
+
       - name: Compiler cache use
         run: ccache -s

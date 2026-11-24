@@ -103,7 +103,7 @@ QList<ProviderModule> builtinProviderModules() {
     helper.transport = QStringLiteral("builtin"); // its program is found by helperProgram()
     helper.capabilities = {QStringLiteral("text.encode"), QStringLiteral("latent.sample"),
                            QStringLiteral("latent.decode"), QStringLiteral("latent.encode"),
-                           QStringLiteral("image.upscale")};
+                           QStringLiteral("image.upscale"), QStringLiteral("image.restore")};
     return {omarchy, helper};
 }
 
