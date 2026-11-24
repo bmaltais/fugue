@@ -49,6 +49,9 @@ class MaskLayer : public QQuickItem {
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged FINAL)
     // Nothing painted: every pixel is 0.
     Q_PROPERTY(bool empty READ isEmpty NOTIFY historyChanged FINAL)
+    // A brush stroke is on (beginStroke to endStroke): the live trace of the Selection Brush and the layer-mask Brush shows
+    // the layer, however its overlay is set, for as long as it is (#380).
+    Q_PROPERTY(bool stroking READ stroking NOTIFY strokingChanged FINAL)
     // The folder `store` writes into: the inputs folder (paths.h) unless a caller says otherwise.
     Q_PROPERTY(QString folder READ folder WRITE setFolder NOTIFY folderChanged FINAL)
 
@@ -83,6 +86,7 @@ public:
     bool canUndo() const { return m_paint->canUndo(); }
     bool canRedo() const { return m_paint->canRedo(); }
     bool isEmpty() const { return m_paint->isEmpty(); }
+    bool stroking() const { return m_stroking; }
     QString folder() const;
     void setFolder(const QString &folder);
 
@@ -135,6 +139,7 @@ signals:
     void historyChanged();
     void folderChanged();
     void clipChanged();
+    void strokingChanged();
     // The mask changed (a stroke dab, a step, an undo): the editor's readout and tests follow it.
     void edited();
 
@@ -154,6 +159,7 @@ private:
     QColor m_tint = QColor(255, 59, 48, 128);
     bool m_maskOnly = false;
     bool m_inverted = false;
+    bool m_stroking = false;
     qreal m_brushOpacity = 1;
     QPointer<MaskLayer> m_clipTo;
     QRectF m_clipRect;

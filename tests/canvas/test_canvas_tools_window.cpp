@@ -235,7 +235,11 @@ private slots:
         drag(app, at, 40);
         QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
         QTRY_VERIFY(find(app.window, "canvasViewAnts") && find(app.window, "canvasViewAnts")->property("outlined").toBool());
-        QVERIFY(!find(app.window, "canvasViewSelection")); // no tint unless asked
+        QVERIFY(find(app.window, "canvasViewSelection")); // the red is on while Q is on (#380); \ hides it
+        key(app, Qt::Key_Backslash);
+        QTRY_VERIFY(!find(app.window, "canvasViewSelection"));
+        key(app, Qt::Key_Backslash);
+        QTRY_VERIFY(find(app.window, "canvasViewSelection"));
         QCOMPARE(revisions(), 1); // a selection is not a revision
         // A second stroke elsewhere adds: the first stays.
         drag(app, at + QPoint(0, 80), 20);
@@ -249,8 +253,6 @@ private slots:
         key(app, Qt::Key_Z, Qt::ControlModifier); // one stroke back
         QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
         // The tint is optional.
-        key(app, Qt::Key_Backslash);
-        QTRY_VERIFY(find(app.window, "canvasViewSelection"));
         key(app, Qt::Key_Backslash);
         QTRY_VERIFY(!find(app.window, "canvasViewSelection"));
         // Leaving Q keeps the ants, and Ctrl+Z still takes the selection back, one stroke.
@@ -357,6 +359,37 @@ private slots:
         QTRY_COMPARE(revisions(), 3);
         QCOMPARE(selection(app)->valueAt(128, 128), before);
         QVERIFY(view(app)->property("maskSelected").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The Selection Brush (#380): A picks it (its tooltip names the key), its stroke is the selection with no Quick Mask and no revision,
+    // the layer mask under a targeted layer stays untouched, and Alt at the press subtracts (the size is [ and ], Alt does not size it).
+    void theSelectionBrushPaintsTheSelectionNotTheMask() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        model(app)->setProperty("maskIdle", 80);
+        click(app, "canvasLayer-1");
+        click(app, "canvasLayerAddMask");
+        QTRY_COMPARE(revisions(), 2);
+        QVERIFY(find(app.window, "canvasViewTool-selbrush")->property("tip").toString().endsWith("(A)"));
+        const QPoint at = hoverPicture(app);
+        key(app, Qt::Key_A);
+        QTRY_COMPARE(view(app)->property("tool").toString(), QString("selbrush"));
+        QVERIFY(!view(app)->property("quickMask").toBool());
+        QCOMPARE(find(app.window, "canvasViewBrushTargetText")->property("text").toString(), QString("Selection"));
+        drag(app, at, 40);
+        QTRY_VERIFY(selection(app)->valueAt(128, 128) > 128);
+        QTRY_VERIFY(find(app.window, "canvasViewAnts") && find(app.window, "canvasViewAnts")->property("outlined").toBool());
+        QVERIFY(!find(app.window, "canvasViewSelection")); // the red was the live trace: the ants took over on release
+        QCOMPARE(layerMask(app)->valueAt(128, 128), 255); // the mask is untouched
+        QCOMPARE(revisions(), 2);
+        const double size = view(app)->property("brushSize").toDouble();
+        QTest::mousePress(app.window, Qt::LeftButton, Qt::AltModifier, at);
+        QTest::mouseMove(app.window, at + QPoint(10, 0));
+        QTest::mouseRelease(app.window, Qt::LeftButton, Qt::AltModifier, at + QPoint(10, 0));
+        QTRY_COMPARE(selection(app)->valueAt(128, 128), 0); // Alt subtracted
+        QCOMPARE(view(app)->property("brushSize").toDouble(), size);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

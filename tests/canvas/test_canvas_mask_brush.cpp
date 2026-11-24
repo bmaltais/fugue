@@ -11,6 +11,7 @@
 
 #include "canvas/canvas_view_model.h"
 #include "canvas/mask_layer.h"
+#include "canvas/paint_target.h"
 #include "canvas_app.h"
 #include "engine/canvas_store.h"
 
@@ -311,6 +312,57 @@ private slots:
         QVERIFY(model.setRegion(QVariantMap{{"x", 10}, {"y", 10}, {"width", 64}, {"height", 64}}));
         QCOMPARE(model.region().value("selection").toString(), QString());
         QCOMPARE(app.model.undoStack()->count(), 2);
+    }
+
+    // #380: which target each tool paints. The Brush and Eraser paint the layer's mask only, the Selection Brush and the lasso the
+    // selection; Quick Mask turns every brush into a selection painter; a brush with no mask to paint paints nothing.
+    void eachToolPaintsItsOwnTarget() {
+        PaintTarget mode;
+        const auto target = [&](const char *tool, bool quick, int mask) {
+            mode.setProperty("tool", tool);
+            mode.setProperty("quickMask", quick);
+            mode.setProperty("maskTarget", mask);
+            return mode.property("target").toString();
+        };
+        QCOMPARE(target("brush", false, 1), QString("mask"));
+        QCOMPARE(target("eraser", false, 1), QString("mask"));
+        QCOMPARE(target("brush", false, -1), QString("none"));
+        QCOMPARE(target("selbrush", false, 1), QString("selection")); // never the mask, a targeted one included
+        QCOMPARE(target("selbrush", false, -1), QString("selection"));
+        QCOMPARE(target("lasso", false, 1), QString("selection"));
+        QCOMPARE(target("brush", true, 1), QString("selection")); // Quick Mask
+        QCOMPARE(target("eraser", true, -1), QString("selection"));
+        for (const char *tool : {"brush", "eraser", "selbrush"}) {
+            mode.setProperty("tool", tool);
+            QVERIFY(mode.property("brushing").toBool());
+        }
+        mode.setProperty("tool", "lasso");
+        QVERIFY(!mode.property("brushing").toBool());
+    }
+
+    // #380: the covered area is there on every move of a stroke (the live trace reads it), `stroking` says a stroke is on, and it is
+    // off again on release (the ants take over).
+    void aStrokeExposesItsLiveCoverageWhileItIsOn() {
+        MaskLayer selection;
+        selection.setImageSize(QSize(256, 256));
+        QSignalSpy spy(&selection, &MaskLayer::strokingChanged);
+        QVERIFY(!selection.stroking());
+        selection.beginStroke(false, 30, 1, 40, 40);
+        QVERIFY(selection.stroking());
+        QCOMPARE(selection.valueAt(40, 40), 255);
+        QCOMPARE(selection.valueAt(120, 40), 0);
+        selection.strokeTo(120, 40);
+        QVERIFY(selection.stroking());
+        QCOMPARE(selection.valueAt(120, 40), 255); // painted before the release
+        selection.endStroke();
+        QVERIFY(!selection.stroking());
+        QCOMPARE(selection.valueAt(80, 40), 255);
+        QCOMPARE(spy.count(), 2);
+        selection.beginStroke(true, 30, 1, 40, 40); // Alt subtracts: the same stroke, erasing
+        QVERIFY(selection.stroking());
+        selection.endStroke();
+        QCOMPARE(selection.valueAt(40, 40), 0);
+        QCOMPARE(selection.valueAt(120, 40), 255);
     }
 };
 

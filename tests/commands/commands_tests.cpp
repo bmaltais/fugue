@@ -359,6 +359,7 @@ private slots:
         registry.setContextActive("canvas-view", true);
         QCOMPARE(registry.ownerOf("Q"), QString("canvas-view.quick-mask"));
         QCOMPARE(registry.ownerOf("B"), QString("canvas-view.tool-brush"));
+        QCOMPARE(registry.ownerOf("A"), QString("canvas-view.tool-selection-brush"));
         QCOMPARE(registry.ownerOf("Ctrl+Z"), QString("canvas-view.undo"));
         QCOMPARE(registry.ownerOf("\\"), QString("canvas-view.mask-overlay"));
         QCOMPARE(registry.ownerOf("X"), QString("canvas-view.brush-swap"));

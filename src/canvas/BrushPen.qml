@@ -30,12 +30,16 @@ Item {
     // The lasso makes a SELECTION of the target (a MaskLayer, selectPolygon): it replaces it, Shift adds, Alt subtracts
     // (Photoshop's). Off, the lasso paints or erases the target as the Mask editor's does.
     property bool selects: false
+    // The Selection Brush (#380): Alt at the press subtracts instead of sizing the brush ([ and ] size it), and the tool is "selbrush".
+    property bool altSubtracts: false
+    // What a lasso or rectangle drag fills while it is on (the selection's red in the Canvas view).
+    property color liveTint: Qt.alpha(look.accent, 0.2)
     signal resize(real size, real hardness)
     signal painted
     signal pressedAt
 
     readonly property bool erasing: tool === "eraser"
-    readonly property bool brushing: tool === "brush" || tool === "eraser"
+    readonly property bool brushing: tool === "brush" || tool === "eraser" || tool === "selbrush"
     readonly property alias area: mouse
     readonly property alias action: mouse.action
     // A lasso drag is on (Escape drops it: the view asks `cancel()`).
@@ -55,7 +59,7 @@ Item {
         ShapePath {
             strokeColor: "white"
             strokeWidth: 1
-            fillColor: Qt.alpha(pen.look.accent, 0.2)
+            fillColor: pen.liveTint
             PathPolyline { path: mouse.screenPath }
         }
     }
@@ -66,7 +70,7 @@ Item {
         y: Math.min(mouse.pressAt.y, mouse.at.y)
         width: Math.abs(mouse.at.x - mouse.pressAt.x)
         height: Math.abs(mouse.at.y - mouse.pressAt.y)
-        color: Qt.alpha(pen.look.accent, 0.2)
+        color: pen.liveTint
         border.width: 1
         border.color: "white"
     }
@@ -154,7 +158,7 @@ Item {
             const p = pixelAt(mouse.x, mouse.y)
             if (pen.spaceHeld || mouse.button === Qt.MiddleButton) {
                 action = "pan"
-            } else if ((mouse.modifiers & Qt.AltModifier) && pen.brushing) {
+            } else if ((mouse.modifiers & Qt.AltModifier) && pen.brushing && !pen.altSubtracts) {
                 action = "resize"
                 startSize = pen.brushSize
                 startHardness = pen.brushHardness
@@ -162,7 +166,7 @@ Item {
                 action = ""
             } else if (pen.brushing) {
                 action = "stroke"
-                pen.target.beginStroke(erases(false), pen.brushSize, pen.brushHardness, p.x, p.y, pressure)
+                pen.target.beginStroke(erases(pen.altSubtracts && (mouse.modifiers & Qt.AltModifier) !== 0), pen.brushSize, pen.brushHardness, p.x, p.y, pressure)
             } else if (pen.tool === "lasso") {
                 action = "lasso"
                 path = [p]
