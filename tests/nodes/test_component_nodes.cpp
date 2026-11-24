@@ -575,6 +575,23 @@ private slots:
         QCOMPARE(request->inputs, (QJsonObject{{"conditioning", QJsonObject{{"path", conditioning.value("path")}}}}));
     }
 
+    void theSamplersFlowShiftIsSentOnlyWhenSet() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<Values> empty = bench.run(kEmptyLatent, {});
+        QVERIFY(empty);
+        const QJsonObject conditioning{{"data", "fugue/conditioning"}, {"path", "/c.bin"}};
+        const Values wired{{"model", Value(model)}, {"conditioning", Value(conditioning)}, {"latent", empty->value("latent")}};
+        const Result<JobRequest> unset = bench.request(kSampler, wired);
+        QVERIFY(unset);
+        QVERIFY(!unset->params.contains("sample.flow_shift")); // empty: the engine's own, the request as before
+        Values withShift = wired;
+        withShift.insert("flow_shift", Value(2.02));
+        const Result<JobRequest> set = bench.request(kSampler, withShift);
+        QVERIFY(set);
+        QCOMPARE(set->params.value("sample.flow_shift").toDouble(), 2.02);
+    }
+
     void theSamplerRedrawsFromAGivenLatentAsFarAsDenoiseSays() {
         Bench bench;
         const QJsonObject model = bench.loaded(bench.zImage());
@@ -1197,6 +1214,51 @@ private slots:
         QVERIFY2(sample, sample ? "" : qPrintable(sample.error().message));
         QCOMPARE(sample->params.value("ref_images").toArray(),
                  (QJsonArray{QJsonObject{{"image", first.path()}}, QJsonObject{{"image", second.path()}}}));
+    }
+
+    // Reference size: auto leaves the request as it was; exact asks the engine to keep every picture
+    // at the graph's size (ref_image_args) in both stages, the Sampler's value coming from the
+    // conditioning, so five pictures of different sizes reach the VAE as they are.
+    void exactReferencesKeepTheirGraphSizeInBothStages() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QList<QSize> sizes{{320, 192}, {256, 256}, {192, 320}, {512, 128}, {64, 64}};
+        QList<Value> pictures;
+        for (qsizetype i = 0; i < sizes.size(); ++i)
+            pictures.append(Value(picture(bench, QStringLiteral("ref%1.png").arg(i), sizes.at(i).width(), sizes.at(i).height())));
+        const Values base{{"model", Value(model)}, {"prompt", Value("make it night")}, {"references", Value::list(pictures)}};
+        const Result<JobRequest> plain = bench.request(kTextEncode, base);
+        QVERIFY(plain);
+        Values autoSize = base;
+        autoSize.insert("reference_size", Value("auto"));
+        const Result<JobRequest> chosenAuto = bench.request(kTextEncode, autoSize);
+        QVERIFY(chosenAuto);
+        QCOMPARE(chosenAuto->params, plain->params); // auto is the request as before
+        QVERIFY(!plain->params.contains("ref_image_args"));
+
+        Values exact = base;
+        exact.insert("reference_size", Value("exact"));
+        const Result<JobRequest> encode = bench.request(kTextEncode, exact);
+        QVERIFY(encode);
+        QCOMPARE(encode->params.value("ref_image_args").toString(), QStringLiteral("resize_before_vae=false"));
+        const QJsonArray sent = encode->params.value("ref_images").toArray();
+        QCOMPARE(sent.size(), sizes.size());
+        for (qsizetype i = 0; i < sizes.size(); ++i) {
+            const vips::VImage image = vips::VImage::new_from_file(sent.at(i).toObject().value("image").toString().toUtf8().constData());
+            QCOMPARE(QSize(image.width(), image.height()), sizes.at(i)); // sent as the graph made them
+        }
+
+        const QString file = bench.workDir() + "/conditioning.bin";
+        const Result<Values> out =
+            bench.outputs(kTextEncode, exact, JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        const Result<Values> empty = bench.run(kEmptyLatent, {{"width", Value(320)}, {"height", Value(192)}});
+        const Result<JobRequest> sample =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", out->value("conditioning")},
+                                     {"latent", empty->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
+        QVERIFY(sample);
+        QCOMPARE(sample->params.value("ref_image_args"), encode->params.value("ref_image_args"));
+        QCOMPARE(sample->params.value("ref_images"), encode->params.value("ref_images"));
     }
 
     // A reference whose file is gone or changed since Text Encode ran (a cached conditioning

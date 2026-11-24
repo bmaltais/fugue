@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/sampler",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "Sampler",
   "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent or an Empty Video Latent (a clip), else from the latent given (a picture from VAE Encode, a clip from VAE Encode Video, or a sampled one), by the amount Denoise sets. A latent from VAE Encode with a mask is redrawn only where the mask is white; with Soft mask, gray in the mask is a strength.",
   "category": "Diffusion",
@@ -26,6 +26,8 @@
      "choices": ["discrete", "karras", "exponential", "ays", "gits", "sgm_uniform", "simple", "smoothstep",
                  "kl_optimal", "lcm", "bong_tangent", "logit_normal", "flux2", "flux", "beta"],
      "description": "Unset: the model's own."},
+    {"name": "flow_shift", "type": "number", "label": "Flow shift", "optional": true, "advanced": true, "min": 0, "max": 100, "step": 0.01,
+     "description": "How far a flow model's sigma curve is bent toward high noise. Unset: the model's own. FLUX.2 Klein's own scheduler (unset Scheduler) ignores it: use simple or discrete with it. 2.02 is ComfyUI's Klein value."},
     {"name": "denoise", "type": "number", "label": "Denoise", "default": 1, "min": 0, "max": 1, "step": 0.05,
      "widget": "slider",
      "description": "For a latent from VAE Encode, VAE Encode Video or another Sampler: how far to move from it, 0 keeps it, 1 ignores it. An Empty Latent always starts from noise."},

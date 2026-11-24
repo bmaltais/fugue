@@ -415,10 +415,10 @@ public:
 class PadKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
-        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
             return Result<Values>(loaded.errors());
-        const Pixels &in = loaded.value();
+        Pixels in = std::move(loaded.value());
         int sides[4];
         const char *names[4] = {"left", "top", "right", "bottom"};
         for (int i = 0; i < 4; ++i) {
@@ -428,7 +428,51 @@ public:
                                       QStringLiteral("A %1 of %2 is outside 0 to %3.")
                                           .arg(QString::fromLatin1(names[i])).arg(sides[i]).arg(kMaxSide));
         }
-        const int left = sides[0], top = sides[1], right = sides[2], bottom = sides[3];
+        int left = sides[0], top = sides[1], right = sides[2], bottom = sides[3];
+        // The keep-area mask (marks what to keep), as the picture's size.
+        const bool userMasked = context.input("mask").isMedia();
+        Pixels keep;
+        if (userMasked) {
+            Result<Pixels> maskLoaded = maskOf(context.input("mask"), "mask");
+            if (!maskLoaded.ok())
+                return Result<Values>(maskLoaded.errors());
+            keep = std::move(maskLoaded.value());
+            if (keep.width != in.width || keep.height != in.height)
+                return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("mask"),
+                                      QStringLiteral("The mask is %1 x %2 but the image is %3 x %4.")
+                                          .arg(keep.width).arg(keep.height).arg(in.width).arg(in.height));
+        }
+        // Target size: fit inside it (only ever smaller) and center; replaces the four sides.
+        const int targetWidth = toInt(context.input("target_width"));
+        const int targetHeight = toInt(context.input("target_height"));
+        for (const auto &[name, value] : {std::pair{"target_width", targetWidth}, std::pair{"target_height", targetHeight}})
+            if (value < 0 || value > kMaxSide)
+                return makeInputError(QStringLiteral("value_out_of_range"), QString::fromLatin1(name),
+                                      QStringLiteral("A %1 of %2 is outside 0 to %3.")
+                                          .arg(QString::fromLatin1(name)).arg(value).arg(kMaxSide));
+        if ((targetWidth > 0) != (targetHeight > 0))
+            return makeInputError(QStringLiteral("input_invalid"),
+                                  QString::fromLatin1(targetWidth > 0 ? "target_height" : "target_width"),
+                                  QStringLiteral("Set both target_width and target_height, or neither."));
+        if (targetWidth > 0) {
+            for (int i = 0; i < 4; ++i)
+                if (sides[i] != 0)
+                    return makeInputError(QStringLiteral("input_invalid"), QString::fromLatin1(names[i]),
+                                          QStringLiteral("A target size and left, top, right or bottom cannot both be set."));
+            const double scale = std::min({1.0, double(targetWidth) / in.width, double(targetHeight) / in.height});
+            if (scale < 1.0) {
+                const int w = std::min(targetWidth, std::max(1, int(std::lround(in.width * scale))));
+                const int h = std::min(targetHeight, std::max(1, int(std::lround(in.height * scale))));
+                in = resample(in, w, h, ResizeMethod::Area);
+                if (userMasked)
+                    keep = resample(keep, w, h, ResizeMethod::Area);
+            }
+            const int roomX = targetWidth - in.width, roomY = targetHeight - in.height;
+            top = roomY / 2;
+            bottom = roomY - top;
+            left = roomX / 2;
+            right = roomX - left;
+        }
         const int feathering = std::max(0, toInt(context.input("feathering")));
         const int width = in.width + left + right;
         const int height = in.height + top + bottom;
@@ -459,11 +503,13 @@ public:
         edgefill::Image filled{width, height, channels, std::move(image.data)};
         edgefill::fillHole(filled, hole, fill, blur);
         image.data = std::move(filled.data);
-        const bool feather = feathering > 0 && feathering * 2 < in.height && feathering * 2 < in.width;
+        const bool feather = !userMasked && feathering > 0 && feathering * 2 < in.height && feathering * 2 < in.width;
         for (int y = 0; y < in.height; ++y)
             for (int x = 0; x < in.width; ++x) {
                 float value = 0.0f;
-                if (feather) {
+                if (userMasked)
+                    value = std::clamp(1.0f - keep.at(x, y, 0), 0.0f, 1.0f); // 0 outside the keep area, inverted
+                else if (feather) {
                     const int dt = top != 0 ? y : in.height;
                     const int db = bottom != 0 ? in.height - y : in.height;
                     const int dl = left != 0 ? x : in.width;
