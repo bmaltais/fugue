@@ -31,6 +31,10 @@ const QList<Rule> &rules() {
         {image, QStringLiteral("Wan 2.2"), re(QStringLiteral("wan[-_]?2[._]?2"))},
         {image, QStringLiteral("Wan 2.1"), re(QStringLiteral("wan[-_]?2[._]?1"))},
         {image, QStringLiteral("FLUX.1"), re(QStringLiteral("flux[-_.]?1"))},
+        // Text encoders (#370): the LLM a diffusion model reads. #369's templates name none of these.
+        {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3.5 9B"), re(QStringLiteral("qwen[-_]?3[._]?5.*9b"))},
+        {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3 8B"), re(QStringLiteral("qwen[-_]?3.*8b"))},
+        {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3 4B"), re(QStringLiteral("qwen[-_]?3.*4b"))},
         {{QStringLiteral("seedvr2-model")}, QStringLiteral("SeedVR2"), re(QStringLiteral(""))},
         {{QStringLiteral("upscale-model")}, QStringLiteral("Real-ESRGAN"), re(QStringLiteral("esrgan"))},
         {{QStringLiteral("birefnet-model")}, QStringLiteral("BiRefNet"), re(QStringLiteral(""))},
