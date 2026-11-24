@@ -6,6 +6,8 @@
 
 #include <QString>
 
+#include <vips/vips8>
+
 #include "engine/mask_paint.h"
 #include "engine/node_kernel.h"
 #include "nodes/resample.h"
@@ -15,6 +17,9 @@ namespace fugue::nodes {
 // The image an input holds as float RGB(A) in 0..1: gray becomes RGB (with alpha), more than four
 // bands keep the first three. `missing_input` when the input holds no image.
 Result<Pixels> pixelsOf(const Value &value, const QString &input);
+
+// The same for a picture already read (no media handle, so no hash of its file).
+Result<Pixels> pixelsFromImage(const vips::VImage &image, const QString &input);
 
 // `pixels` clamped to 0..1 as the output "image".
 Result<Values> imageOutput(Pixels pixels);

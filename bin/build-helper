@@ -38,4 +38,5 @@ if ! out=$(cmake -S "$root/helper" -B "$root/build-helper-$backend" -DFUGUE_HELP
   echo "$out" >&2
   exit 1
 fi
-cmake --build "$root/build-helper-$backend" -j"$(nproc)"
+# CMAKE_BUILD_PARALLEL_LEVEL caps the compiles (a quieter machine); unset, one per core.
+cmake --build "$root/build-helper-$backend" -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"

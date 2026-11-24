@@ -162,10 +162,11 @@ private slots:
         QVERIFY2(catalog.problems().isEmpty(), qPrintable(catalog.problems().join("\n")));
         struct Expected { const char *type, *license, *extension; int least; };
         // Remove Background (BiRefNet, MIT), Segment by Points or Box (SAM 2.1 bundles, Apache-2.0) and Remove Object
-        // (LaMa, Apache-2.0, one build)
+        // (LaMa, Apache-2.0, one build) and Depth Estimate (Depth Anything V2 Small, Apache-2.0, one build)
         for (const Expected &want : {Expected{"io.github.bmaltais.fugue-remove-background/birefnet-model", "MIT", ".onnx", 2},
                                      Expected{"io.github.bmaltais.fugue-segment/sam2-model", "Apache-2.0", ".zip", 2},
-                                     Expected{"io.github.bmaltais.fugue-remove-object/lama-model", "Apache-2.0", ".onnx", 1}}) {
+                                     Expected{"io.github.bmaltais.fugue-remove-object/lama-model", "Apache-2.0", ".onnx", 1},
+                                     Expected{"io.github.bmaltais.fugue-depth/depth-anything-model", "Apache-2.0", ".onnx", 1}}) {
             const QString type = QString::fromLatin1(want.type);
             QVERIFY2(catalog.forType(type).size() >= want.least, want.type);
             for (const CatalogModel &model : catalog.forType(type)) {

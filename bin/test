@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Arguments go to ctest, so `bin/test -V` shows every Qt test function as it runs. The tests run in
-# parallel, one per core (each has its own HOME and XDG folders); `bin/test -j1` runs them in turn,
-# the last -j wins. `bin/test --changed [base]` builds and runs only the tests the change since base
+# parallel, one per core (each has its own HOME and XDG folders), or CTEST_PARALLEL_LEVEL at a time;
+# `bin/test -j1` runs them in turn, the last -j wins. The build before it follows CMAKE_BUILD_PARALLEL_LEVEL
+# (bin/build). `bin/test --changed [base]` builds and runs only the tests the change since base
 # (default origin/main) can affect, chosen by bin/test-select, and says which; a shared file (build files,
 # resources, core headers) makes it the whole suite. Plain `bin/test` is always the whole suite.
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,4 +48,4 @@ if ((narrow)); then
 else
   "$root/bin/build"
 fi
-QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j"$(nproc)" "$@"
+QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j"${CTEST_PARALLEL_LEVEL:-$(nproc)}" "$@"

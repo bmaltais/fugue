@@ -1110,6 +1110,10 @@ private:
         n.jobOver = false;
         n.progressFrom = request.progressFrom;
         n.progressSpan = request.progressSpan;
+        // A kernel with nothing to ask the provider for (Detail Regions with no box) says so with
+        // no capability: its next() and outputs() follow at once, as after a job that finished.
+        if (request.capability.isEmpty())
+            return jobResult(path, JobResult());
         const QPointer<Scheduler> self(this);
         m_providers.at(n.instance).provider->submit(request, [self, path](const Result<QString> &job) {
             if (self)
