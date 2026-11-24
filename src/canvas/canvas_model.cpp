@@ -1828,6 +1828,13 @@ void CanvasModel::setCompareView(const QString &node, const QVariantMap &changes
     emit compareViewChanged(node);
 }
 
+namespace {
+QSizeF compareSizeOf(const QVariantMap &run, const char *which) {
+    const QVariantMap p = run.value(QLatin1String(which)).toMap();
+    return QSizeF(p.value("width").toDouble(), p.value("height").toDouble());
+}
+} // namespace
+
 bool CanvasModel::compareStep(const QString &node, const QString &step) {
     if (!isCompare(node))
         return false;
@@ -1845,11 +1852,7 @@ bool CanvasModel::compareStep(const QString &node, const QString &step) {
     } else if (step == QLatin1String("actual")) {
         // 100% of the larger picture; a second press toggles A and B when they differ (#420).
         const QVariantMap run = compareResult(node);
-        const auto sizeOf = [&](const char *which) {
-            const QVariantMap p = run.value(QLatin1String(which)).toMap();
-            return QSizeF(p.value("width").toDouble(), p.value("height").toDouble());
-        };
-        const QSizeF a = sizeOf("a"), b = sizeOf("b");
+        const QSizeF a = compareSizeOf(run, "a"), b = compareSizeOf(run, "b");
         const compare::Actual next = compare::nextActual(a.width(), a.height(), b.width(), b.height(),
                                                           view.value("actual").toBool(), view.value("actualB").toBool());
         setCompareView(node, {{"actual", next.actual}, {"actualB", next.ofB}});
@@ -1857,6 +1860,43 @@ bool CanvasModel::compareStep(const QString &node, const QString &step) {
         return false;
     }
     return true;
+}
+
+void CanvasModel::comparePeekBegin(const QString &node, const QPointF &imagePoint) {
+    if (!isCompare(node) || m_comparePeek.contains(node))
+        return;
+    const QVariantMap view = compareView(node);
+    QVariantMap before;
+    for (const char *key : {"actual", "actualB", "zoom", "centerX", "centerY"})
+        before.insert(QLatin1String(key), view.value(QLatin1String(key)));
+    m_comparePeek.insert(node, before);
+    const QVariantMap run = compareResult(node);
+    const QSizeF a = compareSizeOf(run, "a"), b = compareSizeOf(run, "b");
+    const compare::Actual target = compare::peekTarget(a.width(), a.height(), b.width(), b.height());
+    QVariantMap changes{{"actual", target.actual}, {"actualB", target.ofB}};
+    if (imagePoint.x() >= 0 && imagePoint.x() <= 1 && imagePoint.y() >= 0 && imagePoint.y() <= 1) {
+        changes.insert("centerX", imagePoint.x());
+        changes.insert("centerY", imagePoint.y());
+    }
+    setCompareView(node, changes);
+}
+
+void CanvasModel::comparePeekEnd(const QString &node, double heldMs) {
+    const auto it = m_comparePeek.find(node);
+    if (it == m_comparePeek.end())
+        return;
+    QVariantMap before = it.value();
+    m_comparePeek.erase(it);
+    if (compare::isTap(heldMs)) {
+        // A tap is the `1` key from the view it had: its center stays.
+        const QVariantMap run = compareResult(node);
+        const QSizeF a = compareSizeOf(run, "a"), b = compareSizeOf(run, "b");
+        const compare::Actual next = compare::nextActual(a.width(), a.height(), b.width(), b.height(),
+                                                          before.value("actual").toBool(), before.value("actualB").toBool());
+        before.insert("actual", next.actual);
+        before.insert("actualB", next.ofB);
+    }
+    setCompareView(node, before);
 }
 
 QSizeF CanvasModel::previewSize(const QString &node) const {

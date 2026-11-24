@@ -479,8 +479,13 @@ public:
     // One of "flip", "next-mode", "fit", "actual" on the node, as the keys do. False when the
     // node is no Compare Images or the step is unknown.
     bool compareStep(const QString &node, const QString &step);
+    // Hold-to-peek (#420): begin goes to 100% of the larger picture centered on `imagePoint` (0..1 of A's frame; a
+    // point outside keeps the center) and remembers the view; end gives it back after a hold, or toggles 100% as `1`
+    // does after a tap (under 200 ms). A second begin (key autorepeat) and an end with no begin do nothing.
+    Q_INVOKABLE void comparePeekBegin(const QString &node, const QPointF &imagePoint);
+    Q_INVOKABLE void comparePeekEnd(const QString &node, double heldMs);
     // The one selected node when it is a Compare Images, else empty.
-    QString selectedCompare() const;
+    Q_INVOKABLE QString selectedCompare() const;
 signals:
     void compareViewChanged(const QString &node);
 public:
@@ -880,6 +885,7 @@ private:
     qreal m_padBottom = 8;      // 2u
     qreal m_defaultWidth = 240; // 60u
     QHash<QString, RunInfo> m_run;
+    QHash<QString, QVariantMap> m_comparePeek; // the view before a peek, while Z is held
     QHash<QString, QVariantMap> m_compareView; // a Compare Images node's viewer state, never saved
 
     QVariantMap m_drag;

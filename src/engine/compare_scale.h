@@ -33,4 +33,12 @@ inline Actual nextActual(double aw, double ah, double bw, double bh, bool actual
     return {true, actual ? !ofB : true};
 }
 
+// Hold-to-peek (#420): while Z is held the view is at 100% of the larger picture, centered on the pointer's point.
+// A press shorter than this is a tap and toggles 100% as `1` does, instead of giving the view back.
+inline constexpr double kPeekTapMs = 200;
+inline bool isTap(double heldMs) { return heldMs < kPeekTapMs; }
+
+// The view while peeking: 100% of B when B is larger, else of A (whatever the view was before).
+inline Actual peekTarget(double aw, double ah, double bw, double bh) { return {true, bIsLarger(aw, ah, bw, bh)}; }
+
 } // namespace fugue::compare

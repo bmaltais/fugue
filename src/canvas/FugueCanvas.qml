@@ -396,6 +396,14 @@ FocusScope {
             event.accepted = true
             return
         }
+        if (event.key === Qt.Key_Z && !(event.modifiers & ~Qt.ShiftModifier) && canvas.model.selectedCompare() !== "") {
+            // Z held peeks at 100% of the selected Compare Images node's larger picture (#420); nothing else owns Z in
+            // the canvas and compare contexts (the Canvas view's Z is the zoom tool, a context of its own).
+            if (!event.isAutoRepeat)
+                canvas.peekCompare(true)
+            event.accepted = true
+            return
+        }
         if (event.key === Qt.Key_Space) {
             // A Space press alone does nothing; held, a drag pans (12.3).
             if (!event.isAutoRepeat)
@@ -404,6 +412,12 @@ FocusScope {
         }
     }
     Keys.onReleased: event => {
+        if (event.key === Qt.Key_Z && canvas.peekItem) {
+            if (!event.isAutoRepeat)
+                canvas.peekCompare(false)
+            event.accepted = true
+            return
+        }
         if (event.key === Qt.Key_Space) {
             if (!event.isAutoRepeat)
                 canvas.spaceHeld = false
@@ -690,6 +704,28 @@ FocusScope {
     Component {
         id: cropDialogComponent
         CropDialog {}
+    }
+    // Hold-to-peek: the node's viewer is the one asked; a release, a lost focus or a lost window gives the view back.
+    property var peekItem: null
+    function peekCompare(down, cancel) {
+        if (down) {
+            const node = canvas.model.selectedCompare()
+            for (let i = 0; !peekItem && i < nodes.count; ++i) {
+                const item = nodes.itemAt(i) as CanvasNode
+                if (item && item.nodeId === node)
+                    peekItem = item.compareItem
+            }
+            if (peekItem)
+                peekItem.peekDown()
+        } else if (peekItem) {
+            peekItem.peekUp(cancel === true)
+            peekItem = null
+        }
+    }
+    onActiveFocusChanged: if (!activeFocus) peekCompare(false, true)
+    Connections {
+        target: canvas.Window.window
+        function onActiveChanged() { if (!canvas.Window.window.active) canvas.peekCompare(false, true) }
     }
     function copyCompareView(node) {
         let viewer = compareDialog && compareDialog.visible && compareDialog.nodeId === node ? compareDialog.viewer : null

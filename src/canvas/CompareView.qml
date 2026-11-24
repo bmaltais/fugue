@@ -321,7 +321,13 @@ Item {
 
     // Fit and 100% on the face (#420), over the pointer's picture so a press on them is theirs, not the divider's.
     // Only while the pointer is over the view, and not on a face too small to hold them beside the labels.
-    HoverHandler { id: hover; enabled: view.zoomChips }
+    HoverHandler { id: hover; enabled: view.interactive }
+    // The image point (0..1 of A's frame) under the pointer, or (-1, -1) when the pointer is not over the view.
+    function pointerImagePoint() {
+        if (!hover.hovered)
+            return Qt.point(-1, -1)
+        return pointAt(hover.point.position.x, hover.point.position.y)
+    }
     Row {
         objectName: "zoomChips"
         visible: view.zoomChips && view.chrome && hover.hovered && view.width >= 24 * view.look.unit

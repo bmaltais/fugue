@@ -57,6 +57,9 @@ private slots:
             v = nextActual(1024, 1024, side, side, true, false);
             QVERIFY(v.actual && !v.ofB);
         }
+        // Hold-to-peek: B's 100% when B is larger, else A's; under 200 ms is a tap.
+        QVERIFY(peekTarget(1024, 1024, 3072, 3072).ofB && !peekTarget(1024, 1024, 512, 512).ofB);
+        QVERIFY(isTap(150) && !isTap(200));
         // The detail rule at 100% of B shows the file one to one, so it loads the files.
         const double shown = actualScale(512, 512, 3072, 3072, true) * 512 / 3072;
         QCOMPARE(shown, 1.0);
