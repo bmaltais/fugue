@@ -391,6 +391,16 @@ size_t memoryFor(const json &options) {
     return bytes + bytes / 5;
 }
 
+// The context options the helper adds unless the request sets them. On CUDA, SageAttention for the
+// diffusion model (#382): about a third less attention time, and the pictures look the same (33-39
+// dB PSNR against flash attention on Klein 9B); a request sends "sage_attn": false to keep flash
+// attention. The library falls back to flash attention where its kernel does not apply.
+json withDefaults(json options) {
+    if (std::string(FUGUE_BACKEND) == "cuda" && !options.contains("sage_attn"))
+        options["sage_attn"] = true;
+    return options;
+}
+
 // The loaded contexts, one per set of context options, least recently used first.
 class Contexts {
 public:
@@ -423,7 +433,8 @@ public:
         return m_upscaler;
     }
 
-    sd_ctx_t *get(const json &options) {
+    sd_ctx_t *get(const json &requested) {
+        const json options = withDefaults(requested);
         const std::string key = options.dump();
         for (auto it = m_entries.begin(); it != m_entries.end(); ++it)
             if (it->key == key) {
