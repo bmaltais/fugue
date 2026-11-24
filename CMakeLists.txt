@@ -374,7 +374,7 @@ endforeach()
 
 # No test reads or writes the owner's files: every test has a home of its own (HOME, so
 # Omarchy's state under ~/.local/state/omarchy is the test's, OmarchyPaths::standard()) and
-# its own XDG folders (settings, providers and keymap; the queue; caches; data), a test
+# its own XDG folders (settings, providers and keymap; the queue; caches; data; the runtime folder with the GPU lock), a test
 # may still set its own. tests/engine/test_isolation.cpp fails when that is not so. No test
 # reaches the owner's desktop either: the generic platform theme, so a FileDialog is Qt's own
 # and never the portal's picker on the owner's screen, and no session bus (the GUI tests also
@@ -388,12 +388,17 @@ foreach(test_name ${fugue_all_tests})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT ${fugue_test_timeout_seconds})
   set(test_home ${CMAKE_BINARY_DIR}/test-home/${test_name})
   file(MAKE_DIRECTORY ${test_home})
+  # The runtime folder too: the cross-root GPU lock lives in it, and a test's run must not wait behind
+  # a real run on the machine. 0700, as a runtime folder must be.
+  file(MAKE_DIRECTORY ${test_home}/run)
+  file(CHMOD ${test_home}/run DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
   set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT
                HOME=${test_home}
                XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config/${test_name}
                XDG_STATE_HOME=${test_home}/.local/state
                XDG_DATA_HOME=${test_home}/.local/share
                XDG_CACHE_HOME=${test_home}/.cache
+               XDG_RUNTIME_DIR=${test_home}/run
                QT_QPA_PLATFORMTHEME=generic
                QT_NO_XDG_DESKTOP_PORTAL=1
                # Qt's incremental GC, in slices, can run in the middle of a window's creation: under load a Question then read
