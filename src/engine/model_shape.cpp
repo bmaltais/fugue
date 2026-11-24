@@ -362,7 +362,7 @@ ModelShape shapeOf(const Header &header) {
     }
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
-                        QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
+                        QStringLiteral("txt_in.in_layer.weight"), QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
     shape.clipWidth = inputWidth(tensor(shapes, {QStringLiteral("vector_in.in_layer.weight")}));
     std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
@@ -379,6 +379,9 @@ ModelShape shapeOf(const Header &header) {
         shape.hidden = int(image->at(0));
     if (const std::optional<int> in = inputWidth(image)) // a linear layer takes 2x2 patches of the channels
         shape.latentChannels = image->size() == 2 ? (*in % 4 == 0 ? std::optional<int>(*in / 4) : std::nullopt) : in;
+    // Qwen-Image 2.1 takes the 64 channels of its VAE as they are, with no 2x2 patching.
+    if (image && image->size() == 2 && shape.latentChannels && hasTensor(shapes, QStringLiteral("txt_in.in_layer.")))
+        shape.latentChannels = inputWidth(image);
     // An inpaint model takes the masked picture in its input beside the noise (14.4), as Wan's
     // image-to-video takes its first frame, and makes the channels its VAE has: SD 1.x, 2.x and SDXL
     // Inpaint read 9 (4 noise, 4 masked picture, 1 mask) through the convolution and make 4; FLUX.1
@@ -403,10 +406,10 @@ ModelShape shapeOf(const Header &header) {
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
         shape.videoVae = wan || (hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in.")));
-        // The LLM it reads: Qwen-Image Qwen2.5-VL; Z-Image (cap_embedder) and FLUX.2 (txt_in with
-        // no vector_in) Qwen3.
+        // The LLM it reads: Qwen-Image Qwen2.5-VL (txt_in.weight), but Qwen-Image 2.1 Qwen3-VL
+        // (txt_in.in_layer, text_norm); Z-Image (cap_embedder) and FLUX.2 (txt_in with no vector_in) Qwen3.
         if (*shape.videoVae && !wan)
-            shape.llmFamily = QStringLiteral("qwen2.5");
+            shape.llmFamily = hasTensor(shapes, QStringLiteral("txt_in.in_layer.")) ? QStringLiteral("qwen3") : QStringLiteral("qwen2.5");
         else if (!t5 && (hasTensor(shapes, QStringLiteral("cap_embedder.")) || hasTensor(shapes, QStringLiteral("txt_in."))))
             shape.llmFamily = QStringLiteral("qwen3");
         shape.unet = hasTensor(shapes, QStringLiteral("input_blocks.")) || hasTensor(shapes, QStringLiteral("down_blocks."));

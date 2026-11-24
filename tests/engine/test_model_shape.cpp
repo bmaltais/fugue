@@ -559,6 +559,33 @@ private slots:
         QCOMPARE(shape(file("gptq.safetensors")).unloadable, QStringLiteral("GPTQ"));
     }
 
+    // Qwen-Image 2.1 reads Qwen3-VL (txt_in.in_layer, 4096 wide), Qwen-Image Qwen2.5-VL (txt_in.weight): told by tensors (#340).
+    void qwenImage21ReadsQwen3VlAndNotQwen35() {
+        writeSafetensors(file("qimg21.safetensors"), {{"txt_in.in_layer.weight", QJsonArray{4096, 4096}},
+                                                      {"time_text_embed.timestep_embedder.linear_1.weight", QJsonArray{4096, 256}},
+                                                      {"img_in.weight", QJsonArray{4096, 64}}});
+        writeSafetensors(file("qimg.safetensors"), {{"txt_in.weight", QJsonArray{3072, 3584}},
+                                                    {"time_text_embed.timestep_embedder.linear_1.weight", QJsonArray{3072, 256}},
+                                                    {"img_in.weight", QJsonArray{3072, 64}}});
+        writeSafetensors(file("qwen3vl.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
+                                                       {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}},
+                                                       {"model.visual.blocks.0.attn.qkv.weight", QJsonArray{3, 3}}});
+        writeSafetensors(file("qwen25vl.safetensors"), {{"model.embed_tokens.weight", QJsonArray{152064, 3584}},
+                                                        {"model.layers.0.self_attn.q_proj.weight", QJsonArray{3584, 3584}},
+                                                        {"visual.blocks.0.attn.qkv.weight", QJsonArray{3, 3}}});
+        writeSafetensors(file("qwen35.safetensors"), {{"model.embed_tokens.weight", QJsonArray{248320, 4096}},
+                                                      {"model.layers.0.linear_attn.A_log", QJsonArray{32}}});
+        const ModelShape v21 = shape(file("qimg21.safetensors")), v1 = shape(file("qimg.safetensors"));
+        QCOMPARE(v21.textWidth, std::optional<int>(4096));
+        QCOMPARE(v21.llmFamily, QStringLiteral("qwen3"));
+        QCOMPARE(v21.latentChannels, std::optional<int>(64)); // no 2x2 patching, as the 64-channel VAE
+        QCOMPARE(v1.latentChannels, std::optional<int>(16));
+        QCOMPARE(v1.llmFamily, QStringLiteral("qwen2.5"));
+        QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen3vl.safetensors"))), Fit::Fits);
+        QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen35.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loadableTextEncoderFits(v1, shape(file("qwen25vl.safetensors"))), Fit::Fits);
+    }
+
     void aShapeIsReadAgainOnlyWhenTheFileChanges() {
         writeSafetensors(file("vae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}});
         ModelShapes shapes;
