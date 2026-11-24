@@ -38,7 +38,6 @@ jobs:
         shell: bash
     env:
       DEBIAN_FRONTEND: noninteractive
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 800M
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -119,6 +118,11 @@ jobs:
             -Djpeg=enabled -Dpng=enabled -Dwebp=enabled -Dtiff=enabled -Dheif=enabled -Dexif=enabled -Dlcms=enabled \
             -Dzlib=enabled -Dnsgif=true -Dppm=true -Danalyze=false -Dradiance=false
           ninja -C vips-build install
+
+      # In a container job `github.workspace` is the host's path (/home/runner/work/...), not where the
+      # checkout is mounted (/__w/...), so ccache would write outside the folder the cache step saves.
+      - name: Point ccache at the cached folder
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
         uses: actions/cache@v6
