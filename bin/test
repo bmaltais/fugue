@@ -6,13 +6,13 @@ set -euo pipefail
 # `bin/test -j1` runs them in turn, the last -j wins. The build before it follows CMAKE_BUILD_PARALLEL_LEVEL
 # (bin/build). `bin/test --changed [base]` builds and runs only the tests the change since base
 # (default origin/main) can affect, chosen by bin/test-select, and says which; a shared file (build files,
-# resources, core headers) makes it the whole suite. `bin/test test_a test_b [ctest args]` builds and runs
+# resources, core headers) makes it the whole suite. `bin/test test_a test_b [ctest args]` (also fugue_tests) builds and runs
 # only those tests (and their shards). Plain `bin/test` is always the whole suite.
 root="$(cd "$(dirname "$0")/.." && pwd)"
 changed=0
 base=origin/main
 named=()
-while [[ ${1:-} == test_* || ${1:-} == qmllint ]]; do
+while [[ ${1:-} == test_* || ${1:-} == qmllint || ${1:-} == fugue_tests ]]; do
   named+=("$1")
   shift
 done
