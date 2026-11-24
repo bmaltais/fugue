@@ -60,6 +60,7 @@
 
 #include "canvas/canvas_model.h"
 #include "canvas/mask_layer.h"
+#include "canvas/task_bar_place.h"
 #include "engine/canvas_act.h"
 #include "engine/canvas_act_outcome.h"
 #include "engine/canvas_action.h"
@@ -112,6 +113,8 @@ class CanvasActions : public QObject {
     Q_PROPERTY(int runTotal READ runTotal NOTIFY stateChanged)
     // The model the Advanced popover's InputWidgets edit (see advanced()).
     Q_PROPERTY(CanvasModel *form READ form CONSTANT)
+    // Where the person left the task bar (#381), kept in the state folder.
+    Q_PROPERTY(fugue::TaskBarPlace *barPlace READ barPlace CONSTANT)
     // A download of an action's models is under way, and its line ("flux-2-klein-4b-Q8_0.gguf, 1 of 3 · 1.2 of 8.9 GB").
     Q_PROPERTY(bool downloading READ downloading NOTIFY downloadsChanged)
     Q_PROPERTY(QString downloadText READ downloadText NOTIFY downloadsChanged)
@@ -144,6 +147,7 @@ public:
     QString notice() const { return m_notice; }
     QString lastRun() const { return m_lastRun; }
     CanvasModel *form() const { return m_form; }
+    TaskBarPlace *barPlace() const { return m_barPlace; }
     int runNumber() const;
     int runTotal() const { return busy() ? int(m_order.size()) : 0; }
     QString liveFrame() const { return m_liveFrame; }
@@ -257,6 +261,7 @@ private:
     QJsonObject readHistory() const;
 
     RunService *m_service;
+    TaskBarPlace *m_barPlace = nullptr;
     const Registry *m_registry;
     Workflows *m_workflows;
     QStringList m_roots;

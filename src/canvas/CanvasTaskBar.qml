@@ -9,7 +9,8 @@ import "widgets"
 // The Canvas view's task bar (#231, docs/canvas-actions-design.md 4; Photoshop's Contextual Task Bar is the reference,
 // docs/ui-ergonomics.md References): edit the canvas from the view without opening a workflow. It lies over the picture
 // (the host makes it the picture's size) and floats under the selection, 2u clear of it, flipping above it when there is
-// no room and staying 4u inside the picture; it follows a pan or a zoom. It shows while there is a selection (the
+// no room and staying 4u inside the picture; it follows a pan or a zoom. Its grip (#381) moves it anywhere instead: the place is
+// kept by App.canvasActions.barPlace (canvas/task_bar_place.h: held inside the area, Reset position, Pin position in the menu). It shows while there is a selection (the
 // rectangle on the picture, or a Quick Mask selection while Quick Mask is on), and while its runs go or its last word
 // stands. Simple state, from the start: the action menu (Auto, then the actions; in a narrow area its glyph alone), the
 // prompt (Enter generates; Up and Down in an empty field step through the earlier prompts; the clock opens the last 20),
@@ -43,6 +44,8 @@ Item {
 
     readonly property real u: look.unit
     readonly property CanvasActions actions: App.canvasActions
+    // Where the person left the bar, if they moved it (#381); Reset position and Pin position are in its menu.
+    readonly property TaskBarPlace spot: actions !== null ? actions.barPlace : null
     // The Quick Mask selection's bounds, read again after each stroke (not each dab).
     property var maskBounds: ({})
     function readMaskBounds() { maskBounds = actions && quickMask && !quickMask.empty ? actions.selectionBounds(quickMask) : ({}) }
@@ -239,8 +242,16 @@ Item {
     }
     function more() {
         openMenu(moreButton, [{text: qsTr("Another preview"), value: "reroll", enabled: liveOn},
-                              {text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
-                 value => { if (value === "clear") clearAsk.open(); else if (value === "reroll") actions.liveReroll() }, 48, "canvasTaskMoreMenu")
+                              {text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0},
+                              {separator: true, enabled: false},
+                              {text: qsTr("Pin position"), value: "pin", checked: spot.pinned, enabled: spot.hasPlace},
+                              {text: qsTr("Reset position"), value: "resetPlace", enabled: spot.hasPlace}],
+                 value => {
+                     if (value === "clear") clearAsk.open()
+                     else if (value === "reroll") actions.liveReroll()
+                     else if (value === "pin") spot.pinned = !spot.pinned
+                     else if (value === "resetPlace") spot.reset()
+                 }, 48, "canvasTaskMoreMenu")
     }
     function advanced() {
         if (advancedPopover.opened)
@@ -305,10 +316,13 @@ Item {
         readonly property real below: bar.selectionBox.y + bar.selectionBox.height + 2 * bar.u
         readonly property real above: bar.selectionBox.y - 2 * bar.u - height
         readonly property real foot: bar.height - 4 * bar.u - height
-        x: bar.docked ? bar.roomX + (bar.roomWidth - width) / 2
-         : bar.selection === null ? (bar.width - width) / 2
+        readonly property real autoX: bar.selection === null ? (bar.width - width) / 2
          : Math.max(4 * bar.u, Math.min(bar.width - 4 * bar.u - width, bar.selectionBox.x + (bar.selectionBox.width - width) / 2))
-        y: bar.docked || bar.selection === null ? foot : below <= foot ? below : above >= 4 * bar.u ? above : foot
+        readonly property real autoY: bar.selection === null ? foot : below <= foot ? below : above >= 4 * bar.u ? above : foot
+        // Moved by the person (#381): its remembered place, or the pointer's while the grip drags it, held inside the area.
+        readonly property bool placed: !bar.docked && (bar.spot !== null && bar.spot.hasPlace || grip.dragging)
+        x: bar.docked ? bar.roomX + (bar.roomWidth - width) / 2 : placed ? grip.position.x : autoX
+        y: bar.docked ? foot : placed ? grip.position.y : autoY
         radius: bar.look.popupCorner
         color: bar.look.popup
         border.width: 1
@@ -332,6 +346,42 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: bar.u
+                // The grip (#381): drag to move the bar anywhere over the picture; kept, and held inside the area.
+                Item {
+                    id: gripBox
+                    objectName: "canvasTaskGripBox"
+                    Layout.preferredWidth: 4 * bar.u
+                    Layout.preferredHeight: 7 * bar.u
+                    HoverHandler { id: gripHover }
+                    ToolTip.visible: gripHover.hovered && !grip.dragging
+                    ToolTip.delay: bar.look.tooltipDelay
+                    ToolTip.text: bar.spot !== null && bar.spot.pinned ? qsTr("Pinned: unpin it in the ⋯ menu to move it") : qsTr("Drag to move")
+                    MoveGrip {
+                        id: grip
+                        objectName: "canvasTaskGrip"
+                        anchors.fill: parent
+                        enabled: bar.spot !== null && !bar.spot.pinned
+                        opacity: enabled ? 1 : 0.4
+                        activeFocusOnTab: false // the focus order is the bar's own, as before
+                        areaWidth: bar.width
+                        areaHeight: bar.height
+                        boxWidth: box.width
+                        boxHeight: box.height
+                        margin: 4 * bar.u
+                        place: bar.spot !== null && bar.spot.hasPlace ? bar.spot.place
+                             : FloatPlace.toFraction(Qt.point(box.autoX, box.autoY), grip.areaSize, grip.boxSize, grip.margin)
+                        snapDistance: 3 * bar.u
+                        onPlaceRequested: place => bar.spot.place = place
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("Move the task bar")
+                        Text {
+                            anchors.centerIn: parent
+                            text: "⋮⋮"
+                            color: bar.look.label
+                            font.pixelSize: 14
+                        }
+                    }
+                }
                 ViewButton {
                     id: actionButton
                     objectName: "canvasTaskAction"
