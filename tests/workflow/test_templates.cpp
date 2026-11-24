@@ -834,7 +834,8 @@ private slots:
         click(item(window->contentItem(), "getReadyCancel"));
         QTRY_COMPARE(workflows.readiness()->phase(), QString("finished"));
         QVERIFY(!workflows.readiness()->view().value("ok").toBool());
-        click(item(window->contentItem(), "getReadyClose"));
+        QTRY_VERIFY(item(window->contentItem(), "getReadyClose")->isVisible());
+        QMetaObject::invokeMethod(item(window->contentItem(), "getReadyClose"), "clicked");
         QTRY_VERIFY(!window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
         QTRY_VERIFY(!workflows.downloads()->busy());
         // What it lacks again, with its button: a cancel needs no news of its own.

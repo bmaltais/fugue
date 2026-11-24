@@ -129,12 +129,14 @@ Item {
                 }
                 // One button for everything the workflow lacks (#379): packs, their trust and environments, and models,
                 // asked once on the sheet, with where models go.
-                ThemedButton {
-                    objectName: "getReady"
-                    visible: App.workflows.getReadyOffer
-                    highlighted: true
-                    text: qsTr("Get ready…")
-                    onClicked: App.workflows.readiness.show()
+                Loader {
+                    active: App.workflows.getReadyOffer // made only when shown: the window keeps few items (#5)
+                    sourceComponent: ThemedButton {
+                        objectName: "getReady"
+                        highlighted: true
+                        text: qsTr("Get ready…")
+                        onClicked: App.workflows.readiness.show()
+                    }
                 }
                 ToolButton {
                     // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
@@ -218,7 +220,19 @@ Item {
     }
 
     // The sheet asks about packs it installs together with everything else (#379), so this waits for it.
-    GetReadySheet {}
+    // Made the first time it opens, and kept: the window keeps few items (#5).
+    property var getReadySheet: null
+    Component {
+        id: getReadyComponent
+        GetReadySheet {}
+    }
+    Connections {
+        target: App.workflows.readiness
+        function onChanged() {
+            if (App.workflows.readiness.open && !root.getReadySheet)
+                root.getReadySheet = getReadyComponent.createObject(root)
+        }
+    }
 
     Question {
         id: trustAsk
