@@ -101,7 +101,7 @@ Rectangle {
                     text: sheet.sourceText + (sheet.source.note ? " · " + sheet.source.note : "")
                     wrapMode: Text.Wrap
                     color: link !== "" ? sheet.look.accent : sheet.look.label
-                    font.pixelSize: sheet.look.labelSize
+                    font.pixelSize: sheet.look.textSize
                     font.underline: link !== "" && sourceHover.hovered
                     HoverHandler { id: sourceHover; cursorShape: sourceLine.link !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
                     TapHandler { enabled: sourceLine.link !== ""; onTapped: Qt.openUrlExternally(sourceLine.link) }
@@ -116,14 +116,14 @@ Rectangle {
                     text: parts.join("  ·  ")
                     wrapMode: Text.Wrap
                     color: sheet.look.label
-                    font.pixelSize: sheet.look.labelSize
+                    font.pixelSize: sheet.look.textSize
                 }
 
                 Text {
                     visible: sheet.template.modelList.length > 0
                     text: qsTr("Models used")
                     color: sheet.look.text
-                    font.pixelSize: sheet.look.textSize
+                    font.pixelSize: sheet.look.resultSize
                     font.weight: Font.DemiBold
                 }
                 Repeater {
@@ -138,7 +138,7 @@ Rectangle {
                             look: sheet.look
                             name: row.modelData.status === "missing" ? "x" : "check"
                             color: row.modelData.status === "missing" ? sheet.look.error : sheet.look.accent
-                            font.pixelSize: 12
+                            font.pixelSize: sheet.look.textSize
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -148,21 +148,21 @@ Rectangle {
                                 text: row.modelData.name
                                 elide: Text.ElideMiddle
                                 color: sheet.look.text
-                                font.pixelSize: sheet.look.labelSize
+                                font.pixelSize: sheet.look.textSize
                             }
                             Text {
                                 Layout.fillWidth: true
                                 text: [row.modelData.kind, row.modelData.size, row.modelData.license].filter(p => p !== "").join(" · ")
                                 elide: Text.ElideRight
                                 color: sheet.look.label
-                                font.pixelSize: sheet.look.captionSize
+                                font.pixelSize: sheet.look.labelSize
                             }
                         }
                         Text {
                             text: row.modelData.status === "disk" ? qsTr("On disk")
                                   : row.modelData.status === "served" ? qsTr("Served") : qsTr("Missing")
                             color: row.modelData.status === "missing" ? sheet.look.error : sheet.look.label
-                            font.pixelSize: sheet.look.captionSize
+                            font.pixelSize: sheet.look.labelSize
                         }
                     }
                 }
@@ -171,7 +171,7 @@ Rectangle {
                     visible: sheet.template.packs.length > 0
                     text: qsTr("Packs needed")
                     color: sheet.look.text
-                    font.pixelSize: sheet.look.textSize
+                    font.pixelSize: sheet.look.resultSize
                     font.weight: Font.DemiBold
                 }
                 Repeater {
@@ -184,7 +184,7 @@ Rectangle {
                               + " · " + (modelData.installed ? qsTr("installed") : qsTr("not installed"))
                         wrapMode: Text.Wrap
                         color: modelData.installed ? sheet.look.label : sheet.look.error
-                        font.pixelSize: sheet.look.labelSize
+                        font.pixelSize: sheet.look.textSize
                     }
                 }
 
@@ -192,7 +192,7 @@ Rectangle {
                     visible: sheet.template.inputs.length > 0
                     text: qsTr("Sample inputs")
                     color: sheet.look.text
-                    font.pixelSize: sheet.look.textSize
+                    font.pixelSize: sheet.look.resultSize
                     font.weight: Font.DemiBold
                 }
                 Flow {
