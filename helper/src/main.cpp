@@ -24,6 +24,10 @@
 //                        "context": {"model_path"}, "params": {"tile_size"} (no sd context: the
 //                        upscaler stays loaded between calls); "frames": DIR, "frames_output":
 //                        DIR instead of image and output: every PNG of a folder, in name order
+//   {"op": "restore",    "image": IN, "output": OUT}           PNG -> PNG restored by SeedVR2 at its own
+//                        "context": {"model_path", "vae_path"}, size (the caller scales it first): padded
+//                        "params": {"tile_size", "overlap",    to a multiple of 16, VAE-encoded in tiles,
+//                        "seed"}                               one euler step, decoded in tiles, cropped
 //
 // A context of a video model (Wan) makes the same operations on video: the library's video
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
@@ -61,7 +65,7 @@
 //   {"op": "shutdown"}         -> {}, then it exits; so does it when stdin closes
 //
 // The capability is the operation: text.encode (encode), latent.sample (sample),
-// latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale). params.context is the request's
+// latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale), image.restore (restore). params.context is the request's
 // "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent,
 // .image, .mask and .frames ({"path"}) are its input files, and its outputs are written into output_dir
 // as conditioning.bin, latent.bin, image.png (an upscale of frames: the folder frames-out/). Jobs
@@ -637,13 +641,112 @@ json runUpscale(const json &request, Contexts &contexts, const Hooks &hooks) {
     }
 }
 
+
+// image.restore: SeedVR2 through the library's DGL (the pin has no vid_upscale call; its docs/models/seedvr2.md
+// script is the model). The picture is already the size it should end at (Fugue scales it, so the
+// reference of the colour fix is the same picture). A script is built from the request: the paths and
+// numbers go in as literals, the picture as the one tensor input. The sides are padded with zeros to a
+// multiple of 16, the VAE encodes and decodes in tiles (tile in pixels; overlap a share of the tile, the
+// library takes at most one half), and one euler step runs from noise on the encoded picture and a ones
+// channel, with the checkpoint's own positive embedding. A single frame is one window of one frame.
+std::string restoreScript(const std::string &model, const std::string &vae, int tile, double overlap, int64_t seed) {
+    std::ostringstream out;
+    out << "# version: 0.0.0\n"
+        << "var {\n"
+        << "    dit_path = " << json(model).dump() << "\n"
+        << "    vae_path = " << json(vae).dump() << "\n"
+        << "    tile = " << tile << "\n"
+        << "    overlap = " << overlap << "\n"
+        << "    seed = " << seed << "\n"
+        << "}\n"
+        << R"(fn main(image) {
+    dit = load_dit(dit_path)
+    vae = load_vae(vae_path)
+    shape = tensor::shape(image)
+    width = shape[1]
+    height = shape[2]
+    aligned_width = math::ceil_div(width, 16) * 16
+    aligned_height = math::ceil_div(height, 16) * 16
+    planar = tensor::permute(tensor::cast(tensor::unsqueeze(image, axis = 3), "f32"), axes = [1, 2, 3, 0])
+    padded = tensor::pad(tensor::clamp(tensor::div(planar, 255.0), min = 0, max = 1), [0, aligned_width - width, 0, aligned_height - height])
+    pixels = tensor::reshape(padded, [aligned_width, aligned_height, 1, 3, 1])
+    tiles = tiling(tile_size_w = tile, tile_size_h = tile, target_overlap = overlap)
+    rng = make_rng("cuda", seed = seed)
+    encoded = vae_encode(vae, pixels, rng = rng, tiling = tiles, posterior = "mode")
+    condition_latent = vae_to_dit_latents(vae, encoded)
+    encoded_shape = tensor::shape(encoded)
+    mask = tensor::full([encoded_shape[0], encoded_shape[1], encoded_shape[2], 1, encoded_shape[4]], 1)
+    condition = { crossattn = seedvr2::positive_embedding(dit), concat = tensor::concat([condition_latent, mask], axis = 3) }
+    noise = tensor::randn_like(condition_latent, rng = rng)
+    latent = sample(noise, tensor::vector([1.0, 0.0]), predict = predictor(dit, condition), method = "euler", rng = rng)
+    decoded = vae_decode(vae, dit_to_vae_latents(vae, latent), tiling = tiles, dtype = "f32")
+    cropped = tensor::crop(decoded, axes = [0, 1, 2], start = [0, 0, 0], size = [width, height, 1])
+    unit = tensor::clamp(tensor::reshape(cropped, [width, height, 3]), min = 0, max = 1)
+    packed = tensor::cast(tensor::add(tensor::mul(tensor::permute(unit, axes = [2, 0, 1]), 255.0), 0.5), "u8")
+    return { image = packed }
+}
+)";
+    return out.str();
+}
+
+struct DglFree {
+    void operator()(sd_dgl_ctx_t *c) const { sd_dgl_ctx_free(c); }
+};
+struct DglResultFree {
+    void operator()(sd_dgl_result_t *r) const { sd_dgl_result_free(r); }
+};
+
+json runRestore(const json &request, Contexts &contexts, const Hooks &hooks) {
+    const json context = request.value("context", json::object());
+    const json params = request.value("params", json::object());
+    const std::string model = context.value("model_path", ""), vae = context.value("vae_path", "");
+    if (model.empty() || vae.empty())
+        fail("input_invalid", "\"model_path\" and \"vae_path\" are required for restore");
+    const int tile = params.value("tile_size", 512);
+    const int overlap = params.value("overlap", 64);
+    if (tile < 64 || overlap < 0 || overlap >= tile)
+        fail("input_invalid", "tile_size must be at least 64 and overlap in [0, tile_size)");
+    const std::string input = required(request, "image");
+    Tensor image = loadImage(input);
+    if (sd_tensor_dim(image.get(), 1) < 16 || sd_tensor_dim(image.get(), 2) < 16)
+        fail("input_invalid", "the image is smaller than 16 pixels on a side");
+    // Free what is loaded (an upscaler, a diffusion context): the DiT needs the whole card.
+    contexts.dropOthers(nullptr);
+    std::unique_ptr<sd_dgl_ctx_t, DglFree> dgl(sd_dgl_ctx_create_once());
+    if (!dgl)
+        fail("out_of_memory", "cannot create the DGL context");
+    sd_dgl_ctx_set(dgl.get(), "embed_metadata", "off");
+    if (hooks.progress)
+        sd_dgl_ctx_set_progress_callback(
+            dgl.get(), [](const sd_generation_progress_t *progress, void *data) {
+                if (progress && progress->total > 0)
+                    (*static_cast<const std::function<void(double)> *>(data))(double(progress->completed) / double(progress->total));
+            },
+            const_cast<std::function<void(double)> *>(&hooks.progress));
+    // The library caps overlap at a half of the tile.
+    const std::string source = restoreScript(model, vae, tile, std::min(0.5, double(overlap) / tile), params.value("seed", int64_t(0)));
+    const sd_dgl_tensor_input_t binding{"image", image.get()};
+    sd_dgl_result_t *raw = nullptr;
+    const sd_status_t status = sd_dgl_run(dgl.get(), source.c_str(), &binding, 1, &raw);
+    std::unique_ptr<sd_dgl_result_t, DglResultFree> result(raw);
+    check(status, "restoring " + std::filesystem::path(input).filename().string());
+    const sd_tensor_t *restored = sd_dgl_value_tensor(sd_dgl_value_field(sd_dgl_result_root(result.get()), "image"));
+    if (!restored)
+        fail("helper_failed", "no image was made");
+    saveImage(restored, required(request, "output"));
+    return {{"outputs", json::array({json{{"image", request["output"]}}})}};
+}
+
+
 json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     const std::string op = request.value("op", "");
     const auto &running = hooks.running;
     if (op == "upscale")
         return runUpscale(request, contexts, hooks);
+    if (op == "restore")
+        return runRestore(request, contexts, hooks);
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
-        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate or upscale");
+        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate, upscale or restore");
 
     // A mask is read and checked first, so a wrong one is refused before any model loads.
     const json params = request.value("params", json::object());
@@ -1308,7 +1411,7 @@ public:
                         {"engine", "sdcpp"},
                         {"shares_filesystem", false},
                         {"backend", FUGUE_BACKEND},
-                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale"}},
+                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale", "image.restore"}},
                         {"free_memory_bytes", availableMemory()},
                         {"host", hostName()}};
         });
@@ -1607,7 +1710,8 @@ private:
                                                             {"latent.sample", "sample"},
                                                             {"latent.decode", "decode"},
                                                             {"latent.encode", "vae_encode"},
-                                                            {"image.upscale", "upscale"}};
+                                                            {"image.upscale", "upscale"},
+                                                            {"image.restore", "restore"}};
         const std::string capability = message.value("capability", "");
         const auto op = ops.find(capability);
         if (op == ops.end())
@@ -1627,6 +1731,8 @@ private:
             request["conditioning"] = (dir / "conditioning.bin").string();
         else if (op->second == "sample" || op->second == "vae_encode")
             request["latent"] = (dir / "latent.bin").string();
+        else if (op->second == "restore")
+            request["output"] = (dir / "image.png").string();
         else if (op->second == "upscale") {
             request["output"] = (dir / "image.png").string(); // "image" stays the input
             request["frames_output"] = (dir / "frames-out").string();

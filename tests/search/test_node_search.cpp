@@ -118,7 +118,7 @@ private slots:
         search->openAt(0, 0);
         search->setQuery("transform");
         const QStringList found = names(search->results());
-        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Flip", "Load Upscale Model", "Pad", "Resize", "Resize to Megapixels", "Rotate", "Upscale Image", "Upscale with Model"}));
+        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Flip", "Load Upscale Model", "Pad", "Resize", "Resize to Megapixels", "Restore Image", "Rotate", "Upscale Image", "Upscale with Model"}));
     }
 
     void noMatchGivesNoResults() {

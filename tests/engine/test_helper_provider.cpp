@@ -117,7 +117,7 @@ private slots:
             QCOMPARE(offer.models.size(), 1);
             QVERIFY(offer.models.first().handle.isEmpty()); // models come as files in the job
         }
-        QCOMPARE(capabilities, (QStringList{"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale"}));
+        QCOMPARE(capabilities, (QStringList{"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale", "image.restore"}));
         QCOMPARE(helper->pid(), qint64(0));
         QVERIFY(logLines(m_log).isEmpty());
     }

@@ -57,6 +57,7 @@
     "repaint-song",
     "resize",
     "resize-megapixels",
+    "restore-image",
     "rotate",
     "sampler",
     "save-audio",

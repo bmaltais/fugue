@@ -11,6 +11,18 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
 
+## Restore (`image.restore`, SeedVR2)
+
+The pinned stable-diffusion.cpp has no `vid_upscale` call: SeedVR2 runs through DGL (`docs/models/seedvr2.md`
+there). `fugue-helper` builds a DGL program for the `restore` op (`restoreScript` in `main.cpp`) from the request's
+two model paths, `tile_size`, `overlap` and `seed`, and runs it with `sd_dgl_run` on a context made for the job
+(`sd_dgl_ctx_create_once`), the picture as the one tensor input. No patch to the engine is needed. It is the
+upstream script for one frame with the two additions the ComfyUI workflow has: the VAE encodes and decodes in tiles
+(`tiling(tile_size_w, tile_size_h, target_overlap)`: pixels, and the overlap as a share of the tile, at most 0.5) and the
+size has no scaling step (the caller resizes first). When the pin moves, re-run a restore and re-read that script and
+`seedvr2::positive_embedding`: a checkpoint without `positive_conditioning` (the GGUF and numz fp8 files) is not
+recognised by the engine.
+
 ## The seam
 
 Since upstream's Diffusion Graph Language (6cd0ef1) a generation is a DGL program: C++ renders one from
