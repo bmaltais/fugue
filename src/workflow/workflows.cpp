@@ -119,10 +119,7 @@ QString downloadSize(const QList<MissingModel> &missing) {
 
 // A model folder as the banner's choice names it.
 QString rootTitle(const QString &root, const ModelLibrary &library) {
-    if (root == library.roots().value(0))
-        return Workflows::tr("Fugue's models folder");
-    const QString home = QDir::homePath();
-    return root.startsWith(home + QLatin1Char('/')) ? QLatin1Char('~') + root.mid(home.size()) : root;
+    return ReadinessSheet::rootTitle(root, library.roots().value(0));
 }
 
 // Each message with its hint, for the banner.
@@ -161,6 +158,14 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     });
     m_images = new ImageInputs(m_canvas, m_registry, this);
     m_downloads = new ModelDownloads(this);
+    m_readiness = new ReadinessSheet(m_registry, locations.trustPath,
+                                     [this] {
+                                         return m_current < 0 ? ReadinessRequest()
+                                                              : requestFor(documentOf(m_current), *m_registry, m_tabs[size_t(m_current)].carried);
+                                     },
+                                     this);
+    // What was installed, trusted or downloaded changes what the banner lacks (the registry reload does the same for packs).
+    connect(m_readiness, &ReadinessSheet::finished, this, [this] { refreshMissing(false); });
     m_canvas->widgets()->setDownloads(m_downloads); // the model picker's catalog downloads share the line (#134)
     // The banner says what arrived, or what went wrong; what is still missing comes back.
     connect(m_downloads, &ModelDownloads::finished, this, [this](int arrived, const Errors &all) {
@@ -908,7 +913,7 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     QStringList lines;
     const QVariantMap carried = carriedPackOffer(document);
     if (!carried.isEmpty())
-        lines << tr("%1 carries the pack %2 %3, which its nodes need. Installing it asks first, and the pack is not trusted until you allow it.")
+        lines << tr("%1 carries the pack %2 %3, which its nodes need. Get ready… installs and trusts it with everything else, after one question.")
                      .arg(title, carried.value("id").toString(), carried.value("version").toString());
     const QStringList missing = missingTypes(document, *m_registry);
     // #266: each missing pack once, by display name; a node type with no pack of its own stays named.

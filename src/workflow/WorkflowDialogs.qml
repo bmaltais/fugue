@@ -127,36 +127,14 @@ Item {
                     color: root.look.text
                     text: App.workflows.notice
                 }
-                // Where they go, when more than one model folder can take them; remembered. Made
-                // only when shown, as the progress row below: the window keeps few items (#5).
-                Loader {
-                    active: App.workflows.downloadOffer !== "" && App.workflows.downloadRoots.length > 1
-                    sourceComponent: ComboBox {
-                        objectName: "downloadInto"
-                        model: App.workflows.downloadRoots.map(r => qsTr("Into %1").arg(r.title))
-                        currentIndex: Math.max(0, App.workflows.downloadRoots.findIndex(r => r.path === App.workflows.downloadRoot))
-                        onActivated: index => App.workflows.setDownloadRoot(App.workflows.downloadRoots[index].path)
-                        Accessible.name: qsTr("Download into")
-                    }
-                }
-                // A pack its nodes come from, where the workflow says it can be had (#91).
-                Repeater {
-                    model: App.workflows.packOffers
-                    ThemedButton {
-                        required property var modelData
-                        objectName: "installPack"
-                        text: modelData.text
-                        onClicked: App.workflows.installPackById(modelData.id)
-                    }
-                }
-                Loader {
-                    active: App.workflows.downloadOffer !== ""
-                    sourceComponent: ThemedButton {
-                        objectName: "downloadModels"
-                        highlighted: true
-                        text: App.workflows.downloadOffer
-                        onClicked: App.workflows.downloadMissing()
-                    }
+                // One button for everything the workflow lacks (#379): packs, their trust and environments, and models,
+                // asked once on the sheet, with where models go.
+                ThemedButton {
+                    objectName: "getReady"
+                    visible: App.workflows.getReadyOffer
+                    highlighted: true
+                    text: qsTr("Get ready…")
+                    onClicked: App.workflows.readiness.show()
                 }
                 ToolButton {
                     // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
@@ -239,10 +217,13 @@ Item {
         }
     }
 
+    // The sheet asks about packs it installs together with everything else (#379), so this waits for it.
+    GetReadySheet {}
+
     Question {
         id: trustAsk
         objectName: "trustAsk"
-        visible: App.workflows.pendingTrust.length > 0
+        visible: App.workflows.pendingTrust.length > 0 && !App.workflows.getReadyOffer && !App.workflows.readiness.open
         closePolicy: Popup.NoAutoClose
         ColumnLayout {
             anchors.fill: parent

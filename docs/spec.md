@@ -2124,8 +2124,8 @@ start it offers to recover.
 - Opening a package (File > Open, a drop, the desktop; told by its first bytes, so one renamed
   `.zip` opens too) unpacks it and opens it as
   its template opens: a new unsaved workflow, its images taken into the inputs folder, the
-  banners naming its missing models (Download) and the first pack it says where to get
-  (Install…, which opens Settings > Packs at the recorded source and commit, asking there).
+  banner naming what it lacks with the one **Get ready…** button (#379, [11.10](#1110-templates)): its packs
+  at the source and commit it records, their environments and its missing models, asked once on one sheet.
   It is unpacked under the cache folder, not `/tmp` (memory on Arch), and removed once open;
   an input naming a file it did not hold keeps the bare name. Only plain files and folders with
   relative names inside it are taken: an absolute name, `..`, `\` or `:`, a link or a device is
@@ -2231,6 +2231,16 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   whose name is taken by another file takes `-2`, `-3`..., and the workflow names that. A sample
   must be a file inside its template's folder; one that leads out, by `..` or a link, is not read.
   The person's own template wins over a bundled one of the same id, even when it is broken.
+- **Get ready (#379).** A template that is not ready (a carried pack not installed or not trusted, its environment, missing
+  models) is made ready with one question. The banner of the opened template keeps its line and has one button, **Get ready…**
+  (it replaces the separate Install pack, Download and "Into …" controls); it opens **one sheet** with the headline ("Fugue will
+  install and trust 1 pack, set up 1 environment and download 1 model, 1.2 GB"), a row per pack and per model that opens to the
+  full detail the separate prompts gave (the pack, version, source, runtime kinds and declared permissions, the setup command and its
+  size; the model's licence, size, host and folder), the **Models go into** row ([8.9](#89-models-on-disk)), and **Install and trust
+  all** or Cancel. Then it shows one list with progress per row and **Stop**; the first failure stops the run, says what is left, and
+  **Get ready again** lists only that. Nothing happens before the yes; a pack update, or a pack that declares more than was shown,
+  still asks on its own ([6.6](#66-installing)). A package ([11.5](#115-export)) opens the same way: its `requires` name the packs
+  and models, and it carries no pack. `fugue template prepare <id>` and `fugue workflow prepare <file>` do the same on a terminal.
 - **Where its models are (#164).** A card says, with a small badge and a tooltip, where each of
   its models can be had: `monitor`, "On this machine" (a file in the model folders, or a model a
   server on this machine serves) and `server`, "Shared by <host>" (a model a paired host serves

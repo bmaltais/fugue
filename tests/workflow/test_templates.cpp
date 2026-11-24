@@ -680,6 +680,51 @@ private slots:
         forgetDownloads();
     }
 
+    // #379: the Get ready sheet says where models go, a picked folder joins the model folders (ComfyUI layout) and becomes
+    // the default, and the one yes downloads into it.
+    void theSheetSaysWhereModelsGoAndAPickedFolderBecomesTheDefault() {
+        forgetDownloads();
+        Fixture f;
+        const QByteArray bytes = "a diffusion model";
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        server.on("GET", "/m.gguf", [&](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, bytes, "application/octet-stream"};
+        });
+        makeTemplateNeeding(f.bundled.filePath("gen"), "Gen", bytes, QString::fromLatin1(server.origin() + "/m.gguf"));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state, picked;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("gen"));
+        QVERIFY(workflows.getReadyOffer());
+        ReadinessSheet *sheet = workflows.readiness();
+        sheet->show();
+        QVERIFY(sheet->isOpen());
+        QCOMPARE(sheet->view().value("destination").toString(), dataDir() + "/models");
+        QCOMPARE(sheet->view().value("models").toList().size(), 1);
+        QCOMPARE(sheet->view().value("destinations").toList().size(), 1);
+        QVERIFY(!QFileInfo::exists(dataDir() + "/models/diffusion-model/m.gguf")); // nothing before the yes
+
+        sheet->pickDestination(picked.path());
+        QCOMPARE(currentSettings().downloadFolder, picked.path());
+        QVERIFY(currentSettings().modelPaths.contains(picked.path()));
+        QCOMPARE(currentSettings().modelFolderKinds.value(picked.path()), ModelLibrary::kLayout);
+        QCOMPARE(sheet->view().value("destination").toString(), picked.path());
+        QCOMPARE(sheet->view().value("destinations").toList().size(), 2);
+
+        sheet->start();
+        QTRY_COMPARE(sheet->phase(), QString("finished"));
+        QVERIFY2(sheet->view().value("ok").toBool(), qPrintable(sheet->view().value("message").toString()));
+        QCOMPARE(readFile(picked.filePath("diffusion-model/m.gguf")), bytes);
+        QVERIFY(sheet->waitIdle());
+        forgetDownloads();
+    }
+
     // #89 in the window: a card's Download fetches its models without opening it; the banner's
     // button does the same for the workflow just opened, with progress and Cancel.
     void aCardAndTheBannerDownloadWithProgressAndCancel() {
@@ -771,21 +816,30 @@ private slots:
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
 
-        // The banner of a workflow that lacks one: Download, then progress and Cancel.
+        // The banner of a workflow that lacks one: one Get ready button (#379), the sheet with where models go and what
+        // they need, then progress and Stop. The banner has no "Into" choice and no Download of its own any more.
         hold = true;
         QVERIFY(workflows.openTemplateById("more"));
-        QTRY_VERIFY(item(window->contentItem(), "downloadModels") && item(window->contentItem(), "downloadModels")->isVisible());
-        QVERIFY(!item(window->contentItem(), "downloadInto")); // one model folder: no choice
-        click(item(window->contentItem(), "downloadModels"));
-        QTRY_VERIFY(item(window->contentItem(), "downloadProgress"));
-        QTRY_VERIFY(!item(window->contentItem(), "downloadModels"));
+        QTRY_VERIFY(item(window->contentItem(), "getReady") && item(window->contentItem(), "getReady")->isVisible());
+        QVERIFY(!item(window->contentItem(), "downloadModels"));
+        QVERIFY(!item(window->contentItem(), "downloadInto"));
+        click(item(window->contentItem(), "getReady"));
+        QTRY_VERIFY(window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "getReadyDestination") && item(window->contentItem(), "getReadyDestination")->isVisible());
+        QVERIFY(workflows.readiness()->view().value("destinationTitle").toString().contains("models folder"));
+        QCOMPARE(server.requestsTo("GET", "/other.gguf").size(), 0); // nothing before the yes
+        click(item(window->contentItem(), "getReadyAll"));
         QTRY_COMPARE(server.requestsTo("GET", "/other.gguf").size(), 1);
-        click(item(window->contentItem(), "downloadCancel"));
+        QCOMPARE(workflows.readiness()->phase(), QString("running"));
+        click(item(window->contentItem(), "getReadyCancel"));
+        QTRY_COMPARE(workflows.readiness()->phase(), QString("finished"));
+        QVERIFY(!workflows.readiness()->view().value("ok").toBool());
+        click(item(window->contentItem(), "getReadyClose"));
+        QTRY_VERIFY(!window->findChild<QObject *>("getReadySheet")->property("visible").toBool());
         QTRY_VERIFY(!workflows.downloads()->busy());
-        QTRY_VERIFY(!item(window->contentItem(), "downloadProgress"));
         // What it lacks again, with its button: a cancel needs no news of its own.
         QVERIFY(workflows.notice().contains("other.gguf"));
-        QTRY_VERIFY(item(window->contentItem(), "downloadModels"));
+        QTRY_VERIFY(item(window->contentItem(), "getReady") && item(window->contentItem(), "getReady")->isVisible());
         QVERIFY(!QFileInfo::exists(ModelLibrary::current(&f.registry).downloadFolder(*PortType::parse("fugue/diffusion-model"))
                                    + "/other.gguf.part"));
 

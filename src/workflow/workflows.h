@@ -25,6 +25,7 @@
 #include "engine/templates.h"
 #include "workflow/image_inputs.h"
 #include "workflow/model_downloads.h"
+#include "workflow/readiness_sheet.h"
 #include "workflow/recovery_store.h"
 #include "engine/trust_store.h"
 
@@ -79,6 +80,10 @@ class Workflows : public QObject {
     Q_PROPERTY(QUrl suggestedFolder READ suggestedFolder CONSTANT)
     // The models being downloaded (#89).
     Q_PROPERTY(fugue::ModelDownloads *downloads READ downloads CONSTANT)
+    // The "Get ready" sheet (#379): one list and one yes for the packs, their trust and environments and the models the
+    // shown workflow needs. The banner has one button, "Get ready…", for it while getReadyOffer.
+    Q_PROPERTY(fugue::ReadinessSheet *readiness READ readiness CONSTANT)
+    Q_PROPERTY(bool getReadyOffer READ getReadyOffer NOTIFY noticeChanged)
     // While the banner names missing models of the shown workflow that have a source: the
     // button's text, "Download 3 models, 19.4 GB" (the size when every one records it). Else empty.
     Q_PROPERTY(QString downloadOffer READ downloadOffer NOTIFY noticeChanged)
@@ -112,6 +117,9 @@ public:
     QString notice() const { return m_notice; }
     QUrl suggestedFolder() const;
     ModelDownloads *downloads() const { return m_downloads; }
+    ReadinessSheet *readiness() const { return m_readiness; }
+    // The banner names a pack to install or models to download for the shown workflow: Get ready… is offered.
+    bool getReadyOffer() const { return !packOffers().isEmpty() || !downloadOffer().isEmpty(); }
     QString downloadOffer() const;
     QVariantList downloadRoots() const { return downloadOffer().isEmpty() ? QVariantList() : m_offer.roots; }
     QString downloadRoot() const { return m_offer.root; }
@@ -397,6 +405,7 @@ private:
     DownloadOffer m_offer; // what goes with m_missingNotice
     Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;
+    ReadinessSheet *m_readiness;
     ModelSource m_source; // empty: listOfferedModels
     QList<ListedModel> m_served; // what the providers offered at the last loadHostModels()
     // "<pack id> <version>" the person answered "not now" for: a reload does not ask again.

@@ -871,14 +871,14 @@ private slots:
         workflows.newWorkflow();
         QTRY_VERIFY(item(window->contentItem(), "tab-1"));
         QCOMPARE(window->title(), QString("Untitled — Fugue"));
-        // The unknown pack's question and the missing-node notice are up.
+        // The missing-node notice is up, with the one Get ready button; the pack's own trust question waits for it (#379).
         workflows.setCurrent(0);
         auto *trust = window->findChild<QObject *>("trustAsk");
         QVERIFY(trust);
-        QTRY_VERIFY(trust->property("visible").toBool());
         QVERIFY(item(window->contentItem(), "workflowNotice")->isVisible());
-        QMetaObject::invokeMethod(window->findChild<QObject *>("trustAllow"), "clicked");
-        QTRY_VERIFY(!trust->property("visible").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "getReady") && item(window->contentItem(), "getReady")->isVisible());
+        QVERIFY(!trust->property("visible").toBool());
+        workflows.allowPendingTrust();
         QVERIFY(workflows.isTrusted("io.example.tools", "2.0.0"));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
     }
