@@ -808,8 +808,8 @@ private slots:
             return out;
         };
         QTRY_COMPARE(rows(), (QStringList{"# Fits klein9b.safetensors", "qwen_3_8b.safetensors", "# Other",
-                                          "mystery.safetensors", "qwen_3_4b.safetensors (dim)", "t5xxl.safetensors (dim)",
-                                          "Type a name…"}));
+                                          "qwen_3_4b.safetensors (dim)", "mystery.safetensors", "t5xxl.safetensors (dim)",
+                                          "Family: All", "Type a name…"}));
         app.key(Qt::Key_Return); // the first is the one that fits
         QTRY_COMPARE(app.stored("models", "text_encoder").toObject().value("name").toString(), QString("qwen_3_8b.safetensors"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

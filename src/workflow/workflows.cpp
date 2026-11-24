@@ -17,6 +17,8 @@
 #include "engine/json.h"
 #include "engine/model_download.h"
 #include "engine/model_library.h"
+#include "engine/model_recommend.h"
+#include "engine/model_speed.h"
 #include "engine/model_places.h"
 #include "engine/template_search.h"
 #include "engine/fugue_home.h"
@@ -690,6 +692,7 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
 
 QVariantList Workflows::templates() const {
     FileHashes hashes(FileHashes::defaultPath());
+    const ModelSpeeds speeds;
     const ModelLibrary models = ModelLibrary::current(m_registry);
     QVariantList out;
     for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
@@ -700,7 +703,10 @@ QVariantList Workflows::templates() const {
         for (const MissingModel &model : absent)
             missing.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
                                        {"source", model.source},
-                                       {"folder", model.folder}});
+                                       {"folder", model.folder},
+                                       // Another quantization of it that is here, the Recommended one (#370).
+                                       {"suggest", suggestOnDisk(model.handle, library, RecommendContext{localComputeDevice(), 0, &speeds},
+                                                                 ModelShapes::shared())}});
         // Where each model is: on disk (not among `absent`), or served (#164).
         QList<ModelPlaces> placed;
         for (const QJsonValue &value : t.models) {

@@ -382,6 +382,21 @@ Rectangle {
         // The catalog's models not on disk come last, under "Download" (#134).
         const downloadable = listed.filter(m => m.catalog === true)
         listed = listed.filter(m => m.catalog !== true)
+        // The family filter (#370): files of one model family (engine/model_family.h), the providers' models
+        // and files of no family always. Offered when the files make two or more families, or one is chosen.
+        const families = familiesOf(listed)
+        if (familyFilter !== "" && !families.includes(familyFilter))
+            familyFilter = ""
+        // Its row is last, beside "Type a name…": the first row stays the file Enter picks.
+        const familyRow = families.length > 1 || familyFilter !== ""
+                          ? { text: qsTr("Family: %1").arg(familyFilter !== "" ? familyFilter : qsTr("All")), value: { familyMenu: true }, keep: true }
+                          : null
+        if (familyFilter !== "")
+            listed = listed.filter(m => m.path === undefined || m.family === familyFilter)
+        // Files of a family sit together, under its name, their quantizations beside each other.
+        const byFamily = (a, b) => (a.path === undefined || b.path === undefined || a.family === b.family) ? 0
+                                   : a.family === "" ? 1 : b.family === "" ? -1 : (a.family < b.family ? -1 : 1)
+        listed = listed.map((m, i) => ({ m: m, i: i })).sort((a, b) => byFamily(a.m, b.m) || a.i - b.i).map(x => x.m)
         const fitsFor = edits.fitsModel(nodeId, name)
         const anyFits = listed.some(m => m.fits === true)
         const isOther = m => m.path !== undefined && (anyFits ? m.fits !== true : m.fits === false)
@@ -399,15 +414,18 @@ Rectangle {
                 group = m.folder // one heading for them all
                 entries.push({ text: qsTr("Fits %1").arg(fitsFor), heading: true, enabled: false })
             }
-            const heading = m.path !== undefined ? m.folder : m.provider
+            const heading = m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
             if (heading !== group && !other && !(anyFits && m.fits === true)) {
                 group = heading
                 entries.push({ text: heading, heading: true, enabled: false })
             }
             if (m.path !== undefined) {
                 // The file a stored handle names is the one with its hash, not only its name.
-                entries.push({ text: m.title, detail: sizeText(m.size), value: { disk: m.path }, dim: m.fits === false,
-                               place: "local", note: m.fitNote,
+                // The recommended file says why (#370), the star is in its detail for a glance.
+                const recommended = m.recommended === true
+                entries.push({ text: m.title, detail: (recommended ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
+                               value: { disk: m.path }, dim: m.fits === false,
+                               place: "local", note: m.fitNote ? m.fitNote : (recommended ? m.recommendedWhy : ""),
                                checked: currentHash !== undefined && m.handle.hash === currentHash })
                 continue
             }
@@ -430,7 +448,28 @@ Rectangle {
             entries.push({ text: qsTr("Looking for models…"), enabled: false })
         else if (listed.length === 0 && downloadable.length === 0)
             entries.push({ text: edits.modelsEmptyText(nodeId, name), enabled: false, note: "" })
+        if (familyRow)
+            entries.push(familyRow)
         entries.push({ text: qsTr("Type a name…"), value: { typeName: true }, keep: true })
+        return entries
+    }
+    // The model families of the listed files, in order of first appearance.
+    function familiesOf(files) {
+        const out = []
+        for (const m of files)
+            if (m.path !== undefined && m.family && !out.includes(m.family))
+                out.push(m.family)
+        return out.sort()
+    }
+    // The family the model menu is narrowed to; "" shows every file. Kept while the widget lives.
+    property string familyFilter: ""
+    // The choices of the family menu: All, then each family of the files with its count.
+    function familyEntries() {
+        const files = edits.models(nodeId, name).filter(m => m.path !== undefined)
+        const entries = [{ text: qsTr("All families"), detail: String(files.length), value: { family: "" }, checked: familyFilter === "" }]
+        for (const family of familiesOf(files))
+            entries.push({ text: family, detail: String(files.filter(m => m.family === family).length), value: { family: family },
+                           checked: family === familyFilter })
         return entries
     }
     // A model file's size as people read it: "6.2 GB", "335 MB".
@@ -471,6 +510,12 @@ Rectangle {
                 return edits.unset(nodeId, name)
             if (value.typeName)
                 return openEditor()
+            if (value.familyMenu)
+                return openMenu(familyEntries(), "")
+            if (value.family !== undefined) {
+                familyFilter = value.family
+                return openMenu(null, "")
+            }
             if (value.download !== undefined)
                 return picker().confirmDownload(value.download)
             if (value.disk !== undefined)

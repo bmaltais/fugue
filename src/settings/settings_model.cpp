@@ -17,6 +17,8 @@
 #include "engine/node_picture.h"
 #include "engine/json.h"
 #include "engine/model_library.h"
+#include "engine/model_recommend.h"
+#include "engine/model_speed.h"
 #include "engine/pack_loader.h"
 #include "engine/paths.h"
 #include "engine/project.h"
@@ -359,6 +361,29 @@ QString SettingsModel::modelFolderFound(const QString &path) const {
         if (value == kind)
             return kind == ModelLibrary::kLayout ? tr("Found: ComfyUI's model folders") : tr("Found: %1").arg(text);
     return tr("Found: %1").arg(kind);
+}
+
+QVariantList SettingsModel::modelFiles() const {
+    QVariantList out;
+    if (!m_types)
+        return out;
+    const ModelLibrary library(ModelLibrary::roots(m_effective.settings), m_types, ModelLibrary::rootKinds(m_effective.settings));
+    const ModelSpeeds speeds;
+    for (const char *id : {"fugue/diffusion-model", "fugue/text-encoder", "fugue/model"}) {
+        const PortType type = PortType::parse(QString::fromLatin1(id)).value_or(PortType{});
+        const QList<ModelFile> files = library.list(type);
+        QList<MarkedFile> marked;
+        for (const ModelFile &file : files)
+            marked.append({file.path, file.size});
+        const QHash<QString, ModelMark> marks = markModels(QString::fromLatin1(id), marked, RecommendContext{localComputeDevice(), 0, &speeds},
+                                                         ModelShapes::shared());
+        for (const ModelFile &file : files) {
+            const ModelMark mark = marks.value(file.path);
+            out.append(QVariantMap{{"type", QString::fromLatin1(id)}, {"name", file.name}, {"path", file.path}, {"size", file.size},
+                                   {"family", mark.family}, {"recommended", mark.recommended}, {"reason", mark.reason}});
+        }
+    }
+    return out;
 }
 
 QVariantList SettingsModel::modelFolderKinds() const {
