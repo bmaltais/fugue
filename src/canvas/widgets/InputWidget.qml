@@ -511,7 +511,7 @@ Rectangle {
             if (value.typeName)
                 return openEditor()
             if (value.familyMenu)
-                return openMenu(familyEntries(), "")
+                return openMenu(familyEntries(), "family")
             if (value.family !== undefined) {
                 familyFilter = value.family
                 return openMenu(null, "")

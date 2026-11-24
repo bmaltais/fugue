@@ -559,6 +559,14 @@ private slots:
         QCOMPARE(gen.value("status").toString(), QString("Models missing: 1 of 1"));
         QCOMPARE(gen.value("missingModels").toList().at(0).toMap().value("name").toString(), QString("m.gguf"));
         QVERIFY(listed.at(1).toMap().value("status").toString().isEmpty()); // the edit is ready
+        // The details view's rows: each model with its type and where it is, the sample inputs as file URLs.
+        const QVariantMap row = gen.value("modelList").toList().at(0).toMap();
+        QCOMPARE(row.value("name").toString(), QString("m.gguf"));
+        QCOMPARE(row.value("kind").toString(), QString("Diffusion model"));
+        QCOMPARE(row.value("status").toString(), QString("missing"));
+        QVERIFY(gen.value("inputs").toList().isEmpty());
+        QCOMPARE(listed.at(1).toMap().value("inputs").toList().size(), 1);
+        QVERIFY(listed.at(1).toMap().value("inputs").toList().at(0).toString().endsWith("/inputs/cat.png"));
 
         QVERIFY(workflows.openTemplateById("edit"));
         QCOMPARE(workflows.count(), 1); // the empty Untitled it started with is replaced
@@ -649,9 +657,57 @@ private slots:
         QVERIFY(dialog->setProperty("family", ""));
         QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
 
+        // The family drop-down's list is searched by word start: "ima" begins Z-Image's second word, "mage" is inside it.
+        QQuickItem *familyBox = item(window->contentItem(), "templatesFamily");
+        QVERIFY(familyBox);
+        QTest::mouseClick(window, Qt::LeftButton, {}, familyBox->mapToScene(QPointF(familyBox->width() / 2, familyBox->height() / 2)).toPoint());
+        QObject *menu = nullptr;
+        QTRY_VERIFY((menu = familyBox->findChild<QObject *>("widgetMenu")) && menu->property("opened").toBool());
+        const auto shownTexts = [&] {
+            QStringList out;
+            for (const QVariant &entry : menu->property("shown").toList())
+                out << entry.toMap().value("text").toString();
+            return out;
+        };
+        QCOMPARE(shownTexts().size(), 2);
+        for (const char c : QByteArray("mage"))
+            QTest::keyClick(window, c);
+        QTRY_COMPARE(shownTexts(), (QStringList{"Nothing matches “mage”"}));
+        QTest::keyClick(window, Qt::Key_Escape); // empties the field first
+        QTRY_COMPARE(shownTexts().size(), 2);
+        for (const char c : QByteArray("ima"))
+            QTest::keyClick(window, c);
+        QTRY_COMPARE(shownTexts(), (QStringList{"Z-Image (1)"}));
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(dialog->property("family").toString(), QString("Z-Image"));
+        QVERIFY(dialog->setProperty("family", ""));
+        QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
+
         QQuickItem *card = item(window->contentItem(), "templateCard-talk");
-        QTest::mouseClick(window, Qt::LeftButton, {}, card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint());
+        const QPoint cardCenter = card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint();
+        // A click shows the details and opens nothing; Escape closes them first (the dialog stays), Cancel too.
+        QTest::mouseClick(window, Qt::LeftButton, {}, cardCenter);
+        QTRY_VERIFY(item(window->contentItem(), "templateDetails") && item(window->contentItem(), "templateDetails")->isVisible());
+        QCOMPARE(item(window->contentItem(), "templateDetailsTitle")->property("text").toString(), QString("Talk"));
+        QVERIFY(window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!item(window->contentItem(), "templateDetails") || !item(window->contentItem(), "templateDetails")->isVisible());
+        QVERIFY(window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        // Open, from the details, opens it.
+        QTest::mouseClick(window, Qt::LeftButton, {}, cardCenter);
+        QTRY_VERIFY(item(window->contentItem(), "templateDetails") && item(window->contentItem(), "templateDetails")->isVisible());
+        QQuickItem *openButton = item(window->contentItem(), "templateDetailsOpen");
+        QTest::mouseClick(window, Qt::LeftButton, {}, openButton->mapToScene(QPointF(openButton->width() / 2, openButton->height() / 2)).toPoint());
         QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Talk"));
+        QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        // A double click on a card opens it at once.
+        QVERIFY(commands.run("file.templates"));
+        QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        card = item(window->contentItem(), "templateCard-gen");
+        const QPoint genCenter = card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, {}, genCenter); // the details come up under the pointer,
+        QTest::mouseClick(window, Qt::LeftButton, {}, genCenter); // and the second click opens it
+        QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Gen"));
         QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
 
         // From the keyboard: the search field has the keys, Enter opens the first match.

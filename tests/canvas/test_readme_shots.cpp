@@ -90,9 +90,60 @@ private slots:
         // The dialog and a margin of the dimmed canvas. Its footnote names this test's own
         // temporary folder, so that line is painted over with the sidebar's color.
         QImage shot = test_support::grab(app.window).convertToFormat(QImage::Format_ARGB32);
-        const QRect dialog(320, 180, 960, 640); // centered, as Popup sizes it in a 1600 x 1000 window
+        const QRect dialog(200, 100, 1200, 800); // centered, as Popup sizes it in a 1600 x 1000 window
         QPainter(&shot).fillRect(QRect(dialog.left() + 1, dialog.bottom() - 60, 207, 58), shot.pixelColor(dialog.left() + 60, dialog.bottom() - 100));
         QVERIFY(shot.copy(dialog.adjusted(-40, -40, 40, 40)).save(shotDir() + "/templates.png"));
+    }
+
+    // The same dialog with a Source and a Model family chosen, in the light theme (a look check, not a README picture).
+    void templatesFiltered() {
+        App app(load(template_("text-to-image")), {}, Look{"catppuccin-latte", 8});
+        QVERIFY(app.open());
+        prepare(app);
+        QVERIFY(app.commands.run("file.templates"));
+        QObject *dialog = app.window->findChild<QObject *>("templatesDialog");
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(dialog->property("sourceOptions").toList().size() > 1);
+        const auto pick = [&](const char *options, const QString &word) {
+            for (const QVariant &option : dialog->property(options).toList())
+                if (option.toMap().value("value").toString().contains(word))
+                    return option.toMap().value("value");
+            return QVariant();
+        };
+        QVERIFY(dialog->setProperty("source", pick("sourceOptions", "DA flux2")));
+        QVERIFY(dialog->setProperty("family", pick("familyOptions", "9B")));
+        QTest::qWait(1500); // the cards' previews load
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/templates-filtered.png"));
+        // The family list open with a word typed.
+        QObject *family = dialog->findChild<QObject *>("templatesFamily");
+        QVERIFY(family && QMetaObject::invokeMethod(family, "open"));
+        for (const char c : QByteArray("klei"))
+            QTest::keyClick(app.window, c);
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/templates-family-search.png"));
+    }
+
+    // A template's details over the dialog's grid (the DA restore one: a long description, models missing), dark and light.
+    void templatesDetails_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("file");
+        QTest::newRow("dark") << QString() << "templates-details.png";
+        QTest::newRow("light") << "catppuccin-latte" << "templates-details-light.png";
+    }
+    void templatesDetails() {
+        QFETCH(QString, theme);
+        QFETCH(QString, file);
+        App app(load(template_("text-to-image")), {}, Look{theme, 8});
+        QVERIFY(app.open());
+        prepare(app);
+        QVERIFY(app.commands.run("file.templates"));
+        QObject *dialog = app.window->findChild<QObject *>("templatesDialog");
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "flux2-klein-9b-da-restore"), Q_ARG(QVariant, QVariant())));
+        QTest::qWait(1000); // the banner and the sample inputs load
+        QVERIFY(test_support::grab(app.window).save(shotDir() + "/" + file));
     }
 
     // The node library panel (N) beside a workflow.

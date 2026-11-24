@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Fugue
+import "../canvas"
 
 // The Models page of the settings panel (#370): the model files Fugue found, grouped by family, with a
 // family filter, and the Recommended file of each model marked with its reason (engine/model_recommend.h).
@@ -29,13 +30,14 @@ ColumnLayout {
     SettingsParts.Setting {
         title: qsTr("Models")
         note: qsTr("The model files Fugue found, by family. Recommended marks the file of a model that fits this computer, with the best quality at the best speed here. Folders are set on the Folders page.")
-        Choices {
-            Layout.fillWidth: true
+        ThemedDropDown {
+            objectName: "modelFamily"
             visible: page.families.length > 0
-            name: "modelFamily"
-            current: page.family
             options: [{value: "", text: qsTr("All")}].concat(page.families.map(f => ({value: f, text: f})))
-            onPicked: value => page.family = value
+            value: page.family
+            label: qsTr("Model family")
+            searchable: true
+            onPicked: v => page.family = v
         }
     }
 

@@ -14,7 +14,7 @@ Item {
     id: picker
     required property InputWidget host
 
-    // `entries` null: the host's model list, kept current while models arrive. `follow` "canvases":
+    // `entries` null: the host's model list, kept current while models arrive. `follow` "canvases" or "family" (the family menu, searched by word start):
     // the canvas list, rebuilt when the root's canvases change.
     function openMenu(entries, follow) {
         const well = host
@@ -25,7 +25,8 @@ Item {
             entries: entries !== null ? entries : host.modelEntries(), followModels: entries === null,
             followCanvases: follow === "canvases",
             // A model list, or a long one, is searched (#84).
-            searchable: entries === null || entries.length > 12,
+            searchable: entries === null || entries.length > 12 || follow === "family",
+            wordStart: follow === "family",
             nothingMatches: entries === null ? qsTr("No model matches “%1”") : qsTr("Nothing matches “%1”")
         }) as WidgetMenu
         menu.open()
