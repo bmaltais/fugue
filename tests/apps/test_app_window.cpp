@@ -307,6 +307,19 @@ private slots:
         QTRY_COMPARE(panel->width(), before);
         QCOMPARE(app.sidePanels.appWidth(), 0);
 
+        // A drag keeps the border under the pointer however many moves come before the layout places the panel again (owner's
+        // recording, 2026-11-25: the panel shook; each move measured from the old border and was applied twice).
+        {
+            const QPoint from = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+            QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+            for (int step = 1; step <= 3; ++step)
+                QTest::mouseMove(app.window, from - QPoint(10 * step, 0));
+            QTest::mouseRelease(app.window, Qt::LeftButton, {}, from - QPoint(30, 0));
+            QTRY_COMPARE(qRound(panel->width()), qRound(before + 30));
+            QTest::keyClick(app.window, Qt::Key_Return); // the press gave the border the focus: back to the automatic width
+            QTRY_COMPARE(panel->width(), before);
+        }
+
         tap(app.window, find(app.window, "appHideInputs"));
         QTRY_VERIFY(find(app.window, "appShowInputs"));
         QVERIFY(!app.chrome.isVisible("app-inputs"));

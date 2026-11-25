@@ -1340,3 +1340,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Old: `WidgetMenu` had no width of its own; every caller set one except `appMoreMenu`, which opened as a 4px strip under `appMore` (owner, with a screenshot).
 - New: a caller that sets no width gets the widest entry's text and detail plus the row's insets, at least 32u. Callers that set a width keep it.
 - Rules met: Floor (the rows are the 28px WidgetMenu rows), Words (every entry reads whole, none elided), Learned place (it still opens under its chip and flips or shifts to stay in the window).
+
+### 2026-11-25 App view: dragging the inputs panel's border no longer shakes
+
+- Control: `appPanelHandle` in `src/apps/AppPage.qml` (its `border`); `src/kit/KitSegmented.qml` (the thumb, `kitSegmentedThumb`).
+- Old: the border was read from the panel's place, which the row layout updates only at its next polish; two pointer moves before it measured from the old border, the drag was applied twice and the panel overshot and came back (owner's recording). Every KitSegmented thumb animated its x and width, so on a resize it trailed the drag and stretched over the next option (Seed, Run again).
+- New: the border comes from the same widths that place the panel, so the panel edge stays under the pointer. The thumb animates only its slot: a new choice slides, a resize is followed at once.
+- Rules met: Learned place (the border follows the pointer as every area border does), Motion (motion only for a change of state, never for a resize).
+- Not changed: a Run again row still stacks its label above the choices when the panel is too narrow for both side by side (KitRow, owner 2026-11-25); that switch is a jump by design.

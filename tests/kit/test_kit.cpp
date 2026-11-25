@@ -284,6 +284,14 @@ private slots:
         QTest::mouseClick(window, Qt::LeftButton, {}, seg->mapToScene(QPointF(seg->width() - 10, seg->height() / 2)).toPoint());
         QTRY_COMPARE(window->property("mode").toInt(), 2);
         QCOMPARE(seg->property("currentIndex").toInt(), 2);
+        // A resize (a dragged panel) moves the chosen option's thumb with it at once; only a new choice slides (owner's recording,
+        // 2026-11-25: the thumb trailed the drag and stretched over the next option).
+        auto *thumb = seg->findChild<QQuickItem *>("kitSegmentedThumb");
+        QVERIFY(thumb);
+        QTRY_COMPARE(thumb->x() + thumb->width(), seg->width() - seg->property("pad").toReal()); // settled on the last option
+        seg->setWidth(seg->width() + 90);
+        QCOMPARE(thumb->width(), seg->property("optionWidth").toReal());
+        QCOMPARE(thumb->x() + thumb->width(), seg->width() - seg->property("pad").toReal());
 
         // The switch: Space asks for the opposite, and the window's answer is what shows.
         toggle->forceActiveFocus();
