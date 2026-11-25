@@ -180,6 +180,8 @@ void bindViewSwitch(AppShelf &shelf, AppView &view, CommandRegistry &commands) {
     });
     commands.setCheckedWhen(id, [&shelf, &view] { return view.shown() || shelf.atHome(); });
     QObject::connect(&shelf, &AppShelf::homeChanged, &commands, &CommandRegistry::changed);
+    // App inputs (the App view's panel) only while the App view itself is shown: view.toggle-app is also checked on the shelf now.
+    commands.setEnabledWhen(QStringLiteral("view.toggle-app-inputs"), [&view] { return view.shown(); });
 }
 
 void bindOwnAppWindow(AppShelf &shelf, AppView &view, AppLauncher &launcher,

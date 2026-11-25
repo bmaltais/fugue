@@ -534,6 +534,7 @@ private slots:
         QTRY_VERIFY(find(app.window, "appViewSwitch"));
         QVERIFY(chosen());
         QVERIFY(app.commands.entry("view.toggle-app").value("checked").toBool());
+        QVERIFY(!app.commands.isEnabled("view.toggle-app-inputs")); // the App view's panel: nothing to show on the shelf
         tap(app.window, "appViewSwitchApp");
         QVERIFY(rig.shelf.atHome());
         tap(app.window, "appViewSwitchGraph");

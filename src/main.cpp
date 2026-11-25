@@ -200,7 +200,6 @@ int main(int argc, char *argv[]) {
     appShelf.setBookmarksFile(fugue::stateDir() + "/app-bookmarks.json"); // pinned apps, per user (#470)
     appShelf.setActions([&workflows](const QString &id, const QString &title) { return workflows.duplicateTemplate(id, title); },
                         [&workflows](const QString &id, const QString &title) { return workflows.renameTemplate(id, title); });
-    fugue::bindViewSwitch(appShelf, appView, commands);
     QObject::connect(&workflows, &fugue::Workflows::tabsChanged, &appShelf,
                      [&appShelf, &workflows] { appShelf.setLanding(workflows.currentIsPristine()); });
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
@@ -215,6 +214,8 @@ int main(int argc, char *argv[]) {
     fugue::SidePanels sidePanels(fugue::stateDir() + "/side-panels.json", &chrome);
     sidePanels.registerCommands(commands);
     fugue::registerChromeCommands(commands, chrome);
+    // After the chrome commands: it sets App inputs' rule, which the chrome rows would otherwise set again.
+    fugue::bindViewSwitch(appShelf, appView, commands);
     fugue::NodeLibrary nodeLibrary(&registry);
     fugue::RecentFiles recentFiles(fugue::stateDir() + "/recent-files.json");
     recentFiles.follow(&workflows);
