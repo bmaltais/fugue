@@ -1473,6 +1473,35 @@ private slots:
         QVERIFY(!unmasked->params.contains("fugue.soft_mask"));
     }
 
+    // Variation seeds (#553): the helper options go out only above strength 0, so a workflow without it is unchanged.
+    void theSamplerSendsVariationOptionsOnlyAboveZero() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        Values sampling{{"model", Value(model)},
+                        {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                        {"latent", Value(QJsonObject{{"data", "fugue/latent"}, {"empty", true}, {"width", 512}, {"height", 512}})},
+                        {"variation_seed", Value(77)}};
+        const Result<JobRequest> off = bench.request(kSampler, sampling);
+        QVERIFY2(off, off ? "" : qPrintable(off.error().message));
+        QVERIFY(!off->params.contains("fugue.variation_strength"));
+        QVERIFY(!off->params.contains("fugue.variation_seed"));
+        sampling.insert("variation_strength", Value(0.25));
+        const Result<JobRequest> on = bench.request(kSampler, sampling);
+        QVERIFY2(on, on ? "" : qPrintable(on.error().message));
+        QCOMPARE(on->params.value("fugue.variation_strength").toDouble(), 0.25);
+        QCOMPARE(on->params.value("fugue.variation_seed").toInteger(), 77);
+
+        // A clip is refused, never quietly sampled without the variation.
+        const QJsonObject wan = bench.loaded(bench.wan());
+        const Result<Values> clip = bench.run(kEmptyVideoLatent, {{"frames", Value(49)}});
+        QVERIFY(clip);
+        const Result<JobRequest> video =
+            bench.request(kSampler, {{"model", Value(wan)}, {"conditioning", sampling.value("conditioning")}, {"latent", clip->value("latent")},
+                                     {"variation_strength", Value(0.25)}, {"variation_seed", Value(77)}});
+        QVERIFY(!video);
+        QCOMPARE(video.error().input, QStringLiteral("variation_strength"));
+    }
+
     // Without a mask the Sampler sends what it sent before (the regression guard of #173).
     void theSamplerWithoutAMaskSendsNoMaskAndNoPicture() {
         Bench bench;
