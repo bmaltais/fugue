@@ -17,6 +17,7 @@
 
 #include "engine/http_provider.h"
 #include "engine/server_api.h"
+#include "engine/vips.h"
 
 namespace fugue {
 
@@ -26,7 +27,11 @@ namespace {
 
 constexpr int kDefaultTimeoutS = 120;
 constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
-constexpr qint64 kAnswerCap = 128LL << 20;
+constexpr qint64 kAnswerCap = 32LL << 20;
+// Cloudflare documents no seed range; a seed is kept inside a signed 32-bit integer, as other services require, and the one sent is recorded.
+constexpr qint64 kSeedRange = 2147483647;
+// The documentation asks for reference pictures under 512x512.
+constexpr int kPictureSide = 511;
 const char *const kCapped = "fugue-capped";
 
 const QString kImageResource = QStringLiteral("fugue/image-model");
@@ -71,7 +76,7 @@ int errorCodeOf(const QJsonObject &answer) { return answer.value("errors").toArr
 
 // A model id such as @cf/black-forest-labs/flux-1-schnell: the path of a URL, so nothing else is let in.
 bool modelIdOk(const QString &id) {
-    static const QRegularExpression ok(QStringLiteral("^@[a-z]{2}/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$"));
+    static const QRegularExpression ok(QStringLiteral("^@[a-z]{2}/[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)+$"));
     return ok.match(id).hasMatch() && !id.contains(QLatin1String(".."));
 }
 
@@ -381,7 +386,7 @@ void CloudflareProvider::submit(const JobRequest &request, Reply<QString> reply)
     if (spec.guidance && params.value("guidance").isDouble())
         sent.insert("guidance", params.value("guidance"));
     if (spec.seed && params.value("seed").isDouble() && params.value("seed").toDouble() >= 0)
-        sent.insert("seed", params.value("seed"));
+        sent.insert("seed", double(qint64(params.value("seed").toDouble()) % kSeedRange));
 
     struct Picture {
         QByteArray bytes;
@@ -390,19 +395,38 @@ void CloudflareProvider::submit(const JobRequest &request, Reply<QString> reply)
     };
     QList<Picture> pictures;
     Errors errors;
-    for (int i = 0; i < images.size() && i < spec.images; ++i) {
+    if (images.size() > spec.images && spec.images > 0)
+        return reply(Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("%1 takes at most %2 pictures, not %3.").arg(spec.title).arg(spec.images).arg(images.size()),
+                                               QStringLiteral("Take some pictures off the node."))));
+    for (int i = 0; i < images.size(); ++i) {
         const QString path = images.at(i).toObject().value("path").toString();
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
             errors.append(makeError(QStringLiteral("file_not_found"), QStringLiteral("Cannot read the input image %1.").arg(path)));
             continue;
         }
-        Picture picture;
-        picture.bytes = file.readAll();
-        const QString format = formatOf(picture.bytes);
-        picture.type = format == QLatin1String("jpeg") ? QStringLiteral("image/jpeg") : format == QLatin1String("webp") ? QStringLiteral("image/webp") : QStringLiteral("image/png");
-        picture.name = QStringLiteral("input_image_%1.%2").arg(i).arg(format == QLatin1String("jpeg") ? QStringLiteral("jpg") : format.isEmpty() ? QStringLiteral("png") : format);
-        pictures.append(picture);
+        // Every picture is sent as a PNG within 511x511: the models take none of 512x512 or more. The aspect is kept, a smaller
+        // picture is not enlarged and the EXIF rotation is applied.
+        if (!initVips()) {
+            errors.append(vipsUnavailable());
+            break;
+        }
+        try {
+            const QByteArray raw = file.readAll();
+            vips::VImage small = vips::VImage::thumbnail_buffer(const_cast<char *>(raw.constData()), size_t(raw.size()), kPictureSide,
+                                                                vips::VImage::option()->set("height", kPictureSide)->set("size", VIPS_SIZE_DOWN));
+            void *memory = nullptr;
+            size_t length = 0;
+            small.write_to_buffer(".png", &memory, &length);
+            Picture picture;
+            picture.bytes = QByteArray(static_cast<const char *>(memory), qsizetype(length));
+            g_free(memory);
+            picture.type = QStringLiteral("image/png");
+            picture.name = QStringLiteral("input_image_%1.png").arg(i);
+            pictures.append(picture);
+        } catch (const vips::VError &error) {
+            errors.append(vipsError(error, QStringLiteral("media_unreadable")));
+        }
     }
     if (hasErrors(errors))
         return reply(Result<QString>(errors));

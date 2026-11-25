@@ -2,6 +2,9 @@
 // Every token here is made up. Nothing reaches Cloudflare.
 
 #include <QDir>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -11,6 +14,8 @@
 
 #include "engine/cloudflare_provider.h"
 #include "engine/providers.h"
+#include "engine/server_api.h"
+#include "engine/vips.h"
 #include "fake_http.h"
 #include "../test_shard.h"
 #include "provider_support.h"
@@ -205,7 +210,8 @@ private slots:
         const HttpRequest edited = fixture.api.requestsTo("POST", runPath(kKlein).toLatin1()).last();
         QVERIFY(edited.body.contains("name=\"input_image_0\"; filename=\"input_image_0.png\""));
         QVERIFY(edited.body.contains("name=\"input_image_1\""));
-        QVERIFY(edited.body.contains(kPng));
+        QVERIFY(edited.body.toLower().contains("content-type: image/png"));
+        QVERIFY(edited.body.contains("\x89PNG"));
         QVERIFY(!edited.body.contains(kKey));
 
         // A model with no reference pictures, a mask, and an edit with no picture are refused before anything is sent.
@@ -214,6 +220,110 @@ private slots:
         QCOMPARE(run(*provider, fixture.request("image.generate", kKlein, {{"prompt", "x"}}, {{"mask", image}})).error.code, QStringLiteral("mask_unsupported"));
         QCOMPARE(run(*provider, fixture.request("image.edit", kKlein, {{"prompt", "x"}})).error.code, QStringLiteral("missing_input"));
         QCOMPARE(fixture.api.requests().size(), sent);
+    }
+
+    void aBigReferencePictureIsScaledToFitUnder512KeepingItsAspect() {
+        Fixture fixture;
+        QVERIFY(initVips());
+        const vips::VImage wide = vips::VImage::black(2048, 1024);
+        wide.write_to_file(fixture.dir.filePath("wide.png").toUtf8().constData());
+        auto provider = fixture.provider();
+        const QJsonObject image{{"path", fixture.dir.filePath("wide.png")}, {"format", "png"}};
+        QCOMPARE(run(*provider, fixture.request("image.edit", kKlein, {{"prompt", "x"}}, {{"image", image}})).state, QStringLiteral("done"));
+        const QByteArray body = fixture.api.requestsTo("POST", runPath(kKlein).toLatin1()).last().body;
+        const qsizetype start = body.indexOf("\x89PNG");
+        QVERIFY(start > 0);
+        const QSize size = serverapi::pngSize(body.mid(start, body.indexOf("\r\n--", start) - start));
+        QCOMPARE(size, QSize(511, 256));
+        // A picture libvips cannot read is refused before anything is sent, and more pictures than the model takes are too.
+        QFile bad(fixture.dir.filePath("bad.png"));
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("not a picture");
+        bad.close();
+        const int sent = fixture.api.requests().size();
+        const QJsonObject broken{{"path", fixture.dir.filePath("bad.png")}, {"format", "png"}};
+        QCOMPARE(run(*provider, fixture.request("image.edit", kKlein, {{"prompt", "x"}}, {{"image", broken}})).error.code, QStringLiteral("media_unreadable"));
+        const QJsonArray five{image, image, image, image, image};
+        const JobStatus many = run(*provider, fixture.request("image.edit", kKlein, {{"prompt", "x"}}, {{"images", five}}));
+        QCOMPARE(many.error.code, QStringLiteral("input_invalid"));
+        QVERIFY(many.error.message.contains("at most 4"));
+        QCOMPARE(fixture.api.requests().size(), sent);
+    }
+
+    void aSeedBeyondTheSignedIntRangeIsReducedAndTheOneSentIsRecorded() {
+        Fixture fixture;
+        auto provider = fixture.provider();
+        JobResult result;
+        const qint64 seed = (1LL << 40) + 5;
+        QCOMPARE(run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}, {"seed", double(seed)}}), &result).state, QStringLiteral("done"));
+        const qint64 sent = parse(fixture.api.requestsTo("POST", runPath(kSchnell).toLatin1()).last().body).value("seed").toDouble();
+        QCOMPARE(sent, seed % 2147483647);
+        QVERIFY(sent < (1LL << 31));
+        QCOMPARE(qint64(result.used.value("seed").toDouble()), sent);
+    }
+
+    void aModelIdOutsideTheRuleIsNotOfferedNorSent() {
+        Fixture fixture;
+        auto provider = fixture.provider({{"image_models", "@cf/x/.hidden, @cf/x/-dash, @cf/x/ok"}});
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QStringList names;
+        for (const OfferedModel &model : described->offer("image.generate")->models)
+            names.append(model.handle.value("name").toString());
+        QVERIFY(names.contains("@cf/x/ok") && !names.contains("@cf/x/.hidden") && !names.contains("@cf/x/-dash"));
+        const JobStatus status = run(*provider, fixture.request("image.generate", "@cf/x/../y", {{"prompt", "x"}}));
+        QVERIFY(status.state == QLatin1String("error") && !status.error.code.isEmpty());
+        QVERIFY(fixture.api.requests().isEmpty());
+    }
+
+    void plainHttpToARemoteHostIsRefusedAtSubmitWithNothingSent() {
+        Fixture fixture;
+        ProviderInstance instance;
+        instance.name = QStringLiteral("Cloudflare Workers AI");
+        instance.type = QStringLiteral("cloudflare");
+        instance.key = QString::fromLatin1(kKey);
+        instance.address = QStringLiteral("http://api.example.com");
+        instance.settings.insert("account_id", kAccount);
+        CloudflareProvider provider(instance);
+        const JobStatus status = run(provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("provider_unreachable"));
+        QVERIFY(status.error.hint.contains("https://"));
+        QVERIFY(!json(status.error.toJson()).contains(kKey));
+    }
+
+    void anAnswerBeyondTheCapIsCutOff() {
+        Fixture fixture;
+        fixture.answer = HttpResponse{200, QByteArray(33 << 20, 'x')};
+        auto provider = fixture.provider();
+        const JobStatus status = run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+        QVERIFY(status.error.message.contains("more data"));
+    }
+
+    void anAnswerThatTricklesInIsGivenUpOnAtTheJobsDeadline() {
+        // A server that sends a huge answer one byte at a time: no byte-to-byte timeout ever trips.
+        QTcpServer drip;
+        QVERIFY(drip.listen(QHostAddress::LocalHost, 0));
+        QObject::connect(&drip, &QTcpServer::newConnection, &drip, [&drip] {
+            QTcpSocket *socket = drip.nextPendingConnection();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket] {
+                socket->readAll();
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000000\r\n\r\n");
+                auto *timer = new QTimer(socket);
+                QObject::connect(timer, &QTimer::timeout, socket, [socket] { socket->write("x"); });
+                timer->start(20);
+            });
+        });
+        Fixture fixture;
+        // the job's deadline is 6 times timeout_s
+        ProviderInstance instance;
+        instance.name = QStringLiteral("Cloudflare Workers AI");
+        instance.type = QStringLiteral("cloudflare");
+        instance.key = QString::fromLatin1(kKey);
+        instance.address = QStringLiteral("http://127.0.0.1:%1").arg(drip.serverPort());
+        instance.settings = QJsonObject{{"account_id", kAccount}, {"timeout_s", 0.15}};
+        CloudflareProvider slow(instance);
+        const JobStatus status = run(slow, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_timeout"));
     }
 
     void theTokenGoesToTheApiOriginOnlyAndARedirectIsNotFollowed() {

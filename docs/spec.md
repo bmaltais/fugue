@@ -1783,7 +1783,8 @@ pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `plac
 - **The flow.** One synchronous call: `POST <address>/client/v4/accounts/<account_id>/ai/run/<model id>`. schnell takes JSON
   (`prompt`, `steps`, `seed`); the FLUX.2 models take `multipart/form-data` even for a prompt (`prompt`, `width` and `height` clamped
   to 256..1920, `guidance`, `seed`, `steps` for dev only, and each reference picture as `input_image_0`..`input_image_3`; the
-  documentation asks for pictures under 512x512 and Fugue does not resize them). The answer is Cloudflare's envelope
+  documentation asks for pictures under 512x512, so each is scaled down with libvips to fit 511x511, keeping its aspect and never
+  enlarging, and sent as a PNG; more pictures than the model takes are refused with `input_invalid`). The answer is Cloudflare's envelope
   `{"result": {"image": "<base64>"}, "success": true, "errors": [], "messages": []}`; a bare `{"image": ...}` and a raw `image/*` body
   are read too. The picture is saved from the base64 at once: nothing is downloaded. Cancel aborts the request and answers
   `cancelled` at once. The engine id is `cloudflare@<host>`; the `engine` used is `cloudflare@<model id>`.
@@ -1808,8 +1809,7 @@ pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `plac
 
 - **Decisions** (the builder's, each with its confidence; overturn any): FLUX.1 [schnell], FLUX.2 [klein] 4B and 9B and FLUX.2 [dev]
   are the table, the others (Leonardo, Stable Diffusion models, some being deprecated on 2026-11-20) are left to `image_models`
-  (medium-high: their request fields were not read); no resizing of reference pictures (medium: the limit is in the changelog, not
-  in the model pages); no retry of a call (high: neurons are billed per run).
+  (medium-high: their request fields were not read); reference pictures are scaled to fit 511x511 (medium-high: the limit is in the FLUX.2 [dev] changelog, not in every model page); a seed is reduced modulo 2^31-1 (medium: no range is documented) and the one sent is what the run record holds; no retry of a call (high: neurons are billed per run).
 - **Not checked against the real service**: no Cloudflare token was at hand. The tests use a fake API on the loopback whose answers
   follow Cloudflare's documentation; the exact REST envelope for the image models, the error codes (5007, the neuron-limit message),
   whether the partner FLUX.2 models draw on the free allocation, and `seed` for schnell (used in Cloudflare's examples, not in its
