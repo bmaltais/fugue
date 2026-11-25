@@ -39,11 +39,11 @@
 
 #include "engine/app_binding.h"
 #include "engine/document.h"
-#include "run/run_service.h"
 
 namespace fugue {
 
 class Registry;
+struct RunRequest; // run/run_service.h: only the .cpp needs it, so this header (in qml_app.h) stays light
 
 class AppView : public QObject {
     Q_OBJECT

@@ -8,6 +8,7 @@
 #include "engine/error.h"
 #include "engine/input_binding.h"
 #include "engine/registry.h"
+#include "run/run_service.h"
 
 namespace fugue {
 

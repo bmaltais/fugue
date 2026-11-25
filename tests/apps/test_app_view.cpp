@@ -9,6 +9,7 @@
 #include "apps/app_view.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
+#include "run/run_service.h"
 
 using namespace fugue;
 

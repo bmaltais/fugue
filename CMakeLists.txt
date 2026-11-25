@@ -43,6 +43,9 @@ add_library(fugue_engine ${fugue_lib_type} ${fugue_engine_sources})
 target_include_directories(fugue_engine PUBLIC src)
 target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan PkgConfig::ARCHIVE ZLIB::ZLIB)
 target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
+# vips.h pulls in vips7compat.h, whose `#define Rect VipsRect` breaks fugue::crop::Rect in any file that includes a vips
+# header first. Fugue uses only the vips8 API.
+target_compile_definitions(fugue_engine PUBLIC VIPS_DISABLE_COMPAT)
 # The model catalogs (spec 8.9, #134) are compiled in: src/catalog/*.json under :/fugue/catalog.
 file(GLOB fugue_catalogs CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/catalog src/catalog/*.json)
 set(fugue_catalog_files)
