@@ -55,7 +55,7 @@ Popup {
     function refocus() {
         if (!opened)
             return
-        let item = card.Window.activeFocusItem
+        let item = parent ? parent.Window.activeFocusItem : null
         const lost = item === null || item === card || item === cancel || item === close
         while (item && item !== card)
             item = item.parent
