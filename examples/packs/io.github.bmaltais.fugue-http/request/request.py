@@ -4,7 +4,9 @@ One JSON request on stdin, one result or error line on stdout (docs/nodes/protoc
 when a run reaches the node; a check or validation never starts it. Rules, in the order they apply:
 
 - Only https is called, except loopback (localhost, 127.0.0.1, ::1), where http is also allowed.
-- {secret:NAME} is reserved for pack secrets (#402) and fails today with "secrets are not supported yet".
+- {secret:token_1} to {secret:token_3} name the pack's own secrets (#402). The runner puts only those the pack declared in the
+  request's "secrets" object, at run time. A secret fills the URL path or query (percent-encoded) and header values, never the body or the address, and
+  only for the origin (scheme, host, port) the person set it for. Its value is taken out ("***") of everything the node returns.
 - A redirect is not followed: its status and body come back as they are.
 - A status of 400 or more is an output, not an error, unless fail_on_error_status is on.
 - The whole call (connect, send, read) must finish within timeout_s, and the answer may be at most
@@ -26,7 +28,11 @@ import urllib.request
 
 JSON_PLACEHOLDER = re.compile(r"\{([a-d]):json\}")
 ANY_PLACEHOLDER = re.compile(r"\{([a-d])(:json)?\}")
+ANY_OR_SECRET = re.compile(r"\{(?:([a-d])(:json)?|secret:([a-z][a-z0-9_]*))\}")
 SECRET = re.compile(r"\{secret:[^{}]*\}")
+SECRET_PLACEHOLDER = re.compile(r"\{secret:([a-z][a-z0-9_]*)\}")
+DECLARED_SECRETS = ("token_1", "token_2", "token_3")  # pack.json's settings
+MIN_MASKED = 4
 HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 LOOPBACK_NAMES = {"localhost"}
 UPLOADS = ("picture", "audio", "video")
@@ -55,21 +61,108 @@ def is_loopback(host):
 
 def check_no_secret(text, where):
     if SECRET.search(text):
-        fail(
-            "not_supported",
-            "Secrets are not supported yet: %s uses {secret:NAME}." % where,
-            "Pack secrets are planned; until then do not put a key in a workflow, and call a service that needs none.",
-        )
+        fail("bad_input", "%s uses {secret:NAME}, and a secret cannot go there." % where,
+             "Put it in a header or the URL; a body is what a server often echoes back.")
 
 
-def fill_text(template, values, quote=False):
-    """Replaces {a} to {d} (and {a:json}, as the text it holds) in one pass, so a value is never expanded again."""
+def origin_of(scheme, host, port):
+    """scheme://host[:port], lower case, the default port left out: the one form an origin is compared in."""
+    scheme = scheme.lower()
+    host = host.lower()
+    if ":" in host:
+        host = "[%s]" % host
+    standard = 443 if scheme == "https" else 80
+    return "%s://%s%s" % (scheme, host, ":%d" % port if port and port != standard else "")
+
+
+def template_origin(template):
+    """The origin of a URL template, read from its literal scheme and authority. A placeholder there ({a} to {d},
+    {secret:...}) is refused: it would let a workflow decide where a key goes."""
+    match = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]*)", template)
+    if not match:
+        fail("bad_input", "The URL must start with https:// and a host written out.", "Placeholders go in the path or the query, not in the address.")
+    if "{" in match.group(0) or "}" in match.group(0):
+        fail("bad_input", "The scheme, user, host and port of the URL cannot hold a placeholder.",
+             "Write the address out, like https://api.example.com/path/{a}; only the path and the query can use {a} to {d} or {secret:...}.")
+    try:
+        parts = urllib.parse.urlsplit(match.group(0))
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        fail("bad_input", "The URL's address is not valid.")
+    if not host:
+        fail("bad_input", "The URL must start with https:// and name a host.")
+    return origin_of(parts.scheme, host, port)
+
+
+class Secrets:
+    """The pack's secret values for this run, and the one place they are looked up and masked. A value is used only for the
+    origin the person set it for, which is checked against the URL's own (written out, no placeholders) before any connection."""
+
+    def __init__(self, given):
+        self.values = {}
+        self.origins = {}
+        for name, entry in (given or {}).items():
+            if isinstance(entry, dict) and isinstance(entry.get("value"), str) and entry["value"]:
+                self.values[name] = entry["value"]
+                self.origins[name] = entry.get("origin") if isinstance(entry.get("origin"), str) else ""
+        self.request_origin = None
+
+    def value(self, name):
+        if name not in DECLARED_SECRETS:
+            fail("bad_input", "{secret:%s} is not one of this pack's secrets." % name[:40],
+                 "Use " + ", ".join("{secret:%s}" % each for each in DECLARED_SECRETS) + ".")
+        if name not in self.values:
+            fail("secret_missing", "The secret %s is not set." % name,
+                 "Set it under Settings > Packs, or `fugue pack secret set io.github.bmaltais.fugue-http %s --origin https://api.example.com`." % name)
+        origin = self.origins.get(name, "")
+        if not origin:
+            fail("secret_missing", "The secret %s has no origin, so it is not used." % name,
+                 "Clear it and set it again with the origin it is for, like https://api.example.com.")
+        if origin != self.request_origin:
+            fail("bad_input", "%s is only for %s, and this URL goes to %s." % (name, origin, self.request_origin),
+                 "A key is sent only to the service it was set for. Change the URL, or set the key for this address.")
+        return self.values[name]
+
+    def forms(self, value):
+        quoted = urllib.parse.quote(value, safe="")
+        lowered = re.sub(r"%[0-9A-F]{2}", lambda m: m.group(0).lower(), quoted)
+        return {
+            value, quoted, lowered, urllib.parse.quote_plus(value), lowered.replace("%20", "+"),
+            json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1],
+        }
+
+    def mask(self, text):
+        found = set()
+        for value in self.values.values():
+            if len(value) >= MIN_MASKED:
+                found |= self.forms(value)
+        for form in sorted(found, key=len, reverse=True):
+            text = text.replace(form, "***")
+        return text
+
+    def mask_all(self, node):
+        if isinstance(node, str):
+            return self.mask(node)
+        if isinstance(node, list):
+            return [self.mask_all(item) for item in node]
+        if isinstance(node, dict):
+            return {self.mask(key): self.mask_all(item) for key, item in node.items()}
+        return node
+
+
+def fill_text(template, values, quote=False, secrets=None):
+    """Replaces {a} to {d} (and {a:json}, as the text it holds) and, where `secrets` is given, {secret:NAME} in one pass,
+    so a value is never expanded again (an input that holds the text {secret:token_1} stays that text)."""
 
     def one(match):
-        value = values[match.group(1)]
+        if match.re is ANY_OR_SECRET and match.group(3) is not None:
+            value = secrets.value(match.group(3))
+        else:
+            value = values[match.group(1)]
         return urllib.parse.quote(value, safe="") if quote else value
 
-    return ANY_PLACEHOLDER.sub(one, template)
+    pattern = ANY_OR_SECRET if secrets is not None else ANY_PLACEHOLDER
+    return pattern.sub(one, template)
 
 
 def fill_json(node, values):
@@ -89,7 +182,14 @@ def fill_json(node, values):
     return node
 
 
-def parse_headers(text, values):
+def check_secret_names(text, where):
+    for match in SECRET.finditer(text):
+        if not SECRET_PLACEHOLDER.fullmatch(match.group(0)):
+            fail("bad_input", "%s has a {secret:...} that does not name a secret." % where,
+                 "Write it like {secret:token_1}: lowercase letters, digits and _.")
+
+
+def parse_headers(text, values, secrets):
     headers = {}
     for line in text.splitlines():
         if not line.strip():
@@ -98,7 +198,12 @@ def parse_headers(text, values):
         name = name.strip()
         if not colon or not HEADER_NAME.match(name):
             fail("bad_input", "Header line %r is not Name: value." % name[:40])
-        filled = fill_text(value.strip(), values)
+        # Host would route the call past the URL's origin (a shared edge sends it to another app), and Proxy-* goes to a
+        # proxy rather than the service: either could carry a key somewhere the origin check never saw. The URL decides.
+        if name.lower() == "host" or name.lower().startswith("proxy-"):
+            fail("bad_input", "The %s header cannot be set here; the URL decides where the call goes." % name,
+                 "Put the service's address in the URL.")
+        filled = fill_text(value.strip(), values, secrets=secrets)
         if "\r" in filled or "\n" in filled:
             fail("bad_input", "The value of header %s has a line break after the placeholders are filled." % name)
         headers[name] = filled
@@ -237,7 +342,7 @@ def as_text(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def run(inputs):
+def run(inputs, secrets):
     values = {name: str(inputs.get(name) or "") for name in "abcd"}
     method = str(inputs.get("method") or "GET").upper()
     if method not in METHODS:
@@ -250,12 +355,14 @@ def run(inputs):
     limit = max(1, int(inputs.get("max_response_mb") or 5)) * 1024 * 1024
     upload_field = str(inputs.get("upload_field") or "file")
 
-    for where, text in (("the URL", template_url), ("a header", header_text), ("the body", body_text)):
-        check_no_secret(text, where)
+    check_no_secret(body_text, "the body")
+    for where, text in (("the URL", template_url), ("a header", header_text)):
+        check_secret_names(text, where)
     if not template_url:
         fail("bad_input", "The URL is empty.", "Set url, for example https://example.com/api.")
 
-    url = fill_text(template_url, values, quote=True)
+    secrets.request_origin = template_origin(template_url)  # from the written-out address, before anything is filled
+    url = fill_text(template_url, values, quote=True, secrets=secrets)
     parsed = urllib.parse.urlsplit(url)
     host = parsed.hostname or ""
     if parsed.scheme not in ("http", "https") or not host:
@@ -266,7 +373,7 @@ def run(inputs):
         fail("bad_input", "Only https is allowed; %s is not this machine." % host,
              "Use https://. Plain http works only for localhost, 127.0.0.1 and ::1.")
 
-    headers = parse_headers(header_text, values)
+    headers = parse_headers(header_text, values, secrets)
 
     data, kind, fields = None, None, None
     if body_kind == "json":
@@ -327,12 +434,15 @@ def run(inputs):
 
 
 def main():
+    secrets = Secrets(None)
     try:
         request = json.loads(sys.stdin.read())
-        outputs = run(request.get("inputs", {}))
+        secrets = Secrets(request.get("secrets"))
+        outputs = run(request.get("inputs", {}), secrets)
         line = {"op": "result", "outputs": outputs}
     except Failure as failure:
         line = {"op": "error", "code": failure.code, "message": failure.text}
+    line = secrets.mask_all(line)  # no value of a secret leaves the node: not in an output, not in an error
     print(json.dumps(line, ensure_ascii=False))
     sys.stdout.flush()
     return 0 if line["op"] == "result" else 1

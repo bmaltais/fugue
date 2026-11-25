@@ -36,6 +36,8 @@ QString packSummaryLine(const ReadinessPack &row, const QString &from) {
     if (!from.isEmpty() && row.installs())
         parts << ReadinessSheet::tr("from %1").arg(from);
     parts << ReadinessSheet::tr("declares %1").arg(p.permissions.isEmpty() ? ReadinessSheet::tr("nothing") : p.permissions.join(QStringLiteral(", ")));
+    if (!p.secrets.isEmpty())
+        parts << ReadinessSheet::tr("reads secrets %1").arg(p.secrets.join(QStringLiteral(", ")));
     if (row.hasEnvironment())
         parts << ReadinessSheet::tr("runs %1").arg(displayCommand(p.setupCommand));
     return parts.join(QStringLiteral(" · "));
@@ -361,6 +363,7 @@ void ReadinessSheet::publish() {
                                                      : packSummaryLine(row, from)},
                              {"source", from}, {"runtime", p.runtimeKinds.join(QStringLiteral(", "))},
                              {"permissions", p.permissions.isEmpty() ? tr("nothing (network, files, GPU)") : p.permissions.join(QStringLiteral(", "))},
+                             {"secrets", p.secrets.join(QStringLiteral(", "))},
                              {"setup", row.hasEnvironment() ? displayCommand(p.setupCommand) : QString()},
                              {"setupNote", p.setupDescription},
                              {"setupSize", p.setupSize >= 0 ? ModelDownloads::sizeText(p.setupSize) : QString()},

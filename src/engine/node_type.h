@@ -101,6 +101,14 @@ struct NodeType {
     // The version of the pack this type was loaded from (pack.json), set by the pack loader;
     // empty for a type with no pack folder. Trust and the cache key use it (6.7, 10.1).
     QString packVersion;
+    // The names of the secrets the node's pack declares in pack.json `settings` (6.4, #402): the only
+    // ones the runner hands to this node's program. Set by the pack loader.
+    QStringList packSecrets;
+    // Of those, the ones pack.json says need an origin (`"origin": "required"`): a value stored without one is not handed over.
+    QStringList packSecretsOriginRequired;
+    // Where the pack was installed from (its `.fugue-source.json` location), empty for one copied in by hand: with the pack id
+    // it is the key the pack's secret values are stored under (6.4.1).
+    QString packSource;
     // What the pack loader saw of a command node's files (nodeSeal in command_node.h); the
     // runner refuses to run when they no longer match. Empty: not checked.
     QString seal;

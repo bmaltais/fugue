@@ -29,6 +29,9 @@ Fugue starts the program for each execution, writes one request, closes stdin.
 - Media inputs are [handles](types.md) with a `path` you can read. Do not write to input files:
   they are shared with the result cache.
 - An optional input nobody set is absent. One with a `default` is always there.
+- `secrets` is there only when the pack declares secrets in `pack.json` `settings` and the person has set some: `"secrets": {"token_1": {"value": "…", "origin": "https://api.example.com"}}`. Use a value only for a request to exactly its `origin` (scheme, host, port); `origin` is empty when the person set none,
+  the pack's own names only, for this run (a persistent program gets the current values with each request). It is never an input and never in the
+  environment. Do not write a value to an output or a log; Fugue also replaces any value of 4 characters or more with `***` in what you return.
 
 The program answers with zero or more progress lines and one result or error:
 

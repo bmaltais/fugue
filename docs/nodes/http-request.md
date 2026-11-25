@@ -15,9 +15,15 @@ What it does, in short:
 - A status of 404 or 500 is **not an error**: `status` is an output, so the workflow can branch on it. Turn on
   `fail_on_error_status` to make 400 and above stop the run.
 - It does not follow redirects: a 302 comes back as the status and body.
-- **No keys in workflows.** A workflow file is plain text and gets shared. A header may later name a pack secret as
-  `{secret:NAME}`; pack secrets are not built yet, so using it today stops the node with "Secrets are not supported yet".
-  Call services that need no key until then.
+- **No keys in workflows.** A workflow file is plain text and gets shared. Keep a key in the pack's secrets instead:
+  open Settings > Packs, find *HTTP Request*, write the service's address under *Only for* (`https://api.example.com`), type the key
+  and press Enter (or pipe it in: `read -rs v; printf %s "$v" | fugue pack secret set io.github.bmaltais.fugue-http token_1 --origin https://api.example.com`).
+  Then write `{secret:token_1}` in a header (`Authorization: Bearer {secret:token_1}`) or in the path or query of the URL. `token_1` to `token_3` are there.
+  **A key goes only to the address it was set for**: a workflow that points the node at another host (or builds the host from an input, or puts
+  a placeholder in the address) stops with "token_1 is only for https://api.example.com" before anything is sent, so opening a workflow you were given cannot leak your key. The value is filled in when the node runs,
+  and is taken out of everything the node returns, so a server that echoes it back shows `***`. It cannot go in the body (use a header),
+  and an input that holds the text `{secret:token_1}` sends that text, not the key. A secret that is not set stops the node with
+  `secret_missing` and says where to set it.
 
 ## Inputs and outputs
 

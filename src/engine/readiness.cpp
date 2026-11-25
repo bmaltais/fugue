@@ -146,11 +146,13 @@ QStringList ReadinessPlan::lines() const {
             out << QStringLiteral("    From:      %1").arg(from);
         if (row.pending) {
             out << QStringLiteral("    Details after download: what it runs as, what it declares and its setup are shown by the pack itself once fetched (https only, 200 MB at most);");
-            out << QStringLiteral("    a pack that declares network, file or GPU access asks once more before it is installed.");
+            out << QStringLiteral("    a pack that declares network, file or GPU access, or reads secrets, asks once more before it is installed.");
             continue;
         }
         out << QStringLiteral("    Runs as:   %1").arg(p.runtimeKinds.isEmpty() ? QStringLiteral("(no nodes)") : p.runtimeKinds.join(QStringLiteral(", ")));
         out << QStringLiteral("    Declares:  %1").arg(p.permissions.isEmpty() ? QStringLiteral("nothing (network, files, GPU)") : p.permissions.join(QStringLiteral(", ")));
+        if (!p.secrets.isEmpty())
+            out << QStringLiteral("    Reads:     the secrets %1 (you set their values; they are never in a workflow)").arg(p.secrets.join(QStringLiteral(", ")));
         if (row.hasEnvironment()) {
             out << QStringLiteral("    Setup:     %1%2").arg(displayCommand(p.setupCommand),
                                                          p.setupSize >= 0 ? QStringLiteral(" (downloads %1)").arg(sizeText(p.setupSize)) : QString());
@@ -184,7 +186,8 @@ QJsonObject ReadinessPlan::toJson() const {
     for (const ReadinessPack &row : packs) {
         const PackSummary &p = row.pack;
         QJsonObject o{{"action", row.installs() ? "install" : "trust"}, {"pending", row.pending}, {"id", p.id}, {"version", p.version}, {"name", p.name},
-                      {"runtime", QJsonArray::fromStringList(p.runtimeKinds)}, {"permissions", QJsonArray::fromStringList(p.permissions)}};
+                      {"runtime", QJsonArray::fromStringList(p.runtimeKinds)}, {"permissions", QJsonArray::fromStringList(p.permissions)},
+                      {"secrets", QJsonArray::fromStringList(p.secrets)}};
         if (const QString from = sourceText(p.source); !from.isEmpty())
             o.insert("source", from);
         if (row.hasEnvironment())
@@ -493,8 +496,11 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
                 break;
             }
             // Nothing about its permissions could be shown before the download: more than nothing is asked, for this row alone.
-            if (!shown.permissions.isEmpty() && !(run.allowMore && run.allowMore(shown, shown.permissions))) {
-                finish(i, RowState::Skipped, QStringLiteral("skipped: it declares %1").arg(shown.permissions.join(QStringLiteral(", "))));
+            QStringList more = shown.permissions;
+            if (!shown.secrets.isEmpty())
+                more << QStringLiteral("secrets (%1)").arg(shown.secrets.join(QStringLiteral(", ")));
+            if (!more.isEmpty() && !(run.allowMore && run.allowMore(shown, more))) {
+                finish(i, RowState::Skipped, QStringLiteral("skipped: it declares %1").arg(more.join(QStringLiteral(", "))));
                 continue;
             }
             prompts = approvals(shown, run, refused);

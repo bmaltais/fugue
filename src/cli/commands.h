@@ -77,6 +77,8 @@ Reply packAdd(const Command &command, Context &context);
 Reply packRemove(const Command &command, Context &context);
 Reply packUpdate(const Command &command, Context &context);
 Reply packTrust(const Command &command, Context &context);
+// `pack secret list [<pack>]`, `set <pack> <name>` (the value from stdin) and `clear <pack> <name>` (6.4, #402).
+Reply packSecret(const Command &command, Context &context);
 // `template prepare` and `workflow prepare` (#379): the one list and the one question (engine/readiness.h).
 Reply templatePrepare(const Command &command, Context &context);
 Reply workflowPrepare(const Command &command, Context &context);
