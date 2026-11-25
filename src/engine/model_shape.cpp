@@ -366,12 +366,13 @@ ModelShape shapeOf(const Header &header) {
     }
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
-                        QStringLiteral("txt_in.in_layer.weight"), QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
+                        QStringLiteral("txt_in.in_layer.weight"), QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight"),
+                        QStringLiteral("text_embedder.proj.weight")}));
     shape.clipWidth = inputWidth(tensor(shapes, {QStringLiteral("vector_in.in_layer.weight")}));
     std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
-                        QStringLiteral("patch_embedding.weight")});
+                        QStringLiteral("patch_embedding.weight"), QStringLiteral("video_embedder.weight")});
     // A diffusers UNet names its input convolution conv_in (a VAE has encoder.conv_in and
     // decoder.conv_in): only SDXL Inpaint's, which takes 9 channels, is read from it.
     if (!image) {
@@ -398,6 +399,9 @@ ModelShape shapeOf(const Header &header) {
              (shape.latentChannels == 96 || shape.latentChannels == 49))
         shape.latentChannels = 16;
     const bool diffusion = shape.textWidth || shape.latentChannels;
+    // MOSS-Image (the engine's own test): it reads Qwen3.5 through its text_embedder and needs the
+    // official Qwen3.5 tokenizer.json, which no model file holds.
+    const bool moss = hasTensor(shapes, QStringLiteral("video_embedder.")) && hasTensor(shapes, QStringLiteral("shared_block_modulation."));
     if (diffusion) {
         // Wan (text_embedding and a 3D patch_embedding) reads UMT5, a T5, and takes a video VAE.
         const bool wan = hasTensor(shapes, QStringLiteral("text_embedding.0.")) && hasTensor(shapes, QStringLiteral("patch_embedding."));
@@ -417,6 +421,10 @@ ModelShape shapeOf(const Header &header) {
             shape.llmFamily = hasTensor(shapes, QStringLiteral("txt_in.in_layer.")) ? QStringLiteral("qwen3") : QStringLiteral("qwen2.5");
         else if (!t5 && (hasTensor(shapes, QStringLiteral("cap_embedder.")) || hasTensor(shapes, QStringLiteral("txt_in."))))
             shape.llmFamily = QStringLiteral("qwen3");
+        if (moss) {
+            shape.llmFamily = QStringLiteral("qwen3.5");
+            shape.needsQwen35Tokenizer = true;
+        }
         shape.unet = hasTensor(shapes, QStringLiteral("input_blocks.")) || hasTensor(shapes, QStringLiteral("down_blocks."));
         // A checkpoint carries its VAE (first_stage_model.decoder) beside the diffusion model.
         shape.kind = tensor(shapes, {QStringLiteral("decoder.conv_in.weight")}) ? ModelKind::Checkpoint : ModelKind::DiffusionModel;

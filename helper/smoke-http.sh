@@ -10,8 +10,10 @@ work="$(mktemp -d)"
 pid=
 cleanup() { [[ -n $pid ]] && kill "$pid" 2>/dev/null || true; rm -rf "$work"; }
 trap cleanup EXIT
-mkdir -p "$work/models/vae"
+mkdir -p "$work/models/vae" "$work/models/tokenizers" "$work/models/tokenizers/a=b"
 head -c 1000 /dev/zero > "$work/models/vae/small.safetensors"
+echo '{"v": 1}' > "$work/models/tokenizers/tok.json"
+cp "$work/models/tokenizers/tok.json" "$work/models/tokenizers/a=b/tok.json"
 echo "secret-key" > "$work/key"
 mkdir -p "$work/tmp"
 export TMPDIR="$work/tmp" # the helper's job folders are made here
@@ -57,6 +59,13 @@ check "missing model: 400" 400 "$(code "${auth[@]}" -X POST -d "$miss" "$url/sub
 check "missing model code" model_missing "$(curl -s "${auth[@]}" -X POST -d "$miss" "$url/submit" | python3 -c 'import json,sys; print(json.load(sys.stdin)["error"]["code"])')"
 check "a path outside the roots: 400" 400 "$(code "${auth[@]}" -X POST -d '{"capability":"latent.decode","params":{"context":{"vae_path":"/etc/passwd"}}}' "$url/submit")"
 check "a name with ..: 400" 400 "$(code "${auth[@]}" -X POST -d '{"capability":"latent.decode","params":{"context":{"vae_path":{"name":"../key"}}}}' "$url/submit")"
+# The engine's tokenizer option (MOSS Image): a path outside the roots and a name with .. are refused, a handle is
+# resolved in tokenizers/, and a file whose path the engine would read as a list of settings is refused.
+tok() { echo "{\"capability\":\"text.encode\",\"params\":{\"context\":{\"tokenizer\":$1}}}"; }
+check "a tokenizer path outside the roots: 400" 400 "$(code "${auth[@]}" -X POST -d "$(tok '"/etc/passwd"')" "$url/submit")"
+check "a tokenizer name with ..: 400" 400 "$(code "${auth[@]}" -X POST -d "$(tok '{"name":"../key"}')" "$url/submit")"
+check "a tokenizer handle in tokenizers/ is accepted" 200 "$(code "${auth[@]}" -X POST -d "$(tok '{"name":"tok.json"}')" "$url/submit")"
+check "a tokenizer path with = is refused: 400" 400 "$(code "${auth[@]}" -X POST -d "$(tok "\"$work/models/tokenizers/a=b/tok.json\"")" "$url/submit")"
 check "unknown job: 404" 404 "$(code "${auth[@]}" -X POST -d '{"job":"99"}' "$url/status")"
 check "a result file of no job: 404" 404 "$(code "${auth[@]}" "$url/result/99/0")"
 check "shutdown does nothing" "{}" "$(curl -s "${auth[@]}" -X POST -d '{}' "$url/shutdown")"

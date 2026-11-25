@@ -129,6 +129,13 @@ private slots:
         }
         QVERIFY(!catalog.find("4x-ultrasharp")->commercial); // CC BY-NC-SA: said
         QVERIFY(catalog.find("realesrgan-x4plus")->commercial);
+        // The tokenizer Load Models gives MOSS Image (#542): the file the code looks for, at a pinned commit.
+        const CatalogModel *tokenizer = catalog.find("qwen3.5-tokenizer");
+        QVERIFY(tokenizer);
+        QCOMPARE(tokenizer->resource, QStringLiteral("fugue/tokenizer"));
+        QCOMPARE(tokenizer->file, QStringLiteral("qwen3.5_tokenizer.json"));
+        QCOMPARE(tokenizer->license, QStringLiteral("Apache-2.0"));
+        QVERIFY(tokenizer->url.contains("/resolve/c202236235762e1c871ad0ccb60c8ee5ba337b9a/")); // a commit, not main
     }
     void aFileInTheUserFolderIsReadAfterFuguesOwn() {
         QTemporaryDir user;

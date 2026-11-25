@@ -48,6 +48,7 @@
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
+#include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/model_shape.h"
 #include "engine/vips.h"
@@ -93,7 +94,7 @@ QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resou
 // (engine/model_shape.h): said here, before the helper fails to load them with less to say.
 // The inputs a mismatch of each part is blamed on.
 struct PartInputs {
-    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL;
+    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL, tokenizer;
 };
 
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
@@ -183,6 +184,10 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                             QStringLiteral("Pick another in Load Models: its list shows the CLIP encoders that fit first."));
         }
     }
+    // A tokenizer is read by MOSS Image only; the engine would take another model's as its main one and fail late.
+    if (derived.contains(QStringLiteral("tokenizer")) && !diffusion->needsQwen35Tokenizer && diffusion->textKind)
+        return mismatch(inputs.tokenizer, QStringLiteral("%1 reads no separate tokenizer, and one is set.").arg(name("base")),
+                        QStringLiteral("Clear the Tokenizer input in Load Models: only MOSS Image takes one."));
     const std::optional<ModelShape> vae = shapes.of(paths.value(QStringLiteral("vae_path")).toString());
     if (vae && vaeFits(*diffusion, *vae) == Fit::DoesNotFit) {
         const QString why = vae->videoVae != diffusion->videoVae
@@ -245,6 +250,49 @@ QString textEncoderKey(const QJsonObject &encoder, const ModelLibrary &library, 
     return found ? encoderKeyOf(found.value()) : QStringLiteral("llm_path");
 }
 
+// MOSS Image reads the official Qwen3.5 tokenizer.json, which no model file holds (#542). The handle of the
+// catalog's (`qwen3.5-tokenizer`, in the tokenizers folder) for a diffusion model that reads it (the file's
+// shape, `needsQwen35Tokenizer`), else none. Load Models puts it in the model it makes when no Tokenizer is
+// picked, so a different catalog entry is a different model for the result cache.
+QJsonObject defaultTokenizerHandle(const QString &diffusionFile) {
+    const std::optional<ModelShape> shape = diffusionFile.isEmpty() ? std::nullopt : ModelShapes::shared().of(diffusionFile);
+    if (!shape || !shape->needsQwen35Tokenizer)
+        return {};
+    const ModelCatalog catalog = ModelCatalog::load();
+    const CatalogModel *entry = catalog.find(QStringLiteral("qwen3.5-tokenizer"));
+    return entry ? entry->handle() : QJsonObject();
+}
+
+// The tokenizer the engine is given, found on this machine: the model's own handle (picked, or the default Load
+// Models added) or, for a model made before that, the default. model_missing with the way to get it when it is not
+// here; input_invalid for a path the engine would read as a list of settings ("main=FILE,clip-l=FILE").
+std::optional<Error> addTokenizer(QJsonObject &context, const QJsonObject &derived, const ModelLibrary &library, FileHashes &hashes) {
+    QJsonObject handle = derived.value(QStringLiteral("tokenizer")).toObject();
+    if (handle.isEmpty()) {
+        const QString base = context.contains(QStringLiteral("diffusion_model_path")) ? context.value(QStringLiteral("diffusion_model_path")).toString()
+                                                                                       : context.value(QStringLiteral("model_path")).toString();
+        handle = defaultTokenizerHandle(base);
+    }
+    if (handle.isEmpty())
+        return std::nullopt;
+    const Result<QString> found = library.resolve(handle, hashes);
+    if (!found) {
+        const CatalogModel *entry = ModelCatalog::load().find(QStringLiteral("qwen3.5-tokenizer"));
+        if (entry && entry->file == handle.value(QStringLiteral("name")).toString())
+            return makeError(QStringLiteral("model_missing"),
+                             QStringLiteral("MOSS Image reads the official Qwen3.5 tokenizer (%1, %2), and it is not in your tokenizers folder.")
+                                 .arg(entry->file, licenseLine(*entry)),
+                             QStringLiteral("Pick it in Load Models' Tokenizer input: its list offers the download."));
+        return found.error();
+    }
+    if (found.value().contains(QLatin1Char('=')) || found.value().contains(QLatin1Char(',')))
+        return makeError(QStringLiteral("input_invalid"),
+                         QStringLiteral("The tokenizer file %1 has a \"=\" or a \",\" in its path, which the engine reads as a setting.").arg(found.value()),
+                         QStringLiteral("Move or rename the file."));
+    context.insert(QStringLiteral("tokenizer"), found.value());
+    return std::nullopt;
+}
+
 // The files of the `fugue/model` handle in `input`, found on this machine (8.9). model_missing,
 // blamed on the input, when one is not here. For a provider that does not share the filesystem
 // (`shares` false) the files are handles the host resolves, and nothing is looked for or checked
@@ -278,6 +326,8 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         files.context.insert(QStringLiteral("clip_l_path"), path(derived.value(QStringLiteral("clip_l"))));
     if (derived.contains(QStringLiteral("vae")))
         files.context.insert(QStringLiteral("vae_path"), path(derived.value(QStringLiteral("vae"))));
+    if (derived.contains(QStringLiteral("tokenizer")) && !shares) // a paired host finds it in its own folders
+        files.context.insert(QStringLiteral("tokenizer"), path(derived.value(QStringLiteral("tokenizer"))));
     for (const QJsonValue &step : derived.value(QStringLiteral("apply")).toArray()) {
         const QJsonObject apply = step.toObject();
         files.loras.append(QJsonObject{{"path", path(apply.value(QStringLiteral("lora")))},
@@ -287,8 +337,14 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         return *missing;
     if (!shares)
         return files;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input}, files.loras))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input, input}, files.loras))
         return *mismatch;
+    // After the parts' check: a text encoder of the wrong family is the first thing to say.
+    if (const std::optional<Error> absent = addTokenizer(files.context, derived, library, *context.hashes)) {
+        Error error = *absent;
+        error.input = input;
+        return error;
+    }
     return files;
 }
 
@@ -618,13 +674,23 @@ public:
         if (const std::optional<Error> mismatch = partsMismatch(
                 derived(context), paths,
                 {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString(),
-                 QStringLiteral("high_noise_diffusion_model"), QStringLiteral("clip_l")}))
+                 QStringLiteral("high_noise_diffusion_model"), QStringLiteral("clip_l"), QStringLiteral("tokenizer")}))
             return {*mismatch};
         return {};
     }
 
     Result<Values> run(const NodeContext &context) override {
-        return Values{{QStringLiteral("model"), Value(modelHandle(derived(context)))}};
+        QJsonObject parts = derived(context);
+        // A model that reads the Qwen3.5 tokenizer and was given none: the catalog's goes in the model, so what
+        // Text Encode caches depends on it (#542).
+        if (!parts.contains(QStringLiteral("tokenizer"))) {
+            const ModelLibrary library = ModelLibrary::current(context.registry);
+            const Result<QString> base = library.resolve(context.input(QStringLiteral("diffusion_model")).json().toObject(), *context.hashes,
+                                                         ModelLibrary::Hashing::RememberedOnly);
+            if (const QJsonObject handle = defaultTokenizerHandle(base ? base.value() : QString()); !handle.isEmpty())
+                parts.insert(QStringLiteral("tokenizer"), handle);
+        }
+        return Values{{QStringLiteral("model"), Value(modelHandle(parts))}};
     }
 
 private:
@@ -638,6 +704,8 @@ private:
                           {"vae", context.input(QStringLiteral("vae")).json()}};
         if (hasClipL(context))
             parts.insert(QStringLiteral("clip_l"), context.input(QStringLiteral("clip_l")).json());
+        if (!context.input(QStringLiteral("tokenizer")).isEmpty())
+            parts.insert(QStringLiteral("tokenizer"), context.input(QStringLiteral("tokenizer")).json());
         if (hasHighNoise(context))
             parts.insert(QStringLiteral("high_noise"), context.input(QStringLiteral("high_noise_diffusion_model")).json());
         return parts;

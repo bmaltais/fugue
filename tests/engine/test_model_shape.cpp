@@ -559,6 +559,28 @@ private slots:
         QCOMPARE(shape(file("gptq.safetensors")).unloadable, QStringLiteral("GPTQ"));
     }
 
+    // MOSS Image (#542): read from its own tensors; it reads a Qwen3.5 (4096 wide, as Qwen3 8B is) and the
+    // engine wants the official tokenizer.json beside it.
+    void mossImageReadsQwen35AndNeedsItsTokenizer() {
+        writeSafetensors(file("moss.safetensors"), {{"video_embedder.weight", QJsonArray{3072, 128}},
+                                                    {"shared_block_modulation.weight", QJsonArray{18432, 3072}},
+                                                    {"text_embedder.proj.weight", QJsonArray{3072, 4096}}});
+        writeSafetensors(file("qwen3_8b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
+                                                        {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}}});
+        writeSafetensors(file("qwen3.5_9b.safetensors"), {{"model.language_model.embed_tokens.weight", QJsonArray{248320, 4096}},
+                                                          {"model.language_model.layers.0.linear_attn.A_log", QJsonArray{32}}});
+        const ModelShape moss = shape(file("moss.safetensors"));
+        QCOMPARE(moss.kind, std::optional<ModelKind>(ModelKind::DiffusionModel));
+        QCOMPARE(moss.textKind, std::optional<TextKind>(TextKind::Llm));
+        QCOMPARE(moss.textWidth, std::optional<int>(4096));
+        QCOMPARE(moss.latentChannels, std::optional<int>(32)); // the FLUX.2 VAE's
+        QCOMPARE(moss.llmFamily, QStringLiteral("qwen3.5"));
+        QVERIFY(moss.needsQwen35Tokenizer);
+        QCOMPARE(loadableTextEncoderFits(moss, shape(file("qwen3.5_9b.safetensors"))), Fit::Fits);
+        QCOMPARE(loadableTextEncoderFits(moss, shape(file("qwen3_8b.safetensors"))), Fit::DoesNotFit);
+        QVERIFY(!shape(file("qwen3_8b.safetensors")).needsQwen35Tokenizer);
+    }
+
     // Qwen-Image 2.1 reads Qwen3-VL (txt_in.in_layer, 4096 wide), Qwen-Image Qwen2.5-VL (txt_in.weight): told by tensors (#340).
     void qwenImage21ReadsQwen3VlAndNotQwen35() {
         writeSafetensors(file("qimg21.safetensors"), {{"txt_in.in_layer.weight", QJsonArray{4096, 4096}},

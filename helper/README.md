@@ -11,6 +11,14 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
 
+## Failures say why (#542)
+
+The engine reports a component that cannot be built as "cannot load component from '<file>'" and logs the reason (a
+missing tokenizer, a tensor that is not there) as an error line. `helper/src/engine_error.h` keeps the last error line of
+the log (`logToStderr`) and `lastError()` appends it to such a message once: "... (the engine said: ...)". The engine reads
+MOSS Image's Qwen3.5 tokenizer from the context option `tokenizer` (a file; over `--serve-http` a handle, resolved in the
+host's `tokenizers` folder).
+
 ## Restore (`image.restore`, SeedVR2)
 
 The pinned stable-diffusion.cpp has no `vid_upscale` call: SeedVR2 runs through DGL (`docs/models/seedvr2.md`

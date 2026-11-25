@@ -122,6 +122,7 @@
 #include "ggml-backend.h"
 #include "json.hpp"
 #include "stable-diffusion.h"
+#include "engine_error.h"
 #include "restore.h"
 #include "strength_args.h"
 
@@ -148,9 +149,18 @@ struct Failure {
 
 [[noreturn]] void fail(const std::string &code, const std::string &message) { throw Failure{code, message}; }
 
+// The last error line of the engine's log (#542): a failed component load says only "cannot load
+// component", and the reason is logged. The log runs on the worker's thread, and a failure is read on it.
+fugue_helper::EngineReason g_engineReason;
+
+void rememberEngineLog(enum sd_log_level_t level, const char *text) {
+    if (level == SD_LOG_ERROR)
+        g_engineReason.record(text);
+}
+
 std::string lastError() {
     const char *e = sd_get_last_error();
-    return e && *e ? e : "no detail";
+    return e && *e ? g_engineReason.explain(e) : "no detail";
 }
 
 // The error code of a failed library call: out of memory is its own code (spec 8.8).
@@ -855,6 +865,7 @@ json runRestore(const json &request, Contexts &contexts, const Hooks &hooks) {
 }
 
 json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
+    g_engineReason.reset(); // every operation starts without the last one's engine error
     const std::string op = request.value("op", "");
     const auto &running = hooks.running;
     if (op == "upscale")
@@ -1248,6 +1259,7 @@ private:
             {"clip_l_path", {"text_encoders", "clip"}},
             {"clip_g_path", {"text_encoders", "clip"}},
             {"clip_vision_path", {"clip_vision"}},
+            {"tokenizer", {"tokenizers"}},
             {"t5xxl_path", {"text_encoders", "clip"}},
             {"controlnet_path", {"controlnet"}},
             {"loras", {"loras"}},
@@ -1674,8 +1686,13 @@ private:
         for (auto &[key, value] : params.items()) {
             if (key == "context" && value.is_object()) {
                 for (auto &[ckey, cvalue] : value.items())
-                    if (ckey.size() > 5 && ckey.compare(ckey.size() - 5, 5, "_path") == 0)
+                    if ((ckey.size() > 5 && ckey.compare(ckey.size() - 5, 5, "_path") == 0) || ckey == "tokenizer")
+                    {
                         cvalue = modelValue(ckey, cvalue, used, "/context/" + ckey, pending);
+                        if (ckey == "tokenizer" && cvalue.is_string())
+                            if (const std::string why = fugue_helper::tokenizerPathError(cvalue.get<std::string>()); !why.empty())
+                                fail("input_invalid", why);
+                    }
             } else if (key == "loras" && value.is_array()) {
                 size_t index = 0;
                 for (json &lora : value) {
@@ -1913,6 +1930,9 @@ private:
                     };
                     for (const PendingModel &model : pending) {
                         const std::string path = m_models->resolve(model.key, model.handle, cancelled);
+                        if (model.key == "tokenizer")
+                            if (const std::string why = fugue_helper::tokenizerPathError(path); !why.empty())
+                                fail("input_invalid", why);
                         request[json::json_pointer(model.pointer)] = path;
                         json entry = model.handle;
                         entry["key"] = model.key;
@@ -2030,7 +2050,10 @@ private:
     fs::path m_base;
 };
 
-void logToStderr(enum sd_log_level_t, const char *text, void *) { std::fputs(text, stderr); }
+void logToStderr(enum sd_log_level_t level, const char *text, void *) {
+    rememberEngineLog(level, text);
+    std::fputs(text, stderr);
+}
 
 } // namespace
 

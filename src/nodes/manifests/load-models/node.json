@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/load-models",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Load Models",
   "description": "A diffusion model with its text encoder and VAE, picked from your model folders, as one model for Text Encode, Sampler and VAE Encode.",
   "category": "Diffusion",
@@ -13,6 +13,8 @@
      "description": "The language model the diffusion model reads prompts with: Qwen3 4B for Z-Image Turbo and FLUX.2 Klein 4B, Qwen3 8B for Klein 9B; UMT5 for Wan; T5 (t5xxl) for FLUX.1."},
     {"name": "clip_l", "type": "fugue/text-encoder", "label": "CLIP-L", "optional": true,
      "description": "FLUX.1 (Dev, Fill, Kontext) reads a CLIP-L encoder beside its T5, which goes in Text encoder. Leave empty for the other models."},
+    {"name": "tokenizer", "type": "fugue/tokenizer", "label": "Tokenizer", "optional": true,
+     "description": "MOSS Image reads the official Qwen3.5 tokenizer.json, which no model file holds. Leave empty to use qwen3.5_tokenizer.json from your tokenizers folder (the list offers its download); the other models take none."},
     {"name": "vae", "type": "fugue/vae", "label": "VAE"},
     {"name": "high_noise_diffusion_model", "type": "fugue/diffusion-model", "label": "High-noise diffusion model", "optional": true,
      "description": "Wan 2.2 14B makes a clip with two diffusion models: this one for the first, noisiest steps, and the Diffusion model for the rest."}
