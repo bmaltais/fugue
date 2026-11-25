@@ -122,6 +122,8 @@ public:
     // The results of a finished run again, answered by event() with the run's own id: its node
     // and run.done events from the run folder (see RunThread::replay).
     void replay(const QString &run);
+    // The folder the run folders are in (RunSetup::runsRoot, else the user's): what History and the App view's takes read.
+    QString runsRoot() const { return m_runsRoot; }
 
     // Calls `call` on the run thread and waits for it (tests: a FakeProvider lives there).
     void onRunThread(const std::function<void()> &call);
@@ -141,6 +143,7 @@ signals:
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
 
 private:
+    QString m_runsRoot;
     QThread *m_thread;
     RunThread *m_worker;
 };

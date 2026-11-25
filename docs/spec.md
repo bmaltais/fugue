@@ -2034,6 +2034,7 @@ Each run has a folder `~/.cache/fugue/runs/<run-id>/`:
 | --- | --- |
 | `run.json` | The run's state: status, the worker's process id, start and end times, the workflow's path and hash, the resolved `auto` values, providers and models, and the cache key of each node. |
 | `compiled.json` | The compiled graph that ran. |
+| `workflow.json` | The workflow document the run started from (for an App view run, with the `app_take` record of its form, [12.17](#1217-the-app-view-385-epic-397)). |
 | `events.jsonl` | Every event, appended as it happens. |
 | `roots.json` | The folders the run's nodes may read and write ([13.6](#136-safety)), when `fugue run` started it. |
 | `nodes/<path id>/` | Each node's working directory, where it writes its outputs. |
@@ -3097,15 +3098,40 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   `AppView::liveFrame`) shows over the result, else the previous result stays; the empty stage says in one line what to do.
   A failed run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the
   rest and the hints; a cancelled run says nothing.
-- **Takes** (#389, `AppView::takes`, `AppTakes.qml`, `appTakes`): every run of this tab in this session is a take, newest first,
-  at most 30 per tab: a thumbnail (a 14u square) with the shown one outlined, a turning badge while it waits or goes and a mark
+- **Takes** (#389, `AppView::takes`, `apps/app_takes.*`, `AppTakes.qml`, `appTakes`): every run of this app is a take, newest first,
+  at most 30: a thumbnail (a 14u square) with the shown one outlined, a turning badge while it waits or goes and a mark
   when it failed; a run cancelled before it made anything leaves none. A take keeps the form it was run with (a quiet line:
   "a red fox · Steps 3 · seed 12"). The stage shows the newest take that made something, or the one the person picked
   (`selectTake`; picking the newest follows new runs again); a new run is shown once it has made a result, the earlier one stays
-  until then. `reuseInputs` and `runAgain` put a take's values and seed modes back (a seed left to Random stays Random: its
-  number was the engine's, so a Random take does not reproduce). Takes live in the session only; reading earlier runs back
-  from the run history (so they survive a restart) needs the history to be filtered by workflow and to give each run's inputs
-  and results, which it does not yet.
+  until then. **Takes survive a restart**: the app owns no outputs, so a take is a run of the existing run history (9.7). The App
+  view stamps the run's bound copy (`workflow.json`) with the `app_take` record in the document's `extra` (4.1; outside the
+  source hash, so no cache key changes): `{"app": <key>, "values": {...}, "modes": {...}}`, the form as bound. The key is the
+  app's workflow file, the saved file or, for an app opened from the catalog (a tab with no file of its own, whose runs carry no
+  workflow path in History), the template's own `workflow.fugue`; an app with neither keeps session takes only. Showing the app
+  reads the run folders newest first (at most 400 looked at), keeps the ended runs (ok or failed) whose record has this key, and
+  lists them below the session's; so takes follow the app across projects and roots as History does (the run folders are one
+  per-user store, not per project) and last as long as History does (run folders go 7 days after the run ends, 10.5). A take read
+  back has no pictures yet: its results come from `RunService::replay` (the queue panel's "show results"; the same thumbnails a
+  live run makes, from the content-addressed cache, so a run whose result is cached shows at once), asked for the newest take
+  when the app is shown and for each other take only when the strip draws it (`AppView::ensureTake`), so a long history costs
+  nothing until it is looked at. **Random seeds are recorded**: a seed left to Random is drawn by the form (in the input's
+  range, as the engine would) and bound as a plain number, so the record, the take's line ("seed 4291") and the run all hold
+  the number the picture came from; the form's own mode stays Random for the next run. `reuseInputs` and `runAgain` put a take's
+  values back (that seed, in Fixed), so Run again with a take's inputs makes the same picture, and with the cache the same
+  result at once. Keys in the strip: Left and Right move, Enter or Space shows the take, **R** runs again with the inputs of the
+  take that has the place (the toolbar's Run again acts on the shown one).
+- **Live and Repeat** (#471, `AppView::setLiveMode`, the "Run again" chooser at the panel's foot above Run: Off, On change, Repeat, `appLiveMode`;
+  the canvas Live toggle's wording, #315): off at first, per tab, for the session only. **Live**: a change
+  of an input made by the person (typing, a slider, the dice, a seed mode, a picture or model chosen; never a value the store
+  moves itself, such as the seed Increment advances after a run) arms a 600 ms debounce, restarted by each change, and when the
+  form has been still it queues one run. A run of the tab that still waits for its turn is cancelled first and leaves no take (it
+  was superseded); a run that is working is never cut: the owed run starts when it ends. A tab not shown keeps the run owed until
+  it is shown. **Repeat**: switching it on starts a run at once when none goes, and each run that ends well starts the next
+  (with a Random seed: a new picture after another); a failure ends the chain (the mode stays on for the next manual run) and
+  **Cancel turns Live and Repeat off**, since the person said stop. One mode at a time. Both run through the one queue and
+  keep one run per tab in it, so the queue never grows; the window losing the focus changes nothing (the queue is the cap).
+  Nothing is armed or polled while both are off (no timer runs). Both switches are Tab stops and Space or Enter flips them;
+  they are hidden while the app has a problem (Run cannot).
 - **Controls per kind** (#386, `AppInput.qml` picks, no control for an input the block does not bind): *text*, a well of
   several lines for the prompt roles (Enter is a new line, Tab leaves it) and a line for the rest; *number*, a drag field with
   its range (`min` and `max`) as a slider with the value in a small editable field at its end (`AppSlider.qml`: a press or drag sets
@@ -3133,7 +3159,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
 - **Run** binds the form's values into a copy of the workflow (`bindApp`, 4.9) and queues it through RunService like any run:
   one queue, one GPU, the queue panel lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
   (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
-  outputs: a run's results are the existing run history's; the screen shows this session's takes (above).
+  outputs: a run's results are the existing run history's, which the takes strip reads back (above).
 - **Open in Graph** (the rail's Graph item, which runs `view.toggle-app`) switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
   workflow (window bar, tabs, the graph's header and its menus, the side panels), with the nodes fitted in the canvas as it is
   now, also when the window was resized or tiled while the shelf or the App view hid the canvas. **App | Graph** is the way back

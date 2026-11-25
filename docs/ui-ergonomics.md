@@ -1150,3 +1150,13 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why Download all of models only starts at once: the click is the yes and there is nothing to approve; with a pack it opens the sheet for the one yes (spec 12.17).
 - Not checked by a person: the real-GPU Settings window (the key press did not reach the hidden session); the narrowest Needs panel with long names.
 
+
+### 2026-11-25 App view: takes from History, Live and Repeat (#389, #471)
+
+- Controls: the takes strip (`appTakes`, `AppTakes.qml`) and, at the input panel's foot above Run, one KitRow "Run again" with a KitSegmented (`appLiveMode`): **Off**, **On change** (Live: run again when an input changes) and **Repeat** (run again when a run ends). One three-way mode is one chooser (coordinator, 2026-11-25: two switches read as two settings and cost a row of the form).
+- Old: the strip held this session's runs only; no way to re-run on change.
+- New: the strip also lists the app's earlier runs from History (they survive a restart), the pictures of an older one loading when the strip draws it; both switches are off at first, per tab, one at a time; Cancel turns them off.
+- Keys: Tab reaches both switches (after Advanced, before Run), Space or Enter flips one (a click anywhere on the row too); in the strip Left and Right move, Enter or Space shows, **R** runs again with the take's inputs (bare R is free there: the strip is a list, not a text field, and no command owns the bare letter).
+- Why: the screen's one primary stays Run (the switches are quiet kit rows, not accent); a switch is the kit's control for a mode that stays on, as the canvas Live toggle (#315); two rows rather than a three-way control so each reads on its own and Space flips the one with the focus.
+- Rules met: Floor (the kit's 7u switch in a 10u row), Primary (Run alone is the accent), Gaps (the group is the panel's padding from its sides and Run), Learned place (above Run, with the other per-app state; the canvas's Live is in its task bar), Keys (R and the switches reachable by Tab; checked against the registry: no bare-letter command).
+- Not checked by a person: the two rows at the narrowest panel and the shortest window (the form scrolls above them; with the Needs panel open at 971px the Advanced row is cut by the scroll's edge until scrolled).

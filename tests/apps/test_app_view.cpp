@@ -15,7 +15,9 @@
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
+#include "apps/app_takes.h"
 #include "engine/port_type.h"
+#include "engine/run_folder.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "run/run_service.h"
@@ -337,7 +339,10 @@ private slots:
         // Random: the engine's own, a new number each run; the one shown stays for a return to Fixed.
         m_view->setSeedMode("seed", "random");
         m_view->run();
-        QCOMPARE(inputOf(m_started.last().document, "sample", "seed"), QJsonValue(QJsonObject{{"auto", "random"}}));
+        // The form draws the number (in the range) and binds it, so the take knows it; the mode stays Random for the next run.
+        const QJsonValue drawn = inputOf(m_started.last().document, "sample", "seed");
+        QVERIFY(drawn.isDouble() && drawn.toInt() >= 0 && drawn.toInt() <= 10);
+        QCOMPARE(m_view->seedMode("seed"), QStringLiteral("random"));
         m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
         // Increment: this run uses the number shown, the next one the next number, told to the control.
         m_view->setSeedMode("seed", "increment");
@@ -526,6 +531,160 @@ private slots:
         m_view->cancel();
         m_view->onEvent(again, evt("run.done", {{"status", "cancelled"}}));
         QCOMPARE(m_view->takes().size(), 2); // nothing made, no take
+    }
+
+    // --- takes that outlive the window (#389) ---
+
+    // What RunService does for a run, on disk: its folder with the bound copy and its end.
+    static void recordRun(const QString &root, const QString &id, const RunRequest &request, RunStatus status = RunStatus::Ok) {
+        const Result<RunFolder> folder = RunFolder::create(root, id);
+        QVERIFY(folder.ok());
+        QVERIFY(folder->writeWorkflow(request.document.toJson()).isEmpty());
+        QVERIFY(folder->queued(request.workflow));
+        folder->finish(status, {}, QDateTime::currentDateTimeUtc());
+    }
+
+    void takesComeBackAfterARestartAndRunAgainMakesTheSamePicture() {
+        QTemporaryDir runs;
+        const QString file = runs.filePath("wf.fugue");
+        const QString first = "20261125-000001-000-aaaa", second = "20261125-000002-000-bbbb";
+        // Two runs, the seed left to Random.
+        m_view->show("a", load(workflow()), file);
+        m_view->setValue("prompt", "a red fox");
+        m_view->run();
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        m_view->setValue("prompt", "a blue fox");
+        m_view->run();
+        QCOMPARE(m_started.size(), 2);
+        QVERIFY(inputOf(m_started.at(0).document, "sample", "seed").isDouble());
+        recordRun(runs.path(), first, m_started.at(0));
+        recordRun(runs.path(), second, m_started.at(1));
+        // A run of the graph (no form record) and one of another file are not takes of this app.
+        RunRequest graphRun = m_started.at(1);
+        graphRun.document.extra.remove("app_take");
+        recordRun(runs.path(), "20261125-000003-000-cccc", graphRun);
+        RunRequest other = m_started.at(1);
+        other.document.extra.insert("app_take", app::takeRecord(runs.filePath("other.fugue"), {}, {}));
+        recordRun(runs.path(), "20261125-000004-000-dddd", other);
+
+        // A restart: a new view over the same history.
+        QStringList replayed;
+        const QJsonValue firstSeed = inputOf(m_started.at(0).document, "sample", "seed");
+        m_started.clear();
+        AppView again([this](const RunRequest &request) { m_started << request; return QStringLiteral("again%1").arg(m_started.size()); },
+                      [](const QString &) {}, &m_registry);
+        again.setHistory(runs.path(), [&replayed](const QString &run) { replayed << run; });
+        again.show("a", load(workflow()), file);
+        QCOMPARE(again.takes().size(), 2);
+        QCOMPARE(again.takes().at(0).toMap().value("run").toString(), second); // newest first
+        QVERIFY(again.takes().at(0).toMap().value("persisted").toBool());
+        QVERIFY(again.takes().at(0).toMap().value("line").toString().contains("a blue fox"));
+        QVERIFY(again.takes().at(1).toMap().value("line").toString().contains("a red fox"));
+        // Only the newest take's results are asked for at once; the older one when it is drawn.
+        QCOMPARE(replayed, QStringList{second});
+        again.ensureTake(1);
+        again.ensureTake(1);
+        QCOMPARE(replayed, (QStringList{second, first})); // once each
+        again.onEvent(second, saved("save", "two.png"));
+        again.onEvent(second, evt("run.done", {{"status", "ok"}}));
+        again.onEvent(first, saved("save", "one.png"));
+        again.onEvent(first, evt("run.done", {{"status", "ok"}}));
+        QCOMPARE(again.takes().at(0).toMap().value("url").toString(), QStringLiteral("file:///t/two.png"));
+        QCOMPARE(again.takes().at(1).toMap().value("url").toString(), QStringLiteral("file:///t/one.png"));
+        QCOMPARE(again.shownResults().first().toMap().value("full").toString(), QStringLiteral("file:///t/two.png"));
+        // Run again with the older take: its words and the seed its run used, so the same inputs make the same picture.
+        const QString run = again.runAgain(1);
+        QVERIFY(!run.isEmpty());
+        QCOMPARE(inputOf(m_started.last().document, "encode", "prompt"), QJsonValue("a red fox"));
+        QCOMPARE(inputOf(m_started.last().document, "sample", "seed"), firstSeed);
+    }
+
+    void anAppWithNoFileKeepsTheSessionsTakesOnly() {
+        QTemporaryDir runs;
+        m_view->setHistory(runs.path(), [](const QString &) {});
+        m_view->show("a", load(workflow()), {});
+        m_view->run();
+        QCOMPARE(m_view->takes().size(), 1);
+        QVERIFY(!m_started.last().document.extra.contains("app_take")); // no file, no key: nothing to find it by
+        m_view->show("b", load(workflow()), {});
+        QVERIFY(m_view->takes().isEmpty());
+        // A template's tab has no file of its own: the template's workflow is the app's key.
+        m_view->show("c", load(workflow()), {}, "/t/lib/restore");
+        m_view->run();
+        QCOMPARE(m_started.last().document.extra.value("app_take").toObject().value("app").toString(), QStringLiteral("/t/lib/restore/workflow.fugue"));
+    }
+
+    // --- Live (#471) ---
+
+    void liveIsOffAtFirstAndArmsNothing() {
+        m_view->setLiveDelay(10);
+        m_view->show("a", load(workflow()), {});
+        QCOMPARE(m_view->liveMode(), QStringLiteral("off"));
+        m_view->setValue("prompt", "x");
+        QVERIFY(!m_view->liveArmed());
+        QTest::qWait(40);
+        QVERIFY(m_started.isEmpty());
+    }
+
+    void anInputChangeQueuesExactlyOneRunAfterTheDebounce() {
+        m_view->setLiveDelay(30);
+        m_view->show("a", load(workflow()), {});
+        m_view->setLiveMode("live");
+        QVERIFY(m_started.isEmpty()); // switching it on runs nothing
+        m_view->setValue("prompt", "a");
+        m_view->setValue("prompt", "ab");
+        m_view->setValue("prompt", "abc");
+        QVERIFY(m_view->liveArmed());
+        QVERIFY(m_started.isEmpty()); // still waiting for the form to be still
+        QTRY_COMPARE(m_started.size(), 1);
+        QTest::qWait(80);
+        QCOMPARE(m_started.size(), 1);
+        QCOMPARE(inputOf(m_started.last().document, "encode", "prompt"), QJsonValue("abc"));
+        // The store's own changes (a seed advanced after the run) are not edits.
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        QTest::qWait(80);
+        QCOMPARE(m_started.size(), 1);
+    }
+
+    void aSupersededWaitingRunIsCancelledAndARunningOneIsNot() {
+        m_view->setLiveDelay(10);
+        m_view->show("a", load(workflow()), {});
+        m_view->setLiveMode("live");
+        m_view->setValue("prompt", "one");
+        QTRY_COMPARE(m_started.size(), 1); // run1 waits in the queue
+        m_view->setValue("prompt", "two");
+        QTRY_COMPARE(m_started.size(), 2);
+        QCOMPARE(m_cancelled, QStringList{"run1"});
+        QCOMPARE(m_view->takes().size(), 1); // the superseded run left no take
+        // A run that works is never cut: the owed run starts when it ends.
+        m_view->onEvent("run2", evt("run.started"));
+        m_view->setValue("prompt", "three");
+        QTest::qWait(60);
+        QCOMPARE(m_started.size(), 2);
+        QCOMPARE(m_cancelled, QStringList{"run1"});
+        m_view->onEvent("run2", evt("run.done", {{"status", "ok"}}));
+        QTRY_COMPARE(m_started.size(), 3);
+        QCOMPARE(inputOf(m_started.last().document, "encode", "prompt"), QJsonValue("three"));
+    }
+
+    void repeatRunsAgainWhenOneEndsAndCancelStopsIt() {
+        m_view->show("a", load(workflow()), {});
+        m_view->setLiveMode("repeat");
+        QCOMPARE(m_started.size(), 1); // starts at once
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        QTRY_COMPARE(m_started.size(), 2);
+        // A new seed each time (the form draws it): Random keeps being Random.
+        QCOMPARE(m_view->seedMode("seed"), QStringLiteral("random"));
+        m_view->onEvent("run2", evt("run.done", {{"status", "failed"}})); // a failure ends the chain, the mode stays
+        QTest::qWait(40);
+        QCOMPARE(m_started.size(), 2);
+        QCOMPARE(m_view->liveMode(), QStringLiteral("repeat"));
+        m_view->run();
+        m_view->cancel(); // the person said stop
+        QCOMPARE(m_view->liveMode(), QStringLiteral("off"));
+        m_view->onEvent("run3", evt("run.done", {{"status", "cancelled"}}));
+        QTest::qWait(40);
+        QCOMPARE(m_started.size(), 3);
     }
 
     void aStepPictureShowsWhileTheRunGoesAndAResultCanBeSavedAndUsedAsAnInput() {

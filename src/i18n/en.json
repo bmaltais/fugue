@@ -801,6 +801,7 @@
   "Rename…": "Rename…",
   "Replace %1 with version %2?": "Replace %1 with version %2?",
   "Replace image": "Replace image",
+  "Repeat": "Repeat",
   "Report an issue": "Report an issue",
   "Reset layout": "Reset layout",
   "Reset the layout to one area showing the Graph": "Reset the layout to one area showing the Graph",
@@ -1965,5 +1966,6 @@
   "Open look file…": "Open look file…",
   "Reset to defaults": "Reset to defaults",
   "Spacing": "Spacing",
-  "Compact cards, or the flat face.": "Compact cards, or the flat face."
+  "Compact cards, or the flat face.": "Compact cards, or the flat face.",
+  "On change": "On change"
 }

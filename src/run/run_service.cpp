@@ -622,7 +622,8 @@ private:
 };
 
 RunService::RunService(RunSetup setup, QObject *parent)
-    : QObject(parent), m_thread(new QThread(this)), m_worker(new RunThread(std::move(setup))) {
+    : QObject(parent), m_runsRoot(setup.runsRoot.isEmpty() ? RunFolder::defaultRoot() : setup.runsRoot),
+      m_thread(new QThread(this)), m_worker(new RunThread(std::move(setup))) {
     qRegisterMetaType<fugue::RunOutcome>();
     m_thread->setObjectName(QStringLiteral("fugue-run"));
     m_worker->moveToThread(m_thread);

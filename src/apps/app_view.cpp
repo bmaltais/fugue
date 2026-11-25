@@ -14,6 +14,7 @@
 #include <cmath>
 
 #include "apps/app_models.h"
+#include "apps/app_takes.h"
 #include "engine/error.h"
 #include "engine/file_roots.h"
 #include "engine/input_binding.h"
@@ -130,6 +131,9 @@ QString kindOf(const InputBinding &input, const QJsonValue &current, const Input
 
 AppView::AppView(Start start, Cancel cancel, const Registry *registry, QObject *parent)
     : QObject(parent), m_start(std::move(start)), m_cancel(std::move(cancel)), m_registry(registry) {
+    m_liveTimer.setSingleShot(true);
+    m_liveTimer.setInterval(600);
+    connect(&m_liveTimer, &QTimer::timeout, this, &AppView::liveFire);
     m_needs = new NeedsModel(this);
     // A new app, or a run that ended, may have found something missing: the panel looks again (the source says "ready" at once
     // when nothing is).
@@ -147,9 +151,10 @@ void AppView::setDownloads(ModelDownloads *downloads) {
         m_models->setDownloads(downloads);
 }
 
-void AppView::show(const QString &tab, const Document &document, const QString &file) {
+void AppView::show(const QString &tab, const Document &document, const QString &file, const QString &templateFolder) {
     m_tab = tab;
     m_file = file;
+    m_takesKey = !file.isEmpty() ? file : templateFolder.isEmpty() ? QString() : QDir(templateFolder).filePath("workflow.fugue");
     m_document = document;
     m_app.reset();
     m_problem.clear();
@@ -177,9 +182,24 @@ void AppView::show(const QString &tab, const Document &document, const QString &
                         : tr("This workflow's app block cannot be used, so it opens as a graph: %1").arg(why.message));
     }
     buildFields();
+    // A debounce waiting for another tab is that tab's: it is owed again when the tab comes back.
+    m_liveTimer.stop();
+    if (m_app) {
+        TabState &state = m_state[tab];
+        if (state.storedFor != m_takesKey)
+            loadStored(state);
+        if (state.live != QLatin1String("off") && state.liveDirty)
+            scheduleLive(tab);
+    }
     emit appChanged();
     emit runChanged();
     emit progressChanged();
+    emit liveChanged();
+}
+
+void AppView::setHistory(const QString &runsRoot, Replay replay) {
+    m_runsRoot = runsRoot;
+    m_replay = std::move(replay);
 }
 
 void AppView::forget(const QString &tab) {
@@ -191,7 +211,9 @@ void AppView::forget(const QString &tab) {
         m_cancel(it->run);
     m_state.erase(it);
     m_waiting.removeIf([&tab](const auto &waiting) { return waiting.value().tab == tab; });
+    m_replaying.removeIf([&tab](const auto &replaying) { return replaying.value() == tab; });
     if (tab == m_tab) {
+        m_liveTimer.stop();
         m_tab.clear();
         m_app.reset();
         m_fields.clear();
@@ -310,6 +332,8 @@ void AppView::setValue(const QString &key, const QVariant &value) {
             kind = field.toMap().value("kind").toString();
     if (kind.isEmpty())
         return;
+    const QMap<QString, QJsonValue> before = state.values;
+    const QMap<QString, QString> modesBefore = state.seedModes;
     if (kind == QLatin1String("number") || kind == QLatin1String("seed")) {
         bool ok = false;
         const double number = value.toDouble(&ok);
@@ -323,6 +347,8 @@ void AppView::setValue(const QString &key, const QVariant &value) {
     } else {
         state.values.insert(key, QJsonValue::fromVariant(value));
     }
+    if (state.values != before || state.seedModes != modesBefore)
+        inputEdited();
 }
 
 QMap<QString, QJsonValue> AppView::values() const { return m_state.value(m_tab).values; }
@@ -370,6 +396,7 @@ void AppView::setSeedMode(const QString &key, const QString &mode) {
     if (mode != QLatin1String("random") && !hasSeedNumber(valueOf(key)))
         state.values.insert(key, newSeed(*inputOf(key)));
     emit valueChanged(key);
+    inputEdited();
 }
 
 void AppView::rollSeed(const QString &key) {
@@ -377,6 +404,7 @@ void AppView::rollSeed(const QString &key) {
         return;
     m_state[m_tab].values.insert(key, newSeed(*inputOf(key)));
     emit valueChanged(key);
+    inputEdited();
 }
 
 // --- images --------------------------------------------------------------------
@@ -432,6 +460,7 @@ QString AppView::storeImages(const QStringList &paths, const QString &key) {
         return QObject::tr("Could not take the image: %1").arg(stored.error().message);
     m_state[m_tab].values.insert(key, stored.value());
     emit valueChanged(key);
+    inputEdited();
     return {};
 }
 
@@ -528,6 +557,7 @@ void AppView::useImage(const QString &key, const QString &path) {
         return;
     m_state[m_tab].values.insert(key, canonical);
     emit valueChanged(key);
+    inputEdited();
 }
 
 QVariantList AppView::recentImages() const {
@@ -595,6 +625,7 @@ void AppView::pickModel(const QString &key, const QVariantMap &handle) {
         return;
     m_state[m_tab].values.insert(key, QJsonObject::fromVariantMap(handle));
     emit valueChanged(key);
+    inputEdited();
 }
 
 void AppView::pickModelFile(const QString &key, const QString &path) {
@@ -661,15 +692,22 @@ QString AppView::run() {
     // A seed left to chance is the engine's own (as a node's is); the others are what the form shows.
     QMap<QString, QJsonValue> given = state.values;
     QStringList incrementing;
+    QMap<QString, QJsonValue> drawn; // the seeds the form drew for this run
     for (const QVariant &field : std::as_const(m_fields)) {
         const QVariantMap map = field.toMap();
         const QString key = map.value("key").toString();
         if (map.value("kind").toString() != QLatin1String("seed"))
             continue;
         const QString mode = seedMode(key);
-        if (mode == QLatin1String("random"))
-            given.insert(key, QJsonObject{{"auto", "random"}});
-        else if (mode == QLatin1String("increment"))
+        if (mode == QLatin1String("random")) {
+            // The form draws the seed (as the engine would, in the input's range) and binds it as a number: the take then
+            // knows the number the picture came from, and Run again with it makes the same picture (#389). The form's own
+            // mode stays Random for the next run.
+            const InputBinding *input = inputOf(key);
+            const double seed = input ? newSeed(*input) : 0;
+            given.insert(key, seed);
+            drawn.insert(key, seed);
+        } else if (mode == QLatin1String("increment"))
             incrementing << key;
     }
     const Result<Document> bound = app::bindApp(m_document, *m_app, given);
@@ -681,10 +719,22 @@ QString AppView::run() {
         emit runChanged();
         return {};
     }
-    const QMap<QString, QJsonValue> shownValues = state.values;
-    const QMap<QString, QString> shownModes = state.seedModes;
+    QMap<QString, QJsonValue> shownValues = state.values;
+    QMap<QString, QString> shownModes = state.seedModes;
+    QJsonObject valuesJson, modesJson;
+    for (auto it = drawn.cbegin(); it != drawn.cend(); ++it) {
+        shownValues.insert(it.key(), it.value());
+        shownModes.insert(it.key(), QStringLiteral("fixed"));
+    }
+    for (auto it = shownValues.cbegin(); it != shownValues.cend(); ++it)
+        valuesJson.insert(it.key(), it.value());
+    for (auto it = shownModes.cbegin(); it != shownModes.cend(); ++it)
+        modesJson.insert(it.key(), it.value());
     RunRequest request;
     request.document = bound.value();
+    // The form as it was run, in the run's own folder: what makes the run a take after a restart (apps/app_takes.h).
+    if (!m_takesKey.isEmpty())
+        request.document.extra.insert(QLatin1String(app::takeKey), app::takeRecord(m_takesKey, valuesJson, modesJson));
     request.workflow = m_file;
     const QString id = m_start(request);
     // The next run's seed is the next number: the run used the one shown (as Increment on a node).
@@ -708,7 +758,7 @@ QString AppView::run() {
     state.liveFrame.clear();
     state.pinned.clear(); // a new run is the one to look at
     state.cleared = false;
-    state.takes.prepend({id, state.status, {}, shownValues, shownModes, inputsLine(shownValues)});
+    state.takes.prepend({id, state.status, {}, shownValues, shownModes, inputsLine(shownValues, shownModes)});
     while (state.takes.size() > maxTakes)
         state.takes.removeLast();
     emit runChanged();
@@ -737,6 +787,9 @@ void AppView::clearResults() {
 }
 
 void AppView::cancel() {
+    // The person said stop: Live and Repeat end with it.
+    if (m_state.value(m_tab).live != QLatin1String("off"))
+        setLiveMode(QStringLiteral("off"));
     const QString run = m_state.value(m_tab).run;
     if (!run.isEmpty() && m_cancel)
         m_cancel(run);
@@ -780,16 +833,16 @@ void AppView::addDetail(TabState &state, const QString &message, const QString &
     state.details << QVariantMap{{"message", message}, {"hint", hint}};
 }
 
-void AppView::addResult(TabState &state, const QJsonObject &event) {
+void AppView::addResult(const QList<app::AppOutput> &outputs, QVariantList &list, const QJsonObject &event) {
     const QString node = event.value("node").toString();
     int index = -1;
     QString label;
     QStringList order;
-    for (int i = 0; i < state.outputs.size(); ++i) {
-        order << state.outputs.at(i).node;
-        if (state.outputs.at(i).node == node) {
+    for (int i = 0; i < outputs.size(); ++i) {
+        order << outputs.at(i).node;
+        if (outputs.at(i).node == node) {
             index = i;
-            label = state.outputs.at(i).label;
+            label = outputs.at(i).label;
         }
     }
     if (index < 0)
@@ -821,7 +874,6 @@ void AppView::addResult(TabState &state, const QJsonObject &event) {
         result.insert("text", thumbnail.value("label").toString());
     }
     // In the block's order, one per output.
-    QVariantList &list = state.results;
     for (int i = 0; i < list.size(); ++i)
         if (list.at(i).toMap().value("id") == node) {
             list[i] = result;
@@ -857,9 +909,19 @@ void AppView::end(const QString &tab, const QString &status) {
         emit runChanged();
         emit progressChanged();
     }
+    // Repeat: the next run when this one made something; an edit made while it ran (Live) is owed the same way.
+    if (state.live == QLatin1String("repeat") && state.status == QLatin1String("done"))
+        state.liveDirty = true;
+    if (state.liveDirty && state.live != QLatin1String("off"))
+        scheduleLive(tab);
 }
 
 void AppView::onEvent(const QString &run, const QJsonObject &event) {
+    const auto replaying = m_replaying.constFind(run);
+    if (replaying != m_replaying.constEnd()) {
+        replayEvent(replaying.value(), run, event);
+        return;
+    }
     const QString tab = tabOfRun(run);
     if (tab.isEmpty())
         return;
@@ -881,7 +943,7 @@ void AppView::onEvent(const QString &run, const QJsonObject &event) {
             emit progressChanged();
     } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
         // The app's own outputs are the app's results; the other nodes' pictures are the graph's.
-        addResult(state, event);
+        addResult(state.outputs, state.results, event);
         syncTake(state);
         if (current)
             emit runChanged();
@@ -918,7 +980,7 @@ namespace {
 QString fileNameOf(const QString &path) { return QFileInfo(path).fileName(); }
 } // namespace
 
-QString AppView::inputsLine(const QMap<QString, QJsonValue> &values) const {
+QString AppView::inputsLine(const QMap<QString, QJsonValue> &values, const QMap<QString, QString> &modes) const {
     QStringList parts;
     for (const QVariant &entry : m_fields) {
         const QVariantMap field = entry.toMap();
@@ -928,7 +990,7 @@ QString AppView::inputsLine(const QMap<QString, QJsonValue> &values) const {
         if (kind == QLatin1String("seed")) {
             // The number the run used: the form's (a take's own), else the one the workflow holds; a seed left to chance has none.
             const QVariant number = values.contains(key) ? values.value(key).toVariant() : field.value("value");
-            parts << (seedMode(key) == QLatin1String("random") || !number.isValid() || number.isNull()
+            parts << (modes.value(key) == QLatin1String("random") || !number.isValid() || number.isNull()
                           ? tr("seed new each run")
                           : tr("seed %1").arg(qint64(number.toDouble())));
             continue;
@@ -992,7 +1054,8 @@ QVariantList AppView::takes() const {
             }
         list << QVariantMap{{"run", take.run}, {"status", take.status},
                             {"pending", take.status == QLatin1String("waiting") || take.status == QLatin1String("running")},
-                            {"url", url}, {"count", take.results.size()}, {"line", take.line}, {"shown", i == shown}};
+                            {"url", url}, {"count", take.results.size()}, {"line", take.line}, {"shown", i == shown},
+                            {"persisted", take.persisted}};
     }
     return list;
 }
@@ -1015,7 +1078,133 @@ void AppView::selectTake(int index) {
         return;
     state.pinned = index == 0 ? QString() : state.takes.at(index).run;
     state.cleared = false;
+    requestTake(state.takes[index]);
     emit runChanged();
+}
+
+void AppView::ensureTake(int index) {
+    TabState &state = m_state[m_tab];
+    if (index >= 0 && index < state.takes.size())
+        requestTake(state.takes[index]);
+}
+
+// A take read back from History: its results are replayed from its run folder, once.
+void AppView::requestTake(Take &take) {
+    if (!take.persisted || take.requested || !m_replay)
+        return;
+    take.requested = true;
+    m_replaying.insert(take.run, m_tab);
+    m_replay(take.run);
+}
+
+void AppView::loadStored(TabState &state) {
+    state.storedFor = m_takesKey;
+    if (m_runsRoot.isEmpty() || m_takesKey.isEmpty())
+        return;
+    QSet<QString> have;
+    for (const Take &take : std::as_const(state.takes))
+        have.insert(take.run);
+    for (const app::StoredTake &stored : app::storedTakes(m_runsRoot, m_takesKey, maxTakes)) {
+        if (have.contains(stored.run) || state.takes.size() >= maxTakes)
+            continue;
+        Take take;
+        take.run = stored.run;
+        take.status = stored.status == QLatin1String("ok") ? QStringLiteral("done") : QStringLiteral("failed");
+        for (auto it = stored.values.begin(); it != stored.values.end(); ++it)
+            take.values.insert(it.key(), it.value());
+        for (auto it = stored.modes.begin(); it != stored.modes.end(); ++it)
+            take.seedModes.insert(it.key(), it.value().toString());
+        take.line = inputsLine(take.values, take.seedModes);
+        take.persisted = true;
+        state.takes.append(take);
+    }
+    // The stage shows the newest take that made something: its results are asked for now, the others when the strip draws them.
+    for (Take &take : state.takes)
+        if (take.persisted && take.status == QLatin1String("done")) {
+            requestTake(take);
+            break;
+        }
+}
+
+void AppView::replayEvent(const QString &tab, const QString &run, const QJsonObject &event) {
+    TabState &state = m_state[tab];
+    const QString kind = event.value("event").toString();
+    for (Take &take : state.takes) {
+        if (take.run != run)
+            continue;
+        if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached"))
+            addResult(state.outputs, take.results, event);
+        break;
+    }
+    if (kind == QLatin1String("run.done"))
+        m_replaying.remove(run);
+    if (tab == m_tab && (kind == QLatin1String("run.done") || kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")))
+        emit runChanged();
+}
+
+// --- Live (#471) ------------------------------------------------------------------
+
+void AppView::setLiveMode(const QString &mode) {
+    if (!m_app || !QStringList{"off", "live", "repeat"}.contains(mode))
+        return;
+    TabState &state = m_state[m_tab];
+    if (state.live == mode)
+        return;
+    state.live = mode;
+    state.liveDirty = false;
+    m_liveTimer.stop();
+    emit liveChanged();
+    if (mode == QLatin1String("repeat") && !busy()) {
+        state.liveDirty = true;
+        liveFire(); // starts at once when nothing goes; else the end of the run chains
+    }
+}
+
+void AppView::inputEdited() {
+    if (!m_app)
+        return;
+    TabState &state = m_state[m_tab];
+    if (state.live != QLatin1String("live"))
+        return;
+    state.liveDirty = true;
+    m_liveTimer.start(); // each change restarts the wait: one run once the form has been still
+}
+
+void AppView::scheduleLive(const QString &tab) {
+    // After the event that ended a run, and only for the tab shown (a tab not shown is owed its run until it is).
+    if (tab != m_tab)
+        return;
+    QTimer::singleShot(0, this, [this, tab] {
+        if (tab == m_tab)
+            liveFire();
+    });
+}
+
+void AppView::liveFire() {
+    if (!m_app)
+        return;
+    TabState &state = m_state[m_tab];
+    if (state.live == QLatin1String("off") || !state.liveDirty || !m_problem.isEmpty())
+        return;
+    if (state.status == QLatin1String("running"))
+        return; // never cut a run that works: end() starts the owed one
+    if (state.status == QLatin1String("waiting") && !state.run.isEmpty()) {
+        // Superseded before it began: it leaves the queue and its take goes, as a cancelled run's does.
+        const QString old = state.run;
+        if (m_cancel)
+            m_cancel(old);
+        state.run.clear();
+        state.status = QStringLiteral("idle");
+        for (int i = 0; i < state.takes.size(); ++i)
+            if (state.takes.at(i).run == old) {
+                state.takes.removeAt(i);
+                break;
+            }
+        if (state.pinned == old)
+            state.pinned.clear();
+    }
+    state.liveDirty = false;
+    run();
 }
 
 void AppView::reuseInputs(int index) {
@@ -1083,6 +1272,7 @@ void AppView::useSample(const QString &key) {
             return;
         m_state[m_tab].values.insert(key, sample);
         emit valueChanged(key);
+        inputEdited();
         return;
     }
 }

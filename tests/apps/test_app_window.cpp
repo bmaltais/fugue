@@ -14,7 +14,9 @@
 
 #include "../canvas/canvas_app.h"
 #include "apps/app_shelf.h"
+#include "apps/app_takes.h"
 #include "apps/app_window.h"
+#include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 
@@ -399,6 +401,81 @@ private slots:
         QTRY_VERIFY(title->hasActiveFocus());
         QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(started.size(), 2);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // Takes of an earlier session (#389) and Live (#471) in the real window: the strip has the runs of History for this file, their
+    // pictures come by replay when the strip draws them, and Live is a switch Space flips. FUGUE_SHOT_DIR=<dir> also takes a picture.
+    void earlierTakesComeBackAndLiveIsASwitch() {
+        App app(load(lookApp), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night")), 12});
+        Rig rig(app);
+        QVERIFY(app.open());
+        QTemporaryDir appFolder, pictures;
+        QDir(appFolder.path()).mkpath("inputs");
+        QVERIFY(QImage(QStringLiteral(FUGUE_SOURCE_DIR "/templates/flux2-klein-9b-da-restore/inputs/reading-nook.jpg")).save(appFolder.filePath("inputs/sample.png")));
+        QFile workflow(appFolder.filePath("workflow.fugue"));
+        QVERIFY(workflow.open(QIODevice::WriteOnly));
+        workflow.write(lookApp);
+        workflow.close();
+        const QString file = appFolder.filePath("workflow.fugue");
+        // Three runs of an earlier session, as the run service leaves them: the bound copy with the form, the result, the end.
+        const QStringList prompts{"an old family portrait", "a wedding in 1950", "two children at the sea"};
+        for (int i = 0; i < prompts.size(); ++i) {
+            QImage image(1392, 752, QImage::Format_RGB32);
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    image.setPixelColor(x, y, QColor::fromHsv((60 + 110 * i + x * 90 / image.width() + y * 40 / image.height()) % 360, 120, 90 + 120 * y / image.height()));
+            const QString picture = pictures.filePath(QString("take%1.png").arg(i));
+            QVERIFY(image.save(picture));
+            const Result<RunFolder> folder = RunFolder::create(app.dir.path() + "/runs", QString("20261125-00000%1-000-aaa%1").arg(i + 1));
+            QVERIFY(folder.ok());
+            QJsonObject bound = QJsonDocument::fromJson(lookApp).object();
+            bound.insert(app::takeKey, app::takeRecord(file, {{"prompt", prompts.at(i)}, {"steps", 2 + i % 2}, {"seed", 1000 + 7 * i}},
+                                                       {{"seed", "fixed"}}));
+            QVERIFY(folder->writeWorkflow(bound).isEmpty());
+            QVERIFY(folder->queued(file));
+            folder->appendEvent({{"event", "node.done"}, {"node", "save"},
+                                 {"shown", QJsonObject{{"image", QJsonObject{{"type", "image"}, {"path", picture}}}}}});
+            folder->finish(RunStatus::Ok, {}, QDateTime::currentDateTimeUtc());
+        }
+        QVERIFY(app.workflows.openPath(file));
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QTRY_COMPARE(rig.view.takes().size(), 3);
+        QTRY_VERIFY([&rig] {
+            const QVariantList takes = rig.view.takes();
+            return std::all_of(takes.cbegin(), takes.cend(), [](const QVariant &take) { return !take.toMap().value("url").toString().isEmpty(); });
+        }());
+        QVERIFY(rig.view.shownInputs().contains("two children at the sea")); // the newest
+        // Run again: one chooser (Off, On change, Repeat), arrows move it; off at first.
+        QCOMPARE(rig.view.liveMode(), QStringLiteral("off"));
+        QQuickItem *live = find(app.window, "appLiveMode");
+        QVERIFY(live);
+        live->forceActiveFocus();
+        QTRY_VERIFY(live->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Right);
+        QTRY_COMPARE(rig.view.liveMode(), QStringLiteral("live"));
+        QTest::keyClick(app.window, Qt::Key_Left);
+        QTRY_COMPARE(rig.view.liveMode(), QStringLiteral("off"));
+        QTest::keyClick(app.window, Qt::Key_Right);
+        QTRY_COMPARE(rig.view.liveMode(), QStringLiteral("live"));
+        QCOMPARE(rig.started.size(), 0); // Live alone starts nothing until an input changes (Repeat would start at once)
+        // R on a take runs it again with its inputs.
+        QQuickItem *strip = find(app.window, "appTakes");
+        QVERIFY(strip);
+        strip->forceActiveFocus();
+        QTRY_VERIFY(strip->hasActiveFocus());
+        strip->setProperty("currentIndex", 2);
+        QTest::keyClick(app.window, Qt::Key_R);
+        QTRY_COMPARE(rig.started.size(), 1);
+        QCOMPARE(rig.started.last().document.graph.nodes.value("encode").inputs.value("prompt").toJson(), QJsonValue("an old family portrait"));
+        QCOMPARE(rig.started.last().document.graph.nodes.value("sample").inputs.value("seed").toJson(), QJsonValue(1000));
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (!dir.isEmpty()) {
+            app.window->resize(1888, 971);
+            QTest::qWait(500);
+            QDir().mkpath(QString::fromLocal8Bit(dir));
+            test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/app-takes-live.png");
+        }
         qDeleteAll(app.engine.rootObjects());
     }
 
