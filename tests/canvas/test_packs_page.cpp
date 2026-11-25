@@ -62,7 +62,7 @@ void click(App &app, QQuickItem *item) {
     const QString name = item->objectName();
     QPoint at = centerOf(item);
     int still = 0;
-    for (int i = 0; still < 3 && i < 500; ++i) {
+    for (int i = 0; still < 5 && i < 500; ++i) {
         QTest::qWait(10);
         QQuickItem *now = find(app.window, name);
         if (!now) {
