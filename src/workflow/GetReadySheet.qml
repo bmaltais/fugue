@@ -44,10 +44,23 @@ Popup {
     onOpened: focusDefault()
     onClosed: if (opener) opener.forceActiveFocus()
     // The default control: Install while there is something to do, else the one answer that is left.
+    readonly property Item defaultControl: [install, cancel, close].find(c => c.visible && c.enabled) ?? null
     function focusDefault() {
-        const first = [install, cancel, close].find(c => c.visible && c.enabled)
-        if (first)
-            first.forceActiveFocus()
+        if (defaultControl)
+            defaultControl.forceActiveFocus()
+    }
+    // The plan can arrive (or the phase change) after the sheet opened, so the default control is another one by then: the focus
+    // follows it unless the person put it on a row or the other button themselves, so Enter and Space work with no Tab first.
+    onDefaultControlChanged: if (opened) Qt.callLater(refocus)
+    function refocus() {
+        if (!opened)
+            return
+        let item = parent ? parent.Window.activeFocusItem : null
+        const lost = item === null || item === card || item === cancel || item === close
+        while (item && item !== card)
+            item = item.parent
+        if (lost || !item)
+            focusDefault()
     }
     // Rows opened for their detail, by "pack:<id>" or "model:<name>".
     property var expanded: ({})

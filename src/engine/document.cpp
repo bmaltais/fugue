@@ -981,6 +981,11 @@ Result<Document> Document::loadFile(const QString &path) {
     if (!file.open(QIODevice::ReadOnly))
         return makeError(QStringLiteral("permission_denied"),
                          QStringLiteral("%1 cannot be read: %2.").arg(path, file.errorString()));
+    // A .fugueapp or .fuguepack is a zip, not JSON: say so (and never read a package of gigabytes into memory to fail on it).
+    if (file.peek(4) == QByteArray("PK\x03\x04", 4))
+        return makeError(QStringLiteral("invalid_document"),
+                         QStringLiteral("%1 is a package (a zip), not a workflow file.").arg(path),
+                         QStringLiteral("Open it with `fugue --app <file>` (an app) or `fugue <file>`; the CLI commands take a workflow file or a template id."));
     return load(file.readAll());
 }
 

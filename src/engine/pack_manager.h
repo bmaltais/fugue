@@ -29,9 +29,9 @@ namespace fugue {
 
 // Where a pack came from. `ref` is a tag or a commit and is required for git.
 struct PackSource {
-    enum class Kind { Path, Git };
+    enum class Kind { Path, Git, Bundle };
     Kind kind = Kind::Path;
-    QString location; // an absolute folder, or a git URL
+    QString location; // an absolute folder, or a git URL; for a Bundle the .fugueapp/.fuguepack file it came in (nothing to update from)
     QString ref;      // git only
     QString commit;   // git only: what `ref` resolved to when it was fetched
 };

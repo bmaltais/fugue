@@ -115,10 +115,13 @@ private slots:
         QVERIFY(sheet->setProperty("sheetModel", QVariant::fromValue(static_cast<QObject *>(&fake))));
         QTRY_VERIFY(sheet->property("visible").toBool());
         QTRY_VERIFY(find(app.window, "getReadyAll")); // the fake plan is shown; the sheet had opened on the real, empty one
-        QMetaObject::invokeMethod(sheet, "focusDefault");
+        // no focusDefault call: the sheet focuses its default control itself, whenever the plan arrives
         // Opening: the focus is on Install, the one primary.
         QQuickItem *install = nullptr;
         QTRY_VERIFY((install = find(app.window, "getReadyAll")) && install->hasActiveFocus());
+        // The first key does its work with no Tab before it (the plan came after the sheet opened: #394 triage).
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QCOMPARE(fake.started, 1);
         // Shift+Tab goes back to Cancel (the buttons are in reading order, the yes last), Tab to Install again.
         QTest::keyClick(app.window, Qt::Key_Backtab, Qt::ShiftModifier);
         QQuickItem *cancel = find(app.window, "getReadyCancel");
@@ -129,7 +132,7 @@ private slots:
         install->forceActiveFocus();
         // Enter is the yes.
         QTest::keyClick(app.window, Qt::Key_Return);
-        QCOMPARE(fake.started, 1);
+        QCOMPARE(fake.started, 2);
         // Escape cancels: the sheet goes and the focus is back on what had it.
         QTest::keyClick(app.window, Qt::Key_Escape);
         QCOMPARE(fake.cancelled, 1);
@@ -158,7 +161,7 @@ private slots:
         fake.view = bigView();
         QVERIFY(sheet->setProperty("sheetModel", QVariant::fromValue(static_cast<QObject *>(&fake))));
         QTRY_VERIFY(find(app.window, "getReadyAll"));
-        QMetaObject::invokeMethod(sheet, "focusDefault");
+        // no focusDefault call: the sheet focuses its default control itself, whenever the plan arrives
         for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
             app.window->resize(size);
             QTest::qWait(400);

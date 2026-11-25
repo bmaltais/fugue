@@ -325,7 +325,8 @@ Errors writeSharePackage(const Document &document, const Registry &registry, con
             if (packsCarried)
                 *packsCarried << packId;
             for (const auto &[name, file] : files.files)
-                entries << ZipEntry{id + QStringLiteral("/packs/") + packId + QLatin1Char('/') + name, {}, file};
+                entries << ZipEntry{id + QStringLiteral("/packs/") + packId + QLatin1Char('/') + name, {}, file,
+                                    QFileInfo(file).permission(QFileDevice::ExeOwner)}; // run.sh stays a program
         }
     }
     entries.prepend(ZipEntry{id + QStringLiteral("/template.json"), writeJson(QJsonObject{{"title", title}}), {}});
@@ -353,7 +354,9 @@ bool isSharePackage(const QString &path) {
     return file.open(QIODevice::ReadOnly) && file.read(4) == QByteArray("PK\x03\x04", 4);
 }
 
-Result<QString> unpackSharePackage(const QString &zipPath, const QString &folder) {
+namespace {
+
+Result<QString> unpackInto(const QString &zipPath, const QString &folder) {
     const Errors unpacked = unpackZip(zipPath, folder, UnpackLimits{maxImageBytes, kMaxUnpacked, kMaxEntries});
     if (hasErrors(unpacked))
         return Result<QString>(unpacked);
@@ -375,6 +378,22 @@ Result<QString> unpackSharePackage(const QString &zipPath, const QString &folder
     if (tops.size() != 1 || !QFileInfo::exists(tops.first().absoluteFilePath() + QStringLiteral("/workflow.fugue")))
         return notAPackage(zipPath, QStringLiteral("it holds no workflow.fugue in one folder"));
     return tops.first().absoluteFilePath();
+}
+
+} // namespace
+
+Result<QString> unpackSharePackage(const QString &zipPath, const QString &folder) {
+    Result<QString> top = unpackInto(zipPath, folder);
+    if (!top)
+        return top;
+    // Each carried pack remembers the bundle it came in: the folder it is unpacked into is a scratch one, gone when
+    // the app closes, so it is no source for `pack update` (#520). The archive cannot say this itself: dot files are skipped.
+    const QString bundle = QFileInfo(zipPath).absoluteFilePath();
+    const QDir packs(top.value() + QStringLiteral("/packs"));
+    for (const QFileInfo &pack : packs.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
+        writeJsonFile(pack.absoluteFilePath() + QStringLiteral("/.fugue-source.json"),
+                      QJsonObject{{"kind", "bundle"}, {"location", bundle}});
+    return top;
 }
 
 } // namespace fugue
