@@ -37,8 +37,11 @@ ApplicationWindow {
     readonly property real cardGap: App.theme.look.params.areaLayout === "panes" ? 0 : App.theme.look.params.areaGap * App.theme.look.unit
     readonly property real cardHalf: cardGap / 2
     // The cards' top and bottom in the main column: the Graph's header above the canvas is part of its card.
-    readonly property real cardTop: graphHeader.active ? graphHeader.y : body.y
-    readonly property real cardBottom: body.y + body.height
+    // The cards' span (the side strip and panels use it): the shelf's own while it shows. The canvas under it is not laid out then,
+    // so measuring the canvas left the strip short of the window's foot (owner, 2026-11-25).
+    readonly property Item cardItem: homeItem ?? body
+    readonly property real cardTop: graphHeader.active ? graphHeader.y : cardItem.y
+    readonly property real cardBottom: cardItem.y + cardItem.height
     // The settings (settings/settings_model.h); a test window may run without them.
     readonly property SettingsModel appSettingsModel: App.settings
     // The shown workflow has an app block (#385), and the window shows it as the App view.

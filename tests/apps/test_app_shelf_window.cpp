@@ -154,6 +154,11 @@ private slots:
         QTRY_VERIFY(find(app.window, "appsHome"));
         QVERIFY(!find(app.window, "canvas"));
         QVERIFY(find(app.window, "appViewSwitch")); // always shown: on the shelf App is chosen (apps below)
+        // The side strip runs to the shelf's foot, as it does beside the graph (owner, 2026-11-25: it stopped short).
+        QQuickItem *strip = nullptr;
+        QTRY_VERIFY((strip = find(app.window, "sideTabStrip")) != nullptr);
+        QQuickItem *home = find(app.window, "appsHome");
+        QTRY_COMPARE(qRound(strip->mapToScene(QPointF(0, strip->height())).y()), qRound(home->mapToScene(QPointF(0, home->height())).y()));
         QTRY_VERIFY(find(app.window, "appCard-ready-app"));
         QTRY_VERIFY(find(app.window, "appCard-needs-app"));
         QVERIFY(!find(app.window, "appCard-plain"));
