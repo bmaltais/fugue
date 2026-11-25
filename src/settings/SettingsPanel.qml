@@ -219,62 +219,6 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
-                        id: corners
-                        readonly property int px: panel.model.cornerRadius // -1: follow Omarchy
-                        visible: panel.page === "general"
-                        title: qsTr("Corner radius")
-                        key: "corner_radius"
-                        origin: panel.model.origins["corner_radius"] ?? ""
-                        onUseDefaultRequested: panel.apply(panel.model.useDefault("corner_radius"))
-                        note: px < 0 ? qsTr("Nodes, menus and popups follow Omarchy's window rounding.")
-                                         : qsTr("Nodes, menus and popups are rounded by this much.")
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: 2 * panel.u
-                            Choices {
-                                name: "corner"
-                                current: corners.px < 0 ? "omarchy" : "fixed"
-                                options: [{value: "fixed", text: qsTr("Fixed")}, {value: "omarchy", text: qsTr("Follow Omarchy")}]
-                                onPicked: value => panel.apply(panel.model.set("corner_radius",
-                                    value === "omarchy" ? "omarchy" : corners.px >= 0 ? corners.px : 8))
-                            }
-                            Row {
-                                visible: corners.px >= 0
-                                spacing: panel.u
-                                height: 7 * panel.u
-                                SettingsParts.SmallButton {
-                                    objectName: "cornerLess"
-                                    text: "\u2212"
-                                    Accessible.name: qsTr("Less round")
-                                    enabled: corners.px > 0
-                                    opacity: enabled ? 1 : 0.5
-                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.px - 1))
-                                }
-                                Item {
-                                    width: 12 * panel.u
-                                    height: 7 * panel.u
-                                    KitWell { look: panel.look }
-                                    Text {
-                                        objectName: "cornerValue"
-                                        anchors.centerIn: parent
-                                        text: qsTr("%1 px").arg(corners.px)
-                                        color: panel.look.text
-                                        font.pixelSize: panel.look.labelSize
-                                        font.features: { "tnum": 1 }
-                                    }
-                                }
-                                SettingsParts.SmallButton {
-                                    objectName: "cornerMore"
-                                    text: "+"
-                                    Accessible.name: qsTr("Rounder")
-                                    enabled: corners.px < panel.model.maxCornerRadius
-                                    opacity: enabled ? 1 : 0.5
-                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.px + 1))
-                                }
-                            }
-                        }
-                    }
-                    SettingsParts.Setting {
                         visible: panel.page === "general"
                         title: qsTr("Magnify small nodes on hover")
                         key: "hover_magnifier"
@@ -608,6 +552,18 @@ Popup {
                             }
                             LookRow { objectNameOfSlider: "lookDepth"; settingKey: "look_depth"; caption: qsTr("Depth"); amount: panel.model.lookDepth }
                             LookRow { objectNameOfSlider: "lookCorners"; settingKey: "look_corners"; caption: qsTr("Corners"); amount: panel.model.lookCorners }
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Follow Omarchy's rounding")
+                                hint: qsTr("The Corners slider starts from the Omarchy theme's window rounding instead of 8 px.")
+                                KitToggle {
+                                    objectName: "lookCornersOmarchy"
+                                    look: panel.look
+                                    text: qsTr("Follow Omarchy's rounding")
+                                    checked: panel.model.lookCornersOmarchy
+                                    onToggled: value => panel.apply(panel.model.set("look_corners_omarchy", value))
+                                }
+                            }
                             LookRow { objectNameOfSlider: "lookSpacing"; settingKey: "look_spacing"; caption: qsTr("Spacing"); amount: panel.model.lookSpacing }
                             KitRow {
                                 look: panel.look

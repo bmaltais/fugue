@@ -98,10 +98,16 @@ private slots:
     }
 
     // The performance budget (docs/canvas-look.md 20.17): a settled window with a side panel and an area split open swaps no frame.
+    void anIdleWindowWithPanelsDoesNotRedraw_data() {
+        QTest::addColumn<QString>("preset");
+        QTest::newRow("calm") << "calm";
+        QTest::newRow("flat") << "flat";
+    }
     void anIdleWindowWithPanelsDoesNotRedraw() {
+        QFETCH(QString, preset);
         App app(load(graph));
         QVERIFY(app.open());
-        calm(app);
+        QCOMPARE(app.settings.applyLookPreset(preset), QString());
         app.commands.trigger("panel.workflows");
         QTRY_VERIFY(named(app, "workflowsPanel"));
         app.commands.trigger("area.split-row");

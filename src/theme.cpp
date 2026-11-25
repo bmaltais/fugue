@@ -267,23 +267,35 @@ void Theme::refreshLook() {
     const QVariantMap all = this->colors();
     for (auto it = all.cbegin(); it != all.cend(); ++it)
         colors.insert(it.key(), it.value().value<QColor>());
-    m_look->update(colors, m_light, fugue::look::corners(m_cornerSetting, m_radius), m_textSize);
+    m_look->update(colors, m_light, fugue::look::corners(m_cornerSlider, m_cornerFollow, m_radius), m_textSize);
+    pushSliders();
 }
 
 void Theme::setFrost(double frost) { m_look->setFrost(frost); }
 
 void Theme::setNodeStyle(const QString &style) { m_look->setNodeStyle(style); }
 
-void Theme::setLookSliders(const fugue::look::Sliders &sliders) { m_look->setSliders(sliders); }
+void Theme::setLookSliders(const fugue::look::Sliders &sliders) {
+    m_sliders = sliders;
+    pushSliders();
+}
+
+void Theme::pushSliders() {
+    fugue::look::Sliders sliders = m_sliders;
+    sliders.corners = m_cornerSlider;
+    sliders.cornerScale = fugue::look::omarchyCornerScale(m_cornerFollow, m_radius);
+    m_look->setSliders(sliders);
+}
 
 void Theme::setLookFile(const QString &path) { m_look->setLookFile(path); }
 
 void Theme::setLookPreset(const QVariantMap &params) { m_look->setPreset(params); }
 
-void Theme::setCornerRadius(int setting) {
-    if (setting == m_cornerSetting)
+void Theme::setCorners(double slider, bool followOmarchy) {
+    if (slider == m_cornerSlider && followOmarchy == m_cornerFollow)
         return;
-    m_cornerSetting = setting;
+    m_cornerSlider = slider;
+    m_cornerFollow = followOmarchy;
     refreshLook();
 }
 

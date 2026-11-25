@@ -448,6 +448,74 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // The performance budget (docs/canvas-look.md 20.17, #467): a settled shelf swaps no frame, in the Calm and the Flat look (the moving
+    // previews play only when hovered or focused; none is here).
+    void anIdleShelfDoesNotRedraw_data() {
+        QTest::addColumn<QString>("preset");
+        QTest::newRow("calm") << "calm";
+        QTest::newRow("flat") << "flat";
+    }
+    void anIdleShelfDoesNotRedraw() {
+        QFETCH(QString, preset);
+        QTemporaryDir root;
+        makeApp(root.path(), "alpha-app", "Alpha app", false);
+        makeApp(root.path(), "beta-app", "Beta app", true);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QElapsedTimer opened;
+        opened.start();
+        QVERIFY(app.open());
+        QCOMPARE(app.settings.applyLookPreset(preset), QString());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QTRY_VERIFY(find(app.window, "appShelfGrid"));
+        qInfo() << "the shelf's first frame after open," << preset << ":" << opened.elapsed() << "ms";
+        find(app.window, "appShelfGrid")->forceActiveFocus(); // the search field's blinking cursor is a frame of its own
+        QTest::mouseMove(app.window, QPoint(5, 5));
+        int frames = 0;
+        const auto connection = connect(app.window, &QQuickWindow::frameSwapped, this, [&frames] { ++frames; });
+        bool quiet = false;
+        for (int i = 0; i < 20 && !quiet; ++i) {
+            frames = 0;
+            QTest::qWait(500);
+            quiet = frames == 0;
+        }
+        QVERIFY2(quiet, "the shelf never stopped drawing");
+        QTest::qWait(1000);
+        disconnect(connection);
+        QCOMPARE(frames, 0);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The Templates window by keys alone (the epic's keyboard rule, #467): it opens with the search focused, Down enters the grid, Enter
+    // opens the card's template, Escape closes it and gives the focus back to what opened it.
+    void theTemplatesWindowIsKeyboardOnly() {
+        QTemporaryDir root;
+        makeApp(root.path(), "alpha-app", "Alpha app", false);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QVERIFY(app.open());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QQuickItem *shelfSearch = nullptr;
+        QTRY_VERIFY((shelfSearch = find(app.window, "appsSearch")) && shelfSearch->hasActiveFocus());
+        QVERIFY(app.commands.run("file.templates"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QQuickItem *search = nullptr;
+        QTRY_VERIFY((search = find(app.window, "templatesSearch")) && search->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QQuickItem *grid = find(app.window, "templatesGrid");
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QCOMPARE(grid->property("currentIndex").toInt(), 0);
+        QTest::keyClick(app.window, Qt::Key_Tab); // out of the grid, on to the next control, never lost
+        QTRY_VERIFY(app.window->activeFocusItem() && app.window->activeFocusItem() != grid);
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!app.window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        QTRY_VERIFY(shelfSearch->hasActiveFocus());
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // A window with a workflow already open never has the shelf: no item, and the catalog is never read.
     void aWindowWithSomethingOpenHasNoShelfAndReadsNothing() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {"a": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {}}}}})"));

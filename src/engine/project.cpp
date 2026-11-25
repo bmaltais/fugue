@@ -479,6 +479,8 @@ QString lastUsedProjectRoot() {
 
 void recordLastUsedProject() {
     const QString root = fugueHome();
+    if (!root.isEmpty() && !rootIsChosenProject())
+        return; // FUGUE_HOME or --home: a script's, a test's or a scratch root, never the person's last project
     const bool project = !root.isEmpty() && QFileInfo(projectManifestPath(root)).isFile();
     if (!project && (!root.isEmpty() || !projectRegistryExists()))
         return; // an anonymous --home, or Default with nothing to forget

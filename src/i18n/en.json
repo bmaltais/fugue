@@ -506,7 +506,6 @@
   "Copy the compare view as it is drawn": "Copy the compare view as it is drawn",
   "Copy the node's image to the clipboard": "Copy the node's image to the clipboard",
   "Copy view": "Copy view",
-  "Corner radius": "Corner radius",
   "Could not export %1: %2": "Could not export %1: %2",
   "Could not open %1: %2": "Could not open %1: %2",
   "Could not open %1: it is not a file.": "Could not open %1: it is not a file.",
@@ -663,7 +662,6 @@
   "Left-drag on an empty part of the graph pans and the wheel zooms; Ctrl+drag selects. ComfyUI's default.": "Left-drag on an empty part of the graph pans and the wheel zooms; Ctrl+drag selects. ComfyUI's default.",
   "Left-drag on an empty part of the graph selects and the wheel pans; Ctrl+wheel zooms.": "Left-drag on an empty part of the graph selects and the wheel pans; Ctrl+wheel zooms.",
   "Legacy": "Legacy",
-  "Less round": "Less round",
   "Library": "Library",
   "Light": "Light",
   "LoRAs": "LoRAs",
@@ -729,8 +727,6 @@
   "Nodes come in packs. A trusted pack runs programs as you: Fugue enforces no sandbox, so trust only what you would run in a terminal.": "Nodes come in packs. A trusted pack runs programs as you: Fugue enforces no sandbox, so trust only what you would run in a terminal.",
   "Nodes with an input that takes %1": "Nodes with an input that takes %1",
   "Nodes with an output that gives %1": "Nodes with an output that gives %1",
-  "Nodes, menus and popups are rounded by this much.": "Nodes, menus and popups are rounded by this much.",
-  "Nodes, menus and popups follow Omarchy's window rounding.": "Nodes, menus and popups follow Omarchy's window rounding.",
   "None": "None",
   "Not available yet": "Not available yet",
   "Not installed. Find it in packs…": "Not installed. Find it in packs…",
@@ -817,7 +813,6 @@
   "Reset the layout to one area showing the Graph": "Reset the layout to one area showing the Graph",
   "Resize": "Resize",
   "Right-click an inner input and choose Expose on the group to add one.": "Right-click an inner input and choose Expose on the group to add one.",
-  "Rounder": "Rounder",
   "Run": "Run",
   "Run first in the queue": "Run first in the queue",
   "Run it": "Run it",
@@ -2026,5 +2021,7 @@
   "The workflow has no node %1.": "The workflow has no node %1.",
   "The workflow's app block cannot be read (%1), so the builder starts empty. Apply replaces it.": "The workflow's app block cannot be read (%1), so the builder starts empty. Apply replaces it.",
   "Title": "Title",
-  "Turn this workflow into an app: pick its inputs and outputs": "Turn this workflow into an app: pick its inputs and outputs"
+  "Turn this workflow into an app: pick its inputs and outputs": "Turn this workflow into an app: pick its inputs and outputs",
+  "Follow Omarchy's rounding": "Follow Omarchy's rounding",
+  "The Corners slider starts from the Omarchy theme's window rounding instead of 8 px.": "The Corners slider starts from the Omarchy theme's window rounding instead of 8 px."
 }

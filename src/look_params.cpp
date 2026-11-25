@@ -60,6 +60,7 @@ const QList<ParamDef> &paramDefs() {
         {"heroOverlap", 5.0, 0.0, 10.0, "", false, "how far the header's art reaches below its content, in u", {}},
         {"heroShadeTop", 0.05, 0.0, 0.6, "", false, "the title shade's alpha at the top of the header", {}},
         {"heroShadeMid", 0.3, 0.0, 0.8, "", false, "its alpha at heroShadeAt", {}},
+        {"heroShadeMidLight", 0.42, 0.0, 0.8, "", false, "the same on a light theme, where the header's blend is paler (white ink keeps 4.5:1)", {}},
         {"heroShadeAt", 0.6, 0.1, 0.95, "", false, "where the shade is strongest, as a fraction of the art's height", {}},
         {"knobTop", 0.62, 0.0, 1.0, "", false, "the toggle knob's white alpha at the top", {}},
         {"knobBottom", 0.34, 0.0, 1.0, "", false, "the same at the bottom", {}},
@@ -96,7 +97,7 @@ double sliderFactor(const QString &slider, const Sliders &s) {
     if (slider == QLatin1String("depth"))
         return s.depth / Sliders::defaultDepth;
     if (slider == QLatin1String("corners")) // 0.1 to 1.9, 1 at the default
-        return 0.1 + 1.8 * s.corners;
+        return s.cornerScale * 2.0 * s.corners; // 0 square, 1 at the default 0.5, 2 at 1
     if (slider == QLatin1String("spacing")) // 0.25 to 1.75
         return 0.25 + 1.5 * s.spacing;
     return 1;

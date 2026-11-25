@@ -60,7 +60,7 @@ inline fugue::Document load(const QByteArray &json) {
 
 // An Omarchy theme for the window: a shipped theme's palette by name (empty: Theme's
 // fallbacks) and Hyprland's rounding (negative: none, as without Hyprland). The canvas draws
-// with that rounding too, set as the corner_radius setting (none: the setting's default).
+// with that rounding too, written as the old corner_radius setting, which migrates to the Corners slider (none: the default).
 struct Look {
     QString theme;
     int radius = -1;

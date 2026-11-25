@@ -133,7 +133,7 @@ Item {
             Gradient {
                 id: roundedShade
                 GradientStop { position: 0; color: Qt.rgba(0, 0, 0, hero.look.params.heroShadeTop) }
-                GradientStop { position: hero.look.params.heroShadeAt; color: Qt.rgba(0, 0, 0, hero.look.params.heroShadeMid) }
+                GradientStop { position: hero.look.params.heroShadeAt; color: Qt.rgba(0, 0, 0, hero.look.light ? hero.look.params.heroShadeMidLight : hero.look.params.heroShadeMid) }
                 GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0) }
             }
             Gradient {

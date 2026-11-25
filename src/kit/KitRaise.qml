@@ -9,12 +9,16 @@ Item {
     id: raise
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
     property real radius: 0
+    property bool outsideOnly: false // a translucent host (a card): the shadow only below its edge, or it would darken the fill
     anchors.fill: parent
     enabled: false
     Rectangle { // the soft shadow under the control
         visible: raise.look.params.raiseShadowOffset > 0.01
-        anchors { fill: parent; topMargin: raise.look.params.raiseShadowOffset; bottomMargin: -raise.look.params.raiseShadowOffset }
-        radius: raise.radius
+        x: raise.outsideOnly ? raise.radius * 0.5 : 0
+        width: parent.width - 2 * x
+        y: raise.outsideOnly ? parent.height - 1 : raise.look.params.raiseShadowOffset
+        height: raise.outsideOnly ? 1 + 2 * raise.look.params.raiseShadowOffset : parent.height
+        radius: raise.outsideOnly ? 1 : raise.radius
         color: Qt.rgba(0, 0, 0, raise.look.light ? raise.look.params.raiseShadowAlphaLight : raise.look.params.raiseShadowAlpha)
         z: -1
     }

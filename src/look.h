@@ -93,13 +93,15 @@ QVariantList tabColors(const QHash<QString, QColor> &colors, const Tokens &token
 
 // --- corners (3) ---
 
-// The node corner r and the popup corner R. `setting` is settings.json's corner_radius (#63):
-// a fixed radius in px for both, or Settings::followOmarchy for Hyprland's rounding `omarchy`,
-// as before the setting: R is the rounding and r is held to 8.
+// The node corner r and the popup corner R, in px. `slider` is the Look's Corners slider (look_corners, 0 to 1; 8 px for both at
+// its default 0.5, the factor 2 x slider of every kit corner: 0 is square). With `followOmarchy` (look_corners_omarchy) the base is
+// Hyprland's rounding `omarchy` instead of 8: R is the rounding and r is held to 8, both times the factor (#63, #467).
 struct Corners {
     int node = 0, popup = 0;
 };
-Corners corners(int setting, int omarchy);
+Corners corners(double slider, bool followOmarchy, int omarchy);
+// What the kit's corner parameters are multiplied by on top of the slider when the base is Omarchy's rounding (1 at 8 px).
+double omarchyCornerScale(bool followOmarchy, int omarchy);
 
 // --- shadows (7) ---
 

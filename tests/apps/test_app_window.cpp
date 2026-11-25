@@ -815,14 +815,21 @@ private slots:
 
     // The performance budget (docs/canvas-look.md 20, Performance): an App view that has settled draws nothing: no animation, timer or
     // effect keeps the scene graph busy, so no frame is swapped for a second.
+    void anIdleAppViewDoesNotRedraw_data() {
+        QTest::addColumn<QString>("preset");
+        QTest::newRow("calm") << "calm";
+        QTest::newRow("flat") << "flat";
+    }
     void anIdleAppViewDoesNotRedraw() {
+        QFETCH(QString, preset);
         App app(load(mediaApp));
         Rig rig(app);
         QElapsedTimer opened;
         opened.start();
         QVERIFY(app.open());
+        QCOMPARE(app.settings.applyLookPreset(preset), QString());
         QTRY_VERIFY(find(app.window, "appInput-seed"));
-        qInfo() << "the App view's first frame after open:" << opened.elapsed() << "ms";
+        qInfo() << "the App view's first frame after open," << preset << ":" << opened.elapsed() << "ms";
         // Wait on the condition, not a fixed time: the page settles when a half second passes with no frame; from then on it must stay so.
         int frames = 0;
         const auto connection = connect(app.window, &QQuickWindow::frameSwapped, this, [&frames] { ++frames; });

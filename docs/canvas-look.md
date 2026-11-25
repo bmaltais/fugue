@@ -756,7 +756,7 @@ Shared QML for the chrome that is not the canvas: panels, dialogs, sheets, cards
 keeps its own look (section 4) except for the node-card style setting (20.14). Colors follow the Omarchy theme through the
 tokens below; sizes are in `u` (1u = 4px at text size 12; every press target at least 7u = 28px, the floor 6u = 24px,
 docs/ui-ergonomics.md). Pixel numbers in this section are the boards' 1x pixels, with `u` beside them where it matters.
-Status per element: **Built**, **Partly**, **To build**, read from `src/kit/` at `f1e5f81c`.
+Status per element: **Built**, **Partly**, **To build**, read from `src/kit/` at the cohesion pass (#467): everything is Built; the leftovers are listed in 20.22.
 
 ### 20.1 Principles
 
@@ -791,20 +791,20 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 
 | Element | File | Status |
 | --- | --- | --- |
-| Tinted panel (card, tone, tint, border) | `KitPanel` (new) | To build |
-| Header, compact, tones, soft fade | `KitHero` | Partly |
+| Tinted panel (card, tone, tint, border) | `KitPanel` | Built (20.4) |
+| Header, compact, tones, soft fade | `KitHero` | Built (20.5; the shade has a light-theme alpha, `heroShadeMidLight`) |
 | Section title, group, row, separator | `KitSection`, `KitGroup`, `KitRow`, `KitSeparator` | Built (group fill and border adapt to the tint, 20.5) |
 | Recessed field, smoked mode | `KitWell` | Built (numbers to align, 20.6) |
 | Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7); `KitChip.toned` tints a chip that is on with the panel's tone |
-| Toggle | `KitToggle` | Partly (pill, white knob, 100 ms; no tone, glass, halo) |
-| Segmented chooser | `KitSegmented` (new) | To build |
-| Slider | `KitSlider` | Partly (accent fill, white knob; no tone, halo, recessed rail) |
+| Toggle | `KitToggle` | Built (20.8, 20.11) |
+| Segmented chooser | `KitSegmented` | Built (20.9) |
+| Slider | `KitSlider` | Built (20.10, 20.11) |
 | Card (pressable, raised), search field | `KitCard`, `KitSearch` | Built (20.19) |
 | Picture, still or moving | `KitPicture`, `KitVideo` | Built (20.19); `KitHero` plays a clip (`video`, `videoActive`) |
 | Apps shelf (page, dialog), Templates window | `AppShelfView`, `AppCard`, `TemplatesDialog` | Built (20.19): Dusk and Sea panels, hero, search, cards, tinted chips |
-| Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | To build (Flat is today's face) |
+| Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | Built (20.14, #466) |
 | App icon, wordmark | `share/icons`, `share/brand`, `fugueMark` | Built |
-| Settings window, Get ready sheet, Needs panel | `SettingsPanel`, `SettingsParts`, `GetReadySheet`, `NeedsPanel` | Built (20.20); Panel colour and Node style rows To build |
+| Settings window, Get ready sheet, Needs panel | `SettingsPanel`, `SettingsParts`, `GetReadySheet`, `NeedsPanel` | Built (20.20); Panel colour is the Colour slider, Node style a chooser in Theme > Look |
 
 ### 20.3 Tokens
 
@@ -984,7 +984,8 @@ range. Reduced `motion` sets every duration to 0.
 | `look_glow` | 0 to 1, default 0.5 | same | the halo's alpha, opacity and reach (reach at half the rate) and the shine of the knob and thumb (position / 0.5; 0 is no halo) | Built |
 | `frost` | 0 to 1, default 0.6 | Settings > Theme > Frost | the glass of frosted chips and smoked wells in `KitFrost`; 0 turns the glass and the halo off | Built (not yet a table of parameters) |
 | `look_depth` | 0 to 1, default 0.5 | same | the wells' darkening, inner shadow and bottom light, and the raised controls' top edge and drop shadow (position / 0.5; capped so it stays calm; a field keeps a minimal fill step at 0) | Built |
-| `look_corners` | 0 to 1, default 0.5 | same | every corner class (card, group, well, chip, segment, hero), factor 0.1 + 1.8 x position, never below about 1.6px, never above 45% of the control's height | Built |
+| `look_corners` | 0 to 1, default 0.5 | same | every corner class (card, group, well, chip, segment, hero), factor 2 x position (0 is square, as an old corner radius of 0), never above 45% of the control's height; the canvas's node corner and the popups' are 8 px x the same factor (the old General > Corner radius, now removed) | Built |
+| `look_corners_omarchy` | true or false, default false | Settings > Theme > Look, a switch under the Corners slider | the base of the corners: Hyprland's window rounding instead of 8 px (node corner held to 8, popups the rounding), and the kit's corner parameters scaled by rounding / 8, then the slider's factor on top; Reset to a preset turns it off. A settings.json with the old `corner_radius` migrates when read: px to the slider position giving the same radius (8 px at 0.5), "omarchy" to this switch (#467) | Built |
 | `look_spacing` | 0 to 1, default 0.5 | same | the gap between cards, the panel's padding, a row's padding and gap, factor 0.25 + 1.5 x position; a row keeps its minimum height (7u floor) | Built |
 | `node_style` | `compact` (default), `flat` | Settings > Theme > Look (a `KitSegmented`: Compact, Flat) | 20.14: the node face's layout metrics (`CanvasModel::nodeStyle`) and its drawing; the Flat preset also sets it (`"settings"` in the preset file) | Built (#466) |
 
@@ -1051,6 +1052,7 @@ range is said once in the log and ignored or clamped; the sliders apply on top.
 | `heroOverlap` | 5 | 0 to 10 | - | how far the header's art reaches below its content, in u |
 | `heroShadeTop` | 0.05 | 0 to 0.6 | - | the title shade's alpha at the top of the header |
 | `heroShadeMid` | 0.3 | 0 to 0.8 | - | its alpha at heroShadeAt |
+| `heroShadeMidLight` | 0.42 | 0 to 0.8 | - | the same on a light theme (the blend is paler there: the subtitle measured 3.6:1 at 0.3, #467) |
 | `heroShadeAt` | 0.6 | 0.1 to 0.95 | - | where the shade is strongest, as a fraction of the art's height |
 | `knobTop` | 0.62 | 0 to 1 | - | the toggle knob's white alpha at the top |
 | `knobBottom` | 0.34 | 0 to 1 | - | the same at the bottom |
@@ -1141,6 +1143,29 @@ bindings read when a slider moves. **Fallbacks:** on the software renderer, or w
 plain fills (the header keeps its square art and strong foot shade). **Reduced motion** (`motion`: `reduced`, a look parameter) sets
 every duration to 0. First frame of the App view after open, offscreen on the CI-like test home: about 0.4 s.
 
+**Measured in the cohesion pass (#467, 2026-11-25).** Idle: a settled window swaps no frame (window tests `anIdleAppViewDoesNotRedraw`,
+`anIdleShelfDoesNotRedraw`, `anIdleSettingsWindowDoesNotRedraw`, `anIdleWindowWithPanelsDoesNotRedraw`, each in Calm and Flat) and,
+on the real GPU in a hidden sway session (RTX 3090, `QSG` loop, nothing playing), used this much CPU over 6 s after settling:
+
+| Surface (real GPU, idle) | Calm | Flat |
+| --- | --- | --- |
+| Apps shelf | 20 ms (0.3%) | 10 ms (0.2%) |
+| App view (`--app image-upscale`, Get ready sheet up) | 0 ms | 0 ms |
+| Graph window (`examples/demo.fugue`) | 0 ms | 0 ms |
+| Settings, graph with panels | no frame (window tests; the real window could not be opened by keys headless) | no frame |
+
+| Open (offscreen software renderer, warm = not the first window of the process; the first one pays about 1.7 s of Qt and QML start-up in either look) | Calm | Flat |
+| --- | --- | --- |
+| Shelf | 257 ms | 246 ms |
+| Settings (Theme page) | 293 ms | 285 ms |
+| App view | 321 ms warm | 321 ms warm |
+| 300 nodes, 600 wires (4155 items Compact, 3847 Flat) | 375 ms warm | about the same (cold 1.7 s) |
+
+Popups: opening Settings (a `PopupSurface` card with a `KitHero`, both Shape gradients) on the real GPU adds 30 to 50 ms of CPU to the
+run in Calm and nothing measurable in Flat (2 runs each, total process CPU with and without the Ctrl+, key; noise is about 30 ms), so
+the gradients are built once and drawn by the GPU: nothing to fix. Nothing was over budget. Not measured: GPU time per frame (no
+counter without the owner's session), and Settings on the real GPU at rest (the headless session could not press its key before the shot).
+
 ### 20.19 Cards, search, moving previews, the shelf and the Templates window (Built)
 
 - **KitCard.** A pressable card: the group's glass fill (twice as strong on a dark theme, so it stands out of the tint), `KitRaise`'s
@@ -1202,3 +1227,18 @@ compositor draws their outline (Hyprland rounds it itself); the full Fugue windo
 
 A shape paints the outside of each card's corners in the window colour over its content (no clipped layer: the canvas is untouched);
 the window keeps a margin of half the gap round its cards. The window fixtures of the tests set `areaGap` to 0.
+
+### 20.22 Cohesion pass (#467): what was checked, fixed and left
+
+Contact sheets (ImageMagick montage of every grab, one PNG per theme and look, plus the real-GPU shots) are in `~/.cache/fugue-cohesion/sheets/` (`<theme>-<look>-ALL.png`; `grab.sh` and `sheets.sh` there remake them). Checked in tokyo-night and catppuccin-latte, Calm and Flat, offscreen (every window and dialog the grab tests make) and on the real GPU
+(shelf, App view, graph, Get ready sheet): spacing, type scale, corner radii, header tones, quiet labels, one primary per screen,
+raised and recessed, glass only over pictures, separators, light-theme contrast. Fixed: translucent cards were darkened by their own
+raised shadow (`KitRaise.outsideOnly`), the header subtitle read 3.6:1 on a light theme (`heroShadeMidLight`), `KitSegmented`'s labels on
+a light theme read 4.1:1 and 4.25:1 (a step darker), and the two corner settings became one (20.13). Left, each small and cosmetic:
+
+| Left | Why |
+| --- | --- |
+| The notice bar of an app's own window is a full-width strip in Calm (the in-window notices are cards) | the app window has no card margin; it shares `Banner` with a square variant. A pass of its own |
+| Frosted chips over a light picture in a header rely on `PictureLuma` and were measured only on the shipped pictures | no failing picture found |
+| The system file dialogs (open, save, export) are the desktop's | not Fugue's to style |
+| Real-GPU grabs of Flat were taken on the owner's own theme (a scratch `HOME` hid the project settings from the settings reader) and Settings and shortcuts could not be opened by keys headless | offscreen grabs cover them in both themes |

@@ -116,6 +116,7 @@ bool setFugueHome(const QString &given, QString *error) {
 namespace {
 
 bool g_selected = false; // a root or Default was named by an option or a variable: no "last used"
+bool g_chosenProject = false; // the root is a project the person chose (--project, FUGUE_PROJECT, the last used one)
 
 // Takes `--<name> <value>` or `--<name>=<value>` out of argv. `present` says it was there.
 bool takeOption(int &argc, char **argv, const char *name, QString *value, bool *present, QString *error) {
@@ -173,6 +174,7 @@ bool projectRoot(const QString &selector, QString *root, QString *error) {
 
 bool applyFugueHome(int &argc, char **argv, QString *error) {
     g_selected = false;
+    g_chosenProject = false;
     QString home, project;
     bool hasHome = false, hasProject = false;
     if (!takeOption(argc, argv, "home", &home, &hasHome, error) || !takeOption(argc, argv, "project", &project, &hasProject, error))
@@ -187,12 +189,14 @@ bool applyFugueHome(int &argc, char **argv, QString *error) {
         root = home;
     } else if (hasProject) {
         g_selected = true;
+        g_chosenProject = true;
         if (!projectRoot(project, &root, error))
             return false;
     } else if (const QString env = qEnvironmentVariable("FUGUE_HOME"); !env.isEmpty()) {
         root = env;
     } else if (const QString named = qEnvironmentVariable("FUGUE_PROJECT"); !named.isEmpty()) {
         g_selected = true;
+        g_chosenProject = true;
         if (!projectRoot(named, &root, error))
             return false;
     }
@@ -205,8 +209,13 @@ bool applyLastUsedProject(QString *error) {
     if (g_selected || !fugueHome().isEmpty())
         return true;
     const QString last = lastUsedProjectRoot();
-    return last.isEmpty() ? true : setFugueHome(last, error);
+    if (last.isEmpty())
+        return true;
+    g_chosenProject = true;
+    return setFugueHome(last, error);
 }
+
+bool rootIsChosenProject() { return g_chosenProject; }
 
 QString fugueHome() {
     const QString root = qEnvironmentVariable("FUGUE_HOME");

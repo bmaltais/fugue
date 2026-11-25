@@ -363,11 +363,14 @@ QHash<QString, QColor> portColors(const QHash<QString, QColor> &colors, bool lig
     return out;
 }
 
-Corners corners(int setting, int omarchy) {
-    if (setting >= 0)
-        return {setting, setting};
-    return {std::min(omarchy, 8), omarchy};
+Corners corners(double slider, bool followOmarchy, int omarchy) {
+    const double factor = 2.0 * std::clamp(slider, 0.0, 1.0); // 0 is square (an old corner_radius 0 stays square)
+    const int node = followOmarchy ? std::min(omarchy, 8) : 8;
+    const int popup = followOmarchy ? omarchy : 8;
+    return {static_cast<int>(std::lround(node * factor)), static_cast<int>(std::lround(popup * factor))};
 }
+
+double omarchyCornerScale(bool followOmarchy, int omarchy) { return followOmarchy ? omarchy / 8.0 : 1.0; }
 
 namespace {
 
@@ -554,7 +557,8 @@ void CanvasLook::setSliders(const fugue::look::Sliders &sliders) {
     clamped.corners = qBound(0.0, sliders.corners, 1.0);
     clamped.spacing = qBound(0.0, sliders.spacing, 1.0);
     clamped.depth = qBound(0.0, sliders.depth, 1.0);
-    if (clamped.colour == m_sliders.colour && clamped.glow == m_sliders.glow && clamped.corners == m_sliders.corners
+    clamped.cornerScale = qBound(0.0, sliders.cornerScale, 4.0);
+    if (clamped.cornerScale == m_sliders.cornerScale && clamped.colour == m_sliders.colour && clamped.glow == m_sliders.glow && clamped.corners == m_sliders.corners
         && clamped.spacing == m_sliders.spacing && clamped.depth == m_sliders.depth)
         return;
     m_sliders = clamped;

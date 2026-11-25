@@ -26,7 +26,7 @@ Rectangle {
     border.color: current ? look.accent : look.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.07)
     Behavior on color { ColorAnimation { duration: card.look.params.durColor; easing.type: Easing.OutCubic } }
 
-    KitRaise { look: card.look; radius: card.radius }
+    KitRaise { look: card.look; radius: card.radius; outsideOnly: card.glass }
     Item { id: holder; anchors.fill: parent }
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: card.tapped() }

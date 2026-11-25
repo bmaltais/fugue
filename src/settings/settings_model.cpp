@@ -213,7 +213,7 @@ void SettingsModel::pushLive() {
     if (m_canvas)
         m_canvas->setPictureMode(pictureModeFromName(m_effective.settings.pictureMode));
     if (m_theme)
-        m_theme->setCornerRadius(m_effective.settings.cornerRadius);
+        m_theme->setCorners(m_effective.settings.lookCorners, m_effective.settings.lookCornersOmarchy);
     if (m_theme)
         m_theme->setFrost(m_effective.settings.frost);
     if (m_theme)
@@ -537,7 +537,7 @@ QString SettingsModel::lookPreset() const {
     const Settings &s = m_effective.settings;
     const look::Preset preset = look::loadPreset(s.lookPreset);
     const auto at = [&](const char *name, double fallback) { return preset.sliders.value(QLatin1String(name), fallback).toDouble(); };
-    const bool same = qFuzzyCompare(1 + s.lookColour, 1 + at("colour", look::Sliders::defaultColour))
+    const bool same = !s.lookCornersOmarchy && qFuzzyCompare(1 + s.lookColour, 1 + at("colour", look::Sliders::defaultColour))
                       && qFuzzyCompare(1 + s.lookGlow, 1 + at("glow", look::Sliders::defaultGlow))
                       && qFuzzyCompare(1 + s.frost, 1 + at("frost", 0.6))
                       && qFuzzyCompare(1 + s.lookDepth, 1 + at("depth", look::Sliders::defaultDepth))
@@ -569,6 +569,8 @@ QString SettingsModel::applyLookPreset(const QString &id) {
     put("look_depth", at("depth", look::Sliders::defaultDepth));
     put("look_corners", at("corners", look::Sliders::defaultCorners));
     put("look_spacing", at("spacing", look::Sliders::defaultSpacing));
+    if (error.isEmpty())
+        error = set(QStringLiteral("look_corners_omarchy"), false); // a preset's radius is its own, not Omarchy's
     // What the preset also sets (node_style): data in the preset file, never a branch on its name.
     for (auto it = preset.settings.cbegin(); it != preset.settings.cend() && error.isEmpty(); ++it)
         error = set(it.key(), it.value().toString());

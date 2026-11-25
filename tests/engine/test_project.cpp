@@ -510,7 +510,11 @@ private slots:
         QVERIFY(!projectRegistryExists());
         QVERIFY(createProject("A", path("p/a"), {}).ok());
         write(path("p/bare/x"), "");
-        QVERIFY(setFugueHome(path("p/a"), nullptr));
+        {
+            Args args({"fugue", "--project", path("p/a").toLocal8Bit().constData()});
+            QString error;
+            QVERIFY2(applyFugueHome(args.argc, args.pointers.data(), &error), qPrintable(error));
+        }
         recordLastUsedProject();
         QCOMPARE(readProjectRegistry()->last, path("p/a"));
         // An anonymous --home leaves it alone.
@@ -522,6 +526,23 @@ private slots:
         recordLastUsedProject();
         QVERIFY(readProjectRegistry()->last.isEmpty());
         QVERIFY(readProjectRegistry()->projects.contains(path("p/a")));
+    }
+
+    // A project given by FUGUE_HOME (a script's, a test's or an agent's scratch home) is never the last used one.
+    void aProjectGivenByFugueHomeIsNotRemembered() {
+        QVERIFY(createProject("A", path("p/a"), {}).ok());
+        QVERIFY(createProject("B", path("p/b"), {}).ok());
+        ProjectRegistry registry = *readProjectRegistry();
+        registry.last = path("p/a");
+        QVERIFY(!hasErrors(writeProjectRegistry(registry)));
+        qputenv("FUGUE_HOME", path("p/b").toLocal8Bit());
+        Args args({"fugue"});
+        QString error;
+        QVERIFY2(applyFugueHome(args.argc, args.pointers.data(), &error), qPrintable(error));
+        QCOMPARE(fugueHome(), path("p/b"));
+        recordLastUsedProject();
+        QCOMPARE(readProjectRegistry()->last, path("p/a"));
+        qunsetenv("FUGUE_HOME");
     }
 
     void removingTheLastUsedProjectForgetsIt() {

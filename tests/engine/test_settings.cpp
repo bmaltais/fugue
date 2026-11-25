@@ -101,25 +101,61 @@ private slots:
         QVERIFY(!checkSetting("frost", "on").isEmpty());
     }
 
-    // The canvas corners (#63): 8 px unless set, any whole number of px from 0 to 16, or
-    // "omarchy" to follow Hyprland's rounding as Fugue did before.
-    void theCornerRadiusIsFixedOrFollowsOmarchy() {
+    // The radius is the Look's Corners slider, with "follow Omarchy" as an option beside it (#467).
+    void theCornerOptionIsABoolean() {
         QTemporaryDir dir;
-        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.cornerRadius, 8);
-        QCOMPARE(settingDefault("corner_radius"), QJsonValue(8));
-        for (const QJsonValue &good : {QJsonValue(0), QJsonValue(12), QJsonValue(16), QJsonValue("omarchy")})
-            QCOMPARE(checkSetting("corner_radius", good), QString());
-        for (const QJsonValue &bad : {QJsonValue(-1), QJsonValue(17), QJsonValue(8.5), QJsonValue("round"), QJsonValue(true)})
-            QVERIFY(!checkSetting("corner_radius", bad).isEmpty());
+        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.lookCornersOmarchy, false);
+        QCOMPARE(settingDefault("look_corners_omarchy"), QJsonValue(false));
+        QCOMPARE(checkSetting("look_corners_omarchy", true), QString());
+        QVERIFY(!checkSetting("look_corners_omarchy", "omarchy").isEmpty());
+        QVERIFY(!settingKeys().contains("corner_radius"));
+        QVERIFY(!changeSetting(dir.filePath("settings.json"), "corner_radius", 8).isEmpty());
+    }
 
-        write(dir.filePath("settings.json"), R"({"corner_radius": 12})");
-        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.cornerRadius, 12);
-        write(dir.filePath("settings.json"), R"({"corner_radius": "omarchy"})");
-        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.cornerRadius, Settings::followOmarchy);
-        write(dir.filePath("settings.json"), R"({"corner_radius": 40})");
-        const SettingsFile bad = readSettings(dir.filePath("settings.json"));
-        QCOMPARE(bad.problems.size(), 1);
-        QCOMPARE(bad.settings.cornerRadius, 8);
+    // The old corner_radius migrates when read: px to the slider position that gives the same radius, "omarchy" to the option.
+    void anOldCornerRadiusMigratesToTheLookSettings() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("settings.json");
+        const auto read = [&](const char *json) {
+            write(path, json);
+            return readSettings(path);
+        };
+        SettingsFile file = read(R"({"corner_radius": 12})");
+        QVERIFY(file.problems.isEmpty());
+        QVERIFY(!file.document.contains("corner_radius"));
+        QCOMPARE(file.settings.lookCorners, 0.75); // 8 px x 2 x 0.75 = 12
+        QCOMPARE(std::lround(8 * 2 * file.settings.lookCorners), 12);
+        QCOMPARE(file.settings.lookCornersOmarchy, false);
+        file = read(R"({"corner_radius": 8})"); // the old default is the new one
+        QCOMPARE(file.settings.lookCorners, 0.5);
+        QVERIFY(!file.document.contains("look_corners"));
+        file = read(R"({"corner_radius": 0})");
+        QCOMPARE(file.settings.lookCorners, 0.0);
+        file = read(R"({"corner_radius": 16})");
+        QCOMPARE(file.settings.lookCorners, 1.0);
+        file = read(R"({"corner_radius": 40})"); // out of the old range: held to it
+        QCOMPARE(file.settings.lookCorners, 1.0);
+        file = read(R"({"corner_radius": "omarchy"})");
+        QCOMPARE(file.settings.lookCornersOmarchy, true);
+        QCOMPARE(file.settings.lookCorners, 0.5);
+        // What the file already says about the new settings wins.
+        file = read(R"({"corner_radius": 12, "look_corners": 0.2})");
+        QCOMPARE(file.settings.lookCorners, 0.2);
+        file = read(R"({"corner_radius": "omarchy", "look_corners_omarchy": false})");
+        QCOMPARE(file.settings.lookCornersOmarchy, false);
+    }
+
+    // The next write leaves the old key out and keeps the migrated value.
+    void aWriteDropsTheOldCornerRadius() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("settings.json");
+        write(path, R"({"corner_radius": "omarchy", "navigation": "standard"})");
+        QVERIFY(changeSetting(path, "frost", 0.3).isEmpty());
+        const QJsonObject document = readSettings(path).document;
+        QVERIFY(!document.contains("corner_radius"));
+        QCOMPARE(document.value("look_corners_omarchy"), QJsonValue(true));
+        QCOMPARE(document.value("navigation"), QJsonValue("standard"));
+        QCOMPARE(document.value("frost"), QJsonValue(0.3));
     }
 
     // The picture mode (#263): smart unless set; smart, sinks or all, nothing else.
