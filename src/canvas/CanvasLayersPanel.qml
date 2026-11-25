@@ -305,7 +305,7 @@ Rectangle {
                 height: 8 * root.u
                 radius: Math.min(root.look.params.cornerChip * root.u, 0.45 * height)
                 color: selected ? (root.look.params.controlColour === "accent" ? root.look.selectedRow : root.toneGlass) : rowHover.hovered ? root.look.kitChipHover : "transparent"
-                border.width: root.current !== null && root.current.position === position && list.activeFocus ? 2 : 0
+                border.width: root.current !== null && root.current.position === position && list.activeFocus && FocusInput.keyboard ? 2 : 0
                 border.color: root.look.accent
                 Accessible.role: Accessible.ListItem
                 Accessible.name: modelData.name

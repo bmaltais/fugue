@@ -40,7 +40,7 @@ Rectangle {
     height: implicitHeight
     radius: look.smallCorner
     color: hovered ? look.menuRow : "transparent"
-    border.width: activeFocus ? 2 : 0
+    border.width: activeFocus && FocusInput.keyboard ? 2 : 0
     border.color: look.accent
     activeFocusOnTab: expandable
     Accessible.role: expandable ? Accessible.Button : Accessible.ListItem

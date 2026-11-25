@@ -92,7 +92,7 @@ Item {
         radius: Math.min(cell.look.params.cornerGroup * cell.look.unit, 0.2 * Math.min(width, height))
         color: "transparent"
         border.width: cell.current ? 2 : 1
-        border.color: cell.current ? (cell.focused ? cell.look.accent : cell.look.label)
+        border.color: cell.current ? (cell.focused && FocusInput.keyboard ? cell.look.accent : cell.look.label)
                                    : (cell.look.light ? Qt.rgba(0, 0, 0, 0.1) : Qt.rgba(1, 1, 1, 0.1))
     }
     HoverHandler { enabled: !cell.compact; cursorShape: Qt.PointingHandCursor }

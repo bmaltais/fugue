@@ -56,8 +56,9 @@ Rectangle {
     color: primary ? (pressed ? Qt.darker(look.accent, 1.15) : hovered ? Qt.lighter(look.accent, 1.08) : look.accent)
          : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
          : glass ? "transparent" : pressed ? look.menuRow : current ? currentFill : hovered ? look.kitChipHover : look.kitChip
-    border.width: activeFocus ? 2 : bordered ? 1 : 0
-    border.color: activeFocus ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
+    readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
+    border.width: ring ? 2 : bordered ? 1 : 0
+    border.color: ring ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button

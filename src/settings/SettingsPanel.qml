@@ -147,7 +147,7 @@ Popup {
                         radius: Math.min(panel.look.params.cornerChip * panel.u, 0.45 * height)
                         // The chosen page takes the window's tone, as a chip that is on does (Templates' categories).
                         color: panel.page === tab.pageId ? Qt.alpha(panel.look.tone(card.tone).glass, 0.34) : tabHover.hovered ? panel.look.kitChipHover : "transparent"
-                        border.width: activeFocus ? 2 : 0
+                        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
                         border.color: panel.look.accent
                         activeFocusOnTab: true
                         Accessible.role: Accessible.PageTab

@@ -79,10 +79,8 @@ Item {
     width: implicitWidth
     height: implicitHeight
     activeFocusOnTab: enabled
-    // The focus ring is for the keyboard (KitSegmented): a press marks the focus it gives, losing the focus clears the mark.
-    property bool pressFocus: false
-    onActiveFocusChanged: if (!activeFocus) pressFocus = false
-    readonly property bool ring: activeFocus && !pressFocus
+    // The focus ring is for the keyboard (KitSegmented).
+    readonly property bool ring: activeFocus && FocusInput.keyboard
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Slider
     Accessible.name: text
@@ -181,7 +179,7 @@ Item {
         TapHandler {
             id: tap
             gesturePolicy: TapHandler.WithinBounds
-            onPressedChanged: if (pressed) { if (!slider.activeFocus) slider.pressFocus = true; slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
+            onPressedChanged: if (pressed) { slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
         }
         HoverHandler { cursorShape: slider.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
     }

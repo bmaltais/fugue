@@ -174,7 +174,7 @@ Item {
             color: "transparent"
             border.width: 2
             border.color: root.look.accent
-            visible: well.focused
+            visible: well.focused && FocusInput.keyboard
         }
         Rectangle {
             anchors.fill: parent
@@ -403,14 +403,14 @@ Item {
                         color: Qt.rgba(0, 0, 0, root.look.light ? 0.25 : 0.5)
                     }
                     Rectangle { // a ring when the current color is hovered or has the keys
-                        visible: currentSwatch.hovered || currentSwatch.activeFocus
+                        visible: currentSwatch.hovered || currentSwatch.activeFocus && FocusInput.keyboard
                         y: parent.height / 2
                         width: parent.width
                         height: parent.height / 2
                         radius: root.look.smallCorner
                         color: "transparent"
                         border.width: 2
-                        border.color: currentSwatch.activeFocus ? root.look.accent : root.look.text
+                        border.color: currentSwatch.activeFocus && FocusInput.keyboard ? root.look.accent : root.look.text
                     }
                     Rectangle { // the block's edge
                         anchors.fill: parent
@@ -529,8 +529,8 @@ Item {
                         background: Rectangle {
                             radius: root.look.smallCorner
                             color: chip.modelData
-                            border.width: chip.activeFocus || chip.hovered ? 2 : 1
-                            border.color: chip.activeFocus ? root.look.accent
+                            border.width: chip.activeFocus && FocusInput.keyboard || chip.hovered ? 2 : 1
+                            border.color: chip.activeFocus && FocusInput.keyboard ? root.look.accent
                                         : chip.hovered ? root.look.text : root.edge
                         }
                     }

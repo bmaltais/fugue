@@ -74,7 +74,7 @@ Rectangle {
                 height: 8 * root.look.unit
                 radius: Math.min(root.look.params.cornerChip * root.look.unit, 0.45 * height)
                 color: modelData.active ? (root.look.params.controlColour === "accent" ? root.look.selectedRow : Qt.alpha(root.look.tone("sea").glass, 0.34)) : "transparent"
-                border.width: modelData.active && list.activeFocus ? 2 : 0
+                border.width: modelData.active && list.activeFocus && FocusInput.keyboard ? 2 : 0
                 border.color: root.look.accent
                 Accessible.role: Accessible.ListItem
                 Accessible.name: modelData.name

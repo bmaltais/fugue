@@ -29,7 +29,7 @@ Rectangle {
     radius: look.smallCorner
     color: hover.hovered ? look.menuRow : look.well
     border.width: 1
-    border.color: activeFocus || menu.opened ? look.accent : look.hairlineStrong
+    border.color: activeFocus && FocusInput.keyboard ? look.accent : look.hairlineStrong
     activeFocusOnTab: true
     Accessible.role: Accessible.ComboBox
     Accessible.name: label

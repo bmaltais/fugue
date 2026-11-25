@@ -25,7 +25,7 @@ Item {
         anchors.fill: parent
         radius: root.look.smallCorner
         color: tap.pressed ? root.look.dangerHover : root.hovered ? root.look.dangerFill : "transparent"
-        border.width: root.activeFocus ? 1 : 0
+        border.width: root.activeFocus && FocusInput.keyboard ? 1 : 0
         border.color: root.look.accent
     }
     Glyph {

@@ -19,16 +19,14 @@ Rectangle {
     signal tapped
 
     readonly property real pad: 2.5 * look.unit
-    property bool pressFocus: false
-    onActiveFocusChanged: if (!activeFocus) pressFocus = false
-    readonly property bool ring: activeFocus && !pressFocus
+    readonly property bool ring: activeFocus && FocusInput.keyboard // the ring is for the keyboard (KitSegmented)
 
     implicitHeight: 7 * look.unit
     implicitWidth: Math.max(14 * look.unit, label.implicitWidth + look.unit + chevron.implicitWidth + 2 * pad)
     radius: pill && look.params.chipShape === "pill" ? height / 2 : Math.min(look.params.cornerChip * look.unit, 0.45 * height)
     color: open || tap.pressed ? look.menuRow : hover.hovered ? look.kitChipHover : look.kitChip
     Behavior on color { ColorAnimation { duration: dd.look.params.durColor; easing.type: Easing.OutCubic } }
-    border.width: ring || (open && activeFocus) ? 2 : 0
+    border.width: ring ? 2 : 0
     border.color: look.accent
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
@@ -62,8 +60,6 @@ Rectangle {
         id: tap
         gesturePolicy: TapHandler.WithinBounds
         onTapped: {
-            if (!dd.activeFocus)
-                dd.pressFocus = true
             dd.forceActiveFocus(Qt.MouseFocusReason)
             dd.tapped()
         }
