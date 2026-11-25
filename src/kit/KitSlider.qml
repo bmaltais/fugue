@@ -1,0 +1,173 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import Fugue
+import "../canvas"
+
+// A round-thumb slider of the Drift kit (docs/canvas-look.md "Drift kit"): a 1u rail on `kitTrack`, filled to the
+// thumb in the accent, a 4.5u `kitKnob` thumb, optional tick dots under the rail, optional Lucide glyphs at the
+// start and the end (a turtle and a rabbit for a speed), and an optional value at the end. It is 7u tall, the floor.
+//
+// The value comes in through `value` and goes out through `moved(value)` on a press, a drag or a key: the slider never
+// sets `value` itself, so a binding stays a binding and the model decides what to keep. A `stepSize` above 0 snaps
+// to steps from `from` (and `ticks` draws one dot at each, up to 24 of them). Keys, when focused: arrows move one step
+// (a fortieth of the range when `stepSize` is 0), PageUp and PageDown ten, Home and End the ends; in a right to left
+// window Left and Right swap with the rail. `valueText` is what the value looks like (a number by default); the end
+// slot has a fixed width (`endWidth`), so every rail in a group starts and ends at the same x.
+Item {
+    id: slider
+    property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
+    property real from: 0
+    property real to: 1
+    property real value: 0
+    property real stepSize: 0
+    property bool ticks: false
+    property string startGlyph
+    property string endGlyph
+    property bool showValue: false
+    property string valueText: String(Math.round(value * 100) / 100)
+    property string text // the name assistive tools say; a KitRow with a label names its own slider
+    property real railWidth: 40 * look.unit
+    property real endWidth: 6.5 * look.unit
+    signal moved(real value)
+
+    readonly property bool mirrored: LayoutMirroring.enabled
+    readonly property real fraction: to > from ? Math.max(0, Math.min(1, (value - from) / (to - from))) : 0
+    readonly property real thumbSize: 4.5 * look.unit
+    readonly property real step: stepSize > 0 ? stepSize : (to - from) / 40
+    readonly property int tickCount: stepSize > 0 ? Math.round((to - from) / stepSize) + 1 : 0
+
+    // The value a position along the rail stands for, snapped to the steps.
+    function valueAt(x) {
+        const f = Math.max(0, Math.min(1, (x - thumbSize / 2) / (rail.width - thumbSize)))
+        const v = from + (mirrored ? 1 - f : f) * (to - from)
+        return clamp(stepSize > 0 ? from + Math.round((v - from) / stepSize) * stepSize : v)
+    }
+    function clamp(v) { return Math.max(Math.min(from, to), Math.min(Math.max(from, to), v)) }
+    function nudge(steps) { moved(clamp(value + steps * step)) }
+
+    implicitWidth: (startGlyph !== "" ? endWidth + look.unit : 0) + railWidth + (endGlyph !== "" || showValue ? look.unit + endWidth : 0)
+    implicitHeight: 7 * look.unit
+    width: implicitWidth
+    height: implicitHeight
+    activeFocusOnTab: enabled
+    opacity: enabled ? 1 : 0.4
+    Accessible.role: Accessible.Slider
+    Accessible.name: text
+    Accessible.description: valueText
+    Accessible.onIncreaseAction: slider.nudge(1)
+    Accessible.onDecreaseAction: slider.nudge(-1)
+
+    // Start glyph, rail, end slot: a Row, so a right to left window mirrors it as it mirrors the rail itself.
+    Row {
+        anchors.fill: parent
+        spacing: slider.look.unit
+        Item {
+            visible: slider.startGlyph !== ""
+            width: slider.endWidth
+            height: parent.height
+            Glyph {
+                look: slider.look
+                name: slider.startGlyph
+                color: slider.look.label
+                font.pixelSize: Math.round(slider.look.textSize * 7 / 6)
+                anchors.centerIn: parent
+            }
+        }
+    Item {
+        id: rail
+        width: slider.railWidth
+        height: parent.height
+        Rectangle {
+            id: groove
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            height: slider.look.unit
+            radius: height / 2
+            color: slider.look.kitTrack
+            Rectangle {
+                x: slider.mirrored ? parent.width - width : 0
+                width: slider.thumbSize / 2 + (parent.width - slider.thumbSize) * slider.fraction
+                height: parent.height
+                radius: height / 2
+                color: slider.look.accent
+            }
+        }
+        Repeater {
+            model: slider.ticks && slider.tickCount > 1 && slider.tickCount <= 24 ? slider.tickCount : 0
+            Rectangle {
+                required property int index
+                readonly property real f: index / (slider.tickCount - 1)
+                x: slider.thumbSize / 2 + (rail.width - slider.thumbSize) * (slider.mirrored ? 1 - f : f) - width / 2
+                y: parent.height / 2 + 3 * slider.look.unit - height / 2
+                width: 0.5 * slider.look.unit
+                height: width
+                radius: width / 2
+                color: slider.look.kitTrack
+            }
+        }
+        Rectangle {
+            id: thumb
+            readonly property real along: (rail.width - width) * (slider.mirrored ? 1 - slider.fraction : slider.fraction)
+            x: along
+            anchors.verticalCenter: parent.verticalCenter
+            width: slider.thumbSize
+            height: width
+            radius: width / 2
+            color: slider.look.kitKnob
+            border.width: slider.activeFocus ? 2 : slider.look.light ? 1 : 0
+            border.color: slider.activeFocus ? slider.look.accent : slider.look.hairlineStrong
+        }
+        // A press or a drag anywhere on the rail's row asks for the value under the pointer.
+        DragHandler {
+            id: drag
+            target: null
+            dragThreshold: 0
+            onCentroidChanged: if (active) slider.moved(slider.valueAt(centroid.position.x))
+        }
+        TapHandler {
+            id: tap
+            gesturePolicy: TapHandler.WithinBounds
+            onPressedChanged: if (pressed) { slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
+        }
+        HoverHandler { cursorShape: slider.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
+    }
+    // The end slot: a glyph, or the value, at one width for every slider of a group.
+    Item {
+        id: endSlot
+        width: slider.endWidth
+        height: parent.height
+        visible: slider.endGlyph !== "" || slider.showValue
+        Glyph {
+            visible: slider.endGlyph !== ""
+            look: slider.look
+            name: slider.endGlyph
+            color: slider.look.label
+            font.pixelSize: Math.round(slider.look.textSize * 7 / 6)
+            anchors.centerIn: parent
+        }
+        Text {
+            visible: slider.endGlyph === "" && slider.showValue
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            text: slider.valueText
+            textFormat: Text.PlainText
+            color: slider.look.label
+            font.pixelSize: Math.round(slider.look.textSize * 13 / 12)
+            font.features: { "tnum": 1 }
+        }
+    }
+    }
+    Keys.onPressed: function (event) {
+        const dir = slider.mirrored ? -1 : 1
+        switch (event.key) {
+        case Qt.Key_Right: case Qt.Key_Up: slider.nudge(event.key === Qt.Key_Right ? dir : 1); break
+        case Qt.Key_Left: case Qt.Key_Down: slider.nudge(event.key === Qt.Key_Left ? -dir : -1); break
+        case Qt.Key_PageUp: slider.nudge(10); break
+        case Qt.Key_PageDown: slider.nudge(-10); break
+        case Qt.Key_Home: slider.moved(slider.from); break
+        case Qt.Key_End: slider.moved(slider.to); break
+        default: return
+        }
+        event.accepted = true
+    }
+}

@@ -39,7 +39,7 @@ while IFS= read -r file; do
     src/*/*)
       area="${file#src/}"; area="${area%%/*}"
       case $area in
-        canvas|commands|media|menu|nodes|panels|run|search|settings|workflow|workspace|cli|engine) ;;
+        canvas|commands|kit|media|menu|nodes|panels|run|search|settings|workflow|workspace|cli|engine) ;;
         *) echo "full shared source changed: $file"; exit 0 ;;
       esac
       if [[ $area == engine && $file == *.h ]]; then echo "full core header changed: $file"; exit 0; fi
