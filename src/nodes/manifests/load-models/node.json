@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/load-models",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Load Models",
   "description": "A diffusion model with its text encoder and VAE, picked from your model folders, as one model for Text Encode, Sampler and VAE Encode.",
   "category": "Diffusion",

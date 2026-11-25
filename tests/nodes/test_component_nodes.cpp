@@ -838,6 +838,7 @@ private slots:
 
     void mossTakesAPickedTokenizerAsTheTokenizerOption() {
         Bench bench;
+        const QScopeGuard cleanup([] { QFile::remove(Bench::modelPath("tokenizers/my-tokenizer.json")); });
         QJsonObject parts = moss(bench, "qwen3.5");
         parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/my-tokenizer.json", "{}"));
         const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
@@ -872,12 +873,91 @@ private slots:
                  Bench::modelPath("tokenizers/qwen3.5_tokenizer.json"));
     }
 
+    // Z-Image's header (cap_embedder) and FLUX.2 Klein's (txt_in, no vector_in): models that read no tokenizer file.
+    QJsonObject zImageWithHeaders(Bench &bench) {
+        return QJsonObject{{"diffusion_model", bench.model("fugue/diffusion-model", "diffusion_models/z-real.safetensors",
+                                                           safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}},
+                                                                        {"x_embedder.weight", QJsonArray{3840, 64}}}))},
+                           {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/qwen3-4b.safetensors",
+                                                        safetensors({{"model.embed_tokens.weight", QJsonArray{151936, 2560}},
+                                                                     {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}}}))},
+                           {"vae", bench.model("fugue/vae", "vae/ae16.safetensors", safetensors({{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}}))}};
+    }
+
     void otherModelsAreGivenNoTokenizer() {
         Bench bench;
         const Result<JobRequest> request =
-            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("a fox")}});
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(zImageWithHeaders(bench)))}, {"prompt", Value("a fox")}});
         QVERIFY2(request, request ? "" : qPrintable(request.error().message));
         QVERIFY(!request->params.value("context").toObject().contains("tokenizer"));
+        QVERIFY(!bench.loaded(zImageWithHeaders(bench)).value("derived").toObject().contains("tokenizer"));
+    }
+
+    void aTokenizerPickedForAModelThatReadsNoneIsRefusedBeforeTheHelper() {
+        Bench bench;
+        const QScopeGuard cleanup([] { QFile::remove(Bench::modelPath("tokenizers/my-tokenizer.json")); });
+        QJsonObject parts = zImageWithHeaders(bench);
+        parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/my-tokenizer.json", "{}"));
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("model_mismatch"));
+        QVERIFY2(request.error().message.contains("reads no separate tokenizer"), qPrintable(request.error().message));
+        // Load Models says it too, on the Tokenizer input, before any run.
+        Values inputs;
+        for (auto it = parts.begin(); it != parts.end(); ++it)
+            inputs.insert(it.key(), Value(it.value()));
+        const Errors errors = bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs));
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().input, QStringLiteral("tokenizer"));
+    }
+
+    void aTokenizerPathTheEngineWouldReadAsSettingsIsRefused() {
+        Bench bench;
+        const QScopeGuard cleanup([] { QFile::remove(Bench::modelPath("tokenizers/a=b,c.json")); });
+        QJsonObject parts = moss(bench, "qwen3.5");
+        parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/a=b,c.json", "{}"));
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("input_invalid"));
+        QVERIFY2(request.error().message.contains("\"=\""), qPrintable(request.error().message));
+    }
+
+    void loadModelsPutsTheDefaultTokenizerInTheModelSoTheCacheKnowsIt() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(moss(bench, "qwen3.5"));
+        const QJsonObject tokenizer = model.value("derived").toObject().value("tokenizer").toObject();
+        QCOMPARE(tokenizer.value("name").toString(), QStringLiteral("qwen3.5_tokenizer.json"));
+        QVERIFY(tokenizer.value("hash").toString().startsWith("sha256:"));
+    }
+
+    void aMossCheckpointInOneFileFindsTheDefaultTokenizerToo() {
+        Bench bench;
+        const QScopeGuard cleanup([] {
+            QFile::remove(Bench::modelPath("tokenizers/qwen3.5_tokenizer.json"));
+            QFile::remove(dataDir() + "/catalog/test.json");
+        });
+        const QByteArray bytes = "{\"version\": \"2.0\"}";
+        bench.model("fugue/tokenizer", "tokenizers/qwen3.5_tokenizer.json", bytes);
+        QDir().mkpath(dataDir() + "/catalog");
+        writeFile(dataDir() + "/catalog/test.json",
+                  QJsonDocument(QJsonObject{{"catalog", 1},
+                                            {"models", QJsonArray{QJsonObject{{"id", "qwen3.5-tokenizer"},
+                                                                              {"resource", "fugue/tokenizer"},
+                                                                              {"title", "Qwen3.5 tokenizer"},
+                                                                              {"file", "qwen3.5_tokenizer.json"},
+                                                                              {"url", "https://example.com/tokenizer.json"},
+                                                                              {"size", bytes.size()},
+                                                                              {"sha256", QString(sha256(bytes)).remove("sha256:")}}}}})
+                      .toJson());
+        const QByteArray dit = safetensors({{"video_embedder.weight", QJsonArray{3072, 128}},
+                                            {"shared_block_modulation.weight", QJsonArray{18432, 3072}},
+                                            {"text_embedder.proj.weight", QJsonArray{3072, 4096}},
+                                            {"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}});
+        const QJsonObject checkpoint = bench.model("fugue/model", "checkpoints/moss-all.safetensors", dit);
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(checkpoint)}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("context").toObject().value("tokenizer").toString(),
+                 Bench::modelPath("tokenizers/qwen3.5_tokenizer.json"));
     }
 
     void aPairedHostGetsWansT5AsT5Too() {

@@ -33,6 +33,32 @@ private slots:
         const std::string already = "cannot load component from 'x': tokenizer is missing";
         QCOMPARE(withEngineReason(already, "tokenizer is missing"), already);
     }
+
+    void aReasonIsClearedWhenAnOperationStartsAndSpentWhenUsed() {
+        EngineReason reason;
+        const std::string generic = "cannot load component from 'x'";
+        reason.record("an old upscaler error --- upscale.cpp:1\n");
+        reason.reset(); // the next operation starts
+        QCOMPARE(reason.explain(generic), generic);
+        reason.record("tokenizer missing --- a.cpp:2\n");
+        QCOMPARE(reason.explain(generic), generic + " (the engine said: tokenizer missing)");
+        QCOMPARE(reason.explain(generic), generic); // spent
+    }
+
+    void aLongReasonIsCutAndASettingLikeTokenizerPathIsRefused() {
+        const std::string generic = "cannot load component from 'x'";
+        const std::string text = withEngineReason(generic, std::string(5000, 'a'));
+        QVERIFY2(text.size() < generic.size() + 300, "too long");
+        QVERIFY(text.find("...") != std::string::npos);
+        std::string wide;
+        for (int i = 0; i < 150; ++i)
+            wide += "\xC3\xA9"; // 300 bytes of two-byte characters: no cut inside one
+        const std::string cut = cappedReason(wide);
+        QVERIFY(cut.size() % 2 == 1 || cut.substr(cut.size() - 3) == "...");
+        QVERIFY(tokenizerPathError("/models/tokenizers/q.json").empty());
+        QVERIFY(!tokenizerPathError("/models/a=b/q.json").empty());
+        QVERIFY(!tokenizerPathError("/models/a,b/q.json").empty());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestHelperEngineError)
