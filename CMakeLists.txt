@@ -200,11 +200,14 @@ list(APPEND fugue_qml_sources src/Main.qml src/commands/CommandUi.qml)
 file(WRITE ${CMAKE_BINARY_DIR}/qmllint/fugue_top_qml.qrc "<RCC>\n  <qresource prefix=\"/\">\n    <file alias=\"Main.qml\">${CMAKE_SOURCE_DIR}/src/Main.qml</file>\n    <file alias=\"CommandUi.qml\">${CMAKE_SOURCE_DIR}/src/commands/CommandUi.qml</file>\n  </qresource>\n</RCC>\n")
 list(APPEND fugue_qmllint_resources --resource ${CMAKE_BINARY_DIR}/qmllint/fugue_top_qml.qrc)
 set_source_files_properties(${fugue_qml_sources} PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE) # not types of the Fugue module: they are found by folder
-# The folders import each other by path, with no qmldir of their own: QTP0004 stays OLD (Qt warns it is deprecated).
+# The folders import each other by path, with no qmldir of their own, so QTP0004 stays OLD; Qt's warning that OLD
+# is deprecated is switched off around the call (CMake 4.3's CMP0218 is set OLD so the switch is still read).
 qt_policy(SET QTP0004 OLD)
+cmake_policy(PUSH)
+cmake_policy(SET CMP0218 OLD)
 set(CMAKE_WARN_DEPRECATED OFF)
 qt_target_qml_sources(fugue_core PREFIX / QML_FILES ${fugue_qml_sources})
-set(CMAKE_WARN_DEPRECATED ON)
+cmake_policy(POP)
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
