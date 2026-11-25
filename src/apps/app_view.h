@@ -230,6 +230,7 @@ public:
     // The model lists (a test gives them folders and a provider).
     AppModels *modelStore() const { return m_models; }
     NeedsModel *needs() const { return m_needs; }
+    const Registry *registry() const { return m_registry; }
 
     // Where the app runs (#395). `source` asks the paired helper whether it answers and calls back with its name (empty: it does not,
     // or there is none; engine/providers.h probePairedHelper); the window gives it. askPlacement(true) is said by whoever knows the app's

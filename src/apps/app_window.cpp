@@ -9,6 +9,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/providers.h"
+#include "engine/remote_placement.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 #include "workflow/readiness_sheet.h"
@@ -17,7 +18,7 @@
 namespace fugue {
 
 void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunService &service, CommandRegistry &commands,
-                 CanvasRuns &runs) {
+                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf) {
     const auto shown = std::make_shared<QString>(); // the tab given to the view last, so a title change does not give it again
     const auto give = [&view, &workflows, &canvas, shown](bool force) {
         const QVariantList tabs = workflows.tabs();
@@ -48,13 +49,40 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // The Needs panel (#469): the shown app's missing models and packs, from the Get ready sheet's own plan, looked at only while the
     // shown workflow is an app that lacks something; its actions go through the paths the window already has.
     NeedsModel *needs = view.needs();
-    // The app runs on the paired helper when its models are not here and that host answers (#395): "Runs on <host>" says so, and the
-    // models the host has are not asked for.
-    view.setPlacementSource([](std::function<void(const QString &)> done) {
+    // The app runs on the paired helper when its models are not here, that host answers, and it can take every node that needs them
+    // (#395, #491): "Runs on <host>" says so. Whether the host has the model files cannot be asked (describe lists no model of a
+    // helper that takes its files in the job), so the rows of the models stay, marked as the host's if it has them (#493). A host
+    // that cannot take a node leaves the rows and adds the node and why (`blocked`).
+    const auto blocked = std::make_shared<Errors>();
+    view.setPlacementSource([&workflows, &canvas, registry = view.registry(), needs, blocked, capabilityOf = std::move(capabilityOf)](std::function<void(const QString &)> done) {
         const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-        probePairedHelper(instances ? instances.value() : QList<ProviderInstance>(), std::move(done));
+        probePairedHelpers(instances ? instances.value() : QList<ProviderInstance>(),
+                           [&workflows, &canvas, registry, needs, blocked, capabilityOf, instances = instances ? instances.value() : QList<ProviderInstance>(),
+                            done = std::move(done)](const QMap<QString, Description> &answered) {
+            blocked->clear();
+            QString host; // the first helper, in the user's order, that answered
+            for (const ProviderInstance &instance : instances)
+                if (host.isEmpty() && answered.contains(instance.name))
+                    host = instance.name;
+            if (!host.isEmpty()) {
+                RemotePlacement placement;
+                placement.instances = instances;
+                placement.capabilityOf = capabilityOf;
+                placement.registry = registry;
+                for (auto it = answered.cbegin(); it != answered.cend(); ++it) { // what each said just now, not a file read back
+                    QStringList capabilities;
+                    for (const CapabilityOffer &offer : it->capabilities)
+                        capabilities << offer.capability;
+                    placement.hostCapabilities.insert(it.key(), capabilities);
+                }
+                *blocked = remoteRunProblems(canvas.document(), workflows.readiness()->currentPlan(), placement);
+            }
+            if (!blocked->isEmpty())
+                needs->refreshSoon(); // the answer is "not there", which changes nothing the view signals: the panel names the nodes now
+            done(blocked->isEmpty() ? host : QString());
+        });
     });
-    needs->setPlanSource([&view, &workflows] {
+    needs->setPlanSource([&view, &workflows, blocked] {
         if (!view.isApp() || !workflows.missingSomething()) {
             view.askPlacement(false);
             return ReadinessPlan();
@@ -65,10 +93,10 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
         };
         view.askPlacement(!plan.models.isEmpty() || std::any_of(plan.problems.cbegin(), plan.problems.cend(), isDownloadProblem));
         if (!view.runsOn().isEmpty()) {
-            plan.models.clear();
-            plan.downloadBytes = 0;
-            plan.unknownSizes = 0;
-            plan.problems.removeIf(isDownloadProblem);
+            for (ReadinessModel &model : plan.models)
+                model.onHost = view.runsOn();
+        } else {
+            plan.problems += *blocked;
         }
         return plan;
     });

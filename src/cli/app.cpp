@@ -9,11 +9,15 @@
 #include <QDir>
 #include <QFile>
 #include <QCoreApplication>
+#include <QEventLoop>
+#include <QTimer>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QPointer>
 
 #include <algorithm>
+#include <memory>
 #include <optional>
 
 #include "cli/canvas_run.h"
@@ -22,6 +26,7 @@
 #include "engine/document.h"
 #include "engine/providers.h"
 #include "engine/readiness.h"
+#include "engine/remote_placement.h"
 #include "engine/registry.h"
 #include "engine/share_package.h"
 #include "engine/templates.h"
@@ -217,11 +222,74 @@ bool onlyModelsMissing(const ReadinessPlan &plan) {
         return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
     });
 }
-bool mayRunOnHost(const ReadinessPlan &plan) {
+// Whether the paired helper can take the run: only models are missing and a helper is configured, and no node of the app is pinned to
+// a provider on this machine or needs what the helper does not offer (#491). `problems` says which node and why when the answer is
+// no because of that; it is empty when there is no helper, or something else than models is missing.
+bool mayRunOnHost(const ReadinessPlan &plan, const Document &document, Context &context, Errors &problems) {
     if (!onlyModelsMissing(plan))
         return false;
     const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-    return instances && !pairedHelperName(instances.value()).isEmpty();
+    if (!instances || pairedHelperName(instances.value()).isEmpty())
+        return false;
+    RemotePlacement placement;
+    placement.instances = instances.value();
+    placement.capabilityOf = [&context](const QString &typeId) {
+        const NodeType *type = context.registry.nodeType(typeId);
+        const std::shared_ptr<ProviderKernel> kernel = type ? context.kernels.provider(*type) : nullptr;
+        return kernel ? kernel->requirement(*type, {}).capability : QString();
+    };
+    placement.registry = &context.registry;
+    // Pins decide without the host. Only when they pass is the host asked what it offers now (it may have gained a capability since it
+    // last answered: a refusal here never reaches the scheduler, which is what would update what is kept); what it last said stands
+    // in only for a host that does not answer.
+    problems = remoteRunProblems(document, plan, placement);
+    if (!problems.isEmpty())
+        return false;
+    QMap<QString, Description> answered;
+    {
+        // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared
+        // state, never in this frame, and quits no loop.
+        struct Wait {
+            QMap<QString, Description> answered;
+            bool finished = false;
+            QPointer<QEventLoop> loop;
+        };
+        const auto wait = std::make_shared<Wait>();
+        QEventLoop loop;
+        wait->loop = &loop;
+        QTimer limit;
+        limit.setSingleShot(true);
+        QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
+        probePairedHelpers(instances.value(), [wait](const QMap<QString, Description> &got) {
+            wait->answered = got;
+            wait->finished = true;
+            if (wait->loop)
+                wait->loop->quit();
+        });
+        limit.start(12000); // a describe on a paired host gives up after 10 s of silence
+        if (!wait->finished)
+            loop.exec();
+        wait->loop = nullptr;
+        if (wait->finished)
+            answered = wait->answered;
+    }
+    for (const ProviderInstance &instance : instances.value()) {
+        if (!instance.enabled || !isPairedHelper(instance))
+            continue;
+        std::optional<Description> offered;
+        if (answered.contains(instance.name))
+            offered = answered.value(instance.name);
+        else
+            offered = rememberedPairedHelper(instance);
+        if (!offered)
+            continue;
+        QStringList capabilities;
+        for (const CapabilityOffer &offer : offered->capabilities)
+            capabilities << offer.capability;
+        placement.hostCapabilities.insert(instance.name, capabilities);
+    }
+    problems = remoteRunProblems(document, plan, placement);
+    return problems.isEmpty();
 }
 
 // The paired hosts that ran a node of the run (run.json: the nodes a provider that does not share this machine's files served), once each.
@@ -245,6 +313,17 @@ Error notReady(const Loaded &loaded, const ReadinessPlan &plan) {
     return makeError(QStringLiteral("app_not_ready"), message,
                      template_ ? QStringLiteral("`fugue template prepare %1` lists what is missing and gets it ready with one question.").arg(loaded.id)
                                : QStringLiteral("`fugue workflow prepare %1` lists what is missing and gets it ready with one question.").arg(loaded.id));
+}
+
+// Why a run is refused: the nodes the paired host cannot serve (each named, with the `prepare` hint of the app), else what is not ready.
+Errors refused(const Loaded &loaded, const ReadinessPlan &plan, const Errors &hostProblems) {
+    if (hostProblems.isEmpty())
+        return {notReady(loaded, plan)};
+    const QString hint = notReady(loaded, plan).hint;
+    Errors errors = hostProblems;
+    for (Error &error : errors)
+        error.hint = QStringLiteral("%1 %2").arg(error.hint, hint);
+    return errors;
 }
 
 // The words of a file: the text as written, one trailing line break dropped.
@@ -482,7 +561,8 @@ Reply appInfo(const Command &command, Context &context) {
                      {"inputs", inputs},
                      {"outputs", outputsJson(*loaded)},
                      {"ready", ready}};
-    if (!ready && mayRunOnHost(plan)) {
+    Errors hostProblems;
+    if (!ready && mayRunOnHost(plan, loaded->document, context, hostProblems)) {
         // Not here, but the paired helper is configured: Run goes there and the host checks the files (#395).
         const QString host = pairedHelperName(loadProviderInstances(providersPath()).value());
         data.insert("runs_on", host);
@@ -491,6 +571,12 @@ Reply appInfo(const Command &command, Context &context) {
     if (!ready) {
         data.insert("needs", plan.toJson());
         lines << QStringLiteral("Not ready: %1").arg(notReady(*loaded, plan).message);
+        // A paired helper is there, but it cannot take these nodes (#491): which node and why.
+        if (!hostProblems.isEmpty()) {
+            data.insert("host_problems", toJson(hostProblems));
+            for (const Error &problem : hostProblems)
+                lines << problem.message;
+        }
     }
     Reply reply = Reply::success(data, lines.join(QLatin1Char('\n')));
     reply.errors = loaded->stale;
@@ -546,8 +632,9 @@ Reply appRun(const Command &command, Context &context) {
 
     // Ready before the block is checked: a missing pack leaves nodes the block names unknown.
     const ReadinessPlan plan = planFor(*loaded, loaded->document, context);
-    if (!isReady(plan) && !mayRunOnHost(plan))
-        return Reply::failure(notReady(*loaded, plan));
+    Errors hostProblems;
+    if (!isReady(plan) && !mayRunOnHost(plan, loaded->document, context, hostProblems))
+        return Reply::failure(refused(*loaded, plan, hostProblems));
     if (const Errors invalid = app::checkApp(loaded->app, loaded->document, context.registry); hasErrors(invalid))
         return Reply::failure(invalid);
 
@@ -556,8 +643,8 @@ Reply appRun(const Command &command, Context &context) {
         return Reply::failure(bound.errors());
     // A model picked with --input has to be here too.
     if (!values->isEmpty())
-        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen) && !mayRunOnHost(chosen))
-            return Reply::failure(notReady(*loaded, chosen));
+        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen) && !mayRunOnHost(chosen, *bound, context, hostProblems))
+            return Reply::failure(refused(*loaded, chosen, hostProblems));
     if (command.has("out")) {
         const QString dir = QDir(command.value("out")).absolutePath();
         if (!QDir().mkpath(dir))

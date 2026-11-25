@@ -89,6 +89,18 @@ class TestDialogsKitWindow : public QObject {
                 return true;
         return false;
     }
+    // The focus is anywhere in the popup (its frame, header or content): its keys are the popup's.
+    bool focusOnPopup(App &app, const char *popup) const {
+        const QObject *box = named(app, popup);
+        if (!box)
+            return false;
+        const auto *content = qobject_cast<QQuickItem *>(box->property("contentItem").value<QObject *>());
+        const QQuickItem *frame = content ? content->parentItem() : nullptr;
+        for (QQuickItem *at = app.window->activeFocusItem(); at && frame; at = at->parentItem())
+            if (at == frame)
+                return true;
+        return false;
+    }
     void openCanvasView(App &app) {
         QVERIFY(app.commands.trigger("file.canvas-view"));
         QTRY_VERIFY(isOpen(app, "canvasViewDialog"));
@@ -151,9 +163,12 @@ private slots:
         QTRY_VERIFY(find(app.window, "aboutClose")->hasActiveFocus());
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app, "about"));
-        // The keys are the window's again: the next dialog hears its Escape.
+        // Wait for About's exit to end: when it does, the popup gives the focus back, and a dialog opened during the fade would lose
+        // it (#503). Then the keys are the window's again: the next dialog hears its Escape.
+        QTRY_VERIFY(!named(app, "about")->property("visible").toBool());
         QVERIFY(app.commands.trigger("app.shortcuts"));
         QTRY_VERIFY(isOpen(app, "help"));
+        QTRY_VERIFY(focusOnPopup(app, "help"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app, "help"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
