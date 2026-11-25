@@ -50,7 +50,7 @@ Result<std::optional<Loaded>> readApp(const QString &id, const QString &file, co
         return block.errors();
     if (!*block)
         return std::optional<Loaded>();
-    return std::optional<Loaded>(Loaded{id, QFileInfo(file).absoluteFilePath(), folder, carried, *document, **block});
+    return std::optional<Loaded>(Loaded{id, QFileInfo(file).absoluteFilePath(), folder, carried, *document, **block, {}}); // stale: filled by loadApp
 }
 
 // The apps of the template library, in its order: the templates the catalog flags (`Template::app`, 11.10). A flagged one that
