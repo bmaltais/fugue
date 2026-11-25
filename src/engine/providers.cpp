@@ -8,12 +8,16 @@
 #include "omarchy_provider.h"
 #include "engine/provider_module.h"
 
+#include <algorithm>
+
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
 #include <QSet>
+#include <QTimer>
+#include <QUrl>
 
 namespace fugue {
 
@@ -423,6 +427,23 @@ QString pairedHelperName(const QList<ProviderInstance> &instances) {
         return instance.name;
     }
     return {};
+}
+
+void probePairedHelper(const QList<ProviderInstance> &instances, std::function<void(const QString &host)> done,
+                       std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make) {
+    const QString name = pairedHelperName(instances);
+    const auto instance = std::find_if(instances.cbegin(), instances.cend(), [&](const ProviderInstance &i) { return i.name == name; });
+    if (name.isEmpty() || instance == instances.cend()) {
+        QTimer::singleShot(0, [done = std::move(done)] { done({}); });
+        return;
+    }
+    const Result<std::shared_ptr<Provider>> provider = make ? make(*instance) : createProvider(*instance);
+    if (!provider) {
+        QTimer::singleShot(0, [done = std::move(done)] { done({}); });
+        return;
+    }
+    const std::shared_ptr<Provider> held = provider.value(); // alive until it has answered
+    held->describe([held, name, done = std::move(done)](const Result<Description> &described) { done(described.ok() ? name : QString()); });
 }
 
 Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {

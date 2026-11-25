@@ -10,6 +10,7 @@
 #include <QList>
 #include <QString>
 
+#include <functional>
 #include <memory>
 
 #include "engine/provider.h"
@@ -66,6 +67,12 @@ QString pairedHostsProblem(const OmarchyPaths &omarchy);
 // The first enabled instance that is a helper on a paired host (#395): not an omarchy instance (those serve models by
 // name, 8.7) and with an address that is not this machine's. Empty when there is none.
 QString pairedHelperName(const QList<ProviderInstance> &instances);
+
+// Asks the paired helper (pairedHelperName of the configured instances) to describe itself: `done` gets its name when it answers,
+// empty when none is configured or it does not answer (a describe on a paired host gives up after 10 s). Called once, from the event
+// loop. `make` makes the provider (createProvider; a test gives a fake).
+void probePairedHelper(const QList<ProviderInstance> &instances, std::function<void(const QString &host)> done,
+                       std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make = {});
 
 // Makes the provider an instance is a use of: omarchy and fugue-helper are compiled in (8.7);
 // any other type is a provider module (8.8) installed in `modulesRoot` (providerModulesDir() when

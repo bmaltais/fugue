@@ -1,11 +1,14 @@
 #include "apps/app_window.h"
 
+#include <algorithm>
+#include <functional>
 #include <memory>
 
 #include "apps/app_launcher.h"
 #include "apps/app_shelf.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "engine/providers.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 #include "workflow/readiness_sheet.h"
@@ -45,9 +48,29 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // The Needs panel (#469): the shown app's missing models and packs, from the Get ready sheet's own plan, looked at only while the
     // shown workflow is an app that lacks something; its actions go through the paths the window already has.
     NeedsModel *needs = view.needs();
-    needs->setPlanSource([&view, &workflows] {
-        return view.isApp() && workflows.missingSomething() ? workflows.readiness()->currentPlan() : ReadinessPlan();
+    // The app runs on the paired helper when its models are not here and that host answers (#395): "Runs on <host>" says so, and the
+    // models the host has are not asked for.
+    view.setPlacementSource([](std::function<void(const QString &)> done) {
+        const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
+        probePairedHelper(instances ? instances.value() : QList<ProviderInstance>(), std::move(done));
     });
+    needs->setPlanSource([&view, &workflows] {
+        if (!view.isApp() || !workflows.missingSomething()) {
+            view.askPlacement(false);
+            return ReadinessPlan();
+        }
+        ReadinessPlan plan = workflows.readiness()->currentPlan();
+        const auto isDownloadProblem = [](const Error &problem) { return problem.code == QLatin1String("download_failed"); };
+        view.askPlacement(!plan.models.isEmpty() || std::any_of(plan.problems.cbegin(), plan.problems.cend(), isDownloadProblem));
+        if (!view.runsOn().isEmpty()) {
+            plan.models.clear();
+            plan.downloadBytes = 0;
+            plan.unknownSizes = 0;
+            plan.problems.removeIf(isDownloadProblem);
+        }
+        return plan;
+    });
+    QObject::connect(&view, &AppView::runsOnChanged, needs, &NeedsModel::refreshSoon);
     needs->setLocator([&canvas](const QVariantMap &item) { return NeedsModel::nodeFor(canvas.document(), item); });
     QObject::connect(&workflows, &Workflows::noticeChanged, needs, &NeedsModel::refreshSoon);
     QObject::connect(needs, &NeedsModel::getReadyRequested, &workflows, [&workflows](bool startNow) {

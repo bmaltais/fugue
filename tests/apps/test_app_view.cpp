@@ -119,6 +119,41 @@ private slots:
             [this](const QString &run) { m_cancelled << run; }, &m_registry);
     }
 
+    // #395: where the app runs. The source is the window's probe of the paired helper; the store only asks it once per tab.
+    void theFormSaysWhereItRunsWhenItsModelsAreOnlyOnTheAnsweringHost() {
+        int asked = 0;
+        std::function<void(const QString &)> answer;
+        m_view->setPlacementSource([&](std::function<void(const QString &)> done) { ++asked; answer = std::move(done); });
+        QSignalSpy changed(m_view.get(), &AppView::runsOnChanged);
+        m_view->show("a", load(workflow()), {});
+        QVERIFY(m_view->runsOn().isEmpty());
+
+        m_view->askPlacement(false); // models are here: nothing is asked
+        QCOMPARE(asked, 0);
+        m_view->askPlacement(true);
+        m_view->askPlacement(true); // once per tab
+        QCOMPARE(asked, 1);
+        answer("gx10");
+        QCOMPARE(m_view->runsOn(), QString("gx10"));
+        QCOMPARE(changed.size(), 1);
+
+        m_view->show("b", load(workflow()), {}); // another tab: not its host, asked again
+        QVERIFY(m_view->runsOn().isEmpty());
+        m_view->askPlacement(true);
+        QCOMPARE(asked, 2);
+        m_view->show("a", load(workflow()), {}); // an answer that comes after the tab changed is dropped
+        answer("gx10");
+        QVERIFY(m_view->runsOn().isEmpty());
+
+        m_view->askPlacement(true);
+        answer("");  // the host does not answer: it runs here
+        QVERIFY(m_view->runsOn().isEmpty());
+        m_view->askPlacement(true);
+        answer("gx10");
+        m_view->askPlacement(false); // the models arrived here
+        QVERIFY(m_view->runsOn().isEmpty());
+    }
+
     void aWorkflowWithoutABlockIsNoApp() {
         QJsonObject plain = workflow();
         plain.remove("app");

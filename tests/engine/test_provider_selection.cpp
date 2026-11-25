@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/fake_provider.h"
 #include "engine/helper_provider.h"
 #include "engine/omarchy_provider.h"
 #include "engine/providers.h"
@@ -456,6 +457,45 @@ private slots:
         QCOMPARE(strings(chosen.errors().first().valid), QStringList{"z-image"});
     }
     // --- model files that are not on this machine (#395) ---
+
+    // The window's probe (#395): the paired helper by name, or empty when none is configured or it does not answer.
+    void theProbeNamesThePairedHelperThatAnswersAndNoOtherCase() {
+        ProviderInstance local;
+        local.name = "This machine";
+        local.type = "omarchy";
+        ProviderInstance loopback;
+        loopback.name = "local-helper";
+        loopback.type = "fugue-helper";
+        loopback.address = "http://127.0.0.1:8787";
+        ProviderInstance host;
+        host.name = "gx10";
+        host.type = "fugue-helper";
+        host.address = "http://gx10.example:8787";
+        QCOMPARE(pairedHelperName({local, loopback}), QString());
+        QCOMPARE(pairedHelperName({local, loopback, host}), QString("gx10"));
+        host.enabled = false;
+        QCOMPARE(pairedHelperName({local, loopback, host}), QString());
+        host.enabled = true;
+
+        const auto probe = [&](const QList<ProviderInstance> &instances, bool answers, QString &got) {
+            got = QStringLiteral("unset");
+            const auto make = [answers](const ProviderInstance &) {
+                auto fake = std::make_shared<FakeProvider>(Description{});
+                if (!answers)
+                    fake->setDescribeErrors({makeError("provider_unreachable", "timed out.")});
+                return Result<std::shared_ptr<Provider>>(std::static_pointer_cast<Provider>(fake));
+            };
+            probePairedHelper(instances, [&got](const QString &name) { got = name; }, make);
+            QTRY_VERIFY_WITH_TIMEOUT(got != QStringLiteral("unset"), 2000);
+        };
+        QString got;
+        probe({local}, true, got);
+        QCOMPARE(got, QString());
+        probe({local, host}, true, got);
+        QCOMPARE(got, QString("gx10"));
+        probe({local, host}, false, got);
+        QCOMPARE(got, QString());
+    }
 
     void modelFilesElsewhereGoToThePairedHelper() {
         Requirement requirement = wants("image.generate");
