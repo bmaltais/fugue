@@ -3,6 +3,7 @@
 // files live in a temporary XDG_CONFIG_HOME, never the owner's.
 
 #include <QFile>
+#include <QQmlProperty>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -482,6 +483,9 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         click(app, NEED("settingsPage-providers"));
+        NEED("providerRow-0");
+        QVERIFY(!find(app.window, "providerKey-0")); // the rows are shut: one line each
+        click(app, NEED("providerRow-0"));
         NEED("providerDefault-0");
         QVERIFY(!QFile::exists(providers));
         type(app, NEED("providerKey-0"), "sk-hidden-123");
@@ -490,7 +494,7 @@ private slots:
         QTRY_VERIFY(!find(app.window, "providerDefault-0")); // saved now
         NEED("providerKeyClear-0");
         // The field never shows the key, and nothing in the panel's model holds it. (The
-        // cards are made again from the new list, so the field is found again.)
+        // rows are made again from the new list, so the field is found again.)
         const QList<QObject *> inputs = NEED("providerKey-0")->findChildren<QObject *>();
         for (QObject *child : inputs)
             QVERIFY(!child->property("text").toString().contains("sk-hidden"));
@@ -503,29 +507,136 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // Add a service by keyboard alone (Tab to the dropdown, Down opens it, Enter picks): fal.ai is added, the focus lands in its key
-    // field, and what is typed there shows as dots.
-    void addingAServiceByKeyboardFocusesTheMaskedKey() {
+    // The search and the catalogue, by keyboard alone: typing filters the list and opens the catalogue (a query nothing answers says so and
+    // offers to clear it), Down goes to the first match, Enter on its Add adds fal.ai, its row opens, the focus lands in its key field,
+    // and what is typed there shows as dots.
+    void theSearchFiltersAndAddingAServiceFocusesTheMaskedKey() {
         App app(load(emptyDoc));
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         click(app, NEED("settingsPage-providers"));
-        QQuickItem *add = NEED("providerAddService");
-        QVERIFY(add->property("activeFocusOnTab").toBool());
-        add->forceActiveFocus(Qt::TabFocusReason);
+        QVERIFY(!find(app.window, "providerAddService")); // the dropdown is gone: the catalogue is a row
+        QQuickItem *search = NEED("providerSearch");
+        QVERIFY(!find(app.window, "providerPreset-fal")); // the catalogue starts shut
+        QQuickItem *input = search->findChild<QQuickItem *>("providerSearchInput");
+        QVERIFY(input);
+        QMetaObject::invokeMethod(search, "focusField");
+        input->setProperty("text", "xyz");
+        QTRY_VERIFY(find(app.window, "providerNoMatch"));
+        QVERIFY(find(app.window, "providerClearSearch"));
+        QVERIFY(!find(app.window, "providerCatalogue")); // nothing anywhere: the catalogue steps aside
+        click(app, NEED("providerClearSearch"));
+        QTRY_VERIFY(find(app.window, "providerRow-0"));
+        QVERIFY(!find(app.window, "providerNoMatch"));
+        QMetaObject::invokeMethod(search, "focusField");
+        for (const QChar c : QStringLiteral("fal"))
+            QTest::keyClick(app.window, c.toLatin1());
+        QTRY_VERIFY(find(app.window, "providerPreset-fal")); // typing opens the catalogue and filters it
+        QVERIFY(!find(app.window, "providerPreset-openai"));
+        QVERIFY(find(app.window, "providerNoMatch")); // none of the services on the list match
+        QVERIFY(!find(app.window, "providerRow-0")); // and the list is filtered too
         QTest::keyClick(app.window, Qt::Key_Down);
-        QTRY_VERIFY(app.window->findChild<QObject *>("providerAddMenu") && app.window->findChild<QObject *>("providerAddMenu")->property("opened").toBool());
+        QQuickItem *chip = NEED("providerPresetAdd-fal");
+        QTRY_VERIFY(app.window->activeFocusItem() == chip);
+        const int before = app.settings.providers().size();
         QTest::keyClick(app.window, Qt::Key_Return);
         const int fal = app.settings.providers().size() - 1;
-        QTRY_VERIFY(find(app.window, QStringLiteral("providerKey-%1").arg(fal)));
-        QQuickItem *key = find(app.window, QStringLiteral("providerKey-%1").arg(fal));
+        QCOMPARE(fal, before);
         QCOMPARE(app.settings.providers().last().toMap().value("name").toString(), QStringLiteral("fal.ai"));
+        QQuickItem *key = NEED(QStringLiteral("providerKey-%1").arg(fal));
         QTRY_VERIFY(app.window->activeFocusItem() && key->isAncestorOf(app.window->activeFocusItem()));
         QVERIFY(find(app.window, QStringLiteral("providerPrivacy-%1").arg(fal)));
+        QCOMPARE(input->property("text").toString(), QString()); // the search cleared
+        QTRY_VERIFY(!find(app.window, "providerPreset-fal")); // and the catalogue shut
         for (const QChar c : QStringLiteral("sk-abc"))
             QTest::keyClick(app.window, c.toLatin1());
         QCOMPARE(app.window->activeFocusItem()->property("echoMode").toInt(), 2 /* TextInput.Password */);
+        // With a filter on, moving is off and Enter in the search never adds.
+        QMetaObject::invokeMethod(search, "focusField");
+        input->setProperty("text", "fal");
+        QTRY_VERIFY(!find(app.window, "providerRow-0"));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QCOMPARE(app.settings.providers().size(), before + 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The rows by keys alone, and the two fixed bugs. Down from the search, End, Enter opens, Down goes on to "Add a service", Alt+Up moves
+    // the service (its open row and the focus go with it, Advanced too: the page keeps its state by name), Tab goes to its switch and into
+    // its body, Escape closes the row with the focus on its header and then closes Settings. A switch flipped by keyboard keeps the
+    // focus although the rows are made again.
+    void theRowsWorkByKeysAndKeepTheirStateByName() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        QCOMPARE(app.settings.addPreset("fal"), QString());
+        const int fal = app.settings.providers().size() - 1;
+        QVERIFY(fal >= 1);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-providers"));
+        const auto header = [&](int n) { return NEED(QStringLiteral("providerRow-%1").arg(n))->property("header").value<QQuickItem *>(); };
+        QVERIFY(!header(fal)->activeFocusOnTab()); // roving: only the first row's header is a Tab stop
+        QVERIFY(header(0)->activeFocusOnTab());
+        // The bug of the keyboard switch: Space flips it, the rows are made again, the focus is still on it.
+        NEED("providerEnabled-0")->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Space);
+        QTRY_COMPARE(fugue::loadProviderInstances(app.settings.providersPath()).value().first().enabled, false);
+        QTRY_VERIFY(app.window->activeFocusItem() == find(app.window, "providerEnabled-0"));
+        QTest::keyClick(app.window, Qt::Key_Space); // and again: it still has it
+        QTRY_COMPARE(fugue::loadProviderInstances(app.settings.providersPath()).value().first().enabled, true);
+        QTRY_VERIFY(app.window->activeFocusItem() == find(app.window, "providerEnabled-0"));
+        // Down, End, Enter.
+        QMetaObject::invokeMethod(NEED("providerSearch"), "focusField");
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_VERIFY(app.window->activeFocusItem() == header(0));
+        QTest::keyClick(app.window, Qt::Key_End);
+        QTRY_VERIFY(app.window->activeFocusItem() == header(fal));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(find(app.window, QStringLiteral("providerBody-%1").arg(fal)));
+        QTest::keyClick(app.window, Qt::Key_Down); // Down from the last header goes on to "Add a service"
+        QTRY_VERIFY(app.window->activeFocusItem() == NEED("providerCatalogue")->property("header").value<QQuickItem *>());
+        QTest::keyClick(app.window, Qt::Key_Up);
+        QTRY_VERIFY(app.window->activeFocusItem() == header(fal));
+        // The bug of Advanced by place: open for fal.ai, then move fal.ai up.
+        QTest::qWait(300); // the body grows over 160 ms
+        test_support::grab(app.window); // a grab polishes the layout: the chip is where it will be clicked
+        QVERIFY(!find(app.window, QStringLiteral("providerName-%1").arg(fal))); // a cloud service keeps its name under Advanced
+        click(app, NEED(QStringLiteral("providerAdvanced-%1").arg(fal)));
+        NEED(QStringLiteral("providerName-%1").arg(fal));
+        header(fal)->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Up, Qt::AltModifier);
+        QTRY_COMPARE(app.settings.providers().at(fal - 1).toMap().value("name").toString(), QStringLiteral("fal.ai"));
+        QTRY_VERIFY(app.window->activeFocusItem() == header(fal - 1)); // the focus stayed with the service
+        QVERIFY(find(app.window, QStringLiteral("providerBody-%1").arg(fal - 1))); // and so did its open row
+        NEED(QStringLiteral("providerName-%1").arg(fal - 1)); // and its Advanced
+        QVERIFY(!find(app.window, QStringLiteral("providerBody-%1").arg(fal)));
+        // Opening the row that took its old place closes this one (one at a time).
+        header(fal)->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(!find(app.window, QStringLiteral("providerBody-%1").arg(fal - 1)));
+        NEED(QStringLiteral("providerBody-%1").arg(fal));
+        // Back to fal.ai: Tab to its switch, then into its body; Escape closes the row, then Settings.
+        header(fal - 1)->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(find(app.window, QStringLiteral("providerBody-%1").arg(fal - 1)));
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QCOMPARE(app.window->activeFocusItem(), NEED(QStringLiteral("providerEnabled-%1").arg(fal - 1)));
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QTRY_VERIFY(NEED(QStringLiteral("providerKey-%1").arg(fal - 1))->isAncestorOf(app.window->activeFocusItem()));
+        QTest::keyClick(app.window, Qt::Key_Escape); // one layer per press: the row, with the focus on its header
+        QTRY_VERIFY(!find(app.window, QStringLiteral("providerBody-%1").arg(fal - 1)));
+        QTRY_VERIFY(app.window->activeFocusItem() == header(fal - 1));
+        QVERIFY(panelOpen(app.window));
+        // Removing a service with no key stored needs no question; the focus goes to the next header (the previous, when it was the last).
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(find(app.window, QStringLiteral("providerBody-%1").arg(fal - 1)));
+        QTest::qWait(300);
+        test_support::grab(app.window);
+        click(app, NEED(QStringLiteral("providerRemove-%1").arg(fal - 1)));
+        QTRY_COMPARE(app.settings.providers().size(), fal);
+        QTRY_VERIFY(app.window->activeFocusItem() == header(fal - 1));
+        QTest::keyClick(app.window, Qt::Key_Escape); // closed: Escape is the panel's
+        QTRY_VERIFY(!panelOpen(app.window));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -625,7 +736,8 @@ private slots:
         }
     }
 
-    // FUGUE_SETTINGS_SHOTS=<dir> (as screenshots()): the Providers page as a person meets it: as it starts, the Add a service menu, a fresh fal.ai card.
+    // FUGUE_SETTINGS_SHOTS=<dir> (as screenshots()): the Providers page as a person meets it: the collapsed list (the default install and a fal.ai
+    // row), one row open, the search "flux", the catalogue open, a search nothing answers, and the list in a narrow window.
     void providerShots() {
         const QString out = qEnvironmentVariable("FUGUE_SETTINGS_SHOTS");
         if (out.isEmpty())
@@ -639,24 +751,35 @@ private slots:
             QCOMPARE(kv[0] == "preset" ? app.settings.applyLookPreset(kv[1]) : app.settings.set(kv[0], kv[1].toDouble()), QString());
         }
         const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG", QStringLiteral("dark"));
+        const auto shot = [&](const QString &name) {
+            QTest::qWait(500);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-%2-%3.png").arg(out, name, tag)));
+        };
+        QCOMPARE(app.settings.addPreset("fal"), QString());
+        const int fal = app.settings.providers().size() - 1;
         app.window->resize(1300, 850);
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         click(app, NEED("settingsPage-providers"));
-        QTest::qWait(300);
-        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-1-start-%2.png").arg(out, tag)));
-        QQuickItem *add = NEED("providerAddService");
-        add->forceActiveFocus(Qt::TabFocusReason);
-        QTest::keyClick(app.window, Qt::Key_Down);
-        QTest::qWait(300);
-        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-2-menu-%2.png").arg(out, tag)));
-        QTest::keyClick(app.window, Qt::Key_Return);
-        QTest::qWait(500);
-        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-3-fal-%2.png").arg(out, tag)));
-        // Advanced open, with a key typed and shown.
-        click(app, NEED(QStringLiteral("providerAdvanced-%1").arg(app.settings.providers().size() - 1)));
-        QTest::qWait(300);
-        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-4-advanced-%2.png").arg(out, tag)));
+        shot("1-list");
+        click(app, NEED(QStringLiteral("providerRow-%1").arg(fal)));
+        shot("2-open");
+        click(app, NEED(QStringLiteral("providerRow-%1").arg(fal))->property("header").value<QQuickItem *>()); // shut again (the header: the row is tall now)
+        QMetaObject::invokeMethod(NEED("providerSearch"), "focusField");
+        for (const QChar c : QStringLiteral("flux"))
+            QTest::keyClick(app.window, c.toLatin1());
+        shot("3-search");
+        QQuickItem *input = NEED("providerSearch")->findChild<QQuickItem *>("providerSearchInput");
+        input->setProperty("text", "");
+        QTRY_VERIFY(find(app.window, "providerPreset-fal")); // typing opened the catalogue, and clearing the search left it open
+        shot("4-catalogue");
+        input->setProperty("text", "xyz");
+        QTRY_VERIFY(find(app.window, "providerClearSearch"));
+        shot("5-nomatch");
+        input->setProperty("text", "");
+        QTRY_VERIFY(find(app.window, "providerRow-0"));
+        app.window->resize(520, 760);
+        shot("6-narrow");
     }
 };
 

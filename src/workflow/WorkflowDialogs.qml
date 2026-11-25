@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Fugue
 import "../menu"
 import "../canvas"
+import "../kit"
 
 // Everything the workflows show besides the tabs (spec 11): the file pickers (the desktop
 // portal, Qt's own dialog when it is not there), the save/discard/cancel question, the trust question, the offer
@@ -132,6 +133,15 @@ Item {
                     wrapMode: Text.Wrap
                     color: root.look.text
                     text: App.workflows.notice
+                }
+                Loader { // made only while a notice shows: the window keeps few items (#5)
+                    Layout.alignment: Qt.AlignTop
+                    active: App.workflows.notice.length > 0
+                    sourceComponent: KitCopyButton {
+                        objectName: "noticeCopy"
+                        look: root.look
+                        copyText: App.workflows.notice
+                    }
                 }
                 // One button for everything the workflow lacks (#379): packs, their trust and environments, and models,
                 // asked once on the sheet, with where models go.

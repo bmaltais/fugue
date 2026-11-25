@@ -144,6 +144,9 @@ public:
     AppLauncher *appLauncher() const { return m_objects.appLauncher; }
     AppShelf *appShelf() const { return m_objects.appShelf; }
 
+    // Puts `text` on the system clipboard as plain text (KitCopyButton: an error message a person pastes into a bug report).
+    Q_INVOKABLE void copyText(const QString &text) const;
+
 private:
     AppObjects m_objects;
 };

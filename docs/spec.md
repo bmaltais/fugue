@@ -1472,11 +1472,14 @@ A provider instance is a configured use of a provider module, stored in
   When a `fugue-helper` is installed, the default ends with `Fugue helper` (type
   `fugue-helper`): last, so "any ready model" stays the model servers', while only the helper
   runs models from disk.
-- **Well-known services (presets).** Settings > Providers > "Add a service…" lists them by group, each with a one-line description;
-  choosing one adds an instance with its name, type and address filled, and the focus goes to the key (or the address when that is what
-  is missing). The table is one place, `src/settings/provider_presets.{h,cpp}` (`knownProviderPresets()`; the model's `providerPresets()`
+- **Well-known services (presets).** Settings > Providers > "Add a service" is a closed row under the list; opened it lists the services
+  by group, each with a one-line description and an Add chip (a cloud service already on the list says Added, with a Show chip), and the
+  page's one search box filters both the list and these rows (names, descriptions, where it runs, "Free tier", and each service's
+  model families, `keywords` in the table). Choosing one adds an instance with its name, type and address filled, opens its row, and the
+  focus goes to the key (or the address when that is what is missing). The list is one 10u line per instance (glyph for where it runs,
+  name, where, status, switch), one row open at a time; docs/ui-ergonomics.md has the decision. The table is one place, `src/settings/provider_presets.{h,cpp}` (`knownProviderPresets()`; the model's `providerPresets()`
   and `addPreset(id)` expose it to QML), a row being id, name, group, type, address, `needsKey`, `needsAddress`, `keyUrl`, a
-  description and, for an off-machine service, a privacy line. A preset is a starting point only: the instance written is the one
+  description, `keywords`, `freeTier` and, for an off-machine service, a privacy line. A preset is a starting point only: the instance written is the one
   typing it in would write, and adding the same preset again names the second "fal.ai 2". "Get a key" opens `keyUrl` in the browser,
   the only network action of the page. **Cloud services:** fal.ai (`fal`, no address: the type's own `https://queue.fal.run`,
   keys at fal.ai/dashboard/keys), Google Gemini (`gemini`, no address: the type's own `https://generativelanguage.googleapis.com`,
@@ -1923,7 +1926,7 @@ pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `plac
 
 | Model id | Offers | Published price | One 1 MP picture |
 | --- | --- | --- | --- |
-| `@cf/black-forest-labs/flux-1-schnell` | `image.generate` (JSON: `prompt`, `steps` up to 8, default 4, `seed`; no size field is documented) | 4.80 neurons per 512x512 tile, 9.60 per step | 57.6 neurons, about $0.0006 |
+| `@cf/black-forest-labs/flux-1-schnell` | `image.generate` (JSON: `prompt`, `steps` up to 8, default 4; no seed: the service answers 400 "Additional or unevaluated properties '/seed'", seen on the owner's first real run 2026-11-25; no size field is documented) | 4.80 neurons per 512x512 tile, 9.60 per step | 57.6 neurons, about $0.0006 |
 | `@cf/black-forest-labs/flux-2-klein-4b` | `image.generate`, `image.edit` (up to 4 reference pictures) | 26.05 neurons per output tile, 5.37 per input tile | 104 neurons, about $0.0012 |
 | `@cf/black-forest-labs/flux-2-klein-9b` | `image.generate`, `image.edit` (up to 4) | 1363.64 neurons per first MP, 181.82 per further or input MP | 1364 neurons, $0.015 |
 | `@cf/black-forest-labs/flux-2-dev` | `image.generate`, `image.edit` (up to 4) | 37.50 neurons per output tile per step, 18.75 per input tile per step | 150 neurons a step, about $0.0016 a step |
@@ -1964,8 +1967,7 @@ pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `plac
   (medium-high: their request fields were not read); reference pictures are scaled to fit 511x511 (medium-high: the limit is in the FLUX.2 [dev] changelog, not in every model page); a seed is reduced modulo 2^31-1 (medium: no range is documented) and the one sent is what the run record holds; no retry of a call (high: neurons are billed per run).
 - **Not checked against the real service**: no Cloudflare token was at hand. The tests use a fake API on the loopback whose answers
   follow Cloudflare's documentation; the exact REST envelope for the image models, the error codes (5007, the neuron-limit message),
-  whether the partner FLUX.2 models draw on the free allocation, and `seed` for schnell (used in Cloudflare's examples, not in its
-  parameter list) are unconfirmed; a real run with a token is pending.
+  and whether the partner FLUX.2 models draw on the free allocation are unconfirmed (schnell's `seed` is settled: refused); a real run with a token is pending.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:
@@ -3110,7 +3112,7 @@ and the `?` overlay marks each one.
 | `view.focus-mode` | Hide all bars and panels; the same key brings them back as they were | H | added |
 | `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
 | `view.toggle-app-inputs` | Show or hide the App view's inputs panel; kept between runs, focus mode hides it (12.17) | none (Window > App inputs) | added |
-| `view.toggle-app` | Switch this workflow between its App view and the graph; off for a workflow with no app block (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
+| `view.toggle-app` | Switch this workflow between its App view and the graph; on a plain graph it opens the app builder, on the shelf it is Start blank, on the empty graph Start blank gave it brings the shelf back (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
 | `app.show-all` | The shelf of apps over the window, on the current app's card, to open another (12.17, #397) | Ctrl+Shift+A (File > All apps…, the rail's Apps item, Fugue's mark in the window bar) | added |
 | `app.make` | Make an app from this workflow, or edit the one it has: the builder (12.19, #393) | Ctrl+Alt+M (File > Make app…) | added |
 | `app.edit` | The same builder on the workflow's app block; off for a workflow with none (12.19, #393) | none (File > Edit app…, shown only with a block) | added |
@@ -3769,9 +3771,12 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
 - **Open in Graph** (the rail's Graph item, which runs `view.toggle-app`) switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
   workflow (window bar, tabs, the graph's header and its menus, the side panels), with the nodes fitted in the canvas as it is
   now, also when the window was resized or tiled while the shelf or the App view hid the canvas. **App | Graph** is the way back
-  and forth: two segments at the window bar's far end (`appViewSwitch`, before the project chip), shown for a tab whose workflow
-  has an app block, in the App view and the graph alike, the view in force marked; the same switch is `view.toggle-app`
-  (Ctrl+Alt+A, Window > App view, Graph > View > App view). It brings the form back rebuilt from the workflow as the graph
+  and forth: two segments at the window bar's far end (`appViewSwitch`, before the project chip), always shown (a
+  bar under 56u wide waits), the view in force marked, labels "App | Graph" in every state; pressing the chosen segment does
+  nothing and the other does what the tab needs: an app workflow, its other view; the apps shelf (App chosen), Start blank; a
+  plain graph with nodes (Graph chosen), the app builder (Make app, Ctrl+Alt+M; cancelling leaves Graph chosen); the empty graph
+  Start blank gave (Graph chosen), the shelf again (`AppShelf.showAgain`). The same switch is `view.toggle-app` (Ctrl+Alt+A,
+  Window > App view, checked on the shelf too, Graph > View > App view). It brings the form back rebuilt from the workflow as the graph
   left it (values kept for inputs that still exist). A workflow with no app block has no switch and the command is off. The choice is per tab and kept for the session; a tab opens in the view its
   `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
 - **The apps shelf** (#388, `apps/app_shelf.h`, `AppsHome.qml`, `AppsDialog.qml`). Fugue has no start screen; a window with nothing

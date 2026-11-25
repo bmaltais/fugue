@@ -32,6 +32,19 @@ Item {
     readonly property var current: results.length > 0 ? results[Math.min(resultIndex, results.length - 1)] : null
     readonly property bool isImage: current !== null && current.kind === "image"
     property bool comparing: false
+    // What the copy button puts on the clipboard: the message, then one line per detail (its hint after it); the detail that repeats the message adds only its hint to the first line.
+    readonly property string errorReport: {
+        const lines = [stage.appView.status === "failed" ? stage.appView.error : stage.notice]
+        if (stage.appView.status === "failed") {
+            for (const d of stage.appView.details) {
+                if (d.message === lines[0]) // the headline again: only its hint is new
+                    lines[0] = d.hint !== "" ? lines[0] + " " + d.hint : lines[0]
+                else
+                    lines.push(d.hint !== "" ? d.message + " " + d.hint : d.message)
+            }
+        }
+        return lines.join("\n")
+    }
     property var inputPicture: ({})
     readonly property bool canCompare: isImage && inputPicture.url !== undefined
     readonly property bool hasInputImage: appView.imageKey() !== ""
@@ -201,6 +214,12 @@ Item {
                 color: stage.look.error
                 font.pixelSize: stage.look.textSize
                 wrapMode: Text.Wrap
+            }
+            KitCopyButton {
+                objectName: "appErrorCopy"
+                look: stage.look
+                Layout.alignment: Qt.AlignTop
+                copyText: stage.errorReport
             }
             KitChip {
                 objectName: "appDetails"

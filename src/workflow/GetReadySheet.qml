@@ -335,14 +335,26 @@ Popup {
                         }
                     }
                 }
-                Text {
-                    objectName: "getReadyMessage"
-                    visible: sheet.view.message !== ""
+                RowLayout {
                     Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    color: sheet.view.ok ? sheet.look.text : sheet.look.error
-                    font.pixelSize: sheet.look.textSize
-                    text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Try again; it lists only what is left.").arg(sheet.view.retry.join(", ")))
+                    visible: sheet.view.message !== ""
+                    spacing: sheet.look.unit
+                    Text {
+                        id: readyMessage
+                        objectName: "getReadyMessage"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: sheet.view.ok ? sheet.look.text : sheet.look.error
+                        font.pixelSize: sheet.look.textSize
+                        text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Try again; it lists only what is left.").arg(sheet.view.retry.join(", ")))
+                    }
+                    KitCopyButton {
+                        objectName: "getReadyMessageCopy"
+                        visible: !sheet.view.ok // only a message that is an error
+                        look: sheet.look
+                        Layout.alignment: Qt.AlignTop
+                        copyText: readyMessage.text
+                    }
                 }
                 // The pack warning, a quiet note by the yes it is about.
                 RowLayout {

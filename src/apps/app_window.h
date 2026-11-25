@@ -33,6 +33,10 @@ class Workflows;
 void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunService &service, CommandRegistry &commands,
                  CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf = {});
 
+// The App | Graph switch's shelf states (call after bindAppView): on the shelf the Graph segment is Start blank and the App segment is
+// chosen; on the empty graph Start blank gave, the App segment brings the shelf back. view.toggle-app does the same as the other segment.
+void bindViewSwitch(AppShelf &shelf, AppView &view, CommandRegistry &commands);
+
 // An app's own window (`fugue --app`): the page's Apps choose another app, which opens in a tab of this window (the shelf's
 // choose) and is shown as the App view whatever its block's defaultView says; the launcher entry and Open in Fugue become that
 // app's, and `retitled(app)` lets the caller change what is not the view's (the window icon). The title is the view's own.

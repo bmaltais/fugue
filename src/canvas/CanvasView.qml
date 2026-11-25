@@ -5,6 +5,7 @@ import QtQuick.Controls
 import Fugue
 import "../menu"
 import "widgets"
+import "../kit"
 import "canvasMenu.js" as CanvasMenu
 
 // The Canvas view (#221, epics #216 and #217, spec 14.5): one canvas as a picture you can look at, choose a revision of,
@@ -1451,6 +1452,15 @@ Item {
             font.pixelSize: root.look.labelSize
             text: root.selectionProblem
         }
+        Loader { // made only while the line shows
+            active: root.quickMask && root.selectionProblem !== ""
+            visible: active
+            sourceComponent: KitCopyButton {
+                objectName: "canvasViewSelectionProblemCopy"
+                look: root.look
+                copyText: root.selectionProblem
+            }
+        }
     }
 
     // The tools (#230), a narrow column at the start of the picture; it scrolls in a short area, never wraps.
@@ -2181,6 +2191,16 @@ Item {
             text: canvasData.canvasId === "" ? (canvasData.canvases.length === 0 ? qsTr("No canvases yet") : qsTr("Choose a canvas"))
                                           : canvasData.error !== "" ? canvasData.error : qsTr("This canvas has no revision yet.")
         }
+        Loader { // made only while the line shows
+            anchors.horizontalCenter: parent.horizontalCenter
+            active: canvasData.canvasId !== "" && canvasData.error !== ""
+            visible: active
+            sourceComponent: KitCopyButton {
+                objectName: "canvasViewEmptyCopy"
+                look: root.look
+                copyText: canvasData.error
+            }
+        }
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: canvasData.canvasId === ""
@@ -2209,6 +2229,16 @@ Item {
             color: root.look.error
             font.pixelSize: root.look.labelSize
             text: root.makeProblem
+        }
+        Loader { // made only while the line shows
+            anchors.horizontalCenter: parent.horizontalCenter
+            active: root.makeProblem !== ""
+            visible: active
+            sourceComponent: KitCopyButton {
+                objectName: "canvasViewMakeProblemCopy"
+                look: root.look
+                copyText: root.makeProblem
+            }
         }
     }
 
@@ -2356,6 +2386,15 @@ Item {
             color: root.look.error
             font.pixelSize: root.look.labelSize
             text: canvasData.error !== "" ? canvasData.error : root.makeProblem
+        }
+        Loader { // made only while the line shows
+            active: (canvasData.error !== "" && pictureView.visible) || (root.makeProblem !== "" && pictureView.visible)
+            visible: active
+            sourceComponent: KitCopyButton {
+                objectName: "canvasViewErrorCopy"
+                look: root.look
+                copyText: canvasData.error !== "" ? canvasData.error : root.makeProblem
+            }
         }
     }
 

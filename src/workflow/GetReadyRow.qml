@@ -146,15 +146,25 @@ Rectangle {
             color: row.look.label
             font.pixelSize: row.look.labelSize
         }
-        Text {
+        RowLayout {
             visible: row.error !== ""
             Layout.fillWidth: true
             Layout.leftMargin: 6 * row.u
             Layout.rightMargin: 5 * row.u
-            text: row.error
-            wrapMode: Text.Wrap
-            color: row.look.error
-            font.pixelSize: row.look.labelSize
+            spacing: row.u
+            Text {
+                Layout.fillWidth: true
+                text: row.error
+                wrapMode: Text.Wrap
+                color: row.look.error
+                font.pixelSize: row.look.labelSize
+            }
+            KitCopyButton {
+                objectName: "getReadyRowCopy"
+                look: row.look
+                Layout.alignment: Qt.AlignTop
+                copyText: row.error
+            }
         }
     }
 

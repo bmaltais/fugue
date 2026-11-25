@@ -79,6 +79,7 @@ Rectangle {
             backdrop: chip.backdrop
             backdropSource: chip.backdropSource
             hovered: chip.hovered
+            on: chip.current
             pressed: chip.pressed
             radius: chip.radius
         }

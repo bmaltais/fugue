@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 
 // The Packs page of the settings panel (spec 6.6-6.8, #25): the installed packs with what
 // the load said about each, add by folder or pinned git address, update, trust and remove.
@@ -265,13 +266,24 @@ ColumnLayout {
                 }
                 Repeater {
                     model: card.modelData.problems
-                    delegate: Text {
+                    delegate: RowLayout {
+                        id: problemRow
                         required property string modelData
                         Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: page.look.error
-                        font.pixelSize: page.look.labelSize
-                        text: modelData
+                        spacing: page.look.unit
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: page.look.error
+                            font.pixelSize: page.look.labelSize
+                            text: problemRow.modelData
+                        }
+                        KitCopyButton {
+                            objectName: "packProblemCopy"
+                            look: page.look
+                            Layout.alignment: Qt.AlignTop
+                            copyText: problemRow.modelData
+                        }
                     }
                 }
             }
@@ -406,14 +418,24 @@ ColumnLayout {
         font.pixelSize: page.look.labelSize
         text: page.model.message
     }
-    Text {
-        objectName: "packsFailure"
-        visible: text !== ""
+    RowLayout {
         Layout.fillWidth: true
-        wrapMode: Text.Wrap
-        color: page.look.error
-        font.pixelSize: page.look.labelSize
-        text: page.model.failure
+        visible: page.model.failure !== ""
+        spacing: page.look.unit
+        Text {
+            objectName: "packsFailure"
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: page.look.error
+            font.pixelSize: page.look.labelSize
+            text: page.model.failure
+        }
+        KitCopyButton {
+            objectName: "packsFailureCopy"
+            look: page.look
+            Layout.alignment: Qt.AlignTop
+            copyText: page.model.failure
+        }
     }
     Text {
         visible: text !== ""

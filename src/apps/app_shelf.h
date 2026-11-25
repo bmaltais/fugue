@@ -40,6 +40,8 @@ class AppShelf : public QObject {
     Q_PROPERTY(QVariantList shown READ shown NOTIFY shownChanged)
     // The window has nothing open and the person has not asked for a blank graph: the shelf is shown in the canvas's place.
     Q_PROPERTY(bool atHome READ atHome NOTIFY homeChanged)
+    // The shown tab is pristine (empty, untitled): the shelf's tab, whether it shows the shelf or, after Start blank, the empty graph.
+    Q_PROPERTY(bool landing READ landing NOTIFY homeChanged)
 
 public:
     using Source = std::function<QVariantList()>; // Workflows::templates(): every template as a map
@@ -70,6 +72,7 @@ public:
     // Gives one of the person's own apps a new title; false for any other, or a blank title.
     Q_INVOKABLE bool rename(const QString &id, const QString &title);
     bool atHome() const { return m_landing && !m_dismissed; }
+    bool landing() const { return m_landing; }
 
     // Reads the catalog again (models arrive, folders change outside Fugue).
     Q_INVOKABLE void refresh();
@@ -77,6 +80,9 @@ public:
     Q_INVOKABLE bool choose(const QString &id);
     // "Start blank": the person wants an empty graph, not the shelf; for the rest of the session.
     Q_INVOKABLE void dismiss();
+    // The window bar's App segment on the empty graph Start blank gave: the shelf comes back. Undoes dismiss() as a whole (the flag is
+    // the session's, not a tab's), so every pristine tab shows the shelf again until the next Start blank.
+    Q_INVOKABLE void showAgain();
     // The window has nothing open (one empty, untitled workflow) or has something.
     void setLanding(bool landing);
 

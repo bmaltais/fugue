@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
+import "../kit"
 
 // The region picker of a Canvas Region node (#213, epic #206, spec 14.5): the canvas at the node's
 // revision (head, named now) in the Crop window's viewer, zoom and pan as everywhere, and a rectangle to drag
@@ -153,6 +154,13 @@ LargeViewDialog {
             text: backend.error !== "" ? backend.error : qsTr("Choose a canvas first: there is no picture to pick a region on.")
             color: root.look.error
             font.pixelSize: root.look.labelSize
+        }
+        KitCopyButton {
+            objectName: "regionErrorCopy"
+            visible: !root.ready
+            anchors { top: parent.verticalCenter; topMargin: 6 * root.look.unit; horizontalCenter: parent.horizontalCenter }
+            look: root.look
+            copyText: backend.error !== "" ? backend.error : qsTr("Choose a canvas first: there is no picture to pick a region on.")
         }
     }
 
