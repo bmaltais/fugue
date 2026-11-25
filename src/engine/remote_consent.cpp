@@ -3,6 +3,7 @@
 #include "engine/atomic_file.h"
 #include "engine/compiler.h"
 #include "engine/fal_provider.h"
+#include "engine/replicate_provider.h"
 #include "engine/http_provider.h"
 #include "engine/json.h"
 #include "engine/node_type.h"
@@ -63,6 +64,8 @@ QString effectiveAddress(const ProviderInstance &instance) {
     // fal.ai's queue is the default of a `fal` instance: a key alone must not skip the question (#407).
     if (instance.type == QLatin1String("fal"))
         return falQueueAddress(instance);
+    if (instance.type == QLatin1String("replicate"))
+        return replicateAddress(instance);
     static const QStringList builtin{QStringLiteral("omarchy"), QStringLiteral("http"), QStringLiteral("fugue-helper")};
     if (builtin.contains(instance.type))
         return {};

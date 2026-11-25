@@ -85,6 +85,12 @@ QList<ModuleField> moduleFields(const ProviderInstance &instance) {
         fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 300"), true, false});
         fields.append({QStringLiteral("poll_ms"), false, QCoreApplication::translate("fugue::SettingsModel", "Poll interval (ms)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 500"), true, false});
     }
+    if (instance.type == QLatin1String("replicate")) {
+        // Replicate's settings (spec 8.7, The `replicate` provider). The address is advanced too: leave it empty for Replicate's own.
+        fields.append({QStringLiteral("image_models"), false, QCoreApplication::translate("fugue::SettingsModel", "More models"), QCoreApplication::translate("fugue::SettingsModel", "Extra official model ids (owner/name), separated by commas"), true, false});
+        fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 300"), true, false});
+        fields.append({QStringLiteral("poll_ms"), false, QCoreApplication::translate("fugue::SettingsModel", "Poll interval (ms)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 500"), true, false});
+    }
     if (instance.type == QLatin1String("http"))
         for (const char *name : {"api", "image_models", "text_models", "timeout_s"})
             fields.append({QLatin1String(name), false});

@@ -534,7 +534,7 @@ private slots:
             QVERIFY2(!ids.contains(p.id), qPrintable(p.id));
             ids.insert(p.id);
             QVERIFY(!p.name.isEmpty() && !p.description.isEmpty());
-            QVERIFY(QStringList({"omarchy", "http", "fugue-helper", "fal"}).contains(p.type));
+            QVERIFY(QStringList({"omarchy", "http", "fugue-helper", "fal", "replicate"}).contains(p.type));
             QVERIFY(QStringList({"cloud", "own"}).contains(p.group));
             if (p.group == QLatin1String("cloud")) {
                 QVERIFY2(p.address.isEmpty() || p.address.startsWith("https://"), qPrintable(p.id));
@@ -542,9 +542,13 @@ private slots:
             } else {
                 QVERIFY(p.privacy.isEmpty() && p.keyUrl.isEmpty());
             }
-            QVERIFY(p.needsAddress == p.address.isEmpty() || p.type == "fal");
+            QVERIFY(p.needsAddress == p.address.isEmpty() || p.type == "fal" || p.type == "replicate");
         }
         QVERIFY(ids.contains("fal"));
+        QVERIFY(ids.contains("replicate"));
+        QCOMPARE(providerPresetById("replicate").type, QStringLiteral("replicate"));
+        QCOMPARE(providerPresetById("replicate").address, QString()); // the replicate type's own default
+        QCOMPARE(providerPresetById("replicate").keyUrl, QStringLiteral("https://replicate.com/account/api-tokens"));
         QCOMPARE(providerPresetById("fal").address, QString()); // the fal type's own default
         QVERIFY(providerPresetById("nope").id.isEmpty());
     }

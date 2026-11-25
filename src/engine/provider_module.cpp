@@ -118,7 +118,14 @@ QList<ProviderModule> builtinProviderModules() {
     fal.transport = QStringLiteral("builtin");
     fal.when = QStringLiteral("never");
     fal.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
-    return {omarchy, http, helper, fal};
+    ProviderModule replicate;
+    replicate.id = QStringLiteral("replicate");
+    replicate.version = QStringLiteral("1");
+    replicate.name = QStringLiteral("Replicate");
+    replicate.transport = QStringLiteral("builtin");
+    replicate.when = QStringLiteral("never");
+    replicate.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    return {omarchy, http, helper, fal, replicate};
 }
 
 Result<QList<ProviderModule>> loadProviderModules(const QString &root) {
