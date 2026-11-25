@@ -78,6 +78,8 @@ std::optional<PortType> resourceTypeOf(const ActionEntry &e, const canvas::Actio
     return std::nullopt;
 }
 
+} // namespace
+
 // A model picked by its file name, as the task bar's picker does: the model files of `type` (the model folders, as `fugue model list`
 // shows them) whose name is `word` or whose file name is, hashed once (the hash is remembered, so the next run is quick). The handle
 // the file's content names, or a plain error that lists the names there are.
@@ -115,6 +117,8 @@ Result<QJsonObject> modelByName(const PortType &type, const QString &word, Conte
     hashes.save();
     return diskHandle(type.toString(), found.first().name, hash);
 }
+
+namespace {
 
 QString nameOf(const ActionEntry &e) { return e.action ? e.action->name : e.id; }
 
