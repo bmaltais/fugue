@@ -30,6 +30,10 @@ Rectangle {
     // A filter that is on takes the window's tone (the KitPanel above, KitTone.js) as translucent colour, as a toggle does, instead of
     // the quiet selection color; with the Colour slider at 0, or no panel above, the selection color.
     property bool toned: false
+    // The surface's one primary action (Install, Download all, Run): the accent fill and its ink. One per surface (docs/ui-ergonomics.md D7).
+    property bool primary: false
+    // A removal or a cancel of work: the red tint while it can act (docs/canvas-look.md 11).
+    property bool danger: false
     readonly property string tone: toned ? KitTone.nearest(chip) : ""
     readonly property color currentFill: tone === "" || look.params.controlColour === "accent" ? look.selectedRow
                                          : Qt.alpha(look.tone(tone).glass, 0.34)
@@ -44,11 +48,15 @@ Rectangle {
     height: implicitHeight
     radius: round || (pill && look.params.chipShape === "pill") ? height / 2 : Math.min(look.params.cornerChip * look.unit, 0.45 * height)
     readonly property bool glass: frosted && look.frost > 0.001 // the frost setting at 0 makes it the plain chip
-    readonly property color ink: glass && glassLoader.item ? (glassLoader.item as KitFrost).ink : glass ? "white" : look.text
+    readonly property color ink: primary ? look.accentForeground
+                                 : glass && glassLoader.item ? (glassLoader.item as KitFrost).ink : glass ? "white" : look.text
     readonly property bool darkInk: glass && glassLoader.item ? (glassLoader.item as KitFrost).pale : false
-    color: glass ? "transparent" : pressed ? look.menuRow : current ? currentFill : hovered ? look.kitChipHover : look.kitChip
+    readonly property bool alarmed: danger && enabled && !primary
+    color: primary ? (pressed ? Qt.darker(look.accent, 1.15) : hovered ? Qt.lighter(look.accent, 1.08) : look.accent)
+         : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
+         : glass ? "transparent" : pressed ? look.menuRow : current ? currentFill : hovered ? look.kitChipHover : look.kitChip
     border.width: activeFocus ? 2 : bordered ? 1 : 0
-    border.color: activeFocus ? look.accent : look.hairlineStrong
+    border.color: activeFocus ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button

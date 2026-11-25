@@ -280,6 +280,10 @@ public:
 
     // Downloads the missing models the banner offers (downloadOffer), into downloadRoot().
     Q_INVOKABLE void downloadMissing();
+    // The shown workflow lacks something (the banner has a line about it): models, packs or nodes (the Needs panel looks only then).
+    bool missingSomething() const { return !m_missingNotice.isEmpty(); }
+    // Downloads these models (Document::models()'s form) on the one download line, into the download folder.
+    void downloadModels(const QJsonArray &models) { startDownloads(models, QStringLiteral("workflow")); }
     // Downloads the missing models of the template with this id; one that needs packs is opened instead, and the
     // Get ready sheet plans the packs and the models (true: opened, the dialog should close).
     Q_INVOKABLE bool downloadTemplate(const QString &id);

@@ -20,17 +20,13 @@ ColumnLayout {
 
     Repeater {
         model: list.model
-        delegate: Rectangle {
+        delegate: SettingsParts.Card {
             id: row
             required property var modelData
             required property int index
             objectName: list.name + "-" + index
             Layout.fillWidth: true
             implicitHeight: rowLayout.implicitHeight + 6 * list.u
-            radius: list.look.smallCorner
-            color: "transparent"
-            border.width: 1
-            border.color: list.look.hairline
             Rectangle { // the share of the biggest, under the text
                 x: 1
                 y: parent.height - height - 1

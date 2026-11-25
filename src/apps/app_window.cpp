@@ -8,6 +8,7 @@
 #include "commands/command_registry.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
+#include "workflow/readiness_sheet.h"
 #include "workflow/workflows.h"
 
 namespace fugue {
@@ -37,6 +38,30 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     QObject::connect(&view, &AppView::notice, &workflows, &Workflows::notify);
     QObject::connect(&service, &RunService::event, &view, &AppView::onEvent);
     view.setDownloads(workflows.downloads()); // a model field's Download shares the window's one download line
+
+    // The Needs panel (#469): the shown app's missing models and packs, from the Get ready sheet's own plan, looked at only while the
+    // shown workflow is an app that lacks something; its actions go through the paths the window already has.
+    NeedsModel *needs = view.needs();
+    needs->setPlanSource([&view, &workflows] {
+        return view.isApp() && workflows.missingSomething() ? workflows.readiness()->currentPlan() : ReadinessPlan();
+    });
+    needs->setLocator([&canvas](const QVariantMap &item) { return NeedsModel::nodeFor(canvas.document(), item); });
+    QObject::connect(&workflows, &Workflows::noticeChanged, needs, &NeedsModel::refreshSoon);
+    QObject::connect(needs, &NeedsModel::getReadyRequested, &workflows, [&workflows](bool startNow) {
+        ReadinessSheet *sheet = workflows.readiness();
+        sheet->show();
+        if (startNow)
+            sheet->start(); // only models: the click is the yes
+    });
+    QObject::connect(needs, &NeedsModel::downloadRequested, &workflows,
+                     [&workflows](const QJsonObject &model) { workflows.downloadModels(QJsonArray{model}); });
+    QObject::connect(needs, &NeedsModel::showNodeRequested, &view, [&view, &canvas](const QString &node) {
+        view.openInGraph();
+        canvas.select({node});
+        const QRectF at = canvas.nodeRect(node);
+        if (!at.isEmpty())
+            canvas.moveView(at.center().x(), at.center().y(), canvas.view().value(QStringLiteral("zoom"), 1.0).toDouble());
+    });
 
     commands.setHandler(QStringLiteral("view.toggle-app"), [&view] { view.toggle(); });
     commands.setEnabledWhen(QStringLiteral("view.toggle-app"), [&view] { return view.isApp(); });

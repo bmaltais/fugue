@@ -1,120 +1,119 @@
 import QtQuick
 import QtQuick.Layouts
 import Fugue
-import "../canvas"
+import "../kit"
 
-// The settings panel's building blocks (#51), as inline components: SettingsParts.Setting
-// and the rest (not Bound: another file cannot make a bound inline component). They draw with theme.look (docs/canvas-look.md) and only report what the
-// user did; the panel and its pages call the model.
+// The settings panel's building blocks (#51, #464), as inline components, on the Drift kit (docs/canvas-look.md 20): a Setting is
+// a KitGroup card (the title, what it does, where its value comes from, then its control), a Toggle a KitToggle, a SmallButton a
+// raised KitChip, a Field a recessed KitWell. They only report what the user did; the panel and its pages call the model. (Not
+// Bound: another file cannot make a bound inline component.)
 QtObject {
-    // A titled setting: the name and what it does on the left, its control under them.
-    // With `key` and `origin` ("inherited" or "override", from SettingsModel.origins) it also says where the value
-    // comes from (spec 1.4.2): "Inherited from Default", or, for the project's own value over the Default's, a
-    // button that gives it up (useDefaultRequested).
-    component Setting: ColumnLayout {
+    // A titled setting: a rounded card with the name and what it does on top and its control under them, as the kit's group is.
+    // `head` takes a control that belongs on the title's line (a toggle). With `key` and `origin` ("inherited" or "override",
+    // from SettingsModel.origins) it also says where the value comes from (spec 1.4.2): "Inherited from Default", or, for the
+    // project's own value over the Default's, a button that gives it up (useDefaultRequested).
+    component Setting: Rectangle {
         id: setting
         property string title
         property string note
         property string key
         property string origin
+        default property alias content: inner.data
+        property alias head: headSlot.data
         signal useDefaultRequested()
+        readonly property CanvasLook look: App.theme.look
         Layout.fillWidth: true
-        spacing: App.theme.look.unit
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 2 * App.theme.look.unit
-            Text {
-                text: setting.title
-                color: App.theme.look.text
-                font.pixelSize: App.theme.look.textSize
-                font.weight: Font.DemiBold
+        implicitHeight: outer.implicitHeight + 2 * look.params.rowPadY * look.unit + 2 * look.unit
+        // A tinted panel shows through the card; a plain one gets the opaque group fill (KitGroup's rule).
+        readonly property bool glass: look.params.panelTint > 0.001
+        radius: Math.min(look.params.cornerGroup * look.unit, 0.3 * height)
+        color: glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
+        border.width: look.params.borders === "hairline" && glass ? 1 : 0
+        border.color: look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
+        ColumnLayout {
+            id: outer
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                      leftMargin: setting.look.params.rowPadLeft * setting.look.unit; rightMargin: setting.look.params.rowPadRight * setting.look.unit }
+            spacing: setting.look.unit
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 2 * setting.look.unit
+                Text {
+                    Layout.alignment: Qt.AlignVCenter
+                    text: setting.title
+                    textFormat: Text.PlainText
+                    color: setting.look.text
+                    font.pixelSize: Math.round(setting.look.textSize * 7 / 6)
+                    Accessible.role: Accessible.Heading
+                    Accessible.name: text
+                }
+                Text {
+                    objectName: "origin-" + setting.key
+                    visible: setting.origin === "inherited"
+                    text: qsTr("Inherited from Default")
+                    color: setting.look.accent
+                    font.pixelSize: setting.look.captionSize
+                }
+                SmallButton {
+                    objectName: "useDefault-" + setting.key
+                    visible: setting.origin === "override"
+                    text: qsTr("Use Default's value")
+                    onClicked: setting.useDefaultRequested()
+                }
+                Item { Layout.fillWidth: true }
+                Row {
+                    id: headSlot
+                    spacing: 2 * setting.look.unit
+                }
             }
             Text {
-                objectName: "origin-" + setting.key
-                visible: setting.origin === "inherited"
-                text: qsTr("Inherited from Default")
-                color: App.theme.look.accent
-                font.pixelSize: App.theme.look.captionSize
+                visible: text !== ""
+                Layout.fillWidth: true
+                text: setting.note
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: setting.look.label
+                font.pixelSize: setting.look.labelSize
             }
-            SmallButton {
-                objectName: "useDefault-" + setting.key
-                visible: setting.origin === "override"
-                text: qsTr("Use Default's value")
-                onClicked: setting.useDefaultRequested()
+            ColumnLayout {
+                id: inner
+                Layout.fillWidth: true
+                spacing: setting.look.unit
             }
-            Item { Layout.fillWidth: true }
-        }
-        Text {
-            visible: text !== ""
-            Layout.fillWidth: true
-            text: setting.note
-            wrapMode: Text.Wrap
-            color: App.theme.look.label
-            font.pixelSize: App.theme.look.labelSize
         }
     }
 
-    // An on/off switch with its label, the same track and knob as a toggle widget (canvas-look
-    // 4.4) and Providers' "Use" switch. The whole row is the press target, 7u = 28px tall.
-    component Toggle: Rectangle {
-        id: toggle
+    // A card of a list (a provider, a pack, a cache kind): the kit group's translucent fill and corner, as a Setting has.
+    component Card: Rectangle {
+        readonly property CanvasLook look: App.theme.look
+        readonly property bool glass: look.params.panelTint > 0.001
+        radius: Math.min(look.params.cornerGroup * look.unit, 0.3 * implicitHeight)
+        color: glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
+        border.width: look.params.borders === "hairline" && glass ? 1 : 0
+        border.color: look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
+    }
+
+    // An on/off switch: the kit's toggle in the window's tone. `on` is the old name of `checked`, kept for the pages and tests that
+    // read it; the Setting's head (or a row's trailing slot) gives it its place.
+    component Toggle: KitToggle {
         property bool on: false
-        property string text
-        signal toggled(bool value)
-        implicitWidth: 22 + App.theme.look.unit * 2 + label.implicitWidth
-        implicitHeight: 7 * App.theme.look.unit
-        color: "transparent"
-        activeFocusOnTab: true
-        Accessible.role: Accessible.CheckBox
-        Accessible.name: text
-        Accessible.checked: on
-        Keys.onSpacePressed: toggle.toggled(!on)
-        Keys.onReturnPressed: toggle.toggled(!on)
-        TapHandler { onTapped: toggle.toggled(!toggle.on) }
-        Rectangle {
-            id: track
-            anchors.verticalCenter: parent.verticalCenter
-            width: 22
-            height: 12
-            radius: 6
-            color: toggle.on ? App.theme.look.accent : App.theme.look.hairlineStrong
-            border.width: toggle.activeFocus ? 1 : 0
-            border.color: App.theme.look.accent
-            Rectangle {
-                x: toggle.on ? track.width - width - 2 : 2
-                y: 2
-                width: 8
-                height: 8
-                radius: 4
-                color: toggle.on ? App.theme.look.accentForeground : App.theme.look.body
-            }
-        }
-        Text {
-            id: label
-            anchors.left: track.right
-            anchors.leftMargin: 2 * App.theme.look.unit
-            anchors.verticalCenter: parent.verticalCenter
-            text: toggle.text
-            color: App.theme.look.text
-            font.pixelSize: App.theme.look.labelSize
-        }
+        checked: on
+        look: App.theme.look
     }
 
-    // A small button of a form: the window's one button (ViewButton, D4) in its bordered variant, a hairline edge on
-    // `well`. `highlighted` is the form's primary; `danger` a removal, in the red tint (docs/canvas-look.md 11) while it
-    // can act. A thin alias, so the settings keep their names and `clicked`.
-    component SmallButton: ViewButton {
+    // A small button of a form: a raised kit chip. `highlighted` is the form's primary, the accent; `danger` a removal, in the red tint
+    // (docs/canvas-look.md 11) while it can act. A thin alias, so the settings keep their names and `clicked`.
+    component SmallButton: KitChip {
         property bool highlighted: false
         signal clicked()
         look: App.theme.look
-        bordered: true
         primary: highlighted
         onTapped: clicked()
     }
 
-    // A one-line text field in a well. It commits on Enter or when focus leaves; the model
-    // decides, and a refused text goes back to the value.
-    component Field: Rectangle {
+    // A one-line text field in a recessed well. It commits on Enter or when focus leaves; the model decides, and a refused text
+    // goes back to the value.
+    component Field: Item {
         id: field
         property string value
         property string placeholder
@@ -124,18 +123,18 @@ QtObject {
         Layout.fillWidth: true
         implicitWidth: 60 * App.theme.look.unit
         implicitHeight: 8 * App.theme.look.unit
-        radius: App.theme.look.smallCorner
-        color: App.theme.look.well
-        border.width: 1
-        border.color: textInput.activeFocus ? App.theme.look.accent : App.theme.look.hairlineStrong
         function commit() {
             if (textInput.text !== field.value)
                 field.committed(textInput.text)
             textInput.text = Qt.binding(() => field.secret ? "" : field.value)
         }
+        KitWell {
+            look: App.theme.look
+            focused: textInput.activeFocus
+        }
         TextInput {
             id: textInput
-            anchors { left: parent.left; right: parent.right; leftMargin: 2 * App.theme.look.unit; rightMargin: 2 * App.theme.look.unit
+            anchors { left: parent.left; right: parent.right; leftMargin: 2.5 * App.theme.look.unit; rightMargin: 2.5 * App.theme.look.unit
                       verticalCenter: parent.verticalCenter }
             clip: true
             selectByMouse: true
@@ -160,7 +159,6 @@ QtObject {
             Text {
                 visible: textInput.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                Layout.fillWidth: true
                 elide: Text.ElideRight
                 text: field.placeholder
                 color: App.theme.look.label

@@ -155,6 +155,19 @@ Rectangle {
                     }
                 }
 
+                // What the app still needs, while it is not ready (#469): a quiet block above the inputs, clear when ready.
+                NeedsPanel {
+                    id: needsPanel
+                    Layout.fillWidth: true
+                    Layout.margins: page.look.params.panelPad * page.u
+                    Layout.topMargin: page.look.params.panelPad * page.u
+                    Layout.bottomMargin: 0
+                    look: page.look
+                    needs: page.appView.needs
+                    standalone: page.standalone
+                    maxHeight: 0.38 * panel.height
+                }
+
                 ScrollView {
                     id: scroll
                     objectName: "appForm"

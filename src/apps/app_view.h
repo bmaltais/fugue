@@ -51,6 +51,7 @@
 #include <functional>
 #include <optional>
 
+#include "apps/needs_model.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
 
@@ -104,6 +105,8 @@ class AppView : public QObject {
     Q_PROPERTY(QString liveFrame READ liveFrame NOTIFY progressChanged)
     // Something is shown of a finished run (results, an error) and no run of this tab goes: Clear can act.
     Q_PROPERTY(bool canClear READ canClear NOTIFY runChanged)
+    // What the app still needs (a missing model or pack), listed while it is not ready (#469).
+    Q_PROPERTY(fugue::NeedsModel *needs READ needs CONSTANT)
 
 public:
     using Start = std::function<QString(const RunRequest &)>;
@@ -197,6 +200,7 @@ public:
     void setDownloads(ModelDownloads *downloads);
     // The model lists (a test gives them folders and a provider).
     AppModels *modelStore() const { return m_models; }
+    NeedsModel *needs() const { return m_needs; }
 
     // Queues a run of the shown tab's workflow with the form's values in. Returns its id, empty when it cannot run
     // (`error` says why).
@@ -303,6 +307,7 @@ private:
     QString m_problem;
     QVariantList m_fields;
     AppModels *m_models = nullptr;
+    NeedsModel *m_needs = nullptr;
     // Model fields waiting for a hash or a download, by ticket: the tab and the field that asked, so an answer that comes
     // after a tab switch, or for one of two fields of the same type, lands where it was asked for.
     struct Waiting {

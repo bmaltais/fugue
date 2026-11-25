@@ -95,7 +95,7 @@ ModelLibrary ReadinessSheet::library() const {
     return library;
 }
 
-void ReadinessSheet::rebuild() {
+ReadinessPlan ReadinessSheet::buildPlan() const {
     FileHashes hashes(FileHashes::defaultPath());
     TrustStore trust(m_trustPath);
     const ModelCatalog catalog = ModelCatalog::load();
@@ -105,8 +105,14 @@ void ReadinessSheet::rebuild() {
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
-    m_ownRoot = env.library.roots().value(0);
-    m_plan = buildReadinessPlan(m_request(), env);
+    return buildReadinessPlan(m_request(), env);
+}
+
+ReadinessPlan ReadinessSheet::currentPlan() const { return buildPlan(); }
+
+void ReadinessSheet::rebuild() {
+    m_ownRoot = library().roots().value(0);
+    m_plan = buildPlan();
     m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
     m_details = QStringList(m_plan.rowCount());
     m_fractions = QList<double>(m_plan.rowCount(), 0.0);

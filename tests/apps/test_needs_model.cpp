@@ -1,0 +1,195 @@
+// The Needs panel's store (#469): a fake readiness plan becomes the rows of what an app still needs, with size, licence and the node
+// that holds each; Download for one, Download all and Show in graph only ask the window (signals); the panel clears when a refresh
+// finds the app ready. No window, no disk, no network. Seam: apps/needs_model.h.
+
+#include <QJsonDocument>
+#include <QSignalSpy>
+#include <QtTest>
+
+#include "apps/needs_model.h"
+#include "engine/document.h"
+
+using namespace fugue;
+
+namespace {
+
+const QString hashA = "sha256:" + QString(64, QLatin1Char('a'));
+const QString hashB = "sha256:" + QString(64, QLatin1Char('b'));
+
+ReadinessModel model(const QString &name, const QString &hash, qint64 size, const QString &license, bool deferred = false) {
+    ReadinessModel m;
+    m.name = name;
+    m.resource = QStringLiteral("fugue/diffusion-model");
+    m.license = license;
+    m.host = QStringLiteral("huggingface.co");
+    m.size = size;
+    m.entry = QJsonObject{{"resource", m.resource}, {"hash", hash}, {"name", name}};
+    m.deferred = deferred;
+    return m;
+}
+
+ReadinessPlan modelsPlan() {
+    ReadinessPlan plan;
+    plan.models << model(QStringLiteral("klein.gguf"), hashA, 5'800'000'000, QStringLiteral("Apache-2.0"))
+                << model(QStringLiteral("vae.safetensors"), hashB, 335'000'000, QString());
+    plan.downloadBytes = 5'800'000'000 + 335'000'000;
+    return plan;
+}
+
+ReadinessPlan withPack(ReadinessPlan plan) {
+    ReadinessPack pack;
+    pack.pack.id = QStringLiteral("extras");
+    pack.pack.name = QStringLiteral("Extras");
+    pack.pack.version = QStringLiteral("1.0.0");
+    pack.pack.setupCommand = {QStringLiteral("uv"), QStringLiteral("sync")};
+    pack.pack.setupSize = 120'000'000;
+    plan.packs << pack;
+    return plan;
+}
+
+Document load(const QByteArray &json) {
+    const Result<Document> loaded = Document::fromJson(QJsonDocument::fromJson(json).object());
+    if (!loaded)
+        qFatal("fixture does not load: %s", qPrintable(loaded.error().message));
+    return loaded.value();
+}
+
+} // namespace
+
+class TestNeedsModel : public QObject {
+    Q_OBJECT
+
+private slots:
+    void aPlanBecomesRowsWithSizeAndLicence() {
+        NeedsModel needs;
+        QVERIFY(needs.ready());
+        QSignalSpy changed(&needs, &NeedsModel::changed);
+        needs.setPlan(modelsPlan());
+        QCOMPARE(changed.size(), 1);
+        QVERIFY(!needs.ready());
+        const QVariantList items = needs.items();
+        QCOMPARE(items.size(), 2);
+        const QVariantMap first = items.at(0).toMap();
+        QCOMPARE(first.value("kind").toString(), QStringLiteral("model"));
+        QCOMPARE(first.value("name").toString(), QStringLiteral("klein.gguf"));
+        QCOMPARE(first.value("licence").toString(), QStringLiteral("Apache-2.0"));
+        QVERIFY(first.value("size").toString().contains("GB"));
+        QVERIFY(first.value("canDownload").toBool());
+        QVERIFY(needs.headline().contains("2 models"));
+        // The same plan again changes nothing: no redraw of an idle view.
+        needs.setPlan(modelsPlan());
+        QCOMPARE(changed.size(), 1);
+        // Ready: the panel clears.
+        needs.setPlan(ReadinessPlan());
+        QVERIFY(needs.ready());
+        QVERIFY(needs.headline().isEmpty());
+        QCOMPARE(changed.size(), 2);
+    }
+
+    void aPackRowComesFirstAndDownloadAllOpensTheSheetForTheYes() {
+        NeedsModel needs;
+        needs.setPlan(withPack(modelsPlan()));
+        QCOMPARE(needs.items().size(), 3);
+        QCOMPARE(needs.items().at(0).toMap().value("kind").toString(), QStringLiteral("pack"));
+        QVERIFY(!needs.items().at(0).toMap().value("canDownload").toBool());
+        QVERIFY(!needs.startsAtOnce()); // a pack needs the person's yes in the sheet
+        QSignalSpy sheet(&needs, &NeedsModel::getReadyRequested);
+        QSignalSpy single(&needs, &NeedsModel::downloadRequested);
+        needs.downloadAll();
+        QCOMPARE(sheet.size(), 1);
+        QCOMPARE(sheet.first().first().toBool(), false);
+        needs.download(0); // the pack: the sheet again, never a download of its own
+        QCOMPARE(sheet.size(), 2);
+        QCOMPARE(single.size(), 0);
+    }
+
+    void onlyModelsStartAtOnceAndOneModelDownloadsAlone() {
+        NeedsModel needs;
+        needs.setPlan(modelsPlan());
+        QVERIFY(needs.startsAtOnce());
+        QSignalSpy sheet(&needs, &NeedsModel::getReadyRequested);
+        QSignalSpy single(&needs, &NeedsModel::downloadRequested);
+        needs.downloadAll();
+        QCOMPARE(sheet.size(), 1);
+        QCOMPARE(sheet.first().first().toBool(), true);
+        needs.download(1);
+        QCOMPARE(single.size(), 1);
+        QCOMPARE(single.first().first().toJsonObject().value("hash").toString(), hashB);
+        needs.download(9); // no such row: nothing
+        QCOMPARE(single.size(), 1);
+    }
+
+    void aModelWaitingForAPackComesWithTheSheet() {
+        NeedsModel needs;
+        ReadinessPlan plan = withPack(ReadinessPlan());
+        plan.models << model(QStringLiteral("typed-by-pack.bin"), hashA, 10, QString(), true);
+        needs.setPlan(plan);
+        QVERIFY(!needs.startsAtOnce());
+        QVERIFY(!needs.items().at(1).toMap().value("canDownload").toBool());
+        QSignalSpy single(&needs, &NeedsModel::downloadRequested);
+        QSignalSpy sheet(&needs, &NeedsModel::getReadyRequested);
+        needs.download(1);
+        QCOMPARE(single.size(), 0);
+        QCOMPARE(sheet.size(), 1);
+    }
+
+    void aProblemIsAQuietLineWithNoAction() {
+        NeedsModel needs;
+        ReadinessPlan plan;
+        Error problem;
+        problem.code = QStringLiteral("no_source");
+        problem.message = QStringLiteral("Nothing says where klein.gguf can be had.");
+        plan.problems << problem;
+        needs.setPlan(plan);
+        QCOMPARE(needs.items().size(), 1);
+        QCOMPARE(needs.items().at(0).toMap().value("kind").toString(), QStringLiteral("problem"));
+        QSignalSpy sheet(&needs, &NeedsModel::getReadyRequested);
+        needs.download(0);
+        QCOMPARE(sheet.size(), 0);
+    }
+
+    void refreshAsksTheSourceAndASourceThatSaysReadyClearsThePanel() {
+        NeedsModel needs;
+        bool missing = true;
+        int asked = 0;
+        needs.setPlanSource([&] { ++asked; return missing ? modelsPlan() : ReadinessPlan(); });
+        needs.refresh();
+        QCOMPARE(needs.items().size(), 2);
+        missing = false; // what a download finishing does: the window asks again
+        needs.refreshSoon();
+        needs.refreshSoon(); // two changes at once, one look
+        QTRY_VERIFY(needs.ready());
+        QCOMPARE(asked, 2);
+    }
+
+    void showInGraphFindsTheNodeThatHoldsTheModelAndOnlyWhenTheGraphIsThere() {
+        const Document document = load(R"({"fugue": 1, "graph": {"nodes": {
+            "enc": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "x"}},
+            "unet": {"type": "fugue/load-diffusion-model", "version": "1.0.0",
+                     "inputs": {"model": {"resource": "fugue/diffusion-model", "hash": ")" + hashB.toUtf8() + R"(", "name": "vae.safetensors"}}}
+        }}})");
+        QCOMPARE(NeedsModel::nodeFor(document, {{"kind", "model"}, {"hash", hashB}}), QStringLiteral("unet"));
+        QCOMPARE(NeedsModel::nodeFor(document, {{"kind", "model"}, {"hash", hashA}}), QString());
+        QCOMPARE(NeedsModel::nodeFor(document, {{"kind", "pack"}, {"id", "fugue"}}), QStringLiteral("enc")); // the first node of that pack
+
+        NeedsModel needs;
+        needs.setLocator([&](const QVariantMap &item) { return NeedsModel::nodeFor(document, item); });
+        needs.setPlan(modelsPlan());
+        QVERIFY(needs.canShowInGraph());
+        QCOMPARE(needs.items().at(0).toMap().value("node").toString(), QString()); // klein is in no node
+        QCOMPARE(needs.items().at(1).toMap().value("node").toString(), QStringLiteral("unet"));
+        QSignalSpy show(&needs, &NeedsModel::showNodeRequested);
+        needs.showInGraph(0);
+        QCOMPARE(show.size(), 0);
+        needs.showInGraph(1);
+        QCOMPARE(show.size(), 1);
+        QCOMPARE(show.first().first().toString(), QStringLiteral("unet"));
+        needs.setGraphAvailable(false); // the app's own window
+        QVERIFY(!needs.canShowInGraph());
+        needs.showInGraph(1);
+        QCOMPARE(show.size(), 1);
+    }
+};
+
+QTEST_GUILESS_MAIN(TestNeedsModel)
+#include "test_needs_model.moc"

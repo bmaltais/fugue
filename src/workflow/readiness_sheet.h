@@ -52,6 +52,8 @@ public:
     QString phase() const { return m_phase; }
     QVariantMap view() const { return m_view; }
 
+    // The plan of what the shown workflow needs now, built without opening the sheet or changing it (the Needs panel, #469).
+    ReadinessPlan currentPlan() const;
     // Builds the list and opens the sheet; with nothing to do it says so.
     Q_INVOKABLE void show();
     // The person's one yes: runs every row, then ends. Ignored unless reviewing.
@@ -84,6 +86,7 @@ signals:
 
 private:
     void rebuild();
+    ReadinessPlan buildPlan() const;
     // The model folders as the settings have them, with a folder picked here and the one chosen, not yet written.
     ModelLibrary library() const;
     // Writes the folder choice (a picked model folder, download_folder) at the yes.

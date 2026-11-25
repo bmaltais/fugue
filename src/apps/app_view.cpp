@@ -130,6 +130,11 @@ QString kindOf(const InputBinding &input, const QJsonValue &current, const Input
 
 AppView::AppView(Start start, Cancel cancel, const Registry *registry, QObject *parent)
     : QObject(parent), m_start(std::move(start)), m_cancel(std::move(cancel)), m_registry(registry) {
+    m_needs = new NeedsModel(this);
+    // A new app, or a run that ended, may have found something missing: the panel looks again (the source says "ready" at once
+    // when nothing is).
+    connect(this, &AppView::appChanged, m_needs, &NeedsModel::refreshSoon);
+    connect(this, &AppView::runChanged, m_needs, [this] { if (status() == QLatin1String("failed")) m_needs->refreshSoon(); });
     if (registry) {
         m_models = new AppModels(registry, this);
         connect(m_models, &AppModels::changed, this, &AppView::modelsChanged);

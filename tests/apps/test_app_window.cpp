@@ -74,6 +74,39 @@ const char *lookApp = R"({
   }}
 })";
 
+// A made-up readiness plan (what the Get ready sheet would list) for the Needs panel: two models, one of them held by node "up" of
+// mediaWithModel, and no pack, so Download all starts at once.
+const QString upscaleHash = "sha256:" + QString(64, QLatin1Char('c'));
+const QString otherHash = "sha256:" + QString(64, QLatin1Char('d'));
+ReadinessPlan needsPlan() {
+    ReadinessPlan plan;
+    ReadinessModel up;
+    up.name = "x.pth";
+    up.resource = "fugue/upscale-model";
+    up.license = "MIT";
+    up.host = "huggingface.co";
+    up.size = 67'000'000;
+    up.entry = QJsonObject{{"resource", up.resource}, {"hash", upscaleHash}, {"name", up.name}};
+    ReadinessModel big;
+    big.name = "flux-2-klein-9b-Q4_K_M.gguf";
+    big.resource = "fugue/diffusion-model";
+    big.license = "FLUX Non-Commercial";
+    big.host = "huggingface.co";
+    big.size = 5'900'000'000;
+    big.entry = QJsonObject{{"resource", big.resource}, {"hash", otherHash}, {"name", big.name}};
+    plan.models << up << big;
+    plan.downloadBytes = up.size + big.size;
+    return plan;
+}
+
+QByteArray mediaWithModel() {
+    QByteArray text(mediaApp);
+    text.replace(R"("up": {"type": "fugue/load-upscale-model", "version": "1.0.0", "inputs": {}})",
+                 QByteArray(R"("up": {"type": "fugue/load-upscale-model", "version": "1.0.0", "inputs": {"model": {"resource": "fugue/upscale-model", "hash": ")")
+                     + upscaleHash.toUtf8() + R"(", "name": "x.pth"}}})");
+    return text;
+}
+
 QQuickItem *shown(QQuickItem *from, const QString &name) {
     for (QQuickItem *child : from->childItems()) {
         if (!child->isVisible())
@@ -451,6 +484,14 @@ private slots:
             QTest::qWait(400);
             test_support::grab(app.window).save(QString("%1/app-result-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
         }
+        // What the app still needs (#469): the quiet panel above the inputs.
+        rig.view.needs()->setPlan(needsPlan());
+        for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
+            app.window->resize(size);
+            QTest::qWait(400);
+            test_support::grab(app.window).save(QString("%1/app-needs-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+        }
+        rig.view.needs()->setPlan(ReadinessPlan());
         // Zoomed into the picture, the stage's own controls shown.
         QQuickItem *viewer = find(app.window, "appResultViewer");
         QVERIFY(viewer);
@@ -571,6 +612,65 @@ private slots:
         QTRY_VERIFY((grid = find(app.window, "appShelfGrid")) && grid->hasActiveFocus());
         QTest::keyClick(app.window, Qt::Key_Return);
         QTRY_COMPARE(app.workflows.count(), 2);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The Needs panel (#469): while the app lacks something it lists each item with its size and licence above the inputs; by keys alone
+    // Tab reaches Download all first, then each row's Download; Enter presses; Show in graph jumps to the node; it clears when ready.
+    void theNeedsPanelListsWhatIsMissingAndWorksByKeys() {
+        App app(load(mediaWithModel()));
+        Rig rig(app);
+        NeedsModel *needs = rig.view.needs();
+        needs->setPlanSource([] { return ReadinessPlan(); }); // the real source would find the made-up model missing: a fake plan instead
+        QObject::disconnect(needs, nullptr, &app.workflows, nullptr); // the window's own answers (the sheet, a download) are not this test's
+        QVERIFY(app.open());
+        QVERIFY(!find(app.window, "appNeeds")); // ready: no panel
+        QSignalSpy sheet(needs, &NeedsModel::getReadyRequested);
+        QSignalSpy single(needs, &NeedsModel::downloadRequested);
+        needs->setPlan(needsPlan());
+        QQuickItem *panel = nullptr;
+        QTRY_VERIFY((panel = find(app.window, "appNeeds")));
+        QVERIFY(find(app.window, "appNeed-model:x.pth"));
+        QVERIFY(find(app.window, "appNeed-model:flux-2-klein-9b-Q4_K_M.gguf"));
+        QVERIFY(find(app.window, "appNeedsHeadline")->property("text").toString().contains("2 models"));
+        // Tab from the top: the header's Download all comes before every input of the form.
+        QStringList order;
+        const auto named = [](QQuickItem *item) {
+            for (; item; item = item->parentItem())
+                if (item->objectName().startsWith("app"))
+                    return item->objectName();
+            return QString();
+        };
+        for (int i = 0; i < 12 && !order.contains("appNeedsAll"); ++i) {
+            QTest::keyClick(app.window, Qt::Key_Tab);
+            order << named(app.window->activeFocusItem());
+        }
+        QVERIFY2(order.contains("appNeedsAll"), qPrintable(order.join(',')));
+        QCOMPARE(app.window->activeFocusItem()->objectName(), QStringLiteral("appNeedsAll"));
+        QTest::keyClick(app.window, Qt::Key_Return); // models only: the click is the yes
+        QCOMPARE(sheet.size(), 1);
+        QCOMPARE(sheet.first().first().toBool(), true);
+        // The next stops are the rows' buttons; Enter on a model's Download asks for that one.
+        QStringList rows;
+        for (int i = 0; i < 6 && single.isEmpty(); ++i) {
+            QTest::keyClick(app.window, Qt::Key_Tab);
+            const QString at = named(app.window->activeFocusItem());
+            rows << at;
+            if (at.startsWith("appNeedGet-"))
+                QTest::keyClick(app.window, Qt::Key_Return);
+        }
+        QVERIFY2(single.size() == 1, qPrintable(rows.join(',')));
+        // Show in graph: the model's node is selected in the graph, which is shown.
+        QQuickItem *show = find(app.window, "appNeedShow-model:x.pth");
+        QVERIFY(show);
+        QVERIFY(!find(app.window, "appNeedShow-model:flux-2-klein-9b-Q4_K_M.gguf")); // in no node
+        tap(app.window, show);
+        QTRY_VERIFY(!rig.view.shown());
+        QCOMPARE(app.model.selectedIds(), QStringList{"up"});
+        // Back in the App view, ready now: the panel is gone.
+        rig.view.showApp();
+        needs->setPlan(ReadinessPlan());
+        QTRY_VERIFY(!find(app.window, "appNeeds"));
         qDeleteAll(app.engine.rootObjects());
     }
 

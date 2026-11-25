@@ -3,8 +3,9 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
-// One row of the Get ready sheet (#379): a kind glyph, the name, what it takes on the right (size, or the word for its
+// One row of the Get ready sheet (#379, #464), a row of a KitGroup (hairline above unless it is the first, the quiet hover of a list row): a kind glyph, the name, what it takes on the right (size, or the word for its
 // state while it runs), a quieter line under the name (licence, source, "type from <pack>"), a thin bar while it
 // downloads, and a chevron that opens the rest inline. The whole row is the button: it takes the menu-row fill under the
 // pointer and the 2px accent ring from the keyboard, as every list row in the window does. Long text is cut at its end
@@ -34,7 +35,9 @@ Rectangle {
     readonly property real u: look.unit
     readonly property bool hovered: hover.hovered && expandable
 
-    implicitHeight: column.implicitHeight + 3 * u
+    width: parent ? parent.width : implicitWidth
+    implicitHeight: Math.max(look.params.rowMinHeight * u, column.implicitHeight + 2 * look.params.rowPadY * u)
+    height: implicitHeight
     radius: look.smallCorner
     color: hovered ? look.menuRow : "transparent"
     border.width: activeFocus ? 2 : 0
@@ -49,12 +52,18 @@ Rectangle {
     Keys.onEnterPressed: if (expandable) row.toggled()
     Keys.onSpacePressed: if (expandable) row.toggled()
 
+    KitSeparator {
+        look: row.look
+        visible: row.y > 0
+        anchors.top: parent.top
+        z: 1
+    }
     ColumnLayout {
         id: column
         anchors.fill: parent
-        anchors.margins: 1.5 * row.u
-        anchors.leftMargin: 2 * row.u
-        anchors.rightMargin: 2 * row.u
+        anchors.margins: row.look.params.rowPadY * row.u
+        anchors.leftMargin: row.look.params.rowPadLeft * row.u
+        anchors.rightMargin: row.look.params.rowPadRight * row.u
         spacing: 0.5 * row.u
 
         RowLayout {
