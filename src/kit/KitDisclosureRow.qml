@@ -12,7 +12,7 @@ import "../canvas"
 // (`moveRequested(+-1)`). Escape closes an open row from the header or from anywhere in its body, the focus staying on the header;
 // a closed row leaves Escape to the window. Controlled, like the kit's other controls: the row never sets `expanded` itself.
 //
-// `detail` is the dim "where" column, `detailWidth` its shared width in px (0 hides it); it hides on its own under 110u of row
+// `detail` is the dim "where" column, `detailWidth` its shared width in px (0 hides it; `statusWidth` does the same for the status column); it hides on its own under 110u of row
 // width, and under 80u the status moves under the name and the row grows to 13u. `trailing` is the end controls (a KitToggle); a click
 // on them is theirs. `tray` puts the body in a recessed tray inset 2u from each side and 2u above the next row; `tray: false` leaves the
 // body to the caller (a list of rows). Height and chevron move over `durToggle`, the body fades over `durColor` (both 0 under
@@ -25,6 +25,8 @@ Item {
     property string detail // the dim "where" column; may be empty when the name already says it
     property string where // the same, in full, for the glyph's tooltip and the accessible description
     property real detailWidth: 0
+    property int detailElide: Text.ElideRight // Text.ElideMiddle for a path
+    property real statusWidth: 0 // more than 0: the status column's width in px, shared by a list so the columns line up (else as wide as its text, up to 26u)
     property string status
     property bool statusStrong: false
     property bool expanded: false
@@ -143,7 +145,7 @@ Item {
                 visible: row.showDetail
                 text: row.detail
                 textFormat: Text.PlainText
-                elide: Text.ElideRight
+                elide: row.detailElide
                 color: row.look.label
                 font.pixelSize: row.look.labelSize
             }
@@ -151,6 +153,7 @@ Item {
                 id: statusText
                 objectName: row.statusName
                 Layout.maximumWidth: 26 * row.look.unit
+                Layout.preferredWidth: row.statusWidth > 0 ? Math.min(row.statusWidth, 26 * row.look.unit) : implicitWidth
                 Layout.alignment: Qt.AlignVCenter
                 visible: !row.narrow && row.status !== ""
                 text: row.status

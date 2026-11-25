@@ -331,55 +331,10 @@ Popup {
                     }
 
                     // Folders
-                    SettingsParts.FolderSetting {
+                    FoldersPage {
                         visible: panel.page === "folders"
-                        title: qsTr("Output folder")
-                        note: qsTr("Where Save Image writes. A Save node's own folder is inside it.")
+                        Layout.fillWidth: true
                         host: panel
-                        key: "output_folder"
-                        value: panel.model.outputFolder
-                        isDefault: panel.model.outputFolderIsDefault
-                    }
-                    SettingsParts.FolderSetting {
-                        visible: panel.page === "folders"
-                        title: qsTr("Inputs folder")
-                        note: qsTr("Where images pasted or dropped into Load Image are kept. By default inside the output folder.")
-                        host: panel
-                        key: "inputs_folder"
-                        value: panel.model.inputsFolder
-                        isDefault: panel.model.inputsFolderIsDefault
-                    }
-                    PathsSetting {
-                        visible: panel.page === "folders"
-                        title: qsTr("Extra model folders")
-                        note: qsTr("Searched for models besides Fugue's own: a ComfyUI models folder as it is, or a folder of one kind of model, such as LoRAs.")
-                        host: panel
-                        key: "model_paths"
-                        value: panel.model.modelPaths
-                        inherited: panel.model.inheritedModelPaths
-                        kinds: true
-                    }
-                    SettingsParts.Setting {
-                        visible: panel.page === "folders"
-                        title: qsTr("Download models into")
-                        note: qsTr("Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders above.")
-                        key: "download_folder"
-                        Choices {
-                            Layout.fillWidth: true
-                            name: "downloadFolder"
-                            current: panel.model.downloadFolder
-                            options: panel.model.downloadFolders.map(f => ({value: f.path, text: f.title}))
-                            onPicked: value => panel.apply(panel.model.set("download_folder", value))
-                        }
-                    }
-                    PathsSetting {
-                        visible: panel.page === "folders"
-                        title: qsTr("Extra pack folders")
-                        note: qsTr("Searched for node packs besides Fugue's own.")
-                        host: panel
-                        key: "pack_paths"
-                        value: panel.model.packPaths
-                        inherited: panel.model.inheritedPackPaths
                     }
 
                     // Run

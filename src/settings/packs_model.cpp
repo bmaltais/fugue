@@ -123,13 +123,19 @@ bool PacksModel::removeLibraryGroup(const QString &id) {
 }
 
 // The pack's own entry in the list: its secrets and the key they are stored under.
-bool PacksModel::setSecret(const QString &packId, const QString &name, const QString &value, const QString &origin) {
+// `path` is the pack's own folder (the list's "path"): with it the pack is found by where it is, so two packs of one id from
+// different sources never share a key (#402); without it the first enabled pack of that id is taken.
+bool PacksModel::setSecret(const QString &packId, const QString &name, const QString &value, const QString &origin, const QString &path) {
     PackSecretStore store;
     bool declared = false, required = false;
     QString key;
     for (const QVariant &entry : std::as_const(m_packs)) {
         if (entry.toMap().value("id") != packId || !entry.toMap().value("enabled").toBool())
             continue;
+        if (!path.isEmpty() && entry.toMap().value("path").toString() != path)
+            continue;
+        if (declared)
+            break;
         for (const QVariant &secret : entry.toMap().value("secrets").toList())
             if (secret.toMap().value("name") == name) {
                 declared = true;
@@ -149,12 +155,15 @@ bool PacksModel::setSecret(const QString &packId, const QString &name, const QSt
     return !hasErrors(errors);
 }
 
-bool PacksModel::clearSecret(const QString &packId, const QString &name) {
+bool PacksModel::clearSecret(const QString &packId, const QString &name, const QString &path) {
     PackSecretStore store;
     QString key = packId;
     for (const QVariant &entry : std::as_const(m_packs))
-        if (entry.toMap().value("id") == packId)
+        if (entry.toMap().value("id") == packId && (path.isEmpty() || entry.toMap().value("path").toString() == path)) {
             key = packSecretKey(packId, entry.toMap().value("source").toString());
+            if (!path.isEmpty())
+                break;
+        }
     const Errors errors = store.clear(key, name);
     m_message = hasErrors(errors) ? QString() : tr("Cleared %1 of %2.").arg(name, packId);
     m_failure = hasErrors(errors) ? firstProblem(errors) : QString();
@@ -170,7 +179,9 @@ Answer PacksModel::ask(const QString &kind, const PackSummary &pack) {
                    : pack.source.ref.isEmpty() ? pack.source.location
                                                : QStringLiteral("%1 at %2").arg(pack.source.location, pack.source.ref)},
         {"runtime", pack.runtimeKinds}, {"permissions", pack.permissions}, {"secrets", pack.secrets}, {"secretsSet", pack.secretsSet}, {"secretsOtherSource", pack.secretsOtherSource}, {"nodes", int(pack.nodes.size())},
-        {"command", displayCommand(pack.setupCommand)}, {"description", pack.setupDescription}, {"folder", pack.folder}};
+        {"command", displayCommand(pack.setupCommand)}, {"description", pack.setupDescription}, {"folder", pack.folder},
+        // A pack of the Default project runs from, and writes into, the Default's folders: said where it is trusted.
+        {"inheritedWarning", isInheritedPack(pack.id, pack.version) ? inheritedPackWarning() : QString()}};
     {
         QMutexLocker lock(&m_mutex);
         if (m_closing)

@@ -121,6 +121,39 @@ void type(App &app, QQuickItem *field, const QString &text) {
 
 QString textOf(QQuickItem *item) { return item->property("text").toString(); }
 
+// Clicks the header of the disclosure row `row` once it has stayed put for a few frames; looked up again by name each frame (the
+// header has no name of its own, and a change of the list makes the rows again).
+void clickHeader(App &app, const QString &row) {
+    QPoint at;
+    int still = 0;
+    for (int i = 0; still < 5 && i < 500; ++i) {
+        QTest::qWait(10);
+        QQuickItem *item = find(app.window, row);
+        if (!item) {
+            still = 0;
+            continue;
+        }
+        const QPoint here = centerOf(item->property("header").value<QQuickItem *>());
+        still = here == at ? still + 1 : 0;
+        at = here;
+    }
+    QVERIFY2(still >= 3, qPrintable(QStringLiteral("%1 never settled").arg(row)));
+    QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
+}
+
+// True once the disclosure row `name` is open and its body has finished growing (a click on its controls before that lands on the clip).
+bool openAndGrown(QQuickWindow *window, const QString &name) {
+    QQuickItem *row = find(window, name);
+    return row && row->property("expanded").toBool() && !row->property("animating").toBool()
+           && qAbs(row->property("shown").toReal() - row->property("bodyHeight").toReal()) < 0.5;
+}
+
+// Opens a row of the Folders page (a KitDisclosureRow) by a click on its header; one open at a time, so the one before shuts.
+void openFolderRow(App &app, const QString &key) {
+    clickHeader(app, QStringLiteral("folderRow-") + key);
+    QTRY_VERIFY(openAndGrown(app.window, QStringLiteral("folderRow-") + key));
+}
+
 } // namespace
 
 class TestProjectsWindow : public QObject {
@@ -446,6 +479,7 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(open(app.window, "settingsPanel"));
         click(app, NEED("settingsPage-folders"));
+        openFolderRow(app, "model_paths");
         // The Default's own models folder first, then its model_paths.
         QVERIFY(NEED("model_paths-inherited-0"));
         QVERIFY(NEED("model_paths-inherited-1"));
@@ -467,6 +501,8 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(open(app.window, "settingsPanel"));
         click(app, NEED("settingsPage-packs"));
+        clickHeader(app, "pack-io.example.tools"); // the badge and the warning are in the open row
+        QTRY_VERIFY(openAndGrown(app.window, "pack-io.example.tools"));
         QCOMPARE(textOf(NEED("packInherited-io.example.tools")), QString("Inherited from Default"));
         QVERIFY(textOf(NEED("packWarning-io.example.tools")).contains("Default"));
         click(app, NEED("packRemove-io.example.tools"));
