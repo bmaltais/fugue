@@ -2,7 +2,25 @@
 # warning, printing each as file:line:column. It reads qmllint's JSON, because its plain
 # output leaves some warnings out (Qt 6.12: CanvasNode.qml's showed in neither).
 #   cmake -DQMLLINT=<qmllint> -DARGS=<options> -DFILES=<qml files> -P qmllint.cmake
-execute_process(COMMAND ${QMLLINT} ${ARGS} --json - ${FILES}
+# One chunk of the files per test (qmllint.1of4 ...), CMakeLists.txt.
+# FUGUE_QMLLINT_FILES (bin/test --changed): only these files, the changed ones; the chunks that hold none pass.
+cmake_policy(SET CMP0057 NEW) # IN_LIST
+if(DEFINED ENV{FUGUE_QMLLINT_FILES})
+  set(only $ENV{FUGUE_QMLLINT_FILES})
+  set(kept)
+  foreach(candidate ${FILES})
+    if(candidate IN_LIST only)
+      list(APPEND kept ${candidate})
+    endif()
+  endforeach()
+  set(lint_files ${kept})
+  if(NOT lint_files)
+    return()
+  endif()
+else()
+  set(lint_files ${FILES})
+endif()
+execute_process(COMMAND ${QMLLINT} ${ARGS} --json - ${lint_files}
                 OUTPUT_VARIABLE json ERROR_VARIABLE errors RESULT_VARIABLE result)
 string(JSON files ERROR_VARIABLE bad GET "${json}" files)
 if(bad)

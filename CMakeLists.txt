@@ -443,9 +443,24 @@ endforeach()
 # the app loads them in: any warning fails it (tests/qmllint.cmake), so `bin/test` keeps the
 # QML lint-clean.
 file(GLOB_RECURSE fugue_qml_files CONFIGURE_DEPENDS src/*.qml)
-add_test(NAME qmllint COMMAND ${CMAKE_COMMAND} "-DQMLLINT=$<TARGET_FILE:Qt6::qmllint>"
-         "-DARGS=-I;${CMAKE_BINARY_DIR}/qml;${fugue_qmllint_resources}" "-DFILES=${fugue_qml_files}"
-         -P ${CMAKE_SOURCE_DIR}/tests/qmllint.cmake)
+# In chunks (qmllint.1of4 ...), one process each, run at the same time: qmllint is one thread, and a long file list
+# slows it down more than in proportion.
+set(fugue_qmllint_chunks 4)
+foreach(chunk RANGE 1 ${fugue_qmllint_chunks})
+  set(chunk_files)
+  set(index 0)
+  foreach(qml ${fugue_qml_files})
+    math(EXPR slot "${index} % ${fugue_qmllint_chunks} + 1")
+    if(slot EQUAL chunk)
+      list(APPEND chunk_files ${qml})
+    endif()
+    math(EXPR index "${index} + 1")
+  endforeach()
+  add_test(NAME qmllint.${chunk}of${fugue_qmllint_chunks}
+           COMMAND ${CMAKE_COMMAND} "-DQMLLINT=$<TARGET_FILE:Qt6::qmllint>"
+           "-DARGS=-I;${CMAKE_BINARY_DIR}/qml;${fugue_qmllint_resources}" "-DFILES=${chunk_files}"
+           -P ${CMAKE_SOURCE_DIR}/tests/qmllint.cmake)
+endforeach()
 
 # A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and
 # worker, but nodes that do fake work. Not installed.
