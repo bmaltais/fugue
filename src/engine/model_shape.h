@@ -97,6 +97,9 @@ struct ModelShape {
     // A language model text encoder's family ("qwen3", "qwen3.5", "qwen2.5"), or the one a
     // diffusion model reads; empty when not known.
     QString llmFamily;
+    // MOSS-Image: the engine takes the official Qwen3.5 tokenizer.json as a file of its own (the
+    // tokenizer context option), which no model file carries.
+    bool needsQwen35Tokenizer = false;
     // The quantization stable-diffusion.cpp has no kernels for that the file is in ("ComfyUI
     // nvfp4 quantization", "GPTQ"); empty when it can load it.
     QString unloadable;

@@ -48,6 +48,7 @@
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
+#include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/model_shape.h"
 #include "engine/vips.h"
@@ -245,6 +246,29 @@ QString textEncoderKey(const QJsonObject &encoder, const ModelLibrary &library, 
     return found ? encoderKeyOf(found.value()) : QStringLiteral("llm_path");
 }
 
+// MOSS Image reads the official Qwen3.5 tokenizer.json, which no model file holds (#542). When Load Models
+// was given none, the catalog's (`qwen3.5-tokenizer`, in the tokenizers folder) goes to the engine as its
+// `tokenizer` option; model_missing, with the way to get it, when it is not here. A model that reads no such
+// tokenizer is left alone. Only for files on this machine: a paired host's helper answers for its own.
+std::optional<Error> addDefaultTokenizer(QJsonObject &context, const ModelLibrary &library, FileHashes &hashes) {
+    const QString base = context.value(QStringLiteral("diffusion_model_path")).toString();
+    const std::optional<ModelShape> shape = base.isEmpty() ? std::nullopt : ModelShapes::shared().of(base);
+    if (!shape || !shape->needsQwen35Tokenizer)
+        return std::nullopt;
+    const ModelCatalog catalog = ModelCatalog::load();
+    const CatalogModel *entry = catalog.find(QStringLiteral("qwen3.5-tokenizer"));
+    if (!entry)
+        return makeError(QStringLiteral("model_missing"), QStringLiteral("MOSS Image needs the Qwen3.5 tokenizer, and this build has no entry for it."));
+    const Result<QString> found = library.resolve(entry->handle(), hashes);
+    if (!found)
+        return makeError(QStringLiteral("model_missing"),
+                         QStringLiteral("MOSS Image reads the official Qwen3.5 tokenizer (%1, %2), and it is not in your tokenizers folder.")
+                             .arg(entry->file, licenseLine(*entry)),
+                         QStringLiteral("Pick it in Load Models' Tokenizer input: its list offers the download."));
+    context.insert(QStringLiteral("tokenizer"), found.value());
+    return std::nullopt;
+}
+
 // The files of the `fugue/model` handle in `input`, found on this machine (8.9). model_missing,
 // blamed on the input, when one is not here. For a provider that does not share the filesystem
 // (`shares` false) the files are handles the host resolves, and nothing is looked for or checked
@@ -278,6 +302,8 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         files.context.insert(QStringLiteral("clip_l_path"), path(derived.value(QStringLiteral("clip_l"))));
     if (derived.contains(QStringLiteral("vae")))
         files.context.insert(QStringLiteral("vae_path"), path(derived.value(QStringLiteral("vae"))));
+    if (derived.contains(QStringLiteral("tokenizer")))
+        files.context.insert(QStringLiteral("tokenizer"), path(derived.value(QStringLiteral("tokenizer"))));
     for (const QJsonValue &step : derived.value(QStringLiteral("apply")).toArray()) {
         const QJsonObject apply = step.toObject();
         files.loras.append(QJsonObject{{"path", path(apply.value(QStringLiteral("lora")))},
@@ -289,6 +315,13 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         return files;
     if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input}, files.loras))
         return *mismatch;
+    // After the parts' check: a text encoder of the wrong family is the first thing to say.
+    if (!derived.contains(QStringLiteral("tokenizer")))
+        if (const std::optional<Error> absent = addDefaultTokenizer(files.context, library, *context.hashes)) {
+            Error error = *absent;
+            error.input = input;
+            return error;
+        }
     return files;
 }
 
@@ -638,6 +671,8 @@ private:
                           {"vae", context.input(QStringLiteral("vae")).json()}};
         if (hasClipL(context))
             parts.insert(QStringLiteral("clip_l"), context.input(QStringLiteral("clip_l")).json());
+        if (!context.input(QStringLiteral("tokenizer")).isEmpty())
+            parts.insert(QStringLiteral("tokenizer"), context.input(QStringLiteral("tokenizer")).json());
         if (hasHighNoise(context))
             parts.insert(QStringLiteral("high_noise"), context.input(QStringLiteral("high_noise_diffusion_model")).json());
         return parts;

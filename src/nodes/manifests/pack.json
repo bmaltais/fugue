@@ -210,6 +210,18 @@
       ]
     },
     {
+      "id": "fugue/tokenizer",
+      "version": 1,
+      "kind": "resource",
+      "name": "Tokenizer",
+      "extensions": [
+        ".json"
+      ],
+      "folders": [
+        "tokenizers"
+      ]
+    },
+    {
       "id": "fugue/latent",
       "version": 1,
       "kind": "data",

@@ -15,6 +15,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -797,6 +798,86 @@ private slots:
         QVERIFY(!request);
         QVERIFY2(!request.error().message.contains("takes a language model or a T5"), qPrintable(request.error().message));
         QVERIFY2(request.error().message.contains("the model reads a language model"), qPrintable(request.error().message));
+    }
+
+    // MOSS Image (#542): the diffusion model reads Qwen3.5 (text_embedder.proj is 4096 wide, as Qwen3 8B is), and
+    // the engine needs the official Qwen3.5 tokenizer.json as the context option `tokenizer`.
+    QJsonObject moss(Bench &bench, const QString &encoderArch) {
+        const QByteArray dit = safetensors({{"video_embedder.weight", QJsonArray{3072, 128}},
+                                            {"shared_block_modulation.weight", QJsonArray{18432, 3072}},
+                                            {"text_embedder.proj.weight", QJsonArray{3072, 4096}}});
+        const QByteArray encoder = safetensors({{"model.language_model.embed_tokens.weight", QJsonArray{248320, 4096}},
+                                                {encoderArch == "qwen3.5" ? "model.language_model.layers.0.linear_attn.A_log"
+                                                                          : "model.layers.0.self_attn.q_norm.weight",
+                                                 QJsonArray{32}}});
+        return QJsonObject{{"diffusion_model", bench.model("fugue/diffusion-model", "diffusion_models/moss.safetensors", dit)},
+                           {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/enc.safetensors", encoder)},
+                           {"vae", bench.model("fugue/vae", "vae/flux2-vae.safetensors", safetensors({{"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}}))}};
+    }
+
+    void mossWithAQwen3EncoderIsRefusedBeforeTheHelper() {
+        Bench bench;
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(moss(bench, "qwen3")))}, {"prompt", Value("a fox")}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("model_mismatch"));
+        QVERIFY2(request.error().message.contains("Qwen3 encoder, and the model reads Qwen3.5"), qPrintable(request.error().message));
+    }
+
+    void mossWithoutATokenizerSaysWhereToGetIt() {
+        Bench bench;
+        QFile::remove(Bench::modelPath("tokenizers/qwen3.5_tokenizer.json")); // the data folder outlives a test run
+        QFile::remove(dataDir() + "/catalog/test.json");
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(moss(bench, "qwen3.5")))}, {"prompt", Value("a fox")}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("model_missing"));
+        QVERIFY2(request.error().message.contains("qwen3.5_tokenizer.json"), qPrintable(request.error().message));
+        QVERIFY(request.error().hint.contains("Tokenizer"));
+    }
+
+    void mossTakesAPickedTokenizerAsTheTokenizerOption() {
+        Bench bench;
+        QJsonObject parts = moss(bench, "qwen3.5");
+        parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/my-tokenizer.json", "{}"));
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("context").toObject().value("tokenizer").toString(), Bench::modelPath("tokenizers/my-tokenizer.json"));
+    }
+
+    void mossFindsTheCatalogsTokenizerByItsHashWhenNoneIsPicked() {
+        Bench bench;
+        const QByteArray bytes = "{\"version\": \"1.0\"}";
+        const QScopeGuard cleanup([] {
+            QFile::remove(Bench::modelPath("tokenizers/qwen3.5_tokenizer.json"));
+            QFile::remove(dataDir() + "/catalog/test.json");
+        });
+        bench.model("fugue/tokenizer", "tokenizers/qwen3.5_tokenizer.json", bytes);
+        // A person's catalog entry of the same id replaces Fugue's: here, the file this test put in the folder.
+        QDir().mkpath(dataDir() + "/catalog");
+        writeFile(dataDir() + "/catalog/test.json",
+                  QJsonDocument(QJsonObject{{"catalog", 1},
+                                            {"models", QJsonArray{QJsonObject{{"id", "qwen3.5-tokenizer"},
+                                                                              {"resource", "fugue/tokenizer"},
+                                                                              {"title", "Qwen3.5 tokenizer"},
+                                                                              {"file", "qwen3.5_tokenizer.json"},
+                                                                              {"url", "https://example.com/tokenizer.json"},
+                                                                              {"size", bytes.size()},
+                                                                              {"sha256", QString(sha256(bytes)).remove("sha256:")}}}}})
+                      .toJson());
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(moss(bench, "qwen3.5")))}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("context").toObject().value("tokenizer").toString(),
+                 Bench::modelPath("tokenizers/qwen3.5_tokenizer.json"));
+    }
+
+    void otherModelsAreGivenNoTokenizer() {
+        Bench bench;
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QVERIFY(!request->params.value("context").toObject().contains("tokenizer"));
     }
 
     void aPairedHostGetsWansT5AsT5Too() {
