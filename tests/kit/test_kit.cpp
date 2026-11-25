@@ -145,6 +145,14 @@ class TestKit : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
+    // A test run by hand from a desktop shell still never opens a window on the owner's screen (tests/test_environment.cpp).
+    void aTestBinaryRunsOffscreenWhateverTheShellSays() {
+        if (qgetenv("FUGUE_TEST_ON_SCREEN") == "1")
+            QSKIP("FUGUE_TEST_ON_SCREEN asks for a real window");
+        QCOMPARE(QGuiApplication::platformName(), QStringLiteral("offscreen"));
+        QVERIFY(qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY"));
+    }
+
     void kitControlsKeepTheirContract() {
         const QString home = dir.filePath("controls");
         Shell shell(home, "tokyo-night");
