@@ -1752,4 +1752,32 @@ FocusScope {
             }
         }
     }
+    // Click-to-expose while the app builder is picking (#393): over everything, taking only the left button. Made only
+    // while picking, so the canvas keeps its items the rest of the time (the default-window item count, spec 12.1).
+    Component {
+        id: appPickLayerComponent
+        AppPickLayer {
+            objectName: "appPickLayer"
+            anchors.fill: parent
+            look: canvas.look
+            model: canvas.model
+            panX: world.x
+            panY: world.y
+            zoom: world.scale
+        }
+    }
+    property Item appPickLayer: null
+    Connections {
+        target: canvas.model ? canvas.model.appBuilder : null
+        function onStateChanged() {
+            const picking = canvas.model.appBuilder.picking
+            if (picking && !canvas.appPickLayer)
+                canvas.appPickLayer = appPickLayerComponent.createObject(canvas) as Item
+            else if (!picking && canvas.appPickLayer) {
+                canvas.appPickLayer.destroy()
+                canvas.appPickLayer = null
+            }
+        }
+    }
+
 }

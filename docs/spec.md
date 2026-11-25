@@ -2554,6 +2554,8 @@ and the `?` overlay marks each one.
 | `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
 | `view.toggle-app` | Switch this workflow between its App view and the graph; off for a workflow with no app block (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
 | `app.show-all` | The shelf of apps over the window, on the current app's card, to open another (12.17, #397) | Ctrl+Shift+A (File > All apps…, the rail's Apps item, Fugue's mark in the window bar) | added |
+| `app.make` | Make an app from this workflow, or edit the one it has: the builder (12.19, #393) | Ctrl+Alt+M (File > Make app…) | added |
+| `app.edit` | The same builder on the workflow's app block; off for a workflow with none (12.19, #393) | none (File > Edit app…, shown only with a block) | added |
 | `app.menu-bar` | Open the menu bar | F10 | added |
 | `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
 | `area.split-row`, `area.split-column` | Split the active area side by side, top and bottom (12.16) | `Ctrl+\`, `Ctrl+Alt+\` | added |
@@ -3266,6 +3268,52 @@ window with "This is not an app." and an Open in Fugue button.
 - **Open in Fugue** (`appOpenInFugue`, the app's own window): starts `fugue --edit <ref>`, the full window with that app's
   workflow as a tab, shown as the graph. A template is opened as a new unsaved workflow (as the Templates window does), a file
   as that file. `--edit` also works from a terminal.
+
+### 12.19 Make an app: the builder (#393, epic #397)
+
+File > Make app… (`app.make`, Ctrl+Alt+M) turns the workflow on the canvas into an app (4.9) with no JSON by hand; File > Edit app…
+(`app.edit`, shown only while the workflow has a block) is the same dialog on the block there. Both work from the graph and from the
+App view, and an app block that cannot be read starts an empty builder that replaces it on Apply. Inside an entered group the builder
+refuses and says to leave the group first: an app is made of the whole workflow. The logic is `apps/app_builder.*` (`AppBuilder`, the
+canvas model's `appBuilder`); `apps/AppBuilderDialog.qml` only draws it.
+
+- **The draft.** The builder works on a copy of the block (`app::App`, 4.9) and never touches the document until **Apply**, which writes it
+  with `app::setApp` as ONE undo step on the document ("Make app", "Edit app"; Remove app is "Remove app"), so Ctrl+Z takes the block out
+  again, and the App view reads it at once. Cancel, Escape and closing throw the draft away. Applying a draft equal to the block pushes
+  no step. An input or output of a block loaded for editing whose node is gone from the workflow is left out with a sentence (as
+  `pruneApp` does everywhere).
+- **What it holds** (the group interface editor's rules, 5.4, where they fit): the **title** (required), **description** and **Opens in**
+  (`defaultView`: App or Graph); the **inputs** in the form's order, each with a label (the placeholder is the name the form would
+  say), **Advanced** (the one section the form folds), a range for a number (the placeholder is the target's own), a default, the inner
+  inputs it sets and **Also set…** (one input drives several of one type, never of two types), Move up and Move down (Alt+Up and
+  Alt+Down in a row) and a button to stop asking for it; the **outputs**, each with an optional label and the same ordering. Not in the
+  builder (kept as the block has them): choices and their numbers, `optional`, `fallback`, other section names. The role is guessed
+  from the input the way the templates name it: a Load Image's `file` is `image`, its `mask` is `mask`, a seed-widget input `seed`, a
+  model picker `model`, a text input named `prompt` or `negative_prompt` that role, anything else a plain input keyed by its name (a
+  second picture keeps its role under a name of its own).
+- **Adding.** By clicking, or from a list, so a keyboard needs no pointer. **Pick on the canvas** closes the dialog and puts the canvas in
+  click-to-expose mode (`canvas/AppPickLayer.qml`, over the canvas while `appBuilder.picking`): the input row or node under the pointer
+  is outlined, a click on an input row adds it (a second click takes it out), a click on a Save or Preview node adds its result as an
+  output (a second takes it out), a click on any other node says in the banner that it has no result; what the draft already has is
+  outlined in the accent. The wheel and the middle button still pan and zoom the canvas. **Done** in the banner or Escape ends picking
+  and the dialog comes back (from the App view the window goes to the graph for the picking and back after). **Add an input…** lists
+  every unlinked value input of the workflow (node title, then the input) and **Add an output…** every Save and Preview node. An input
+  that is linked, only takes a connection (an image wire), or is in the app already is refused in one sentence.
+- **Checking.** `problems` (the red line above the buttons) says in words what Apply refuses: no title, nothing to show, no output
+  ("Pick at least one output: the Save or Preview node whose result the app shows"), and every `app_invalid` that `app::checkApp` gives
+  (an output that is not a sink, a target that is linked or of mixed types); Apply and Apply and open are off while any stands. The
+  model can add an output that is not a sink (it is shown in the error tint and named in the problems); a click on the canvas never does.
+- **Preview.** The right pane is the App view's own form: `AppView::fields` of a second, idle `AppView` given the workflow with the draft's
+  block, drawn with `AppInput` and nothing in it editable, so a label, a range, Advanced or a new input shows as the form will show
+  it, with the title, the description and what the app shows.
+- **After Apply.** **Apply** leaves the window where it was (the graph stays the graph); **Apply and open App view** (the primary) shows
+  the App view (`AppView::showApp`); the key and the switch in the window bar (`view.toggle-app`) are there after either.
+- **Keys.** Tab goes through the title, description, Opens in, Pick on the canvas, Add an input, each row (label, Advanced, Move up, Move
+  down, remove, its range, Also set…), Add an output, its rows, then Remove app (when editing), Cancel, Apply, Apply and open. Space,
+  Enter or Down opens a list, the arrows choose and Enter picks; **Enter in a text field applies**, Escape cancels.
+  `test_app_builder_window` drives it with keys only.
+- **Words** are the group editor's where the thing is the same (Move up, Move down, the x that stops exposing, Advanced), and the form's
+  own where it is not ("Pick on the canvas", "Add an input…", "Sets <node>").
 
 ---
 

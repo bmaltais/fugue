@@ -9,7 +9,8 @@
 # Drift-kit slice 2: Fugue's mark (the Dusk icon, `fugueMark` and its picture) sits at the window bar's start and runs app.show-all: two items more.
 # #465: rounded spaces (docs/canvas-look.md 20.21): the Graph's card outline (AreaFrame, a Shape) above the canvas, and a raised button's KitRaise in a Loader (ViewButton): nine items more.
 # #478: the workflow notice is a Banner (an item, its Loader and its content holder), two items more than the rectangle it was; the keymap notice is one too: four items more.
-items 256
+# #393: the app builder (AppBuilderDialog) is one item over the window; its picking banner and the canvas pick layer are made only while picking: one item more.
+items 257
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 areaClose-1 1

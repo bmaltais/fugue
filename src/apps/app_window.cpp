@@ -66,6 +66,17 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             canvas.moveView(at.center().x(), at.center().y(), canvas.view().value(QStringLiteral("zoom"), 1.0).toDouble());
     });
 
+    // Make app and Edit app (#393): the block the builder wrote is in the form now. Apply and open shows the App view; plain Apply
+    // leaves the window where it was (a first block would otherwise open the tab in its defaultView, taking the graph away).
+    QObject::connect(canvas.appBuilder(), &AppBuilder::applied, &view, [&view](bool openAppView) {
+        const bool wasShown = view.shown();
+        emit view.documentWanted();
+        if (openAppView)
+            view.showApp();
+        else if (!wasShown)
+            view.openInGraph();
+    });
+
     commands.setHandler(QStringLiteral("view.toggle-app"), [&view] { view.toggle(); });
     commands.setEnabledWhen(QStringLiteral("view.toggle-app"), [&view] { return view.isApp(); });
     commands.setCheckedWhen(QStringLiteral("view.toggle-app"), [&view] { return view.shown(); });
