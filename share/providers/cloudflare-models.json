@@ -4,7 +4,7 @@
   "models": [
     {
       "id": "@cf/black-forest-labs/flux-1-schnell", "title": "FLUX.1 [schnell]", "price": "~$0.0006/picture", "format": "json",
-      "steps": true, "steps_max": 8, "seed": true,
+      "steps": true, "steps_max": 8, "seed": false,
       "defaults": {"steps": 4}
     },
     {
