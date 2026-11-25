@@ -10,6 +10,7 @@
 
 #include "engine/group_library.h"
 #include "engine/pack_loader.h"
+#include "engine/pack_secrets.h"
 #include "engine/registry.h"
 #include "engine/trust_store.h"
 
@@ -53,6 +54,7 @@ void PacksModel::refresh() {
         paths.prepend(m_packsFolder);
     const PackReport report = loadPacks(scratch, paths, inheritedPackPaths());
     const TrustStore trust(m_trustFile);
+    const PackSecretStore secretStore;
     QVariantList list;
     for (const LoadedPack &pack : report.packs) {
         if (pack.hidden)
@@ -63,6 +65,13 @@ void PacksModel::refresh() {
         for (const PackProblem &problem : pack.disabled)
             problems << QStringLiteral("%1: %2").arg(problem.node, problem.reason);
         const PackSource source = readPackSource(pack.path);
+        const QString secretKey = packSecretKey(pack.id, source.location);
+        const QStringList secretsSet = secretStore.namesSet(secretKey);
+        QVariantList secrets;
+        for (const PackSecretSpec &spec : pack.secrets)
+            secrets << QVariantMap{{"name", spec.name}, {"label", spec.label}, {"description", spec.description},
+                                   {"set", secretsSet.contains(spec.name)}, {"originRequired", spec.originRequired},
+                                   {"origin", secretStore.originOf(secretKey, spec.name)}};
         list << QVariantMap{
             {"id", pack.id}, {"version", pack.version}, {"name", pack.name}, {"path", pack.path},
             {"enabled", pack.enabled}, {"trusted", pack.enabled && trust.isTrusted(pack.id, pack.version)},
@@ -70,7 +79,7 @@ void PacksModel::refresh() {
             {"nodes", int(pack.nodes.size())}, {"source", source.location}, {"problems", problems},
             {"active", m_registry && pack.enabled && m_registry->hasPackVersion(pack.id, pack.version)},
             {"folder", QFileInfo(pack.path).fileName()}, {"inherited", pack.inherited},
-            {"warning", pack.inherited ? inheritedPackWarning() : QString()}};
+            {"warning", pack.inherited ? inheritedPackWarning() : QString()}, {"secrets", secrets}};
     }
     m_packs = list;
     m_library.clear();
@@ -113,13 +122,54 @@ bool PacksModel::removeLibraryGroup(const QString &id) {
     return !hasErrors(removed);
 }
 
+// The pack's own entry in the list: its secrets and the key they are stored under.
+bool PacksModel::setSecret(const QString &packId, const QString &name, const QString &value, const QString &origin) {
+    PackSecretStore store;
+    bool declared = false, required = false;
+    QString key;
+    for (const QVariant &entry : std::as_const(m_packs)) {
+        if (entry.toMap().value("id") != packId || !entry.toMap().value("enabled").toBool())
+            continue;
+        for (const QVariant &secret : entry.toMap().value("secrets").toList())
+            if (secret.toMap().value("name") == name) {
+                declared = true;
+                required = secret.toMap().value("originRequired").toBool();
+                key = packSecretKey(packId, entry.toMap().value("source").toString());
+            }
+    }
+    Errors errors;
+    if (!declared)
+        errors << makeError(QStringLiteral("usage"), tr("%1 does not declare a secret named %2.").arg(packId, name));
+    else
+        errors = store.set(key, name, value, origin, required); // the same rules as the command line
+    m_message = hasErrors(errors) ? QString() : tr("Stored %1 of %2.").arg(name, packId);
+    m_failure = hasErrors(errors) ? firstProblem(errors) : QString();
+    emit messageChanged();
+    refresh();
+    return !hasErrors(errors);
+}
+
+bool PacksModel::clearSecret(const QString &packId, const QString &name) {
+    PackSecretStore store;
+    QString key = packId;
+    for (const QVariant &entry : std::as_const(m_packs))
+        if (entry.toMap().value("id") == packId)
+            key = packSecretKey(packId, entry.toMap().value("source").toString());
+    const Errors errors = store.clear(key, name);
+    m_message = hasErrors(errors) ? QString() : tr("Cleared %1 of %2.").arg(name, packId);
+    m_failure = hasErrors(errors) ? firstProblem(errors) : QString();
+    emit messageChanged();
+    refresh();
+    return !hasErrors(errors);
+}
+
 Answer PacksModel::ask(const QString &kind, const PackSummary &pack) {
     QVariantMap question{
         {"kind", kind}, {"id", pack.id}, {"name", pack.name.isEmpty() ? pack.id : pack.name}, {"version", pack.version}, {"oldVersion", pack.oldVersion},
         {"source", pack.source.location.isEmpty() ? QString()
                    : pack.source.ref.isEmpty() ? pack.source.location
                                                : QStringLiteral("%1 at %2").arg(pack.source.location, pack.source.ref)},
-        {"runtime", pack.runtimeKinds}, {"permissions", pack.permissions}, {"nodes", int(pack.nodes.size())},
+        {"runtime", pack.runtimeKinds}, {"permissions", pack.permissions}, {"secrets", pack.secrets}, {"secretsSet", pack.secretsSet}, {"secretsOtherSource", pack.secretsOtherSource}, {"nodes", int(pack.nodes.size())},
         {"command", displayCommand(pack.setupCommand)}, {"description", pack.setupDescription}, {"folder", pack.folder}};
     {
         QMutexLocker lock(&m_mutex);

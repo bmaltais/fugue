@@ -45,6 +45,9 @@ struct PackSummary {
     QStringList runtimeKinds; // "command", "native", ... of the pack's nodes, sorted
     QStringList permissions;  // "network", "files", "gpu": what the nodes declare (6.3), sorted
     QStringList nodes;        // node type ids
+    QStringList secrets;      // the names of the secrets the pack reads (6.4 `settings`), in pack.json's order; never values
+    QStringList secretsSet;   // of those, the ones already set for this pack id from this same source (an update keeps them)
+    QStringList secretsOtherSource; // names set for this pack id from ANOTHER source: this pack does not get them (6.4.1)
     QStringList setupCommand; // empty when the pack has no setup
     QString setupDescription;
     qint64 setupSize = -1;    // bytes its setup downloads, when pack.json's setup says (`size`); -1 when it does not
@@ -100,7 +103,7 @@ struct PreparedPack {
 
 // True for what a git source may be: https, ssh, git, file or user@host:path.
 bool looksLikeGitUrl(const QString &text);
-// True when `a` and `b` are the same pack as a person reads it: id, version, setup command, permissions, runtime kinds, nodes
+// True when `a` and `b` are the same pack as a person reads it: id, version, setup command, permissions, secrets, runtime kinds, nodes
 // and (when `a` names one) the commit. What a yes covers, and no more.
 bool samePack(const PackSummary &shown, const PackSummary &now);
 

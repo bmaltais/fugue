@@ -2,6 +2,7 @@
 
 #include "engine/json.h"
 #include "engine/pack_loader.h"
+#include "engine/pack_secrets.h"
 #include "engine/registry.h"
 #include "engine/version.h"
 
@@ -361,7 +362,8 @@ bool looksLikeGitUrl(const QString &text) {
 
 bool samePack(const PackSummary &shown, const PackSummary &now) {
     return shown.id == now.id && shown.version == now.version && shown.setupCommand == now.setupCommand
-           && shown.permissions == now.permissions && shown.runtimeKinds == now.runtimeKinds && shown.nodes == now.nodes
+           && shown.permissions == now.permissions && shown.secrets == now.secrets && shown.runtimeKinds == now.runtimeKinds
+           && shown.nodes == now.nodes
            && (shown.source.commit.isEmpty() || shown.source.commit == now.source.commit);
 }
 
@@ -390,6 +392,21 @@ PackSource readPackSource(const QString &packFolder) {
     return source;
 }
 
+// Which of the pack's secrets already have a value for this id from this source, and which only from another source (6.4.1).
+static void fillSecretState(PackSummary &summary) {
+    summary.secretsSet.clear();
+    summary.secretsOtherSource.clear();
+    if (summary.secrets.isEmpty())
+        return;
+    const PackSecretStore store;
+    const QString key = packSecretKey(summary.id, summary.source.location);
+    const QStringList mine = store.namesSet(key);
+    for (const QString &name : summary.secrets)
+        if (mine.contains(name))
+            summary.secretsSet << name;
+    summary.secretsOtherSource = store.namesSetForOtherSources(summary.id, key);
+}
+
 Result<PackSummary> summarizePack(const QString &folder) {
     const Result<QJsonObject> json = readPackJson(folder);
     if (!json)
@@ -406,6 +423,7 @@ Result<PackSummary> summarizePack(const QString &folder) {
     summary.name = loaded.name;
     summary.folder = folder;
     summary.nodes = loaded.nodes;
+    summary.secrets = packSecretNames(loaded.secrets);
     QSet<QString> kinds, permissions;
     for (const QString &id : loaded.nodes) {
         const NodeType *type = scratch.nodeType(id);
@@ -427,6 +445,7 @@ Result<PackSummary> summarizePack(const QString &folder) {
     if (const QJsonValue size = json->value("setup").toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
         summary.setupSize = qint64(size.toDouble());
     summary.source = readPackSource(folder);
+    fillSecretState(summary);
     QStringList shown{summary.name, summary.version, summary.setupDescription};
     shown += summary.setupCommand;
     for (const QString &text : shown)
@@ -450,6 +469,7 @@ Error warningOf(Error error, const QString &prefix = {}) {
 Result<PackAdded> install(const Staged &staged, PackSummary summary, const QString &packsDir, const QString &target,
                           const PackPrompts &prompts, bool replacing, TrustStore &trust) {
     summary.source = staged.source;
+    fillSecretState(summary);
     summary.folder = target;
     PackAdded added;
     added.pack = summary;
@@ -749,6 +769,8 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
     const Errors forgotten = beside && !summary.version.isEmpty() ? trust.forget(packId, summary.version) : trust.forget(packId);
     if (hasErrors(forgotten))
         return forgotten;
+    if (!beside)
+        PackSecretStore().forgetPack(packId); // its keys go with it; best effort, the pack itself is gone
     return summary;
 }
 

@@ -1209,3 +1209,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rules met: Floor (no new control; the line is text, not a button), Primary (Run stays the one accent), Learned place (where Run's status already is: the foot of the panel), no technical text (a host's name, no address or id).
 - Decision (confirm): a quiet line, not a chip or badge; the shelf and Templates window keep their where-badges (#164), which are about models by name on omarchy hosts.
 - Not checked by a person: the line in a real window (the offscreen tests cover the store, not the pixels).
+
+### 2026-11-25 Packs page: a pack's secrets (#402, epic #409)
+
+- Control: under a pack's card in `src/settings/PacksPage.qml`, one block per declared secret: its label and a state word (`packSecretState-<pack>-<name>`, "set" or "not set"), an optional description, an **Only for** field (`packSecretOnlyFor-…`, the address the key may be sent to; required for some packs; once the key is set it is shown read-only as `packSecretOrigin-…`, and to change it you Clear and set again), a password field (`packSecret-<pack>-<name>`, the settings' `Field` with `secret`), **Set…** (`packSecretSet-…`) and **Clear** (`packSecretClear-…`, only while set). The trust questions (this page's, the Get ready sheet's, the workflow's) get one more line, "Reads secrets: token_1, token_2"; this page's and the CLI's add "Already set" / "set for another source" and say that isolation between packs is advisory.
+- Old: a pack had nowhere to keep a key; only providers did.
+- New: type the value and press Enter (or click Set…); the field empties and the state says "set"; the value is never shown again. Clear drops it at once (it is quick and undoes by typing it again, so no question).
+- Rules met: Keyboard (Tab to the field, Enter sets; Clear and Set… are buttons in the same tab order), Floor (the field is the settings' `Field`, the buttons the settings' `SmallButton`), Primary (no accent on the row: setting a key is not the page's main action), Learned place (the same field, placeholder and "set" wording as the Providers page's key).
+- Decision (confirm): Clear has no confirmation question, as the Providers key.
+- Not checked by a person: the block in a real window.

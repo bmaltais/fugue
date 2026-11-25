@@ -14,6 +14,7 @@
 // is loaded with PackOrigin::BuiltIn, from the compiled-in resources, through the same code.
 
 #include "engine/error.h"
+#include "engine/pack_secrets.h"
 #include "engine/registry.h"
 
 #include <QList>
@@ -91,6 +92,7 @@ struct LoadedPack {
     bool enabled = false;       // false: nothing of the pack is registered
     Errors errors;              // why a pack is disabled; for one that loaded, warnings and declared-type problems
     QStringList nodes;          // type ids registered, sorted
+    QList<PackSecretSpec> secrets; // the secrets pack.json declares (6.4); empty when the pack did not read
     bool inherited = false;     // from the Default project's folders (1.4.2): read-only here
     bool hidden = false;        // an inherited pack an own pack of the same id and major hides: not loaded, no problem
     QList<PackProblem> disabled; // nodes that did not load, in pack.json's order

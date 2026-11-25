@@ -249,6 +249,69 @@ private slots:
         QVERIFY(model->message().contains("said no"));
     }
 
+    // #402: a pack that declares a secret shows it on its card as set or not set, the person types the value and
+    // presses Enter (keys only), and the list never carries the value; Clear drops it.
+    void aDeclaredSecretIsSetFromTheKeyboardAndShownOnlyAsSetOrNotSet() {
+        const QString dir = packs() + "/io.example.keyed";
+        QDir().mkpath(dir + "/call");
+        QFile pack(dir + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write(QJsonDocument(QJsonObject{{"manifest", 1}, {"id", "io.example.keyed"}, {"version", "1.0.0"}, {"name", "Keyed"},
+                                             {"nodes", QJsonArray{"call"}},
+                                             {"settings", QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "Token 1"}, {"origin", "required"}}}}}).toJson());
+        pack.close();
+        QFile node(dir + "/call/node.json");
+        QVERIFY(node.open(QIODevice::WriteOnly));
+        node.write(QJsonDocument(QJsonObject{{"manifest", 1}, {"id", "io.example.keyed/call"}, {"version", "1.0.0"}, {"name", "Call"},
+                                             {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                                             {"inputs", QJsonArray{}}, {"outputs", QJsonArray{}}}).toJson());
+        node.close();
+        QFile::remove(m_xdg.filePath("config/fugue/pack-secrets.json"));
+
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        fugue::PacksModel *model = app.settings.packs();
+        const auto secretOf = [model] {
+            for (const QVariant &entry : model->packs())
+                if (entry.toMap().value("id") == "io.example.keyed")
+                    return entry.toMap().value("secrets").toList().value(0).toMap();
+            return QVariantMap();
+        };
+        QCOMPARE(secretOf().value("name").toString(), QString("token_1"));
+        QVERIFY(!secretOf().value("set").toBool());
+
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
+        click(app, NEED("settingsPage-packs"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packSecret-io.example.keyed-token_1"), 20000);
+        QCOMPARE(find(app.window, "packSecretState-io.example.keyed-token_1")->property("text").toString(), QString("not set"));
+        // The pack needs an origin: a value alone is refused, and nothing is stored.
+        type(app, NEED("packSecret-io.example.keyed-token_1"), "made-up-key-1234");
+        QTRY_VERIFY_WITH_TIMEOUT(model->failure().contains("origin"), 20000);
+        QVERIFY(!secretOf().value("set").toBool());
+        type(app, NEED("packSecretOnlyFor-io.example.keyed-token_1"), "https://api.example.com");
+        type(app, NEED("packSecret-io.example.keyed-token_1"), "made-up-key-1234");
+        QTRY_VERIFY_WITH_TIMEOUT(secretOf().value("set").toBool(), 20000);
+        QCOMPARE(secretOf().value("origin").toString(), QString("https://api.example.com"));
+        QVERIFY(!QString::fromUtf8(QJsonDocument::fromVariant(model->packs()).toJson()).contains("made-up-key-1234"));
+        QTRY_COMPARE_WITH_TIMEOUT(find(app.window, "packSecretState-io.example.keyed-token_1")->property("text").toString(), QString("set"), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packSecretOrigin-io.example.keyed-token_1"), 20000); // shown, read-only
+        QVERIFY(!find(app.window, "packSecretOnlyFor-io.example.keyed-token_1") || !find(app.window, "packSecretOnlyFor-io.example.keyed-token_1")->isVisible());
+        QCOMPARE(QFileInfo(m_xdg.filePath("config/fugue/pack-secrets.json")).permissions() & QFileDevice::ReadOther, QFileDevice::Permissions());
+
+        // The same rules as the command line: one line, no NUL, at most 4096 bytes, an origin that is one.
+        QVERIFY(model->clearSecret("io.example.keyed", "token_1"));
+        QVERIFY(!model->setSecret("io.example.keyed", "token_1", "two\nlines", "https://api.example.com"));
+        QVERIFY(!model->setSecret("io.example.keyed", "token_1", QString(4097, 'a'), "https://api.example.com"));
+        QVERIFY(!model->setSecret("io.example.keyed", "token_1", "made-up-key-1234", "https://api.example.com/path"));
+        QVERIFY(!model->setSecret("io.example.keyed", "token_1", "made-up-key-1234"));
+        QVERIFY(model->setSecret("io.example.keyed", "token_1", "made-up-key-1234", "https://api.example.com"));
+        QVERIFY(!model->setSecret("io.example.keyed", "undeclared", "made-up-key-1234")); // only a declared name
+        click(app, NEED("packSecretClear-io.example.keyed-token_1"));
+        QTRY_VERIFY_WITH_TIMEOUT(!secretOf().value("set").toBool(), 20000);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aPackThatDoesNotLoadShowsWhy() {
         QDir().mkpath(packs() + "/io.example.broken");
         QFile broken(packs() + "/io.example.broken/pack.json");

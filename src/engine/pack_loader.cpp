@@ -4,6 +4,7 @@
 #include "engine/group_library.h"
 #include "engine/json.h"
 #include "engine/pack_manager.h"
+#include "engine/pack_secrets.h"
 #include "engine/paths.h"
 #include "engine/project.h"
 #include "engine/settings.h"
@@ -43,7 +44,7 @@ QString shareableSource(const PackSource &source) {
 
 
 const QStringList knownPackFields = {"manifest", "id",    "version", "name",  "license",   "source",
-                                     "description", "nodes", "types", "setup", "converters"};
+                                     "description", "nodes", "types", "setup", "converters", "settings"};
 
 Error problem(const QString &code, const QString &message, Error::Severity severity = Error::Severity::Error) {
     Error error = makeError(code, message);
@@ -87,6 +88,7 @@ struct PackManifest {
     QString name;
     QStringList nodes;
     QList<DeclaredPortType> types;
+    QList<PackSecretSpec> secrets;
 };
 
 // Validates pack.json, reporting every problem found.
@@ -200,6 +202,14 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
         if (!ok)
             errors << invalid(QStringLiteral("pack.json \"setup.command\" must be a program and its arguments, "
                                              "like [\"uv\", \"sync\"]."));
+    }
+
+    if (json.contains("settings")) {
+        const Result<QList<PackSecretSpec>> secrets = parsePackSecrets(json.value("settings"));
+        if (secrets)
+            pack.secrets = *secrets;
+        else
+            errors << secrets.errors();
     }
 
     for (auto it = json.begin(); it != json.end(); ++it)
@@ -317,6 +327,12 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         type.dir = nodeDir;
         if (origin != PackOrigin::BuiltIn)
             type.packVersion = pack.version; // the built-ins' versions are the app's, keyed by the node's own
+        type.packSecrets = packSecretNames(pack.secrets);
+        for (const PackSecretSpec &spec : pack.secrets)
+            if (spec.originRequired)
+                type.packSecretsOriginRequired << spec.name;
+        if (!pack.secrets.isEmpty())
+            type.packSource = readPackSource(folder).location;
         if (runtime.value("kind").toString() == QLatin1String("command"))
             type.seal = nodeSeal(nodeDir, runtime.value("entry").toString());
         errors = registry.add(type);
@@ -459,6 +475,8 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.id = read.value().value("id").toString();
     loaded.version = read.value().value("version").toString();
     loaded.name = read.value().value("name").toString();
+    if (pack)
+        loaded.secrets = pack->secrets;
     if (!pack)
         return loaded;
     const int major = Version::parse(pack->version)->major; // parsePack checked it
