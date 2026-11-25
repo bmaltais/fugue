@@ -19,6 +19,7 @@
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
+#include "../test_shard.h"
 
 using namespace canvas_test;
 using namespace fugue;
@@ -815,13 +816,12 @@ private slots:
 
     // The performance budget (docs/canvas-look.md 20, Performance): an App view that has settled draws nothing: no animation, timer or
     // effect keeps the scene graph busy, so no frame is swapped for a second.
-    void anIdleAppViewDoesNotRedraw_data() {
-        QTest::addColumn<QString>("preset");
-        QTest::newRow("calm") << "calm";
-        QTest::newRow("flat") << "flat";
-    }
-    void anIdleAppViewDoesNotRedraw() {
-        QFETCH(QString, preset);
+    // One function per look so the two land in different shards (each waits for the page to settle).
+    void anIdleAppViewDoesNotRedrawInCalm() { idleAppViewDoesNotRedraw(QStringLiteral("calm")); }
+    void anIdleAppViewDoesNotRedrawInFlat() { idleAppViewDoesNotRedraw(QStringLiteral("flat")); }
+
+private:
+    void idleAppViewDoesNotRedraw(const QString &preset) {
         App app(load(mediaApp));
         Rig rig(app);
         QElapsedTimer opened;
@@ -830,7 +830,8 @@ private slots:
         QCOMPARE(app.settings.applyLookPreset(preset), QString());
         QTRY_VERIFY(find(app.window, "appInput-seed"));
         qInfo() << "the App view's first frame after open," << preset << ":" << opened.elapsed() << "ms";
-        // Wait on the condition, not a fixed time: the page settles when a half second passes with no frame; from then on it must stay so.
+        // Wait on the condition, not a fixed time: the page settles when a half second passes with no frame (the preset's colour
+        // changes and the frosted controls' measure, 150 ms later, animate once); from then on it must stay so for half a second.
         int frames = 0;
         const auto connection = connect(app.window, &QQuickWindow::frameSwapped, this, [&frames] { ++frames; });
         bool quiet = false;
@@ -840,11 +841,13 @@ private slots:
             quiet = frames == 0;
         }
         QVERIFY2(quiet, "the App view never stopped drawing");
-        QTest::qWait(1000);
+        QTest::qWait(500);
         disconnect(connection);
         QCOMPARE(frames, 0);
         qDeleteAll(app.engine.rootObjects());
     }
+
+private slots:
 
     // The seed row: Random and back to Fixed through the control keeps a number in the field; Clear empties a result.
     void theSeedModeControlReachesTheStoreAndClearEmptiesTheResult() {
@@ -874,10 +877,12 @@ private slots:
         QCOMPARE(mode->property("currentIndex").toInt(), 0);
 
         QVERIFY(!find(app.window, "appClear"));
+        const QString picture = app.dir.path() + "/a.png"; // a real file: the stage and the strip load it
+        QVERIFY(QImage(4, 4, QImage::Format_RGB32).save(picture));
         rig.view.run();
         rig.view.onEvent("r1", QJsonObject{{"event", "run.started"}});
         rig.view.onEvent("r1", QJsonObject{{"event", "node.done"}, {"node", "save"},
-                                           {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", "file:///t/a.png"}, {"source", "/t/a.png"},
+                                           {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", QUrl::fromLocalFile(picture).toString()}, {"source", picture},
                                                                                             {"width", 4}, {"height", 4}}}}}});
         QVERIFY(!find(app.window, "appClear")); // the run still goes: Cancel is in the toolbar's place
         QVERIFY(find(app.window, "appCancel"));
@@ -905,5 +910,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestAppWindow)
+FUGUE_TEST_MAIN(TestAppWindow, QGuiApplication)
 #include "test_app_window.moc"

@@ -745,6 +745,26 @@ workflow with a form's values in (a missing value keeps the block's default, els
 `min`..`max`; a word of `choices` with `choice_values` becomes its number). The file is never changed. The reader of
 `inputs[]` is the one `engine/canvas_action.*` uses.
 
+### 4.10 Apps at a glance (#396, epic #397)
+
+This is the map; each part is specified where it lives. An **app** is a workflow that also has an `app` block: the few inputs
+worth changing, the results to show. It is never a second document, so the graph stays the truth and Open in Graph is always
+there.
+
+| Part | What it is | Where |
+| --- | --- | --- |
+| The block | The `app` key of `workflow.fugue`: title, description, `defaultView`, `inputs[]`, `outputs[]`, optional pictures; checked and pruned (`app_stale`, `app_invalid`) | [4.9](#49-app) |
+| A bundled app | A template whose workflow has a block that reads; the catalog flags it (`app`), the Apps chip and the shelf list it | [11.10](#1110-templates), 12.17 |
+| The App view | The form, Run, the stage, the takes strip, Run again Off / On change / Repeat, the Needs panel; a tab mode, or a view type of an area (#450) | [12.17](#1217-the-app-view-385-epic-397) |
+| Its own window | `fugue --app <id\|file>`: the App view and nothing around it, a launcher entry for it; a `.fugueapp` opens there | [12.18](#1218-an-app-as-its-own-application-398-epic-397) |
+| The builder | File > Make app… (Ctrl+Alt+M) and Edit app…: writes the block, one undo step | [12.19](#1219-make-an-app-the-builder-393-epic-397) |
+| The bundle | `.fugueapp`: the app with its packs and sample files, models as references; File > Export for sharing… or `fugue app export` | [11.5](#115-export) |
+| The CLI | `fugue app list`, `info`, `run`, `export` | [13](#13-cli-and-agent-interface) |
+
+The app owns no outputs and no store: a run of an app is an ordinary run of a bound copy of the workflow (`bindApp`), so its results,
+its History and its **takes** are the existing ones. The form's values live in that copy; the file is never changed by a run.
+How to use all this is in [docs/apps.md](apps.md).
+
 ## 5. Groups
 
 Two separate things, as in every mature node tool.
@@ -4724,3 +4744,17 @@ Building M4 made these further choices.
 | #134 upscaling: Upscale Image and Video, Upscale with Model, the model catalog and picker downloads | 8.1, 8.9, 14.1, Appendix A |
 | #138 Upscale Video with Model: frames streamed through the helper's upscaler | 8.1, 9.2, 14.1, Appendix A |
 | #164 template and model picker icons for models on this machine and on paired hosts, Ready to run | 11.10, 8.7, 2.5, Appendix A |
+| #384 app block: binding, check, prune | 4.9, 4.10, 11.10 |
+| #385 App view: a workflow as one simple screen | 12.17, 12.5 |
+| #386 App view: one control per input type | 12.17 |
+| #387 apps in the catalog: the Apps chip, the `app` flag | 11.10, 12.17 |
+| #388 apps shelf | 12.17 |
+| #389 takes from History, Run again | 12.17 |
+| #471 Run again: Off, On change, Repeat | 12.17 |
+| #392 `fugue app list`, `info`, `run` | 13.3, 4.9 |
+| #393 Make an app: the builder | 12.19, 12.5 |
+| #394 `.fugueapp` bundles, `fugue app export`, Keep this app | 11.5, 12.18, 13.3 |
+| #398 an app as its own application (`fugue --app`) | 12.18, 13.3 |
+| #450 App view as a view type of an area | 12.16, 12.17 |
+| #484 optional pictures (a branch bypassed when left empty) | 4.9, 12.17 |
+| #396 Apps docs and tests | 4.10, [docs/apps.md](apps.md), GLOSSARY |
