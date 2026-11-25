@@ -24,7 +24,10 @@ ApplicationWindow {
     minimumHeight: 440
     visible: true
     title: App.appView.title !== "" ? App.appView.title : qsTr("Fugue")
-    color: App.theme.background
+    // The window's outline is the rounded card inside it, as the owner's Drift window was: the window itself is transparent and the card
+    // takes the Corners parameter's card radius. Without an alpha surface (the software renderer) or in the Flat panes layout the card
+    // is square and fills the window.
+    color: "transparent"
     font.pixelSize: App.theme.textSize
 
     Material.theme: App.theme.light ? Material.Light : Material.Dark
@@ -34,6 +37,19 @@ ApplicationWindow {
 
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
+
+    readonly property bool roundedCard: GraphicsInfo.api !== GraphicsInfo.Software && look.params.areaLayout !== "panes"
+    readonly property real cardRadius: roundedCard ? Math.min(look.params.cornerCard * u, 0.25 * Math.min(width, height)) : 0
+
+    Rectangle {
+        id: card
+        objectName: "appWindowCard"
+        anchors.fill: parent
+        radius: win.cardRadius
+        color: App.theme.background
+        border.width: win.roundedCard && win.look.params.borders === "hairline" ? 1 : 0
+        border.color: win.look.hairline
+        clip: true
 
     // Not an app (the file has no block, or one that does not read): the window says so and offers the full window.
     Item {
@@ -80,6 +96,10 @@ ApplicationWindow {
         height: visible ? 8 * win.u : 0
         visible: App.workflows.notice.length > 0
         color: win.look.popup
+        topLeftRadius: 0
+        topRightRadius: 0
+        bottomLeftRadius: win.cardRadius
+        bottomRightRadius: win.cardRadius
         RowLayout {
             anchors { fill: parent; leftMargin: 4 * win.u; rightMargin: 4 * win.u }
             spacing: 3 * win.u
@@ -109,6 +129,8 @@ ApplicationWindow {
             }
         }
     }
+
+    } // card
 
     // The shortcuts of the command registry (Ctrl+Enter runs the app) and the keys help.
     CommandUi { anchors.fill: parent }

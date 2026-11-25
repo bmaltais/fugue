@@ -9,8 +9,9 @@ Item {
     implicitHeight: 1
     width: parent ? parent.width : 0
     height: 1
+    visible: look.params.rowSeparators === "hairline"
     Rectangle {
-        x: 3.5 * separator.look.unit
+        x: separator.look.params.rowPadLeft * separator.look.unit
         width: parent.width - 2 * x
         height: 1
         color: separator.look.kitSeparator

@@ -825,7 +825,7 @@ as in section 6. Existing tokens keep their derivations (`kit-group`, `kit-separ
 The light derivations are proposals: the boards are dark; the first grab of each kit element in a light theme is checked against
 4.5:1 for text and 3:1 for control edges, and the derivation is adjusted, not the rule.
 
-### 20.4 KitPanel and the tinted panel background (To build)
+### 20.4 KitPanel and the tinted panel background (Built)
 
 `KitPanel` is the card of one space: radius 4.5u (18px), 1px `kit-panel-edge`, clip, a `tone` (default `dusk`), an optional
 `KitHero` at its head, children below. It is the one place that knows the tone; the hero, toggles, choosers and sliders inside
@@ -840,7 +840,7 @@ Calm is the test: noticeable, never loud; it is a tint behind glass, so frosted 
 On the software renderer the gradients are drawn the same (they are plain `Rectangle` gradients and `Shape`s, no blur).
 A dialog is a `KitPanel`; so is each side panel.
 
-### 20.5 KitHero, compact, with the soft fade (Partly)
+### 20.5 KitHero, compact, with the soft fade (Built; the fade is a shader, `hero.frag`, not a MultiEffect mask)
 
 Built: compact height (title + subtitle + padding, about 84px = 21u for a 32px title at text size 12), the five tones, the
 picture or the blend, Fraunces at weight 420 (`font.variableAxes`), white title and 88% white subtitle, `PictureLuma` legible
@@ -897,7 +897,7 @@ Built differs from the board in two places, the tint (built `kit-frost` alpha x 
 0.18; accept, it is the same at the default) and the blur (built: a small texture scaled up, not a radius in pixels; the board's
 radius is the target and is matched by the scale). The default Frost slider is the setting (`frost`, 0 to 1, 0.6).
 
-### 20.8 KitToggle: tone glass (Partly)
+### 20.8 KitToggle: tone glass (Built; no backdrop blur: the track is translucent colour)
 
 Built: pill, white knob, `toggled(value)`, Space, 10u x 7u press area, 100 ms. **To change** (owner: toggles are glass in the
 window's tone):
@@ -923,7 +923,7 @@ window's tone):
 
 Track alphas 0.52 and 0.34 (the gradient), 0.22 for the halo stop. Over a picture the off track is black 38%.
 
-### 20.9 KitSegmented: tone glass chooser (To build)
+### 20.9 KitSegmented: tone glass chooser (Built)
 
 For a few exclusive options (the seed's Fixed, Random, Increment; the window's App | Graph switch; Frost's levels if wanted).
 `options` (texts, optional glyphs), `currentIndex`, `moved(index)`; controlled like the others.
@@ -936,7 +936,7 @@ For a few exclusive options (the seed's Fixed, Random, Increment; the window's A
 | Frost 0 | opaque track (`kit-track`), thumb the tone mixed 70% into the track, no blur |
 | Keys | one tab stop; Left and Right (mirrored in right-to-left) move and choose, Home and End jump; Space and Enter keep the choice; accessible role radio group with the checked option |
 
-### 20.10 KitSlider: tone fill (Partly)
+### 20.10 KitSlider: tone fill (Built; the value box stays the row's own number)
 
 Built: 1u rail, accent fill, white `kit-knob` 4.5u thumb, optional ticks and glyphs, keys. **To change:** the rail is a recessed
 well (6px high, `KitWell` look); the fill is the panel's tone at 85% (4px high, 0.5u inside the rail); the thumb stays opaque white,
@@ -963,15 +963,105 @@ Dusk hero; tagline 15px "Workflows for local AI, woven together." Files: `share/
 `scripts/make-app-icon.py`; Fugue's mark sits at the start of the window bar (`fugueMark`). Nothing left to build; the final
 pass checks the icon at 16 to 512px on a light and a dark launcher.
 
-### 20.13 Settings that control the look
+### 20.13 Settings that control the look, and the look parameters
 
-| Setting (settings.json) | Values | Where | Controls | Status |
+Every number and every structural choice of the kit is a named **look parameter** (`src/look_params.cpp`; `CanvasLook::params`,
+read in QML as `look.params.cornerCard`). Nothing in `src/kit` or `src/apps` keeps a look number of its own. A look is pure data:
+no code compares a preset's name. The layers, bottom to top: the default (the table below, the approved value); a **preset**
+(`share/looks/<id>.json`: parameters and slider positions); the user's **`look.json`**; then the **sliders**, each a factor that
+multiplies a documented group of parameters around the value below it (1 at the slider's default position), the result clamped to the
+range. Reduced `motion` sets every duration to 0.
+
+| Setting (settings.json) | Values | Where | Moves | Status |
 | --- | --- | --- | --- | --- |
-| `frost` | 0 to 1, default 0.6 | Settings > Theme (Frost slider, notes Off/Light/Medium/Strong) | glass of frosted chips and smoked wells, the halo (0 = off), the toggles' and choosers' glass (0 = opaque) | Built |
-| `panel_colour` | `tinted` (default), `plain` | Settings > Theme, a `KitSegmented` | 20.4 | To build |
-| `node_style` | `compact` (default), `flat` | Settings > Theme (Appearance), a `KitSegmented` | 20.14 | To build |
+| `look_preset` | a preset id, default `calm` | Settings > Theme > Look (a `KitSegmented`: Calm, Flat, Custom) | the base parameters and the sliders' positions; shown as Custom when a slider differs from the preset's | Built |
+| `look_colour` | 0 to 1, default 0.4 | Settings > Theme > Look | the parameters whose slider is `colour`: the panel tint and the tone alphas of toggles, choosers and sliders (factor = position / 0.4) | Built |
+| `look_glow` | 0 to 1, default 0.5 | same | the halo's alpha, opacity and reach (reach at half the rate) and the shine of the knob and thumb (position / 0.5; 0 is no halo) | Built |
+| `frost` | 0 to 1, default 0.6 | Settings > Theme > Frost | the glass of frosted chips and smoked wells in `KitFrost`; 0 turns the glass and the halo off | Built (not yet a table of parameters) |
+| `look_depth` | 0 to 1, default 0.5 | same | the wells' darkening, inner shadow and bottom light, and the raised controls' top edge and drop shadow (position / 0.5; capped so it stays calm; a field keeps a minimal fill step at 0) | Built |
+| `look_corners` | 0 to 1, default 0.5 | same | every corner class (card, group, well, chip, segment, hero), factor 0.1 + 1.8 x position, never below about 1.6px, never above 45% of the control's height | Built |
+| `look_spacing` | 0 to 1, default 0.5 | same | the gap between cards, the panel's padding, a row's padding and gap, factor 0.25 + 1.5 x position; a row keeps its minimum height (7u floor) | Built |
+| `node_style` | `compact` (default), `flat` | Settings > Theme | 20.14 | To build (#466); the Flat preset will also set it |
 
-All three apply live; none changes a workflow. The rest of the retheme is not switchable: one calm look.
+The parameter groups are named so node cards read the same ones later (corners, depth, colour, glow, spacing apply to node faces,
+#466). Flat is a preset like any other: UI-font titles, a tone header, rounded chips, hairlines, panes, the accent colour, no glass,
+glow or depth and small corners, the compact flat look; once #466 exists it also sets the node style to Flat (the node layout stays
+a separate structural setting). Presets live in `share/looks/` (Calm, Flat; a Paper look, light, warm and low-glass, needs a warm
+tone table and a light-theme pass over the glass values, so it is not shipped yet).
+
+**look.json** (the power user's file) is `look.json` in the settings folder (`$FUGUE_HOME/config` or `~/.config/fugue`); Settings >
+Theme > Look > Open look file... creates it with every parameter listed at its default and opens it. Keep only the lines you change.
+It is read at start and again whenever it is saved. A name that is not a parameter, a value of the wrong kind, or a number out of its
+range is said once in the log and ignored or clamped; the sliders apply on top.
+
+| Parameter | Default | Range | Slider | What it is |
+| --- | --- | --- | --- | --- |
+| `panelTint` | 0.124 | 0 to 0.5 | colour | alpha of the strongest blob of a panel's tint (the board: 0.06 + 0.16 x 0.4) |
+| `tintBlob1` | 0.8 | 0 to 1 | - | the second blob's alpha as a fraction of the first |
+| `tintBlob2` | 0.9 | 0 to 1 | - | the third blob's alpha as a fraction of the first |
+| `tintCalm` | 0.55 | 0 to 1 | - | the stage and the rail's tint as a fraction of the panel's |
+| `groupFillAlpha` | 0.035 | 0 to 0.3 | - | a group's white fill over a tinted panel, dark theme |
+| `groupFillAlphaLight` | 0.04 | 0 to 0.3 | - | a group's black fill over a tinted panel, light theme |
+| `toggleOnTop` | 0.52 | 0 to 1 | colour | an on toggle's tone alpha at the top of the track |
+| `toggleOnBottom` | 0.34 | 0 to 1 | colour | the same at the bottom |
+| `segThumbTop` | 0.55 | 0 to 1 | colour | a chooser thumb's tone alpha at the top |
+| `segThumbBottom` | 0.34 | 0 to 1 | colour | the same at the bottom |
+| `sliderFill` | 0.85 | 0 to 1 | colour | a slider fill's tone alpha |
+| `haloStop` | 0.22 | 0 to 1 | glow | the halo's alpha at its centre before its opacity |
+| `haloOpacity` | 0.18 | 0 to 1 | glow | the halo's opacity when on (centre about 4%) |
+| `haloWidth` | 65 | 10 to 160 | glow | the halo's width in u |
+| `haloHeight` | 30 | 6 to 80 | glow | the halo's height in u |
+| `knobShine` | 0.75 | 0 to 1 | glow | the toggle knob's light edge along the top |
+| `thumbShine` | 0.35 | 0 to 1 | glow | the chooser thumb's light edge along the top |
+| `wellDarken` | 0.12 | 0.02 to 0.3 | depth | how much darker a field is than its group, dark theme (black) |
+| `wellDarkenLight` | 0.03 | 0.01 to 0.2 | depth | the same on a light theme |
+| `wellShadowAlpha` | 0.22 | 0 to 0.4 | depth | the inner shadow along a field's top edge, dark theme |
+| `wellShadowAlphaLight` | 0.08 | 0 to 0.4 | depth | the same on a light theme |
+| `wellShadowHeight` | 1 | 0 to 3 | depth | the inner shadow's height in px |
+| `wellBottomLight` | 0.045 | 0 to 0.5 | depth | the light line along a field's bottom edge, dark theme |
+| `wellBottomLightLight` | 0.6 | 0 to 1 | depth | the same on a light theme |
+| `raiseEdge` | 0.07 | 0 to 0.5 | depth | the light top edge of a raised control, dark theme |
+| `raiseEdgeLight` | 0.6 | 0 to 1 | depth | the same on a light theme |
+| `raiseShadowAlpha` | 0.28 | 0 to 0.5 | depth | the drop shadow under a raised control, dark theme |
+| `raiseShadowAlphaLight` | 0.1 | 0 to 0.5 | depth | the same on a light theme |
+| `raiseShadowOffset` | 1 | 0 to 3 | depth | the drop shadow's offset in px |
+| `glassTrackAlpha` | 0.3 | 0 to 0.6 | depth | the recessed glass of a toggle or a chooser off, dark theme (black) |
+| `glassTrackAlphaLight` | 0.12 | 0 to 0.5 | depth | the same on a light theme |
+| `glassTrackShadow` | 0.4 | 0 to 0.6 | depth | the inner shadow of that track, dark theme |
+| `cornerCard` | 4.5 | 0.4 to 9 | corners | a card: the panel, the stage, the rail, in u |
+| `cornerGroup` | 3 | 0.4 to 7 | corners | a group of rows, in u |
+| `cornerWell` | 2 | 0.4 to 5 | corners | a field, in u |
+| `cornerChip` | 2.5 | 0.4 to 6 | corners | a chip and a rail item, in u |
+| `cornerSegment` | 3.5 | 0.4 to 7 | corners | a chooser's track and thumb, in u (a pill at its default) |
+| `cornerHero` | 4.5 | 0.4 to 9 | corners | the header's top corners, in u |
+| `areaGap` | 2 | 0 to 6 | spacing | between the rail, the stage and the panel, in u |
+| `panelPad` | 3 | 0 to 8 | spacing | the panel's padding round its form and Run, in u |
+| `rowPadLeft` | 3.5 | 0 to 8 | spacing | a row's padding at its start, in u |
+| `rowPadRight` | 3 | 0 to 8 | spacing | a row's padding at its end, in u |
+| `rowPadY` | 3 | 0 to 6 | spacing | a row's padding above and below, in u (the row keeps its minimum height) |
+| `rowGap` | 2 | 0 to 6 | spacing | between a row's controls, in u |
+| `rowMinHeight` | 10 | 7 to 16 | - | a row's least height in u (a press target: 7u is the floor) |
+| `heroFadeStart` | 0.58 | 0.2 to 0.95 | - | where the header's art starts to fade, as a fraction of its height |
+| `heroOverlap` | 5 | 0 to 10 | - | how far the header's art reaches below its content, in u |
+| `heroShadeTop` | 0.05 | 0 to 0.6 | - | the title shade's alpha at the top of the header |
+| `heroShadeMid` | 0.3 | 0 to 0.8 | - | its alpha at heroShadeAt |
+| `heroShadeAt` | 0.6 | 0.1 to 0.95 | - | where the shade is strongest, as a fraction of the art's height |
+| `knobTop` | 0.62 | 0 to 1 | - | the toggle knob's white alpha at the top |
+| `knobBottom` | 0.34 | 0 to 1 | - | the same at the bottom |
+| `knobEdge` | 0.55 | 0 to 1 | - | the knob's white edge |
+| `trackEdge` | 0.25 | 0 to 1 | - | the glass track's dark edge |
+| `durColor` | 100 | 0 to 1000 | - | a colour change in ms |
+| `durToggle` | 160 | 0 to 1000 | - | a toggle's knob and track in ms |
+| `durThumb` | 180 | 0 to 1000 | - | a chooser's thumb in ms |
+| `titleFont` | `serif` | `serif` \| `ui` | - | the header's title: the serif (Fraunces) or the interface font |
+| `heroStyle` | `picture` | `picture` \| `tone` \| `plain` | - | a header: its picture (else the tone), the tone's blend always, or a plain fill |
+| `chipShape` | `pill` | `pill` \| `rounded` | - | a chip: fully round or rounded like a field |
+| `borders` | `hairline` | `hairline` \| `none` | - | the hairline round cards and groups |
+| `rowSeparators` | `hairline` | `hairline` \| `none` | - | the hairline between a group's rows |
+| `areaLayout` | `cards` | `cards` \| `panes` | - | rounded cards with gaps between them, or panes edge to edge with 1px dividers |
+| `controlColour` | `tone` | `tone` \| `accent` | - | a switch, a chooser and a slider in the window's tone or in the accent |
+| `motion` | `normal` | `normal` \| `reduced` | - | animations at their durations, or none |
+| `durHalo` | 260 | 0 to 1000 | - | the halo's fade in ms |
 
 ### 20.14 Node cards: Compact (Drift) and Flat (To build)
 
@@ -1013,3 +1103,22 @@ widget type draws in both (one window test per style for the widget set, not per
 - Translucent fillable fields on plain panels (glass only over pictures); a strongly recessed well (it must be slightly recessed); a loud tint or a glow-effect halo.
 
 Credit: the layout, proportions and the idea of every component are omarchy-drift's.
+
+### 20.17 Performance
+
+The kit is calm on the machine as well as on the eye. **Idle draws nothing:** an App view that has settled swaps no frame (a window
+test, `anIdleAppViewDoesNotRedraw`, waits for a quiet half second and then requires a second with none); the halo, the knob and the
+thumb animate only for their ~160 to 260 ms transition (`Behavior`, no running animation, no timer), and a halo that is off is not
+visible, so it is not drawn. **Blur once:** frosted glass blurs a small downscaled copy of the backdrop (`KitFrost`, a
+`ShaderEffectSource` a fraction of the control's size), and `PictureLuma` measures a picture once per picture and position, never per
+frame; the header's fade is one shader pass over its art. **The sliders cost nothing per frame:** they change parameters, which
+bindings read when a slider moves. **Fallbacks:** on the software renderer, or when Frost is 0, glass, halos and the fade give way to
+plain fills (the header keeps its square art and strong foot shade). **Reduced motion** (`motion`: `reduced`, a look parameter) sets
+every duration to 0. First frame of the App view after open, offscreen on the CI-like test home: about 0.4 s.
+
+### 20.18 The app's own window
+
+`fugue --app` is a transparent window (`color: "transparent"`) whose content is a rounded card of `cornerCard` radius with the kit's
+hairline, as omarchy-drift's window is, so the visible outline follows the Corners slider. With no alpha surface (the software
+renderer) or the Flat panes layout the card is square and fills the window. Fugue's own windows have no client-side frame, so the
+compositor draws their outline (Hyprland rounds it itself); the full Fugue window may follow the card later and is not changed yet.

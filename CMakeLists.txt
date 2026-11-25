@@ -108,6 +108,15 @@ foreach(action ${fugue_action_files})
 endforeach()
 qt_add_resources(fugue_core fugue_actions PREFIX /fugue/actions FILES ${fugue_action_sources})
 
+# The look presets (docs/canvas-look.md 20.13): share/looks/*.json compiled in under :/fugue/looks, read by the same reader as look.json.
+file(GLOB fugue_look_files CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/share/looks share/looks/*.json)
+set(fugue_look_sources)
+foreach(look ${fugue_look_files})
+  set_source_files_properties(share/looks/${look} PROPERTIES QT_RESOURCE_ALIAS ${look})
+  list(APPEND fugue_look_sources share/looks/${look})
+endforeach()
+qt_add_resources(fugue_core fugue_looks PREFIX /fugue/looks FILES ${fugue_look_sources})
+
 # A folder of the window's QML: its .qml files compiled in under qrc:<prefix>, where the
 # others import them by folder. A new .qml file there needs no line here. The same files are
 # written as build/qmllint/<name>.qrc too, so the qmllint test reads them where the app does.

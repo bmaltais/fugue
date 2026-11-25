@@ -12,6 +12,8 @@
 // Theme colors stay as they were for the rest of the window (owner's decision, 18.3).
 
 #include <QColor>
+#include <QFileSystemWatcher>
+#include <QStringList>
 #include <QHash>
 #include <QImage>
 #include <QObject>
@@ -19,6 +21,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
+
+#include "look_params.h"
 
 namespace fugue::look {
 
@@ -161,6 +165,11 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor error MEMBER m_error NOTIFY changed)
     // How frosted the controls over a picture are, 0 (off: plain opaque chips) to 1; settings.json's `frost` (default 0.6).
     Q_PROPERTY(qreal frost READ frost WRITE setFrost NOTIFY changed)
+    // Every number of the Drift kit's look by name (look_params.h, docs/canvas-look.md 20.3): the default or look.json's value, times its
+    // slider's factor, clamped. Read it as `look.params.cornerCard`; it changes with the sliders and the file, live.
+    Q_PROPERTY(QVariantMap params READ params NOTIFY changed)
+    // What look.json said that was wrong (an unknown name, a bad value), one line each, empty when it is fine or absent.
+    Q_PROPERTY(QStringList lookProblems READ lookProblems NOTIFY changed)
     Q_PROPERTY(bool light MEMBER m_light NOTIFY changed)
     // A port color key from the canvas model (text, number, ..., declared) to its color.
     Q_PROPERTY(QVariantMap ports MEMBER m_ports NOTIFY changed)
@@ -217,6 +226,34 @@ public:
         m_frost = frost;
         emit changed();
     }
+    const QVariantMap &params() const { return m_params; }
+    QStringList lookProblems() const { return m_lookProblems; }
+    // The five sliders' positions (settings.json look_colour, look_glow, look_corners, look_spacing, look_depth, each 0 to 1).
+    void setSliders(const fugue::look::Sliders &sliders);
+    // The file of the power user's overrides, read now and again whenever it changes; "" stops watching.
+    void setLookFile(const QString &path);
+    const QString &lookFile() const { return m_lookFile; }
+    // The look preset's parameters, the layer between the defaults and look.json.
+    void setPreset(const QVariantMap &params);
+    // A header tone's colours (docs/canvas-look.md 20.5, 20.8): {base, blobs: [3 colors], glass}, `glass` being the colour of a toggle,
+    // a chooser's thumb and a slider's fill in a window of that tone. An unknown name is dusk.
+    Q_INVOKABLE QVariantMap tone(const QString &name) const {
+        struct Tone { const char *name, *base, *blob0, *blob1, *blob2, *glass; };
+        static const Tone tones[] = {
+            {"dusk", "#2a2533", "#b98bd6", "#e3828f", "#6f86d6", "#968ceb"},
+            {"sea", "#1d2a31", "#6fc3c9", "#6f9fd6", "#8fd6c0", "#6ec8cd"},
+            {"ember", "#32251f", "#e8a87c", "#e3828f", "#d6b46f", "#eba578"},
+            {"moss", "#1f2e28", "#8fcf9a", "#6fc3a8", "#b7d67a", "#78cd8c"},
+            {"slate", "#242933", "#8fa6c9", "#a9b4c9", "#6f86d6", "#82a0e1"},
+        };
+        const Tone *found = &tones[0];
+        for (const Tone &t : tones)
+            if (name == QLatin1String(t.name))
+                found = &t;
+        return {{"base", QColor(QLatin1String(found->base))},
+                {"blobs", QVariantList{QColor(QLatin1String(found->blob0)), QColor(QLatin1String(found->blob1)), QColor(QLatin1String(found->blob2))}},
+                {"glass", QColor(QLatin1String(found->glass))}};
+    }
     Q_INVOKABLE QString glyph(const QString &name) const;
     QString iconFont() const;
     QString serifFont() const;
@@ -242,6 +279,13 @@ private:
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     qreal m_frost = 0.6;
+    fugue::look::Sliders m_sliders;
+    QVariantMap m_overrides, m_preset, m_params;
+    QStringList m_lookProblems;
+    QString m_lookFile;
+    QFileSystemWatcher *m_watcher = nullptr;
+    void resolve();
+    void readLookFile();
     QVariantMap m_ports;
     QVariantList m_tabColors;
     int m_textSize = 12;

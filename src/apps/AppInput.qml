@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
-import "../canvas"
 import "../kit"
 
 // One input of an app's form (#385, #386) as a row of the panel's KitGroup (docs/canvas-look.md "Drift kit"): a switch is a

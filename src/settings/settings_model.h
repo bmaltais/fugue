@@ -61,6 +61,15 @@ class SettingsModel : public QObject {
     Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
     // How frosted the kit's controls over a picture are, 0 (off) to 1 (docs/canvas-look.md "Drift kit"); the theme's look follows it live.
     Q_PROPERTY(double frost READ frost NOTIFY changed)
+    // The kit's three look factors, 0 to 1 (docs/canvas-look.md 20.13); the theme's look follows them live.
+    Q_PROPERTY(double lookColour READ lookColour NOTIFY changed)
+    Q_PROPERTY(double lookGlow READ lookGlow NOTIFY changed)
+    Q_PROPERTY(double lookDepth READ lookDepth NOTIFY changed)
+    Q_PROPERTY(double lookCorners READ lookCorners NOTIFY changed)
+    // The look preset the six sliders (these five and Frost) stand for: "calm" (the defaults), "flat" or "custom". Derived, not stored.
+    Q_PROPERTY(QString lookPreset READ lookPreset NOTIFY changed)
+    Q_PROPERTY(QVariantList lookPresets READ lookPresets CONSTANT) // [{value, text}] of the shipped presets
+    Q_PROPERTY(double lookSpacing READ lookSpacing NOTIFY changed)
     // The hover magnifier (#74, #123): off unless turned on; the canvas binds it.
     Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
     // Reopen the last session's saved tabs at start (#212): on unless turned off; the window follows it live.
@@ -131,6 +140,19 @@ public:
     QString stepPreview() const { return m_effective.settings.stepPreview; } // off, fast, tae or vae (#297)
     int cornerRadius() const { return m_effective.settings.cornerRadius; }
     double frost() const { return m_effective.settings.frost; }
+    double lookColour() const { return m_effective.settings.lookColour; }
+    double lookGlow() const { return m_effective.settings.lookGlow; }
+    double lookDepth() const { return m_effective.settings.lookDepth; }
+    QString lookPreset() const;
+    QVariantList lookPresets() const;
+    // Sets the six sliders to a preset ("calm" or "flat"); "" on success.
+    Q_INVOKABLE QString applyLookPreset(const QString &preset);
+    // Makes look.json in the config folder with every parameter at its default when it is absent; its path.
+    Q_INVOKABLE QString createLookFile() const;
+    // Opens look.json (made first when absent) in the desktop's editor.
+    Q_INVOKABLE void openLookFile();
+    double lookCorners() const { return m_effective.settings.lookCorners; }
+    double lookSpacing() const { return m_effective.settings.lookSpacing; }
     bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
     bool restoreTabs() const { return m_effective.settings.restoreTabs; }
     QVariantMap origins() const;

@@ -1,7 +1,5 @@
 import QtQuick
-import QtQuick.Layouts
 import Fugue
-import "../canvas"
 import "../kit"
 
 // The App form's one text field: a well 7u tall with a hairline edge (the accent edge while it has the focus), the text in the
@@ -23,7 +21,7 @@ Rectangle {
 
     implicitHeight: 7 * look.unit
     implicitWidth: 16 * look.unit
-    radius: look.smallCorner
+    radius: look.params.cornerWell * look.unit
     color: "transparent"
     KitWell { look: field.look; focused: input.activeFocus }
     opacity: enabled ? 1 : 0.5

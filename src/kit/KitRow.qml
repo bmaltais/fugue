@@ -19,7 +19,7 @@ Item {
     default property alias trailing: slot.data
 
     width: parent ? parent.width : implicitWidth
-    implicitHeight: Math.max(10 * look.unit, layout.implicitHeight + 6 * look.unit)
+    implicitHeight: Math.max(look.params.rowMinHeight * look.unit, layout.implicitHeight + 2 * look.params.rowPadY * look.unit)
     height: implicitHeight
     Accessible.role: Accessible.Grouping
     Accessible.name: label
@@ -49,9 +49,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: 3.5 * row.look.unit
-        anchors.rightMargin: 3 * row.look.unit
-        spacing: 2 * row.look.unit
+        anchors.leftMargin: row.look.params.rowPadLeft * row.look.unit
+        anchors.rightMargin: row.look.params.rowPadRight * row.look.unit
+        spacing: row.look.params.rowGap * row.look.unit
         Column {
             Layout.fillWidth: true
             spacing: 0.5 * row.look.unit

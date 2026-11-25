@@ -19,27 +19,21 @@ import "../canvas"
 Item {
     id: hero
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
-    property url source // the picture; empty for the theme's gradient
+    property url source // the picture; empty for the tone's blend
+    readonly property url shownSource: look.params.heroStyle === "picture" ? source : "" // "tone" and "plain" never show it
     property string title
     property string subtitle
     property string status // the pill's text; empty hides it
     property color statusColor: look.tabColors.length > 2 ? look.tabColors[2] : look.accent // the pill's dot
     property bool statusTappable: false
     property bool showClose: false
-    property real cornerRadius: look.popupCorner + 4
+    property real cornerRadius: look.params.areaLayout === "panes" ? 0 : Math.min(look.params.cornerHero * look.unit, 0.3 * implicitHeight)
     property real minHeight: 0
     // The blend says which part of Fugue a header belongs to (docs/canvas-look.md "Drift kit", Tones): dusk is the
     // brand (Fugue, Apps), sea Templates, ember Results and media, moss Get ready and downloads, slate Settings. An
     // unknown name is dusk. A picture (`source`) covers the blend; duskBase and duskBlobs take a blend of a host's own.
     property string tone: "dusk"
-    readonly property var tones: ({
-        dusk: { base: "#2a2533", blobs: ["#b98bd6", "#e3828f", "#6f86d6"] },  // lilac, rose, blue
-        sea: { base: "#1d2a31", blobs: ["#6fc3c9", "#6f9fd6", "#8fd6c0"] },   // teal, blue, mint
-        ember: { base: "#32251f", blobs: ["#e8a87c", "#e3828f", "#d6b46f"] }, // amber, rose, gold
-        moss: { base: "#1f2e28", blobs: ["#8fcf9a", "#6fc3a8", "#b7d67a"] },  // green, teal, lime
-        slate: { base: "#242933", blobs: ["#8fa6c9", "#a9b4c9", "#6f86d6"] }  // blue-grey, mist, blue
-    })
-    readonly property var toneBlend: tones[tone] !== undefined ? tones[tone] : tones.dusk
+    readonly property var toneBlend: look.tone(tone)
     property color duskBase: toneBlend.base
     property var duskBlobs: toneBlend.blobs
     // Small round buttons in the top corner (the app panel's pin and Open in Fugue): children of the hero, laid in a row at the
@@ -53,7 +47,7 @@ Item {
     // The white title keeps 4.5:1 on a pale picture: the mean luminance of the picture (PictureLuma, read once from a small
     // copy) sets a uniform shade just strong enough that the darkened picture is at most 0.18 (white on 0.18 is 4.5:1).
     // The dusk blend and dark pictures need none.
-    readonly property real pictureLuma: source.toString() !== "" ? PictureLuma.meanOfFile(source, 0, 0, 1, 1) : -1
+    readonly property real pictureLuma: shownSource.toString() !== "" ? PictureLuma.meanOfFile(source, 0, 0, 1, 1) : -1
     readonly property real legibleShade: pictureLuma > 0.18 ? Math.min(0.85, 1 - 0.18 / pictureLuma) : 0
     // The picture and its shade: what the frosted pills and buttons over it blur (KitFrost).
     readonly property Item backdropItem: art
@@ -66,7 +60,7 @@ Item {
     implicitHeight: Math.max(minHeight, titleBlock.height + 7 * look.unit)
     width: parent ? parent.width : implicitWidth
     height: implicitHeight
-    clip: true // the picture is rounded all round and taller by its corner; the clip squares the foot
+    clip: !rounded // the art reaches below the content and fades there; without the shader it is square and clipped
     Accessible.role: Accessible.Grouping
     Accessible.name: title
 
@@ -74,15 +68,16 @@ Item {
     Item {
         id: art
         width: hero.width
-        height: hero.height + hero.cornerRadius
+        readonly property real overlap: hero.rounded ? hero.look.params.heroOverlap * hero.look.unit : 0
+        height: hero.height + overlap
         visible: !hero.rounded
         layer.enabled: hero.rounded // the shader reads it as a texture
         Rectangle {
             anchors.fill: parent
-            visible: hero.source.toString() === ""
+            visible: hero.shownSource.toString() === ""
             color: hero.duskBase
             Repeater {
-                model: 3
+                model: hero.look.params.heroStyle === "plain" ? 0 : 3
                 Shape {
                     id: blob
                     required property int index
@@ -110,8 +105,8 @@ Item {
         }
         Image {
             anchors.fill: parent
-            visible: hero.source.toString() !== ""
-            source: hero.source
+            visible: hero.shownSource.toString() !== ""
+            source: hero.shownSource
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             sourceSize.width: 2 * hero.width
@@ -119,9 +114,19 @@ Item {
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
-            y: hero.height - height
-            height: Math.min(hero.height * 0.6, 17.5 * hero.look.unit)
-            gradient: Gradient {
+            y: hero.rounded ? 0 : hero.height - height
+            height: hero.rounded ? art.height : Math.min(hero.height * 0.6, 17.5 * hero.look.unit)
+            // The title's shade: a little at the top, most at 60%, clearing toward the foot so no dark band shows (the software
+            // renderer, which cannot fade the art, keeps the shade strong at the foot).
+            gradient: hero.rounded ? roundedShade : footShade
+            Gradient {
+                id: roundedShade
+                GradientStop { position: 0; color: Qt.rgba(0, 0, 0, hero.look.params.heroShadeTop) }
+                GradientStop { position: hero.look.params.heroShadeAt; color: Qt.rgba(0, 0, 0, hero.look.params.heroShadeMid) }
+                GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0) }
+            }
+            Gradient {
+                id: footShade
                 GradientStop { position: 0; color: "transparent" }
                 GradientStop { position: 1; color: hero.look.kitHeroShade }
             }
@@ -141,7 +146,9 @@ Item {
             readonly property variant source: art
             readonly property size size: Qt.size(width, height)
             readonly property real radius: hero.cornerRadius
-            fragmentShader: "qrc:/canvas/shaders/thumbnail.frag.qsb"
+            readonly property real fadeFrom: art.height * hero.look.params.heroFadeStart
+            readonly property real fadeTo: art.height
+            fragmentShader: "qrc:/canvas/shaders/hero.frag.qsb"
         }
     }
 
@@ -163,7 +170,7 @@ Item {
         KitFrost {
             look: hero.look
             backdrop: hero.backdropItem
-            backdropSource: hero.source
+            backdropSource: hero.shownSource
             z: -1
             hovered: pillHover.hovered && hero.statusTappable
             pressed: pillTap.pressed
@@ -219,7 +226,7 @@ Item {
         KitFrost {
             look: hero.look
             backdrop: hero.backdropItem
-            backdropSource: hero.source
+            backdropSource: hero.shownSource
             z: -1
             hovered: closeHover.hovered
             pressed: closeTap.pressed
@@ -260,12 +267,13 @@ Item {
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: hero.ink
-            font.family: hero.look.serifFont !== "" ? hero.look.serifFont : "Noto Serif"
+            readonly property bool serif: hero.look.params.titleFont === "serif"
+            font.family: serif ? (hero.look.serifFont !== "" ? hero.look.serifFont : "Noto Serif") : Application.font.family
             font.pixelSize: Math.round(hero.look.textSize * 8 / 3)
             // The bundled Fraunces is variable with its default instance at weight 900: the calm regular cut is asked for on
             // its weight axis (font.weight alone does not move a variable font's default instance).
-            font.weight: Font.Normal
-            font.variableAxes: ({ "wght": 420 })
+            font.weight: serif ? Font.Normal : Font.DemiBold
+            font.variableAxes: serif ? ({ "wght": 420 }) : ({})
         }
         Text {
             width: parent.width

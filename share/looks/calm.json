@@ -1,0 +1,5 @@
+{
+  "title": "Calm",
+  "params": {},
+  "sliders": {"colour": 0.4, "glow": 0.5, "frost": 0.6, "depth": 0.5, "corners": 0.5, "spacing": 0.5}
+}

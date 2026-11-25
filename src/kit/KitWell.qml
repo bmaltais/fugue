@@ -22,10 +22,10 @@ Rectangle {
     property bool dashed: false // the picture well draws its own dashed edge; this one then leaves the border off
 
     anchors.fill: parent
-    radius: look.smallCorner + 2
-    color: glass ? "transparent" : look.kitWell
+    radius: Math.min(look.params.cornerWell * look.unit, 0.45 * height)
+    color: glass ? "transparent" : Qt.tint(look.kitGroup, Qt.rgba(0, 0, 0, look.light ? look.params.wellDarkenLight : look.params.wellDarken))
     border.width: focused ? 2 : dashed ? 0 : 1
-    border.color: focused ? look.accent : Qt.tint(look.kitWell, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
+    border.color: focused ? look.accent : Qt.tint(color, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
     enabled: false
     Loader {
         id: glassLoader
@@ -41,19 +41,19 @@ Rectangle {
         }
     }
     Rectangle { // the shadow along the top edge
-        visible: !well.glass
+        visible: !well.glass && height > 0.01
         x: well.radius * 0.6
         y: well.border.width
         width: parent.width - 2 * x
-        height: 1
-        color: Qt.rgba(0, 0, 0, well.look.light ? 0.08 : 0.22)
+        height: well.look.params.wellShadowHeight
+        color: Qt.rgba(0, 0, 0, well.look.light ? well.look.params.wellShadowAlphaLight : well.look.params.wellShadowAlpha)
     }
     Rectangle { // the light line along the bottom edge
-        visible: !well.glass
+        visible: !well.glass && well.look.params.wellBottomLight > 0.001
         x: well.radius * 0.6
         y: parent.height - 1 - well.border.width
         width: parent.width - 2 * x
         height: 1
-        color: well.look.light ? Qt.rgba(1, 1, 1, 0.6) : Qt.rgba(1, 1, 1, 0.045)
+        color: well.look.light ? Qt.rgba(1, 1, 1, well.look.params.wellBottomLightLight) : Qt.rgba(1, 1, 1, well.look.params.wellBottomLight)
     }
 }

@@ -16,7 +16,7 @@ Rectangle {
 
     readonly property real lineHeight: Math.round(look.textSize * 4 / 3)
     implicitHeight: Math.max(3, Math.min(8, edit.lineCount)) * lineHeight + 2 * look.unit + 8
-    radius: look.smallCorner
+    radius: look.params.cornerWell * look.unit
     color: "transparent"
     KitWell { look: area.look; focused: edit.activeFocus }
 

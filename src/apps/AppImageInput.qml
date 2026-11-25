@@ -157,7 +157,7 @@ ColumnLayout {
         objectName: "appInput-" + root.field.key
         Layout.fillWidth: true
         implicitHeight: 40 * root.look.unit
-        radius: root.look.smallCorner + 2
+        radius: root.look.params.cornerWell * root.look.unit
         color: "transparent"
         KitWell { look: root.look; dashed: true } // recessed; the dashed edge stays
         activeFocusOnTab: true
@@ -196,7 +196,7 @@ ColumnLayout {
                     x: 0.5; y: 0.5
                     width: well.width - 1
                     height: well.height - 1
-                    radius: root.look.smallCorner
+                    radius: root.look.params.cornerWell * root.look.unit
                 }
             }
         }

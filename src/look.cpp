@@ -4,6 +4,9 @@
 
 #include <QBuffer>
 #include <QFile>
+#include <QDir>
+#include <QFileInfo>
+#include <QDebug>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QPainter>
@@ -524,7 +527,81 @@ const Icons &icons() {
 
 } // namespace
 
-CanvasLook::CanvasLook(QObject *parent) : QObject(parent) { icons(); }
+CanvasLook::CanvasLook(QObject *parent) : QObject(parent) {
+    icons();
+    m_params = fugue::look::resolveParams(m_sliders, m_overrides);
+}
+
+void CanvasLook::setPreset(const QVariantMap &params) {
+    if (params == m_preset)
+        return;
+    m_preset = params;
+    resolve();
+}
+
+void CanvasLook::resolve() {
+    QVariantMap layered = m_preset; // the preset, then look.json over it
+    for (auto it = m_overrides.cbegin(); it != m_overrides.cend(); ++it)
+        layered.insert(it.key(), it.value());
+    m_params = fugue::look::resolveParams(m_sliders, layered);
+    emit changed();
+}
+
+void CanvasLook::setSliders(const fugue::look::Sliders &sliders) {
+    fugue::look::Sliders clamped;
+    clamped.colour = qBound(0.0, sliders.colour, 1.0);
+    clamped.glow = qBound(0.0, sliders.glow, 1.0);
+    clamped.corners = qBound(0.0, sliders.corners, 1.0);
+    clamped.spacing = qBound(0.0, sliders.spacing, 1.0);
+    clamped.depth = qBound(0.0, sliders.depth, 1.0);
+    if (clamped.colour == m_sliders.colour && clamped.glow == m_sliders.glow && clamped.corners == m_sliders.corners
+        && clamped.spacing == m_sliders.spacing && clamped.depth == m_sliders.depth)
+        return;
+    m_sliders = clamped;
+    resolve();
+}
+
+void CanvasLook::setLookFile(const QString &path) {
+    if (path == m_lookFile)
+        return;
+    if (!m_watcher) {
+        m_watcher = new QFileSystemWatcher(this);
+        // An editor that saves by replacing the file drops the watch on it: the folder's change brings it back.
+        connect(m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { readLookFile(); });
+        connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { readLookFile(); });
+    }
+    if (!m_watcher->files().isEmpty())
+        m_watcher->removePaths(m_watcher->files());
+    if (!m_watcher->directories().isEmpty())
+        m_watcher->removePaths(m_watcher->directories());
+    m_lookFile = path;
+    readLookFile();
+}
+
+void CanvasLook::readLookFile() {
+    QVariantMap overrides;
+    QStringList problems;
+    if (!m_lookFile.isEmpty()) {
+        const QFileInfo info(m_lookFile);
+        if (!m_watcher->directories().contains(info.absolutePath()) && info.dir().exists())
+            m_watcher->addPath(info.absolutePath());
+        QFile file(m_lookFile);
+        if (file.exists() && file.open(QIODevice::ReadOnly)) {
+            if (!m_watcher->files().contains(m_lookFile))
+                m_watcher->addPath(m_lookFile);
+            overrides = fugue::look::parseLookFile(file.readAll(), &problems);
+        }
+    }
+    // A problem is said once: a reload with the same text says nothing new.
+    for (const QString &problem : std::as_const(problems))
+        if (!m_lookProblems.contains(problem))
+            qWarning().noquote() << problem;
+    if (overrides == m_overrides && problems == m_lookProblems)
+        return;
+    m_overrides = overrides;
+    m_lookProblems = problems;
+    resolve();
+}
 
 QString CanvasLook::iconFont() const { return icons().family; }
 QString CanvasLook::serifFont() const { return icons().serif; }

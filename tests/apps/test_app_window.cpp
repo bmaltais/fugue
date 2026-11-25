@@ -377,12 +377,19 @@ private slots:
             QSKIP("set FUGUE_SHOT_DIR to take the pictures");
         // FUGUE_SHOT_THEME=<omarchy theme> (default tokyo-night): one theme per process, a second window in one process is not safe.
         for (const QString &themeName : {qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night"))}) {
-        const QString out = QString::fromLocal8Bit(dir) + "/" + themeName;
+        // FUGUE_SHOT_LOOK="preset=flat;look_corners=1;frost=0": look settings applied before the pictures; FUGUE_SHOT_TAG names the folder.
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG");
+        const QString out = QString::fromLocal8Bit(dir) + "/" + themeName + (tag.isEmpty() ? QString() : "-" + tag);
         QDir().mkpath(out);
         App app(load(lookApp), {}, Look{themeName, 12});
         Rig rig(app);
         app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
         QVERIFY(app.open());
+        for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
+            const QStringList kv = part.split('=');
+            QVERIFY(kv.size() == 2);
+            QCOMPARE(kv[0] == "preset" ? app.settings.applyLookPreset(kv[1]) : app.settings.set(kv[0], kv[1].toDouble()), QString());
+        }
         // The app as a file with a real template's preview and a sample picture beside it, as an app of the catalog is.
         QTemporaryDir appFolder;
         QDir(appFolder.path()).mkpath("inputs");
@@ -402,6 +409,9 @@ private slots:
         workflow.close();
         QVERIFY(app.workflows.openPath(appFolder.filePath("workflow.fugue")));
         QTRY_VERIFY(find(app.window, "appPage"));
+        // The Advanced inputs open, so a switch shows (FUGUE_SHOT_TOGGLE=0 for it off).
+        rig.view.setValue("tapered", qEnvironmentVariable("FUGUE_SHOT_TOGGLE", "1") != "0");
+        find(app.window, "appPage")->setProperty("advancedOpen", true);
         QTemporaryDir files;
         const auto made = [&files](const QString &name, int w, int h, int hue) {
             QImage image(w, h, QImage::Format_RGB32);
@@ -622,6 +632,32 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // The performance budget (docs/canvas-look.md 20, Performance): an App view that has settled draws nothing: no animation, timer or
+    // effect keeps the scene graph busy, so no frame is swapped for a second.
+    void anIdleAppViewDoesNotRedraw() {
+        App app(load(mediaApp));
+        Rig rig(app);
+        QElapsedTimer opened;
+        opened.start();
+        QVERIFY(app.open());
+        QTRY_VERIFY(find(app.window, "appInput-seed"));
+        qInfo() << "the App view's first frame after open:" << opened.elapsed() << "ms";
+        // Wait on the condition, not a fixed time: the page settles when a half second passes with no frame; from then on it must stay so.
+        int frames = 0;
+        const auto connection = connect(app.window, &QQuickWindow::frameSwapped, this, [&frames] { ++frames; });
+        bool quiet = false;
+        for (int i = 0; i < 20 && !quiet; ++i) {
+            frames = 0;
+            QTest::qWait(500);
+            quiet = frames == 0;
+        }
+        QVERIFY2(quiet, "the App view never stopped drawing");
+        QTest::qWait(1000);
+        disconnect(connection);
+        QCOMPARE(frames, 0);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // The seed row: Random and back to Fixed through the control keeps a number in the field; Clear empties a result.
     void theSeedModeControlReachesTheStoreAndClearEmptiesTheResult() {
         App app(load(mediaApp));
@@ -631,13 +667,23 @@ private slots:
         QTRY_VERIFY((mode = find(app.window, "appSeedMode-seed")));
         QQuickItem *field = find(app.window, "appInput-seed");
         QCOMPARE(field->property("text").toString(), QStringLiteral("3"));
-        QMetaObject::invokeMethod(mode, "picked", Q_ARG(QVariant, QStringLiteral("random")));
+        QCOMPARE(mode->property("currentIndex").toInt(), 0); // Fixed
+        // By key: the chooser is one tab stop, Right chooses Random, Left Fixed again; the number field then shows and hides.
+        mode->forceActiveFocus();
+        QTRY_VERIFY(mode->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Right);
         QTRY_COMPARE(rig.view.seedMode("seed"), QStringLiteral("random"));
         QTRY_COMPARE(field->property("text").toString(), QString());
-        QMetaObject::invokeMethod(mode, "picked", Q_ARG(QVariant, QStringLiteral("fixed")));
+        QTRY_COMPARE(mode->property("currentIndex").toInt(), 1);
+        QTest::keyClick(app.window, Qt::Key_Left);
         QTRY_COMPARE(rig.view.seedMode("seed"), QStringLiteral("fixed"));
         QTRY_COMPARE(field->property("text").toString(), QStringLiteral("3"));
-        QCOMPARE(mode->property("value").toString(), QStringLiteral("fixed"));
+        // By the signal a press makes: Increment.
+        QMetaObject::invokeMethod(mode, "moved", Q_ARG(int, 2));
+        QTRY_COMPARE(rig.view.seedMode("seed"), QStringLiteral("increment"));
+        QMetaObject::invokeMethod(mode, "moved", Q_ARG(int, 0));
+        QTRY_COMPARE(rig.view.seedMode("seed"), QStringLiteral("fixed"));
+        QCOMPARE(mode->property("currentIndex").toInt(), 0);
 
         QVERIFY(!find(app.window, "appClear"));
         rig.view.run();
@@ -655,7 +701,12 @@ private slots:
         QPointF where;
         QTRY_VERIFY((where == clear->mapToScene(QPointF())) || ((where = clear->mapToScene(QPointF())) != QPointF() && false)); // stopped moving
         QCOMPARE(rig.view.results().size(), 1);
-        tap(app.window, clear);
+        // The toolbar can still be settling on a cold start (the first run after a build compiles the QML): press again until it takes.
+        for (int attempt = 0; attempt < 5 && !rig.view.results().isEmpty(); ++attempt) {
+            if (QQuickItem *button = find(app.window, "appClear"))
+                tap(app.window, button);
+            QTest::qWait(300);
+        }
         QTRY_VERIFY(rig.view.results().isEmpty());
         QTRY_VERIFY(!find(app.window, "appClear"));
         QCOMPARE(rig.view.takes().size(), 1); // Clear empties the stage; the take stays in the strip

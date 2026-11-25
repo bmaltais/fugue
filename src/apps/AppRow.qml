@@ -1,6 +1,5 @@
 import QtQuick
 import Fugue
-import "../canvas"
 import "../kit"
 
 // One input of the app panel as a row of a KitGroup (docs/canvas-look.md "Drift kit"), for the controls that are too wide to

@@ -12,9 +12,10 @@ Item {
     anchors.fill: parent
     enabled: false
     Rectangle { // the soft shadow under the control
-        anchors { fill: parent; topMargin: 1; bottomMargin: -1 }
+        visible: raise.look.params.raiseShadowOffset > 0.01
+        anchors { fill: parent; topMargin: raise.look.params.raiseShadowOffset; bottomMargin: -raise.look.params.raiseShadowOffset }
         radius: raise.radius
-        color: Qt.rgba(0, 0, 0, raise.look.light ? 0.10 : 0.28)
+        color: Qt.rgba(0, 0, 0, raise.look.light ? raise.look.params.raiseShadowAlphaLight : raise.look.params.raiseShadowAlpha)
         z: -1
     }
     Rectangle { // the light top edge
@@ -22,6 +23,6 @@ Item {
         y: 0
         width: parent.width - 2 * x
         height: 1
-        color: raise.look.light ? Qt.rgba(1, 1, 1, 0.6) : Qt.rgba(1, 1, 1, 0.07)
+        color: raise.look.light ? Qt.rgba(1, 1, 1, raise.look.params.raiseEdgeLight) : Qt.rgba(1, 1, 1, raise.look.params.raiseEdge)
     }
 }

@@ -267,7 +267,7 @@ Item {
             objectName: "appResultWell"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: stage.look.smallCorner
+            radius: stage.look.params.cornerWell * stage.look.unit
             color: stage.look.well
             clip: true
 

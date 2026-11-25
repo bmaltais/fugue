@@ -5,7 +5,7 @@ import "../canvas"
 import "../canvas/widgets"
 import "../kit"
 
-// A choice of the app panel in the kit's chip look: a KitChip-sized pill with the chosen word and a chevron, opening the window's
+// A choice of the app panel as a dropdown well (a value is chosen in it, so it is recessed, KitWell): the chosen word and a chevron, opening the window's
 // menu of the options (arrows move, Enter picks, Escape closes). `options` are {value, text}; `value` is the chosen one;
 // `picked(value)` says the person chose, it never sets `value` itself.
 Rectangle {
@@ -24,10 +24,14 @@ Rectangle {
     }
     implicitHeight: 7 * look.unit
     implicitWidth: Math.max(content.implicitWidth + 4 * look.unit, 14 * look.unit)
-    radius: height / 2
-    color: menu.opened ? look.selectedRow : hover.hovered ? look.kitChipHover : look.kitChip
-    border.width: activeFocus ? 2 : 0
-    border.color: look.accent
+    radius: look.params.cornerWell * look.unit
+    color: "transparent"
+    KitWell { look: chip.look; focused: chip.activeFocus }
+    Rectangle { // the open menu and the pointer over it tint the well
+        anchors.fill: parent
+        radius: parent.radius
+        color: menu.opened ? chip.look.selectedRow : hover.hovered ? Qt.alpha(chip.look.text, 0.06) : "transparent"
+    }
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.ComboBox
