@@ -30,6 +30,7 @@ SECRET = re.compile(r"\{secret:[^{}]*\}")
 HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 LOOPBACK_NAMES = {"localhost"}
 UPLOADS = ("picture", "audio", "video")
+METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")  # the manifest's choices
 
 
 class Failure(Exception):
@@ -239,6 +240,8 @@ def as_text(value):
 def run(inputs):
     values = {name: str(inputs.get(name) or "") for name in "abcd"}
     method = str(inputs.get("method") or "GET").upper()
+    if method not in METHODS:
+        fail("bad_input", "The method %r is not one of %s." % (method[:20], ", ".join(METHODS)))
     template_url = str(inputs.get("url") or "").strip()
     header_text = str(inputs.get("headers") or "")
     body_kind = str(inputs.get("body_kind") or "none")
