@@ -63,7 +63,7 @@ QStringList snapshot(const QString &base) {
 
 QJsonObject defaultSettings(const QString &models) {
     return QJsonObject{{"navigation", "standard"},
-                       {"corner_radius", 12},
+                       {"frost", 0.2},
                        {"hover_magnifier", true},
                        {"new_seed", "fixed"},
                        {"language", "da"},
@@ -139,15 +139,15 @@ private slots:
         const EffectiveSettings effective = effectiveSettings();
         QCOMPARE(effective.settings.navigation, QString("legacy")); // own wins over the Default's standard
         QCOMPARE(effective.origins.value("navigation"), SettingOrigin::Own);
-        QCOMPARE(effective.settings.cornerRadius, 12); // inherited
-        QCOMPARE(effective.origins.value("corner_radius"), SettingOrigin::Default);
+        QCOMPARE(effective.settings.frost, 0.2); // inherited
+        QCOMPARE(effective.origins.value("frost"), SettingOrigin::Default);
         QVERIFY(effective.settings.hoverMagnifier);
         QCOMPARE(effective.settings.newSeed, QString("fixed"));
         QCOMPARE(effective.settings.language, QString("da"));
         QCOMPARE(effective.settings.embedWorkflow, QString("full")); // set nowhere
         QCOMPARE(effective.origins.value("embed_workflow"), SettingOrigin::BuiltIn);
         QCOMPARE(settingOriginName(SettingOrigin::Default), QString("inherited from Default"));
-        QCOMPARE(currentSettings().cornerRadius, 12);
+        QCOMPARE(currentSettings().frost, 0.2);
     }
 
     void keysThatAreNeverInheritableStayOwnEvenWhenTheDefaultHasThem() {
@@ -176,26 +176,37 @@ private slots:
         enterProject({});
         const EffectiveSettings effective = effectiveSettings();
         QCOMPARE(effective.settings.navigation, QString("legacy"));
-        QCOMPARE(effective.settings.cornerRadius, 8);
+        QCOMPARE(effective.settings.frost, 0.6);
         QVERIFY(effective.settings.modelPaths.isEmpty());
         QVERIFY(!effective.settings.inheritsModels);
         for (auto it = effective.origins.begin(); it != effective.origins.end(); ++it)
             QCOMPARE(it.value(), SettingOrigin::BuiltIn);
     }
 
+    // An old corner_radius in the Default migrates there too, so a project that inherits preferences gets the slider position (#467).
+    void anOldCornerRadiusInTheDefaultComesThroughAsTheSlider() {
+        QJsonObject old = defaultSettings(path("models"));
+        old.insert("corner_radius", 12);
+        writeDefault(old);
+        enterProject({"preferences"});
+        const EffectiveSettings effective = effectiveSettings();
+        QCOMPARE(effective.settings.lookCorners, 0.778);
+        QCOMPARE(effective.origins.value("look_corners"), SettingOrigin::Default);
+    }
+
     void aClassNotListedIsNotRead() {
         writeDefault(defaultSettings(path("models")));
         enterProject({"models"}); // not preferences
-        QCOMPARE(effectiveSettings().settings.cornerRadius, 8);
+        QCOMPARE(effectiveSettings().settings.frost, 0.6);
         QCOMPARE(effectiveSettings().settings.modelPaths.size(), 2);
     }
 
     void theDefaultSessionAndAnAnonymousRootSeeNoLayering() {
         writeDefault(defaultSettings(path("models")));
-        QCOMPARE(effectiveSettings().origins.value("corner_radius"), SettingOrigin::Own); // its own file
+        QCOMPARE(effectiveSettings().origins.value("frost"), SettingOrigin::Own); // its own file
         QVERIFY(!effectiveSettings().settings.inheritsModels);
         QVERIFY(setFugueHome(path("p/bare"), nullptr)); // no project.json
-        QCOMPARE(currentSettings().cornerRadius, 8);
+        QCOMPARE(currentSettings().frost, 0.6);
         QVERIFY(currentSettings().modelPaths.isEmpty());
     }
 
@@ -239,25 +250,25 @@ private slots:
         QVERIFY(first.open(QIODevice::ReadOnly));
         const QByteArray before = first.readAll();
         QVERIFY(changeSetting(settingsPath(), "navigation", "legacy").isEmpty());
-        QVERIFY(changeSetting(settingsPath(), "corner_radius", 4).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "frost", 0.4).isEmpty());
         QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{path("models/mine")}).isEmpty());
         const SettingsFile own = readSettings(settingsPath());
-        QCOMPARE(own.settings.cornerRadius, 4);
+        QCOMPARE(own.settings.frost, 0.4);
         QCOMPARE(own.settings.modelPaths, (QStringList{path("models/mine")})); // the file holds only its own entries
         QFile base(baseConfig() + "/settings.json");
         QVERIFY(base.open(QIODevice::ReadOnly));
         QCOMPARE(base.readAll(), before);
-        QCOMPARE(effectiveSettings().settings.cornerRadius, 4);
+        QCOMPARE(effectiveSettings().settings.frost, 0.4);
         QCOMPARE(effectiveSettings().settings.inheritedModelPaths.size(), 2);
     }
 
     void aProjectCanSetAPreferenceBackToTheBuiltInValueOverTheDefaults() {
         writeDefault(defaultSettings(path("models")));
         enterProject({"preferences"});
-        QVERIFY(changeSetting(settingsPath(), "corner_radius", 8).isEmpty()); // the built-in, but the Default says 12
-        QCOMPARE(readSettings(settingsPath()).document.value("corner_radius").toInt(), 8);
-        QCOMPARE(effectiveSettings().settings.cornerRadius, 8);
-        QCOMPARE(effectiveSettings().origins.value("corner_radius"), SettingOrigin::Own);
+        QVERIFY(changeSetting(settingsPath(), "frost", 0.6).isEmpty()); // the built-in, but the Default says 0.2
+        QCOMPARE(readSettings(settingsPath()).document.value("frost").toDouble(), 0.6);
+        QCOMPARE(effectiveSettings().settings.frost, 0.6);
+        QCOMPARE(effectiveSettings().origins.value("frost"), SettingOrigin::Own);
         // Without a different inherited value the default is still not written.
         QVERIFY(changeSetting(settingsPath(), "embed_workflow", "full").isEmpty());
         QVERIFY(!readSettings(settingsPath()).document.contains("embed_workflow"));
@@ -448,8 +459,8 @@ private slots:
         const QStringList before = snapshot(path("base"));
         QVERIFY(!before.isEmpty());
         enterProject({"models", "preferences"});
-        QVERIFY(changeSetting(settingsPath(), "corner_radius", 3).isEmpty());
-        QVERIFY(changeSetting(settingsPath(), "corner_radius", 8).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "frost", 0.3).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "frost", 0.6).isEmpty());
         QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{path("models/mine")}).isEmpty());
         QVERIFY(changeSetting(settingsPath(), "navigation", QJsonValue::Undefined).isEmpty());
         Registry registry;

@@ -311,33 +311,60 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // General > Corner radius (#63): fixed at 8 px by default, a step at a time from 0 to 16, or
-    // Omarchy's rounding (none here: square); the canvas redraws at once and the file keeps it.
-    void theCornerRadiusChangesLiveAndPersists() {
+    // Theme > Look > Follow Omarchy's rounding (#467, replacing General > Corner radius, #63): the Corners slider starts from Omarchy's
+    // rounding (none here: square) instead of 8 px; the canvas redraws at once and the file keeps it. The old General row is gone.
+    void theCornersFollowOmarchyOptionChangesLiveAndPersists() {
         App app(load(emptyDoc));
         QVERIFY(app.open());
         const auto corner = [&] { return app.theme.look()->property("corner").toInt(); };
         QCOMPARE(corner(), 8);
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        QCOMPARE(NEED("cornerValue")->property("text").toString(), QStringLiteral("8 px"));
-        click(app, NEED("cornerMore"));
-        QTRY_COMPARE(corner(), 9);
-        click(app, NEED("cornerLess"));
-        click(app, NEED("cornerLess"));
-        QTRY_COMPARE(corner(), 7);
-        QCOMPARE(fugue::SettingsModel(app.settings.path()).cornerRadius(), 7);
-        click(app, NEED("corner-omarchy"));
+        QVERIFY(!find(app.window, "cornerValue")); // the old General row
+        click(app, NEED("settingsPage-theme"));
+        QQuickItem *toggle = NEED("lookCornersOmarchy");
+        QVERIFY(!toggle->property("checked").toBool());
+        click(app, toggle);
         QTRY_COMPARE(corner(), 0);
-        QTRY_VERIFY(!find(app.window, "cornerValue"));
-        click(app, NEED("corner-fixed"));
+        QTRY_VERIFY(fugue::SettingsModel(app.settings.path()).lookCornersOmarchy());
+        click(app, toggle);
         QTRY_COMPARE(corner(), 8);
-        // Held to the range at its ends.
-        for (int i = 0; i < 10; ++i)
-            click(app, NEED("cornerMore"));
-        QTRY_COMPARE(corner(), 16);
-        QVERIFY(!NEED("cornerMore")->isEnabled());
+        QTRY_VERIFY(!fugue::SettingsModel(app.settings.path()).lookCornersOmarchy());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The performance budget (docs/canvas-look.md 20.17, #467): Settings, settled on its Theme page (sliders, switches, choosers), swaps
+    // no frame, in the Calm and the Flat look.
+    void anIdleSettingsWindowDoesNotRedraw_data() {
+        QTest::addColumn<QString>("preset");
+        QTest::newRow("calm") << "calm";
+        QTest::newRow("flat") << "flat";
+    }
+    void anIdleSettingsWindowDoesNotRedraw() {
+        QFETCH(QString, preset);
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        QCOMPARE(app.settings.applyLookPreset(preset), QString());
+        QElapsedTimer opened;
+        opened.start();
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-theme"));
+        qInfo() << "Settings' first frame after open," << preset << ":" << opened.elapsed() << "ms";
+        app.window->contentItem()->forceActiveFocus();
+        QTest::mouseMove(app.window, QPoint(5, 5));
+        int frames = 0;
+        const auto connection = connect(app.window, &QQuickWindow::frameSwapped, this, [&frames] { ++frames; });
+        bool quiet = false;
+        for (int i = 0; i < 20 && !quiet; ++i) {
+            frames = 0;
+            QTest::qWait(500);
+            quiet = frames == 0;
+        }
+        QVERIFY2(quiet, "Settings never stopped drawing");
+        QTest::qWait(1000);
+        disconnect(connection);
+        QCOMPARE(frames, 0);
     }
 
     // The page list is alphabetical by title, opens on General, and Up and Down walk it in that order.

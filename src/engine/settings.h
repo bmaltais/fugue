@@ -22,7 +22,6 @@
 // | pack_paths       | extra pack search paths (6.5)            | []                       |
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
-// | corner_radius    | 0 to 16 px, or "omarchy" (#63)           | 8                        |
 // | frost            | 0 to 1: how frosted the controls over a  | 0.6                      |
 // |                  | picture are; 0 is off (docs/canvas-look.md)|                          |
 // | look_preset      | a look preset's id (share/looks, docs/     | "calm"                   |
@@ -35,8 +34,12 @@
 // |                  | shine of raised controls; 0 is none        |                          |
 // | look_depth       | 0 to 1: how recessed fields and how raised | 0.5                      |
 // |                  | controls are; 0 is flat                    |                          |
-// | look_corners     | 0 to 1: the kit's corner radii, 0.5 as    | 0.5                      |
-// |                  | designed (docs/canvas-look.md 20.13)      |                          |
+// | look_corners     | 0 to 1: every corner radius (the kit's and | 0.5                      |
+// |                  | the canvas's, 8 px at 0.5; docs/canvas-look.md 20.13) |                |
+// | look_corners_omarchy | true or false: the radius comes from the | false                    |
+// |                  | Omarchy theme (Hyprland's rounding) as the |                          |
+// |                  | slider's base. Replaces corner_radius (#467): an old |                  |
+// |                  | settings.json value is migrated when read |                          |
 // | look_spacing     | 0 to 1: the kit's gaps and padding, 0.5   | 0.5                      |
 // |                  | as designed                               |                          |
 // | hover_magnifier  | true or false: far out, a short hover    | false                    |
@@ -77,10 +80,6 @@ struct Settings {
     QStringList packPaths;
     QString newSeed = QStringLiteral("random");
     QString embedWorkflow = QStringLiteral("full");
-    // The canvas corners in px, or followOmarchy for Hyprland's rounding (look::corners).
-    static constexpr int followOmarchy = -1;
-    static constexpr int maxCornerRadius = 16;
-    int cornerRadius = 8;
     QString pictureMode = QStringLiteral("smart"); // which nodes show a picture (#263)
     QString stepPreview = QStringLiteral("fast"); // the Sampler's picture while it runs (#297)
     double frost = 0.6;          // the frosted glass of the kit's controls over a picture, 0 (off) to 1
@@ -90,6 +89,7 @@ struct Settings {
     double lookGlow = 0.5;    // the halo and the shine of raised controls, 0 (none) to 1; 0.5 as designed
     double lookDepth = 0.5;   // how recessed fields and how raised controls are, 0 (flat) to 1; 0.5 as designed
     double lookCorners = 0.5; // the kit's corner radii, 0 (nearly square) to 1; 0.5 as designed
+    bool lookCornersOmarchy = false; // the corner radius is Hyprland's rounding as the Corners slider's base (was corner_radius "omarchy")
     double lookSpacing = 0.5; // the kit's gaps and padding, 0 to 1; 0.5 as designed
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
     bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)

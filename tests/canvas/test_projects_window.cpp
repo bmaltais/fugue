@@ -160,7 +160,7 @@ class TestProjectsWindow : public QObject {
         QFile file(baseConfig() + "/settings.json");
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(writeJson(QJsonObject{{"navigation", "standard"},
-                                         {"corner_radius", 12},
+                                         {"look_corners", 0.8},
                                          {"model_paths", QJsonArray{path("shared-models")}}}));
     }
 

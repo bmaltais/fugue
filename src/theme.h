@@ -27,7 +27,7 @@
 //                         Color is never the only signal (spec 12.6)
 //   radius                Hyprland's window rounding in px; the canvas surfaces draw
 //                         with look.corner and look.popupCorner instead, which follow
-//                         the corner_radius setting (8 px unless set, #63)
+//                         the Corners slider (8 px at its default, #63, #467)
 //   textSize              desktop base text size in px (12 by default);
 //                         derive other sizes from it, e.g. textSize * 1.2
 //   light                 true on a light theme
@@ -79,9 +79,9 @@ public:
     // (docs/canvas-look.md 6.2).
     Q_INVOKABLE QColor portColor(const QString &type) const;
     CanvasLook *look() const { return m_look; }
-    // settings.json's corner_radius: px, or Settings::followOmarchy (look::corners). Only
-    // the look changes (and says so); Theme's own properties stay.
-    void setCornerRadius(int setting);
+    // settings.json's look_corners slider and look_corners_omarchy (look::corners). Only the look
+    // changes (and says so); Theme's own properties stay.
+    void setCorners(double slider, bool followOmarchy);
     // settings.json's frost, 0 to 1: the look's `frost` (the kit's frosted controls read it).
     void setFrost(double frost);
     // settings.json's node_style: "compact" or "flat" (docs/canvas-look.md 20.14).
@@ -110,6 +110,7 @@ private:
     void reload();
     void refreshRounding();
     void refreshLook();
+    void pushSliders(); // the look gets the sliders with the Corners position and the Omarchy scale applied
 
     QString m_directory;
     QString m_shellFile;
@@ -120,7 +121,9 @@ private:
     QTimer m_debounce;
     QString m_hyprctl;
     int m_radius = 0;
-    int m_cornerSetting = 8;
+    double m_cornerSlider = 0.5;
+    bool m_cornerFollow = false;
+    fugue::look::Sliders m_sliders;
     bool m_roundingAgain = false;
     QProcess m_roundingProcess;
     QTimer m_roundingTimeout;

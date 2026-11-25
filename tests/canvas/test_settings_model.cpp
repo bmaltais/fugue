@@ -266,26 +266,26 @@ private slots:
         QVERIFY(!readJsonObject(settingsFile()).value().contains("hover_magnifier"));
     }
 
-    // The corner radius (#63) reaches the Theme at once: 8 px by default, a fixed radius, or
-    // Omarchy's rounding again.
-    void theCornerRadiusAppliesLive() {
+    // The Corners slider and "follow Omarchy" (#467, #63) reach the Theme at once: 8 px by default, the slider's factor, or
+    // Omarchy's rounding as the base; Reset leaves the option.
+    void theCornersApplyLive() {
         QTemporaryDir omarchy;
         Theme theme(omarchy.path());
-        theme.setCornerRadius(3);
         SettingsModel model;
         model.attach(nullptr, nullptr, nullptr, &theme);
-        QCOMPARE(model.cornerRadius(), 8);
+        QVERIFY(!model.lookCornersOmarchy());
         QCOMPARE(theme.look()->property("corner").toInt(), 8);
-        QCOMPARE(model.set("corner_radius", 12), QString());
-        QCOMPARE(model.cornerRadius(), 12);
-        QCOMPARE(theme.look()->property("corner").toInt(), 12);
-        QVERIFY(!model.set("corner_radius", 30).isEmpty());
-        QCOMPARE(theme.look()->property("corner").toInt(), 12);
-        QCOMPARE(model.set("corner_radius", "omarchy"), QString());
-        QCOMPARE(model.cornerRadius(), Settings::followOmarchy);
+        QCOMPARE(model.set("look_corners", 0.8), QString());
+        QCOMPARE(theme.look()->property("corner").toInt(), 12); // 8 x (0.1 + 1.8 x 0.8) = 12
+        QCOMPARE(model.set("look_corners_omarchy", true), QString());
+        QVERIFY(model.lookCornersOmarchy());
         QCOMPARE(theme.look()->property("corner").toInt(), 0); // no Hyprland here: square
-        QCOMPARE(model.set("corner_radius", 8), QString()); // the default leaves the file
-        QVERIFY(!readSettings(settingsFile()).document.contains("corner_radius"));
+        QCOMPARE(model.lookPreset(), QString("custom"));
+        QCOMPARE(model.applyLookPreset("calm"), QString());
+        QVERIFY(!model.lookCornersOmarchy());
+        QCOMPARE(theme.look()->property("corner").toInt(), 8);
+        QVERIFY(!readSettings(settingsFile()).document.contains("look_corners_omarchy")); // the default leaves the file
+        QVERIFY(!model.set("look_corners_omarchy", "yes").isEmpty());
     }
 
     // The six sliders reach the Theme's look live; the presets set all six, a slider move after one reads Custom, and the defaults are Calm.

@@ -31,6 +31,7 @@ struct ParamDef {
 struct Sliders {
     static constexpr double defaultColour = 0.4, defaultGlow = 0.5, defaultCorners = 0.5, defaultSpacing = 0.5, defaultDepth = 0.5;
     double colour = defaultColour, glow = defaultGlow, corners = defaultCorners, spacing = defaultSpacing, depth = defaultDepth;
+    double cornerScale = 1; // the corners factor times this: Omarchy's rounding over 8 px when the radius follows it (look::omarchyCornerScale)
 };
 
 const QList<ParamDef> &paramDefs();

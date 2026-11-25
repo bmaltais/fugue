@@ -115,8 +115,10 @@ Item {
                         anchors.centerIn: parent
                         text: String(option.modelData)
                         textFormat: Text.PlainText
-                        color: !seg.glass ? (option.chosen ? (seg.toneColor.hslLightness > 0.6 ? "#17171b" : "white") : seg.look.label)
-                             : seg.look.light ? (option.chosen ? seg.look.text : seg.look.label)
+                        // Light theme: the labels sit on a mid-grey track and a pale tone, so they are a step darker than the theme's text (4.5:1, #467).
+                        color: !seg.glass ? (option.chosen ? (seg.toneColor.hslLightness > 0.6 ? "#17171b" : "white")
+                                                           : seg.look.light ? Qt.darker(seg.look.label, 1.25) : seg.look.label)
+                             : seg.look.light ? (option.chosen ? Qt.darker(seg.look.text, 1.4) : seg.look.label)
                                                              : (option.chosen ? "white" : Qt.rgba(1, 1, 1, 0.72))
                         font.pixelSize: seg.look.labelSize + 1
                         font.weight: Font.Medium

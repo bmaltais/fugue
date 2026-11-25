@@ -22,7 +22,7 @@ namespace {
 const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "pack_paths",    "new_seed",
-                        "embed_workflow", "corner_radius",  "hover_magnifier",
+                        "embed_workflow", "look_corners_omarchy",  "hover_magnifier",
                         "restore_tabs",   "picture_mode", "step_preview", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
@@ -90,8 +90,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.newSeed = value.toString();
     else if (key == QLatin1String("embed_workflow"))
         settings.embedWorkflow = value.toString();
-    else if (key == QLatin1String("corner_radius"))
-        settings.cornerRadius = value.isString() ? Settings::followOmarchy : value.toInt();
+    else if (key == QLatin1String("look_corners_omarchy"))
+        settings.lookCornersOmarchy = value.toBool();
     else if (key == QLatin1String("picture_mode"))
         settings.pictureMode = value.toString();
     else if (key == QLatin1String("step_preview"))
@@ -159,7 +159,7 @@ QString settingOriginName(SettingOrigin origin) {
 }
 
 SettingClass settingClass(const QString &key) {
-    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview"};
+    static const QStringList preferences{"navigation", "language", "look_corners_omarchy", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview"};
     if (preferences.contains(key))
         return SettingClass::Preferences;
     if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
@@ -194,8 +194,8 @@ QJsonValue settingDefault(const QString &key) {
         return QStringLiteral("smart");
     if (key == QLatin1String("step_preview"))
         return QStringLiteral("fast");
-    if (key == QLatin1String("corner_radius"))
-        return 8;
+    if (key == QLatin1String("look_corners_omarchy"))
+        return false;
     if (key == QLatin1String("hover_magnifier"))
         return false;
     if (key == QLatin1String("frost"))
@@ -241,14 +241,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return oneOf(value, {"smart", "sinks", "all"}, key);
     if (key == QLatin1String("step_preview"))
         return oneOf(value, {"off", "fast", "tae", "vae"}, key);
-    if (key == QLatin1String("corner_radius")) {
-        const double px = value.toDouble(-1);
-        if (value == QJsonValue(QStringLiteral("omarchy"))
-            || (value.isDouble() && px == std::floor(px) && px >= 0 && px <= Settings::maxCornerRadius))
-            return {};
-        return QStringLiteral("corner_radius must be a whole number of px from 0 to %1, or omarchy.")
-            .arg(Settings::maxCornerRadius);
-    }
+    if (key == QLatin1String("look_corners_omarchy"))
+        return value.isBool() ? QString() : QStringLiteral("look_corners_omarchy must be true or false.");
     if (key == QLatin1String("frost"))
         return value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= 1 ? QString() : QStringLiteral("frost must be a number from 0 to 1.");
     if (key == QLatin1String("look_preset"))
@@ -300,6 +294,25 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
     return QStringLiteral("%1 is not a setting.").arg(key);
 }
 
+// corner_radius (a whole px, 0 to 16, or "omarchy") was replaced by the Look's Corners slider and its "follow Omarchy" option (#467).
+// The old value becomes the slider position that gives the same radius (8 px at 0.5, a factor 0.1 + 1.8 x position) or the option, unless
+// the file already says its own; the old key goes. True when the document changed.
+bool migrateCornerRadius(QJsonObject &document) {
+    if (!document.contains(QLatin1String("corner_radius")))
+        return false;
+    const QJsonValue old = document.take(QLatin1String("corner_radius"));
+    if (old.isString() && old.toString() == QLatin1String("omarchy")) {
+        if (!document.contains(QLatin1String("look_corners_omarchy")))
+            document.insert(QLatin1String("look_corners_omarchy"), true);
+    } else if (old.isDouble() && !document.contains(QLatin1String("look_corners"))) {
+        const double px = std::clamp(old.toDouble(), 0.0, 16.0);
+        const double position = std::clamp(std::round((px / 8.0 - 0.1) / 1.8 * 1000.0) / 1000.0, 0.0, 1.0);
+        if (std::abs(position - 0.5) > 0.0005)
+            document.insert(QLatin1String("look_corners"), position);
+    }
+    return true;
+}
+
 SettingsFile readSettings(const QString &path) {
     SettingsFile file;
     if (!QFileInfo::exists(path))
@@ -311,6 +324,7 @@ SettingsFile readSettings(const QString &path) {
         return file;
     }
     file.document = read.value();
+    migrateCornerRadius(file.document);
     for (const QString &key : kKeys) {
         if (!file.document.contains(key))
             continue;
@@ -334,6 +348,7 @@ Errors changeSetting(const QString &path, const QString &key, const QJsonValue &
         if (!read)
             return read.errors();
         document = read.value();
+        migrateCornerRadius(document); // written back with this change: the old key goes
     }
     // The default is not written, except where the Default project's value would otherwise show through:
     // a project that sets a preference back to the built-in value must say so.
@@ -441,8 +456,8 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
         return settings.newSeed;
     if (key == QLatin1String("embed_workflow"))
         return settings.embedWorkflow;
-    if (key == QLatin1String("corner_radius"))
-        return settings.cornerRadius == Settings::followOmarchy ? QJsonValue(QStringLiteral("omarchy")) : QJsonValue(settings.cornerRadius);
+    if (key == QLatin1String("look_corners_omarchy"))
+        return settings.lookCornersOmarchy;
     if (key == QLatin1String("picture_mode"))
         return settings.pictureMode;
     if (key == QLatin1String("step_preview"))

@@ -56,9 +56,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QString embedWorkflow READ embedWorkflow NOTIFY changed)
     Q_PROPERTY(QString pictureMode READ pictureMode NOTIFY changed)
     Q_PROPERTY(QString stepPreview READ stepPreview NOTIFY changed)
-    // The canvas corners (#63): px from 0 to maxCornerRadius, or -1 to follow Omarchy.
-    Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY changed)
-    Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
+    // The Corners slider takes Omarchy's window rounding as its base (look_corners_omarchy, #467; it replaced corner_radius).
+    Q_PROPERTY(bool lookCornersOmarchy READ lookCornersOmarchy NOTIFY changed)
     // How frosted the kit's controls over a picture are, 0 (off) to 1 (docs/canvas-look.md "Drift kit"); the theme's look follows it live.
     Q_PROPERTY(double frost READ frost NOTIFY changed)
     // The kit's three look factors, 0 to 1 (docs/canvas-look.md 20.13); the theme's look follows them live.
@@ -139,7 +138,7 @@ public:
     QString embedWorkflow() const { return m_effective.settings.embedWorkflow; }
     QString pictureMode() const { return m_effective.settings.pictureMode; } // smart, sinks or all (#263)
     QString stepPreview() const { return m_effective.settings.stepPreview; } // off, fast, tae or vae (#297)
-    int cornerRadius() const { return m_effective.settings.cornerRadius; }
+    bool lookCornersOmarchy() const { return m_effective.settings.lookCornersOmarchy; }
     double frost() const { return m_effective.settings.frost; }
     double lookColour() const { return m_effective.settings.lookColour; }
     double lookGlow() const { return m_effective.settings.lookGlow; }
@@ -165,7 +164,6 @@ public:
     double cacheResultsGb() const { return m_file.settings.cacheResultsGb; }
     double cacheThumbnailsGb() const { return m_file.settings.cacheThumbnailsGb; }
     int runsKept() const { return m_file.settings.runsKept; }
-    static int maxCornerRadius() { return Settings::maxCornerRadius; }
     QStringList problems() const { return m_effective.problems; }
     bool writable() const { return m_file.writable; }
 

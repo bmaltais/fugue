@@ -320,16 +320,20 @@ private slots:
         }
     }
 
-    // The corner radius setting (#63): a fixed radius for nodes and popups alike, or Omarchy's
-    // (Hyprland's rounding) as before, the node corner then held to 8.
-    void cornersComeFromTheSettingOrFromOmarchy() {
+    // The Corners slider owns the radius (#467, #63): 8 px at its default, the kit's factor 0.1 + 1.8 x position on top, or with
+    // "follow Omarchy" Hyprland's rounding as the base (the node corner held to 8 before the factor).
+    void cornersComeFromTheSliderOrFromOmarchy() {
         const auto is = [](look::Corners c, int node, int popup) { return c.node == node && c.popup == popup; };
-        QVERIFY(is(look::corners(8, 0), 8, 8));
-        QVERIFY(is(look::corners(16, 3), 16, 16));
-        QVERIFY(is(look::corners(0, 10), 0, 0));
-        QVERIFY(is(look::corners(Settings::followOmarchy, 10), 8, 10));
-        QVERIFY(is(look::corners(Settings::followOmarchy, 4), 4, 4));
-        QVERIFY(is(look::corners(Settings::followOmarchy, 0), 0, 0));
+        QVERIFY(is(look::corners(0.5, false, 0), 8, 8));
+        QVERIFY(is(look::corners(0.5, false, 12), 8, 8)); // Omarchy's rounding is ignored unless followed
+        QVERIFY(is(look::corners(1.0, false, 0), 15, 15));
+        QVERIFY(is(look::corners(0.0, false, 0), 1, 1));
+        QVERIFY(is(look::corners(0.5, true, 10), 8, 10));
+        QVERIFY(is(look::corners(0.5, true, 4), 4, 4));
+        QVERIFY(is(look::corners(0.5, true, 0), 0, 0));
+        QVERIFY(is(look::corners(1.0, true, 10), 15, 19));
+        QCOMPARE(look::omarchyCornerScale(false, 12), 1.0);
+        QCOMPARE(look::omarchyCornerScale(true, 12), 1.5);
     }
 
     // Every corner derives from the node corner r, inner ones concentric (docs/canvas-look.md 3),
@@ -346,7 +350,7 @@ private slots:
         QFETCH(int, radius);
         QFETCH(bool, light);
         CanvasLook canvasLook;
-        canvasLook.update(light ? flexokiLight : ethereal, light, look::corners(radius, 0), 12);
+        canvasLook.update(light ? flexokiLight : ethereal, light, look::Corners{radius, radius}, 12);
         QCOMPARE(canvasLook.property("corner").toInt(), radius);
         QCOMPARE(canvasLook.property("popupCorner").toInt(), radius);
         QCOMPARE(canvasLook.property("smallCorner").toInt(), std::min(radius, 4));
@@ -399,21 +403,25 @@ private slots:
         }
     }
 
-    // The Theme draws with the setting: 8 px by default, even where Hyprland's rounding is 0;
-    // following Omarchy takes Hyprland's (none here, so square).
-    void theThemeDrawsWithTheCornerSetting() {
+    // The Theme draws with the slider: 8 px by default, even where Hyprland's rounding is 0; following Omarchy takes Hyprland's
+    // (none here, so square, and the kit's corner parameters follow it: its scale is 0).
+    void theThemeDrawsWithTheCornerSlider() {
         QTemporaryDir dir;
         Theme theme(dir.path());
         QCOMPARE(theme.look()->property("corner").toInt(), 8);
         QSignalSpy changed(theme.look(), &CanvasLook::changed);
-        theme.setCornerRadius(Settings::followOmarchy);
+        theme.setCorners(0.5, true);
         QCOMPARE(theme.look()->property("corner").toInt(), 0);
-        QCOMPARE(changed.count(), 1);
-        theme.setCornerRadius(16);
-        QCOMPARE(theme.look()->property("corner").toInt(), 16);
-        QCOMPARE(theme.look()->property("popupCorner").toInt(), 16);
-        theme.setCornerRadius(16);
-        QCOMPARE(changed.count(), 2);
+        QVERIFY(changed.count() >= 1);
+        theme.setCorners(1.0, false);
+        QCOMPARE(theme.look()->property("corner").toInt(), 15);
+        QCOMPARE(theme.look()->property("popupCorner").toInt(), 15);
+        const int count = changed.count();
+        theme.setCorners(1.0, false);
+        QCOMPARE(changed.count(), count); // the same again changes nothing
+        const double card = theme.look()->params().value("cornerCard").toDouble();
+        theme.setCorners(0.5, false);
+        QVERIFY(theme.look()->params().value("cornerCard").toDouble() < card);
     }
 };
 

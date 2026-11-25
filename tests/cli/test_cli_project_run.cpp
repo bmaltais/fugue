@@ -238,7 +238,7 @@ private slots:
 
     void theDefaultIsUnchangedByASettingsListAModelListAndARunInAProject() {
         write(path("base/config/fugue/settings.json"),
-              R"({"corner_radius": 12, "model_paths": ["/srv/models-d"], "output_folder": "/srv/out-d"})");
+              R"({"new_seed": "fixed", "model_paths": ["/srv/models-d"], "output_folder": "/srv/out-d"})");
         write(path("base/data/fugue/models/loras/x.safetensors"), "x");
         write(path("base/state/fugue/trust.json"), "{}");
         const QStringList before = tree(path("base"));
@@ -249,17 +249,17 @@ private slots:
         QMap<QString, QJsonObject> byKey;
         for (const QJsonValue &entry : settings.data().value("settings").toArray())
             byKey.insert(entry.toObject().value("key").toString(), entry.toObject());
-        QCOMPARE(byKey.value("corner_radius").value("value").toInt(), 12);
-        QCOMPARE(byKey.value("corner_radius").value("origin").toString(), QString("inherited from Default"));
+        QCOMPARE(byKey.value("new_seed").value("value").toString(), QString("fixed"));
+        QCOMPARE(byKey.value("new_seed").value("origin").toString(), QString("inherited from Default"));
         QCOMPARE(byKey.value("navigation").value("origin").toString(), QString("built-in"));
         QVERIFY(byKey.value("output_folder").value("value").isNull()); // never inherited
         QCOMPARE(byKey.value("output_folder").value("origin").toString(), QString("built-in"));
         QVERIFY(byKey.value("model_paths").value("inherited_entries").toArray().contains("/srv/models-d"));
-        QVERIFY(QString::fromUtf8(fugue({"settings", "list"}, root(1)).out).contains("corner_radius = 12  (inherited from Default)"));
+        QVERIFY(QString::fromUtf8(fugue({"settings", "list"}, root(1)).out).contains("new_seed = fixed  (inherited from Default)"));
         // The Default session reads its own file: every set key is its own.
         const Outcome plain = fugue({"settings", "list", "--json"});
         for (const QJsonValue &entry : plain.data().value("settings").toArray())
-            if (entry.toObject().value("key").toString() == "corner_radius")
+            if (entry.toObject().value("key").toString() == "new_seed")
                 QCOMPARE(entry.toObject().value("origin").toString(), QString("own"));
 
         const Outcome models = fugue({"model", "list", "--json"}, root(1));
