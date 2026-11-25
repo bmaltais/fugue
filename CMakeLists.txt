@@ -121,7 +121,6 @@ qt_add_resources(fugue_core fugue_looks PREFIX /fugue/looks FILES ${fugue_look_s
 set_source_files_properties(share/providers/fal-models.json PROPERTIES QT_RESOURCE_ALIAS fal-models.json)
 set_source_files_properties(share/providers/gemini-models.json PROPERTIES QT_RESOURCE_ALIAS gemini-models.json)
 qt_add_resources(fugue_engine fugue_provider_tables PREFIX /fugue/providers FILES share/providers/fal-models.json share/providers/gemini-models.json)
-qt_add_resources(fugue_engine fugue_provider_tables PREFIX /fugue/providers FILES share/providers/fal-models.json)
 # The `replicate` provider's model table (spec 8.7): share/providers/replicate-models.json, under :/fugue/providers too.
 set_source_files_properties(share/providers/replicate-models.json PROPERTIES QT_RESOURCE_ALIAS replicate-models.json)
 qt_add_resources(fugue_engine fugue_replicate_table PREFIX /fugue/providers FILES share/providers/replicate-models.json)
