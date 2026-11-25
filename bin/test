@@ -7,7 +7,8 @@ set -euo pipefail
 # (bin/build). `bin/test --changed [base]` builds and runs only the tests the change since base
 # (default origin/main) can affect, chosen by bin/test-select, and says which; a shared file (build files,
 # resources, core headers) makes it the whole suite. `bin/test test_a test_b [ctest args]` (also fugue_tests) builds and runs
-# only those tests (and their shards). Plain `bin/test` is always the whole suite.
+# only those tests (and their shards). Plain `bin/test` is always the whole suite. With --changed, qmllint
+# (4 chunks, qmllint.1of4 ...) lints only the changed .qml files (FUGUE_QMLLINT_FILES, tests/qmllint.cmake).
 root="$(cd "$(dirname "$0")/.." && pwd)"
 changed=0
 base=origin/main
@@ -46,6 +47,14 @@ if ((changed)); then
     full) echo "bin/test --changed: the whole suite (${pick[*]:1})" ;;
     tests)
       narrow=1
+      # qmllint lints only the .qml files that changed here; the whole suite lints them all.
+      if [[ " ${pick[*]:1} " == *" qmllint "* ]]; then
+        qml_files=""
+        while IFS= read -r file; do
+          [[ -f $root/$file ]] && qml_files+="${qml_files:+;}$root/$file"
+        done < <(cd "$root" && { git diff --name-only "$(git merge-base "$base" HEAD)"; git ls-files -o --exclude-standard; } | grep '^src/.*\.qml$' | sort -u || true)
+        export FUGUE_QMLLINT_FILES=${qml_files:-none}
+      fi
       for name in "${pick[@]:1}"; do [[ $name == qmllint ]] || selected+=("$name"); done
       echo "bin/test --changed: ${#pick[@]} tests: ${pick[*]:1}" ;;
   esac

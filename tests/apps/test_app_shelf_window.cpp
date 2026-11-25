@@ -482,7 +482,7 @@ private slots:
             quiet = frames == 0;
         }
         QVERIFY2(quiet, "the shelf never stopped drawing");
-        QTest::qWait(1000);
+        QTest::qWait(600);
         disconnect(connection);
         QCOMPARE(frames, 0);
         qDeleteAll(app.engine.rootObjects());

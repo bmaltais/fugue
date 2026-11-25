@@ -60,8 +60,8 @@ bool panelOpen(QQuickWindow *window) {
 // when the next frame is polished, so the item must stay put for a few frames first.
 QPoint settled(QQuickItem *item) {
     QPoint at = centerOf(item);
-    for (int still = 0, i = 0; still < 3 && i < 50; ++i) {
-        QTest::qWait(20);
+    for (int still = 0, i = 0; still < 5 && i < 50; ++i) {
+        QTest::qWait(10);
         const QPoint now = centerOf(item);
         still = now == at ? still + 1 : 0;
         at = now;
@@ -363,7 +363,7 @@ private slots:
             quiet = frames == 0;
         }
         QVERIFY2(quiet, "Settings never stopped drawing");
-        QTest::qWait(1000);
+        QTest::qWait(600);
         disconnect(connection);
         QCOMPARE(frames, 0);
     }

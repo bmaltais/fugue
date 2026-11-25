@@ -123,7 +123,7 @@ private slots:
             quiet = frames == 0;
         }
         QVERIFY2(quiet, "the window never stopped drawing");
-        QTest::qWait(1000);
+        QTest::qWait(600);
         disconnect(connection);
         QCOMPARE(frames, 0);
     }

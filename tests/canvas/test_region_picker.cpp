@@ -107,8 +107,8 @@ struct RegionApp {
     void click(const QString &name) {
         QPoint at;
         int still = 0;
-        for (int i = 0; still < 3 && i < 500; ++i) {
-            QTest::qWait(20);
+        for (int i = 0; still < 5 && i < 500; ++i) {
+            QTest::qWait(10);
             QQuickItem *now = find(name);
             if (!now) {
                 still = 0;
