@@ -283,6 +283,18 @@ private slots:
         QCOMPARE(fugue({"app", "run", "shade.fugue", "--input", "image=" + picture(), "--input", "opacity=lots", "--json"}).code(), QString("usage"));
     }
 
+    // 13.6: an --out outside the folders a run may write is refused before it is made; a package is said to be one, not "invalid JSON".
+    void anOutFolderOutsideTheWriteRootsIsRefusedAndABundleIsNamed() {
+        const QString elsewhere = path("elsewhere/out");
+        const Outcome ran = fugue({"app", "run", "shade.fugue", "--input", "image=" + picture(), "--out", elsewhere, "--json"});
+        QCOMPARE(ran.code(), QString("permission_denied"));
+        QVERIFY(!QFileInfo::exists(elsewhere));
+        write(path("work/x.fugueapp"), QByteArray("PK\x03\x04 and so on", 14));
+        const Outcome bundle = fugue({"app", "info", "x.fugueapp", "--json"});
+        QCOMPARE(bundle.code(), QString("invalid_document"));
+        QVERIFY(bundle.error().value("message").toString().contains("package"));
+    }
+
     void infoSaysWhenTheAppIsNotReady() {
         const Outcome info = fugue({"app", "info", "needs-pack.fugue", "--json"});
         QCOMPARE(info.exitCode, 0);

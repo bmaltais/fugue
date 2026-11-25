@@ -25,6 +25,7 @@
 #include "cli/commands.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
+#include "engine/file_roots.h"
 #include "engine/providers.h"
 #include "engine/readiness.h"
 #include "engine/remote_placement.h"
@@ -648,6 +649,9 @@ Reply appRun(const Command &command, Context &context) {
             return Reply::failure(refused(*loaded, chosen, hostProblems));
     if (command.has("out")) {
         const QString dir = QDir(command.value("out")).absolutePath();
+        // 13.6: judged before the folder is made, so a refused --out leaves nothing behind.
+        if (const Result<QString> allowed = FileRoots::defaults(QDir::currentPath(), loaded->file).checkWrite(dir, QStringLiteral("out")); !allowed)
+            return Reply::failure(allowed.errors());
         if (!QDir().mkpath(dir))
             return Reply::failure(makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot make the folder %1.").arg(dir)));
         const Result<int> taken = putOutputsIn(*bound, *loaded, dir, context.registry);
