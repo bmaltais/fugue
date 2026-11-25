@@ -146,6 +146,7 @@ public:
         ErrorDetail,     // the whole error text when `error` is the short words of a missing pack (#264), else empty: the chip's tooltip
         ErrorPack,       // a node of a pack that is not installed: {id, name, text, installable}, else empty (the chip's Install button)
         Stack,           // its place in the stacking order, session only: a node that was selected or moved last is the highest (the node's z)
+        RunsOn,          // a node routed to a service off this machine: "<instance> (<host>)" (8.2, #404), else empty
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -819,6 +820,7 @@ private:
         QVariantMap media;
         QVariantMap values;
         QString notice;
+        QString runsOn;
         QString errorDetail;
         QVariantMap errorPack;
     };

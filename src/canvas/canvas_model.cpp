@@ -111,6 +111,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Media: return run.media;
     case CompareView: return m_canvas->isCompare(row.id) ? QVariant(m_canvas->compareView(row.id)) : QVariant(QVariantMap());
     case Notice: return run.notice;
+    case RunsOn: return run.runsOn;
     case ErrorDetail: return run.errorDetail;
     case ErrorPack: return run.errorPack;
     default: return {};
@@ -126,7 +127,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}, {LiveFrame, "liveFrame"}, {LiveAspect, "liveAspect"},
             {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
             {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}, {Stack, "stack"},
-            {ErrorDetail, "errorDetail"}, {ErrorPack, "errorPack"}};
+            {ErrorDetail, "errorDetail"}, {ErrorPack, "errorPack"}, {RunsOn, "runsOn"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -1836,6 +1837,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.media = state.value("media").toMap();
     run.values = state.value("values").toMap();
     run.notice = state.value("notice").toString();
+    run.runsOn = state.value("runsOn").toString();
     run.errorDetail = state.value("errorDetail").toString();
     run.errorPack = state.value("errorPack").toMap();
     const RunInfo before = m_run.value(node);
@@ -1845,7 +1847,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
                  NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim, NodeList::LiveFrame, NodeList::LiveAspect,
-                 NodeList::Compare, NodeList::Media, NodeList::Outputs, NodeList::Notice, NodeList::ErrorDetail, NodeList::ErrorPack});
+                 NodeList::Compare, NodeList::Media, NodeList::Outputs, NodeList::Notice, NodeList::ErrorDetail, NodeList::ErrorPack, NodeList::RunsOn});
     if (previewChanged)
         emit previewSizeChanged(node);
 }

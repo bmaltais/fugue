@@ -45,17 +45,6 @@ constexpr int kMaxTransientPolls = 5;
 // The status of a reply: 0 when it was cut off for its size, as if nothing had answered.
 int codeOf(QNetworkReply *reply) { return reply->property(kCapped).toBool() ? 0 : httpStatus(reply); }
 
-bool isLocalHost(const QString &host) {
-    if (host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
-        host.endsWith(QLatin1String(".local"), Qt::CaseInsensitive) || host.endsWith(QLatin1String(".internal"), Qt::CaseInsensitive))
-        return true;
-    QHostAddress address;
-    if (!address.setAddress(host))
-        return false;
-    return address.isLoopback() || address.isLinkLocal() || address.isPrivateUse() || address.isInSubnet(QHostAddress(QStringLiteral("fc00::")), 7) || address.isNull() ||
-           address == QHostAddress::Any || address == QHostAddress::AnyIPv4 || address.isInSubnet(QHostAddress(QStringLiteral("100.64.0.0")), 10);
-}
-
 QString oneLine(QString text) {
     text = text.simplified();
     return text.size() > 300 ? text.left(297) + QStringLiteral("...") : text;
@@ -89,6 +78,17 @@ QByteArray mimeOf(const QJsonValue &image) {
 }
 
 } // namespace
+
+bool isLocalHost(const QString &host) {
+    if (host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
+        host.endsWith(QLatin1String(".local"), Qt::CaseInsensitive) || host.endsWith(QLatin1String(".internal"), Qt::CaseInsensitive))
+        return true;
+    QHostAddress address;
+    if (!address.setAddress(host))
+        return false;
+    return address.isLoopback() || address.isLinkLocal() || address.isPrivateUse() || address.isInSubnet(QHostAddress(QStringLiteral("fc00::")), 7) || address.isNull() ||
+           address == QHostAddress::Any || address == QHostAddress::AnyIPv4 || address.isInSubnet(QHostAddress(QStringLiteral("100.64.0.0")), 10);
+}
 
 bool downloadUrlAllowed(const QUrl &url, const QString &instanceHost) {
     if ((url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https")) || url.host().isEmpty())

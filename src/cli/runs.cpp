@@ -18,6 +18,7 @@
 #include "engine/queue.h"
 #include "engine/document.h"
 #include "engine/json.h"
+#include "engine/remote_consent.h"
 
 namespace fugue::cli {
 
@@ -148,7 +149,8 @@ Plan graphToRun(const Command &command, Context &context) {
 
 } // namespace
 
-Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context) {
+Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
+                                   const QJsonObject &allowRemote) {
     const Result<RunFolder> folder = RunFolder::create(context.runsRoot);
     if (!folder)
         return folder.errors();
@@ -162,6 +164,8 @@ Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonOb
         written += folder->writeWorkflow(document);
     // The worker is not started here, so "the current directory" of 13.6 is recorded now.
     written += folder->writeRoots(FileRoots::defaults(QDir::currentPath(), workflow));
+    if (!allowRemote.isEmpty())
+        written += folder->writeRemoteAllowed(allowRemote);
     if (hasErrors(written)) {
         folder->finish(RunStatus::Failed, written, utcNow());
         return written;
@@ -197,7 +201,13 @@ Reply startRun(const Command &command, Context &context) {
     const Compilation &compilation = plan.compilation;
     if (!compilation.ok())
         return Reply::failure(compilation.errors());
-    const Result<RunFolder> folder = startCompiledRun(compilation, plan.document, file, command.has("first"), context);
+    // Nothing is sent off this machine unless allowed (8.2, #404): refused here, with a code, before a worker is started.
+    const Result<QJsonObject> allowRemote = allowRemoteFingerprints(command.options.value("allow-remote"), context);
+    if (!allowRemote)
+        return Reply::failure(allowRemote.errors());
+    if (const Errors refused = remoteConsentProblems(*compilation, context, file, *allowRemote); !refused.isEmpty())
+        return Reply::failure(refused);
+    const Result<RunFolder> folder = startCompiledRun(compilation, plan.document, file, command.has("first"), context, *allowRemote);
     if (!folder)
         return Reply::failure(folder.errors());
 
@@ -327,6 +337,11 @@ int work(const QString &runId, Context &context) {
     options.workflow = folder->state().value("workflow").toObject().value("path").toString();
     options.document = folder->workflow();
     options.roots = folder->roots();
+    {
+        const QList<ProviderInstance> instances = registeredInstances(context.registry);
+        options.remoteAllowed = RemoteConsent().allowedNames(instances);
+        options.remoteAllowed += RemoteConsent::matching(folder->remoteAllowed(), instances);
+    }
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);
     return outcome.status == RunStatus::Ok ? 0 : 1;

@@ -1,5 +1,7 @@
 #include "settings/settings_model.h"
 
+#include "engine/remote_consent.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -434,6 +436,7 @@ QString SettingsModel::saveProviders(const QList<ProviderInstance> &instances) {
     const Errors errors = saveProviderInstances(m_providersPath, instances);
     if (!errors.isEmpty())
         return errors.first().message;
+    RemoteConsent().prune(instances); // removing an instance, or changing its address, forgets what was allowed for it (8.2, #404)
     loadProviders();
     emit providersChanged();
     return {};

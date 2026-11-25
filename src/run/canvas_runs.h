@@ -28,8 +28,10 @@
 // together, in order, also ahead of the queue with run.start-first. start() returns the first id.
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include <QPair>
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
@@ -69,6 +71,9 @@ class CanvasRuns : public QObject {
     // True while something that is not the canvas holds the keys the `run` context owns (the queue
     // panel has the focus, and Escape closes it): run.cancel's keys sleep until it is false again.
     Q_PROPERTY(bool yieldKeys READ yieldKeys WRITE setYieldKeys NOTIFY yieldKeysChanged)
+    // The question a run waits on before it sends data to a service off this machine (8.2, #404): {run, services: [{instance, host,
+    // text}]} (text: "pictures and prompts"), empty when none waits. The window shows it as a Question; answerRemote answers it.
+    Q_PROPERTY(QVariantMap remoteQuestion READ remoteQuestion NOTIFY remoteQuestionChanged)
     // How many runs one start makes, 1 to maxBatch (#60).
     Q_PROPERTY(int batch READ batch WRITE setBatch NOTIFY batchChanged)
 
@@ -89,6 +94,11 @@ public:
     QVariantList runningWires() const;
     QVariantList errors() const;
     QString lastStatus() const;
+    QVariantMap remoteQuestion() const;
+    // The services off this machine the shown workflow's nodes are routed to, "<service> (<host>)" each, joined by ", " (#404); empty for none.
+    QString runsOn() const;
+    // Yes keeps the answer for the services asked about and the run goes on; no cancels it. The next waiting question, if any, shows.
+    Q_INVOKABLE void answerRemote(bool allow);
     static constexpr int maxBatch = 99;
     bool yieldKeys() const { return m_yieldKeys; }
     void setYieldKeys(bool yield);
@@ -140,6 +150,8 @@ signals:
     void progressChanged();
     void runningNodesChanged();
     void errorsChanged();
+    void remoteQuestionChanged();
+    void runsOnChanged();
     void finished(const QString &run, const QString &status);
     void checkApplied();
     void inputPreviewed(const QString &node);
@@ -154,6 +166,7 @@ private:
         QVariantMap pack;    // that missing pack: {id, name, text, installable}; else empty (#264)
         QStringList warnings;
         QString notice; // a check's word on why the node cannot run now, and the fix (8.5)
+        QString runsOn; // "<service> (<host>)" when a check routed the node off this machine (#404)
         QString thumbnail;
         int thumbnailWidth = 0;
         int thumbnailHeight = 0;
@@ -240,6 +253,9 @@ private:
     QSet<QString> m_rowsMade;            // its nodes whose cards made their rows
     CommandRegistry *m_commands = nullptr;
     QHash<QString, TabRuns> m_tabs;
+    QString m_runsOn;                                // the last runsOn() told
+    void noteRunsOn();
+    QList<QPair<QString, QJsonArray>> m_remoteAsks; // runs waiting for the off-machine question (#404), oldest first
     QHash<QString, QString> m_tabOf; // run id -> tab id
     QStringList m_order;
     QSet<QString> m_first; // the waiting runs started ahead of the queue (they keep their order)

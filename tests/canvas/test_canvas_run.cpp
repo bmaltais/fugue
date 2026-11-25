@@ -146,8 +146,9 @@ struct RunApp {
     std::unique_ptr<fugue::RunBar> bar;
     std::unique_ptr<fugue::RunQueue> queue;
 
+    // `address` makes the one provider instance an http service at that address ("Cloud"), off this machine when it is public (#404).
     explicit RunApp(const QByteArray &graph, bool slow = false, const fugue::Description &offers = imageDescription(),
-                    const Look &look = {})
+                    const Look &look = {}, const QString &address = {})
         : app(load(graph), {}, look) {
         RunSetup setup;
         // As main() fills it: the built-ins, then the test's own (XDG) packs folder.
@@ -157,13 +158,14 @@ struct RunApp {
         };
         setup.addKernels = fugue::nodes::addBuiltinKernels;
         auto *self = this;
-        setup.registerProviders = [self, slow, offers](fugue::Registry &registry) {
+        setup.registerProviders = [self, slow, offers, address](fugue::Registry &registry) {
             if (!self->fake)
                 self->fake = slow ? std::make_shared<SlowProvider>(offers)
                                   : std::make_shared<FakeProvider>(offers);
             fugue::ProviderInstance instance;
-            instance.name = QStringLiteral("This machine");
-            instance.type = QStringLiteral("fake");
+            instance.name = address.isEmpty() ? QStringLiteral("This machine") : QStringLiteral("Cloud");
+            instance.type = address.isEmpty() ? QStringLiteral("fake") : QStringLiteral("http");
+            instance.address = address;
             return registry.setProviders({fugue::ProviderEntry{instance, self->fake}});
         };
         const QString root = app.dir.path();
@@ -172,6 +174,7 @@ struct RunApp {
         setup.lockPath = root + "/engine.lock";
         setup.cacheRoot = root + "/results";
         setup.hashesPath = root + "/hashes.json";
+        setup.consentPath = root + "/remote-consent.json";
         setup.thumbnailDir = root + "/thumbnails";
         setup.collectGarbage = false;
         service = std::make_unique<RunService>(setup);
@@ -864,6 +867,110 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
+
+    // 8.2, #404: a node routed to a service off this machine says so on its face; a run that would send data there asks first
+    // (nothing is sent meanwhile); the question opens on No, so Enter and Escape cancel the run and Tab then Enter is Yes, which is kept for the next run.
+    void aServiceOffThisMachineIsMarkedAndAsksBeforeAnythingIsSent() {
+        RunApp r(kGraph, false, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.role("gen", NodeList::RunsOn).toString(), QStringLiteral("Cloud (api.example.com)"));
+        QCOMPARE(r.role("words", NodeList::RunsOn).toString(), QString());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        QObject *ask = r.app.window->findChild<QObject *>("remoteConsentAsk");
+        QVERIFY(ask);
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        QTRY_VERIFY(ask->property("opened").toBool());
+        const QVariantMap service = r.runs->remoteQuestion().value("services").toList().first().toMap();
+        QCOMPARE(service.value("instance").toString(), QStringLiteral("Cloud"));
+        QVERIFY(service.value("text").toString().contains("prompts"));
+        QVERIFY(r.jobs().isEmpty());
+        // The question opens on No: a stray Enter cancels the run and sends nothing.
+        QTRY_VERIFY(ask->property("opened").toBool());
+        r.app.key(Qt::Key_Return);
+        QTRY_VERIFY(r.runs->remoteQuestion().isEmpty());
+        QTRY_VERIFY(!r.runs->busy());
+        QVERIFY(r.jobs().isEmpty());
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_VERIFY(ask->property("opened").toBool());
+        r.app.key(Qt::Key_Escape); // No, by keys alone
+        QTRY_VERIFY(r.runs->remoteQuestion().isEmpty());
+        QTRY_VERIFY(!r.runs->busy());
+        QVERIFY(r.jobs().isEmpty());
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_VERIFY(ask->property("opened").toBool());
+        r.app.key(Qt::Key_Tab); // Yes takes Enter only once the focus is on it
+        r.app.key(Qt::Key_Return);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QVERIFY(QFile::exists(r.app.dir.path() + "/remote-consent.json"));
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier); // remembered: no question this time
+        QTRY_VERIFY(r.runs->busy());
+        QVERIFY(r.runs->remoteQuestion().isEmpty());
+        r.runs->cancel();
+    }
+
+    // A batch (several starts at once) asks once and keeps its order; No cancels all of it.
+    void aBatchAsksOnceAndKeepsItsOrder() {
+        RunApp r(kGraph, false, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        QStringList queued, cancelled;
+        QSignalSpy asked(r.service.get(), &RunService::remoteConsentNeeded);
+        connect(r.service.get(), &RunService::event, this, [&](const QString &run, const QJsonObject &event) {
+            if (event.value("event").toString() == QLatin1String("run.queued"))
+                queued << run;
+            else if (event.value("event").toString() == QLatin1String("run.done") && event.value("status").toString() == QLatin1String("cancelled"))
+                cancelled << run;
+        });
+        fugue::RunRequest request;
+        request.document = r.app.model.document();
+        const auto startThree = [&] {
+            QStringList ids;
+            for (int i = 0; i < 3; ++i)
+                ids << r.service->start(request);
+            return ids;
+        };
+
+        QStringList ids = startThree();
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        QTest::qWait(300); // the other two reach the question the first one asked (they have no event to wait on)
+        QCOMPARE(asked.size(), 1);
+        QVERIFY(queued.isEmpty());
+        r.runs->answerRemote(false);
+        QTRY_COMPARE(cancelled, ids);
+        QVERIFY(queued.isEmpty());
+
+        cancelled.clear();
+        asked.clear();
+        ids = startThree();
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        QTest::qWait(300);
+        QCOMPARE(asked.size(), 1);
+        r.runs->answerRemote(true);
+        QTRY_COMPARE(queued, ids); // all three, in the order they were started
+        QCOMPARE(asked.size(), 1);
+        for (const QString &id : ids)
+            r.service->cancel(id);
+        QTRY_COMPARE(cancelled.size(), 3);
+    }
+
+    // The window closes while the check that precedes the question is under way: nothing is queued or written, and nothing crashes.
+    void closingTheWindowDuringTheOffMachineCheckQueuesNothing() {
+        RunApp r(kGraph, true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        fugue::RunRequest request;
+        request.document = r.app.model.document();
+        r.service->start(request); // its check waits 300 ms on the slow provider's describe
+        r.close();                 // shutdown arrives inside that check
+        QVERIFY(QDir(r.app.dir.path() + "/runs").entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+        QVERIFY(QDir(r.app.dir.path() + "/queue").entryList(QDir::Files | QDir::NoDotAndDotDot).isEmpty());
+    }
 
     // Ctrl+Enter runs the shown workflow: progress shows on the running node, a finished
     // node shows cached with its time, values and thumbnail, a failure inside a group shows

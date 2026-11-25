@@ -79,6 +79,7 @@ struct RunSetup {
     QString cacheRoot;    // default ResultCache::defaultRoot()
     QString hashesPath;   // default FileHashes::defaultPath()
     QString trustPath;    // default TrustStore::defaultPath(): the packs the user allowed (6.7)
+    QString consentPath;  // default RemoteConsent::defaultPath(): the off-machine services the user allowed (8.2, #404)
     QString thumbnailDir; // default <cache>/thumbnails
     // The file roots of 13.6 the runs are held to; none: not limited (spec Appendix A, #19).
     std::optional<FileRoots> roots;
@@ -109,6 +110,8 @@ public:
     // Starts a run and returns its id at once; everything else happens on the run thread.
     QString start(const RunRequest &request);
     void cancel(const QString &run);
+    // The person's answer to remoteConsentNeeded for a run: yes keeps it (per instance) and the run goes on, no cancels the run.
+    void answerRemote(const QString &run, bool allow);
     // The state of every node, answered by checked() with the same ticket. A newer request
     // replaces one not made yet.
     void check(const RunRequest &request, int ticket);
@@ -137,10 +140,13 @@ public:
 
 signals:
     void event(const QString &run, const QJsonObject &event);
-    // nodes: {<path id>: {"state", "reason"?}}; problems: the compiler's and checkGraph's
+    // nodes: {<path id>: {"state", "reason"?, "runsOn"? ("<instance> (<host>)" for a node routed off this machine)}}; problems: the compiler's and checkGraph's
     // errors and warnings.
     void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
+    // A run would send data off this machine to services the person has not allowed (8.2, #404): `services` is
+    // [{"instance", "host", "sends": [..], "text"}]. The run waits (no folder, not queued) for answerRemote.
+    void remoteConsentNeeded(const QString &run, const QJsonArray &services);
 
 private:
     QString m_runsRoot;

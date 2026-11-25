@@ -69,11 +69,13 @@ void installStopHandlers() {
 
 bool stopRequested() { return g_stop.load(); }
 
-Result<RunFolder> startBoundRun(const Document &bound, const QString &workflow, Context &context) {
+Result<RunFolder> startBoundRun(const Document &bound, const QString &workflow, Context &context, const QJsonObject &allowRemote) {
     const Compilation compilation = compileDocument(bound, context.registry);
     if (!compilation.ok())
         return compilation.errors();
-    return startCompiledRun(compilation, bound.toJson(), workflow, false, context);
+    if (const Errors refused = remoteConsentProblems(*compilation, context, workflow, allowRemote); !refused.isEmpty())
+        return refused;
+    return startCompiledRun(compilation, bound.toJson(), workflow, false, context, allowRemote);
 }
 
 canvas::BatchRunResult waitForRun(const RunFolder &folder, Context &context, const std::function<void(const QJsonObject &)> &onEvent) {

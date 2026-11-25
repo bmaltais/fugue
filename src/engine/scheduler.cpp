@@ -590,6 +590,7 @@ private:
                 return fail(n, nodeError(QStringLiteral("internal"),
                                          QStringLiteral("Provider %1 was selected but is not configured.")
                                              .arg(n.selection->instance)));
+            m_outcome.routes.insert(n.path, NodeRoute{n.selection->instance, sendsOf(*n.type, *n.node)});
             parts.engine = n.selection->engine;
             parts.model = resourceIdentity(n.selection->model.handle);
             parts.extra = n.providerKernel->keyExtra(n.inputs);
@@ -633,6 +634,15 @@ private:
             return giveUp(n, *hostGone);
         if (m_dry)
             return stale(n);
+        // Nothing is sent to an off-machine service the person has not allowed (8.2, #404). A cached result sends nothing, so
+        // this comes after the cache; the window and `fugue run` ask before the run, which makes this the last line.
+        if (n.selection && n.instance >= 0 && placementOf(m_providers.at(n.instance).instance) == Placement::OffMachine &&
+            !m_options.remoteAllowed.contains(n.selection->instance)) {
+            const ProviderInstance &instance = m_providers.at(n.instance).instance;
+            Error error = consentNeededError({RemoteUse{instance.name, hostOf(instance), consentFingerprint(instance), sendsOf(*n.type, *n.node), {n.path}}});
+            error.node = n.path;
+            return fail(n, error);
+        }
         n.phase = Phase::Ready;
     }
 
@@ -1600,6 +1610,7 @@ GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environm
     check.aborted = !scheduler.finished();
     check.states = scheduler.outcome().states;
     check.keys = scheduler.outcome().keys;
+    check.routes = scheduler.outcome().routes;
     check.warnings = scheduler.outcome().errors;
     return check;
 }

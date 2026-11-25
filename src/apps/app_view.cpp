@@ -173,8 +173,19 @@ void AppView::askPlacement(bool modelsAreElsewhere) {
 void AppView::setRunsOn(const QString &host) {
     if (host == m_runsOn)
         return;
+    const QString before = runsOn();
     m_runsOn = host;
-    emit runsOnChanged();
+    if (runsOn() != before)
+        emit runsOnChanged();
+}
+
+void AppView::setOffMachine(const QString &services) {
+    if (services == m_offMachine)
+        return;
+    const QString before = runsOn();
+    m_offMachine = services;
+    if (runsOn() != before)
+        emit runsOnChanged();
 }
 
 void AppView::show(const QString &tab, const Document &document, const QString &file, const QString &templateFolder) {

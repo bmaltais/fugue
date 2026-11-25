@@ -7,6 +7,7 @@ import Fugue
 import ".."
 import "../canvas"
 import "../workflow"
+import "../run"
 
 // An app as its own application (#398, epic #397, spec 12.18): `fugue --app <id|file>` opens this instead of Main.qml. The window
 // is the App view and nothing else: no menu bar, no graph, no node library, no panels, no tabs. Its title is the app's own
@@ -134,6 +135,9 @@ ApplicationWindow {
 
     // The shortcuts of the command registry (Ctrl+Enter runs the app) and the keys help.
     CommandUi { anchors.fill: parent }
+
+    // The question a run waits on before it sends data off this machine (#404).
+    RemoteConsentQuestion {}
 
     // The Get ready sheet, made the first time it opens, and kept: the window keeps few items (#5).
     property var getReadySheet: null

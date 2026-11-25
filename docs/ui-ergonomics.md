@@ -1218,3 +1218,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rules met: Keyboard (Tab to the field, Enter sets; Clear and Set… are buttons in the same tab order), Floor (the field is the settings' `Field`, the buttons the settings' `SmallButton`), Primary (no accent on the row: setting a key is not the page's main action), Learned place (the same field, placeholder and "set" wording as the Providers page's key).
 - Decision (confirm): Clear has no confirmation question, as the Providers key.
 - Not checked by a person: the block in a real window.
+
+### 2026-11-25 Privacy question and the "Runs on" mark for services off this machine (#404, epic #409)
+
+- Control: `src/run/RemoteConsentQuestion.qml` (`remoteConsentAsk`, one `remoteConsentService` line per service, answers `remoteConsentNo` and `remoteConsentYes`), the node face's mark `runsOnMark` in `src/canvas/CanvasNode.qml`, and the App view's existing `appRunsOn` line.
+- Old: a run routed to any provider instance sent its inputs there without a word; the App view said "Runs on <host>" only for a paired helper.
+- New: before a run that would send pictures, masks, audio or prompts to a service off this machine, one `Question` names each service (name and host) and what leaves it, with **No, cancel the run** and **Yes, send it**; the yes is kept per service. A node routed there shows "Runs on <service> (<host>)" in the label color above its face, and the App view's line says the same.
+- Rules met: Primary (Yes the one accent fill, not the default: the question opens on No), Keys (Tab reaches Yes, Enter on it sends; Enter on No and Escape cancel the run wherever the focus is; the whole question works without a pointer), Destructive (nothing is removed; No only cancels the run), Gaps (3u between lines, 2u between answers, as every Question), Words ("Yes, send it" and "No, cancel the run" say what the answer does), Right-to-left (the content mirrors as every Question's), Floor (the mark uses `captionSize`, quiet, never over a chip: it sits above the card, the chips below).
+- Decision (changed after review, confirm): the focus opens on No, not on the primary Yes, because a stray Enter must never grant consent to send data off the machine; the primary stays visually Yes. Escape answers No instead of doing nothing, because the run is waiting on the answer and a closed question that left it waiting would hang the queue.
+- Not checked by a person: the question and the mark in a real window.
