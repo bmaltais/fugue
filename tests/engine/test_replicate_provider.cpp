@@ -248,10 +248,10 @@ private slots:
         QCOMPARE(klein.value("aspect_ratio").toString(), QStringLiteral("match_input_image"));
         QVERIFY(!klein.contains("output_megapixels"));
 
-        // Over 1 MiB: the files API (the key goes to it, as multipart), and its link goes into the input.
+        // Over 256 KB: the files API (the key goes to it, as multipart), and its link goes into the input.
         fixture.polls = 0;
         QByteArray big = kPng;
-        big.append(QByteArray(1100 * 1024, 'x'));
+        big.append(QByteArray(300 * 1024, 'x'));
         const QJsonObject large = fixture.picture("big.png", big);
         QCOMPARE(run(*provider, fixture.request("image.edit", kKontext, {{"prompt", "x"}}, {{"images", QJsonArray{large}}})).state, QStringLiteral("done"));
         const auto uploads = fixture.api.requestsTo("POST", "/v1/files");
@@ -424,6 +424,107 @@ private slots:
         const JobStatus status = run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
         QCOMPARE(status.error.code, QStringLiteral("node_timeout"));
         QTRY_COMPARE(fixture.api.requestsTo("POST", "/v1/predictions/p1/cancel").size(), 1);
+    }
+
+    void theKeyMayGoToTheDeliveryHostOnlyAfterARefusalAtTheDefaultAddress() {
+        ProviderInstance instance;
+        instance.name = QStringLiteral("Replicate");
+        instance.type = QStringLiteral("replicate");
+        instance.key = QString::fromLatin1(kKey);
+        const auto may = [&](const ProviderInstance &who, const char *url, int hops = 0) { return replicateMayKeyDelivery(who, QUrl(QString::fromLatin1(url)), hops); };
+        QVERIFY(may(instance, "https://replicate.delivery/yyyy/out.png"));
+        QVERIFY(may(instance, "https://pbxt.REPLICATE.delivery/yyyy/out.png"));
+        QVERIFY(may(instance, "https://replicate.delivery:443/out.png"));
+        instance.address = QStringLiteral("https://api.replicate.com/");
+        QVERIFY(may(instance, "https://replicate.delivery/out.png")); // the typed default is the default
+        QVERIFY(!may(instance, "https://replicate.delivery/out.png", 1)); // never on or after a redirect
+        QVERIFY(!may(instance, "https://evilreplicate.delivery/out.png"));
+        QVERIFY(!may(instance, "https://replicate.delivery.evil.com/out.png"));
+        QVERIFY(!may(instance, "https://example.com/replicate.delivery"));
+        QVERIFY(!may(instance, "http://replicate.delivery/out.png"));
+        QVERIFY(!may(instance, "https://replicate.delivery:8443/out.png"));
+        QVERIFY(!may(instance, "https://api.replicate.com/out.png"));
+        ProviderInstance overridden = instance;
+        overridden.address = QStringLiteral("https://proxy.example.com");
+        QVERIFY(!may(overridden, "https://replicate.delivery/out.png"));
+        overridden.address = QStringLiteral("http://127.0.0.1:9");
+        QVERIFY(!may(overridden, "https://replicate.delivery/out.png"));
+        ProviderInstance keyless = instance;
+        keyless.key.clear();
+        QVERIFY(!may(keyless, "https://replicate.delivery/out.png"));
+
+        // An output on a private host is refused while the address is remote, and allowed beside a loopback fake.
+        QVERIFY(!replicateOutputAllowed(instance, QUrl("http://10.0.0.5/out.png")));
+        QVERIFY(!replicateOutputAllowed(instance, QUrl("http://127.0.0.1/out.png")));
+        QVERIFY(!replicateOutputAllowed(instance, QUrl("file:///etc/hostname")));
+        QVERIFY(replicateOutputAllowed(instance, QUrl("https://replicate.delivery/out.png")));
+        QVERIFY(replicateOutputAllowed(overridden, QUrl("http://127.0.0.1:9/out.png")));
+    }
+
+    void aRefusedOutputIsNotRetriedWithTheKeyAtAnOverriddenAddress() {
+        Fixture fixture;
+        fixture.cdn.on("GET", "/out.png", [](const HttpRequest &) { return HttpResponse{403, "denied"}; });
+        auto provider = fixture.provider();
+        const JobStatus status = run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+        QVERIFY(status.error.message.contains("HTTP 403") && !status.error.message.contains("expired"));
+        QCOMPARE(fixture.cdn.requests().size(), 1);
+        QVERIFY(!fixture.cdn.requests().first().headers.contains("authorization"));
+    }
+
+    void aFilesApiLinkOnAnotherHostIsRefused() {
+        Fixture fixture;
+        fixture.api.on("POST", "/v1/files", [&](const HttpRequest &) { return HttpResponse{201, json({{"urls", QJsonObject{{"get", fixture.cdnUrl("/f")}}}})}; });
+        auto provider = fixture.provider();
+        QByteArray big = kPng;
+        big.append(QByteArray(300 * 1024, 'x'));
+        const JobStatus status = run(*provider, fixture.request("image.edit", kKontext, {{"prompt", "x"}}, {{"images", QJsonArray{fixture.picture("big.png", big)}}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+        QVERIFY(status.error.message.contains("Fugue does not use"));
+        QVERIFY(fixture.api.requestsTo("POST", "/v1/models/black-forest-labs/flux-kontext-dev/predictions").isEmpty());
+        QVERIFY(fixture.cdn.requests().isEmpty());
+    }
+
+    void aCancelWhileTheJobIsBeingSentIsPassedOnWhenItsUrlsArrive() {
+        Fixture fixture;
+        auto provider = fixture.provider();
+        const auto job = await<QString>([&](auto reply) { provider->submit(fixture.request("image.generate", kSchnell, {{"prompt", "x"}}), reply); });
+        QVERIFY(job.ok());
+        QCOMPARE(await<QString>([&](auto reply) { provider->cancel(job.value(), reply); }).value(), QStringLiteral("cancelled"));
+        QTRY_COMPARE(fixture.api.requestsTo("POST", "/v1/predictions/p1/cancel").size(), 1);
+        QCOMPARE(fixture.polls, 0);
+    }
+
+    void aSeedIsKeptInTheRangeOfAnInt32AndAListOfPicturesInTheModelsLimit() {
+        Fixture fixture;
+        auto provider = fixture.provider();
+        const qint64 seed = (1LL << 40) + 5;
+        JobResult result;
+        QCOMPARE(run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}, {"seed", double(seed)}}), &result).state, QStringLiteral("done"));
+        QCOMPARE(fixture.lastInput(kSchnell).value("seed").toDouble(), 5.0);
+        QCOMPARE(result.used.value("seed").toDouble(), 5.0); // what was sent
+
+        fixture.polls = 0;
+        QJsonArray seven;
+        const QJsonObject image = fixture.picture("a.png");
+        for (int i = 0; i < 7; ++i)
+            seven.append(image);
+        QCOMPARE(run(*provider, fixture.request("image.edit", kKlein, {{"prompt", "x"}}, {{"images", seven}})).state, QStringLiteral("done"));
+        QCOMPARE(fixture.lastInput(kKlein).value("images").toArray().size(), 5);
+    }
+
+    void aMissingModelIsNamedEvenBehindAPathPrefix() {
+        Fixture fixture;
+        fixture.api.on("POST", "/proxy/v1/models/black-forest-labs/flux-schnell/predictions", [](const HttpRequest &) { return HttpResponse{404, "{}"}; });
+        ProviderInstance instance;
+        instance.name = QStringLiteral("Replicate");
+        instance.type = QStringLiteral("replicate");
+        instance.key = QString::fromLatin1(kKey);
+        instance.address = QString::fromLatin1(fixture.api.origin()) + "/proxy";
+        ReplicateProvider provider(instance);
+        const JobStatus status = run(provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("model_missing"));
+        QVERIFY(status.error.message.contains("black-forest-labs/flux-schnell") && !status.error.message.contains("proxy"));
     }
 
     void aReplicateInstanceIsMadeByTheRegistry() {

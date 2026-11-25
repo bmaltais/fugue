@@ -1757,7 +1757,7 @@ consent question of #404 is asked before anything is sent. Unlike fal there is o
 
 | Setting | Meaning |
 | --- | --- |
-| `key` | Sent as `Authorization: Bearer <key>` to the origin of `address` only. Never to a picture or output URL, or a redirect (none is followed on an API call). Without a key the models are `unavailable` and a job is refused before anything is sent. |
+| `key` | Sent as `Authorization: Bearer <key>` to the origin of `address` only. Never to a picture URL or a redirect (none is followed on an API call); the one exception is an output file at `replicate.delivery` that refuses the first, keyless fetch (below). Without a key the models are `unavailable` and a job is refused before anything is sent. |
 | `address` | The API's root, default `https://api.replicate.com`. Tests point it at a local fake. |
 | `image_models` | More official model ids, `owner/name` (a list, or text separated by commas), with a generic mapping: `prompt`, `seed`, `image`. An id that is not `owner/name` is ignored. Only official models can be run by name (a community model needs a version id: not built). |
 | `timeout_s` | How long a request may go silent before the job fails (default 300). A job is given up on, in any phase, after 6 times that (`node_timeout`; the transfer is cut and the prediction cancelled). |
@@ -1774,7 +1774,7 @@ consent question of #404 is asked before anything is sent. Unlike fal there is o
 | Model | Offered for | Price |
 | --- | --- | --- |
 | `black-forest-labs/flux-schnell` | `image.generate` | $0.003 per image |
-| `black-forest-labs/flux-2-klein-4b` | `image.generate`, and `image.edit` (up to 5 pictures, the first used) | $0.001 per megapixel |
+| `black-forest-labs/flux-2-klein-4b` | `image.generate`, and `image.edit` (up to 5 pictures: the table's `images_max`) | $0.001 per megapixel |
 | `qwen/qwen-image` | `image.generate` | $0.025 per image |
 | `black-forest-labs/flux-kontext-dev` | `image.edit` (one picture) | $0.025 per image |
 | `qwen/qwen-image-edit` | `image.edit` (one picture) | $0.03 per image |
@@ -1786,10 +1786,14 @@ consent question of #404 is asked before anything is sent. Unlike fal there is o
   so Replicate stops a prediction nobody waits for) answers 201 with `urls.get` and `urls.cancel`; these are the only URLs used afterwards
   and must be on the API's origin, or the job fails before the key goes there. `GET urls.get` is polled (`starting`, shown as queued;
   `processing`; then `succeeded` with `output`, or `failed` with `error`, `canceled`, `aborted`). The first output URL (`replicate.delivery`)
-  is downloaded **without the key**, under the `http` provider's URL rules (3 hops, 512 MB). Cancel is at once: the job is `cancelled`,
+  is downloaded **without the key**, under the `http` provider's URL rules (3 hops, 512 MB). Replicate's own clients send the token to
+  the delivery host, and its output-files page says to; so when that first fetch is answered 401 or 403 it is repeated **once** with the key,
+  and only when all hold: the instance's address is the default `https://api.replicate.com` (an overridden or loopback address was agreed to
+  for that address only), the URL is `https` on port 443, its host (case-folded) is `replicate.delivery` or ends in `.replicate.delivery`,
+  it is the first hop (never on or after a redirect; a redirect drops the key), and there is a key (`replicateMayKeyDelivery`). Cancel is at once: the job is `cancelled`,
   polling stops and `POST urls.cancel` is sent (a cancel made while the job is being sent is sent when its URLs arrive). `Prefer: wait`
   is not used: one polling path serves a 1 s model and a 60 s one alike.
-- **Pictures.** Up to 1 MiB (Replicate's guide for data URIs) goes in the input as a `data:` URI, which Replicate does not store; a larger
+- **Pictures.** Up to 256 KB (the HTTP reference's limit for data URLs) goes in the input as a `data:` URI, which Replicate does not store; a larger
   one is uploaded with the files API (`POST /v1/files`, multipart `content`, 100 MB at most, with the key) and its `urls.get` (checked to be
   on the API origin) goes in the input. The files API keeps a copy on Replicate for its own lifetime, which is why the small path is a
   data URI.
@@ -1805,14 +1809,14 @@ consent question of #404 is asked before anything is sent. Unlike fal there is o
   `Bearer`, the official-model endpoint, `Prefer: wait` 1 to 60 s, `Cancel-After` (5 s minimum), the status values, the files API's
   multipart `content` field and 201 answer with `urls.get`, the rate limits (600 predictions and 3000 other calls per minute; 429 with
   a `detail`).
-- **Decisions** (the builder's, each with its confidence; overturn any): a data URI up to 1 MiB and the files API above it (medium-high:
-  the guides say 256 KB and 1 MB, no hard limit is published); no `Prefer: wait`, polling only (high); the output is fetched without
-  the key (medium: see below); the seed reported is the one sent, as Replicate returns none (high); `image_models` takes official ids
+- **Decisions** (the builder's, each with its confidence; overturn any): a data URI up to 256 KB and the files API above it (medium-high:
+  the HTTP reference says 256 KB, the input-files guide 1 MB, no hard limit is published); seeds are reduced modulo 2^31 (the models
+  publish no seed range; Fugue's go to 2^53-1; the table's `seed_max` overrides) and the value sent is the one reported; no `Prefer: wait`, polling only (high); the output is fetched without
+  the key first and with it once on a 401 or 403 under the conditions above (medium-high, owner's decision after review); the seed reported is the one sent, as Replicate returns none (high); `image_models` takes official ids
   only (high).
-- **Not checked against the real service**: no Replicate token was at hand. Open question: Replicate's output-files page says "you'll
-  need to pass the `Authorization` header" to request `replicate.delivery` files, while its Python client's `FileOutput` adds no header of
-  its own; a run with a real token decides. If the delivery host does want the key, the download fails with "picture link was refused
-  (HTTP 401)" and the fix is a deliberate, narrow exception (the key to `replicate.delivery` and its subdomains only), not a silent one.
+- **Not checked against the real service**: no Replicate token was at hand. Whether `replicate.delivery` really answers 401 or 403
+  without the key is not observed: the retry costs nothing if it does not. A refusal after the retry is `node_failed` ("would not serve
+  the picture"), without a hint of expiry.
   Not built: a cost estimate, community models by version id, several outputs, upscale, video, webhooks and `Prefer: wait`.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))

@@ -9,11 +9,13 @@
 // `urls.get` the service returned (0.5 s growing to 3 s) until `succeeded`, download the first output URL (no key). Cancel is
 // a POST to the returned `urls.cancel`. Only URLs the service returned are used, and only when they are on the API's own origin.
 //
-// The key is sent as `Authorization: Bearer <key>` to the origin of `address` and to no other: never to an output or
-// picture URL, a redirect (none is followed on an API call). No message, status, result or file holds it; a service that
-// echoes it in an error is scrubbed.
+// The key is sent as `Authorization: Bearer <key>` to the origin of `address` and to no other, with one narrow exception: an
+// output file is first fetched without it, and only when replicate.delivery answers 401 or 403 (Replicate's own clients send
+// the token there) is it fetched once more with the key, under replicateMayKeyDelivery()'s conditions. Never to a picture URL
+// or a redirect (none is followed on an API call). No message, status, result or file holds it; a service that echoes it in an
+// error is scrubbed.
 //
-// Pictures: up to 1 MiB each go into the input as a `data:` URI (Replicate does not store those); a larger one is uploaded with
+// Pictures: up to 256 KB each go into the input as a `data:` URI (Replicate does not store those); a larger one is uploaded with
 // the files API (`POST /v1/files`, 100 MB at most) and its `urls.get` goes into the input.
 //
 // Instance settings (all optional):
@@ -42,6 +44,12 @@ namespace fugue {
 QString replicateDefaultAddress();
 // The API's address: the instance's, else the default.
 QString replicateAddress(const ProviderInstance &instance);
+// Whether the key may go with a second fetch of an output file after a 401 or 403: the instance is at the default API address
+// (an overridden or loopback address was agreed to for that address only), the URL is https on port 443 at replicate.delivery or
+// a subdomain of it, it is the first hop (never after a redirect) and there is a key.
+bool replicateMayKeyDelivery(const ProviderInstance &instance, const QUrl &url, int hops);
+// Whether an output URL may be fetched at all: downloadUrlAllowed() judged against the instance's API host.
+bool replicateOutputAllowed(const ProviderInstance &instance, const QUrl &url);
 
 // One model: how Fugue's standard parameters (8.1) become the model's own input fields.
 struct ReplicateModel {
@@ -63,6 +71,8 @@ struct ReplicateModel {
     QString seedField;
     QString imageField;           // a picture; a list of them when `imageList`
     bool imageList = false;
+    int imagesMax = 0;            // the most pictures of a list (0: no limit); a single picture field takes one
+    qint64 seedMax = 1LL << 31;   // a seed is reduced modulo this (Fugue's go to 2^53-1; the models publish no range, int32 is safe)
     QString maskField;
     QJsonObject fixed;    // sent as it is
     QJsonObject defaults; // steps, guidance: what the model uses when a node says nothing
@@ -97,7 +107,7 @@ private:
     bool isApiUrl(const QUrl &url) const;
     QNetworkReply *send(const QUrl &url, const QByteArray &method, const QByteArray &body = {},
                         const QByteArray &contentType = QByteArrayLiteral("application/json"), bool withKey = true,
-                        qint64 cap = 64LL << 20, const QList<QPair<QByteArray, QByteArray>> &headers = {});
+                        qint64 cap = 64LL << 20, const QList<QPair<QByteArray, QByteArray>> &headers = {}, bool keyAnywhere = false);
     QString clean(const QString &text) const;
     // The failure of an HTTP answer (code 0: no answer), in the spec's codes (8.7, 13.3).
     Error failure(QNetworkReply *reply, const QJsonObject &answer, bool submitting = false) const;
@@ -111,7 +121,7 @@ private:
     void pollLater(const QString &id, int atLeastMs = 0);
     void giveUp(const QString &id);
     void pollNow(const QString &id);
-    void download(const QString &id, const QUrl &url);
+    void download(const QString &id, const QUrl &url, bool withKey = false);
     void saveImage(const QString &id, const QByteArray &bytes);
     void sendCancel(const std::shared_ptr<Job> &job);
     QJsonObject bodyOf(const Job &job) const;

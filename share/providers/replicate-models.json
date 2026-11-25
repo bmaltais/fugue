@@ -14,7 +14,7 @@
       "id": "black-forest-labs/flux-2-klein-4b", "title": "FLUX.2 [klein] 4B", "price": "$0.001/MP", "capability": "generate",
       "aspect": "aspect_ratio", "aspects": ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "21:9", "9:21"], "aspect_follow": "match_input_image",
       "megapixels": "output_megapixels", "megapixel_values": ["0.25", "0.5", "1", "2", "4"],
-      "seed": "seed", "image": "images", "image_list": true,
+      "seed": "seed", "image": "images", "image_list": true, "images_max": 5,
       "fixed": {"output_format": "png"}
     },
     {

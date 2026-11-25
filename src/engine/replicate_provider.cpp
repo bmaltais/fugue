@@ -31,8 +31,8 @@ constexpr int kDefaultPollMs = 500;
 constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
 constexpr qint64 kJsonCap = 64LL << 20;
 constexpr qint64 kPictureCap = 512LL << 20;
-// Replicate's guide: a data URI is for files under 1 MB; a larger one goes through the files API.
-constexpr qint64 kDataUriMax = 1LL << 20;
+// Replicate's HTTP reference: data URLs are for files of 256 KB or less; a larger one goes through the files API.
+constexpr qint64 kDataUriMax = 256LL << 10;
 constexpr int kMaxHops = 3;
 constexpr int kMaxTransientPolls = 5;
 const char *const kCapped = "fugue-capped";
@@ -136,6 +136,13 @@ QString nearestMegapixels(const QStringList &values, int width, int height) {
     return best;
 }
 
+// The `owner/name` of `<prefix>/v1/models/<owner>/<name>/predictions`.
+QString modelOfPath(const QString &path) {
+    const QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    const qsizetype at = parts.lastIndexOf(QStringLiteral("predictions"));
+    return at >= 2 ? parts.at(at - 2) + QLatin1Char('/') + parts.at(at - 1) : QString();
+}
+
 QStringList stringList(const QJsonValue &value) {
     QStringList list;
     for (const QJsonValue &item : value.toArray())
@@ -150,6 +157,20 @@ QString replicateDefaultAddress() { return QStringLiteral("https://api.replicate
 QString replicateAddress(const ProviderInstance &instance) {
     const QString address = trimmedAddress(instance.address);
     return address.isEmpty() ? replicateDefaultAddress() : address;
+}
+
+bool replicateMayKeyDelivery(const ProviderInstance &instance, const QUrl &url, int hops) {
+    if (instance.key.isEmpty() || hops != 0)
+        return false;
+    if (originOf(QUrl(replicateAddress(instance))) != originOf(QUrl(replicateDefaultAddress())))
+        return false;
+    const QString host = url.host().toLower();
+    return url.scheme() == QLatin1String("https") && url.port(443) == 443 &&
+           (host == QLatin1String("replicate.delivery") || host.endsWith(QLatin1String(".replicate.delivery")));
+}
+
+bool replicateOutputAllowed(const ProviderInstance &instance, const QUrl &url) {
+    return downloadUrlAllowed(url, QUrl(replicateAddress(instance)).host());
 }
 
 QList<ReplicateModel> replicateShippedModels() {
@@ -180,6 +201,9 @@ QList<ReplicateModel> replicateShippedModels() {
         model.seedField = row.value("seed").toString();
         model.imageField = row.value("image").toString();
         model.imageList = row.value("image_list").toBool();
+        model.imagesMax = row.value("images_max").toInt();
+        if (row.contains("seed_max"))
+            model.seedMax = qint64(row.value("seed_max").toDouble());
         model.maskField = row.value("mask").toString();
         model.fixed = row.value("fixed").toObject();
         model.defaults = row.value("defaults").toObject();
@@ -232,13 +256,13 @@ QString ReplicateProvider::host() const { return apiUrl({}).host(); }
 bool ReplicateProvider::isApiUrl(const QUrl &url) const { return wholeUrl(url) && originOf(url) == originOf(apiUrl({})); }
 
 QNetworkReply *ReplicateProvider::send(const QUrl &url, const QByteArray &method, const QByteArray &body, const QByteArray &contentType, bool withKey,
-                                       qint64 cap, const QList<QPair<QByteArray, QByteArray>> &headers) {
+                                       qint64 cap, const QList<QPair<QByteArray, QByteArray>> &headers, bool keyAnywhere) {
     QNetworkRequest request(url);
     request.setTransferTimeout(timeoutMs());
     // No redirect is followed by Qt: a picture's is checked by download(), hop by hop, and an API call's is an error.
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     // The key goes to Replicate's API origin and nowhere else: a URL the service named is sent it only when it is that.
-    if (withKey && !m_instance.key.isEmpty() && isApiUrl(url))
+    if (withKey && !m_instance.key.isEmpty() && (isApiUrl(url) || keyAnywhere))
         request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
     for (const auto &header : headers)
         request.setRawHeader(header.first, header.second);
@@ -288,7 +312,7 @@ Error ReplicateProvider::failure(QNetworkReply *reply, const QJsonObject &answer
                          QStringLiteral("Check the address of %1 in %2.").arg(who, where()));
     if (code == 404 || code == 410) {
         if (submitting && code == 404)
-            return makeError(QStringLiteral("model_missing"), QStringLiteral("%1 has no such model: %2").arg(who, clean(reply->url().path().mid(11).section(QLatin1String("/predictions"), 0, 0))),
+            return makeError(QStringLiteral("model_missing"), QStringLiteral("%1 has no such model: %2").arg(who, clean(modelOfPath(reply->url().path()))),
                              QStringLiteral("Check the model id, such as black-forest-labs/flux-schnell: only official models are run by name; they are listed at replicate.com/collections/official."));
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 no longer has the job (HTTP %2).").arg(who).arg(code), QStringLiteral("Run the node again."));
     }
@@ -516,7 +540,8 @@ void ReplicateProvider::submit(const JobRequest &request, Reply<QString> reply) 
             upload.url = QStringLiteral("data:%1;base64,%2").arg(upload.type, QString::fromLatin1(upload.bytes.toBase64()));
         job->uploads.append(upload);
     };
-    for (int i = 0; i < images.size() && (spec.imageList || i == 0); ++i)
+    const int imageLimit = spec.imageList ? (spec.imagesMax > 0 ? spec.imagesMax : int(images.size())) : 1;
+    for (int i = 0; i < images.size() && i < imageLimit; ++i)
         collect(QStringLiteral("image"), images.at(i));
     if (masked)
         collect(QStringLiteral("mask"), request.inputs.value("mask"));
@@ -534,7 +559,7 @@ void ReplicateProvider::submit(const JobRequest &request, Reply<QString> reply) 
     uploadNext(id);
 }
 
-// A picture over 1 MiB goes to the files API (multipart, `content`); the others already hold their data URI.
+// A picture over 256 KB goes to the files API (multipart, `content`); the others already hold their data URI.
 void ReplicateProvider::uploadNext(const QString &id) {
     const auto job = m_jobs.value(id);
     if (!job || job->status.isTerminal())
@@ -592,7 +617,7 @@ QJsonObject ReplicateProvider::bodyOf(const Job &job) const {
     if (!spec.negativeField.isEmpty() && !params.value("negative_prompt").toString().trimmed().isEmpty())
         input.insert(spec.negativeField, params.value("negative_prompt"));
     if (!spec.seedField.isEmpty() && params.value("seed").isDouble() && params.value("seed").toDouble() >= 0)
-        input.insert(spec.seedField, params.value("seed"));
+        input.insert(spec.seedField, double(qint64(params.value("seed").toDouble()) % std::max<qint64>(1, spec.seedMax)));
     QJsonArray images;
     for (const Job::Upload &upload : job.uploads) {
         if (upload.role == QLatin1String("mask") && !spec.maskField.isEmpty())
@@ -730,11 +755,11 @@ void ReplicateProvider::pollNow(const QString &id) {
 }
 
 // The picture, from Replicate's delivery host, with no key.
-void ReplicateProvider::download(const QString &id, const QUrl &url) {
+void ReplicateProvider::download(const QString &id, const QUrl &url, bool withKey) {
     const auto job = m_jobs.value(id);
     if (!job || job->status.isTerminal())
         return;
-    if (!downloadUrlAllowed(url, host()))
+    if (!replicateOutputAllowed(m_instance, url))
         return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1 named a picture at %2, which Fugue does not fetch.").arg(m_instance.name, clean(url.toString())),
                                   QStringLiteral("Only http and https links, and no local address of another machine, are fetched.")));
     job->phase = Phase::Downloading;
@@ -742,8 +767,13 @@ void ReplicateProvider::download(const QString &id, const QUrl &url) {
     status.state = QStringLiteral("running");
     status.stage = QStringLiteral("downloading");
     change(id, status);
-    call(id, send(url, "GET", {}, {}, false, kPictureCap), [this, id, job](QNetworkReply *reply) {
+    call(id, send(url, "GET", {}, {}, withKey, kPictureCap, {}, withKey), [this, id, job, url, withKey](QNetworkReply *reply) {
         const int code = codeOf(reply);
+        if (reply->property(kCapped).toBool())
+            return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1's picture is larger than Fugue fetches.").arg(m_instance.name), QStringLiteral("Run the node again with a smaller size.")));
+        // Replicate's own clients send the token to its delivery host: asked for once, after a refusal, under strict conditions.
+        if ((code == 401 || code == 403) && !withKey && replicateMayKeyDelivery(m_instance, url, job->hops))
+            return download(id, url, true);
         if (code >= 300 && code < 400 && code != 304) {
             const QUrl next = reply->url().resolved(QUrl(QString::fromLatin1(reply->rawHeader("Location"))));
             if (++job->hops > kMaxHops)
@@ -751,6 +781,9 @@ void ReplicateProvider::download(const QString &id, const QUrl &url) {
                                           QStringLiteral("Run the node again.")));
             return download(id, next);
         }
+        if (code == 401 || code == 403)
+            return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1 would not serve the picture (HTTP %2).").arg(m_instance.name).arg(code),
+                                      QStringLiteral("Run the node again; if it repeats, Replicate has changed how it serves files.")));
         if (code >= 400)
             return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1's picture link was refused (HTTP %2); it may have expired (they last an hour).").arg(m_instance.name).arg(code),
                                       QStringLiteral("Run the node again.")));
