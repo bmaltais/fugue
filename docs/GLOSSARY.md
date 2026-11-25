@@ -87,6 +87,26 @@ _Avoid_: model path, models dir
 A download not finished yet, `<file>.part` beside where the model goes; it becomes the model only once its hash is the handle's.
 _Avoid_: temp file, partial
 
+**App**:
+A workflow with an `app` block: a few inputs worth changing and the results, shown as one simple screen (the App view). The graph stays the truth; there is no second file format.
+_Avoid_: mini-app, form, wizard
+
+**App block**:
+The top-level `app` key of `workflow.fugue` that makes a workflow an app: title, inputs bound to node inputs, and outputs. Outside the cache key, kept by older Fugue.
+_Avoid_: app node, app file
+
+**App view**:
+The screen of an app: the form, Run, the stage and the takes. A mode of a workflow's tab, a view type of an area, or the whole of an app's own window; Open in Graph shows the same workflow as a graph.
+_Avoid_: app mode, simple mode
+
+**App bundle (.fugueapp)**:
+One file that shares an app with its packs and sample pictures, models kept as references. Opening it asks once on the Get ready sheet, then the app runs in a window of its own.
+_Avoid_: app package, app export
+
+**Take**:
+One run of an app, shown newest first in the App view's strip with the form it was run with. A take is a run of the existing History; the app keeps no store of its own.
+_Avoid_: result set, attempt, version
+
 **Template**:
 A ready-to-run workflow listed in the window and by `fugue template list`: a folder of the workflow, its description, a preview and sample pictures. Opening one makes a new workflow from it; the template itself is never edited. Bundled ones come from the fugue-workflows repo; a person keeps their own in ~/Documents/Fugue/templates.
 _Avoid_: example, preset, starter

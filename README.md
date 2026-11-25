@@ -125,6 +125,7 @@ This is a test release and the packages and the AppImage are unsigned.
 ## Docs
 
 - [docs/spec.md](docs/spec.md): the design and behavior.
+- [docs/apps.md](docs/apps.md): make an app from a workflow, run it, share it, run it from the command line.
 - [docs/nodes](docs/nodes/README.md): writing nodes and packs.
 - [docs/GLOSSARY.md](docs/GLOSSARY.md): the vocabulary.
 - [docs/ui-ergonomics.md](docs/ui-ergonomics.md): rules window UI follows.

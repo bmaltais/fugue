@@ -874,10 +874,12 @@ private slots:
         QCOMPARE(mode->property("currentIndex").toInt(), 0);
 
         QVERIFY(!find(app.window, "appClear"));
+        const QString picture = app.dir.path() + "/a.png"; // a real file: the stage and the strip load it
+        QVERIFY(QImage(4, 4, QImage::Format_RGB32).save(picture));
         rig.view.run();
         rig.view.onEvent("r1", QJsonObject{{"event", "run.started"}});
         rig.view.onEvent("r1", QJsonObject{{"event", "node.done"}, {"node", "save"},
-                                           {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", "file:///t/a.png"}, {"source", "/t/a.png"},
+                                           {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", QUrl::fromLocalFile(picture).toString()}, {"source", picture},
                                                                                             {"width", 4}, {"height", 4}}}}}});
         QVERIFY(!find(app.window, "appClear")); // the run still goes: Cancel is in the toolbar's place
         QVERIFY(find(app.window, "appCancel"));
