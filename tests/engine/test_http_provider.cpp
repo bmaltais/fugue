@@ -12,6 +12,7 @@
 #include "engine/http_provider.h"
 #include "engine/providers.h"
 #include "fake_http.h"
+#include "../test_shard.h"
 #include "provider_support.h"
 
 using namespace fugue;
@@ -614,5 +615,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestHttpProvider)
+FUGUE_TEST_MAIN(TestHttpProvider, QCoreApplication)
 #include "test_http_provider.moc"

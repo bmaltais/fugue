@@ -217,7 +217,7 @@ target_link_libraries(fugue PRIVATE fugue_core fugue_cli fugue_nodes fugue_app_r
 set(fugue_test_shards
     test_canvas_view_window=8 test_canvas_run=6 test_cli_canvas=6 test_cli_canvas_act=2 test_menus=4 test_settings_panel=4
     test_side_panels_window=4 test_basic_cli=3 test_canvas_window=3
-    test_chrome_window=3 test_canvas_look=2 test_canvas_widgets=2 test_canvas_editing=2 test_canvas_mask_editor=2 test_packs_page=2 test_omarchy_provider=2 test_projects_window=2 test_area_split_window=2 test_canvas_layers_window=2 test_app_window=3)
+    test_chrome_window=3 test_canvas_look=2 test_canvas_widgets=2 test_canvas_editing=2 test_canvas_mask_editor=2 test_packs_page=2 test_omarchy_provider=2 test_projects_window=2 test_area_split_window=2 test_canvas_layers_window=2 test_app_window=3 test_http_provider=2)
 function(fugue_add_test name)
   cmake_parse_arguments(ARG "OFFSCREEN" "" "" ${ARGN})
   set(count 1)
