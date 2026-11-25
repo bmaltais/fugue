@@ -50,28 +50,6 @@ QString oneLine(QString text) {
     return text.size() > 300 ? text.left(297) + QStringLiteral("...") : text;
 }
 
-// The picture's size from a PNG's header (8-byte signature, then IHDR: width and height as
-// big-endian 32-bit numbers); 0 x 0 for any other file.
-QSize pngSize(const QByteArray &bytes) {
-    if (bytes.size() < 24 || !bytes.startsWith("\x89PNG\r\n\x1a\n"))
-        return {};
-    const auto number = [&](int at) {
-        return (uchar(bytes[at]) << 24) | (uchar(bytes[at + 1]) << 16) | (uchar(bytes[at + 2]) << 8) | uchar(bytes[at + 3]);
-    };
-    return {number(16), number(20)};
-}
-
-// The format of picture bytes, from their first bytes; empty when unknown.
-QString formatOf(const QByteArray &bytes) {
-    if (bytes.startsWith("\x89PNG"))
-        return QStringLiteral("png");
-    if (bytes.startsWith("\xff\xd8"))
-        return QStringLiteral("jpeg");
-    if (bytes.size() > 12 && bytes.startsWith("RIFF") && bytes.mid(8, 4) == "WEBP")
-        return QStringLiteral("webp");
-    return {};
-}
-
 QByteArray mimeOf(const QJsonValue &image) {
     const QString format = image.toObject().value("format").toString();
     return format == QLatin1String("jpeg") ? "image/jpeg" : "image/png";

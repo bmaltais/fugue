@@ -2,6 +2,7 @@
 
 #include "engine/atomic_file.h"
 #include "engine/compiler.h"
+#include "engine/fal_provider.h"
 #include "engine/http_provider.h"
 #include "engine/json.h"
 #include "engine/node_type.h"
@@ -57,6 +58,9 @@ QString effectiveAddress(const ProviderInstance &instance) {
         return instance.address;
     // A provider module's own default address is used when the instance has none (providers.cpp moduleProvider): that is where
     // the data goes. A default with {port} is a loopback port the module starts for itself.
+    // fal.ai's queue is the default of a `fal` instance: a key alone must not skip the question (#407).
+    if (instance.type == QLatin1String("fal"))
+        return falDefaultAddress();
     static const QStringList builtin{QStringLiteral("omarchy"), QStringLiteral("http"), QStringLiteral("fugue-helper")};
     if (builtin.contains(instance.type))
         return {};

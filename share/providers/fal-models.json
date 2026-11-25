@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "note": "The fal.ai endpoints the `fal` provider offers (spec 8.7). Per endpoint: how Fugue's standard parameters (8.1) map to the model's own input fields. A field left out is not sent. `fixed` is sent as it is. Prices are fal.ai's published ones (2026-11-25), shown in the model's title.",
+  "models": [
+    {
+      "id": "fal-ai/flux/schnell", "title": "FLUX.1 [schnell]", "price": "$0.003/MP", "capability": "generate",
+      "size": "image_size", "steps": "num_inference_steps", "steps_max": 4, "guidance": "guidance_scale", "seed": "seed",
+      "defaults": {"steps": 4},
+      "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
+    },
+    {
+      "id": "fal-ai/flux/dev", "title": "FLUX.1 [dev]", "price": "$0.025/MP", "capability": "generate",
+      "size": "image_size", "steps": "num_inference_steps", "guidance": "guidance_scale", "seed": "seed",
+      "defaults": {"steps": 28, "guidance": 3.5},
+      "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
+    },
+    {
+      "id": "fal-ai/flux-pro/v1.1", "title": "FLUX1.1 [pro]", "price": "$0.04/MP", "capability": "generate",
+      "size": "image_size", "seed": "seed",
+      "fixed": {"num_images": 1, "output_format": "png", "safety_tolerance": "2"}
+    },
+    {
+      "id": "fal-ai/flux-pro/kontext", "title": "FLUX.1 Kontext [pro]", "price": "$0.04/image", "capability": "edit",
+      "guidance": "guidance_scale", "seed": "seed", "image": "image_url",
+      "defaults": {"guidance": 3.5},
+      "fixed": {"num_images": 1, "output_format": "png", "safety_tolerance": "2"}
+    },
+    {
+      "id": "fal-ai/flux-pro/v1/fill", "title": "FLUX.1 Fill [pro]", "price": "$0.05/MP", "capability": "inpaint",
+      "seed": "seed", "image": "image_url", "mask": "mask_url",
+      "fixed": {"num_images": 1, "output_format": "png", "safety_tolerance": "2"}
+    },
+    {
+      "id": "fal-ai/qwen-image", "title": "Qwen-Image", "price": "$0.02/MP", "capability": "generate",
+      "size": "image_size", "steps": "num_inference_steps", "guidance": "guidance_scale", "negative_prompt": "negative_prompt", "seed": "seed",
+      "defaults": {"steps": 30, "guidance": 2.5},
+      "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
+    }
+  ]
+}

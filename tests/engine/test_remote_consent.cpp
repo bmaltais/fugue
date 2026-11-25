@@ -84,6 +84,14 @@ private slots:
         QCOMPARE(placementOf(instance("Box", "http", "http://192.168.1.20:7860")), Placement::OwnHost);
         QCOMPARE(placementOf(instance("Tail", "http", "http://100.101.102.103:7860")), Placement::OwnHost);
         QCOMPARE(placementOf(instance("Mac", "http", "http://studio.local:7860")), Placement::OwnHost);
+        // A fal instance with only a key goes to fal's queue by default: off-machine, so the question is asked (#407).
+        const ProviderInstance fal = instance("fal.ai", "fal");
+        QCOMPARE(placementOf(fal), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(fal), QStringLiteral("https://queue.fal.run"));
+        QCOMPARE(hostOf(fal), QStringLiteral("queue.fal.run"));
+        QCOMPARE(consentFingerprint(fal), QStringLiteral("fal|https://queue.fal.run"));
+        QVERIFY(anyOffMachine({fal}));
+        QCOMPARE(placementOf(instance("fal.ai", "fal", "http://127.0.0.1:9")), Placement::ThisMachine); // a test's fake
         // A public name or address is off this machine, whatever the scheme.
         QCOMPARE(placementOf(instance("Cloud", "http", "https://api.example.com/v1")), Placement::OffMachine);
         QCOMPARE(placementOf(instance("Cloud", "http", "8.8.8.8:80")), Placement::OffMachine);

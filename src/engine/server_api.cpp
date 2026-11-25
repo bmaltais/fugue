@@ -218,6 +218,25 @@ QJsonObject chatBody(const QString &recipe, const JobRequest &request, Errors *e
     return body;
 }
 
+QSize pngSize(const QByteArray &bytes) {
+    if (bytes.size() < 24 || !bytes.startsWith("\x89PNG\r\n\x1a\n"))
+        return {};
+    const auto number = [&](int at) {
+        return (uchar(bytes[at]) << 24) | (uchar(bytes[at + 1]) << 16) | (uchar(bytes[at + 2]) << 8) | uchar(bytes[at + 3]);
+    };
+    return {number(16), number(20)};
+}
+
+QString formatOf(const QByteArray &bytes) {
+    if (bytes.startsWith("\x89PNG"))
+        return QStringLiteral("png");
+    if (bytes.startsWith("\xff\xd8"))
+        return QStringLiteral("jpeg");
+    if (bytes.size() > 12 && bytes.startsWith("RIFF") && bytes.mid(8, 4) == "WEBP")
+        return QStringLiteral("webp");
+    return {};
+}
+
 QJsonObject firstObject(const QJsonArray &array) { return array.isEmpty() ? QJsonObject() : array.first().toObject(); }
 
 QByteArray multipartBody(const QList<FormPart> &parts, QByteArray *boundary) {

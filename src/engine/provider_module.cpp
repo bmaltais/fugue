@@ -111,7 +111,14 @@ QList<ProviderModule> builtinProviderModules() {
     helper.capabilities = {QStringLiteral("text.encode"), QStringLiteral("latent.sample"),
                            QStringLiteral("latent.decode"), QStringLiteral("latent.encode"),
                            QStringLiteral("image.upscale"), QStringLiteral("image.restore")};
-    return {omarchy, http, helper};
+    ProviderModule fal;
+    fal.id = QStringLiteral("fal");
+    fal.version = QStringLiteral("1");
+    fal.name = QStringLiteral("fal.ai");
+    fal.transport = QStringLiteral("builtin");
+    fal.when = QStringLiteral("never");
+    fal.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    return {omarchy, http, helper, fal};
 }
 
 Result<QList<ProviderModule>> loadProviderModules(const QString &root) {
