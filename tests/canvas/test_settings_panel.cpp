@@ -59,6 +59,12 @@ bool panelOpen(QQuickWindow *window) {
 // Where `item` is once the layouts have placed it: a list that just changed moves its rows
 // when the next frame is polished, so the item must stay put for a few frames first.
 QPoint settled(QQuickItem *item) {
+    // A row's tray still opening clips its body: a click on a control half inside it falls through to the row under it
+    // (the Providers key field caught a row header in about half the runs). Wait until no row around the item animates.
+    for (QQuickItem *up = item->parentItem(); up; up = up->parentItem())
+        if (up->property("animating").isValid())
+            for (int i = 0; i < 200 && up->property("animating").toBool(); ++i)
+                QTest::qWait(10);
     QPoint at = centerOf(item);
     for (int still = 0, i = 0; still < 5 && i < 50; ++i) {
         QTest::qWait(10);
