@@ -2078,6 +2078,8 @@
   "More models": "More models",
   "Extra endpoint ids, separated by commas": "Extra endpoint ids, separated by commas",
   "Extra model ids, separated by commas": "Extra model ids, separated by commas",
+  "Extra official model ids (owner/name), separated by commas": "Extra official model ids (owner/name), separated by commas",
+  "Open image models, run in the cloud": "Open image models, run in the cloud",
   "Storage address": "Storage address",
   "Empty is https://rest.fal.ai": "Empty is https://rest.fal.ai",
   "Timeout (seconds)": "Timeout (seconds)",

@@ -1481,6 +1481,7 @@ A provider instance is a configured use of a provider module, stored in
   the only network action of the page. **Cloud services:** fal.ai (`fal`, no address: the type's own `https://queue.fal.run`,
   keys at fal.ai/dashboard/keys), Google Gemini (`gemini`, no address: the type's own `https://generativelanguage.googleapis.com`,
   keys at aistudio.google.com/apikey), OpenAI (`http`, `https://api.openai.com/v1`), Together AI (`http`, `https://api.together.ai/v1`),
+  Replicate (`replicate`, no address: the type's own `https://api.replicate.com`, keys at replicate.com/account/api-tokens),
   OpenRouter (`http`, `https://openrouter.ai/api/v1`). Each says "Sends your pictures and prompts to <name>" under its title.
   **Your own machines:** a local OpenAI-compatible server (`http`, `http://localhost:1234/v1`, no key: LM Studio, llama.cpp, vLLM),
   an Omarchy host (`omarchy`, address to fill), a Fugue helper on another machine (`fugue-helper`, address and key to fill).
@@ -1496,7 +1497,7 @@ A provider instance is a configured use of a provider module, stored in
   (Tailscale) address or a `.local`, `.internal` or `.ts.net` name: the test the `http` provider applies to the pictures a
   service may make Fugue fetch, 8.7, plus the tailnet's names, so there is one idea of "local"), or *off-machine* (any
   other type at any other address: a cloud service). The address is the one the provider really uses: an http provider
-  module's default `address` (8.8) when the instance has none, `https://queue.fal.run` for a `fal` instance and `https://generativelanguage.googleapis.com` for a `gemini` instance. Nothing is asked for the first two: the person typed the
+  module's default `address` (8.8) when the instance has none, `https://queue.fal.run` for a `fal` instance, `https://generativelanguage.googleapis.com` for a `gemini` instance and `https://api.replicate.com` for a `replicate` one. Nothing is asked for the first two: the person typed the
   address in and it is their own network. **The limit:** a stdio provider module is a program that runs here, so it counts as
   this machine even if its program calls a cloud API itself; Fugue cannot see that, and the module's description should say it.
   - **The question.** Before a run whose plan would run a node on an off-machine instance (the nodes that are not cached, found
@@ -1583,11 +1584,12 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | `http` | A generic endpoint: OpenAI-compatible images and text, and the stable-diffusion.cpp native API. | M4 |
 | `fal` | fal.ai's image models, from a key alone: `image.generate`, `image.edit` and inpainting with a mask ([the `fal` provider](#87-shipped-providers), #407). | M6 |
 | `gemini` | Google's Gemini image models (Nano Banana), from a key alone: `image.generate` and `image.edit` with pictures ([the `gemini` provider](#87-shipped-providers), #407). | M6 |
+| `replicate` | Replicate's official image models, from a token alone: `image.generate`, `image.edit` and inpainting with a mask ([the `replicate` provider](#87-shipped-providers), #407). | M6 |
 | `fugue-helper` | Fugue's own out-of-process generation helper and a Fugue-managed server, started on demand ([8.10](#810-gpu-memory-and-the-helper)). | M5 |
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal`, `gemini` and `fugue-helper` are
+third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal`, `gemini`, `replicate` and `fugue-helper` are
 listed as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
 Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, the helper's
 program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)), and `http` needs what a module
@@ -1826,6 +1828,76 @@ question of #404 is asked before anything is sent.
   levels, multi-turn editing, a mask, a cost estimate before a run.
 - **Not checked against the real service**: no Gemini key was used and no call was made to Google (documentation only). The tests use
   a fake API on the loopback whose answers follow Google's documentation.
+
+**The `replicate` provider** (#407, approved by the owner 2026-11-25) gives a person who pastes only their Replicate API token
+Replicate's official image models in the model pickers: `{"name": "Replicate", "type": "replicate", "key": "r8_…"}` in `providers.json`.
+Compiled in like `fal`, for the same reason. It serves `image.generate`, `image.edit` and, with a mask, inpainting. It is off-machine
+([8.2](#82-provider-instances)): `placementOf` takes the default address `https://api.replicate.com` for an instance with none, so the
+consent question of #404 is asked before anything is sent. Unlike fal there is one host, so the consent fingerprint is the address alone.
+
+| Setting | Meaning |
+| --- | --- |
+| `key` | Sent as `Authorization: Bearer <key>` to the origin of `address` only. Never to a picture URL or a redirect (none is followed on an API call); the one exception is an output file at `replicate.delivery` that refuses the first, keyless fetch (below). Without a key the models are `unavailable` and a job is refused before anything is sent. |
+| `address` | The API's root, default `https://api.replicate.com`. Tests point it at a local fake. |
+| `image_models` | More official model ids, `owner/name` (a list, or text separated by commas), with a generic mapping: `prompt`, `seed`, `image`. An id that is not `owner/name` is ignored. Only official models can be run by name (a community model needs a version id: not built). |
+| `timeout_s` | How long a request may go silent before the job fails (default 300). A job is given up on, in any phase, after 6 times that (`node_timeout`; the transfer is cut and the prediction cancelled). |
+| `poll_ms` | The first wait between polls (default 500, growing by half each time to 6 times it; back to the first when the state changes). |
+
+- **Models.** A table shipped with Fugue (`share/providers/replicate-models.json`, compiled in) lists each model with its title, published
+  price, kind (generate, edit, inpaint) and how Fugue's standard parameters ([8.1](#81-capabilities)) become the model's own `input` fields,
+  read from each model's published input schema. Replicate's models take an aspect ratio and a megapixel class, not a width and height:
+  the node's size becomes the nearest `aspect_ratio` the model lists (on a log scale) and, where the model has one, the nearest
+  megapixel value; a model that follows its picture (Kontext, Qwen-Image Edit, Klein with a picture: `match_input_image`) gets no size.
+  `seed`, steps (cut to the model's limit), guidance, a negative prompt where the model has one, the picture (`input_image`, `image` or
+  a list `images`) and the mask (`mask`; white is redrawn, as Fugue sends it); fixed: `output_format` png. Prices checked 2026-11-25:
+
+| Model | Offered for | Price |
+| --- | --- | --- |
+| `black-forest-labs/flux-schnell` | `image.generate` | $0.003 per image |
+| `black-forest-labs/flux-2-klein-4b` | `image.generate`, and `image.edit` (up to 5 pictures: the table's `images_max`) | $0.001 per megapixel |
+| `qwen/qwen-image` | `image.generate` | $0.025 per image |
+| `black-forest-labs/flux-kontext-dev` | `image.edit` (one picture) | $0.025 per image |
+| `qwen/qwen-image-edit` | `image.edit` (one picture) | $0.03 per image |
+| `black-forest-labs/flux-fill-dev` | `image.generate` with a picture and a mask (`inputs: ["mask"]`) | $0.04 per image |
+
+  The refusals are fal's: a start picture for a text-only model is `input_invalid`, a mask for a model with none `mask_unsupported`, an
+  edit with no picture or an inpaint with no mask `missing_input`.
+- **The flow.** `POST <address>/v1/models/<owner>/<name>/predictions` (`{"input": {...}}`, header `Cancel-After` set to the job's deadline,
+  so Replicate stops a prediction nobody waits for) answers 201 with `urls.get` and `urls.cancel`; these are the only URLs used afterwards
+  and must be on the API's origin, or the job fails before the key goes there. `GET urls.get` is polled (`starting`, shown as queued;
+  `processing`; then `succeeded` with `output`, or `failed` with `error`, `canceled`, `aborted`). The first output URL (`replicate.delivery`)
+  is downloaded **without the key**, under the `http` provider's URL rules (3 hops, 512 MB). Replicate's own clients send the token to
+  the delivery host, and its output-files page says to; so when that first fetch is answered 401 or 403 it is repeated **once** with the key,
+  and only when all hold: the instance's address is the default `https://api.replicate.com` (an overridden or loopback address was agreed to
+  for that address only), the URL is `https` on port 443, its host (case-folded) is `replicate.delivery` or ends in `.replicate.delivery`,
+  it is the first hop (never on or after a redirect; a redirect drops the key), and there is a key (`replicateMayKeyDelivery`). Cancel is at once: the job is `cancelled`,
+  polling stops and `POST urls.cancel` is sent (a cancel made while the job is being sent is sent when its URLs arrive). `Prefer: wait`
+  is not used: one polling path serves a 1 s model and a 60 s one alike.
+- **Pictures.** Up to 256 KB (the HTTP reference's limit for data URLs) goes in the input as a `data:` URI, which Replicate does not store; a larger
+  one is uploaded with the files API (`POST /v1/files`, multipart `content`, 100 MB at most, with the key) and its `urls.get` (checked to be
+  on the API origin) goes in the input. The files API keeps a copy on Replicate for its own lifetime, which is why the small path is a
+  data URI.
+- **What still leaves the machine.** The prompt and other fields and every picture and mask go to Replicate. For predictions made
+  through the API Replicate removes inputs, outputs and logs after one hour (its documentation), and output files expire after an hour
+  too; there is no setting to ask for more or less. The key is in no message, status, result, run record or log: error texts are
+  scrubbed of it.
+- **Errors**, as fal's table (13.3), with these differences: 402 (no credit) is `provider_unreachable` with a hint to add credit at
+  replicate.com/account/billing; the body is `{title, detail, status}` or, on a 422, `{detail, invalid_fields: [{field, description}]}`;
+  a `failed` prediction is `node_failed` with its `error` ("NSFW content detected" says content policy; E1001 or "out of memory" is
+  `out_of_memory`; E6716, E9243 and E8765 are `provider_unreachable`). Polls are retried as fal's. No retry of a submit.
+- **Wire details** confirmed from Replicate's HTTP API reference, its OpenAPI schema and its Python client (2026-11-25): the key header is
+  `Bearer`, the official-model endpoint, `Prefer: wait` 1 to 60 s, `Cancel-After` (5 s minimum), the status values, the files API's
+  multipart `content` field and 201 answer with `urls.get`, the rate limits (600 predictions and 3000 other calls per minute; 429 with
+  a `detail`).
+- **Decisions** (the builder's, each with its confidence; overturn any): a data URI up to 256 KB and the files API above it (medium-high:
+  the HTTP reference says 256 KB, the input-files guide 1 MB, no hard limit is published); seeds are reduced modulo 2^31 (the models
+  publish no seed range; Fugue's go to 2^53-1; the table's `seed_max` overrides) and the value sent is the one reported; no `Prefer: wait`, polling only (high); the output is fetched without
+  the key first and with it once on a 401 or 403 under the conditions above (medium-high, owner's decision after review); the seed reported is the one sent, as Replicate returns none (high); `image_models` takes official ids
+  only (high).
+- **Not checked against the real service**: no Replicate token was at hand. Whether `replicate.delivery` really answers 401 or 403
+  without the key is not observed: the retry costs nothing if it does not. A refusal after the retry is `node_failed` ("would not serve
+  the picture"), without a hint of expiry.
+  Not built: a cost estimate, community models by version id, several outputs, upscale, video, webhooks and `Prefer: wait`.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:

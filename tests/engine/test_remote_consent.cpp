@@ -111,6 +111,13 @@ private slots:
         QCOMPARE(effectiveAddress(gemini), QStringLiteral("https://generativelanguage.googleapis.com"));
         QCOMPARE(consentFingerprint(gemini), QStringLiteral("gemini|https://generativelanguage.googleapis.com"));
         QCOMPARE(placementOf(instance("Google Gemini", "gemini", "http://127.0.0.1:9")), Placement::ThisMachine);
+        // A replicate instance with only a key goes to Replicate's API by default: off-machine, so the question is asked (#407).
+        const ProviderInstance replicate = instance("Replicate", "replicate");
+        QCOMPARE(placementOf(replicate), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(replicate), QStringLiteral("https://api.replicate.com"));
+        QCOMPARE(consentFingerprint(replicate), QStringLiteral("replicate|https://api.replicate.com"));
+        QCOMPARE(consentFingerprint(instance("Replicate", "replicate", "https://api.replicate.com/")), consentFingerprint(replicate));
+        QCOMPARE(placementOf(instance("Replicate", "replicate", "http://127.0.0.1:9")), Placement::ThisMachine);
         // A public name or address is off this machine, whatever the scheme.
         QCOMPARE(placementOf(instance("Cloud", "http", "https://api.example.com/v1")), Placement::OffMachine);
         QCOMPARE(placementOf(instance("Cloud", "http", "8.8.8.8:80")), Placement::OffMachine);
