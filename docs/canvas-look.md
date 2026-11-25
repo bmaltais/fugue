@@ -793,10 +793,13 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Header, compact, tones, soft fade | `KitHero` | Partly |
 | Section title, group, row, separator | `KitSection`, `KitGroup`, `KitRow`, `KitSeparator` | Built (group fill and border adapt to the tint, 20.5) |
 | Recessed field, smoked mode | `KitWell` | Built (numbers to align, 20.6) |
-| Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7) |
+| Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7); `KitChip.toned` tints a chip that is on with the panel's tone |
 | Toggle | `KitToggle` | Partly (pill, white knob, 100 ms; no tone, glass, halo) |
 | Segmented chooser | `KitSegmented` (new) | To build |
 | Slider | `KitSlider` | Partly (accent fill, white knob; no tone, halo, recessed rail) |
+| Card (pressable, raised), search field | `KitCard`, `KitSearch` | Built (20.19) |
+| Picture, still or moving | `KitPicture`, `KitVideo` | Built (20.19); `KitHero` plays a clip (`video`, `videoActive`) |
+| Apps shelf (page, dialog), Templates window | `AppShelfView`, `AppCard`, `TemplatesDialog` | Built (20.19): Dusk and Sea panels, hero, search, cards, tinted chips |
 | Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | To build (Flat is today's face) |
 | App icon, wordmark | `share/icons`, `share/brand`, `fugueMark` | Built |
 | Settings Frost / Panel colour / Node style | `SettingsPanel.qml`, `settings.cpp` | Frost built; the other two To build |
@@ -1115,6 +1118,28 @@ frame; the header's fade is one shader pass over its art. **The sliders cost not
 bindings read when a slider moves. **Fallbacks:** on the software renderer, or when Frost is 0, glass, halos and the fade give way to
 plain fills (the header keeps its square art and strong foot shade). **Reduced motion** (`motion`: `reduced`, a look parameter) sets
 every duration to 0. First frame of the App view after open, offscreen on the CI-like test home: about 0.4 s.
+
+### 20.19 Cards, search, moving previews, the shelf and the Templates window (Built)
+
+- **KitCard.** A pressable card: the group's glass fill (twice as strong on a dark theme, so it stands out of the tint), `KitRaise`'s
+  light top edge and soft shadow, the `cornerGroup` corner (min of that and 20% of its size), a 1px hairline (`borders`), lighter
+  under the pointer, the 2px accent ring while it has the keyboard's place. Flat: the same code with square corners and the opaque
+  group fill. `tapped` says it was pressed; a chip inside keeps its own press.
+- **KitSearch.** A `KitWell` (recessed, accent ring while focused), a search glyph, the placeholder, a clear button while there is
+  text; Enter is `accepted`, Down is `down`; Escape is left to the dialog (it closes).
+- **KitPicture, KitVideo.** A rounded picture (the thumbnail shader, square on the software renderer) of a still, with the clip
+  over it. `KitVideo` keeps the budget of 20.17 in one place: the player gets its source the first time the clip is wanted; wanted
+  is "the owner says active" and the window is the active one and `motion` is not `reduced` and the clip did not fail; when not
+  wanted the player is stopped (position 0, no decoding, nothing drawn), the poster shows; the clip fades over the poster in twice
+  the colour duration. Muted (no audio output), looping. The frosted controls over it blur and measure the still behind them as
+  before (`PictureLuma` reads the poster, no per-frame work); the blur copy follows the frames, a small texture.
+- **The shelf** (`AppShelfView`: a Dusk `KitPanel`, a `KitHero` with the frosted Browse templates and Start blank, the search, the
+  grid of `AppCard`s; one component for the page, with a 2u gap of window background round it, and the dialog, with the level 3
+  shadow): the card has a picture (10:16) that plays only while hovered or focused (one clip at a time), the pin and the menu frosted over its corner (shown while the
+  card is hovered or focused; the pin stays when pinned), the title, three lines, the readiness line. **The Templates window**: a
+  Sea panel, the hero with a close button, the categories as rows (the chosen one in the Sea tone), the search, two drop-downs, the
+  two chips (`KitChip` pill, `toned`), the cards as `KitCard`s with a frosted info button on the picture.
+- **Keys.** See docs/ui-ergonomics.md "Apps shelf and Templates window in the Drift kit".
 
 ### 20.18 The app's own window
 

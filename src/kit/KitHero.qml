@@ -20,6 +20,8 @@ Item {
     id: hero
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
     property url source // the picture; empty for the tone's blend
+    property url video // its moving preview (a WebM): plays over the picture while `videoActive` (KitVideo keeps the budget)
+    property bool videoActive: false
     readonly property url shownSource: look.params.heroStyle === "picture" ? source : "" // "tone" and "plain" never show it
     property string title
     property string subtitle
@@ -110,6 +112,15 @@ Item {
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             sourceSize.width: 2 * hero.width
+        }
+        KitVideo {
+            objectName: "heroVideo"
+            anchors.fill: parent
+            look: hero.look
+            visible: hero.shownSource.toString() !== ""
+            source: hero.video
+            active: hero.videoActive && hero.shownSource.toString() !== ""
+            fillMode: Image.PreserveAspectCrop
         }
         Rectangle {
             anchors.left: parent.left
@@ -251,7 +262,7 @@ Item {
     }
     Row {
         id: actionRow
-        x: hero.width - width - hero.edge
+        x: (hero.showClose ? close.x - hero.look.unit : hero.width - hero.edge) - width
         y: 3 * hero.look.unit
         spacing: hero.look.unit
     }

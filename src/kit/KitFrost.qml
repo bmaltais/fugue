@@ -68,7 +68,7 @@ Item {
     // Measuring: a grab of the backdrop at 64 px, the mean taken over the rectangle behind this control. Where the renderer has
     // source textures the grab is taken from a hidden probe of the backdrop (the hero hides its own picture under a shader).
     function measure() {
-        if (frozen || !backdrop || backdrop.width <= 0 || backdrop.height <= 0 || width <= 0)
+        if (frozen || !backdrop || !backdrop.window || backdrop.width <= 0 || backdrop.height <= 0 || width <= 0)
             return
         const at = frost.mapToItem(backdrop, 0, 0, width, height)
         const nx = at.x / backdrop.width, ny = at.y / backdrop.height, nw = at.width / backdrop.width, nh = at.height / backdrop.height

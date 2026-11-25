@@ -129,6 +129,8 @@ Rectangle {
                     Layout.fillWidth: true
                     look: page.look
                     source: page.appView.preview
+                    video: page.appView.previewVideo
+                    videoActive: page.visible // KitVideo adds the window's focus; the poster stays under reduced motion
                     title: page.appView.title
                     subtitle: page.appView.description
                     tone: page.tone

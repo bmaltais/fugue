@@ -811,7 +811,9 @@ QVariantList Workflows::templates() const {
                                {"source", t.source.toVariantMap()},
                                {"families", t.families},
                                {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
+                               {"video", t.video.isEmpty() ? QString() : QUrl::fromLocalFile(t.video).toString()},
                                {"own", t.own},
+                               {"inherited", t.inherited},
                                {"missingModels", missing},
                                {"ready", places.ready},
                                {"local", places.local},
@@ -870,6 +872,37 @@ bool Workflows::openTemplateById(const QString &id) {
         return false;
     }
     return openTemplate(*chosen);
+}
+
+QString Workflows::duplicateTemplate(const QString &id, const QString &title) {
+    const TemplateLibrary library(m_templateRoots, m_registry);
+    const std::optional<Template> chosen = library.find(id);
+    if (!chosen) {
+        setNotice(tr("There is no template %1.").arg(id));
+        return {};
+    }
+    QString copied;
+    if (const Errors failed = library.duplicate(*chosen, title, &copied); !failed.isEmpty()) {
+        setNotice(failed.first().message);
+        return {};
+    }
+    emit templatesChanged();
+    return copied;
+}
+
+bool Workflows::renameTemplate(const QString &id, const QString &title) {
+    const TemplateLibrary library(m_templateRoots, m_registry);
+    const std::optional<Template> chosen = library.find(id);
+    if (!chosen) {
+        setNotice(tr("There is no template %1.").arg(id));
+        return false;
+    }
+    if (const Errors failed = library.rename(*chosen, title); !failed.isEmpty()) {
+        setNotice(failed.first().message);
+        return false;
+    }
+    emit templatesChanged();
+    return true;
 }
 
 bool Workflows::openClipboard() {

@@ -554,16 +554,20 @@ private slots:
         QTest::keyClick(app.window, Qt::Key_Left);
         QTRY_COMPARE(takes->property("currentIndex").toInt(), 0);
 
-        // All apps: the key opens the shelf with the focus on the cards; Escape closes it; Enter opens the focused card.
+        // All apps: the key opens the shelf with the focus on the search; Escape closes it; Down goes to the cards and Enter opens
+        // the focused card.
         QVERIFY(app.commands.run("app.show-all"));
         QObject *dialog = nullptr;
         QTRY_VERIFY((dialog = app.window->findChild<QObject *>("appsDialog")) && dialog->property("visible").toBool());
-        QQuickItem *grid = nullptr;
-        QTRY_VERIFY((grid = find(app.window, "appShelfGrid")) && grid->hasActiveFocus());
+        QQuickItem *search = nullptr;
+        QTRY_VERIFY((search = find(app.window, "appsSearch")) && search->hasActiveFocus());
         QTest::keyClick(app.window, Qt::Key_Escape);
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QVERIFY(app.commands.run("app.show-all"));
         QTRY_VERIFY(dialog->property("visible").toBool());
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((search = find(app.window, "appsSearch")) && search->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Down);
         QTRY_VERIFY((grid = find(app.window, "appShelfGrid")) && grid->hasActiveFocus());
         QTest::keyClick(app.window, Qt::Key_Return);
         QTRY_COMPARE(app.workflows.count(), 2);

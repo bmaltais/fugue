@@ -2329,6 +2329,15 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   a preview (`preview.webp`, `.png` or `.jpg`) and `inputs/`, the sample pictures its Load Image
   nodes name as `inputs/<name>`. A root of templates may hold `categories.json`, the order and
   titles of its categories. Nothing indexes the templates: a root's folders are its templates.
+- A template may have a **moving preview** (docs/canvas-look.md 20.19): `template.json`'s `preview` names a file of the folder, a still
+  (`preview.webp`, `.png`, `.jpg`) or a WebM (`"preview": "preview.webm"`, VP9, no audio, a loop of 3 to 4 seconds, 640 by 640,
+  under 600 KB), and for a WebM `poster` names its still (`"poster": "poster.png"`; else `poster.png`, else the conventional
+  `preview.webp|png|jpg`, which the bundled templates keep as the fallback). Without the key the conventional stills are found, and
+  a `preview.webm` beside them is the moving preview. A name that is not a plain file of the folder is ignored. The still (the
+  poster) is `preview` in `Workflows::templates()` and everywhere a picture is wanted (frosted ink reads it); the clip is `video`.
+  The apps shelf's card and the App view's header play it muted and looped only while visible (card hovered or focused;
+  the open app's header) and the window is focused, stop otherwise, and under reduced motion (`motion` look parameter) show the
+  poster only. `bin/check` of fugue-workflows reads both keys and limits each file to 600 KB.
 - A template folder may also hold `packs/<id>/`, the exact pack its nodes need (a pack folder,
   [6.4](#64-packjson)), so it runs whatever Fugue ships. It is offered, never
   installed on its own: the banner of the opened template says it carries the pack and its button
@@ -3146,6 +3155,16 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   for the session (an empty graph). A window that is given a workflow or reopens its tabs never makes the shelf: the
   catalog is read only when the shelf is shown (`AppShelf::refresh`). With no apps it says so and offers **Browse
   templates…**.
+  In the Drift kit (#463): a Dusk panel (`AppShelfView.qml`, one component for the page and the dialog) with a `KitHero` header (the
+  frosted Browse templates and Start blank buttons), a search field (`KitSearch`, a recessed well) and kit cards (`KitCard`,
+  raised) over `KitPicture`s that move (the app's WebM, 11.10) while in view and the window is focused. **Search, pins, copies,
+  names** (#470): the search narrows the cards live by every word in the title, summary or kind (`AppShelf.query`, `shown`);
+  a pinned app (the pin on its picture, Ctrl+B) comes first and stays pinned for the person (`app-bookmarks.json` in the state
+  folder, ids only); **Duplicate** makes a whole copy as the person's own app (`<id>-copy` in the own templates folder, titled
+  "<name> copy", the original untouched) and opens it in the App view; **Rename** changes the title of one of the person's own
+  apps only (`template.json` and the workflow's app block), never a bundled or inherited one. Keys: the search has the focus on
+  open; Down or Tab go to the cards, the arrows move, Enter or Space open, F2 renames, Ctrl+D duplicates, Ctrl+B pins, Menu or
+  Shift+F10 opens the card's menu; Escape closes the dialog.
 - **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `setSeedMode`, `setImageFiles`, `pasteImage`, `useImage`, `maskPicture`, `models`, `pickModel`, `run`, `cancel`,
   `status`, `progress`, `error`, `details`, `results`, `takes`, `takeIndex`, `shownResults`, `selectTake`, `reuseInputs`, `runAgain`, `saveResult`, `useResultAsInput`, `useSample`, `liveFrame`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
   it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.

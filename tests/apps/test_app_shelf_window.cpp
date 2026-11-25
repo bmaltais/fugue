@@ -121,6 +121,9 @@ struct Rig {
         app.runs = &runs;
         bindAppView(view, app.workflows, app.model, service, app.commands, runs);
         app.appView = &view;
+        shelf.setBookmarksFile(app.dir.path() + "/app-bookmarks.json");
+        shelf.setActions([&app](const QString &id, const QString &title) { return app.workflows.duplicateTemplate(id, title); },
+                         [&app](const QString &id, const QString &title) { return app.workflows.renameTemplate(id, title); });
         QObject::connect(&app.workflows, &Workflows::tabsChanged, &shelf, [this, &app] { shelf.setLanding(app.workflows.nothingOpen()); });
         app.appShelf = &shelf;
     }
@@ -261,6 +264,187 @@ private slots:
         QCOMPARE(app.model.view().value("zoom").toDouble(), before.value("zoom").toDouble());
         QCOMPARE(app.model.view().value("center").toList(), before.value("center").toList());
         saveGrab(app.window, "graph-from-shelf");
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+
+    // The shelf by keys alone (#463, #470): the focus is on the search, which narrows the cards live; Down goes to the cards,
+    // Ctrl+B pins one to the top (kept in a file), F2 renames one of the person's own apps, Ctrl+D copies one and opens the copy in the
+    // App view. A bundled app has no Rename.
+    void theShelfSearchesPinsRenamesAndDuplicatesByKeys() {
+        QTemporaryDir root, mine;
+        makeApp(root.path(), "alpha-app", "Alpha app", false);
+        makeApp(root.path(), "beta-app", "Beta app", false);
+        makeApp(mine.path(), "own-app", "Own app", false);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{mine.path(), true}, {root.path(), false}});
+        QVERIFY(app.open());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QQuickItem *search = nullptr;
+        QTRY_VERIFY((search = find(app.window, "appsSearch")) && search->hasActiveFocus());
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = find(app.window, "appShelfGrid")));
+        const auto order = [&] {
+            QStringList ids;
+            for (const QVariant &card : rig.shelf.shown())
+                ids << card.toMap().value("id").toString();
+            return ids;
+        };
+        QTRY_COMPARE(order(), (QStringList{"own-app", "alpha-app", "beta-app"}));
+
+        // Typing narrows the cards at once; the others have no card.
+        for (const char c : {'b', 'e', 't'})
+            QTest::keyClick(app.window, c);
+        QTRY_COMPARE(order(), QStringList{"beta-app"});
+        QTRY_VERIFY(!find(app.window, "appCard-alpha-app"));
+        QVERIFY(find(app.window, "appCard-beta-app"));
+        search->setProperty("text", "nothing like it");
+        QTRY_VERIFY(find(app.window, "appShelfEmpty"));
+        QVERIFY(find(app.window, "appShelfEmptyText")->property("text").toString().contains("nothing like it"));
+        search->setProperty("text", "");
+        QTRY_COMPARE(order().size(), 3);
+
+        // Down goes to the cards; Ctrl+B pins the focused one to the top, and it stays there in the next session.
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        grid->setProperty("currentIndex", 2); // beta
+        QTest::keyClick(app.window, Qt::Key_B, Qt::ControlModifier);
+        QTRY_COMPARE(order().first(), QString("beta-app"));
+        QVERIFY(rig.shelf.isBookmarked("beta-app"));
+        QVERIFY(QFileInfo(app.dir.path() + "/app-bookmarks.json").size() > 0);
+
+        // F2 on a bundled app does nothing; on the person's own it opens the name field, Enter keeps the new name.
+        grid->setProperty("currentIndex", 2); // alpha, bundled
+        QTest::keyClick(app.window, Qt::Key_F2);
+        QTest::qWait(50);
+        QVERIFY(!find(app.window, "appRename-alpha-app"));
+        grid->setProperty("currentIndex", 1); // own-app
+        QTest::keyClick(app.window, Qt::Key_F2);
+        QQuickItem *name = nullptr;
+        QTRY_VERIFY2((name = find(app.window, "appRename-own-app")), "the name field is made");
+        QTRY_VERIFY2(name->hasActiveFocus(), "the name field has the keyboard");
+        QCOMPARE(name->property("text").toString(), QString("Own app"));
+        name->setProperty("text", "Renamed app");
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_COMPARE(find(app.window, "appTitle-own-app")->property("text").toString(), QString("Renamed app"));
+        QVERIFY(!find(app.window, "appRename-own-app"));
+        QTRY_VERIFY(grid->hasActiveFocus());
+        // Escape in the name field keeps the old name.
+        QTest::keyClick(app.window, Qt::Key_F2);
+        QTRY_VERIFY((name = find(app.window, "appRename-own-app")) && name->hasActiveFocus());
+        name->setProperty("text", "Never kept");
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!find(app.window, "appRename-own-app"));
+        QCOMPARE(find(app.window, "appTitle-own-app")->property("text").toString(), QString("Renamed app"));
+
+        // Ctrl+D makes the person's copy and opens it in the App view; the shelf goes.
+        QTest::keyClick(app.window, Qt::Key_D, Qt::ControlModifier);
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QVERIFY(QFileInfo(mine.path() + "/own-app-copy/workflow.fugue").isFile());
+        QVERIFY(!find(app.window, "appsHome"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+
+    // FUGUE_SHOT_DIR=<dir>: the shelf at home, the Apps dialog over a graph and the Templates window, at 1888x971 and 900x700, over
+    // the bundled templates (their moving previews stay on the poster here: the clip needs the window to be the active one).
+    // FUGUE_SHOT_THEME (default tokyo-night) and FUGUE_SHOT_LOOK ("preset=flat;frost=0") as test_app_window's. For looking.
+    void theShelfAndTemplatesInTwoSizes() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        const QString themeName = qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night"));
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG");
+        const QString out = QString::fromLocal8Bit(dir) + "/" + themeName + (tag.isEmpty() ? QString() : "-" + tag);
+        QDir().mkpath(out);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"), {}, Look{themeName, 12});
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/templates"), false}});
+        QVERIFY(app.open());
+        for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
+            const QStringList kv = part.split('=');
+            QVERIFY(kv.size() == 2);
+            QCOMPARE(kv[0] == "preset" ? app.settings.applyLookPreset(kv[1]) : app.settings.set(kv[0], kv[1].toDouble()), QString());
+        }
+        rig.shelf.toggleBookmark("remove-background"); // one pinned, to see it
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        const auto grab = [&](const QString &name) {
+            QTest::qWait(400); // the pictures decode, the frosted buttons measure
+            test_support::grab(app.window).save(out + "/" + name + ".png");
+        };
+        const QList<QSize> sizes{QSize(1888, 971), QSize(900, 700)};
+        const auto suffixOf = [](const QSize &size) { return QString("-%1x%2").arg(size.width()).arg(size.height()); };
+        for (const QSize &size : sizes) {
+            app.window->resize(size);
+            QTRY_COMPARE(app.window->width(), size.width());
+            QTRY_VERIFY(find(app.window, "appsHome"));
+            QTRY_VERIFY(find(app.window, "appCard-remove-background"));
+            grab("shelf-home" + suffixOf(size));
+            if (QQuickItem *card = find(app.window, "appCard-image-upscale")) { // the pointer on a card: its buttons show
+                QTest::mouseMove(app.window, card->mapToScene(QPointF(card->width() / 2, card->height() / 3)).toPoint());
+                grab("shelf-hover" + suffixOf(size));
+            }
+            QTest::mouseMove(app.window, QPoint(2, 2));
+        }
+        tap(app.window, "appsStartBlank");
+        QTRY_VERIFY(find(app.window, "canvas"));
+        for (const QSize &size : sizes) {
+            app.window->resize(size);
+            QTRY_COMPARE(app.window->width(), size.width());
+            QVERIFY(app.commands.run("app.show-all"));
+            QTRY_VERIFY(app.window->findChild<QObject *>("appsDialog")->property("opened").toBool());
+            grab("apps-dialog" + suffixOf(size));
+            QTest::keyClick(app.window, Qt::Key_Escape);
+            QTRY_VERIFY(!app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
+            QVERIFY(app.commands.run("file.templates"));
+            QTRY_VERIFY(app.window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+            QTRY_VERIFY(find(app.window, "templatesGrid"));
+            grab("templates" + suffixOf(size));
+            QTest::keyClick(app.window, Qt::Key_Escape);
+            QTRY_VERIFY(!app.window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        }
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+
+    // Every control of the shelf is reachable by keys (the epic's keyboard rule): Shift+Tab from the search goes back to the header's
+    // buttons, Enter on Start blank gives the graph.
+    void theHeaderButtonsAreReachableByTab_data() {
+        QTest::addColumn<QString>("preset");
+        QTest::newRow("calm") << "calm";
+        QTest::newRow("flat") << "flat";
+    }
+    void theHeaderButtonsAreReachableByTab() {
+        QFETCH(QString, preset);
+        QTemporaryDir root;
+        makeApp(root.path(), "alpha-app", "Alpha app", false);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QVERIFY(app.open());
+        QCOMPARE(app.settings.applyLookPreset(preset), QString());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QQuickItem *search = nullptr;
+        QTRY_VERIFY((search = find(app.window, "appsSearch")) && search->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Backtab);
+        QTRY_VERIFY2(app.window->activeFocusItem() && app.window->activeFocusItem()->objectName() == "appsStartBlank",
+                     qPrintable(app.window->activeFocusItem() ? app.window->activeFocusItem()->objectName() : "none"));
+        QTest::keyClick(app.window, Qt::Key_Backtab);
+        QTRY_COMPARE(app.window->activeFocusItem()->objectName(), QString("appsBrowseTemplates"));
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QTRY_COMPARE(app.window->activeFocusItem()->objectName(), QString("appsStartBlank"));
+        QTest::keyClick(app.window, Qt::Key_Tab); // round: the search, the cards, the header again
+        QTRY_VERIFY(search->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QTRY_VERIFY(find(app.window, "appShelfGrid")->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QTRY_COMPARE(app.window->activeFocusItem()->objectName(), QString("appsBrowseTemplates"));
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QTRY_COMPARE(app.window->activeFocusItem()->objectName(), QString("appsStartBlank"));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QTRY_VERIFY(!find(app.window, "appsHome"));
         qDeleteAll(app.engine.rootObjects());
     }
 

@@ -187,6 +187,9 @@ int main(int argc, char *argv[]) {
     // window shows it, so a window started on a file or on the last session's tabs pays nothing for it.
     fugue::AppShelf appShelf([&workflows] { return workflows.templates(); },
                              [&workflows](const QString &id) { return workflows.openTemplateById(id); });
+    appShelf.setBookmarksFile(fugue::stateDir() + "/app-bookmarks.json"); // pinned apps, per user (#470)
+    appShelf.setActions([&workflows](const QString &id, const QString &title) { return workflows.duplicateTemplate(id, title); },
+                        [&workflows](const QString &id, const QString &title) { return workflows.renameTemplate(id, title); });
     QObject::connect(&workflows, &fugue::Workflows::tabsChanged, &appShelf,
                      [&appShelf, &workflows] { appShelf.setLanding(workflows.currentIsPristine()); });
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.

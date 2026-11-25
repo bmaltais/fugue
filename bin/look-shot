@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# bin/look-shot <out.png> [--size WxH] [--wait SECONDS] [-- <fugue arguments...>]
+# bin/look-shot <out.png> [--size WxH] [--wait SECONDS] [--keys "<wtype arguments>"] [-- <fugue arguments...>]
 #
 # A picture of the real window, drawn on the real GPU, without touching the desktop: a hidden (headless) sway session
 # gets its own Wayland display, Fugue runs in it, grim takes the picture, and both are stopped. Offscreen grabs
@@ -9,7 +9,8 @@ set -euo pipefail
 # this shows them as a person sees them. Nothing appears on the owner's screen and the pointer is never touched.
 #
 # FUGUE_HOME is used when set (a scratch home: never the owner's store); otherwise a temporary home is made and removed.
-# The build is build/fugue of this checkout.
+# The build is build/fugue of this checkout. --keys types into that hidden session only (wtype, e.g. "-M ctrl -M shift -k a -m shift -m ctrl"
+# is Ctrl+Shift+A) once Fugue has settled, then waits 2 seconds before the picture: how a dialog is shown.
 #
 #   bin/look-shot ~/.cache/shots/restore.png -- --app flux2-klein-9b-da-restore
 #   FUGUE_HOME=~/.cache/look-home bin/look-shot shot.png --size 900x700 --wait 15 -- examples/text-to-image.fugue
@@ -19,10 +20,12 @@ out=${1:?usage: bin/look-shot <out.png> [--size WxH] [--wait S] [-- fugue args]}
 shift
 size=1888x971
 wait=10
+keys=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --size) size=$2; shift 2 ;;
     --wait) wait=$2; shift 2 ;;
+    --keys) keys=$2; shift 2 ;;
     --) shift; break ;;
     *) echo "bin/look-shot: unknown option $1" >&2; exit 2 ;;
   esac
@@ -59,6 +62,12 @@ env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 QT_QPA_PLATFORM=
 fugue_pid=$!
 sleep "$wait"
 kill -0 "$fugue_pid" 2>/dev/null || { echo "bin/look-shot: fugue exited early:" >&2; tail -5 "$work/fugue.log" >&2; exit 1; }
+if [[ -n $keys ]]; then
+  command -v wtype >/dev/null || { echo "bin/look-shot: --keys needs wtype" >&2; exit 1; }
+  # shellcheck disable=SC2086
+  XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 wtype $keys
+  sleep 2
+fi
 mkdir -p "$(dirname "$out")"
 XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 grim "$out"
 echo "$out"

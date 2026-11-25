@@ -89,6 +89,28 @@ Window {
 }
 )";
 
+// A moving picture: a clip over its poster, wanted or not by the window's `wanted` (KitVideo, docs/canvas-look.md 20.19).
+const char *videoQml = R"(
+import QtQuick
+import Fugue
+import "qrc:/kit"
+
+Window {
+    id: window
+    width: 240
+    height: 240
+    visible: true
+    property bool wanted: false
+    property url clip
+    KitVideo {
+        objectName: "video"
+        anchors.fill: parent
+        source: window.clip
+        active: window.wanted
+    }
+}
+)";
+
 void writeScene(const QString &path) {
     QImage image(760, 280, QImage::Format_RGB32);
     QPainter p(&image);
@@ -262,6 +284,53 @@ private slots:
         shell.theme.look()->setFrost(0.6);
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
         delete window;
+    }
+
+
+    // A moving preview plays only while it is wanted, is stopped (not decoding, not drawing) when it is not, is not even opened until
+    // it is first wanted, and never plays under reduced motion (the poster stays). The budget of docs/canvas-look.md 20.17.
+    void aMovingPictureOnlyPlaysWhileItIsWanted() {
+        const QString clip = QStringLiteral(FUGUE_SOURCE_DIR "/templates/remove-background/preview.webm");
+        if (!QFileInfo::exists(clip))
+            QSKIP("the templates submodule has no preview.webm (git submodule update --init templates)");
+        Shell shell(dir.filePath("video"), "tokyo-night");
+        QQuickWindow *window = show(shell, videoQml, QUrl("qrc:/test_kit_video.qml"), {{"clip", QUrl::fromLocalFile(clip)}});
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *video = window->findChild<QQuickItem *>("video");
+        QObject *player = window->findChild<QObject *>("kitVideoPlayer");
+        QVERIFY(video && player);
+        const auto state = [&] { return player->property("playbackState").toInt(); };
+        const int stopped = 0;
+        const int playing = 1;
+
+        // Not wanted: nothing is opened, nothing plays.
+        QVERIFY(!video->property("made").toBool());
+        QVERIFY(player->property("source").toUrl().isEmpty());
+        QCOMPARE(state(), stopped);
+
+        window->setProperty("wanted", true);
+        QTRY_VERIFY(video->property("wanted").toBool()); // the window is the active one
+        QTRY_COMPARE(state(), playing);
+        QCOMPARE(player->property("source").toUrl(), QUrl::fromLocalFile(clip));
+
+        // Hidden or out of view again: stopped at once, the player kept for the next time.
+        window->setProperty("wanted", false);
+        QTRY_COMPARE(state(), stopped);
+        QVERIFY(!video->property("playing").toBool());
+        window->setProperty("wanted", true);
+        QTRY_COMPARE(state(), playing);
+        window->setProperty("wanted", false);
+        QTRY_COMPARE(state(), stopped);
+
+        // Reduced motion: it is never wanted, so the poster is all there is.
+        shell.theme.look()->setPreset({{"motion", "reduced"}});
+        QTRY_VERIFY(video->property("reduced").toBool());
+        window->setProperty("wanted", true);
+        QTest::qWait(150);
+        QVERIFY(!video->property("wanted").toBool());
+        QCOMPARE(state(), stopped);
+        delete window;
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
     }
 
     void shots_data() {

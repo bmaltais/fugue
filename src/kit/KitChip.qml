@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "KitTone.js" as KitTone
 
 // A small rounded button of the Drift kit (docs/canvas-look.md "Drift kit"): the `kitChip` fill, a Lucide `glyph`
 // before the `text` or alone, 7u tall (the floor). `pill` rounds it fully, as the footer's pause and shuffle buttons are;
@@ -26,6 +27,12 @@ Rectangle {
     property url backdropSource // the picture the backdrop shows, when it is one: a new one is measured again
     property bool round: false // as wide as tall, fully round (a glyph button in a corner)
     property bool bordered: false // a hairline edge, for a chip that stands on its own (Cancel)
+    // A filter that is on takes the window's tone (the KitPanel above, KitTone.js) as translucent colour, as a toggle does, instead of
+    // the quiet selection color; with the Colour slider at 0, or no panel above, the selection color.
+    property bool toned: false
+    readonly property string tone: toned ? KitTone.nearest(chip) : ""
+    readonly property color currentFill: tone === "" || look.params.controlColour === "accent" ? look.selectedRow
+                                         : Qt.alpha(look.tone(tone).glass, 0.34)
     signal tapped
 
     readonly property bool hovered: hover.hovered
@@ -39,7 +46,7 @@ Rectangle {
     readonly property bool glass: frosted && look.frost > 0.001 // the frost setting at 0 makes it the plain chip
     readonly property color ink: glass && glassLoader.item ? (glassLoader.item as KitFrost).ink : glass ? "white" : look.text
     readonly property bool darkInk: glass && glassLoader.item ? (glassLoader.item as KitFrost).pale : false
-    color: glass ? "transparent" : pressed ? look.menuRow : current ? look.selectedRow : hovered ? look.kitChipHover : look.kitChip
+    color: glass ? "transparent" : pressed ? look.menuRow : current ? currentFill : hovered ? look.kitChipHover : look.kitChip
     border.width: activeFocus ? 2 : bordered ? 1 : 0
     border.color: activeFocus ? look.accent : look.hairlineStrong
     activeFocusOnTab: enabled
