@@ -1183,17 +1183,22 @@ compositor draws their outline (Hyprland rounds it itself); the full Fugue windo
 - **Needs panel.** 12.17 in the spec. A header line with a Moss bar, `KitGroup` rows (name, size, licence, source), Download, Download all.
 - **Keys.** See docs/ui-ergonomics.md "Settings, Get ready and Needs panel in the kit".
 
-### 20.21 Rounded spaces, side panels, popups (Partly built; #465)
+### 20.21 Rounded spaces, side panels, popups (Built; #465, #478)
 
 | Surface | Status |
 | --- | --- |
 | Workspace areas: a card per area, gap `areaGap`, tone-faded header (Graph dusk, Canvas sea, else slate), accent outline on the active one; Flat: panes with 1px dividers | Built (`AreaFrame`, `AreaNode` insets half the gap on shared borders, `AreaHandle` shows its line in use in Cards) |
 | The Graph's card (one area): header and canvas in one rounded card | Built (`graphFrame` in Main.qml) |
-| Side panels (node library, workflows, results): `KitPanel` card, `tone` dusk, results ember, tone-faded title bar, `KitWell` search, rows with the chip corner | Built (`SidePanel`); the media browser's own controls are raised `ViewButton`s, its thumbs the group corner |
+| Side panels (node library, workflows, results): `KitPanel` card, `tone` dusk, results ember, tone-faded title bar, `KitWell` search, rows with the chip corner | Built (`SidePanel`); the media browser's own controls are raised `ViewButton`s (a current mode toned), its thumbs the group corner: nothing left to restyle there |
 | Run bar and queue: queue is a calm `KitPanel`; the bar takes the card corner | Built |
-| Dialogs, popovers, menus: one `PopupSurface` (calm tinted `KitPanel`, shadow level 3), menu rows with the chip corner, separators per `rowSeparators`, buttons raised | Built; `WidgetMenu` rows keep their old corner (outside this slice's files) |
-| Projects dialog: kit surface and rows, focus on New | Partly (no `KitHero`) |
-| Large view, paint window, export, canvas dialogs, About, keymap help, notices and toasts, layers panel | To build (they get the popup surface and buttons from `PopupSurface` and `ViewButton`; their own headers and rows are not yet kit rows) |
+| Dialogs, popovers, menus: one `PopupSurface` (calm tinted `KitPanel`, shadow level 3), menu rows with the chip corner, separators per `rowSeparators`, buttons raised | Built; `WidgetMenu` rows take the chip corner from `cornerChip` |
+| Projects dialog: dusk `KitHero` (title per view: Projects, New project, Project settings, Unsaved work), kit rows and raised buttons, focus on New | Built |
+| About: dusk `KitHero`, Close focused, Esc closes | Built |
+| Shortcuts help (`?`): slate `KitHero` with its close, the filter a Tab stop | Built |
+| Canvas dialogs (New canvas, Layer properties, Transform selection, selection modify, Batch) and the export dialog: a sea (export: slate) `KitHero` through `Question.heading`; a plain question keeps the quiet slate card, no header | Built (`Question` puts the hero at the top of its background and makes room with `topPadding`; a popup has no header slot) |
+| Large view, Canvas view, paint window (`LargeViewDialog.tone`: ember, sea for the Canvas and the paint window): a soft fade of the tone behind the bar, not a hero | Built (a 60px hero would cost a working window its picture) |
+| Notices: `Banner` is a calm `KitPanel` card with a `tone` (slate; moss for Get ready, downloads and the helper offer); the workflow notice, the helper notice, the Canvas view's toast and its banners | Built (objectNames and behaviour unchanged) |
+| Layers panels (`CanvasLayersPanel`, `PaintLayersPanel`): a `KitGroup` fill and corner in the sea tone, rows with the chip corner and the tone as selection, hover `kitChipHover`, the caption's tone fade | Built |
 
 A shape paints the outside of each card's corners in the window colour over its content (no clipped layer: the canvas is untouched);
 the window keeps a margin of half the gap round its cards. The window fixtures of the tests set `areaGap` to 0.

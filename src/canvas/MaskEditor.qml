@@ -31,6 +31,7 @@ LargeViewDialog {
     id: root
     objectName: "maskEditor"
     name: "mask"
+    tone: layers ? "sea" : "ember"
 
     property url imageSource
     property size imageSize: Qt.size(0, 0)

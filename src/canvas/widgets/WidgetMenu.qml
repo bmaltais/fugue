@@ -165,7 +165,7 @@ Popup {
                   : hasThumbnail ? menu.thumbHeight
                   : note !== "" ? menu.rowHeight + noteText.implicitHeight
                   : menu.rowHeight
-            radius: Math.max(0, menu.look.popupCorner - 2)
+            radius: Math.min(menu.look.params.cornerChip * menu.look.unit, 0.45 * height) // the chip corner, as every menu row (look parameters)
             color: ListView.isCurrentItem && usable ? menu.look.menuRow : "transparent"
             Rectangle {
                 visible: entry.separator

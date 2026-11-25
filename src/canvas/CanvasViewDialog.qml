@@ -10,6 +10,7 @@ import Fugue
 LargeViewDialog {
     id: root
     objectName: "canvasViewDialog"
+    tone: "sea"
     name: "canvasView"
     look: App.theme.look
     readonly property alias view: content

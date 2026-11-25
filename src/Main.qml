@@ -154,15 +154,15 @@ ApplicationWindow {
             Loader {
                 Layout.fillWidth: true
                 Layout.preferredHeight: item ? (item as Item).implicitHeight : 0
+                Layout.margins: active ? 2 * App.theme.look.unit : 0
                 active: helperNotice.shown
-                sourceComponent: Rectangle {
+                sourceComponent: Banner {
                     objectName: "helperNotice"
-                    implicitHeight: noticeRow.implicitHeight + 16
-                    color: App.theme.look.popup
-                    border.color: App.theme.look.hairline
+                    look: App.theme.look
+                    tone: "moss" // an offer to get something ready, as Get ready's
                     RowLayout {
                         id: noticeRow
-                        anchors { fill: parent; margins: 8 }
+                        width: parent.width
                         spacing: 8
                         Label {
                             Layout.fillWidth: true
@@ -261,7 +261,7 @@ ApplicationWindow {
         }
 
         // The file pickers, the save and trust and recovery questions, the drop area.
-        WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas }
+        WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas; noticeInset: win.stripWidth }
         GroupDialogs { anchors.fill: parent }
         LayoutColorPicker {}
         ImageSaveDialog {}

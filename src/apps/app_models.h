@@ -3,9 +3,9 @@
 // The model picker of the App view (#386): for a resource type (and the capabilities of the node that takes it), the models a
 // person can choose: the ones their providers offer, the files in the model folders (the Recommended one of a model marked,
 // #370) and the catalog's models not on disk yet, which a Download fetches. No window and no document: a type in, entries out,
-// so any form can draw them. The canvas's picker (WidgetEdit::models) is the same list for a node's input and stays tied to the
-// canvas; this is the small version of it a form needs (no "fits this diffusion model" judging, which needs the node's
-// neighbours).
+// so any form can draw them. The canvas's picker (WidgetEdit::models) is the same list for a node's input; the rows, the hash
+// and header threads, the empty text and the download plan are shared with it (workflow/model_picker.h, #452). This is the small
+// version a form needs (no "fits this diffusion model" judging, which needs the node's neighbours).
 //
 // Entries (`entries`): {title, note, status ("ready", "loading", "unavailable"), handle (what a pick stores), path?, folder?, size?,
 // family?, recommended?, recommendedWhy?}; a catalog model is {catalog: true, id, title, detail, size, note}. A file on disk whose
@@ -18,11 +18,9 @@
 #include <QObject>
 #include <QSet>
 #include <QString>
-#include <QThreadPool>
 #include <QVariantList>
 
 #include <functional>
-#include <atomic>
 #include <memory>
 #include <optional>
 
@@ -30,6 +28,7 @@
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
 #include "engine/model_recommend.h"
+#include "workflow/model_picker.h"
 
 namespace fugue {
 
@@ -51,7 +50,7 @@ public:
     void setLibrary(const ModelLibrary &library) { m_library = library; }
     void setSource(Source source) { m_source = std::move(source); }
     void setCatalog(ModelCatalog catalog) { m_catalog = std::move(catalog); }
-    void setHashes(std::shared_ptr<FileHashes> hashes) { m_hashes = std::move(hashes); }
+    void setHashes(std::shared_ptr<FileHashes> hashes) { m_work.setHashes(std::move(hashes)); }
 
     // Lists what is on disk and in the catalog now and asks the providers and the header reader for the rest; `changed` says
     // when they answer. Asking again is a refresh.
@@ -90,7 +89,7 @@ private:
     };
     static QString keyOf(const QString &type, const QStringList &capabilities);
     ModelLibrary library() const;
-    FileHashes &hashes();
+    FileHashes &hashes() { return m_work.hashes(); }
     void downloadsFinished();
 
     const Registry *m_registry;
@@ -98,11 +97,9 @@ private:
     Source m_source;
     std::optional<ModelCatalog> m_catalog; // none: read each time, so a file dropped in the catalog folder shows
     ModelDownloads *m_downloads = nullptr;
-    std::shared_ptr<FileHashes> m_hashes;
+    ModelWorkers m_work;
     QHash<QString, Entry> m_entries;
     QList<Download> m_downloading;
-    QThreadPool m_pool;
-    std::shared_ptr<std::atomic_bool> m_stop = std::make_shared<std::atomic_bool>(false);
     int m_asked = 0;
 };
 

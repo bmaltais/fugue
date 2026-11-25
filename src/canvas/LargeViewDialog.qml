@@ -26,6 +26,9 @@ Popup {
     property alias footer: footerHolder.data
     readonly property alias bar: bar
     property bool showBar: true
+    // The area the picture belongs to colours the card (docs/canvas-look.md 20.21): ember for the media and results, sea for the Canvas
+    // and the paint window. A working window keeps its room, so the header is a soft fade of the tone behind the bar, not a hero.
+    property string tone: "ember"
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     signal confirm // Enter, when nothing in the dialog took it (a text field does)
     // A key the dialog did not take, for a viewer with keys of its own (the mask editor's B and E):
@@ -44,7 +47,21 @@ Popup {
     enter: null
     exit: null
     closePolicy: Popup.CloseOnEscape
-    background: PopupSurface { look: root.look }
+    background: Item {
+        PopupSurface { anchors.fill: parent; look: root.look; tone: root.tone }
+        Rectangle {
+            objectName: "largeViewFade"
+            x: 1; y: 1
+            width: parent.width - 2
+            height: root.topPadding + bar.h + root.look.unit
+            visible: root.look.params.panelTint > 0.001 && root.look.params.areaLayout !== "panes"
+            radius: Math.max(0, Math.min(root.look.params.cornerCard * root.look.unit, 0.2 * Math.min(parent.width, parent.height)) - 1)
+            gradient: Gradient {
+                GradientStop { position: 0; color: Qt.alpha(root.look.tone(root.tone).blobs[0], 2.2 * root.look.params.panelTint) }
+                GradientStop { position: 1; color: Qt.alpha(root.look.tone(root.tone).blobs[0], 0) }
+            }
+        }
+    }
     onClosed: if (zoomable && zoomable.peekUp) zoomable.peekUp(true)
     onActiveFocusChanged: if (!activeFocus && zoomable && zoomable.peekUp) zoomable.peekUp(true)
 

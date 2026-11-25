@@ -62,10 +62,14 @@ Rectangle {
     property int renaming: -1 // the position whose name is being typed
 
     width: 56 * u
-    radius: look.smallCorner
-    color: look.body // the controls inside are wells, so they read as recessed against it
-    border.width: 1
-    border.color: look.hairline
+    // A kit group in the Canvas's sea tone (docs/canvas-look.md 20.21): the translucent group fill over the tinted card, the group corner, rows
+    // with the chip corner and the tone as their selection; the controls inside are wells, so they read as recessed against it.
+    readonly property bool glass: look.params.panelTint > 0.001
+    readonly property color toneGlass: Qt.alpha(look.tone("sea").glass, 0.34)
+    radius: Math.min(look.params.cornerGroup * u, 0.3 * height)
+    color: glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
+    border.width: look.params.borders === "hairline" && glass ? 1 : 0
+    border.color: look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
 
     HoverHandler { id: hover }
     onHotChanged: App.commands.setContextActive("canvas-layers", hot)
@@ -222,6 +226,15 @@ Rectangle {
         Item {
             width: parent.width
             height: 7 * root.u
+            Rectangle { // the tone fades in behind the caption, as the side panels' title bars
+                anchors { fill: parent; margins: -root.u / 2 }
+                visible: root.glass
+                radius: root.radius
+                gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.alpha(root.look.tone("sea").blobs[0], 2.2 * root.look.params.panelTint) }
+                    GradientStop { position: 1; color: Qt.alpha(root.look.tone("sea").blobs[0], 0) }
+                }
+            }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 leftPadding: root.u
@@ -290,8 +303,8 @@ Rectangle {
                 objectName: "canvasLayer-" + position
                 width: list.width
                 height: 8 * root.u
-                radius: root.look.smallCorner
-                color: selected ? root.look.selectedRow : rowHover.hovered ? root.look.menuRow : "transparent"
+                radius: Math.min(root.look.params.cornerChip * root.u, 0.45 * height)
+                color: selected ? (root.look.params.controlColour === "accent" ? root.look.selectedRow : root.toneGlass) : rowHover.hovered ? root.look.kitChipHover : "transparent"
                 border.width: root.current !== null && root.current.position === position && list.activeFocus ? 2 : 0
                 border.color: root.look.accent
                 Accessible.role: Accessible.ListItem

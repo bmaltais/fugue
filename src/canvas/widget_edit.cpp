@@ -2,6 +2,7 @@
 
 #include "workflow/image_inputs.h"
 #include "workflow/model_downloads.h"
+#include "workflow/model_picker.h"
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
@@ -92,8 +93,6 @@ void setIncrementing(Document &document, const QString &node, const QString &inp
 
 WidgetEdit::WidgetEdit(const Registry *registry, CanvasModel *canvas, QObject *parent)
     : QObject(parent), m_registry(registry), m_canvas(canvas) {
-    // One file at a time: two models read at once from one disk each take twice as long.
-    m_hashPool.setMaxThreadCount(1);
     connect(&m_canvases, &CanvasChoices::changed, this, &WidgetEdit::canvasesChanged);
     const auto bump = [this] {
         ++m_graphRevision;
@@ -387,9 +386,7 @@ QString WidgetEdit::check(const QString &node, const QString &input, const QStri
 
 WidgetEdit::~WidgetEdit() {
     // A model being hashed, or headers being read, are not waited for: the next pick or open
-    // reads them again.
-    m_stopHashing->store(true);
-    m_hashPool.waitForDone();
+    // reads them again (m_work stops them as it goes).
 }
 
 void WidgetEdit::write(const QString &node, const QString &input, const QJsonValue &value, const QString &text) {
@@ -791,26 +788,25 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
         return;
     }
     // Else read on the pool; a later request, or the window closing, makes this one moot.
-    QPointer<WidgetEdit> self(this);
     ModelShapes *shapes = m_shapes;
-    std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
+    const std::shared_ptr<std::atomic_bool> stop = m_work.stopFlag();
     const int asked = fits.asked;
-    m_shapePool.start([self, shapes, stop, judge, key, asked, diffusion, paths] {
+    m_work.read(this, [this, shapes, stop, judge, key, asked, diffusion, paths]() -> std::function<void()> {
         const std::optional<ModelShape> wanted = diffusion.isEmpty() ? std::nullopt : shapes->of(diffusion);
         QHash<QString, Judged> read;
         for (const QString &path : paths) {
             if (stop->load())
-                return;
+                return {};
             if (const std::optional<Judged> judged = judge(wanted, shapes->of(path)))
                 read.insert(path, *judged);
         }
-        QMetaObject::invokeMethod(self, [self, key, asked, read] {
-            if (!self || self->m_fits.value(key).asked != asked)
+        return [this, key, asked, read] {
+            if (m_fits.value(key).asked != asked)
                 return;
-            self->m_fits[key].byPath = read;
-            ++self->m_modelsRevision;
-            emit self->modelsChanged();
-        });
+            m_fits[key].byPath = read;
+            ++m_modelsRevision;
+            emit modelsChanged();
+        };
     });
 }
 
@@ -842,23 +838,19 @@ void WidgetEdit::requestMarks(const QString &node, const QString &input) {
         files.append({model.path, model.size});
     if (files.isEmpty())
         return;
-    QPointer<WidgetEdit> self(this);
     ModelShapes *shapes = m_shapes;
-    std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
     const int asked = marks.asked;
     const qint64 others = otherModelsMb(node, input);
-    m_shapePool.start([self, shapes, stop, key, asked, type, files, others] {
-        if (stop->load())
-            return;
+    m_work.read(this, [this, shapes, key, asked, type, files, others]() -> std::function<void()> {
         const ModelSpeeds speeds;
         const QHash<QString, ModelMark> found = markModels(type, files, RecommendContext{localComputeDevice(), others, &speeds}, *shapes);
-        QMetaObject::invokeMethod(self, [self, key, asked, found] {
-            if (!self || self->m_marks.value(key).asked != asked)
+        return [this, key, asked, found] {
+            if (m_marks.value(key).asked != asked)
                 return;
-            self->m_marks[key].byPath = found;
-            ++self->m_modelsRevision;
-            emit self->modelsChanged();
-        });
+            m_marks[key].byPath = found;
+            ++m_modelsRevision;
+            emit modelsChanged();
+        };
     });
 }
 
@@ -875,39 +867,17 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
     const QString type = target(node, input).spec->type.type.toString();
     QVariantList list;
     for (const Model &model : m_models.value(key) + m_diskModels.value(key)) {
-        QVariantMap entry{{"name", model.name},
-                          {"title", model.title.isEmpty() ? model.name : model.title},
-                          {"handle", model.handle.toVariantMap()},
-                          {"status", model.status},
-                          {"provider", model.provider},
-                          {"host", model.host},
-                          {"hostOffline", model.hostOffline()},
-                          {"note", model.note}};
-        if (model.onDisk()) {
-            entry.insert("path", model.path);
-            entry.insert("folder", model.folder);
-            entry.insert("size", model.size);
-            entry.insert("family", modelFamily(familyKindOf(type), QFileInfo(model.path).fileName()));
-            if (const auto mark = marks.constFind(model.path); mark != marks.constEnd() && mark->recommended) {
-                entry.insert("recommended", true);
-                entry.insert("recommendedWhy", mark->reason);
-            }
+        QVariantMap entry = modelRow(model, type, marks);
+        if (model.onDisk())
             if (const auto fit = fits.constFind(model.path); fit != fits.constEnd()) {
                 entry.insert("fits", fit->fits); // absent when the file's header tells nothing
                 if (!fit->why.isEmpty())
                     entry.insert("fitNote", fit->why);
             }
-        }
         list.append(entry);
     }
     for (const CatalogModel &model : m_catalogMissing.value(key))
-        list.append(QVariantMap{{"catalog", true},
-                                {"id", model.id},
-                                {"title", model.title},
-                                {"detail", model.summary()},
-                                {"size", model.size},
-                                {"keywords", model.keywords()},
-                                {"note", model.description}});
+        list.append(catalogRow(model));
     return list;
 }
 
@@ -917,20 +887,8 @@ bool WidgetEdit::modelsLoading(const QString &node, const QString &input) const 
 }
 
 QString WidgetEdit::modelsEmptyText(const QString &node, const QString &input) const {
-    const QStringList wanted = capabilities(node, input);
-    const bool image = std::any_of(wanted.begin(), wanted.end(), [](const QString &capability) {
-        return capability.startsWith(QLatin1String("image."));
-    });
-    if (image)
-        return tr("No image model available: start one in omarchy-local-ai or add a provider");
-    if (wanted.contains(QStringLiteral("text.generate")))
-        return tr("No text model available: start one in omarchy-local-ai or add a provider");
-    // A model file of this kind goes in its folder in Fugue's models folder (8.9).
     const Target t = target(node, input);
-    const QString folder = t.spec ? library().folders(t.spec->type.type).value(0) : QString();
-    if (folder.isEmpty())
-        return tr("No model available: start one in omarchy-local-ai or add a provider");
-    return tr("No model found: put one in %1, or add its folder to Extra model folders in Settings").arg(folder);
+    return fugue::modelsEmptyText(capabilities(node, input), t.spec ? &t.spec->type.type : nullptr, library());
 }
 
 QString WidgetEdit::setModel(const QString &node, const QString &input, const QVariantMap &handle) {
@@ -953,11 +911,7 @@ ModelLibrary WidgetEdit::library() const {
     return ModelLibrary::current(m_registry); // with what each model folder is set to hold (#86)
 }
 
-FileHashes &WidgetEdit::hashes() {
-    if (!m_hashes)
-        m_hashes = std::make_shared<FileHashes>(FileHashes::defaultPath());
-    return *m_hashes;
-}
+FileHashes &WidgetEdit::hashes() { return m_work.hashes(); }
 
 QString WidgetEdit::setDiskModel(const QString &node, const QString &input, const QString &path) {
     const Target t = target(node, input);
@@ -1006,24 +960,7 @@ QVariantMap WidgetEdit::catalogInfo(const QString &node, const QString &input, c
     const CatalogModel *model = t.widget == QLatin1String("model") ? m_catalog.find(id) : nullptr;
     if (!model || model->resource != t.spec->type.type.toString())
         return {};
-    return QVariantMap{{"id", model->id},
-                       {"title", model->title},
-                       {"description", model->description},
-                       {"scale", model->scale},
-                       {"architecture", model->architecture},
-                       {"license", model->license},
-                       {"licenseLine", licenseLine(*model)},
-                       {"licenseUrl", model->licenseUrl},
-                       {"commercial", model->commercial},
-                       {"attribution", model->attribution},
-                       {"author", model->author},
-                       {"source", model->source},
-                       {"url", model->url},
-                       {"host", QUrl(model->url).host()},
-                       {"size", model->size},
-                       {"sizeText", ModelDownloads::sizeText(model->size)},
-                       {"folder", library().downloadFolder(t.spec->type.type)},
-                       {"file", model->file}};
+    return catalogDetails(*model, library(), t.spec->type.type);
 }
 
 QString WidgetEdit::downloadCatalogModel(const QString &node, const QString &input, const QString &id) {
@@ -1037,14 +974,7 @@ QString WidgetEdit::downloadCatalogModel(const QString &node, const QString &inp
         return tr("This model is not in the catalog for this input.");
     if (!m_downloads)
         return tr("Downloads are not available here.");
-    ModelLibrary lib = library();
-    lib.fitDownloadRoot({t.spec->type.type});
-    MissingModel wanted;
-    wanted.handle = model->handle();
-    wanted.source = model->url;
-    wanted.size = model->size;
-    wanted.folder = lib.downloadFolder(t.spec->type.type);
-    const Result<DownloadTarget> planned = planDownload(lib, wanted);
+    const Result<DownloadTarget> planned = planCatalogDownload(library(), *model, t.spec->type.type);
     if (!planned)
         return planned.error().message;
     m_downloading.append(Download{m_canvas->scopePath(), node, input, planned->path, model->resource, model->file,
@@ -1077,42 +1007,21 @@ void WidgetEdit::startHashing(const QString &path) {
     if (m_hashing.contains(path))
         return;
     m_hashing.insert(path);
-    QPointer<WidgetEdit> self(this);
-    hashes(); // made here, on the window's thread
-    std::shared_ptr<FileHashes> store = m_hashes;
-    std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
-    m_hashPool.start([self, store, stop, path] {
-        int shown = -1; // percent last told, so the window is told at most a hundred times
-        const QString hash = store->hash(path, [&](qint64 done, qint64 total) {
-            const int percent = total > 0 ? int(done * 100 / total) : 100;
-            if (percent != shown) {
-                shown = percent;
-                QMetaObject::invokeMethod(self, [self, path, percent] {
-                    if (!self)
-                        return;
-                    bool moved = false;
-                    for (Pick &pick : self->m_picks)
-                        if (pick.path == path) {
-                            pick.progress = percent / 100.0;
-                            moved = true;
-                        }
-                    if (moved) {
-                        ++self->m_hashRevision;
-                        emit self->hashingChanged();
-                    }
-                });
+    m_work.hash(
+        this, path,
+        [this, path](int percent) {
+            bool moved = false;
+            for (Pick &pick : m_picks)
+                if (pick.path == path) {
+                    pick.progress = percent / 100.0;
+                    moved = true;
+                }
+            if (moved) {
+                ++m_hashRevision;
+                emit hashingChanged();
             }
-            return !stop->load();
-        });
-        if (stop->load())
-            return;
-        if (!hash.isEmpty())
-            store->save();
-        QMetaObject::invokeMethod(self, [self, path, hash] {
-            if (self)
-                self->hashed(path, hash);
-        });
-    });
+        },
+        [this, path](const QString &hash) { hashed(path, hash); });
 }
 
 void WidgetEdit::hashed(const QString &path, const QString &hash) {

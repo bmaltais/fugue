@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "canvas"
+import "kit"
 
 // Everything the command registry shows or listens to in the window (spec 12.4, 12.5): one
 // shortcut for each key that has an owner, the `?` overlay, the unsaved-work question on
@@ -111,17 +112,17 @@ Item {
     }
 
     // The keymap file could not be used (or holds mistakes): the defaults still work.
-    Rectangle {
+    Banner {
         id: notice
         objectName: "keymapNotice"
         property bool dismissed: false
         visible: App.commands.problems.length > 0 && !dismissed
-        anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: visible ? noticeRow.implicitHeight + 16 : 0
-        color: root.look.errorChip
+        look: root.look
+        tone: "ember" // a warning in the warm tone, a calm card like every notice (docs/canvas-look.md 20.21)
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 2 * root.u }
         RowLayout {
             id: noticeRow
-            anchors { fill: parent; margins: 8 }
+            width: parent.width
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -183,10 +184,7 @@ Item {
         anchors.centerIn: Overlay.overlay
         modal: true
         focus: true
-        topPadding: 6 * root.u
-        leftPadding: 7 * root.u
-        rightPadding: 7 * root.u
-        bottomPadding: 5 * root.u
+        padding: 0
         width: Math.min(880, root.width - 12 * root.u)
         height: Math.min(root.height - 12 * root.u, implicitHeight)
         Overlay.modal: Rectangle { color: root.look.scrim }
@@ -254,26 +252,29 @@ Item {
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
 
+            KitHero {
+                id: helpHero
+                objectName: "helpHero"
+                Layout.fillWidth: true
+                look: root.look
+                tone: "slate"
+                title: qsTr("Shortcuts")
+                subtitle: qsTr("Matches ComfyUI except where marked. Greyed commands are not built yet.")
+                showClose: true
+                onClosed: help.close()
+            }
+            ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.topMargin: 3 * root.u
+            Layout.leftMargin: 7 * root.u
+            Layout.rightMargin: 7 * root.u
+            Layout.bottomMargin: 5 * root.u
+            spacing: 0
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 4 * root.u
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: root.u
-                    Text {
-                        text: qsTr("Shortcuts")
-                        color: root.look.text
-                        font.pixelSize: root.look.overlayTitleSize
-                        font.weight: Font.DemiBold
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: root.look.label
-                        font.pixelSize: root.look.textSize
-                        text: qsTr("Matches ComfyUI except where marked. Greyed commands are not built yet.")
-                    }
-                }
+                Item { Layout.fillWidth: true }
                 // Narrows the list as you type.
                 Rectangle {
                     Layout.alignment: Qt.AlignTop
@@ -295,6 +296,7 @@ Item {
                     TextInput {
                         id: filterField
                         objectName: "helpFilter"
+                        activeFocusOnTab: true // the filter is reachable by Tab (it was by pointer only)
                         x: filterGlyph.x + filterGlyph.width + 2 * root.u
                         width: parent.width - x - 2 * root.u
                         anchors.verticalCenter: parent.verticalCenter
@@ -418,7 +420,7 @@ Item {
                                                     model: entry.modelData.gesture ? [] : help.capsOf(entry.modelData.key)
                                                     delegate: Keycap {
                                                         required property string modelData
-                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        anchors.verticalCenter: parent ? parent.verticalCenter : undefined // null while a filtered row is torn down
                                                         look: root.look
                                                         text: modelData
                                                     }
@@ -480,6 +482,7 @@ Item {
                     color: root.look.label
                     font.pixelSize: root.look.labelSize
                 }
+            }
             }
         }
     }

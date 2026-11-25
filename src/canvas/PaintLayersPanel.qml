@@ -23,8 +23,12 @@ Rectangle {
     readonly property int activeIndex: entries.findIndex(e => e.active)
 
     width: 48 * look.unit
-    radius: look.smallCorner
-    color: look.well
+    // A kit group in the paint window's sea tone (docs/canvas-look.md 20.21), its rows the chip corner.
+    readonly property bool glass: look.params.panelTint > 0.001
+    radius: Math.min(look.params.cornerGroup * look.unit, 0.3 * height)
+    color: glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
+    border.width: look.params.borders === "hairline" && glass ? 1 : 0
+    border.color: look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
 
     Column {
         anchors.fill: parent
@@ -66,8 +70,8 @@ Rectangle {
                 objectName: "paintLayer-" + index
                 width: list.width
                 height: 8 * root.look.unit
-                radius: root.look.smallCorner
-                color: modelData.active ? root.look.selectedRow : "transparent"
+                radius: Math.min(root.look.params.cornerChip * root.look.unit, 0.45 * height)
+                color: modelData.active ? (root.look.params.controlColour === "accent" ? root.look.selectedRow : Qt.alpha(root.look.tone("sea").glass, 0.34)) : "transparent"
                 border.width: modelData.active && list.activeFocus ? 2 : 0
                 border.color: root.look.accent
                 Accessible.role: Accessible.ListItem

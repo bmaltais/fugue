@@ -44,7 +44,8 @@
 // the level it was made at: entering a group meanwhile hides it, and it is stored once that
 // level is shown again. Any other value set on the input meanwhile wins, and another document
 // (another tab, a file opened) drops the pick; the hashing goes on and is remembered either way.
-// Closing the window stops it.
+// Closing the window stops it. The glue the App view's picker shares (rows, empty text, download plan, the hash and header
+// threads) is in workflow/model_picker.h; what stays here is the fits judging, the picks and their undo steps (#452).
 
 #include "engine/document.h"
 #include "engine/node_type.h"
@@ -65,6 +66,7 @@
 #include "engine/model_offers.h"
 #include "engine/model_recommend.h"
 #include "engine/model_shape.h"
+#include "workflow/model_picker.h"
 
 #include <QThreadPool>
 
@@ -361,11 +363,9 @@ private:
     QList<Pick> m_picks;
     QSet<QString> m_hashing; // paths on the worker thread
     int m_hashRevision = 0;
-    std::shared_ptr<fugue::FileHashes> m_hashes;
-    std::shared_ptr<std::atomic_bool> m_stopHashing = std::make_shared<std::atomic_bool>(false);
-    QThreadPool m_hashPool;
+    fugue::ModelWorkers m_work; // the hash store and the hash and header threads (workflow/model_picker.h, #452)
     // Which listed files fit the node's diffusion model (#85), by node and input (fitsKey): by
-    // path, read from the files' headers on m_shapePool (not behind a long hash). `asked` is the
+    // path, read from the files' headers on m_work's header thread (not behind a long hash). `asked` is the
     // request the answer belongs to; one that comes after a later request is dropped.
     struct Judged {
         bool fits = false;
@@ -379,7 +379,7 @@ private:
     QHash<QString, Fits> m_fits;
     int m_fitsAsked = 0;
     // The Recommended marks of the listed files (#370), by node and input (fitsKey), read from the files'
-    // headers on m_shapePool like the fits; `asked` drops an answer that a later request overtook.
+    // headers on m_work like the fits; `asked` drops an answer that a later request overtook.
     struct Marks {
         int asked = 0;
         QHash<QString, fugue::ModelMark> byPath;
@@ -390,7 +390,6 @@ private:
     // model...), which share the device's memory with the one listed; remembered hashes only.
     qint64 otherModelsMb(const QString &node, const QString &input);
     fugue::ModelShapes *m_shapes = &fugue::ModelShapes::shared(); // lives as long as the process
-    QThreadPool m_shapePool;
     static QString fitsKey(const QString &node, const QString &input);
     // The diffusion model handle of `node` on the level shown, or of the node its model links
     // from (Apply LoRA from Load Models, through other Apply LoRAs); empty when none is picked.
