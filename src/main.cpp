@@ -93,8 +93,8 @@ int main(int argc, char *argv[]) {
                                                     "qt.qpa.services.warning=false"));
 
     // Matches the window to fugue.desktop, so the compositor (Wayland app_id)
-    // and the launcher pick up the installed icon. The window's own icon follows the
-    // Omarchy theme (set below, once the theme is read): the dark art on a dark theme.
+    // and the launcher pick up the installed icon. The window's icon is chosen by the Omarchy theme
+    // (set below, once the theme is read); the light and dark names hold the same art for now.
     app.setDesktopFileName("fugue");
 
     QQuickStyle::setStyle("Material");

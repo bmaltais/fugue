@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Fugue</title>
+  <desc>Letterforms outlined from Fraunces (SIL Open Font License 1.1, https://github.com/undercasetype/Fraunces).</desc>
+  <defs>
+    <radialGradient id="lilac" gradientUnits="userSpaceOnUse" cx="128" cy="154" r="358">
+      <stop offset="0" stop-color="#b98bd6"/><stop offset="1" stop-color="#b98bd6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rose" gradientUnits="userSpaceOnUse" cx="399" cy="143" r="307">
+      <stop offset="0" stop-color="#e3828f"/><stop offset="1" stop-color="#e3828f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blue" gradientUnits="userSpaceOnUse" cx="358" cy="486" r="410">
+      <stop offset="0" stop-color="#6f86d6"/><stop offset="1" stop-color="#6f86d6" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="tile"><rect width="512" height="512" rx="118" ry="118"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="#2a2533"/>
+    <rect width="512" height="512" fill="url(#lilac)"/>
+    <rect width="512" height="512" fill="url(#rose)"/>
+    <rect width="512" height="512" fill="url(#blue)"/>
+  </g>
+  <path fill="#ffffff" d="M324.8 105.34Q329.67 105.34 333.81 103.87Q337.96 102.4 340.64 100.93Q343.32 99.46 344.11 99.46Q344.68 99.46 345.07 100.18Q345.47 100.91 346.12 103.85L365.52 182.23Q365.87 183.68 365.63 184.27Q365.39 184.86 364.82 185.12Q364.34 185.26 363.81 185.01Q363.28 184.77 362.45 183.72Q346.04 155.24 332.37 139.07Q318.7 122.89 305.86 116.22Q293.02 109.55 278.98 109.55H236.59V400.69Q236.59 403.32 239.17 404.77Q241.76 406.22 246.85 406.75L272.92 409.47Q274.37 409.6 274.96 409.95Q275.56 410.3 275.56 411.14Q275.56 411.62 275.03 412.08Q274.5 412.54 273.45 412.54H148.38Q147.32 412.54 146.8 412.08Q146.27 411.62 146.27 411.14Q146.27 409.86 148.9 409.47L166.63 406.75Q170.98 406.05 173.06 404.68Q175.15 403.32 175.15 400.69V117.19Q175.15 114.56 173.06 113.15Q170.98 111.75 166.63 111.13L148.9 108.41Q146.27 108.02 146.27 106.74Q146.27 106.17 146.8 105.76Q147.32 105.34 148.38 105.34ZM221.31 256.66H277.66Q296.93 256.66 306.52 248.47Q316.11 240.29 317.95 218.3Q318.21 216.99 318.59 216.59Q318.96 216.2 319.44 216.2Q321.07 216.02 321.72 218.65L339.45 294.58Q339.89 295.72 339.61 296.42Q339.32 297.12 338.75 297.38Q338.27 297.52 337.68 297.45Q337.08 297.38 336.12 296.51Q326.2 282.64 318.56 274.87Q310.93 267.1 302.83 263.99Q294.73 260.87 283.37 260.87H221.31Z"/>
+</svg>

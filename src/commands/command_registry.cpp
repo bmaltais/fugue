@@ -136,6 +136,11 @@ bool CommandRegistry::hasHandler(const QString &id) const {
     return it != m_index.constEnd() && bool(m_entries[*it].handler);
 }
 
+CommandRegistry::Handler CommandRegistry::handlerOf(const QString &id) const {
+    const auto it = m_index.constFind(id);
+    return it != m_index.constEnd() ? m_entries[*it].handler : Handler();
+}
+
 QStringList CommandRegistry::keys(const QString &id) const {
     const auto it = m_index.constFind(id);
     return it == m_index.constEnd() ? QStringList() : m_entries[*it].keys;

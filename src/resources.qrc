@@ -6,6 +6,7 @@
         <file alias="fugue-dark.png">../share/icons/fugue-dark.png</file>
         <file alias="fonts/lucide.ttf">../share/fonts/lucide-fugue.ttf</file>
         <file alias="fonts/lucide.txt">../share/fonts/lucide-fugue.txt</file>
+        <file alias="fonts/fraunces.ttf">../share/fonts/fraunces-latin.ttf</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/da.json">i18n/da.json</file>
     </qresource>

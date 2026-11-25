@@ -251,6 +251,16 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
             break;
     }
     t.bypassEdge = lift(magenta, t.canvas, 3.0);
+    // The Drift kit: a group a step off the popup it sits on, its separator, rail, knob and chips from the group.
+    t.kitGroup = mix(t.popup, fg, light ? .045 : .07);
+    t.kitSeparator = mix(t.kitGroup, fg, .10);
+    t.kitTrack = mix(t.kitGroup, fg, light ? .30 : .28);
+    t.kitKnob = QColor(Qt::white); // Drift: a white knob and thumb on every theme, on and off
+    t.kitChip = mix(t.kitGroup, fg, .10);
+    t.kitChipHover = mix(t.kitGroup, fg, .17);
+    t.kitHeroShade = QColor(0, 0, 0, 140);
+    t.kitHeroPill = QColor(0, 0, 0, 112);
+    t.kitHeroPillHover = QColor(0, 0, 0, 153);
     return t;
 }
 
@@ -478,6 +488,7 @@ namespace {
 // The icon font, loaded once per process; its glyph names from the map beside it.
 struct Icons {
     QString family;
+    QString serif; // Fraunces, the Drift kit's title face
     QHash<QString, QString> glyphs;
 };
 
@@ -488,6 +499,11 @@ const Icons &icons() {
             const int id = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/lucide.ttf"));
             if (id >= 0)
                 icons.family = QFontDatabase::applicationFontFamilies(id).value(0);
+        }
+        if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+            const int id = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/fraunces.ttf"));
+            if (id >= 0)
+                icons.serif = QFontDatabase::applicationFontFamilies(id).value(0);
         }
         QFile map(QStringLiteral(":/fonts/lucide.txt"));
         if (map.open(QIODevice::ReadOnly)) {
@@ -507,6 +523,7 @@ const Icons &icons() {
 CanvasLook::CanvasLook(QObject *parent) : QObject(parent) { icons(); }
 
 QString CanvasLook::iconFont() const { return icons().family; }
+QString CanvasLook::serifFont() const { return icons().serif; }
 
 QString CanvasLook::glyph(const QString &name) const { return icons().glyphs.value(name); }
 
@@ -538,6 +555,15 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     m_litTop = t.litTop;
     m_litBottom = t.litBottom;
     m_scrim = t.scrim;
+    m_kitGroup = t.kitGroup;
+    m_kitSeparator = t.kitSeparator;
+    m_kitTrack = t.kitTrack;
+    m_kitKnob = t.kitKnob;
+    m_kitChip = t.kitChip;
+    m_kitChipHover = t.kitChipHover;
+    m_kitHeroShade = t.kitHeroShade;
+    m_kitHeroPill = t.kitHeroPill;
+    m_kitHeroPillHover = t.kitHeroPillHover;
     m_bypassBody = t.bypassBody;
     m_bypassHeader = t.bypassHeader;
     m_bypassEdge = t.bypassEdge;

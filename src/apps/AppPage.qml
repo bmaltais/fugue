@@ -43,6 +43,16 @@ Rectangle {
         }
     }
 
+    // A picture dropped anywhere on the page goes into the app's picture input (the last focused, else the first); a picture
+    // input's own well, above this, takes it first.
+    DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onDropped: event => {
+            if (event.hasUrls)
+                page.appView.dropImageFiles(event.urls)
+        }
+    }
     ColumnLayout {
         anchors { fill: parent; margins: 4 * page.u }
         spacing: 3 * page.u
@@ -269,6 +279,19 @@ Rectangle {
                     }
                 }
 
+                // The output's one quiet control: the screen back to its empty state (the files stay where they are).
+                ViewButton {
+                    objectName: "appClear"
+                    Layout.alignment: Qt.AlignRight
+                    look: page.look
+                    text: qsTr("Clear")
+                    glyph: "x"
+                    flat: true
+                    tip: qsTr("Clear the result from this screen; the files stay saved")
+                    enabled: page.appView.canClear
+                    visible: page.appView.canClear || page.appView.busy
+                    onTapped: page.appView.clearResults()
+                }
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true

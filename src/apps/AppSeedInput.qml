@@ -3,9 +3,11 @@ import QtQuick.Layouts
 import Fugue
 import "../canvas"
 
-// A seed as a node has it: the number, a dice for a new one, and its mode: Fixed (the run uses the number), Randomize each
-// run (a new one every time) or Increment after each run (the number, then the next). The mode and the number live in
-// AppView (setSeedMode, rollSeed, setValue); this only shows them.
+// A seed as a node has it, in one row of the height of the other fields (7u): the number in a plain well (no Material outline,
+// no floating label: the mode is said by the mode control alone), a small dice for a new number, and the mode as a small
+// drop-down: Fixed (the run uses the number), Random (a new one every run, the field then shows "New each run") or Increment
+// (the number, then the next after each run). The mode and the number live in AppView (setSeedMode, rollSeed, setValue);
+// this only shows them.
 RowLayout {
     id: row
     required property var field
@@ -13,6 +15,7 @@ RowLayout {
     required property CanvasLook look
     property string mode: field.mode
     property var current: field.value
+    readonly property bool random: mode === "random"
     spacing: look.unit
 
     Connections {
@@ -24,20 +27,48 @@ RowLayout {
             row.current = row.appView.valueOf(key)
         }
     }
-    ThemedTextField {
-        objectName: "appInput-" + row.field.key
+    Rectangle {
+        id: well
         Layout.fillWidth: true
-        enabled: row.mode !== "random"
-        text: row.mode === "random" || row.current === undefined || row.current === null ? "" : String(row.current)
-        placeholderText: row.mode === "random" ? qsTr("New each run") : qsTr("Automatic")
-        font.pixelSize: row.look.textSize
-        inputMethodHints: Qt.ImhDigitsOnly
-        validator: RegularExpressionValidator { regularExpression: /^[0-9]{0,16}$/ }
-        selectByMouse: true
-        Accessible.name: row.field.label
-        onTextEdited: {
-            row.current = text
-            row.appView.setValue(row.field.key, text)
+        Layout.minimumWidth: 16 * row.look.unit
+        implicitHeight: 7 * row.look.unit
+        radius: row.look.smallCorner
+        color: row.look.well
+        border.width: input.activeFocus ? 1 : 0
+        border.color: row.look.accent
+        opacity: row.random ? 0.6 : 1
+        TextInput {
+            id: input
+            objectName: "appInput-" + row.field.key
+            anchors { fill: parent; leftMargin: 2 * row.look.unit; rightMargin: 2 * row.look.unit }
+            verticalAlignment: TextInput.AlignVCenter
+            clip: true
+            enabled: !row.random
+            text: row.random || row.current === undefined || row.current === null ? "" : String(row.current)
+            color: row.look.text
+            selectionColor: row.look.accent
+            selectedTextColor: row.look.accentForeground
+            font.pixelSize: row.look.textSize
+            font.features: { "tnum": 1 }
+            inputMethodHints: Qt.ImhDigitsOnly
+            validator: RegularExpressionValidator { regularExpression: /^[0-9]{0,16}$/ }
+            selectByMouse: true
+            activeFocusOnTab: true
+            Accessible.role: Accessible.EditableText
+            Accessible.name: row.field.label
+            onTextEdited: {
+                row.current = text
+                row.appView.setValue(row.field.key, text)
+            }
+        }
+        Text {
+            anchors { fill: parent; leftMargin: 2 * row.look.unit; rightMargin: 2 * row.look.unit }
+            verticalAlignment: Text.AlignVCenter
+            visible: row.random
+            text: qsTr("New each run")
+            color: row.look.label
+            font.pixelSize: row.look.textSize
+            elide: Text.ElideRight
         }
     }
     ViewButton {
@@ -45,14 +76,15 @@ RowLayout {
         look: row.look
         glyph: "dices"
         tip: qsTr("A new random number")
-        enabled: row.mode !== "random"
+        enabled: !row.random
         onTapped: row.appView.rollSeed(row.field.key)
     }
     ThemedDropDown {
         objectName: "appSeedMode-" + row.field.key
+        Layout.preferredWidth: 22 * row.look.unit
         options: [{ value: "fixed", text: qsTr("Fixed") },
-                  { value: "random", text: qsTr("Randomize each run") },
-                  { value: "increment", text: qsTr("Increment after each run") }]
+                  { value: "random", text: qsTr("Random") },
+                  { value: "increment", text: qsTr("Increment") }]
         value: row.mode
         label: qsTr("%1 mode").arg(row.field.label)
         onPicked: v => row.appView.setSeedMode(row.field.key, v)

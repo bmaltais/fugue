@@ -32,6 +32,11 @@ ColumnLayout {
             root.current = String(root.appView.valueOf(key) ?? "")
             root.recents = root.appView.recentImages()
         }
+        // A picture the page took by Ctrl+V or a drop anywhere on it: its refusal shows here.
+        function onImageNotice(key, text) {
+            if (key === root.field.key)
+                root.notice = text
+        }
     }
     function paste() { root.notice = root.appView.pasteImage(root.field.key) }
 
@@ -45,6 +50,8 @@ ColumnLayout {
         border.width: activeFocus || drop.containsDrag ? 2 : 1
         border.color: activeFocus || drop.containsDrag ? root.look.accent : root.look.hairline
         activeFocusOnTab: true
+        // The page's Ctrl+V and drop go to the picture input last focused.
+        onActiveFocusChanged: root.appView.setFocusedImage(root.field.key, activeFocus)
         Accessible.role: Accessible.Button
         Accessible.name: root.field.label
         Accessible.description: root.current === "" ? qsTr("No picture") : root.current.split("/").pop()

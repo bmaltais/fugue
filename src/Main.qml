@@ -133,6 +133,7 @@ ApplicationWindow {
                 id: menuBar
                 width: parent.width
                 tabsAllowed: win.chromeIsShown("workflow-tabs")
+                appSwitchAllowed: !win.areaHost
                 onNeeded: menuBarHost.reveal()
             }
         }
@@ -270,9 +271,9 @@ ApplicationWindow {
         headerHeight: win.focusMode ? 0 : 7 * App.theme.look.unit
         leadingClear: Math.max(0, menuBarHost.handleEnd - win.body.x)
     }
-    // The App view (#385): a workflow with an app block as one simple screen, in the canvas's place, and for such a workflow
-    // opened in the graph the strip with the way back under the canvas. Made only while needed, as the areas' host is, so
-    // any other window has none of these items (test_area_window).
+    // The App view (#385): a workflow with an app block as one simple screen, in the canvas's place. Made only while needed, as
+    // the areas' host is, so any other window has none of these items (test_area_window). The way back to it from the graph is
+    // the window bar's App | Graph switch (menu/MenuBar.qml, #397).
     property Item appPageItem: null
     // The apps shelf in the same place while nothing is open (#388), made only then, for the same reason.
     property Item homeItem: null
@@ -285,7 +286,6 @@ ApplicationWindow {
             Layout.rightMargin: win.sidePanelMargin("right")
         }
     }
-    property Item appBackItem: null
     Component {
         id: appPageComponent
         AppPage {
@@ -295,42 +295,13 @@ ApplicationWindow {
             Layout.rightMargin: win.sidePanelMargin("right")
         }
     }
-    Component {
-        id: appBackComponent
-        Rectangle {
-            objectName: "appBackHost"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 7 * App.theme.look.unit
-            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
-            Layout.rightMargin: win.sidePanelMargin("right")
-            color: App.theme.look.popup
-            ViewButton {
-                objectName: "appShowApp"
-                anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 3 * App.theme.look.unit }
-                look: App.theme.look
-                text: qsTr("Show as app")
-                glyph: "layout-template"
-                flat: true
-                compact: true
-                tip: qsTr("Back to the simple screen of this app")
-                onTapped: App.appView.showApp()
-            }
-        }
-    }
     function syncApp() {
         const page = appShown
-        const back = appIsApp && !appShown && !focusMode && !areaHost
         if (page && !appPageItem) {
             appPageItem = appPageComponent.createObject(mainLayout) as Item
         } else if (!page && appPageItem) {
             appPageItem.destroy()
             appPageItem = null
-        }
-        if (back && !appBackItem) {
-            appBackItem = appBackComponent.createObject(mainLayout) as Item
-        } else if (!back && appBackItem) {
-            appBackItem.destroy()
-            appBackItem = null
         }
     }
     function syncHome() {

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../apps"
 import "../workflow"
 
 // The window bar (#50, #262; Blender's top bar): the window's own menus, File, Edit, Run, Window and Help, built from
@@ -23,6 +24,8 @@ Rectangle {
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     // Off while View > Bars and panels has the workflow tabs hidden (#129).
     property bool tabsAllowed: true
+    // False while the window has several areas: the App view is not shown then, so the App | Graph switch has nothing to switch.
+    property bool appSwitchAllowed: true
 
     // The top menus; read again when the language changes.
     property var tree: App.commands.menu("bar")
@@ -238,9 +241,35 @@ Rectangle {
         allowed: bar.tabsAllowed
         anchors.left: bar.narrow ? hamburger.right : titles.right
         anchors.leftMargin: 2 * bar.u
-        anchors.right: chipLoader.left
+        anchors.right: bar.appSwitch ? bar.appSwitch.left : chipLoader.left
         anchors.rightMargin: 2 * bar.u
         height: parent.height - 1
+    }
+
+    // The App | Graph switch (#397): only while the shown workflow has an app block, in the App view and the graph alike, so the
+    // person can flip back and forth; 2u from the project chip. Made only then (the window keeps few items: test_area_window), and
+    // the tabs end 2u before it.
+    property Item appSwitch: null
+    readonly property bool appSwitchWanted: appSwitchAllowed && App.appView !== null && App.appView.isApp
+    function syncAppSwitch() {
+        if (appSwitchWanted && !appSwitch) {
+            appSwitch = appSwitchComponent.createObject(bar) as Item
+        } else if (!appSwitchWanted && appSwitch) {
+            appSwitch.destroy()
+            appSwitch = null
+        }
+    }
+    onAppSwitchWantedChanged: syncAppSwitch()
+    Component.onCompleted: syncAppSwitch()
+    Component {
+        id: appSwitchComponent
+        AppViewSwitch {
+            look: bar.look
+            appShown: App.appView.shown
+            anchors.right: chipLoader.left
+            anchors.rightMargin: 2 * bar.u
+            anchors.verticalCenter: parent.verticalCenter
+        }
     }
 
     // The project chip (spec 1.4.2): which project this window is in, at the bar's far end; a press opens the

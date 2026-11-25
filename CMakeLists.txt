@@ -152,6 +152,8 @@ fugue_add_qml(fugue_apps_qml src/apps /apps)
 fugue_add_qml(fugue_panels_qml src/panels /panels)
 # The media browser (#133): a standalone viewer of a list of images, videos and sounds.
 fugue_add_qml(fugue_media_qml src/media /media)
+# The Drift kit (docs/canvas-look.md): grouped rows, switches, chips, sliders and the hero header, on the canvas look's tokens.
+fugue_add_qml(fugue_kit_qml src/kit /kit)
 # The window's areas and their views (#217): the area tree drawn (AreaNode.qml).
 fugue_add_qml(fugue_workspace_qml src/workspace /workspace)
 
@@ -359,6 +361,16 @@ foreach(test_source ${fugue_media_tests})
   fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 
+# Kit tests: the Drift kit's controls alone, in a window of their own (tests/kit/KitGallery.qml is also its picture).
+file(GLOB fugue_kit_tests CONFIGURE_DEPENDS tests/kit/*.cpp)
+foreach(test_source ${fugue_kit_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+  fugue_add_test(${test_name} OFFSCREEN)
+endforeach()
+
 # A `fugue` run from the build folder finds the bundled templates beside it, as an installed one
 # finds share/fugue/templates (engine/templates.h).
 file(CREATE_LINK ${CMAKE_SOURCE_DIR}/templates ${CMAKE_BINARY_DIR}/templates SYMBOLIC)
@@ -443,7 +455,7 @@ include(GNUInstallDirs)
 install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES share/fugue-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages RENAME fugue.xml)
-# The icon, light-art as `fugue` and dark-art as `fugue-dark`, in the sizes a launcher asks for.
+# The icon (one art, installed as `fugue` and `fugue-dark`), scalable and in the sizes a launcher asks for.
 install(DIRECTORY share/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
 install(FILES examples/demo.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
 # The bundled templates (spec 11.10): the `templates` submodule, bmaltais/fugue-workflows at the

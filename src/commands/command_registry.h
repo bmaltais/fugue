@@ -85,6 +85,8 @@ public:
     QStringList ids() const;
     const CommandSpec *spec(const QString &id) const;
     bool hasHandler(const QString &id) const;
+    // The command's handler (empty when none): a window that takes a key over in one view runs this one in the others.
+    Handler handlerOf(const QString &id) const;
     // The keys now bound to the command: its defaults, less the user's unsets, plus the
     // user's adds. Portable text, as QKeySequence prints it.
     QStringList keys(const QString &id) const;
