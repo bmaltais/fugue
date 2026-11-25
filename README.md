@@ -156,3 +156,5 @@ bin/build-helper cuda    # or vulkan, cpu; into build-helper-<backend>/
 ## License
 
 MIT.
+
+The icon and wordmarks use letterforms outlined from Fraunces (SIL OFL 1.1); see `share/brand/CREDITS.md`.
