@@ -13,26 +13,15 @@
 
 namespace fugue {
 
-AppModels::AppModels(const Registry *registry, QObject *parent) : QObject(parent), m_registry(registry) {
-    m_pool.setMaxThreadCount(1); // headers and hashes one after the other: the disk is the limit
-}
+AppModels::AppModels(const Registry *registry, QObject *parent) : QObject(parent), m_registry(registry) {}
 
-AppModels::~AppModels() {
-    m_stop->store(true);
-    m_pool.waitForDone();
-}
+AppModels::~AppModels() = default;
 
 QString AppModels::keyOf(const QString &type, const QStringList &capabilities) {
     return type + QLatin1Char('\n') + capabilities.join(QLatin1Char(','));
 }
 
 ModelLibrary AppModels::library() const { return m_library ? *m_library : ModelLibrary::current(m_registry); }
-
-FileHashes &AppModels::hashes() {
-    if (!m_hashes)
-        m_hashes = std::make_shared<FileHashes>(FileHashes::defaultPath());
-    return *m_hashes;
-}
 
 void AppModels::setDownloads(ModelDownloads *downloads) {
     m_downloads = downloads;
@@ -58,23 +47,18 @@ void AppModels::request(const QString &type, const QStringList &capabilities) {
     QList<MarkedFile> files;
     for (const ListedModel &model : std::as_const(entry.disk))
         files.append({model.path, model.size});
-    if (!files.isEmpty()) {
-        QPointer<AppModels> self(this);
-        const std::shared_ptr<std::atomic_bool> stop = m_stop;
-        m_pool.start([self, stop, key, type, files, asked] {
-            if (stop->load())
-                return;
+    if (!files.isEmpty())
+        m_work.read(this, [key, type, files, asked, this]() -> std::function<void()> {
             const ModelSpeeds speeds;
             const QHash<QString, ModelMark> found =
                 markModels(type, files, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared());
-            QMetaObject::invokeMethod(self, [self, key, found, asked] {
-                if (!self || self->m_asked != asked || !self->m_entries.contains(key))
+            return [this, key, found, asked] {
+                if (m_asked != asked || !m_entries.contains(key))
                     return;
-                self->m_entries[key].marks = found;
-                emit self->changed();
-            });
+                m_entries[key].marks = found;
+                emit changed();
+            };
         });
-    }
     if (!m_source)
         m_source = listOfferedModels;
     QPointer<AppModels> self(this);
@@ -95,47 +79,16 @@ bool AppModels::loading(const QString &type, const QStringList &capabilities) co
 QVariantList AppModels::entries(const QString &type, const QStringList &capabilities) const {
     const Entry entry = m_entries.value(keyOf(type, capabilities));
     QVariantList list;
-    for (const ListedModel &model : entry.offered + entry.disk) {
-        QVariantMap row{{"title", model.title.isEmpty() ? model.name : model.title},
-                        {"name", model.name},
-                        {"note", model.note},
-                        {"status", model.status},
-                        {"provider", model.provider},
-                        {"handle", model.handle.toVariantMap()}};
-        if (model.onDisk()) {
-            row.insert("path", model.path);
-            row.insert("folder", model.folder);
-            row.insert("size", model.size);
-            row.insert("family", modelFamily(familyKindOf(type), QFileInfo(model.path).fileName()));
-            if (const auto mark = entry.marks.constFind(model.path); mark != entry.marks.constEnd() && mark->recommended) {
-                row.insert("recommended", true);
-                row.insert("recommendedWhy", mark->reason);
-            }
-        }
-        list.append(row);
-    }
+    for (const ListedModel &model : entry.offered + entry.disk)
+        list.append(modelRow(model, type, entry.marks));
     for (const CatalogModel &model : std::as_const(entry.missing))
-        list.append(QVariantMap{{"catalog", true},
-                                {"id", model.id},
-                                {"title", model.title},
-                                {"detail", model.summary()},
-                                {"size", model.size},
-                                {"note", model.description}});
+        list.append(catalogRow(model));
     return list;
 }
 
 QString AppModels::emptyText(const QString &type, const QStringList &capabilities) const {
-    const bool image = std::any_of(capabilities.begin(), capabilities.end(),
-                                   [](const QString &capability) { return capability.startsWith(QLatin1String("image.")); });
-    if (image)
-        return tr("No image model available: start one in omarchy-local-ai or add a provider");
-    if (capabilities.contains(QStringLiteral("text.generate")))
-        return tr("No text model available: start one in omarchy-local-ai or add a provider");
     const std::optional<PortType> portType = PortType::parse(type);
-    const QString folder = portType ? library().folders(*portType).value(0) : QString();
-    if (folder.isEmpty())
-        return tr("No model available: start one in omarchy-local-ai or add a provider");
-    return tr("No model found: put one in %1, or add its folder to Extra model folders in Settings").arg(folder);
+    return modelsEmptyText(capabilities, portType ? &*portType : nullptr, library());
 }
 
 void AppModels::pick(int ticket, const QString &type, const QString &path) {
@@ -155,21 +108,9 @@ void AppModels::pick(int ticket, const QString &type, const QString &path) {
         return;
     }
     // A large model takes seconds to minutes to read: on the pool, the field says it is being checked meanwhile.
-    QPointer<AppModels> self(this);
-    const std::shared_ptr<FileHashes> store = m_hashes;
-    const std::shared_ptr<std::atomic_bool> stop = m_stop;
-    hashes(); // made here, on the window's thread
-    const std::shared_ptr<FileHashes> shared = m_hashes;
-    m_pool.start([self, shared, stop, ticket, type, path, name] {
-        if (stop->load())
-            return;
-        const QString hash = shared->hash(path);
-        if (stop->load())
-            return;
-        QMetaObject::invokeMethod(self, [self, ticket, type, name, hash] {
-            if (self) // an unreadable file answers with no handle, so the field stops waiting
-                emit self->hashed(ticket, hash.isEmpty() ? QVariantMap() : diskHandle(type, name, hash).toVariantMap());
-        });
+    m_work.hash(this, path, {}, [this, ticket, type, name](const QString &hash) {
+        // an unreadable file answers with no handle, so the field stops waiting
+        emit hashed(ticket, hash.isEmpty() ? QVariantMap() : diskHandle(type, name, hash).toVariantMap());
     });
 }
 
@@ -179,16 +120,7 @@ QVariantMap AppModels::catalogInfo(const QString &type, const QString &id) const
     const std::optional<PortType> portType = PortType::parse(type);
     if (!model || !portType || model->resource != type)
         return {};
-    return QVariantMap{{"id", model->id},
-                       {"title", model->title},
-                       {"description", model->description},
-                       {"licenseLine", licenseLine(*model)},
-                       {"licenseUrl", model->licenseUrl},
-                       {"commercial", model->commercial},
-                       {"author", model->author},
-                       {"host", QUrl(model->url).host()},
-                       {"sizeText", ModelDownloads::sizeText(model->size)},
-                       {"folder", library().downloadFolder(*portType)}};
+    return catalogDetails(*model, library(), *portType);
 }
 
 QString AppModels::download(int ticket, const QString &type, const QString &id) {
@@ -199,14 +131,7 @@ QString AppModels::download(int ticket, const QString &type, const QString &id) 
         return tr("This model is not in the catalog for this input.");
     if (!m_downloads)
         return tr("Downloads are not available here.");
-    ModelLibrary lib = library();
-    lib.fitDownloadRoot({*portType});
-    MissingModel wanted;
-    wanted.handle = model->handle();
-    wanted.source = model->url;
-    wanted.size = model->size;
-    wanted.folder = lib.downloadFolder(*portType);
-    const Result<DownloadTarget> planned = planDownload(lib, wanted);
+    const Result<DownloadTarget> planned = planCatalogDownload(library(), *model, *portType);
     if (!planned)
         return planned.error().message;
     m_downloading.append(Download{ticket, type, planned->path, model->file, QStringLiteral("sha256:") + model->sha256});
