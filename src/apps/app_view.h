@@ -111,8 +111,15 @@ class AppView : public QObject {
     Q_PROPERTY(QString shownInputs READ shownInputs NOTIFY runChanged)
     // The newest step picture of the run going ("" when none): what a Sampler's preview gives while it works.
     Q_PROPERTY(QString liveFrame READ liveFrame NOTIFY progressChanged)
-    // Something is shown of a finished run (results, an error) and no run of this tab goes: Clear can act.
+    // Something is shown of a finished run (results, an error) or the strip has takes, and no run of this tab goes: Clear can act.
+    // Clear empties the stage and the strip; the run folders stay (History, Results), and the strip's old takes stay away after a restart.
     Q_PROPERTY(bool canClear READ canClear NOTIFY runChanged)
+    // The app has a seed input, so Repeat can make something new each run (owner, 2026-11-25: Repeat on Upscale, which has none,
+    // made a strip of identical takes in a second: each run came from the cache at once). Without one the form offers no Repeat.
+    Q_PROPERTY(bool canRepeat READ canRepeat NOTIFY appChanged)
+    // Repeat is chosen but no seed is Random or Increment, so the next run would be the same: it waits (the form says why) and goes on
+    // once a seed is set to vary.
+    Q_PROPERTY(bool repeatWaits READ repeatWaits NOTIFY liveChanged)
     // What the app still needs (a missing model or pack), listed while it is not ready (#469).
     Q_PROPERTY(fugue::NeedsModel *needs READ needs CONSTANT)
     // The paired host the app runs on, when its models are not on this machine and that host answers (#395); empty when it runs here.
@@ -142,7 +149,8 @@ public:
     // Live's debounce in ms (600 at first; tests shorten it).
     void setLiveDelay(int milliseconds) { m_liveTimer.setInterval(milliseconds); }
     QString liveMode() const { return m_state.value(m_tab).live; }
-    // "off", "live" or "repeat". Repeat starts a run at once when none goes. Cancel turns it off.
+    // "off", "live" or "repeat". Repeat starts a run at once when none goes, and the next when one ends while a seed varies (Random
+    // or Increment); it is refused for an app with no seed (canRepeat). Cancel turns it off.
     Q_INVOKABLE void setLiveMode(const QString &mode);
     // Whether anything is armed for Live (a debounce waiting): false at idle and when it is off.
     bool liveArmed() const { return m_liveTimer.isActive(); }
@@ -173,6 +181,8 @@ public:
     QString shownInputs() const;
     QString liveFrame() const { return m_state.value(m_tab).liveFrame; }
     bool canClear() const;
+    bool canRepeat() const;
+    bool repeatWaits() const;
 
     // A form's value, by the field's key. Empty text or NaN for a number takes the value away (the workflow's own stays).
     Q_INVOKABLE void setValue(const QString &key, const QVariant &value);
@@ -333,7 +343,7 @@ private:
         QString live = QStringLiteral("off"); // Live (#471): "off", "live" or "repeat"
         bool liveDirty = false;               // an input changed (or the last run ended in Repeat) and a run is owed
         QString storedFor;                    // the file the takes of History were read for
-        bool cleared = false; // Clear emptied the stage; the takes stay in the strip, and picking one shows it again
+        bool cleared = false; // Clear emptied the stage and the strip
     };
     static constexpr int maxTakes = 30;
     QString inputsLine(const QMap<QString, QJsonValue> &values, const QMap<QString, QString> &modes) const;
@@ -343,6 +353,8 @@ private:
     // The person changed an input (not the store by itself): Live arms its debounce.
     void inputEdited();
     void liveFire();
+    // A seed of the shown tab is Random or Increment: the next run differs from the last.
+    bool repeatVaries() const;
     void scheduleLive(const QString &tab);
     void syncTake(TabState &state);
     void setRunsOn(const QString &host);

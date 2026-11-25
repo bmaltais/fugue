@@ -1933,7 +1933,7 @@
   "Open in Fugue": "Open in Fugue",
   "This is not an app.": "This is not an app.",
   "This workflow is not an app.": "This workflow is not an app.",
-  "Clear the result from this screen; the files stay saved": "Clear the result from this screen; the files stay saved",
+  "Clear the results and the takes from this screen; the files stay saved (Results)": "Clear the results and the takes from this screen; the files stay saved (Results)",
   "Increment": "Increment",
   "Random": "Random",
   "Add to launcher: start this app from the desktop launcher, in a window of its own": "Add to launcher: start this app from the desktop launcher, in a window of its own",
@@ -2054,5 +2054,6 @@
   "Hide the inputs: more room for the result": "Hide the inputs: more room for the result",
   "Project: %1. Switch or manage projects (File > Projects…)": "Project: %1. Switch or manage projects (File > Projects…)",
   "Show or hide the inputs panel of the App view": "Show or hide the inputs panel of the App view",
-  "Show the inputs": "Show the inputs"
+  "Show the inputs": "Show the inputs",
+  "Repeat waits: set a seed to Random or Increment, or each run makes the same picture.": "Repeat waits: set a seed to Random or Increment, or each run makes the same picture."
 }

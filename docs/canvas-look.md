@@ -892,6 +892,8 @@ numbers win (20.15). A field on a plain panel is never glass. Frost 0 or no back
 | Element | Recipe |
 | --- | --- |
 | Raised chip (plain panel) | `kit-chip` fill (group mixed 10% toward fg), hover `kit-chip-hover` (17%), pressed `menuRow`, 100 ms color; `KitRaise`: top edge white 7% (light 60%), 1px soft shadow black 28% (light 10%); 7u tall, radius 2.5u or a pill; `current` uses `selectedRow`, never the accent |
+| Chip padding | content 2.5u from each end (a pill's too: its round end needs it), 1.75u between a glyph and its text; a glyph 14px; this holds for every raised chip, button and dropdown, so their contents line up down a panel |
+| Dropdown (`KitDropdown`) | a raised chip (it is clicked; a value picked from a menu is not typed, so it is not a well): the chosen text at the start in `text` (`label` for a prompt such as "Choose a picture"), elided, a 14px `chevron-down` in `label` at the end, 1u between them, both 2.5u from the ends; `menuRow` fill while its menu is open; the App view's picture, choice and model inputs (owner, 2026-11-25) |
 | Frosted chip (over a picture, Frost above 0) | blur `4 + 16 f` px, saturate `100 + 50 f` %; tint white `0.06 + 0.20 f`; edge 1px white `0.12 + 0.30 f`; inset top shine white `0.10 + 0.30 f`; white ink with a 0 1px 2px black 45% text shadow (`f` is the Frost setting, 0.6 by default) |
 | Frosted chip over a pale patch (luma above 0.55) | tint white `0.30 + 0.30 f`, raised in 5% steps until the dark ink `#17171b` reads 4.5:1; edge black `0.08 + 0.10 f`; inset top shine white 60%; drop 0 1px 2px black 10% |
 | Mixed pictures | each control measures its own patch (a 64px grab, once per picture and position); the ink is chosen per control |
@@ -941,7 +943,7 @@ For a few exclusive options (the seed's Fixed, Random, Increment; the window's A
 | Frost 0 | opaque track (`kit-track`), thumb the tone mixed 70% into the track, no blur |
 | Keys | one tab stop; Left and Right (mirrored in right-to-left) move and choose, Home and End jump; Space and Enter keep the choice; accessible role radio group with the checked option |
 
-### 20.10 KitSlider: tone fill (Built; the value box stays the row's own number)
+### 20.10 KitSlider: tone fill (Built; with `showValue` the value is a typed field, a `KitWell` 6u tall at the rail's end, 11u wide by default: owner, 2026-11-25)
 
 Built: 1u rail, accent fill, white `kit-knob` 4.5u thumb, optional ticks and glyphs, keys. **To change:** the rail is a recessed
 well (6px high, `KitWell` look); the fill is the panel's tone at 85% (4px high, 0.5u inside the rail); the thumb stays opaque white,

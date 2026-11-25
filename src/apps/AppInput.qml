@@ -90,8 +90,6 @@ Item {
             look: root.look
             label: root.field.label
             hint: root.hint
-            value: root.field.kind === "number" && root.field.min !== undefined && root.field.max !== undefined
-                   ? String(Number(root.current ?? root.field.min)) : ""
             Loader {
                 width: parent.width
                 sourceComponent: root.field.kind === "number" && root.field.min !== undefined && root.field.max !== undefined ? rangedInput
@@ -193,7 +191,10 @@ Item {
             objectName: "appInput-" + root.field.key
             look: root.look
             width: parent?.width ?? 0
-            railWidth: width
+            // The value is a field at the rail's end, wide enough for a size in pixels (owner, 2026-11-25).
+            showValue: true
+            endWidth: 14 * root.look.unit
+            railWidth: width - endWidth - root.look.unit
             text: root.field.label
             from: root.field.min
             to: root.field.max

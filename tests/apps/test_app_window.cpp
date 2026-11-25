@@ -951,10 +951,9 @@ private slots:
         }
         QTRY_VERIFY(rig.view.results().isEmpty());
         QTRY_VERIFY(!find(app.window, "appClear"));
-        QCOMPARE(rig.view.takes().size(), 1); // Clear empties the stage; the take stays in the strip
+        QVERIFY(rig.view.takes().isEmpty()); // Clear empties the stage and the strip (owner, 2026-11-25)
         QCOMPARE(rig.view.takeIndex(), -1);
-        rig.view.selectTake(0);
-        QCOMPARE(rig.view.shownResults().size(), 1);
+        QVERIFY(!find(app.window, "appTakes"));
         qDeleteAll(app.engine.rootObjects());
     }
 };

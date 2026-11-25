@@ -451,7 +451,7 @@ private slots:
         QVERIFY(m_view->valueOf("seed").canConvert<double>() && m_view->valueOf("seed").typeId() != QMetaType::QVariantMap);
     }
 
-    void clearingTheResultEmptiesTheScreenOnlyWhenNoRunGoes() {
+    void clearingEmptiesTheScreenAndTheStripOnlyWhenNoRunGoes() {
         m_view->show("a", load(workflow()), {});
         QVERIFY(!m_view->canClear());
         m_view->run();
@@ -461,9 +461,11 @@ private slots:
         m_view->onEvent("run1", saved("save", "a.png"));
         m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
         QCOMPARE(m_view->results().size(), 1);
+        QCOMPARE(m_view->takes().size(), 1);
         QVERIFY(m_view->canClear());
         QSignalSpy changed(m_view.get(), &AppView::runChanged);
         m_view->clearResults();
+        QVERIFY(m_view->takes().isEmpty()); // the strip too (owner, 2026-11-25)
         QCOMPARE(changed.count(), 1);
         QVERIFY(m_view->results().isEmpty());
         QVERIFY(m_view->details().isEmpty());
@@ -678,6 +680,31 @@ private slots:
         QCOMPARE(inputOf(m_started.last().document, "sample", "seed"), firstSeed);
     }
 
+    // Clear takes the strip's takes away for good: a restart does not read them back, and a run after the clear is a take again.
+    void clearedTakesStayAwayAfterARestart() {
+        QTemporaryDir runs;
+        const QString file = runs.filePath("wf.fugue");
+        m_view->show("a", load(workflow()), file);
+        m_view->run();
+        recordRun(runs.path(), "20261125-000001-000-aaaa", m_started.at(0));
+        const auto restart = [&] {
+            auto view = std::make_unique<AppView>([this](const RunRequest &request) { m_started << request; return QStringLiteral("r%1").arg(m_started.size()); },
+                                                  [](const QString &) {}, &m_registry);
+            view->setHistory(runs.path(), [](const QString &) {});
+            view->show("a", load(workflow()), file);
+            return view;
+        };
+        auto first = restart();
+        QCOMPARE(first->takes().size(), 1);
+        QVERIFY(first->canClear()); // takes on the strip, nothing on the stage yet
+        first->clearResults();
+        QVERIFY(first->takes().isEmpty());
+        QVERIFY(QFileInfo::exists(runs.filePath("20261125-000001-000-aaaa"))); // the run folder stays (History, Results)
+        QVERIFY(restart()->takes().isEmpty());
+        recordRun(runs.path(), "20261125-000002-000-bbbb", m_started.at(0));
+        QCOMPARE(restart()->takes().size(), 1);
+    }
+
     void anAppWithNoFileKeepsTheSessionsTakesOnly() {
         QTemporaryDir runs;
         m_view->setHistory(runs.path(), [](const QString &) {});
@@ -764,6 +791,36 @@ private slots:
         m_view->onEvent("run3", evt("run.done", {{"status", "cancelled"}}));
         QTest::qWait(40);
         QCOMPARE(m_started.size(), 3);
+    }
+
+    // Repeat makes something new each run only through a seed (owner, 2026-11-25: Repeat on Upscale, which has none, filled the strip
+    // with identical takes in a second, each from the cache). No seed: no Repeat. A Fixed seed: one run, then it waits until a seed varies.
+    void repeatNeedsASeedThatVaries() {
+        QJsonObject json = workflow();
+        QJsonObject app = json.value("app").toObject();
+        QJsonArray inputs = app.value("inputs").toArray();
+        inputs.removeAt(1); // the seed
+        app.insert("inputs", inputs);
+        json.insert("app", app);
+        m_view->show("a", load(json), {});
+        QVERIFY(!m_view->canRepeat());
+        m_view->setLiveMode("repeat");
+        QCOMPARE(m_view->liveMode(), QStringLiteral("off"));
+        QVERIFY(m_started.isEmpty());
+
+        m_view->show("b", load(workflow()), {});
+        QVERIFY(m_view->canRepeat());
+        m_view->setSeedMode("seed", "fixed");
+        m_view->setLiveMode("repeat");
+        QCOMPARE(m_started.size(), 1); // the first run still goes
+        QVERIFY(!m_view->repeatWaits());
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        QTest::qWait(40);
+        QCOMPARE(m_started.size(), 1); // the next would be the same picture
+        QVERIFY(m_view->repeatWaits());
+        m_view->setSeedMode("seed", "random");
+        QCOMPARE(m_started.size(), 2); // a seed varies: Repeat goes on
+        QVERIFY(!m_view->repeatWaits());
     }
 
     void aStepPictureShowsWhileTheRunGoesAndAResultCanBeSavedAndUsedAsAnInput() {

@@ -13,7 +13,7 @@ import "../menu"
 // runs of this session as thumbnails). AppView holds all the logic; this draws it.
 //
 //   toolbar  while a run goes: Cancel (a normal button: danger red is for deletion) and where the run is. Otherwise Run again,
-//            Reuse inputs (this take's inputs back in the form), Save as…, Clear, and "…" (Open large, Show in folder, Use as
+//            Reuse inputs (this take's inputs back in the form), Save as…, Clear (the stage and the takes; the files stay), and "…" (Open large, Show in folder, Use as
 //            input, Compare with the input)
 //   result   a picture in CompareView (single mode, as the large view's): the wheel zooms about the pointer, a drag pans once
 //            zoomed, a double click fits (at Fit it opens the large view), Z toggles 100%, C compares with the input picture,
@@ -147,7 +147,7 @@ Item {
                 glyph: "x"
                 enabled: stage.appView.canClear
                 visible: stage.appView.canClear
-                tip: qsTr("Clear the result from this screen; the files stay saved")
+                tip: qsTr("Clear the results and the takes from this screen; the files stay saved (Results)")
                 onTapped: stage.appView.clearResults()
             }
             KitChip {

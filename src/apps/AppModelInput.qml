@@ -6,17 +6,17 @@ import "../canvas"
 import "../canvas/widgets"
 import "../kit"
 
-// A model input: a well with the model's name that opens the model menu (WidgetMenu, searched by word start), the same menu
+// A model input: a KitDropdown (raised: it is clicked; owner, 2026-11-25) with the model's name that opens the model menu (WidgetMenu, searched by word start), the same menu
 // rows as a node's model picker: the models the providers offer, the files in the model folders with their size and the
 // Recommended one marked (#370, with its reason), and the catalog's models not on disk under Download, which asks first
 // (ModelDownloadAsk: license, size, source, folder) and fetches through the window's one download line. AppView holds the
 // lists and the value; a file whose hash is not known is read first, and a download is the value once it has arrived: the
-// well says so meanwhile.
-Rectangle {
+// dropdown says so meanwhile.
+KitDropdown {
     id: root
     required property var field
     required property AppView appView
-    required property CanvasLook look
+    required look
     property var current: field.value
     property string notice
     readonly property bool waiting: appView.waitingModels.includes(field.key)
@@ -24,25 +24,10 @@ Rectangle {
                                     : current && current.name ? current.name : qsTr("Choose a model…")
 
     objectName: "appInput-" + field.key
-    implicitHeight: 7 * look.unit
-    radius: look.params.cornerWell * look.unit
-    color: "transparent"
-    KitWell { look: root.look; focused: root.activeFocus } // recessed, as every field
-    Rectangle {
-        anchors.fill: parent
-        radius: parent.radius
-        color: hover.hovered ? Qt.alpha(root.look.text, 0.06) : "transparent"
-    }
-    activeFocusOnTab: true
-    Accessible.role: Accessible.ComboBox
+    text: shown
+    ink: notice !== "" ? look.error : waiting || !(current && current.name) ? look.label : look.text
     Accessible.name: field.label
-    Accessible.description: shown
-    Keys.onReturnPressed: openMenu()
-    Keys.onEnterPressed: openMenu()
-    Keys.onSpacePressed: openMenu()
-    Keys.onDownPressed: openMenu()
-    HoverHandler { id: hover }
-    TapHandler { onTapped: { root.forceActiveFocus(); root.openMenu() } }
+    onTapped: openMenu()
 
     Connections {
         target: root.appView
@@ -50,20 +35,6 @@ Rectangle {
             if (key === root.field.key)
                 root.current = root.appView.valueOf(key)
         }
-    }
-    Text {
-        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 2 * root.look.unit; rightMargin: 6 * root.look.unit }
-        text: root.shown
-        color: root.notice !== "" ? root.look.error : root.waiting || !(root.current && root.current.name) ? root.look.label : root.look.text
-        font.pixelSize: root.look.textSize
-        elide: Text.ElideMiddle
-    }
-    Glyph {
-        anchors { right: parent.right; rightMargin: 2 * root.look.unit; verticalCenter: parent.verticalCenter }
-        name: "chevron-down"
-        look: root.look
-        color: root.look.label
-        font.pixelSize: 12
     }
 
     function sizeText(bytes) {

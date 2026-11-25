@@ -3358,7 +3358,8 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   is for deletion) and where the run is ("Waiting for its turn…", "Working… 40%"); otherwise **Run again** (`appRunAgain`: this
   take's inputs, run), **Reuse inputs** (`appReuseInputs`: this take's inputs back in the form), **Save as…** (`appSaveAs`: a copy
   of the file, `AppView::saveResult`), **Clear** (`appClear`, shown once there is something to clear: the stage back to its
-  empty state, the takes stay in the strip and picking one shows it again; the files stay on disk and in the results store) and
+  empty state and the takes strip emptied, owner 2026-11-25; the files stay on disk and in the results store, and the newest run
+  cleared is recorded in `app-takes.json` beside the runs root, so a restart does not bring the cleared takes back) and
   **…** (`appMore`: Open large, Show in folder, Use as input, Compare with the input). The **result** is a picture in
   `CompareView` (single mode, the large view's viewer): the wheel zooms about the pointer, a drag pans once zoomed, a double
   click fits (at Fit it opens `LargeViewDialog`), **Z** toggles 100%, **C** compares with the input picture (slider mode over
@@ -3395,8 +3396,10 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   moves itself, such as the seed Increment advances after a run) arms a 600 ms debounce, restarted by each change, and when the
   form has been still it queues one run. A run of the tab that still waits for its turn is cancelled first and leaves no take (it
   was superseded); a run that is working is never cut: the owed run starts when it ends. A tab not shown keeps the run owed until
-  it is shown. **Repeat**: switching it on starts a run at once when none goes, and each run that ends well starts the next
-  (with a Random seed: a new picture after another); a failure ends the chain (the mode stays on for the next manual run) and
+  it is shown. **Repeat**: only for an app with a seed (`canRepeat`); switching it on starts a run at once when none goes, and
+  each run that ends well starts the next while a seed is Random or Increment (a new picture after another). With every seed
+  Fixed the next run would be the same picture (from the cache, at once: the owner's strip of identical takes, 2026-11-25), so
+  Repeat waits and says so (`appRepeatWaits`) until a seed varies; a failure ends the chain (the mode stays on for the next manual run) and
   **Cancel turns Live and Repeat off**, since the person said stop. One mode at a time. Both run through the one queue and
   keep one run per tab in it, so the queue never grows; the window losing the focus changes nothing (the queue is the cap).
   Nothing is armed or polled while both are off (no timer runs). Both switches are Tab stops and Space or Enter flips them;
