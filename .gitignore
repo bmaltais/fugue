@@ -2,3 +2,11 @@
 __pycache__/
 /build-helper-*/
 /dist/
+# makepkg's work in packaging/ (sources it fetches, its build folders, the packages it makes)
+/packaging/*.tar.gz
+/packaging/*.pkg.tar.zst
+/packaging/SHA256SUMS
+/packaging/src/
+/packaging/pkg/
+/packaging/fugue/
+/packaging/fugue-workflows/
