@@ -1834,5 +1834,22 @@
   "Environments": "Environments",
   "Get ready": "Get ready",
   "Install and trust": "Install and trust",
-  "Trust": "Trust"
+  "Trust": "Trust",
+  "Apps": "Apps",
+  "Only apps: templates that open as one simple screen": "Only apps: templates that open as one simple screen",
+  "This workflow's app was made by a newer Fugue, so it opens as a graph.": "This workflow's app was made by a newer Fugue, so it opens as a graph.",
+  "This workflow's app block cannot be used, so it opens as a graph: %1": "This workflow's app block cannot be used, so it opens as a graph: %1",
+  "%1 mode": "%1 mode",
+  "A new random number": "A new random number",
+  "Browse…": "Browse…",
+  "Choose a model…": "Choose a model…",
+  "Drop a picture file.": "Drop a picture file.",
+  "Drop a picture here, paste one or browse": "Drop a picture here, paste one or browse",
+  "Getting the model ready…": "Getting the model ready…",
+  "New each run": "New each run",
+  "No picture": "No picture",
+  "Paint mask…": "Paint mask…",
+  "Pick a picture first: there is nothing to paint on yet.": "Pick a picture first: there is nothing to paint on yet.",
+  "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif)": "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif)",
+  "Pictures to try": "Pictures to try"
 }

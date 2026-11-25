@@ -196,6 +196,69 @@ private slots:
         QVERIFY(library.find("plain")->families.isEmpty());
     }
 
+    // template.json's `app` and the workflow's block (#387, 11.10): the block decides what is an app, template.json gives the card's
+    // words and may say `false`; what does not agree is a problem of the catalog check and never keeps a template out of the list.
+    void readsTheAppFlagAgainstTheWorkflowsBlock() {
+        Fixture f;
+        const QJsonObject block{{"format", 1}, {"title", "Block title"}, {"description", "Block words"},
+                                {"inputs", QJsonArray{QJsonObject{{"role", "prompt"}, {"targets", QJsonArray{"prompt.text"}}}}},
+                                {"outputs", QJsonArray{QJsonObject{{"node", "prompt"}}}}};
+        QJsonObject app = workflow({{"prompt", node("fugue/text", {{"text", "a fox"}})}});
+        app.insert("app", block);
+        QJsonObject broken = app;
+        broken.insert("app", QJsonObject{{"format", 1}, {"inputs", "nope"}});
+        const QJsonObject card{{"title", "Card title"}, {"summary", "Card words"}, {"kind", "image"}};
+
+        makeTemplate(f.bundled.filePath("plain"), {{"title", "Plain"}});
+        makeTemplate(f.bundled.filePath("yes"), {{"title", "Yes"}, {"description", "Own words"}, {"app", true}}, app);
+        makeTemplate(f.bundled.filePath("card"), {{"title", "Card"}, {"app", card}}, app);
+        makeTemplate(f.bundled.filePath("off"), {{"title", "Off"}, {"app", false}}, app);
+        writeFile(f.own.filePath("loose.fugue"), QJsonDocument(app).toJson()); // a plain file has no template.json to agree with
+        const TemplateLibrary library = f.library();
+        QVERIFY(library.problems().isEmpty());
+
+        QVERIFY(!library.find("plain")->app);
+        QVERIFY(!library.find("off")->app); // false keeps it out of the Apps; its block still runs by name
+        const TemplateApp yes = *library.find("yes")->app;
+        QCOMPARE(yes.title, QStringLiteral("Block title")); // the block's, then the template's own
+        QCOMPARE(yes.summary, QStringLiteral("Block words"));
+        QCOMPARE(yes.kind, QString());
+        const TemplateApp named = *library.find("card")->app;
+        QCOMPARE(named.title, QStringLiteral("Card title"));
+        QCOMPARE(named.summary, QStringLiteral("Card words"));
+        QCOMPARE(named.kind, QStringLiteral("image"));
+        QVERIFY(library.find("loose")->app);
+
+        // What does not agree is said, and the template stays listed.
+        makeTemplate(f.bundled.filePath("ghost"), {{"title", "Ghost"}, {"app", true}});
+        makeTemplate(f.bundled.filePath("unflagged"), {{"title", "Unflagged"}}, app);
+        makeTemplate(f.bundled.filePath("unreadable"), {{"title", "Unreadable"}, {"app", true}}, broken);
+        makeTemplate(f.bundled.filePath("odd"), {{"title", "Odd"}, {"app", QJsonObject{{"kind", 3}, {"colour", "red"}}}}, app);
+        makeTemplate(f.bundled.filePath("text"), {{"title", "Text"}, {"app", "yes"}}, app);
+        QStringList said;
+        for (const Error &problem : library.problems())
+            said << problem.message;
+        const auto about = [&](const char *id) {
+            QStringList mine;
+            for (const QString &line : said)
+                if (line.startsWith(QStringLiteral("Template %1:").arg(QLatin1String(id))))
+                    mine << line;
+            return mine;
+        };
+        QVERIFY(!library.find("ghost")->app);
+        QCOMPARE(about("ghost").size(), 1);
+        QVERIFY(about("ghost").first().contains("no app block"));
+        QVERIFY(library.find("unflagged")->app); // lenient to run, strict to check
+        QCOMPARE(about("unflagged").size(), 1);
+        QVERIFY(!library.find("unreadable")->app);
+        QCOMPARE(about("unreadable").size(), 1);
+        QVERIFY(about("unreadable").first().contains("does not read"));
+        QCOMPARE(about("odd").size(), 2); // a field that is not text, an unknown field
+        QCOMPARE(about("text").size(), 1);
+        QVERIFY(library.find("odd")->app && library.find("text")->app);
+        QCOMPARE(said.size(), 6);
+    }
+
     void listsTheOwnFirstThenByCategoryOrderThenTitle() {
         Fixture f;
         writeJson(f.bundled.filePath("categories.json"),
@@ -597,6 +660,10 @@ private slots:
                      workflow({{"models", node("fugue/load-models", {{"diffusion_model",
                                 QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z-image-turbo.gguf"}}}})}}));
         makeTemplate(f.bundled.filePath("talk"), {{"title", "Talk"}, {"category", "text"}});
+        QJsonObject appFlow = workflow({{"prompt", node("fugue/text", {{"text", "a fox"}})}});
+        appFlow.insert("app", QJsonObject{{"format", 1}, {"title", "Pic block"}, {"inputs", QJsonArray{QJsonObject{{"role", "prompt"}, {"targets", QJsonArray{"prompt.text"}}}}},
+                                          {"outputs", QJsonArray{QJsonObject{{"node", "prompt"}}}}});
+        makeTemplate(f.bundled.filePath("pic"), {{"title", "Pic"}, {"category", "text"}, {"app", QJsonObject{{"title", "Picture app"}}}}, appFlow);
         QTemporaryDir dir;
         QFile shell(dir.filePath("shell.toml"));
         QVERIFY(shell.open(QIODevice::WriteOnly));
@@ -662,8 +729,8 @@ private slots:
                 out << option.toMap().value("text").toString();
             return out;
         };
-        QCOMPARE(labels("sourceOptions"), (QStringList{"All sources (2)", "Ann's flow (1)"}));
-        QCOMPARE(labels("familyOptions"), (QStringList{"All model families (2)", "Z-Image (1)"}));
+        QCOMPARE(labels("sourceOptions"), (QStringList{"All sources (3)", "Ann's flow (1)"}));
+        QCOMPARE(labels("familyOptions"), (QStringList{"All model families (3)", "Z-Image (1)"}));
         QVERIFY(dialog->setProperty("family", "Z-Image"));
         QTRY_VERIFY(!item(window->contentItem(), "templateCard-talk"));
         QVERIFY(item(window->contentItem(), "templateCard-gen"));
@@ -694,6 +761,20 @@ private slots:
         QTest::keyClick(window, Qt::Key_Return);
         QTRY_COMPARE(dialog->property("family").toString(), QString("Z-Image"));
         QVERIFY(dialog->setProperty("family", ""));
+        QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
+
+        // The Apps chip (#387) narrows to the apps, which are called by the app's own title; a second tap lifts it.
+        QQuickItem *appsChip = item(window->contentItem(), "templatesApps");
+        QVERIFY(appsChip && appsChip->isVisible());
+        QTest::mouseClick(window, Qt::LeftButton, {}, appsChip->mapToScene(QPointF(appsChip->width() / 2, appsChip->height() / 2)).toPoint());
+        QTRY_VERIFY(dialog->property("appsOnly").toBool());
+        QTRY_VERIFY(!item(window->contentItem(), "templateCard-talk"));
+        QVERIFY(item(window->contentItem(), "templateCard-pic"));
+        for (const QVariant &entry : workflows.templates())
+            if (entry.toMap().value("id") == "pic")
+                QCOMPARE(entry.toMap().value("title").toString(), QStringLiteral("Picture app"));
+        QTest::mouseClick(window, Qt::LeftButton, {}, appsChip->mapToScene(QPointF(appsChip->width() / 2, appsChip->height() / 2)).toPoint());
+        QTRY_VERIFY(!dialog->property("appsOnly").toBool());
         QTRY_VERIFY(item(window->contentItem(), "templateCard-talk"));
 
         QQuickItem *card = item(window->contentItem(), "templateCard-talk");

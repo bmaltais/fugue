@@ -16,6 +16,7 @@
 
 #include <algorithm>
 
+#include "engine/app_binding.h"
 #include "engine/atomic_file.h"
 #include "engine/document.h"
 #include "engine/file_inputs.h"
@@ -79,6 +80,55 @@ QJsonObject sourceOf(const QString &id, const QJsonObject &about, Errors *proble
             && it.key() != QLatin1String("url") && it.key() != QLatin1String("note"))
             bad(QStringLiteral("source has an unknown field %1").arg(it.key()));
     return out;
+}
+
+// template.json's `app` and the workflow's `app` block (#387): the card's words, or nothing when the template is not an app.
+// The block is the binding and decides: a template is an app when its workflow has a block that reads, unless template.json
+// says `false`. What does not agree is said in `problems` (the bundled templates' check), never kept out of the list: an
+// `app` flag with no block, a block with no flag in a folder's template.json, a block that does not read (the template is
+// then no app: it opens as a graph), a field that is not as 11.10 says.
+std::optional<TemplateApp> appOf(const Template &t, const QJsonObject &about, const Document &document, bool hasAbout, Errors *problems) {
+    const auto bad = [&](const QString &what) {
+        if (problems)
+            problems->append(problem(QStringLiteral("Template %1: %2.").arg(t.id, what)));
+    };
+    const QJsonValue raw = about.value(QStringLiteral("app"));
+    if (raw.isBool() && !raw.toBool())
+        return std::nullopt;
+    const Result<std::optional<app::App>> block = app::appOf(document);
+    if (!block) {
+        bad(QStringLiteral("its app block does not read: %1").arg(block.error().message));
+        return std::nullopt;
+    }
+    if (!*block) {
+        if (!raw.isUndefined())
+            bad(QStringLiteral("%1 says app, but the workflow has no app block").arg(kAbout));
+        return std::nullopt;
+    }
+    if (hasAbout && raw.isUndefined())
+        bad(QStringLiteral("the workflow has an app block, but %1 does not say \"app\"").arg(kAbout));
+    QJsonObject card;
+    if (raw.isObject()) {
+        card = raw.toObject();
+        for (auto it = card.begin(); it != card.end(); ++it) {
+            const bool known = it.key() == QLatin1String("title") || it.key() == QLatin1String("summary") || it.key() == QLatin1String("kind");
+            if (!known)
+                bad(QStringLiteral("app has an unknown field %1 in %2").arg(it.key(), kAbout));
+            else if (!it->isString())
+                bad(QStringLiteral("app.%1 must be text in %2").arg(it.key(), kAbout));
+        }
+    } else if (!raw.isUndefined() && !raw.isBool()) {
+        bad(QStringLiteral("app must be true or an object with title, summary and kind in %1").arg(kAbout));
+    }
+    const auto text = [&](const char *key, const QString &fallback) {
+        const QString own = card.value(QLatin1String(key)).toString().trimmed();
+        return own.isEmpty() ? fallback : own;
+    };
+    TemplateApp app;
+    app.title = text("title", (*block)->title.trimmed()); // the block always has a title (4.9)
+    app.summary = text("summary", (*block)->description.trimmed().isEmpty() ? t.description : (*block)->description.trimmed());
+    app.kind = text("kind", QString());
+    return app;
 }
 
 // A JSON object file, or why it is not one (13.3's codes: permission_denied, invalid_json,
@@ -335,6 +385,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             for (const QJsonValue tag : about.value(QStringLiteral("tags")).toArray())
                 t.tags << tag.toString();
             t.source = sourceOf(t.id, about, problems);
+            t.app = appOf(t, about, *document, entry.isDir(), problems);
             t.models = document->models();
             t.families = modelFamilies(t.models);
             if (entry.isDir()) // not a loose .fugue file: its folder is the person's own

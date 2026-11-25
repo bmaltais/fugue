@@ -32,7 +32,9 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             shown->clear();
         view.forget(id);
     });
+    QObject::connect(&view, &AppView::notice, &workflows, &Workflows::notify);
     QObject::connect(&service, &RunService::event, &view, &AppView::onEvent);
+    view.setDownloads(workflows.downloads()); // a model field's Download shares the window's one download line
 
     const auto run = [&view, &runs](bool first) {
         if (view.shown())

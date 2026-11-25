@@ -326,6 +326,7 @@ foreach(test_source ${fugue_apps_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 

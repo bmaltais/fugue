@@ -797,8 +797,10 @@ QVariantList Workflows::templates() const {
                                {"modelList", modelRows(t.models, placed, catalog)},
                                {"packs", packs},
                                {"inputs", inputs},
-                               {"title", t.title},
-                               {"description", t.description},
+                               {"title", t.app ? t.app->title : t.title}, // an app's card says what the app is called (#387)
+                               {"description", t.app ? t.app->summary : t.description},
+                               {"app", t.app.has_value()},
+                               {"appKind", t.app ? t.app->kind : QString()},
                                {"category", t.category},
                                {"categoryTitle", t.categoryTitle},
                                {"tags", t.tags},

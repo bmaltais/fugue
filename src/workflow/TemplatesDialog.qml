@@ -27,6 +27,8 @@ Popup {
     property string category: ""
     // Only the templates whose models are all here or on a paired host (#164).
     property bool readyOnly: false
+    // Only the apps (#387): the templates with an `app` block.
+    property bool appsOnly: false
     // "" is every source, else a source's name (template.json's `source.name`, #369); the same for a model family.
     property string source: ""
     property string family: ""
@@ -74,6 +76,7 @@ Popup {
         search.text = ""
         source = ""
         family = ""
+        appsOnly = false
         detailId = ""
         if (category !== "" && !categories.some(c => c.id === category))
             category = ""
@@ -108,13 +111,15 @@ Popup {
         return list
     }
 
-    // Whether a template passes the tab, Ready to run, the search and the two drop-downs, except
+    // Whether a template passes the tab, Ready to run, Apps, the search and the two drop-downs, except
     // the one named by `skip` ("source" or "family"): the counts of a drop-down say what choosing
     // each of its entries would leave.
     function passes(t, skip) {
         if (category === "own" ? !t.own : category !== "" && (t.own || t.category !== category))
             return false
         if (readyOnly && !t.ready)
+            return false
+        if (appsOnly && !t.app)
             return false
         if (skip !== "source" && source !== "" && t.source.name !== source)
             return false
@@ -264,6 +269,7 @@ Popup {
                     spacing: 2 * dialog.u
                     readonly property real others: (sourceBox.visible ? sourceBox.width + spacing : 0)
                                                    + (familyBox.visible ? familyBox.width + spacing : 0) + readyChip.width + spacing
+                                                   + (appsChip.visible ? appsChip.width + spacing : 0)
                 // Fugue's well, as the settings' fields and the drop-downs: 7u high, the accent edge while focused.
                 Rectangle {
                     width: filterRow.width - filterRow.others >= 28 * dialog.u ? filterRow.width - filterRow.others : filterRow.width
@@ -320,46 +326,25 @@ Popup {
                     searchable: true
                     onPicked: v => dialog.family = v
                 }
-                // The filter chip: a toggle, its state said by the check and the accent edge as well as the fill.
-                Rectangle {
+                // The filter chips: toggles (FilterChip.qml). Apps is there only when some template is an app (#387).
+                FilterChip {
                     id: readyChip
                     objectName: "templatesReadyOnly"
-                    width: chipRow.implicitWidth + 4 * dialog.u
-                    height: 7 * dialog.u
-                    radius: height / 2
-                    color: dialog.readyOnly ? dialog.look.selectedRow : chipHover.hovered ? dialog.look.well : "transparent"
-                    border.width: activeFocus ? 2 : 1
-                    border.color: dialog.readyOnly || activeFocus ? dialog.look.accent : dialog.look.hairlineStrong
-                    activeFocusOnTab: true
-                    Accessible.role: Accessible.CheckBox
-                    Accessible.name: qsTr("Ready to run")
-                    Accessible.checked: dialog.readyOnly
-                    Keys.onSpacePressed: dialog.readyOnly = !dialog.readyOnly
-                    Keys.onReturnPressed: dialog.readyOnly = !dialog.readyOnly
-                    HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: dialog.readyOnly = !dialog.readyOnly }
-                    ToolTip.visible: chipHover.hovered
-                    ToolTip.delay: App.theme.look.tooltipDelay
-                    ToolTip.text: qsTr("Only templates whose models are on this machine or on a paired host")
-                    Row {
-                        id: chipRow
-                        anchors.centerIn: parent
-                        spacing: dialog.u
-                        Glyph {
-                            visible: dialog.readyOnly
-                            anchors.verticalCenter: parent.verticalCenter
-                            look: dialog.look
-                            name: "check"
-                            color: dialog.look.accent
-                            font.pixelSize: 12
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: qsTr("Ready to run")
-                            color: dialog.look.text
-                            font.pixelSize: dialog.look.textSize
-                        }
-                    }
+                    look: dialog.look
+                    text: qsTr("Ready to run")
+                    tip: qsTr("Only templates whose models are on this machine or on a paired host")
+                    checked: dialog.readyOnly
+                    onToggled: dialog.readyOnly = !dialog.readyOnly
+                }
+                FilterChip {
+                    id: appsChip
+                    objectName: "templatesApps"
+                    visible: dialog.templates.some(t => t.app)
+                    look: dialog.look
+                    text: qsTr("Apps")
+                    tip: qsTr("Only apps: templates that open as one simple screen")
+                    checked: dialog.appsOnly
+                    onToggled: dialog.appsOnly = !dialog.appsOnly
                 }
                 }
 

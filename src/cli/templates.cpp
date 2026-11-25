@@ -22,6 +22,13 @@ QJsonArray carriedAsJson(const Template &t) {
     return out;
 }
 
+// `false` for a template that is not an app, else its card's words (11.10, #387).
+QJsonValue appAsJson(const Template &t) {
+    if (!t.app)
+        return false;
+    return QJsonObject{{"title", t.app->title}, {"summary", t.app->summary}, {"kind", t.app->kind}};
+}
+
 } // namespace
 
 Reply templateList(const Command &, Context &context) {
@@ -53,6 +60,7 @@ Reply templateList(const Command &, Context &context) {
                                   {"tags", QJsonArray::fromStringList(t.tags)},
                                   {"source", t.source},
                                   {"families", QJsonArray::fromStringList(t.families)},
+                                  {"app", appAsJson(t)},
                                   {"own", t.own},
                                   {"inherited", t.inherited},
                                   {"origin", t.inherited ? QStringLiteral("inherited from Default") : t.own ? QStringLiteral("own") : QStringLiteral("bundled")},

@@ -52,10 +52,13 @@ Result<std::optional<Loaded>> readApp(const QString &id, const QString &file, co
     return std::optional<Loaded>(Loaded{id, QFileInfo(file).absoluteFilePath(), folder, carried, *document, **block});
 }
 
-// The apps of the template library, in its order. A template that cannot be read is a warning, and is left out.
+// The apps of the template library, in its order: the templates the catalog flags (`Template::app`, 11.10). A flagged one that
+// cannot be read is a warning, and is left out.
 QList<Loaded> templateApps(Context &context, Errors *problems) {
     QList<Loaded> apps;
     for (const Template &t : TemplateLibrary(TemplateLibrary::standardRoots(), &context.registry).list()) {
+        if (!t.app)
+            continue;
         const Result<std::optional<Loaded>> read = readApp(t.id, t.workflow, t.folder, t.carriedPacks);
         if (!read) {
             if (problems)
@@ -72,26 +75,31 @@ QList<Loaded> templateApps(Context &context, Errors *problems) {
 }
 
 Result<Loaded> loadApp(const QString &ref, Context &context) {
+    const auto noApp = [](const QString &what) {
+        return makeError(QStringLiteral("no_app"), QStringLiteral("%1 has no app block.").arg(what),
+                         QStringLiteral("An app is a workflow with a top-level \"app\" block (spec 4.9); `fugue app list` shows the apps there are."));
+    };
     if (QFileInfo(ref).isFile()) {
         const Result<std::optional<Loaded>> read = readApp(ref, ref, QFileInfo(ref).absolutePath(), {});
         if (!read)
             return read.errors();
         if (!*read)
-            return makeError(QStringLiteral("no_app"), QStringLiteral("%1 has no app block.").arg(ref),
-                             QStringLiteral("An app is a workflow with a top-level \"app\" block (spec 4.9); `fugue app list` shows the apps there are."));
+            return noApp(ref);
         return **read;
     }
-    const QList<Loaded> apps = templateApps(context, nullptr);
-    for (const Loaded &loaded : apps)
-        if (loaded.id == ref)
-            return loaded;
-    // A template with no block is not an app: say so rather than "no such app".
-    if (TemplateLibrary(TemplateLibrary::standardRoots(), &context.registry).find(ref))
-        return makeError(QStringLiteral("no_app"), QStringLiteral("The template %1 has no app block.").arg(ref),
-                         QStringLiteral("`fugue app list` shows the apps there are."));
+    const TemplateLibrary library(TemplateLibrary::standardRoots(), &context.registry);
+    if (const std::optional<Template> t = library.find(ref)) {
+        // Read again from the file, whatever the catalog says: a block that does not read is said in its own words.
+        const Result<std::optional<Loaded>> read = readApp(t->id, t->workflow, t->folder, t->carriedPacks);
+        if (!read)
+            return read.errors();
+        if (!*read)
+            return noApp(QStringLiteral("The template %1").arg(t->id));
+        return **read;
+    }
     Error error = makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no app %1.").arg(ref),
                             QStringLiteral("`fugue app list` shows the apps; give one's id, or a workflow file with an `app` block."));
-    for (const Loaded &loaded : apps)
+    for (const Loaded &loaded : templateApps(context, nullptr))
         error.valid.append(loaded.id);
     return error;
 }
