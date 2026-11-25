@@ -802,7 +802,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Apps shelf (page, dialog), Templates window | `AppShelfView`, `AppCard`, `TemplatesDialog` | Built (20.19): Dusk and Sea panels, hero, search, cards, tinted chips |
 | Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | To build (Flat is today's face) |
 | App icon, wordmark | `share/icons`, `share/brand`, `fugueMark` | Built |
-| Settings Frost / Panel colour / Node style | `SettingsPanel.qml`, `settings.cpp` | Frost built; the other two To build |
+| Settings window, Get ready sheet, Needs panel | `SettingsPanel`, `SettingsParts`, `GetReadySheet`, `NeedsPanel` | Built (20.20); Panel colour and Node style rows To build |
 
 ### 20.3 Tokens
 
@@ -1147,3 +1147,16 @@ every duration to 0. First frame of the App view after open, offscreen on the CI
 hairline, as omarchy-drift's window is, so the visible outline follows the Corners slider. With no alpha surface (the software
 renderer) or the Flat panes layout the card is square and fills the window. Fugue's own windows have no client-side frame, so the
 compositor draws their outline (Hyprland rounds it itself); the full Fugue window may follow the card later and is not changed yet.
+
+### 20.20 Settings, Get ready and the Needs panel (Built; #464, #469)
+
+- **Settings.** A Slate `KitPanel` with a `KitHero` ("Settings", one line, close), the pages as rows on the left (the chosen one in the Slate
+  tone, as the Templates categories), the page on the right. `SettingsParts` is on the kit: `Setting` is a group-glass card (title, what
+  it does, origin, its control; `head` puts a control on the title's line), `Toggle` a `KitToggle`, `SmallButton` a raised `KitChip`
+  (`highlighted` is the accent primary, `danger` the red tint), `Field` a `KitWell`; `Choices` is a `KitSegmented` for up to four short
+  options, else a wrapping row of toned `KitChip`s. Theme > Look is one `KitGroup` of `KitRow`s (preset chooser, six sliders with a percent at
+  the end, Reset), then the Omarchy theme rows. Flat is the same code with the Flat parameters.
+- **Get ready.** A Moss `KitPanel`, a `KitHero` with the plan's headline, packs, environments and models as `KitGroup`s of `GetReadyRow`s,
+  the destination as a group that stays in view, Install the one primary (`KitChip.primary`), Cancel raised.
+- **Needs panel.** 12.17 in the spec. A header line with a Moss bar, `KitGroup` rows (name, size, licence, source), Download, Download all.
+- **Keys.** See docs/ui-ergonomics.md "Settings, Get ready and Needs panel in the kit".

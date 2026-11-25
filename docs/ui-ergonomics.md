@@ -1130,3 +1130,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: apps ride on templates (epic #397), so they are found where templates are, by one more filter, not a second window. Two chips share one component so they cannot drift.
 - Rules met: Floor (28px chip as before), Primary (no accent fill; a filter is not an action), Gaps (2u, the filter row's), Learned place (right of Ready to run).
 - Not checked by a person: the chip's wrap in the narrowest dialog.
+
+### 2026-11-24 Settings, Get ready and the Needs panel in the kit (#464, #469, epic #456)
+
+- Controls: Settings window (`settingsPanel`), Get ready sheet (`getReadySheet`), Needs panel (`appNeeds`); toggles are `KitToggle`, choices `KitSegmented` or toned chips, buttons `KitChip`.
+- Old: one-off rows, toggles and buttons in `SettingsParts`; a sheet on the popup surface with a title text.
+- New: Slate, Moss and Moss panels with heroes; every button a raised chip; Install the one primary of its sheet; Download all in the Needs panel a toned raised chip (the screen's primary stays Run).
+- Keys: Settings opens on the current page, Tab walks the list then the page, Up and Down move in the list, Space flips a switch, Escape closes and gives the focus back. Get ready opens on Install (Cancel when nothing to install), Enter installs, Escape cancels (stops a run), the focus goes back. Needs panel: Tab reaches Download all first, then each row's Show in graph and Download.
+- Tests: `theWindowWorksByKeysAlone` (test_settings_panel), `enterInstallsEscapeCancelsAndTheFocusComesBack` (test_get_ready_sheet), `theNeedsPanelListsWhatIsMissingAndWorksByKeys` (test_app_window).
+- Why Download all of models only starts at once: the click is the yes and there is nothing to approve; with a pack it opens the sheet for the one yes (spec 12.17).
+- Not checked by a person: the real-GPU Settings window (the key press did not reach the hidden session); the narrowest Needs panel with long names.
+

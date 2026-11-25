@@ -40,10 +40,11 @@ ColumnLayout {
             objectName: "provider-" + index
             Layout.fillWidth: true
             implicitHeight: cardColumn.implicitHeight + 6 * page.u
-            radius: page.look.smallCorner
-            color: "transparent"
-            border.width: 1
-            border.color: page.look.hairline
+            readonly property bool glass: page.look.params.panelTint > 0.001
+            radius: Math.min(page.look.params.cornerGroup * page.look.unit, 0.3 * implicitHeight)
+            color: glass ? (page.look.light ? Qt.rgba(0, 0, 0, page.look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, page.look.params.groupFillAlpha)) : page.look.kitGroup
+            border.width: page.look.params.borders === "hairline" && glass ? 1 : 0
+            border.color: page.look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
             readonly property bool editable: page.model.providersProblem === ""
 
             ColumnLayout {
@@ -57,28 +58,11 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: page.u
                     // Enabled.
-                    Rectangle {
-                        id: toggle
+                    SettingsParts.Toggle {
                         objectName: "providerEnabled-" + card.index
-                        readonly property bool on: card.modelData.enabled
-                        implicitWidth: 22
-                        implicitHeight: 12
-                        radius: 6
-                        color: on ? page.look.accent : page.look.hairlineStrong
-                        activeFocusOnTab: true
-                        Accessible.role: Accessible.CheckBox
-                        Accessible.name: qsTr("Use %1").arg(card.modelData.name)
-                        Accessible.checked: on
-                        Keys.onSpacePressed: page.host.apply(page.model.setProviderField(card.index, "enabled", !on))
-                        TapHandler { onTapped: page.host.apply(page.model.setProviderField(card.index, "enabled", !toggle.on)) }
-                        Rectangle {
-                            x: toggle.on ? toggle.width - width - 2 : 2
-                            y: 2
-                            width: 8
-                            height: 8
-                            radius: 4
-                            color: toggle.on ? page.look.accentForeground : page.look.body
-                        }
+                        text: qsTr("Use %1").arg(card.modelData.name)
+                        on: card.modelData.enabled
+                        onToggled: value => page.host.apply(page.model.setProviderField(card.index, "enabled", value))
                     }
                     SettingsParts.Field {
                         objectName: "providerName-" + card.index

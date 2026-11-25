@@ -131,6 +131,49 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The window by keys alone (#464, the owner's keyboard rule): opening puts the focus on the current page, Tab walks the page list and
+    // then the page's controls in reading order, Space flips a switch, Escape closes and the focus goes back to what had it.
+    void theWindowWorksByKeysAlone() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.canvas->forceActiveFocus();
+        QTRY_VERIFY(app.canvas->hasActiveFocus());
+        QQuickItem *before = app.window->activeFocusItem();
+        QVERIFY(!app.canvas->property("hoverMagnifier").toBool());
+        QTest::keyClick(app.window, Qt::Key_Comma, Qt::ControlModifier);
+        QTRY_VERIFY(panelOpen(app.window));
+        QTRY_VERIFY(NEED("settingsPage-general")->hasActiveFocus());
+        // Down moves in the page list and opens that page; Up comes back.
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_COMPARE(app.window->findChild<QObject *>("settingsPanel")->property("page").toString(), QStringLiteral("keymap"));
+        NEED("settingsPage-keymap")->forceActiveFocus();
+        QTest::keyClick(app.window, Qt::Key_Up);
+        QTRY_COMPARE(app.window->findChild<QObject *>("settingsPanel")->property("page").toString(), QStringLiteral("general"));
+        // Tab: out of the list into the page, the kit's ring on each, until the magnify switch; Space flips it.
+        QStringList order;
+        for (int i = 0; i < 60; ++i) {
+            QTest::keyClick(app.window, Qt::Key_Tab);
+            QQuickItem *focused = app.window->activeFocusItem();
+            QVERIFY(focused);
+            QQuickItem *named = focused;
+            while (named && named->objectName().isEmpty())
+                named = named->parentItem();
+            order << (named ? named->objectName() : QString());
+            if (named && named->objectName() == "hoverMagnifier")
+                break;
+        }
+        QVERIFY2(order.last() == "hoverMagnifier", qPrintable(order.join(',')));
+        QVERIFY2(order.indexOf("navigation-legacy") < 0 || order.indexOf("navigation-legacy") < order.size() - 1, qPrintable(order.join(',')));
+        QTest::keyClick(app.window, Qt::Key_Space);
+        QTRY_VERIFY(app.canvas->property("hoverMagnifier").toBool());
+        QVERIFY(fugue::SettingsModel(app.settings.path()).hoverMagnifier());
+        // Escape closes it and the focus is where it was.
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!panelOpen(app.window));
+        QTRY_COMPARE(app.window->activeFocusItem(), before);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // Settings > Cache (#141): the command "Clear image preview cache" opens the page with the
     // question for the previews; nothing goes before the yes, and a no keeps everything.
     void clearingTheImagePreviewsAsksFirst() {
@@ -498,22 +541,32 @@ private slots:
         QVERIFY(overflowing > 0);
     }
 
-    // FUGUE_SETTINGS_SHOTS=<dir> QT_QUICK_BACKEND=rhi: each page as a PNG, to look at.
+    // FUGUE_SETTINGS_SHOTS=<dir> [FUGUE_SHOT_THEME=<omarchy theme>] [FUGUE_SHOT_LOOK="preset=flat"] [QT_QUICK_BACKEND=rhi]: pages as PNGs, to look at,
+    // at the two sizes of the owner's checks (one theme and look per process).
     void screenshots() {
         const QString out = qEnvironmentVariable("FUGUE_SETTINGS_SHOTS");
         if (out.isEmpty())
             QSKIP("Set FUGUE_SETTINGS_SHOTS to a folder to write the pages there.");
-        App app(load(emptyDoc), {}, Look{"ethereal", 8});
+        QDir().mkpath(out);
+        App app(load(emptyDoc), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night")), 12});
         QVERIFY(app.open());
+        for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
+            const QStringList kv = part.split('=');
+            QVERIFY(kv.size() == 2);
+            QCOMPARE(kv[0] == "preset" ? app.settings.applyLookPreset(kv[1]) : app.settings.set(kv[0], kv[1].toDouble()), QString());
+        }
         QCOMPARE(app.settings.addPath("model_paths", "~/ComfyUI/models"), QString());
         QCOMPARE(app.settings.addProvider("omarchy"), QString());
         QCOMPARE(app.settings.setProviderField(1, "key", "k"), QString());
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
-        for (const QString &page : QStringList{"general", "folders", "run", "providers", "keymap", "theme"}) {
-            click(app, NEED("settingsPage-" + page));
-            QTest::qWait(300);
-            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2.png").arg(out, page)));
+        for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
+            app.window->resize(size);
+            for (const QString &page : QStringList{"general", "folders", "run", "providers", "keymap", "theme", "packs", "cache"}) {
+                click(app, NEED("settingsPage-" + page));
+                QTest::qWait(300);
+                QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2-%3x%4.png").arg(out, page).arg(size.width()).arg(size.height())));
+            }
         }
     }
 };

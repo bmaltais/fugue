@@ -3169,6 +3169,15 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   `status`, `progress`, `error`, `details`, `results`, `takes`, `takeIndex`, `shownResults`, `selectTake`, `reuseInputs`, `runAgain`, `saveResult`, `useResultAsInput`, `useSample`, `liveFrame`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
   it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.
 
+**Needs panel (#469).** While the shown app is not ready, or a run failed for a missing model or pack, a quiet persistent block at the head of
+the input panel (not a toast, in the app's own window too) lists each missing item with its size and licence: a Moss header line ("This app
+needs 2 models (6.0 GB)"), one row per item, **Download** for one model, **Download all** for the lot, and for builders **Show in graph**
+(switches to the graph and centres and selects the node that holds it; not in the app's own window). The rows are the Get ready plan
+(`engine/readiness.h`, asked again whenever the workflow, its models or packs, or a run's outcome change; `apps/needs_model.h` is the
+store). Download all goes through the Get ready path: a plan of models only starts at once (the click is the yes, nothing to approve);
+a plan with a pack opens the sheet for the one yes, as does a pack row's button. One model downloads on the window's download line. The
+panel clears by itself when a refresh finds the app ready. Keys: Tab reaches Download all first, then each row's buttons.
+
 ### 12.18 An app as its own application (#398, epic #397)
 
 `fugue --app <id|file|folder>` opens one app in a window of its own: the App view (12.17) and nothing else. No menu bar, tabs,

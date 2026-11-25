@@ -97,17 +97,13 @@ ColumnLayout {
 
     Repeater {
         model: page.model.packs
-        delegate: Rectangle {
+        delegate: SettingsParts.Card {
             id: card
             required property var modelData
             required property int index
             objectName: "pack-" + modelData.id
             Layout.fillWidth: true
             implicitHeight: cardColumn.implicitHeight + 6 * page.u
-            radius: page.look.smallCorner
-            color: "transparent"
-            border.width: 1
-            border.color: page.look.hairline
 
             ColumnLayout {
                 id: cardColumn

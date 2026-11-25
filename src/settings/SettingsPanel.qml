@@ -10,7 +10,10 @@ import "../canvas"
 // The settings panel (#51), opened by app.settings (Ctrl+,): nine pages on the left, the
 // page on the right. Each change goes to the model (settings_model.h), which checks it and
 // writes the file at once; a refused change shows why under the page and writes nothing.
-// Styled as the `?` overlay (docs/canvas-look.md 13): scrim, popup card, level 3 shadow.
+// In the Drift kit (docs/canvas-look.md 20, #464): a Slate KitPanel with a KitHero header, the pages as tone-tinted rows on the left
+// (as the Templates categories), each page's settings as kit cards and rows on the right. Keys: opening focuses the current page, Tab
+// and Shift+Tab walk the page list, then the page's controls, Up and Down move in the list, Space flips a toggle, Escape closes and
+// gives the focus back to what opened it. Scrim, level 3 shadow.
 Popup {
     id: panel
     objectName: "settingsPanel"
@@ -31,7 +34,10 @@ Popup {
     width: Math.min(880, (parent ? parent.width : 880) - 12 * u)
     height: Math.min(600, (parent ? parent.height : 600) - 12 * u)
     Overlay.modal: Rectangle { color: panel.look.scrim }
-    background: PopupSurface { look: panel.look }
+    background: Item {
+        Shadow { target: box; level: 3; look: panel.look }
+        Item { id: box; anchors.fill: parent }
+    }
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
         NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 140; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
@@ -39,7 +45,19 @@ Popup {
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
     }
-    onAboutToShow: { error = ""; model.reload() }
+    // What had the focus before: Escape gives it back (the window's canvas, a menu's button).
+    property Item opener: null
+    onAboutToShow: {
+        error = ""
+        model.reload()
+        opener = parent ? parent.Window.activeFocusItem : null
+    }
+    onOpened: {
+        const tab = pageTabs.itemAt(Math.max(0, pages.findIndex(p => p.id === page)))
+        if (tab)
+            tab.forceActiveFocus()
+    }
+    onClosed: if (opener) opener.forceActiveFocus()
 
     // Runs a model call and keeps its refusal, if any.
     function apply(result) { error = result; return result === "" }
@@ -75,10 +93,31 @@ Popup {
 
     // --- the panel ---------------------------------------------------------------------
 
-    contentItem: ColumnLayout {
+    contentItem: KitPanel {
+      id: card
+      objectName: "settingsCard"
+      look: panel.look
+      tone: "slate"
+      clip: true
+      // Tab walks the window's controls: it is also the window's "Add a node by search" key.
+      Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab
+      ColumnLayout {
+        anchors { fill: parent; margins: 1 }
         spacing: 0
         LayoutMirroring.enabled: panel.rightToLeft
         LayoutMirroring.childrenInherit: true
+
+        KitHero {
+            id: hero
+            objectName: "settingsHero"
+            Layout.fillWidth: true
+            look: panel.look
+            tone: card.tone
+            title: qsTr("Settings")
+            subtitle: qsTr("How Fugue looks, where it keeps things and how it runs.")
+            showClose: true
+            onClosed: panel.close()
+        }
 
         RowLayout {
             Layout.fillWidth: true
@@ -87,20 +126,13 @@ Popup {
 
             // The pages.
             ColumnLayout {
-                Layout.preferredWidth: 44 * panel.u
+                Layout.preferredWidth: 36 * panel.u
                 Layout.fillWidth: false
                 Layout.fillHeight: true
                 Layout.margins: 4 * panel.u
                 spacing: 0
-                Text {
-                    Layout.bottomMargin: 4 * panel.u
-                    Layout.leftMargin: 2 * panel.u
-                    text: qsTr("Settings")
-                    color: panel.look.text
-                    font.pixelSize: panel.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                }
                 Repeater {
+                    id: pageTabs
                     model: panel.pages
                     delegate: Rectangle {
                         id: tab
@@ -110,13 +142,17 @@ Popup {
                         objectName: "settingsPage-" + pageId
                         Layout.fillWidth: true
                         implicitHeight: 7 * panel.u
-                        radius: panel.look.smallCorner
-                        color: panel.page === tab.pageId ? panel.look.selectedRow : tabHover.hovered ? panel.look.well : "transparent"
+                        radius: Math.min(panel.look.params.cornerChip * panel.u, 0.45 * height)
+                        // The chosen page takes the window's tone, as a chip that is on does (Templates' categories).
+                        color: panel.page === tab.pageId ? Qt.alpha(panel.look.tone(card.tone).glass, 0.34) : tabHover.hovered ? panel.look.kitChipHover : "transparent"
+                        border.width: activeFocus ? 2 : 0
+                        border.color: panel.look.accent
                         activeFocusOnTab: true
                         Accessible.role: Accessible.PageTab
                         Accessible.name: modelData.title
                         Accessible.selected: panel.page === tab.pageId
                         Keys.onSpacePressed: panel.page = tab.pageId
+                        Keys.onReturnPressed: panel.page = tab.pageId
                         Keys.onUpPressed: if (index > 0) panel.page = panel.pages[index - 1].id
                         Keys.onDownPressed: if (index < panel.pages.length - 1) panel.page = panel.pages[index + 1].id
                         HoverHandler { id: tabHover }
@@ -149,7 +185,7 @@ Popup {
                     x: 6 * panel.u
                     y: 6 * panel.u
                     width: scroller.width - 12 * panel.u - (scroller.ScrollBar.vertical as FugueScrollBar).inset
-                    spacing: 6 * panel.u
+                    spacing: 3 * panel.u
 
                     // settings.json cannot be used as it is.
                     Repeater {
@@ -184,52 +220,56 @@ Popup {
                     }
                     SettingsParts.Setting {
                         id: corners
-                        readonly property int radius: panel.model.cornerRadius // -1: follow Omarchy
+                        readonly property int px: panel.model.cornerRadius // -1: follow Omarchy
                         visible: panel.page === "general"
                         title: qsTr("Corner radius")
                         key: "corner_radius"
                         origin: panel.model.origins["corner_radius"] ?? ""
                         onUseDefaultRequested: panel.apply(panel.model.useDefault("corner_radius"))
-                        note: radius < 0 ? qsTr("Nodes, menus and popups follow Omarchy's window rounding.")
+                        note: px < 0 ? qsTr("Nodes, menus and popups follow Omarchy's window rounding.")
                                          : qsTr("Nodes, menus and popups are rounded by this much.")
                         Flow {
                             Layout.fillWidth: true
                             spacing: 2 * panel.u
                             Choices {
                                 name: "corner"
-                                current: corners.radius < 0 ? "omarchy" : "fixed"
+                                current: corners.px < 0 ? "omarchy" : "fixed"
                                 options: [{value: "fixed", text: qsTr("Fixed")}, {value: "omarchy", text: qsTr("Follow Omarchy")}]
                                 onPicked: value => panel.apply(panel.model.set("corner_radius",
-                                    value === "omarchy" ? "omarchy" : corners.radius >= 0 ? corners.radius : 8))
+                                    value === "omarchy" ? "omarchy" : corners.px >= 0 ? corners.px : 8))
                             }
                             Row {
-                                visible: corners.radius >= 0
+                                visible: corners.px >= 0
                                 spacing: panel.u
+                                height: 7 * panel.u
                                 SettingsParts.SmallButton {
                                     objectName: "cornerLess"
                                     text: "\u2212"
                                     Accessible.name: qsTr("Less round")
-                                    enabled: corners.radius > 0
+                                    enabled: corners.px > 0
                                     opacity: enabled ? 1 : 0.5
-                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.radius - 1))
+                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.px - 1))
                                 }
-                                Text {
-                                    objectName: "cornerValue"
-                                    width: 10 * panel.u
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    horizontalAlignment: Text.AlignHCenter
-                                    text: qsTr("%1 px").arg(corners.radius)
-                                    color: panel.look.text
-                                    font.pixelSize: panel.look.labelSize
-                                    font.features: { "tnum": 1 }
+                                Item {
+                                    width: 12 * panel.u
+                                    height: 7 * panel.u
+                                    KitWell { look: panel.look }
+                                    Text {
+                                        objectName: "cornerValue"
+                                        anchors.centerIn: parent
+                                        text: qsTr("%1 px").arg(corners.px)
+                                        color: panel.look.text
+                                        font.pixelSize: panel.look.labelSize
+                                        font.features: { "tnum": 1 }
+                                    }
                                 }
                                 SettingsParts.SmallButton {
                                     objectName: "cornerMore"
                                     text: "+"
                                     Accessible.name: qsTr("Rounder")
-                                    enabled: corners.radius < panel.model.maxCornerRadius
+                                    enabled: corners.px < panel.model.maxCornerRadius
                                     opacity: enabled ? 1 : 0.5
-                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.radius + 1))
+                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.px + 1))
                                 }
                             }
                         }
@@ -241,9 +281,9 @@ Popup {
                         origin: panel.model.origins["hover_magnifier"] ?? ""
                         onUseDefaultRequested: panel.apply(panel.model.useDefault("hover_magnifier"))
                         note: qsTr("Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.")
-                        SettingsParts.Toggle {
+                        head: SettingsParts.Toggle {
                             objectName: "hoverMagnifier"
-                            text: on ? qsTr("On") : qsTr("Off")
+                            text: qsTr("Magnify small nodes on hover")
                             on: panel.model.hoverMagnifier
                             onToggled: value => panel.apply(panel.model.set("hover_magnifier", value))
                         }
@@ -295,9 +335,9 @@ Popup {
                         origin: panel.model.origins["restore_tabs"] ?? ""
                         onUseDefaultRequested: panel.apply(panel.model.useDefault("restore_tabs"))
                         note: qsTr("Start with the saved workflows that were open when this session ended, on the tab you were on. Each project and the Default session remember their own. A new workflow that was never saved does not come back (its unsaved changes are offered as a recovery copy after a crash). Starting Fugue with a file opens only that file.")
-                        SettingsParts.Toggle {
+                        head: SettingsParts.Toggle {
                             objectName: "restoreTabs"
-                            text: on ? qsTr("On") : qsTr("Off")
+                            text: qsTr("Reopen tabs at start")
                             on: panel.model.restoreTabs
                             onToggled: value => panel.apply(panel.model.set("restore_tabs", value))
                         }
@@ -473,137 +513,155 @@ Popup {
                         }
                     }
 
-                    // Frost: the glass of the controls over a picture, live
-                    SettingsParts.Setting {
-                        id: frostSetting
-                        readonly property real amount: panel.model.frost
+                    // Theme: the kit's look (a preset and six sliders, live; Reset puts them back) as one group of rows, then what the
+                    // Omarchy theme says. The sliders change parameters, never per-frame work (docs/canvas-look.md 20.13).
+                    Column {
+                        id: themePage
                         visible: panel.page === "theme"
-                        title: qsTr("Frost")
-                        key: "frost"
-                        origin: panel.model.origins["frost"] ?? ""
-                        onUseDefaultRequested: panel.apply(panel.model.useDefault("frost"))
-                        note: amount <= 0 ? qsTr("Off: the buttons over a picture are plain.")
-                            : amount < 0.4 ? qsTr("Light: the buttons over a picture are faintly frosted.")
-                            : amount < 0.75 ? qsTr("Medium: the buttons over a picture are frosted glass, the picture blurred behind them.")
-                            : qsTr("Strong: the buttons over a picture are thick frosted glass.")
-                        KitSlider {
-                            objectName: "frost"
-                            look: panel.look
-                            Layout.fillWidth: true
-                            railWidth: 40 * panel.u
-                            from: 0
-                            to: 1
-                            stepSize: 0.1
-                            value: frostSetting.amount
-                            text: qsTr("Frost")
-                            showValue: true
-                            valueText: frostSetting.amount <= 0 ? qsTr("Off") : frostSetting.amount < 0.4 ? qsTr("Light")
-                                     : frostSetting.amount < 0.75 ? qsTr("Medium") : qsTr("Strong")
-                            onMoved: v => panel.apply(panel.model.set("frost", Math.round(v * 10) / 10))
-                        }
-                    }
-                    // The kit's look: a preset and six sliders (colour, glow, frost, depth, corners, spacing), live; Reset puts them back
-                    SettingsParts.Setting {
-                        id: lookSetting
-                        visible: panel.page === "theme"
-                        title: qsTr("Look")
-                        note: qsTr("A preset sets the sliders; moving one makes it Custom. A look.json file in the settings folder can set any look parameter by name.")
-                        component LookSlider: KitSlider {
+                        Layout.fillWidth: true
+                        readonly property real frostAmount: panel.model.frost
+                        component LookRow: KitRow {
+                            id: lookRow
                             required property string settingKey
                             required property string caption
                             required property real amount
+                            property alias objectNameOfSlider: slide.objectName
                             look: panel.look
-                            Layout.fillWidth: true
-                            railWidth: 40 * panel.u
-                            from: 0
-                            to: 1
-                            stepSize: 0.05
-                            value: amount
-                            text: caption
-                            onMoved: v => panel.apply(panel.model.set(settingKey, Math.round(v * 20) / 20))
+                            label: caption
+                            KitSlider {
+                                id: slide
+                                look: panel.look
+                                railWidth: 36 * panel.u
+                                from: 0
+                                to: 1
+                                stepSize: 0.05
+                                value: lookRow.amount
+                                showValue: true
+                                valueText: Math.round(lookRow.amount * 100) + "%"
+                                text: lookRow.caption
+                                onMoved: v => panel.apply(panel.model.set(lookRow.settingKey, Math.round(v * 20) / 20))
+                            }
                         }
-                        KitSegmented {
-                            id: presets
-                            objectName: "lookPreset"
+                        // The Node style row (Compact / Flat, the node-cards slice) joins this group, after Preset.
+                        KitSection { look: panel.look; text: qsTr("Look"); topPadding: 0 }
+                        KitGroup {
                             look: panel.look
-                            tone: "slate"
-                            text: qsTr("Look")
-                            readonly property var shown: panel.model.lookPresets.concat([{value: "custom", text: qsTr("Custom")}])
-                            options: shown.map(o => o.text)
-                            currentIndex: Math.max(0, shown.findIndex(o => o.value === panel.model.lookPreset))
-                            onMoved: index => { if (shown[index].value !== "custom") panel.apply(panel.model.applyLookPreset(shown[index].value)) }
-                        }
-                        GridLayout {
-                            Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 4 * panel.u
-                            rowSpacing: panel.u
-                            Text { text: qsTr("Colour"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            LookSlider { objectName: "lookColour"; settingKey: "look_colour"; caption: qsTr("Colour"); amount: panel.model.lookColour }
-                            Text { text: qsTr("Glow"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            LookSlider { objectName: "lookGlow"; settingKey: "look_glow"; caption: qsTr("Glow"); amount: panel.model.lookGlow }
-                            Text { text: qsTr("Depth"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            LookSlider { objectName: "lookDepth"; settingKey: "look_depth"; caption: qsTr("Depth"); amount: panel.model.lookDepth }
-                            Text { text: qsTr("Corners"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            LookSlider { objectName: "lookCorners"; settingKey: "look_corners"; caption: qsTr("Corners"); amount: panel.model.lookCorners }
-                            Text { text: qsTr("Spacing"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            LookSlider { objectName: "lookSpacing"; settingKey: "look_spacing"; caption: qsTr("Spacing"); amount: panel.model.lookSpacing }
-                        }
-                        Row {
-                            spacing: 2 * panel.u
-                            SettingsParts.SmallButton {
-                                objectName: "lookReset"
-                                text: qsTr("Reset to defaults")
-                                onClicked: {
-                                    panel.apply(panel.model.applyLookPreset("calm"))
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Preset")
+                                hint: qsTr("Calm is the full look, Flat the plain one.")
+                                KitSegmented {
+                                    id: presets
+                                    objectName: "lookPreset"
+                                    look: panel.look
+                                    text: qsTr("Look")
+                                    readonly property var shown: panel.model.lookPresets.concat([{value: "custom", text: qsTr("Custom")}])
+                                    options: shown.map(o => o.text)
+                                    optionNames: shown.map(o => "lookPreset-" + o.value)
+                                    currentIndex: Math.max(0, shown.findIndex(o => o.value === panel.model.lookPreset))
+                                    onMoved: index => { if (shown[index].value !== "custom") panel.apply(panel.model.applyLookPreset(shown[index].value)) }
                                 }
                             }
-                            SettingsParts.SmallButton {
-                                objectName: "lookFile"
-                                text: qsTr("Open look file…")
-                                onClicked: panel.model.openLookFile()
+                            LookRow { objectNameOfSlider: "lookColour"; settingKey: "look_colour"; caption: qsTr("Colour"); amount: panel.model.lookColour }
+                            LookRow { objectNameOfSlider: "lookGlow"; settingKey: "look_glow"; caption: qsTr("Glow"); amount: panel.model.lookGlow }
+                            KitRow {
+                                id: frostRow
+                                look: panel.look
+                                label: qsTr("Frost")
+                                hint: themePage.frostAmount <= 0 ? qsTr("Off: the buttons over a picture are plain.")
+                                    : themePage.frostAmount < 0.4 ? qsTr("Light: faintly frosted.")
+                                    : themePage.frostAmount < 0.75 ? qsTr("Medium: frosted glass, the picture blurred behind.")
+                                    : qsTr("Strong: thick frosted glass.")
+                                SettingsParts.SmallButton {
+                                    objectName: "useDefault-frost"
+                                    visible: (panel.model.origins["frost"] ?? "") === "override"
+                                    text: qsTr("Use Default's value")
+                                    onClicked: panel.apply(panel.model.useDefault("frost"))
+                                }
+                                KitSlider {
+                                    objectName: "frost"
+                                    look: panel.look
+                                    railWidth: 36 * panel.u
+                                    from: 0
+                                    to: 1
+                                    stepSize: 0.1
+                                    value: themePage.frostAmount
+                                    text: qsTr("Frost")
+                                    showValue: true
+                                    valueText: Math.round(themePage.frostAmount * 100) + "%"
+                                    onMoved: v => panel.apply(panel.model.set("frost", Math.round(v * 10) / 10))
+                                }
+                            }
+                            LookRow { objectNameOfSlider: "lookDepth"; settingKey: "look_depth"; caption: qsTr("Depth"); amount: panel.model.lookDepth }
+                            LookRow { objectNameOfSlider: "lookCorners"; settingKey: "look_corners"; caption: qsTr("Corners"); amount: panel.model.lookCorners }
+                            LookRow { objectNameOfSlider: "lookSpacing"; settingKey: "look_spacing"; caption: qsTr("Spacing"); amount: panel.model.lookSpacing }
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Reset")
+                                hint: qsTr("Back to Calm.")
+                                SettingsParts.SmallButton {
+                                    objectName: "lookFile"
+                                    text: qsTr("Open look file…")
+                                    onClicked: panel.model.openLookFile()
+                                }
+                                SettingsParts.SmallButton {
+                                    objectName: "lookReset"
+                                    text: qsTr("Reset to defaults")
+                                    onClicked: panel.apply(panel.model.applyLookPreset("calm"))
+                                }
                             }
                         }
-                    }
-                    // Theme
-                    SettingsParts.Setting {
-                        visible: panel.page === "theme"
-                        title: qsTr("Theme")
-                        note: qsTr("Fugue follows the Omarchy theme and the desktop text size. Change them in Omarchy. The corner radius of nodes and popups is set on the General page.")
-                        GridLayout {
-                            Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 4 * panel.u
-                            rowSpacing: panel.u
-                            Text { text: qsTr("Mode"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            Text {
-                                text: App.theme.light ? qsTr("Light") : qsTr("Dark")
-                                color: panel.look.text
-                                font.pixelSize: panel.look.textSize
+                        Text {
+                            width: parent.width
+                            topPadding: panel.u
+                            leftPadding: 2 * panel.u
+                            wrapMode: Text.Wrap
+                            color: panel.look.label
+                            font.pixelSize: panel.look.labelSize
+                            text: qsTr("A preset sets the sliders; moving one makes it Custom. A look.json file in the settings folder can set any look parameter by name.")
+                        }
+                        KitSection { look: panel.look; text: qsTr("Omarchy theme") }
+                        KitGroup {
+                            look: panel.look
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Mode")
+                                Text { text: App.theme.light ? qsTr("Light") : qsTr("Dark"); color: panel.look.text; font.pixelSize: panel.look.textSize }
                             }
-                            Text { text: qsTr("Window rounding"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            Text { text: App.theme.radius; color: panel.look.text; font.pixelSize: panel.look.textSize }
-                            Text { text: qsTr("Text size"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            Text { text: App.theme.textSize; color: panel.look.text; font.pixelSize: panel.look.textSize }
-                            Text { text: qsTr("Colors"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: panel.u
-                                Repeater {
-                                    model: Object.keys(App.theme.colors)
-                                    delegate: Rectangle {
-                                        required property string modelData
-                                        width: 5 * panel.u
-                                        height: 5 * panel.u
-                                        radius: panel.look.smallCorner
-                                        color: App.theme.colors[modelData]
-                                        border.width: 1
-                                        border.color: panel.look.hairline
-                                        Accessible.name: modelData
-                                        ToolTip.visible: swatchHover.hovered
-                                        ToolTip.delay: App.theme.look.tooltipDelay
-                                        ToolTip.text: modelData
-                                        HoverHandler { id: swatchHover }
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Window rounding")
+                                Text { text: App.theme.radius; color: panel.look.text; font.pixelSize: panel.look.textSize }
+                            }
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Text size")
+                                Text { text: App.theme.textSize; color: panel.look.text; font.pixelSize: panel.look.textSize }
+                            }
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Colors")
+                                hint: qsTr("Fugue follows the Omarchy theme and the desktop text size; change them in Omarchy.")
+                                Flow {
+                                    id: swatches
+                                    width: 52 * panel.u
+                                    spacing: panel.u
+                                    Repeater {
+                                        model: Object.keys(App.theme.colors)
+                                        delegate: Rectangle {
+                                            required property string modelData
+                                            width: 4 * panel.u
+                                            height: 4 * panel.u
+                                            radius: panel.look.smallCorner
+                                            color: App.theme.colors[modelData]
+                                            border.width: 1
+                                            border.color: panel.look.hairline
+                                            Accessible.name: modelData
+                                            ToolTip.visible: swatchHover.hovered
+                                            ToolTip.delay: App.theme.look.tooltipDelay
+                                            ToolTip.text: modelData
+                                            HoverHandler { id: swatchHover }
+                                        }
                                     }
                                 }
                             }
@@ -645,5 +703,6 @@ Popup {
                 font.pixelSize: panel.look.captionSize
             }
         }
+      }
     }
 }
