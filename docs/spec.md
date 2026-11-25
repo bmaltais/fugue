@@ -3002,6 +3002,7 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   | --- | --- | --- | --- | --- | --- |
   | `graph` | Graph | `workflow` | `canvas/FugueCanvas.qml` (declared by the window, adopted) | 160 x 120 px | one per window |
   | `canvas` | Canvas | `image` | `workspace/CanvasArea.qml` | 240 x 180 px | many |
+  | `app` | App | `layout-template` | `apps/AppArea.qml` | 800 x 360 px | one per window |
 
   A component other than the Graph is an `AreaView` (`workspace/AreaView.qml`): made with its area's id and the
   state its type has there, and it says what to keep (`areaStateEdited`) only on a change of its own. A type no row
@@ -3090,8 +3091,18 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
 A workflow whose document has an `app` block (4.9) opens as one simple screen instead of the graph when its `defaultView` is
 `app`. The screen has no graph or node vocabulary in it.
 
-- **A tab mode, for now.** Until #217's view registry carries it, the App view is a mode of the workflow's tab: the window's
-  body shows it in the canvas's place, in a window with one area. With several areas the app stays the Graph's tab. A window
+- **A tab mode in one area, a view type in a split (#450).** With one area the App view is a mode of the workflow's tab: the
+  window's body shows it in the canvas's place (`Main.qml`, `appPageItem`, made only while shown). With several areas, `app` is a
+  view type (12.16): an area shows `apps/AppArea.qml`, which holds `AppPage.qml` over the same `AppView` store (one store, a
+  form, runs and takes per tab), beside the Graph or a Canvas; the page is made only while the shown workflow is an app (else
+  the area says "This workflow is not an app."), and no page exists while no area shows the App. In a split `AppView.shown`
+  is whether the **active area** shows the App (`AppView::setAreas`), so Ctrl+Enter, Ctrl+Alt+Enter, Ctrl+V and the bare keys
+  act on the App in its area and on the graph in the Graph's; the tab's own mode is kept for the one-area window. `view.toggle-app`,
+  the App | Graph switch and the rail's Graph item ask the areas (`Workspace::toggleApp`): the active area shows the other view;
+  an area showing the App takes the Graph (the two areas trade, 12.16); the Graph's area takes the App from the area that shows it,
+  or with none gives it to the next area; any other area shows the App. Asking for the App view (Apply and open, a chosen app)
+  brings it to the active area unless one shows it (`requestApp`). Splitting from the one-area App view shows the graph and a
+  Canvas (the App is one pick away in the new area's type menu). A window
   with no app tab has exactly the items it had (`tests/workspace/data/default-window.txt`). A block that does not read
   (`app_invalid`, a later `format`) or a document with none opens as an ordinary workflow; for a block that does not read the
   window says so once per tab, in the notice line other load problems use: "This workflow's app block cannot be used, so it
