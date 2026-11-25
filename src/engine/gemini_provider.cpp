@@ -26,7 +26,7 @@ namespace {
 constexpr int kDefaultTimeoutS = 300;
 constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
 // An answer holds the picture as base64; a 4K picture is well under this.
-constexpr qint64 kAnswerCap = 256LL << 20;
+constexpr qint64 kAnswerCap = 128LL << 20;
 // Google's limit for one request with inline pictures (text, instructions and inline bytes): 20 MB.
 constexpr qint64 kRequestCap = 20LL << 20;
 const char *const kCapped = "fugue-capped";
@@ -157,6 +157,7 @@ struct GeminiProvider::Job {
 
 GeminiProvider::GeminiProvider(ProviderInstance instance, QObject *parent) : Provider(parent), m_instance(std::move(instance)) {
     m_instance.address = trimmedAddress(m_instance.address);
+    m_instance.key = m_instance.key.trimmed(); // what is sent is what clean() scrubs
 }
 
 GeminiProvider::~GeminiProvider() = default;
@@ -186,10 +187,6 @@ Error GeminiProvider::failure(QNetworkReply *reply, const QJsonObject &answer) c
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent more data than Fugue reads in one answer.").arg(who),
                          QStringLiteral("Check the address of %1: it should be %2.").arg(who, geminiDefaultAddress()));
     if (code == 0) {
-        const QNetworkReply::NetworkError error = reply->error();
-        if (error == QNetworkReply::TimeoutError || error == QNetworkReply::OperationCanceledError)
-            return makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 said nothing for %2 seconds.").arg(who).arg(timeoutMs() / 1000),
-                             QStringLiteral("Raise timeout_s for %1 in %2 if the service is only slow.").arg(who, where()));
         return makeError(QStringLiteral("provider_unreachable"),
                          QStringLiteral("%1 is not answering at %2 (%3).").arg(who, clean(reply->url().host()), clean(reply->errorString())),
                          QStringLiteral("Check the connection to the internet, then run the node again."));
@@ -372,6 +369,9 @@ void GeminiProvider::submit(const JobRequest &request, Reply<QString> reply) {
             errors.append(makeError(QStringLiteral("file_not_found"), QStringLiteral("Cannot read the input image %1.").arg(path)));
             continue;
         }
+        if (size + file.size() / 3 * 4 > kRequestCap)
+            return reply(Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("The pictures are too big for one request to %1 (the limit is 20 MB).").arg(who),
+                                                   QStringLiteral("Use fewer or smaller pictures."))));
         const QByteArray bytes = file.readAll();
         const QString format = formatOf(bytes);
         if (format.isEmpty()) {
@@ -402,8 +402,9 @@ void GeminiProvider::submit(const JobRequest &request, Reply<QString> reply) {
     if (!imageConfig.isEmpty())
         config.insert("imageConfig", imageConfig);
     const QJsonValue seed = request.params.value("seed");
+    // Google's seed is an int32 and Fugue's random ones reach 2^53: the same seed always gives the same one.
     if (seed.isDouble() && seed.toDouble() >= 0)
-        config.insert("seed", seed);
+        config.insert("seed", int(qint64(seed.toDouble()) % 2147483648LL));
     const QJsonObject body{{"contents", QJsonArray{QJsonObject{{"role", "user"}, {"parts", parts}}}}, {"generationConfig", config}};
 
     auto job = std::make_shared<Job>();
@@ -441,7 +442,7 @@ void GeminiProvider::submit(const JobRequest &request, Reply<QString> reply) {
         const auto found = m_jobs.value(id);
         if (!found || found->status.isTerminal())
             return;
-        fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() / 1000),
+        fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name, QString::number(timeoutMs() / 1000.0, 'g', 3)),
                            QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, where())));
         if (found->reply)
             found->reply->abort();
@@ -450,18 +451,21 @@ void GeminiProvider::submit(const JobRequest &request, Reply<QString> reply) {
 }
 
 void GeminiProvider::finish(const QString &id, QNetworkReply *reply) {
-    const auto job = m_jobs.value(id);
     const int code = reply->property(kCapped).toBool() ? 0 : httpStatus(reply);
     const QJsonObject answer = reply->isOpen() ? jsonBody(reply) : QJsonObject{};
     if (code != 200)
         return fail(id, failure(reply, answer));
+    // A body cut off after the 200 is no answer.
+    if (reply->error() != QNetworkReply::NoError)
+        return fail(id, makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1's answer broke off (%2).").arg(m_instance.name, clean(reply->errorString())),
+                                  QStringLiteral("Check the connection to the internet, then run the node again.")));
     const QString who = m_instance.name;
     const QString blocked = answer.value("promptFeedback").toObject().value("blockReason").toString();
     if (!blocked.isEmpty())
         return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1 refused the prompt or the pictures under its safety rules (%2).").arg(who, clean(blocked)),
                                   QStringLiteral("Change the prompt or the pictures and run the node again.")));
     const QJsonObject candidate = firstObject(answer.value("candidates").toArray());
-    const QString reason = candidate.value("finishReason").toString();
+    const QString reason = clean(candidate.value("finishReason").toString());
     QByteArray picture;
     QStringList texts;
     for (const QJsonValue &value : candidate.value("content").toObject().value("parts").toArray()) {
@@ -469,7 +473,8 @@ void GeminiProvider::finish(const QString &id, QNetworkReply *reply) {
         if (part.value("thought").toBool()) // Gemini 3 Pro shows interim pictures as thoughts: not the result
             continue;
         const QJsonObject inlined = part.contains("inlineData") ? part.value("inlineData").toObject() : part.value("inline_data").toObject();
-        if (picture.isEmpty() && !inlined.value("data").toString().isEmpty())
+        const QString mime = inlined.contains("mimeType") ? inlined.value("mimeType").toString() : inlined.value("mime_type").toString();
+        if (picture.isEmpty() && mime.startsWith(QLatin1String("image/")) && !inlined.value("data").toString().isEmpty())
             picture = QByteArray::fromBase64(inlined.value("data").toString().toLatin1());
         else if (part.contains("text"))
             texts.append(part.value("text").toString());

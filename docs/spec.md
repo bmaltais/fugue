@@ -1767,7 +1767,7 @@ question of #404 is asked before anything is sent.
 - **The flow.** One synchronous call: `POST <address>/v1beta/models/<model>:generateContent`, body `contents[0].parts` = the prompt
   as `text`, then each picture as `inline_data` (`mime_type`, base64 `data`), and `generationConfig`: `responseModalities`
   `["TEXT", "IMAGE"]`, `imageConfig.aspectRatio` (the nearest supported ratio to the node's width and height), `imageConfig.imageSize`
-  (`512`, `1K`, `2K`, `4K`: the nearest to the larger side, for the models that take one; the others make about 1 K) and `seed` when
+  (`512`, `1K`, `2K`, `4K`: the nearest to the larger side, for the models that take one; the others make about 1 K) and `seed` (modulo 2^31: Google's is an int32) when
   the node sets one. The result is the first `inlineData` image part of the first candidate that is not a `thought` (Gemini 3 Pro
   shows interim pictures as thoughts), written to the output folder. The values used are the picture's own size (PNG) or the size
   asked for, the seed sent, the model and `gemini@<model id>`. A cancel drops the call (Google has no cancel; a started call is billed).

@@ -158,7 +158,7 @@ private slots:
         fixture.reply = answer({imagePart("thought-picture", true), QJsonObject{{"text", "ok"}}, imagePart(kPng)});
         auto provider = fixture.provider();
         JobResult result;
-        const JobStatus status = run(*provider, fixture.request("image.generate", {{"prompt", "a dot"}, {"width", 1920}, {"height", 1080}, {"seed", 7}}), &result);
+        const JobStatus status = run(*provider, fixture.request("image.generate", {{"prompt", "a dot"}, {"width", 1920}, {"height", 1080}, {"seed", 5000000000.0}}), &result);
         QCOMPARE(status.state, QStringLiteral("done"));
 
         const QJsonObject body = fixture.lastBody();
@@ -169,11 +169,11 @@ private slots:
         QCOMPARE(config.value("responseModalities").toArray(), (QJsonArray{"TEXT", "IMAGE"}));
         QCOMPARE(config.value("imageConfig").toObject().value("aspectRatio").toString(), QStringLiteral("16:9"));
         QCOMPARE(config.value("imageConfig").toObject().value("imageSize").toString(), QStringLiteral("2K"));
-        QCOMPARE(config.value("seed").toInt(), 7);
+        QCOMPARE(config.value("seed").toInt(), 705032704); // 5e9 modulo 2^31: Google's seed is an int32
 
         QCOMPARE(readAll(result.outputs.value("image").toObject().value("path").toString()), kPng);
         QCOMPARE(result.used.value("engine").toString(), QStringLiteral("gemini@gemini-3.1-flash-image"));
-        QCOMPARE(result.used.value("seed").toInt(), 7);
+        QCOMPARE(result.used.value("seed").toInt(), 705032704); // what was sent
         QCOMPARE(result.used.value("width").toInt(), 1); // the picture's own size
 
         // The key is in the header of the one call, and in no URL, body, result or error.
@@ -271,8 +271,11 @@ private slots:
         fixture.reply = error(404, "NOT_FOUND", "models/nope is not found");
         QCOMPARE(run(*provider, fixture.request("image.generate", {{"prompt", "x"}}, {}, "gemini-3.1-flash-image")).error.code, QStringLiteral("model_missing"));
         // A redirect is an error, and the key goes nowhere else.
-        fixture.reply = HttpResponse{302, {}, "text/plain", false, -1, {"Location: http://127.0.0.1:1/elsewhere"}};
+        FakeHttpServer elsewhere;
+        elsewhere.listen();
+        fixture.reply = HttpResponse{302, {}, "text/plain", false, -1, {"Location: " + elsewhere.origin() + "/elsewhere"}};
         QCOMPARE(run(*provider, job).error.code, QStringLiteral("provider_unreachable"));
+        QVERIFY2(elsewhere.requests().isEmpty(), "the redirect was followed");
     }
 
     void aJobHasOneDeadlineAndACancelAbortsIt() {
