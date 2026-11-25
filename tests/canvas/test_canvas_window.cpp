@@ -128,7 +128,8 @@ struct App {
     // clock not stretched when other programs (ctest -j8) take the CPU meanwhile.
     qint64 openedCpuMs = 0;
 
-    explicit App(const Document &document, int textSize = 12) : theme(themeFolder(dir, textSize)) {
+    explicit App(const Document &document, int textSize = 12, const QString &nodeStyle = QStringLiteral("flat")) : theme(themeFolder(dir, textSize)) {
+        theme.setNodeStyle(nodeStyle); // Flat unless asked: the tests below place the pointer on the Flat face's ports
         nodes::addBuiltinNodeTypes(registry);
         registerDefaultCommands(commands);
         model.setDocument(document);
@@ -222,6 +223,20 @@ private slots:
         QVERIFY2(items < 3870, qPrintable(QString::number(items)));
         QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);
         QCOMPARE(item(app.window->contentItem(), "wires")->property("count").toInt(), 600);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The Compact node face (docs/canvas-look.md 20.14, #466) costs a few items more on a face in view (the shadow, the chevron, the hairlines,
+    // the extras of its widgets) and none on a node out of view; counted, as above: 3842 items in Flat and 4150 in Compact on 2026-11-25 (about 570 ms and 350 ms of CPU: the first window of a process pays the cold start).
+    void opensQuicklyInTheCompactStyle() {
+        App app(grid(300), 12, "compact");
+        QVERIFY(app.open());
+        const int items = countItems(app.window->contentItem());
+        qInfo("compact: window up with 302 nodes and 600 wires in %lld ms, %lld ms of CPU (objects made in %lld ms); %d items",
+              app.openedMs, app.openedCpuMs, app.createdMs, items);
+        QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
+        QVERIFY2(items < 4300, qPrintable(QString::number(items)));
+        QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

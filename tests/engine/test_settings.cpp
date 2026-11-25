@@ -149,6 +149,11 @@ private slots:
         QCOMPARE(settingDefault("look_preset"), QJsonValue("calm"));
         QCOMPARE(checkSetting("look_preset", "flat"), QString());
         QVERIFY(!checkSetting("look_preset", "Not A Preset").isEmpty());
+        // The node card's face (#466): compact or flat, compact unless set.
+        QCOMPARE(settingDefault("node_style"), QJsonValue("compact"));
+        QCOMPARE(checkSetting("node_style", "flat"), QString());
+        QVERIFY(!checkSetting("node_style", "classic").isEmpty());
+        QCOMPARE(settingClass("node_style"), SettingClass::Preferences);
         QCOMPARE(settingDefault("look_colour"), QJsonValue(0.4));
         QCOMPARE(settingDefault("look_corners"), QJsonValue(0.5));
         QCOMPARE(settingDefault("look_spacing"), QJsonValue(0.5));

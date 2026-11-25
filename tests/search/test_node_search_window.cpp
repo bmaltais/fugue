@@ -64,6 +64,7 @@ struct App {
     QQuickItem *world = nullptr;
 
     App() {
+        theme.setNodeStyle("flat"); // these tests place the pointer on the Flat face's ports (docs/canvas-look.md 20.14)
         nodes::addBuiltinNodeTypes(registry);
         registerDefaultCommands(commands);
         commands.setContextActive("canvas", true);

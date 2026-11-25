@@ -7,6 +7,6 @@ Rectangle {
     visible: host.editable
     height: host.height
     width: visible ? host.width * host.edits.fraction(host.nodeId, host.name, host.number) : 0
-    radius: host.smallCorner
-    color: Qt.alpha(host.look.accent, 0.22)
+    radius: host.radius
+    color: host.compact ? Qt.alpha(host.toneColor, host.look.params.sliderFill * 0.4) : Qt.alpha(host.look.accent, 0.22)
 }

@@ -369,6 +369,8 @@ FocusScope {
 
     // Nodes follow the desktop text size.
     Binding { target: canvas.model; property: "textSize"; value: App.theme.textSize }
+    // and the node style (settings.json's node_style, live): the face's metrics, so ports and wires follow.
+    Binding { target: canvas.model; property: "nodeStyle"; value: canvas.look.nodeStyle }
 
     // A port is hit within 10 pixels on screen, and never less than its own size, wherever ports
     // are drawn: the map tier too (#74, as ComfyUI). In the overview a press is on the node.

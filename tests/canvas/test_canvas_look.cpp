@@ -340,7 +340,7 @@ private slots:
             QSKIP("set FUGUE_LOOK_SHOTS to a folder to take the screenshots");
         if (!QFile::exists("/usr/share/omarchy/themes/" + theme))
             QSKIP("Omarchy's themes are not installed here");
-        App app(board == "states" ? statesBoard() : load(workflow), {}, Look{theme, radius});
+        App app(board == "states" ? statesBoard() : load(workflow), {}, Look{theme, radius, qEnvironmentVariable("FUGUE_NODE_STYLE", "flat")}); // FUGUE_NODE_STYLE=compact: the Compact face
         QTRY_COMPARE(app.theme.radius(), radius);
         QVERIFY(openAt(app));
         if (board != "states") {

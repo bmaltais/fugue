@@ -1958,8 +1958,12 @@
   "Depth": "Depth",
   "Glow": "Glow",
   "Look": "Look",
+  "Node style": "Node style",
+  "Compact": "Compact",
+  "Flat": "Flat",
   "No look preset %1.": "No look preset %1.",
   "Open look file…": "Open look file…",
   "Reset to defaults": "Reset to defaults",
-  "Spacing": "Spacing"
+  "Spacing": "Spacing",
+  "Compact cards, or the flat face.": "Compact cards, or the flat face."
 }

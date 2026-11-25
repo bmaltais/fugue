@@ -542,7 +542,6 @@ Popup {
                                 onMoved: v => panel.apply(panel.model.set(lookRow.settingKey, Math.round(v * 20) / 20))
                             }
                         }
-                        // The Node style row (Compact / Flat, the node-cards slice) joins this group, after Preset.
                         KitSection { look: panel.look; text: qsTr("Look"); topPadding: 0 }
                         KitGroup {
                             look: panel.look
@@ -560,6 +559,21 @@ Popup {
                                     optionNames: shown.map(o => "lookPreset-" + o.value)
                                     currentIndex: Math.max(0, shown.findIndex(o => o.value === panel.model.lookPreset))
                                     onMoved: index => { if (shown[index].value !== "custom") panel.apply(panel.model.applyLookPreset(shown[index].value)) }
+                                }
+                            }
+                            // The node card's face (docs/canvas-look.md 20.14, #466): live; the Flat preset also sets it, and the
+                            // two can be mixed.
+                            KitRow {
+                                look: panel.look
+                                label: qsTr("Node style")
+                                hint: qsTr("Compact cards, or the flat face.")
+                                KitSegmented {
+                                    objectName: "nodeStyle"
+                                    look: panel.look
+                                    text: qsTr("Node style")
+                                    options: [qsTr("Compact"), qsTr("Flat")]
+                                    currentIndex: panel.model.nodeStyle === "flat" ? 1 : 0
+                                    onMoved: index => panel.apply(panel.model.set("node_style", index === 1 ? "flat" : "compact"))
                                 }
                             }
                             LookRow { objectNameOfSlider: "lookColour"; settingKey: "look_colour"; caption: qsTr("Colour"); amount: panel.model.lookColour }

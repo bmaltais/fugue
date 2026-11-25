@@ -84,6 +84,8 @@ public:
     void setCornerRadius(int setting);
     // settings.json's frost, 0 to 1: the look's `frost` (the kit's frosted controls read it).
     void setFrost(double frost);
+    // settings.json's node_style: "compact" or "flat" (docs/canvas-look.md 20.14).
+    void setNodeStyle(const QString &style);
     // settings.json's five look sliders (look_params.h) and the power user's look.json, which the look reads.
     void setLookSliders(const fugue::look::Sliders &sliders);
     void setLookFile(const QString &path);

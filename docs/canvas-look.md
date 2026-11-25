@@ -91,6 +91,8 @@ the mockups use the same.
 
 ## 4. Node anatomy
 
+_This section and 5 to 9 describe the Flat face. The Compact face (the default, settings.json `node_style`) is 20.14; both are built._
+
 ```
  ┌───────────────────────────────────────┐  1 px hairline, corner r
  │ ■ Generate Image          6.2 s  ✓    │  header 7u: kind mark, title, meta
@@ -984,12 +986,13 @@ range. Reduced `motion` sets every duration to 0.
 | `look_depth` | 0 to 1, default 0.5 | same | the wells' darkening, inner shadow and bottom light, and the raised controls' top edge and drop shadow (position / 0.5; capped so it stays calm; a field keeps a minimal fill step at 0) | Built |
 | `look_corners` | 0 to 1, default 0.5 | same | every corner class (card, group, well, chip, segment, hero), factor 0.1 + 1.8 x position, never below about 1.6px, never above 45% of the control's height | Built |
 | `look_spacing` | 0 to 1, default 0.5 | same | the gap between cards, the panel's padding, a row's padding and gap, factor 0.25 + 1.5 x position; a row keeps its minimum height (7u floor) | Built |
-| `node_style` | `compact` (default), `flat` | Settings > Theme | 20.14 | To build (#466); the Flat preset will also set it |
+| `node_style` | `compact` (default), `flat` | Settings > Theme > Look (a `KitSegmented`: Compact, Flat) | 20.14: the node face's layout metrics (`CanvasModel::nodeStyle`) and its drawing; the Flat preset also sets it (`"settings"` in the preset file) | Built (#466) |
 
 The parameter groups are named so node cards read the same ones later (corners, depth, colour, glow, spacing apply to node faces,
 #466). Flat is a preset like any other: UI-font titles, a tone header, rounded chips, hairlines, panes, the accent colour, no glass,
-glow or depth and small corners, the compact flat look; once #466 exists it also sets the node style to Flat (the node layout stays
-a separate structural setting). Presets live in `share/looks/` (Calm, Flat; a Paper look, light, warm and low-glass, needs a warm
+glow or depth and small corners, the compact flat look; it also sets the node style to Flat, as data (`"settings": {"node_style": "flat"}` in
+`share/looks/flat.json`, Calm says compact; no code compares a preset's name), and the node layout stays a separate structural setting
+(Compact under the Flat preset is still the Flat preset). Presets live in `share/looks/` (Calm, Flat; a Paper look, light, warm and low-glass, needs a warm
 tone table and a light-theme pass over the glass values, so it is not shipped yet).
 
 **look.json** (the power user's file) is `look.json` in the settings folder (`$FUGUE_HOME/config` or `~/.config/fugue`); Settings >
@@ -1066,7 +1069,7 @@ range is said once in the log and ignored or clamped; the sliders apply on top.
 | `motion` | `normal` | `normal` \| `reduced` | - | animations at their durations, or none |
 | `durHalo` | 260 | 0 to 1000 | - | the halo's fade in ms |
 
-### 20.14 Node cards: Compact (Drift) and Flat (To build)
+### 20.14 Node cards: Compact (Drift) and Flat (Built, #466)
 
 Setting `node_style`: `compact` is the Drift card below; `flat` is today's Blender-like face (sections 4 to 9, kept as it is). Only the
 card's drawing switches (frame, header, rows, port dots, widgets); the model, ports, wire logic, sizes in the file, keys and
@@ -1076,7 +1079,7 @@ widget type draws in both (one window test per style for the widget set, not per
 
 | Part | Compact recipe (board "Nodes") |
 | --- | --- |
-| Card | width 51 to 61u (204 to 244px), radius 3u (12px), fill `#222226` (group fill: `kit-group` over the canvas), 1px border `#34343a`, shadow 0 8px 22px black 35% |
+| Card | width 56u (224px) by default (the board's 204 to 244px; a size in the file wins), radius 3u (12px, `cornerGroup`), fill `#222226` (group fill: `kit-group` over the canvas), 1px border `#34343a`, shadow 0 8px 22px black 35% |
 | Header | 7u (28px), padding 0 10px, a 2u (8px) dot in the node's category color, name 13px weight 600, a 14px fold chevron in `label`; 1px hairline below (`#2f2f35`) |
 | Rows | 6.5u (26px); label left 12px `label`; control right; a 1px hairline inset 10px between groups of rows |
 | Controls | value chip or dropdown: a `KitWell` at 20px, radius 6px, 12px text (fillable is recessed; the board draws a flat chip, the epic's rule wins); seed + mode: a well and a `KitChip`; slider: a compact `KitSlider` (4px rail, 14px thumb, value 18px wide); toggle: 32 x 18px pill with a 14px knob |
@@ -1085,6 +1088,25 @@ widget type draws in both (one window test per style for the widget set, not per
 | Running | the header takes a faint Dusk tint (radials of lilac 35% at (15%, 0) and rose 30% at (85%, 0), 60% x 160%), a 2px accent progress line along its bottom edge and a 11px percentage |
 | Selected | the border becomes the accent and a 3px ring of accent at 18% |
 | Frost 0 | no change: cards are opaque; Panel colour does not apply to cards |
+
+**What is shared and what switches (built).** `CanvasModel::nodeStyle` sets the face's metrics only (`applyMetrics`): Flat is a 7u header,
+6u rows, 1u above the first row, 2u under the last, 60u wide, a picture inset 1.5u; Compact is a 7u header, 6.5u rows (26px), half a unit
+above the first row, 1.5u under the last, 56u wide, a picture inset 2.5u. A port's `y`, a wire's ends, a hit test and every size in a file
+are computed from them in the model, so the style needs no second layout and writes nothing into the document. `FugueCanvas` binds
+the model's style to `look.nodeStyle`, which is settings.json's `node_style`, so a switch is live and keeps the selection, the wires and
+the undo stack. Everything the style draws reads `look.params`: the card's radius is `cornerGroup`, its side padding 2.5u scaled by
+`rowPadRight` (Spacing), the well's fill, shadow and light are `wellDarken`, `wellShadowAlpha` and `wellBottomLight` (Depth), the toggle's
+and the slider's tone `toggleOnTop` and `sliderFill` (Colour; the tone is Dusk's glass, or the accent when `controlColour` is `accent`),
+the separators `rowSeparators`, the border `borders`, the shadow the look's level 1 (2 when selected). A node's text is the interface font
+at 12px (labels, values) and 13px (the title), never the serif.
+
+The face does not instance `KitToggle`, `KitSlider` or `KitWell`: they take their own presses (the canvas takes the presses of a node, and a
+node's widget has one mouse area that serves every kind), carry a halo or extra items, and a graph of 300 nodes counts its items
+(12.1, `test_canvas_window`). `ToggleSwitch.qml` and `InputWidget.qml` draw the same recipes from the same parameters in one to three items.
+The Compact extras (the shadow, the header hairline, the fold chevron, the separator between the outputs and the inputs) are made only while
+the style is Compact, so a Flat node is the items it always was. Zoom tiers (14), the magnifier, groups (the stacked second card), bypass
+and mute, missing and error states, warnings, the live Sampler frame and every gesture are the Flat face's code with the card's radius and
+padding read from the style; the fold chevron is the one new control (it calls the canvas's Collapse).
 
 ### 20.15 Contradictions between the boards, the epic and the code, and what the spec follows
 

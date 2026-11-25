@@ -2,5 +2,6 @@
   "title": "Flat",
   "params": {"titleFont": "ui", "heroStyle": "tone", "chipShape": "rounded", "borders": "hairline", "rowSeparators": "hairline",
              "areaLayout": "panes", "controlColour": "accent"},
-  "sliders": {"colour": 0, "glow": 0, "frost": 0, "depth": 0, "corners": 0.1, "spacing": 0.5}
+  "sliders": {"colour": 0, "glow": 0, "frost": 0, "depth": 0, "corners": 0.1, "spacing": 0.5},
+  "settings": {"node_style": "flat"}
 }

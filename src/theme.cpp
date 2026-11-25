@@ -272,6 +272,8 @@ void Theme::refreshLook() {
 
 void Theme::setFrost(double frost) { m_look->setFrost(frost); }
 
+void Theme::setNodeStyle(const QString &style) { m_look->setNodeStyle(style); }
+
 void Theme::setLookSliders(const fugue::look::Sliders &sliders) { m_look->setSliders(sliders); }
 
 void Theme::setLookFile(const QString &path) { m_look->setLookFile(path); }

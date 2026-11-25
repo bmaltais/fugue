@@ -64,6 +64,9 @@ inline fugue::Document load(const QByteArray &json) {
 struct Look {
     QString theme;
     int radius = -1;
+    // The node card's face (settings.json's node_style). The window tests measure the Flat face (docs/canvas-look.md 4 to 9: row
+    // heights, port places, pixels), so it is Flat unless a test asks for the Compact one (test_canvas_node_style).
+    QString nodeStyle = QStringLiteral("flat");
 };
 
 // Writes the theme's folder into `dir`; the fake hyprctl that reports the rounding, or empty.
@@ -75,13 +78,18 @@ inline QString prepareLook(const QTemporaryDir &dir, const Look &look) {
         if (QFile::exists(from + "/light.mode"))
             QFile::copy(from + "/light.mode", dir.filePath("theme/light.mode"));
     }
+    // Under FUGUE_HOME (a project's own settings) the file is the project's, not this one.
+    if (!qEnvironmentVariableIsSet("FUGUE_HOME")) {
+        QDir(dir.path()).mkpath("config/fugue");
+        QFile settings(dir.filePath("config/fugue/settings.json"));
+        if (settings.open(QIODevice::WriteOnly))
+            settings.write((look.radius < 0 ? QStringLiteral("{\"node_style\": \"%1\"}\n").arg(look.nodeStyle)
+                                            : QStringLiteral("{\"corner_radius\": %1, \"node_style\": \"%2\"}\n").arg(look.radius).arg(look.nodeStyle))
+                               .toUtf8());
+        settings.close();
+    }
     if (look.radius < 0)
         return {};
-    QDir(dir.path()).mkpath("config/fugue");
-    QFile settings(dir.filePath("config/fugue/settings.json"));
-    if (settings.open(QIODevice::WriteOnly))
-        settings.write(QStringLiteral("{\"corner_radius\": %1}\n").arg(look.radius).toUtf8());
-    settings.close();
     QFile script(dir.filePath("hyprctl"));
     if (!script.open(QIODevice::WriteOnly))
         return {};

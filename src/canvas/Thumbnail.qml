@@ -16,12 +16,15 @@ Item {
     property string text // shown in the image's place: a text or number result, a label
     required property CanvasLook look
     property bool full: true // the info chip only at the full zoom tier
+    // The Compact node style (docs/canvas-look.md 20.14): a picture with the well's corner and its size badge at the bottom right.
+    property bool compact: false
+    readonly property real corner: compact ? Math.min(look.params.cornerWell * look.unit, 0.2 * Math.min(width, height)) : look.thumbCorner
 
-    readonly property bool rounded: look.thumbCorner > 0 && GraphicsInfo.api !== GraphicsInfo.Software
+    readonly property bool rounded: corner > 0 && GraphicsInfo.api !== GraphicsInfo.Software
 
     Rectangle {
         anchors.fill: parent
-        radius: thumb.look.thumbCorner
+        radius: thumb.corner
         color: thumb.look.well
     }
     Image {
@@ -43,7 +46,7 @@ Item {
         sourceComponent: ShaderEffect {
             readonly property variant source: image
             readonly property size size: Qt.size(width, height)
-            readonly property real radius: thumb.look.thumbCorner
+            readonly property real radius: thumb.corner
             fragmentShader: "qrc:/canvas/shaders/thumbnail.frag.qsb"
         }
     }
@@ -63,7 +66,7 @@ Item {
     }
     Rectangle {
         anchors.fill: parent
-        radius: thumb.look.thumbCorner
+        radius: thumb.corner
         color: "transparent"
         border.width: 1
         border.color: thumb.look.light ? Qt.rgba(0, 0, 0, 0.1) : Qt.rgba(1, 1, 1, 0.1)
@@ -75,10 +78,10 @@ Item {
         id: chip
         objectName: "infoChip"
         visible: thumb.full && (thumb.info !== "" || thumb.file !== "")
-        x: Math.round(1.5 * thumb.look.unit)
-        y: parent.height - height - x
+        x: thumb.compact ? parent.width - width - Math.round(1.5 * thumb.look.unit) : Math.round(1.5 * thumb.look.unit)
+        y: parent.height - height - Math.round(1.5 * thumb.look.unit)
         readonly property real pad: 1.5 * thumb.look.unit
-        width: Math.min(thumb.width - 2 * x, fileText.implicitWidth + sizeText.implicitWidth + 2 * pad)
+        width: Math.min(thumb.width - 3 * thumb.look.unit, fileText.implicitWidth + sizeText.implicitWidth + 2 * pad)
         height: sizeText.implicitHeight + thumb.look.unit
         radius: thumb.look.smallCorner
         color: Qt.rgba(0, 0, 0, 0.6)
@@ -100,7 +103,7 @@ Item {
             objectName: "infoFile"
             x: chip.pad
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(implicitWidth, Math.max(0, thumb.width - 2 * chip.x - sizeText.implicitWidth - 2 * chip.pad - thumb.look.unit))
+            width: Math.min(implicitWidth, Math.max(0, thumb.width - 3 * thumb.look.unit - sizeText.implicitWidth - 2 * chip.pad - thumb.look.unit))
             text: thumb.file
             textFormat: Text.PlainText
             elide: Text.ElideMiddle

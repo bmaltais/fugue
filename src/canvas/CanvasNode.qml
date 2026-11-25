@@ -112,7 +112,26 @@ Item {
             readonly property bool dragging: node.linkDrag.node !== undefined
             readonly property bool full: node.tier === 0
             readonly property real u: node.look.unit
-            readonly property int corner: node.look.corner
+            // The node style (docs/canvas-look.md 20.14, #466): Compact is the Drift card, Flat today's face. The model, the ports, the
+            // wires and the gestures are the same; what differs is drawn here and in the widgets, and the metrics in CanvasModel.
+            readonly property bool compact: node.look.nodeStyle === "compact"
+            readonly property var pm: node.look.params
+            readonly property int corner: compact ? Math.round(pm.cornerGroup * u) : node.look.corner
+            // A card's side padding: 2.5u (the board's 10px), scaled by the Spacing slider; Flat keeps 3u.
+            readonly property real padX: compact ? Math.round(2.5 * u * pm.rowPadRight / 3) : 3 * u
+            readonly property int labelPx: compact ? node.look.textSize : node.look.labelSize
+            readonly property int titlePx: compact ? node.look.textSize + 1 : node.look.textSize
+            // Where a row's control starts in Compact: its label on the left, the control right of this.
+            // It is a third of the card at least and half at most, wider for the longest label of a row with a control (a label is
+            // about 6.4 px a character at 12 px).
+            readonly property real splitX: {
+                let longest = 0
+                for (const p of node.inputs)
+                    if (p.widget && !p.hidden && p.widgetType !== "multiline")
+                        longest = Math.max(longest, String(p.label).length)
+                return Math.round(Math.min(node.width * 0.5, Math.max(node.width * 0.36, padX + longest * 6.4 + 8)))
+            }
+            readonly property bool hairlines: compact && pm.rowSeparators === "hairline"
             readonly property bool bypassed: node.mode === "bypass"
             readonly property bool muted: node.mode === "mute"
             readonly property bool running: node.runState === "running"
@@ -124,12 +143,16 @@ Item {
             readonly property var colorRole: node.color !== "" ? node.look.role(node.color) : null
             readonly property color headerFill: failed ? node.look.errorHeader
                                                : bypassed ? node.look.bypassHeader
-                                               : colorRole ? colorRole.tint : node.look.header
+                                               : colorRole ? colorRole.tint
+                                               : compact ? (node.look.light ? Qt.rgba(0, 0, 0, 0.025) : Qt.rgba(1, 1, 1, 0.03))
+                                               : node.look.header
             readonly property color bodyFill: bypassed ? node.look.bypassBody
-                                             : colorRole ? colorRole.tintBody : node.look.body
+                                             : colorRole ? colorRole.tintBody
+                                             : compact ? Qt.tint(node.look.body, node.look.kitGroup) : node.look.body
             readonly property color edge: failed ? node.look.error
-                                        : running ? node.look.accent
-                                        : node.hovered ? node.look.hairlineStrong : node.look.hairline
+                                        : running || (compact && node.selected) ? node.look.accent
+                                        : node.hovered ? node.look.hairlineStrong
+                                        : compact && pm.borders === "none" ? "transparent" : node.look.hairline
 
             // The kind mark: the shape and color of the first output (a sink: its first input).
             readonly property var kindPort: node.outputs.length > 0 ? node.outputs[0]
@@ -162,17 +185,92 @@ Item {
 
             // Selected: a 2 px accent ring outside a 2 px gap; its corner r + 4 (0 when r is 0).
             // Around a group's whole stack, its second card included (#72).
+            // Compact: the card's own edge turns accent and a 3 px ring of the accent at 18% surrounds it.
             Rectangle {
                 readonly property real stack: node.groupSize > 0 ? face.u : 0
+                readonly property real reach: face.compact ? 3 : 4
                 visible: node.selected
-                x: -4
-                y: -4
-                width: parent.width + 8 + stack
-                height: parent.height + 8 + stack
-                radius: face.corner > 0 ? face.corner + 4 : 0
+                x: -reach
+                y: -reach
+                width: parent.width + 2 * reach + stack
+                height: parent.height + 2 * reach + stack
+                radius: face.corner > 0 ? face.corner + reach : 0
                 color: "transparent"
-                border.width: 2
-                border.color: node.look.accent
+                border.width: face.compact ? 3 : 2
+                border.color: face.compact ? Qt.alpha(node.look.accent, 0.18) : node.look.accent
+            }
+            // Compact: the card's own extras (its shadow, the chevron and the hairlines) are made only while the style is Compact, so a Flat
+            // node is the items it always was (12.1; test_canvas_window counts them). Made by compactParts below.
+            property Item compactUnder: null
+            property Item compactOver: null
+            function syncCompact() {
+                if (compact && !compactUnder) {
+                    compactUnder = underParts.createObject(face)
+                    compactOver = overParts.createObject(face)
+                } else if (!compact && compactUnder) {
+                    compactUnder.destroy()
+                    compactOver.destroy()
+                    compactUnder = null
+                    compactOver = null
+                }
+            }
+            onCompactChanged: syncCompact()
+            Component.onCompleted: syncCompact()
+            // Under the card: its soft shadow (the look's level 1, 2 selected), a 9-slice made once.
+            Component {
+                id: underParts
+                Item {
+                    anchors.fill: parent
+                    z: -1
+                    Shadow {
+                        target: box
+                        level: node.selected ? 2 : 1
+                        look: node.look
+                    }
+                }
+            }
+            // Over the card: the hairline under the header, the fold chevron at its end (a click folds or unfolds the node, the canvas's
+            // Collapse), and the hairline between the outputs and the inputs, inset by the card's padding.
+            Component {
+                id: overParts
+                Item {
+                    anchors.fill: parent
+                    z: 1
+                    Rectangle {
+                        visible: face.hairlines && !node.collapsed && face.full
+                        x: 1
+                        y: node.canvasModel.headerHeight - 1
+                        width: node.width - 2
+                        height: 1
+                        color: node.look.kitSeparator
+                    }
+                    Glyph {
+                        objectName: "foldChevron"
+                        visible: face.full
+                        x: node.width - width - face.padX + 2
+                        y: (node.canvasModel.headerHeight - height) / 2
+                        look: node.look
+                        name: node.collapsed ? "chevron-right" : "chevron-down"
+                        color: node.look.label
+                        font.pixelSize: 14
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                node.canvasModel.select([node.nodeId], "replace")
+                                node.canvasModel.toggleCollapsed()
+                            }
+                        }
+                    }
+                    Rectangle {
+                        visible: face.hairlines && face.full && node.rowsMade && !node.collapsed && node.outputs.length > 0 && node.inputs.length > 0
+                        x: face.padX
+                        y: node.outputs.length > 0 ? node.outputs[node.outputs.length - 1].rowTop + node.outputs[node.outputs.length - 1].rowHeight : 0
+                        width: node.width - 2 * face.padX
+                        height: 1
+                        color: node.look.kitSeparator
+                    }
+                }
             }
 
             // A group is a stacked card (docs/canvas-look.md 9, 10): a second card 1u down and right
@@ -197,7 +295,9 @@ Item {
                 readonly property bool lit: node.hovered || node.selected
                 anchors.fill: parent
                 radius: face.corner
-                gradient: Gradient {
+                color: face.compact ? face.bodyFill : "transparent"
+                gradient: face.compact ? null : sheen
+                property Gradient sheen: Gradient {
                     GradientStop {
                         position: 0
                         color: Qt.tint(face.bodyFill, box.lit ? node.look.litTop : node.look.sheenTop)
@@ -223,10 +323,19 @@ Item {
                 bottomLeftRadius: node.collapsed ? Math.max(0, face.corner - 1) : 0
                 bottomRightRadius: node.collapsed ? Math.max(0, face.corner - 1) : 0
                 color: face.headerFill
+                // A running node's header takes a faint Dusk tint, lilac at the left to rose at the right (the board's two radials); Compact only.
+                gradient: face.compact && face.running ? runTint : null
+                property Gradient runTint: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Qt.alpha(node.look.tone("dusk").blobs[0], 0.35) }
+                    GradientStop { position: 0.5; color: Qt.alpha(node.look.tone("dusk").blobs[0], 0) }
+                    GradientStop { position: 0.5; color: Qt.alpha(node.look.tone("dusk").blobs[1], 0) }
+                    GradientStop { position: 1; color: Qt.alpha(node.look.tone("dusk").blobs[1], 0.3) }
+                }
 
                 // Dark themes: a 1 px highlight along the top.
                 Rectangle {
-                    visible: !node.look.light && face.full
+                    visible: !node.look.light && face.full && !face.compact
                     x: Math.max(0, face.corner - 1)
                     width: parent.width - 2 * x
                     height: 1
@@ -237,7 +346,7 @@ Item {
                     id: kind
                     readonly property string shape: face.kindPort ? face.kindPort.shape : ""
                     visible: face.kindPort !== null && node.groupSize === 0
-                    x: 3 * face.u - 1
+                    x: face.compact ? face.padX - 1 : 3 * face.u - 1
                     anchors.verticalCenter: parent.verticalCenter
                     width: 8
                     height: 8
@@ -253,15 +362,15 @@ Item {
                     // Hidden while it is edited in place (#74).
                     visible: face.full && !face.renaming
                     // A group's kind mark is the layers glyph (drawn with the decor), 12 px.
-                    x: node.groupSize > 0 ? 3 * face.u - 1 + 12 + 1.5 * face.u
-                     : kind.visible ? kind.x + kind.width + 1.5 * face.u : 3 * face.u - 1
-                    width: parent.width - x - (decor.item ? decor.metaWidth + 1.5 * face.u : 0) - 2.5 * face.u
+                    x: node.groupSize > 0 ? kind.x + 12 + 1.5 * face.u
+                     : kind.visible ? kind.x + kind.width + (face.compact ? 7 : 1.5 * face.u) : kind.x
+                    width: parent.width - x - (decor.item ? decor.metaWidth + 1.5 * face.u : 0) - (face.compact && face.full ? 14 + face.u : 0) - 2.5 * face.u
                     anchors.verticalCenter: parent.verticalCenter
                     text: node.title
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                     color: node.missing ? node.look.error : node.look.text
-                    font.pixelSize: node.look.textSize
+                    font.pixelSize: face.titlePx
                     font.weight: Font.DemiBold
                 }
             }
@@ -294,14 +403,14 @@ Item {
                         id: outputLabel
                         visible: face.full
                         anchors.right: parent.right
-                        anchors.rightMargin: 3 * face.u
+                        anchors.rightMargin: face.padX
                         anchors.verticalCenter: parent.verticalCenter
-                        width: Math.min(implicitWidth, parent.width - 6 * face.u - (chip.item ? (chip.item as Item).width + 2 * face.u : 0))
+                        width: Math.min(implicitWidth, parent.width - 2 * face.padX - (chip.item ? (chip.item as Item).width + 2 * face.u : 0))
                         text: output.modelData.label
                         elide: Text.ElideLeft
                         textFormat: Text.PlainText
                         color: node.look.label
-                        font.pixelSize: node.look.labelSize
+                        font.pixelSize: face.labelPx
                     }
                     // The last value, as a chip left of the label.
                     Loader {
@@ -336,7 +445,7 @@ Item {
                         shape: output.modelData.shape
                         mask: output.modelData.role === "mask"
                         fill: node.canvasView.portColor(output.modelData.color)
-                        body: node.look.body
+                        body: face.compact ? node.look.canvas : node.look.body
                         corner: face.corner
                         list: output.modelData.list
                         wired: output.modelData.wired
@@ -380,11 +489,17 @@ Item {
                         visible: face.full
                         // Under the label, except while typed into.
                         z: item && (item as InputWidget).editingText ? 1 : -1
-                        x: 3 * face.u
-                        y: Math.round(0.5 * face.u)
-                        width: node.width - 6 * face.u
-                        height: input.height - 2 * Math.round(0.5 * face.u)
+                        // Flat: across the row, the label drawn over its well. Compact: the control right of the label, 20 px high in a
+                        // row (a toggle's pill at the end of it, a multiline well across the row under its caption).
+                        readonly property bool pill: input.modelData.widgetType === "toggle"
+                        readonly property bool inline: face.compact && !input.tall
+                        readonly property real side: face.compact ? face.padX : 3 * face.u
+                        x: !inline ? side : pill ? node.width - face.padX - 32 : face.splitX
+                        y: inline ? Math.round((input.height - height) / 2) : Math.round(0.5 * face.u)
+                        width: !inline ? node.width - 2 * side : pill ? 32 : node.width - face.padX - face.splitX
+                        height: inline ? 20 : input.height - 2 * Math.round(0.5 * face.u)
                         sourceComponent: InputWidget {
+                            compact: face.compact
                             edits: node.canvasModel.widgets
                             nodeId: node.nodeId
                             port: input.modelData
@@ -399,16 +514,17 @@ Item {
                         // whether it is filled or not (#74).
                         objectName: "inputLabel"
                         visible: face.full && input.shown
-                        x: input.showsWidget ? 5 * face.u : 3 * face.u
+                        x: face.compact ? face.padX + (input.tall ? 2 * face.u : 0) : input.showsWidget ? 5 * face.u : 3 * face.u
                         y: input.tall ? Math.round(2 * face.u) : 0
-                        width: (input.hasWidget ? 0.45 : 1) * (node.width - 6 * face.u) - (input.showsWidget ? 2 * face.u : 0)
+                        width: face.compact ? (input.tall ? node.width - 2 * face.padX - 4 * face.u : face.splitX - face.padX - face.u)
+                               : (input.hasWidget ? 0.45 : 1) * (node.width - 6 * face.u) - (input.showsWidget ? 2 * face.u : 0)
                         height: input.tall ? 16 : node.canvasModel.rowHeight
                         verticalAlignment: Text.AlignVCenter
                         text: visible ? input.modelData.label : ""
                         elide: Text.ElideRight
                         textFormat: Text.PlainText
                         color: node.look.label
-                        font.pixelSize: node.look.labelSize
+                        font.pixelSize: face.labelPx
                     }
                     // An unlinked widget input shows its mark only on hover (of the node, or of the
                     // port itself, which reaches past the node's edge) or to a compatible link.
@@ -421,7 +537,7 @@ Item {
                         shape: input.modelData.shape
                         mask: input.modelData.role === "mask"
                         fill: node.canvasView.portColor(input.modelData.color)
-                        body: node.look.body
+                        body: face.compact ? node.look.canvas : node.look.body
                         corner: face.corner
                         list: input.modelData.list
                         wired: input.modelData.wired
@@ -466,6 +582,7 @@ Item {
                         text: node.thumbnailText
                         look: node.look
                         full: face.full
+                        compact: face.compact
                         // A placeholder, and the last run's picture while the node runs again (not
                         // this run's preview), are at half strength.
                         opacity: node.thumbnailDim ? 0.5 : 1
@@ -652,7 +769,7 @@ Item {
                             required property var modelData
                             objectName: "sectionHeader"
                             readonly property bool advanced: modelData.advancedHeader === true
-                            x: 3 * face.u
+                            x: face.padX
                             y: modelData.headerTop
                             height: node.canvasModel.rowHeight
                             spacing: face.u
@@ -676,6 +793,18 @@ Item {
                                 font.pixelSize: node.look.captionSize
                                 font.weight: Font.DemiBold
                             }
+                        }
+                    }
+                    // Compact: a hairline above a section's header, inset by the card's padding.
+                    Repeater {
+                        model: decor.extrasNeeded && face.hairlines ? node.inputs.filter(p => p.headerTop !== undefined && p.headerTop > node.canvasModel.headerHeight + 2 * face.u) : []
+                        delegate: Rectangle {
+                            required property var modelData
+                            x: face.padX
+                            y: modelData.headerTop
+                            width: node.width - 2 * face.padX
+                            height: 1
+                            color: node.look.kitSeparator
                         }
                     }
                     Repeater {
@@ -794,7 +923,7 @@ Item {
                     Row {
                         id: meta
                         visible: face.full
-                        x: node.width - width - 2.5 * face.u
+                        x: node.width - width - (face.compact && face.full ? face.padX + 14 + face.u : 2.5 * face.u)
                         y: ((node.collapsed ? node.height : node.canvasModel.headerHeight) - height) / 2
                         spacing: face.u
                         Text {
