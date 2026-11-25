@@ -75,7 +75,7 @@ Errors writeZip(const QList<ZipEntry> &entries, const QString &zip) {
         archive_entry_set_pathname_utf8(entry.get(), name.constData());
         archive_entry_set_size(entry.get(), item.file.isEmpty() ? item.bytes.size() : in.size());
         archive_entry_set_filetype(entry.get(), AE_IFREG);
-        archive_entry_set_perm(entry.get(), 0644);
+        archive_entry_set_perm(entry.get(), item.executable ? 0755 : 0644);
         archive_entry_set_mtime(entry.get(), now, 0);
         if (archive_write_header(out.get(), entry.get()) != ARCHIVE_OK)
             return failed(item.name);
@@ -148,6 +148,7 @@ Errors unpackZip(const QString &zipPath, const QString &folder, const UnpackLimi
         QFile out(path);
         if (out.exists() || !out.open(QIODevice::WriteOnly))
             return {notAPackage(zipPath, QStringLiteral("%1 cannot be unpacked").arg(name))};
+        const bool executable = (archive_entry_perm(entry) & 0100) != 0;
         qint64 size = 0;
         for (;;) {
             const la_ssize_t got = archive_read_data(in.get(), buffer.data(), size_t(buffer.size()));
@@ -166,6 +167,9 @@ Errors unpackZip(const QString &zipPath, const QString &folder, const UnpackLimi
                 return {makeError(writeFailureCode(EIO),
                                  QStringLiteral("Fugue could not unpack %1: %2.").arg(name, out.errorString()))};
         }
+        if (executable)
+            out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner | QFileDevice::ReadGroup
+                               | QFileDevice::ExeGroup | QFileDevice::ReadOther | QFileDevice::ExeOther);
     }
     if (read != ARCHIVE_EOF)
         return {notAPackage(zipPath, QString::fromLocal8Bit(archive_error_string(in.get())))};

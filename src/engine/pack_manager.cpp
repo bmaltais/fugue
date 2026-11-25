@@ -247,12 +247,41 @@ bool copyTree(const QString &from, const QString &to, QString *problem, CopyBudg
 }
 
 Errors writeSource(const QString &folder, const PackSource &source) {
-    QJsonObject object{{"kind", source.kind == PackSource::Kind::Git ? "git" : "path"}, {"location", source.location}};
+    const char *kind = source.kind == PackSource::Kind::Git ? "git" : source.kind == PackSource::Kind::Bundle ? "bundle" : "path";
+    QJsonObject object{{"kind", kind}, {"location", source.location}};
     if (source.kind == PackSource::Kind::Git) {
         object.insert("ref", source.ref);
         object.insert("commit", source.commit);
     }
     return writeJsonFile(folder + QLatin1Char('/') + sourceFile, object);
+}
+
+// Makes the program each command node of the pack at `folder` declares (pack.json "nodes", each node.json
+// runtime.entry) executable, for a pack that lost its exec bits on the way (a bundle made before #520). Only a
+// regular file inside the node's own folder, never a link, and only what the manifest names.
+void restoreCommandEntries(const QString &folder) {
+    const Result<QJsonObject> pack = readJsonObject(folder + QStringLiteral("/pack.json"));
+    if (!pack)
+        return;
+    const QString root = realPath(folder);
+    for (const QJsonValue &node : pack->value("nodes").toArray()) {
+        const QString name = node.toString();
+        if (name.isEmpty() || name.contains(QLatin1Char('/')) || name.startsWith(QLatin1Char('.')))
+            continue;
+        const QString nodeFolder = folder + QLatin1Char('/') + name;
+        const Result<QJsonObject> manifest = readJsonObject(nodeFolder + QStringLiteral("/node.json"));
+        if (!manifest || QFileInfo(nodeFolder).isSymLink())
+            continue;
+        const QJsonObject runtime = manifest->value("runtime").toObject();
+        const QString entry = runtime.value("entry").toString();
+        if (runtime.value("kind").toString() != QLatin1String("command") || entry.isEmpty() || QDir::isAbsolutePath(entry))
+            continue;
+        const QString path = QDir::cleanPath(nodeFolder + QLatin1Char('/') + entry);
+        const QFileInfo info(path);
+        if (info.isSymLink() || !info.isFile() || !realPath(path).startsWith(root + QLatin1Char('/')))
+            continue;
+        QFile(path).setPermissions(info.permissions() | QFileDevice::ExeOwner | QFileDevice::ExeGroup | QFileDevice::ExeOther);
+    }
 }
 
 // Brings the pack at `source` into a folder named after its id under a staging folder.
@@ -291,6 +320,9 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
         CopyBudget budget;
         if (!copyTree(from, work, &problem, budget))
             return cleanFail(fail(QStringLiteral("permission_denied"), QStringLiteral("Copying the pack failed: %1.").arg(problem)));
+        // A pack unpacked from a bundle says so (written by unpackSharePackage), and keeps saying it: its folder is a scratch one.
+        if (const PackSource carried = readPackSource(work); carried.kind == PackSource::Kind::Bundle && !carried.location.isEmpty())
+            staged.source = carried;
     } else if (prompts.fetch) {
         const Result<QString> fetched = prompts.fetch(wanted, work);
         if (!fetched)
@@ -335,6 +367,7 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
             return cleanFail(fail(QStringLiteral("pack_invalid"), QStringLiteral("The pack holds a symbolic link (%1).").arg(link),
                                   QStringLiteral("A pack holds no links: they could lead out of it.")));
     }
+    restoreCommandEntries(work);
     // The pack is `work`, to be named after its id.
     const Result<QJsonObject> json = readPackJson(work);
     if (!json)
@@ -385,7 +418,9 @@ PackSource readPackSource(const QString &packFolder) {
     const Result<QJsonObject> read = readJsonObject(packFolder + QLatin1Char('/') + sourceFile);
     if (!read)
         return source;
-    source.kind = read->value("kind").toString() == QLatin1String("git") ? PackSource::Kind::Git : PackSource::Kind::Path;
+    const QString kind = read->value("kind").toString();
+    source.kind = kind == QLatin1String("git") ? PackSource::Kind::Git
+                  : kind == QLatin1String("bundle") ? PackSource::Kind::Bundle : PackSource::Kind::Path;
     source.location = read->value("location").toString();
     source.ref = read->value("ref").toString();
     source.commit = read->value("commit").toString();
@@ -667,6 +702,12 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
         if (source.location.isEmpty()) {
             if (!id.isEmpty())
                 return fail(QStringLiteral("usage"), QStringLiteral("%1 was not installed by `fugue pack add`, so there is nothing to fetch it from.").arg(name));
+            continue;
+        }
+        if (source.kind == PackSource::Kind::Bundle) {
+            if (!id.isEmpty())
+                return fail(QStringLiteral("usage"), QStringLiteral("%1 came in the bundle %2, which is no source to update it from.").arg(name, source.location),
+                            QStringLiteral("Open a newer bundle to replace it, or install it from its folder or git address with `fugue pack add`."));
             continue;
         }
         if (!ref.isEmpty()) {

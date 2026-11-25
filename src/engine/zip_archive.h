@@ -7,7 +7,8 @@
 // Unpacking takes only plain files and folders with relative names inside the package: an absolute name, a "..",
 // a "\" or ":" (a Windows path), a link or a device is refused, and so is a file, a total or a count over the limits
 // the caller gives. Sizes are counted as the bytes come, whatever an entry says of its size. Dot files and
-// __MACOSX (what other systems add) are skipped. Nothing is ever written outside `folder`.
+// __MACOSX (what other systems add) are skipped. A file the archive stores with the owner's execute bit is unpacked
+// 0755 (the bit is read from the archive only; no other mode, never setuid, is restored). Nothing is ever written outside `folder`.
 
 #include <QByteArray>
 #include <QList>
@@ -22,6 +23,7 @@ struct ZipEntry {
     QString name;
     QByteArray bytes;
     QString file;
+    bool executable = false; // stored 0755 (a pack's run.sh), else 0644: only what the caller says is a program
 };
 
 // Writes `entries` as the zip `zip` (which is opened for writing, so the caller names it into place).

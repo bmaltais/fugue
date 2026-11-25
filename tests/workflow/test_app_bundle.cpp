@@ -23,6 +23,8 @@
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/pack_loader.h"
+#include "engine/pack_manager.h"
+#include "engine/zip_archive.h"
 #include "engine/paths.h"
 #include "engine/readiness.h"
 #include "engine/registry.h"
@@ -69,6 +71,8 @@ QString makePack(const QString &root, const QString &id) {
                           {"inputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}},
                           {"outputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}}});
     write(dir + "/tool/run.sh", "#!/bin/sh\n");
+    QFile::setPermissions(dir + "/tool/run.sh", QFile::permissions(dir + "/tool/run.sh") | QFileDevice::ExeOwner | QFileDevice::ExeGroup | QFileDevice::ExeOther);
+    write(dir + "/tool/helper.py", "# not a program: stays 0644\n");
     write(dir + "/.venv/bin/python", "an environment: never carried");
     write(dir + "/venv/lib/x.py", "another one");
     write(dir + "/.fugue-source.json", R"({"kind": "git", "location": "https://example.com/segment.git", "ref": "v1", "commit": "abc123"})");
@@ -161,8 +165,11 @@ private slots:
         const Result<QString> folder = unpackSharePackage(zip, unpacked);
         QVERIFY(folder);
         const QStringList files = filesUnder(folder.value());
-        QCOMPARE(files, (QStringList{"inputs/pic.png", "inputs/sample.clip", "packs/io.test.segment/pack.json", "packs/io.test.segment/tool/node.json",
-                                     "packs/io.test.segment/tool/run.sh", "template.json", "workflow.fugue"}));
+        QCOMPARE(files, (QStringList{"inputs/pic.png", "inputs/sample.clip", "packs/io.test.segment/.fugue-source.json", "packs/io.test.segment/pack.json",
+                                     "packs/io.test.segment/tool/helper.py", "packs/io.test.segment/tool/node.json", "packs/io.test.segment/tool/run.sh", "template.json", "workflow.fugue"}));
+        // #520: a program stays one in the bundle, a plain file does not become one.
+        QVERIFY(QFileInfo(folder.value() + "/packs/io.test.segment/tool/run.sh").isExecutable());
+        QVERIFY(!QFileInfo(folder.value() + "/packs/io.test.segment/tool/helper.py").isExecutable());
         const QJsonObject recorded = QJsonDocument::fromJson(read(folder.value() + "/workflow.fugue")).object().value("requires").toObject();
         QCOMPARE(recorded.value("packs").toObject().value("io.test.segment").toObject().value("commit").toString(), QString("abc123"));
         QCOMPARE(recorded.value("models").toArray().at(0).toObject().value("source").toString(), QString::fromLatin1(m_server->origin()) + "/m.safetensors");
@@ -212,6 +219,13 @@ private slots:
         QVERIFY(outcome.packsChanged);
         QVERIFY(QFileInfo(packsDir + "/io.test.segment/environment.ok").isFile());
         QVERIFY(!QFileInfo::exists(packsDir + "/io.test.segment/.venv")); // the sender's environment never travelled
+        QVERIFY(QFileInfo(packsDir + "/io.test.segment/tool/run.sh").isExecutable()); // #520: else execve says Permission denied
+        // The source record names the bundle, a file that stays, not the scratch folder the bundle was unpacked into (#520).
+        const PackSource recordedSource = readPackSource(packsDir + "/io.test.segment");
+        QVERIFY(recordedSource.kind == PackSource::Kind::Bundle);
+        QCOMPARE(recordedSource.location, QFileInfo(zip).absoluteFilePath());
+        const Result<QList<PackAdded>> updated = updatePacks("io.test.segment", {}, packsDir, trust, PackPrompts{});
+        QVERIFY(!updated && updated.error().message.contains("bundle")); // plainly: no source to update from
         QVERIFY(trust.isTrusted("io.test.segment", "1.0.0"));
         QDirIterator weights(path("receiver/models"), {"m.safetensors"}, QDir::Files, QDirIterator::Subdirectories);
         QVERIFY(weights.hasNext());
@@ -226,6 +240,33 @@ private slots:
         const ReadinessPlan again = buildReadinessPlan(requestFor(*document, receiver, opened->carriedPacks, opened->folder), env);
         QVERIFY(again.models.isEmpty() && again.problems.isEmpty());
         QCOMPARE(again.installCount(), 0);
+    }
+
+    // A bundle made before #520 holds run.sh as 0644: the pack manifest names its command, so it installs executable anyway,
+    // and a file the manifest does not name is not made one.
+    void anOlderBundleWithoutExecBitsStillInstallsItsCommandExecutable() {
+        const QString src = path("old/src");
+        QDir().mkpath(src);
+        makePack(src, "io.test.old");
+        QList<ZipEntry> entries;
+        for (const QString &name : {QString("pack.json"), QString("tool/node.json"), QString("tool/run.sh"), QString("tool/helper.py")})
+            entries << ZipEntry{"p/packs/io.test.old/" + name, {}, src + "/io.test.old/" + name, false};
+        entries << ZipEntry{"p/workflow.fugue", "{\"fugue\": 1}", {}, false};
+        QVERIFY(!hasErrors(writeZipFile(entries, path("old/old.fugueapp"))));
+        QDir().mkpath(path("old/unpacked"));
+        const Result<QString> folder = unpackSharePackage(path("old/old.fugueapp"), path("old/unpacked"));
+        QVERIFY(folder);
+        const QString carried = folder.value() + "/packs/io.test.old";
+        QVERIFY(!QFileInfo(carried + "/tool/run.sh").isExecutable()); // as the old bundle left it
+        TrustStore trust(path("old/trust.json"));
+        PackPrompts yes;
+        yes.install = [](const PackSummary &) { return Answer::Yes; };
+        yes.runSetup = [](const PackSummary &) { return Answer::No; };
+        const Result<PackAdded> added = addPack(carried, {}, path("old/packs"), trust, yes);
+        QVERIFY2(added, added.errors().isEmpty() ? "" : qPrintable(added.errors().first().message));
+        QVERIFY(QFileInfo(added->pack.folder + "/tool/run.sh").isExecutable());
+        QVERIFY(!QFileInfo(added->pack.folder + "/tool/helper.py").isExecutable());
+        QVERIFY(readPackSource(added->pack.folder).kind == PackSource::Kind::Bundle);
     }
 
     // The export checks first and names every item the receiver could not get (#394).
