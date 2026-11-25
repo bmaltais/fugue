@@ -12,6 +12,7 @@
 # #393: the app builder (AppBuilderDialog) is one item over the window; its picking banner and the canvas pick layer are made only while picking: one item more.
 # App | Graph switch always shown in the window bar (owner, 2026-11-25; it was made only for an app workflow): the KitSegmented, its track, thumb, two options and their labels, the tooltip: 13 items more.
 # Copy buttons for error messages (owner, 2026-11-25): the workflow notice holds a Loader for its KitCopyButton (made only while a notice shows) and so do the group banner and the task bar's error line: two items more.
+# #524: the Seed and Run again choosers' thumb is named (kitSegmentedThumb) so a test can find it: no new item, one more name.
 items 272
 ApplicationWindow 1
 ApplicationWindowContentControl 1
@@ -50,6 +51,7 @@ graphMenuTitle-Select 1
 graphMenuTitle-View 1
 groupNotice 1
 keymapNotice 1
+kitSegmentedThumb 1
 lens 1
 lensWorld 1
 linkProblem 1
