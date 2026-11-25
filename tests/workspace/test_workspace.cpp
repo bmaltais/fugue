@@ -83,6 +83,38 @@ private slots:
         QVERIFY(w.canSplit(1, "row")); // no window: every split fits
     }
 
+    // view.toggle-app in a split (#450): the active area shows the other of the App and the Graph, the two areas trading.
+    void toggleAppTradesTheActiveAreasViewBetweenTheAppAndTheGraph() {
+        Workspace w;
+        QVERIFY(!w.toggleApp()); // one area: nothing to trade (the tab's mode is the window's)
+        w.splitArea(1, "row");
+        QCOMPARE(w.active(), 2);
+        QCOMPARE(w.areaOf("app"), 0);
+        // A Canvas area shows the App; again, the Graph comes (area 1 then shows the App).
+        QVERIFY(w.toggleApp());
+        QCOMPARE(w.viewOf(2), QString("app"));
+        QVERIFY(w.toggleApp());
+        QCOMPARE(w.viewOf(2), QString("graph"));
+        QCOMPARE(w.viewOf(1), QString("app"));
+        QCOMPARE(w.areaOf("app"), 1);
+        // From the Graph's area the App comes from the area that shows it.
+        QVERIFY(w.toggleApp());
+        QCOMPARE(w.viewOf(2), QString("app"));
+        QCOMPARE(w.viewOf(1), QString("graph"));
+        // Asking for the App when an area shows it changes nothing; asking for the graph in the Graph's area neither.
+        QVERIFY(!w.requestApp(true));
+        w.setActive(1);
+        QVERIFY(!w.requestApp(false));
+        w.setActive(2);
+        QVERIFY(w.requestApp(false));
+        QCOMPARE(w.graphArea(), 2);
+        // The Graph's area with no App anywhere gives it to the next area; the Canvas is what that area showed.
+        QCOMPARE(w.areaOf("app"), 1);
+        QVERIFY(w.showView(1, "canvas"));
+        QVERIFY(w.requestApp(true));
+        QCOMPARE(w.viewOf(1), QString("app"));
+    }
+
     void theGraphKeepsAnAreaAndMovesWhereItIsChosen() {
         Workspace w;
         w.splitArea(1, "row");
@@ -93,7 +125,7 @@ private slots:
         QVERIFY(!w.showView(2, "canvas")); // already
         QVERIFY(!w.showView(2, "storyboard"));
         const QVariantList choices = w.viewChoices(2);
-        QCOMPARE(choices.size(), 2);
+        QCOMPARE(choices.size(), 3);
         QCOMPARE(choices.at(0).toMap().value("id").toString(), QString("graph"));
         QVERIFY(choices.at(0).toMap().value("moves").toBool());
         QVERIFY(choices.at(1).toMap().value("current").toBool());

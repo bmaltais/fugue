@@ -155,9 +155,39 @@ Errors checkApp(const App &app, const Document &document, const Registry &regist
     return errors;
 }
 
+namespace {
+
+bool isPictureRole(const InputBinding &input) { return input.role == QLatin1String("image") || input.role == QLatin1String("mask"); }
+
+bool isBlank(const QJsonValue &value) { return value.isUndefined() || value.isNull() || (value.isString() && value.toString().trimmed().isEmpty()); }
+
+// The nodes an optional picture switches: its `bypass` list, else the nodes of its targets (a group instance stands for its branch).
+QStringList switched(const InputBinding &input) {
+    if (!input.bypass.isEmpty())
+        return input.bypass;
+    QStringList nodes;
+    for (const PortRef &target : input.targets)
+        if (!nodes.contains(target.node))
+            nodes << target.node;
+    return nodes;
+}
+
+} // namespace
+
 Result<Document> bindApp(const Document &document, const App &app, const QMap<QString, QJsonValue> &values) {
     Document bound = document;
     for (const InputBinding &input : app.inputs) {
+        if (input.optional && isPictureRole(input)) {
+            // An optional picture left empty (nothing given and no default, or an empty one given) takes its branch out of the run;
+            // filled, it puts the branch back in, whatever the file held (#484).
+            const QJsonValue given = values.contains(input.key()) ? values.value(input.key()) : input.defaultValue;
+            const bool empty = isBlank(given);
+            for (const QString &id : switched(input))
+                if (const auto node = bound.graph.nodes.find(id); node != bound.graph.nodes.end())
+                    node->mode = empty ? NodeMode::Bypass : NodeMode::Normal;
+            if (empty)
+                continue;
+        }
         const Result<QJsonValue> resolved = resolveInputValue(reader(), input, values.value(input.key(), QJsonValue::Undefined));
         if (!resolved)
             return resolved.errors();

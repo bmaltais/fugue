@@ -74,7 +74,7 @@ class AppView : public QObject {
     // The shown workflow has an app block that reads (the shown tab can be an app).
     Q_PROPERTY(bool isApp READ isApp NOTIFY appChanged)
     // The window shows the App view: isApp and not opened in the graph.
-    Q_PROPERTY(bool shown READ shown NOTIFY appChanged)
+    Q_PROPERTY(bool shown READ shown NOTIFY shownChanged)
     Q_PROPERTY(QString title READ title NOTIFY appChanged)
     // The workflow file the form was made from (a template's own workflow.fugue, else the saved file), empty for an unsaved one.
     Q_PROPERTY(QString file READ file NOTIFY appChanged)
@@ -145,7 +145,11 @@ public:
     bool liveArmed() const { return m_liveTimer.isActive(); }
 
     bool isApp() const { return m_app.has_value(); }
-    bool shown() const { return m_app && !m_state[m_tab].graph; }
+    // With one area, the tab's mode; in a split (setAreas), whether the active area shows the App view.
+    bool shown() const { return m_app && (m_split ? m_areaApp : !m_state[m_tab].graph); }
+    // The window's areas (#450): `split` when the window has several, `appActive` when the active one shows the App view. In a split
+    // the area's view type decides what `shown` is, and the tab's own mode is kept for the one-area window.
+    Q_INVOKABLE void setAreas(bool split, bool appActive);
     QString title() const { return m_app ? m_app->title : QString(); }
     QString file() const { return m_file; }
     QUrl preview() const;
@@ -268,6 +272,11 @@ signals:
     // showApp() wants the workflow as it is now (edits made in the graph): the window answers with show().
     void documentWanted();
     void appChanged();
+    void shownChanged();
+    // A split window: the App view (true) or the graph (false) is wanted in the active area; the window's areas do it (Workspace).
+    void areaViewRequested(bool app);
+    // view.toggle-app in a split window: the active area shows the other view.
+    void areaToggleRequested();
     // The store changed a value itself (see the fields' doc): the control shows `valueOf(key)`.
     void valueChanged(const QString &key);
     // A picture taken by the page's paste or drop was refused (`text`) or taken (empty): the picture input `key` shows it.
@@ -347,6 +356,8 @@ private:
     QString m_takesKey; // the app of the shown tab, as its takes know it (apps/app_takes.h); empty: session takes only
     Document m_document;
     std::optional<app::App> m_app;
+    bool m_split = false;   // the window has several areas (setAreas)
+    bool m_areaApp = false; // and the active one shows the App view
     QString m_problem;
     QVariantList m_fields;
     AppModels *m_models = nullptr;

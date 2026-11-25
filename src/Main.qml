@@ -43,7 +43,7 @@ ApplicationWindow {
     readonly property SettingsModel appSettingsModel: App.settings
     // The shown workflow has an app block (#385), and the window shows it as the App view.
     readonly property bool appIsApp: App.appView ? App.appView.isApp : false
-    // One area only: with several, the areas are the window's body and the app stays the graph's tab (#217 carries it later).
+    // One area only: with several, the areas are the window's body and an area whose view type is App shows it (apps/AppArea.qml, #450).
     readonly property bool appShown: (App.appView ? App.appView.shown : false) && !areaHost
     // Nothing is open and the person has not asked for a blank graph: the apps shelf is the body (#388).
     readonly property bool homeShown: (App.appShelf ? App.appShelf.atHome : false) && !appShown && !areaHost
@@ -140,7 +140,6 @@ ApplicationWindow {
                 id: menuBar
                 width: parent.width
                 tabsAllowed: win.chromeIsShown("workflow-tabs")
-                appSwitchAllowed: !win.areaHost
                 onNeeded: menuBarHost.reveal()
             }
         }
@@ -327,6 +326,22 @@ ApplicationWindow {
             appPageItem = null
         }
     }
+    // What the App view's store needs of the areas (#450): whether the window is split, and whether its active area shows the App.
+    function syncAppAreas() {
+        if (App.appView)
+            App.appView.setAreas(areaHost !== null, App.workspace ? App.workspace.viewOf(App.workspace.active) === "app" : false)
+    }
+    Connections {
+        target: App.workspace
+        function onChanged() { win.syncAppAreas() }
+        function onActiveChanged() { win.syncAppAreas() }
+    }
+    // The key, the switch, the rail's Graph and the builder ask the App view for one view or the other; in a split the areas do it.
+    Connections {
+        target: App.appView
+        function onAreaToggleRequested() { App.workspace?.toggleApp() }
+        function onAreaViewRequested(app) { App.workspace?.requestApp(app) }
+    }
     function syncHome() {
         if (homeShown && !homeItem) {
             homeItem = homeComponent.createObject(mainLayout) as Item
@@ -360,6 +375,7 @@ ApplicationWindow {
             areaHost.destroy()
             areaHost = null
         }
+        syncAppAreas()
     }
     // A press in an area makes it the active one (the commands act on it), and gives its view the keys.
     function activateAreaAt(point) {

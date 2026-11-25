@@ -97,6 +97,16 @@ public:
     // glyph, current, enabled, moves (it is shown in another area and moves here).
     Q_INVOKABLE QVariantList viewChoices(int id) const;
     Q_INVOKABLE QString viewOf(int id) const;
+    // The area showing `view` (the first), or 0.
+    Q_INVOKABLE int areaOf(const QString &view) const;
+    // view.toggle-app in a split (#450): the active area shows the other of the App and the Graph. An area showing the App takes the
+    // Graph (the two areas trade); the Graph's area takes the App from its area, or, with none, gives it to the next area; any other
+    // area shows the App. False when nothing changed.
+    Q_INVOKABLE bool toggleApp();
+    // The App view, wanted shown (true) or the graph wanted (false), for what asks for one view (the builder, the shelf, Show node):
+    // the App is brought to the active area (or the next one when that is the Graph's) unless some area shows it; the Graph is brought
+    // to the active area when that shows the App. False when nothing changed.
+    Q_INVOKABLE bool requestApp(bool app);
     // Moves the border after child `border` of the branch at `path` (child indexes from the root) by `delta`
     // pixels along a branch `length` pixels long, each side kept at its views' minimum.
     Q_INVOKABLE bool resizeBorder(const QVariantList &path, int border, double delta, double length);

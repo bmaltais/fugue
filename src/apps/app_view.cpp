@@ -138,6 +138,7 @@ AppView::AppView(Start start, Cancel cancel, const Registry *registry, QObject *
     // A new app, or a run that ended, may have found something missing: the panel looks again (the source says "ready" at once
     // when nothing is).
     connect(this, &AppView::appChanged, m_needs, &NeedsModel::refreshSoon);
+    connect(this, &AppView::appChanged, this, &AppView::shownChanged); // what the tab shows follows the app and its mode
     connect(this, &AppView::runChanged, m_needs, [this] { if (status() == QLatin1String("failed")) m_needs->refreshSoon(); });
     if (registry) {
         m_models = new AppModels(registry, this);
@@ -245,7 +246,9 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
     // What the block leaves unsaid comes from the target's spec, through a group instance to its inner input (spec 5.4).
     const InputSpec *spec = m_registry && !given.targets.isEmpty() ? targetInputSpec(m_document, *m_registry, given.targets.first()) : nullptr;
     const InputBinding input = completedBy(given, spec);
-    const QJsonValue current = currentOf(m_document, input);
+    // An optional picture or mask starts empty, whatever file its node holds: left empty it takes its branch out of the run (#484).
+    const bool optionalPicture = input.optional && (input.role == QLatin1String("image") || input.role == QLatin1String("mask"));
+    const QJsonValue current = optionalPicture ? QJsonValue(QJsonValue::Undefined) : currentOf(m_document, input);
     const QString kind = kindOf(input, current, spec);
     TabState &state = const_cast<AppView *>(this)->m_state[m_tab];
     QVariantMap field{{"key", input.key()},
@@ -257,6 +260,10 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
         field.insert("min", *input.min);
     if (input.max)
         field.insert("max", *input.max);
+    if (optionalPicture) {
+        field.insert("optional", true);
+        field.insert("hint", tr("Optional"));
+    }
     if (kind == QLatin1String("text"))
         field.insert("multiline", input.role == QLatin1String("prompt") || input.role == QLatin1String("negative_prompt"));
     if (kind == QLatin1String("seed"))
@@ -795,7 +802,21 @@ void AppView::cancel() {
         m_cancel(run);
 }
 
+void AppView::setAreas(bool split, bool appActive) {
+    if (m_split == split && m_areaApp == appActive)
+        return;
+    const bool was = shown();
+    m_split = split;
+    m_areaApp = appActive;
+    if (was != shown())
+        emit shownChanged();
+}
+
 void AppView::openInGraph() {
+    if (m_app && m_split) { // the graph is on screen already: bring it to the area that shows the App view
+        emit areaViewRequested(false);
+        return;
+    }
     if (!m_app || m_state[m_tab].graph)
         return;
     m_state[m_tab].graph = true;
@@ -803,13 +824,19 @@ void AppView::openInGraph() {
 }
 
 void AppView::toggle() {
-    if (shown())
+    if (m_app && m_split)
+        emit areaToggleRequested();
+    else if (shown())
         openInGraph();
     else
         showApp();
 }
 
 void AppView::showApp() {
+    if (m_app && m_split) { // an area shows it, in the active one or the next
+        emit areaViewRequested(true);
+        return;
+    }
     if (!m_app || !m_state[m_tab].graph)
         return;
     emit documentWanted(); // edits made in the graph, and a block changed there, are in the form
