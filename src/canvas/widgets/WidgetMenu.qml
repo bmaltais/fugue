@@ -26,6 +26,8 @@ Popup {
     // sit anywhere in it. Off: a word may be anywhere (the model menus').
     property bool wordStart: false
     property string query: ""
+    // How many rows tall the list grows before it scrolls (a menu of a few grouped services sets more).
+    property int maxRows: 12
     // What `nothing` says when no entry matches the query.
     property string nothingMatches: qsTr("Nothing matches “%1”")
     // The entries the query leaves (all of them with none), as the list shows them.
@@ -51,7 +53,7 @@ Popup {
     property real anchorHeight: 0
     readonly property Item overlay: Overlay.overlay
     margins: Placement.margin
-    height: Math.min(Math.min(list.contentHeight, rowHeight * 12) + searchHeight + 2 * padding,
+    height: Math.min(Math.min(list.contentHeight, rowHeight * maxRows) + searchHeight + 2 * padding,
                      overlay ? Placement.maxExtent(overlay.height) : Infinity)
     readonly property real searchHeight: searchable ? rowHeight + 2 : 0
     // Flipped above the widget, or shifted, so it stays inside the window (placement.js).
@@ -156,7 +158,7 @@ Popup {
             required property var modelData
             required property int index
             readonly property bool usable: modelData.enabled !== false
-            width: ListView.view.width
+            width: ListView.view.width - list.edge // the highlight stays out of the scroll bar's gutter
             readonly property bool hasThumbnail: modelData.thumbnail !== undefined
             readonly property bool heading: modelData.heading === true
             readonly property bool separator: modelData.separator === true

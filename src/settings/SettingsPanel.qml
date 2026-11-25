@@ -61,16 +61,12 @@ Popup {
     }
     onClosed: if (opener) opener.forceActiveFocus()
 
-    // Scrolls the page so `item` shows whole, as far as the page allows (a service just added, below the fold).
+    // Scrolls the page so `item` (a card whose title has 5u of room above it) starts with its title 3u under the top, as far as the
+    // page allows: a service just added, below the fold, shows from its title and no sliver of the group before it.
     function reveal(item) {
         Qt.callLater(() => {
             const r = item.mapToItem(scroller.contentItem, 0, 0)
-            const top = r.y - 3 * u
-            const bottom = r.y + item.height + 3 * u
-            if (bottom > scroller.contentY + scroller.height)
-                scroller.contentY = Math.max(0, Math.min(bottom - scroller.height, scroller.contentHeight - scroller.height))
-            if (r.y - 3 * u < scroller.contentY)
-                scroller.contentY = Math.max(0, top)
+            scroller.contentY = Math.max(0, Math.min(r.y + 2 * u, scroller.contentHeight - scroller.height))
         })
     }
 
@@ -199,7 +195,7 @@ Popup {
                     id: pageColumn
                     x: 6 * panel.u
                     y: 6 * panel.u
-                    width: scroller.width - 12 * panel.u - (scroller.ScrollBar.vertical as FugueScrollBar).inset
+                    width: scroller.width - 12 * panel.u - (scroller.ScrollBar.vertical as FugueScrollBar).breadth // the bar's gutter stays reserved: the page does not shift when it appears
                     spacing: 3 * panel.u
 
                     // settings.json cannot be used as it is.

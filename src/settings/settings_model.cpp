@@ -78,9 +78,9 @@ QList<ModuleField> moduleFields(const ProviderInstance &instance) {
         fields.append({QStringLiteral("idle_timeout_s"), false});
     if (instance.type == QLatin1String("fal")) {
         // fal's settings (spec 8.7, The `fal` provider). The queue address is advanced too: leave it empty for fal's own.
-        fields.append({QStringLiteral("image_models"), false, QCoreApplication::translate("fugue::SettingsModel", "More models"), QCoreApplication::translate("fugue::SettingsModel", "Extra endpoint ids, separated by commas"), false, false});
-        fields.append({QStringLiteral("store_io"), false, QCoreApplication::translate("fugue::SettingsModel", "Let fal keep my pictures"),
-                       QCoreApplication::translate("fugue::SettingsModel", "Off: fal is asked not to keep your pictures and prompts"), false, true});
+        fields.append({QStringLiteral("image_models"), false, QCoreApplication::translate("fugue::SettingsModel", "More models"), QCoreApplication::translate("fugue::SettingsModel", "Extra endpoint ids, separated by commas"), true, false});
+        fields.append({QStringLiteral("store_io"), false, QCoreApplication::translate("fugue::SettingsModel", "Let fal.ai keep my pictures"),
+                       QCoreApplication::translate("fugue::SettingsModel", "When off, fal.ai is asked to delete them after the run"), false, true});
         fields.append({QStringLiteral("rest_address"), false, QCoreApplication::translate("fugue::SettingsModel", "Storage address"), QCoreApplication::translate("fugue::SettingsModel", "Empty is https://rest.fal.ai"), true, false});
         fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 300"), true, false});
         fields.append({QStringLiteral("poll_ms"), false, QCoreApplication::translate("fugue::SettingsModel", "Poll interval (ms)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 500"), true, false});
@@ -421,17 +421,19 @@ QVariantList SettingsModel::providers() const {
                                       {"set", !text.isEmpty()}});
         }
         // A well-known service by its type and address (provider_presets.h): where to get its key and what it is sent.
-        QString keyUrl, privacy;
+        QString keyUrl, privacy, presetId;
         for (const ProviderPreset &preset : knownProviderPresets())
             if (preset.type == instance.type && preset.address == instance.address && (!preset.keyUrl.isEmpty() || !preset.privacy.isEmpty())) {
                 keyUrl = preset.keyUrl;
                 privacy = preset.privacy;
+                presetId = preset.id;
                 break;
             }
         list.append(QVariantMap{{"name", instance.name},
                                 {"type", instance.type},
                                 {"keyUrl", keyUrl},
-                                {"addressAdvanced", instance.type == QLatin1String("fal")}, // its own address is the default one
+                                {"preset", presetId},
+                                {"cloud", !privacy.isEmpty()}, // a service off this machine: its name and address are advanced, the key comes first
                                 {"privacy", privacy},
                                 {"address", instance.address},
                                 {"enabled", instance.enabled},

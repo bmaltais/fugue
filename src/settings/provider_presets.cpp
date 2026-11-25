@@ -8,7 +8,7 @@ namespace fugue {
 QList<ProviderPreset> knownProviderPresets() {
     QList<ProviderPreset> rows;
     const auto cloud = [&](const QString &id, const QString &name, const QString &type, const QString &address,
-                           const QString &keyUrl, const QString &description) {
+                           const QString &keyUrl, const QString &description, bool textOnly = false) {
         ProviderPreset p;
         p.id = id;
         p.name = name;
@@ -18,7 +18,8 @@ QList<ProviderPreset> knownProviderPresets() {
         p.needsKey = true;
         p.keyUrl = keyUrl;
         p.description = description;
-        p.privacy = QCoreApplication::translate("fugue::ProviderPresets", "Sends your pictures and prompts to %1").arg(name);
+        p.privacy = textOnly ? QCoreApplication::translate("fugue::ProviderPresets", "Runs in the cloud: your prompts go to %1").arg(name)
+                             : QCoreApplication::translate("fugue::ProviderPresets", "Runs in the cloud: your prompts and pictures go to %1").arg(name);
         rows.append(p);
     };
     // The addresses and key pages are the services' own documentation (checked 2026-11-25); fal's queue address is the
@@ -30,7 +31,7 @@ QList<ProviderPreset> knownProviderPresets() {
     cloud(QStringLiteral("together"), QStringLiteral("Together AI"), QStringLiteral("http"), QStringLiteral("https://api.together.ai/v1"),
           QStringLiteral("https://api.together.ai/settings/api-keys"), QCoreApplication::translate("fugue::ProviderPresets", "Open image and text models, run in the cloud"));
     cloud(QStringLiteral("openrouter"), QStringLiteral("OpenRouter"), QStringLiteral("http"), QStringLiteral("https://openrouter.ai/api/v1"),
-          QStringLiteral("https://openrouter.ai/settings/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Text models from many makers through one key"));
+          QStringLiteral("https://openrouter.ai/settings/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Text models from many makers through one key"), true);
 
     ProviderPreset local;
     local.id = QStringLiteral("local-openai");

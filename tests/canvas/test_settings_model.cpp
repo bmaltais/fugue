@@ -573,9 +573,9 @@ private slots:
         for (const QVariant &f : card.value("fields").toList())
             seen.insert(f.toMap().value("name").toString(), f);
         QVERIFY(seen.contains("store_io") && seen.value("store_io").toMap().value("isBool").toBool());
-        QVERIFY(!seen.value("image_models").toMap().value("advanced").toBool());
+        QVERIFY(seen.value("image_models").toMap().value("advanced").toBool());
         QVERIFY(seen.value("poll_ms").toMap().value("advanced").toBool() && seen.value("rest_address").toMap().value("advanced").toBool());
-        QVERIFY(card.value("addressAdvanced").toBool());
+        QVERIFY(card.value("cloud").toBool());
         const int fal = model.providers().size() - 1;
         QCOMPARE(model.setProviderField(fal, "store_io", true), QString());
         QCOMPARE(loadProviderInstances(providersFile()).value().last().settings.value("store_io"), QJsonValue(true));
