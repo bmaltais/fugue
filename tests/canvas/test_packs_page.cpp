@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include "../test_shard.h"
+#include "../window_grab.h"
 
 using namespace canvas_test;
 
@@ -77,6 +78,42 @@ void click(App &app, QQuickItem *item) {
     QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
 }
 
+// Clicks the header of the disclosure row `row` once it has stayed put for a few frames; looked up again by name each frame (the
+// header has no name of its own, and a change of the list makes the rows again).
+void clickHeader(App &app, const QString &row) {
+    QPoint at;
+    int still = 0;
+    for (int i = 0; still < 5 && i < 500; ++i) {
+        QTest::qWait(10);
+        QQuickItem *item = find(app.window, row);
+        if (!item) {
+            still = 0;
+            continue;
+        }
+        const QPoint here = centerOf(item->property("header").value<QQuickItem *>());
+        still = here == at ? still + 1 : 0;
+        at = here;
+    }
+    QVERIFY2(still >= 3, qPrintable(QStringLiteral("%1 never settled").arg(row)));
+    QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
+}
+
+// True once the disclosure row `name` is open and its body has finished growing (a click on its controls before that lands on the clip).
+bool openAndGrown(QQuickWindow *window, const QString &name) {
+    QQuickItem *row = find(window, name);
+    return row && row->property("expanded").toBool() && !row->property("animating").toBool()
+           && qAbs(row->property("shown").toReal() - row->property("bodyHeight").toReal()) < 0.5;
+}
+
+// Opens the row named `row` (a KitDisclosureRow) unless `part`, something in its body, shows: a closed row's body is not visible.
+void openFor(App &app, const QString &row, const QString &part) {
+    if (find(app.window, part))
+        return;
+    clickHeader(app, row);
+    QTRY_VERIFY_WITH_TIMEOUT(find(app.window, part), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, row), 20000);
+}
+
 // Types `text` into a field of the panel and presses Enter.
 void type(App &app, QQuickItem *field, const QString &text) {
     click(app, field);
@@ -128,6 +165,7 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-packs"));
+        openFor(app, "packAddRow", "packLocation");
         type(app, NEED("packLocation"), m_source);
         click(app, NEED("packAdd"));
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
@@ -147,6 +185,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-packs"));
 
+        openFor(app, "packAddRow", "packLocation");
         type(app, NEED("packLocation"), m_source);
         click(app, NEED("packAdd"));
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
@@ -166,6 +205,7 @@ private slots:
         click(app, NEED("packYes"));
         QTRY_COMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), true);
 
+        openFor(app, "pack-io.example.tools", "packRemove-io.example.tools");
         click(app, NEED("packRemove-io.example.tools"));
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
@@ -283,7 +323,7 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-packs"));
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packSecret-io.example.keyed-token_1"), 20000);
+        openFor(app, "pack-io.example.keyed", "packSecret-io.example.keyed-token_1");
         QCOMPARE(find(app.window, "packSecretState-io.example.keyed-token_1")->property("text").toString(), QString("not set"));
         // The pack needs an origin: a value alone is refused, and nothing is stored.
         type(app, NEED("packSecret-io.example.keyed-token_1"), "made-up-key-1234");
@@ -324,6 +364,97 @@ private slots:
         QCOMPARE(list.size(), 1);
         QCOMPARE(list.first().toMap().value("enabled").toBool(), false);
         QVERIFY(!list.first().toMap().value("problems").toStringList().isEmpty());
+    }
+
+    // FUGUE_SETTINGS_SHOTS=<dir> [FUGUE_SHOT_THEME=<omarchy theme>] [FUGUE_SHOT_TAG=<word>]: the Packs and Folders pages as a person meets them, as PNGs to
+    // look at: the list (a trusted pack, one not trusted, one with a key, one that does not load, a library group), a row open, the add row, a
+    // search, a narrow window; the Folders list, a row open, the model folders open with one folder.
+    void packsAndFoldersShots() {
+        const QString out = qEnvironmentVariable("FUGUE_SETTINGS_SHOTS");
+        if (out.isEmpty())
+            QSKIP("Set FUGUE_SETTINGS_SHOTS to a folder to write the pages there.");
+        QDir().mkpath(out);
+        const auto write = [](const QString &path, const QJsonObject &json) {
+            QDir().mkpath(QFileInfo(path).path());
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(QJsonDocument(json).toJson());
+        };
+        for (const QString id : {"io.example.tools", "io.example.draw", "io.example.keyed"})
+            write(packs() + "/" + id + "/pack.json", QJsonObject{{"manifest", 1}, {"id", id}, {"version", id.endsWith("draw") ? "0.12.3" : "1.0.0"},
+                  {"name", id.section('.', -1).replace(0, 1, id.section('.', -1).at(0).toUpper())}, {"nodes", QJsonArray{}},
+                  {"settings", id.endsWith("keyed") ? QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "API token"},
+                      {"description", "Sent to the service this pack's nodes call."}, {"origin", "required"}}} : QJsonArray{}}});
+        QDir().mkpath(packs() + "/io.example.broken");
+        QFile broken(packs() + "/io.example.broken/pack.json");
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write("{ not json");
+        broken.close();
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {
+            "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a fox"}}}},
+            "layout": {"nodes": {"words": {"pos": [0, 0]}}}})"), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night")), 12});
+        QVERIFY(app.open());
+        app.model.select({"words"});
+        const QString instance = app.model.groups()->makeGroup();
+        app.model.select({instance});
+        QVERIFY(app.model.groups()->saveGroupToLibrary());
+        fugue::TrustStore trust(trustFile());
+        trust.trust("io.example.tools", "1.0.0");
+        QVERIFY(app.settings.addPath("model_paths", "~/ComfyUI/models").isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(app.settings.packs()->packs().size() >= 4, 20000);
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG", QStringLiteral("dark"));
+        const auto shot = [&](const QString &name) {
+            QTest::qWait(500);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/%2-%3.png").arg(out, name, tag)));
+        };
+        const auto reveal = [&](const QString &name) { // scrolls the panel to the row, as a person does
+            QMetaObject::invokeMethod(app.window->findChild<QObject *>("settingsPanel"), "showAll", Q_ARG(QVariant, QVariant::fromValue(NEED(name))), Q_ARG(QVariant, QVariant()));
+            QTest::qWait(200);
+        };
+        app.window->resize(1300, 850);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
+        click(app, NEED("settingsPage-packs"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "pack-io.example.keyed"), 20000);
+        shot("packs-1-list");
+        reveal("pack-io.example.keyed");
+        clickHeader(app, "pack-io.example.keyed");
+        QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "pack-io.example.keyed"), 20000);
+        shot("packs-2-open");
+        reveal("packAddRow");
+        clickHeader(app, "packAddRow");
+        QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "packAddRow"), 20000);
+        shot("packs-3-add");
+        QMetaObject::invokeMethod(NEED("packSearch"), "focusField");
+        for (const QChar c : QStringLiteral("zzz"))
+            QTest::keyClick(app.window, c.toLatin1());
+        shot("packs-4-nomatch");
+        NEED("packSearch")->findChild<QQuickItem *>("packSearchInput")->setProperty("text", "");
+        app.window->resize(520, 760);
+        shot("packs-5-narrow");
+        reveal("pack-io.example.tools");
+        clickHeader(app, "pack-io.example.tools");
+        QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "pack-io.example.tools"), 20000);
+        shot("packs-6-narrow-open");
+
+        app.window->resize(1300, 850);
+        click(app, NEED("settingsPage-folders"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "folderRow-output_folder"), 20000);
+        shot("folders-1-list");
+        reveal("folderRow-output_folder");
+        clickHeader(app, "folderRow-output_folder");
+        QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "folderRow-output_folder"), 20000);
+        shot("folders-2-open");
+        reveal("folderRow-model_paths");
+        clickHeader(app, "folderRow-model_paths");
+        QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "folderRow-model_paths"), 20000);
+        shot("folders-3-models");
+        app.window->resize(520, 760);
+        shot("folders-4-narrow");
+        reveal("folderRow-download_folder");
+        clickHeader(app, "folderRow-download_folder");
+        QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "folderRow-download_folder"), 20000);
+        shot("folders-5-narrow-download");
     }
 };
 

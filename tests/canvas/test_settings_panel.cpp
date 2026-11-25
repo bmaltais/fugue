@@ -116,6 +116,21 @@ void type(App &app, QQuickItem *field, const QString &text) {
     QTest::keyClick(app.window, Qt::Key_Return);
 }
 
+// True once the disclosure row `name` is open and its body has finished growing (a click on its controls before that lands on the clip).
+bool openAndGrown(QQuickWindow *window, const QString &name) {
+    QQuickItem *row = find(window, name);
+    return row && row->property("expanded").toBool() && !row->property("animating").toBool()
+           && qAbs(row->property("shown").toReal() - row->property("bodyHeight").toReal()) < 0.5;
+}
+
+// Opens a row of the Folders page (a KitDisclosureRow) by a click on its header; one open at a time, so the one before shuts.
+void openFolderRow(App &app, const QString &key) {
+    QQuickItem *row = NEED(QStringLiteral("folderRow-") + key);
+    click(app, row->property("header").value<QQuickItem *>());
+    QTRY_VERIFY(row->property("expanded").toBool());
+    QTRY_VERIFY(openAndGrown(app.window, QStringLiteral("folderRow-") + key));
+}
+
 } // namespace
 
 class TestSettingsPanel : public QObject {
@@ -403,6 +418,7 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         click(app, NEED("settingsPage-folders"));
+        openFolderRow(app, "output_folder");
         QQuickItem *output = NEED("output_folder");
         type(app, output, "not/absolute");
         QTRY_VERIFY(find(app.window, "settingsError"));
@@ -410,6 +426,7 @@ private slots:
         type(app, output, "~/Art/Fugue");
         QTRY_COMPARE(app.settings.outputFolder(), QStringLiteral("~/Art/Fugue"));
         QCOMPARE(fugue::SettingsModel(app.settings.path()).outputFolder(), QStringLiteral("~/Art/Fugue"));
+        openFolderRow(app, "model_paths");
         type(app, NEED("model_paths-add"), "/srv/models");
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).modelPaths(), QStringList{"/srv/models"});
         click(app, NEED("model_paths-remove-0"));
@@ -425,6 +442,7 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         click(app, NEED("settingsPage-folders"));
+        openFolderRow(app, "output_folder");
         click(app, NEED("output_folder-choose"));
         QTRY_VERIFY(app.window->findChild<QObject *>("settingsFolderDialog"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -447,6 +465,7 @@ private slots:
         app.commands.trigger("app.settings");
         QTRY_VERIFY(panelOpen(app.window));
         click(app, NEED("settingsPage-folders"));
+        openFolderRow(app, "model_paths");
         type(app, NEED("model_paths-add"), loras.path());
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).modelPaths(), QStringList{loras.path()});
         QTRY_COMPARE(NEED("model_paths-found-0")->property("text").toString(), QStringLiteral("Found: LoRAs"));
