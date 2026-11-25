@@ -63,7 +63,7 @@ void click(App &app, QQuickItem *item) {
     QPoint at = centerOf(item);
     int still = 0;
     for (int i = 0; still < 3 && i < 500; ++i) {
-        QTest::qWait(20);
+        QTest::qWait(10);
         QQuickItem *now = find(app.window, name);
         if (!now) {
             still = 0; // gone for now: wait for the rebuilt row

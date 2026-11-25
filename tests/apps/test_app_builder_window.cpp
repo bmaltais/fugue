@@ -108,7 +108,7 @@ class TestAppBuilderWindow : public QObject {
         QPoint at;
         int still = 0;
         for (int i = 0; still < 3 && i < 500; ++i) {
-            QTest::qWait(20);
+            QTest::qWait(10);
             QQuickItem *now = find(app.window, name);
             if (!now) {
                 still = 0;

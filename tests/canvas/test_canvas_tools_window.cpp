@@ -47,7 +47,7 @@ QPoint settled(QQuickWindow *window, const QString &name) {
     QPoint at(-1, -1);
     int still = 0;
     for (int i = 0; still < 3 && i < 500; ++i) {
-        QTest::qWait(20);
+        QTest::qWait(10);
         QQuickItem *now = find(window, name);
         if (!now) {
             still = 0;

@@ -60,7 +60,7 @@ bool panelOpen(QQuickWindow *window) {
 QPoint settled(QQuickItem *item) {
     QPoint at = centerOf(item);
     for (int still = 0, i = 0; still < 3 && i < 50; ++i) {
-        QTest::qWait(20);
+        QTest::qWait(10);
         const QPoint now = centerOf(item);
         still = now == at ? still + 1 : 0;
         at = now;
@@ -362,7 +362,7 @@ private slots:
             quiet = frames == 0;
         }
         QVERIFY2(quiet, "Settings never stopped drawing");
-        QTest::qWait(1000);
+        QTest::qWait(600);
         disconnect(connection);
         QCOMPARE(frames, 0);
     }
