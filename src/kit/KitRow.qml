@@ -16,6 +16,7 @@ Item {
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
     property string label
     property string hint
+    property int hintLines: 1 // more than 1: the hint wraps to that many lines (then ends with an ellipsis)
     property var target // a control of the row with a toggle() function
     default property alias trailing: slot.data
     readonly property real innerWidth: width - (look.params.rowPadLeft + look.params.rowPadRight) * look.unit
@@ -76,6 +77,8 @@ Item {
                 width: parent.width
                 text: row.hint
                 textFormat: Text.PlainText
+                wrapMode: row.hintLines > 1 ? Text.Wrap : Text.NoWrap
+                maximumLineCount: row.hintLines
                 elide: Text.ElideRight
                 color: row.look.label
                 font.pixelSize: row.look.labelSize

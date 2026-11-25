@@ -68,6 +68,7 @@ const QList<ParamDef> &paramDefs() {
         {"trackEdge", 0.25, 0.0, 1.0, "", false, "the glass track's dark edge", {}},
         {"durColor", 100.0, 0.0, 1000.0, "", false, "a colour change in ms", {}},
         {"durToggle", 160.0, 0.0, 1000.0, "", false, "a toggle's knob and track in ms", {}},
+        {"durCopied", 1500.0, 0.0, 10000.0, "", false, "how long a copy button shows Copied, in ms", {}},
         {"durThumb", 180.0, 0.0, 1000.0, "", false, "a chooser's thumb in ms", {}},
         {"thumbAlpha", 0.35, 0.0, 1.0, "", false, "a scroll bar's thumb alpha at rest", {}},
         {"thumbAlphaLight", 0.45, 0.0, 1.0, "", false, "the same on a light theme", {}},

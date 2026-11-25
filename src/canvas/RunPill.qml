@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
+import "../kit"
 
 // The run pill, top right of the canvas (docs/canvas-look.md 11): while a run of the window
 // is waiting or going, a spinner, "Running", the node and its percent, and "1 of 3" when
@@ -108,6 +109,8 @@ Item {
                 delegate: Rectangle {
                     id: entry
                     required property var modelData
+                    readonly property CanvasLook look: pill.look // KitChip has a `pill` property of its own, so the button reads these
+                    readonly property real u: pill.u
                     width: column.width
                     height: entryText.implicitHeight + 2 * pill.u
                     radius: pill.look.smallCorner
@@ -121,7 +124,7 @@ Item {
                         id: entryText
                         x: 2 * pill.u
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 3 * pill.u
+                        width: parent.width - 10 * pill.u
                         text: "<b>" + entry.modelData.node + "</b> " + entry.modelData.message
                         textFormat: Text.StyledText
                         wrapMode: Text.Wrap
@@ -135,6 +138,13 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: pill.runs.showError(entry.modelData.shown)
+                    }
+                    KitCopyButton { // the row exists only while the list shows
+                        objectName: "runErrorCopy"
+                        x: entry.width - width - entry.u
+                        y: entry.u
+                        look: entry.look
+                        copyText: entry.modelData.node + ": " + entry.modelData.message + (entry.modelData.hint ? " " + entry.modelData.hint : "")
                     }
                 }
             }

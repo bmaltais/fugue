@@ -610,6 +610,95 @@ private slots:
         QVERIFY(card.value("keyUrl").toString().startsWith("https://fal.ai/"));
         QVERIFY(!card.value("privacy").toString().isEmpty());
     }
+
+    // The Providers page's list line and search: where it runs, what it says, and what a query finds.
+    void aProviderSaysWhereItRunsAndWhetherItIsReady() {
+        SettingsModel model;
+        const QVariantMap first = model.providers().first().toMap(); // the built-in "This machine"
+        QCOMPARE(first.value("placement").toString(), QStringLiteral("machine"));
+        QCOMPARE(first.value("status").toString(), QStringLiteral("ready"));
+        QVERIFY(!first.value("statusStrong").toBool());
+        QCOMPARE(model.addPreset("fal"), QString());
+        QCOMPARE(model.addPreset("cloudflare"), QString());
+        QCOMPARE(model.addPreset("fugue-helper-host"), QString());
+        const auto instance = [&](const QString &name) {
+            for (const QVariant &p : model.providers())
+                if (p.toMap().value("name").toString() == name)
+                    return p.toMap();
+            return QVariantMap();
+        };
+        // A cloud service without its key needs one, and says so strongly; the key makes it ready; off beats it all.
+        QCOMPARE(instance("fal.ai").value("placement").toString(), QStringLiteral("cloud"));
+        QCOMPARE(instance("fal.ai").value("status").toString(), QStringLiteral("needsKey"));
+        QVERIFY(instance("fal.ai").value("statusStrong").toBool());
+        const int fal = model.providers().size() - 3;
+        QCOMPARE(model.setProviderField(fal, "key", "k"), QString());
+        QCOMPARE(instance("fal.ai").value("status").toString(), QStringLiteral("ready"));
+        QCOMPARE(model.setProviderField(fal, "enabled", false), QString());
+        QCOMPARE(instance("fal.ai").value("status").toString(), QStringLiteral("off"));
+        // Cloudflare needs its account id besides the token.
+        QCOMPARE(model.setProviderField(fal + 1, "key", "k"), QString());
+        QCOMPARE(instance("Cloudflare Workers AI").value("status").toString(), QStringLiteral("needsAccount"));
+        QCOMPARE(model.setProviderField(fal + 1, "account_id", "abc"), QString());
+        QCOMPARE(instance("Cloudflare Workers AI").value("status").toString(), QStringLiteral("ready"));
+        // A helper with no address is the built-in one: ready. With an address it needs a key; the address makes it a network service,
+        // localhost a local one.
+        QCOMPARE(instance("Fugue helper").value("status").toString(), QStringLiteral("ready"));
+        QCOMPARE(model.setProviderField(fal + 2, "address", "https://studio.example.ts.net"), QString());
+        QCOMPARE(instance("Fugue helper").value("status").toString(), QStringLiteral("needsKey"));
+        QCOMPARE(instance("Fugue helper").value("placement").toString(), QStringLiteral("network"));
+        QCOMPARE(model.setProviderField(fal + 2, "address", "http://localhost:9000"), QString());
+        QCOMPARE(instance("Fugue helper").value("placement").toString(), QStringLiteral("machine"));
+    }
+
+    // The engine's placement and key rule: a helper without an address is the built-in one (no key); a plain http endpoint off the
+    // person's networks is a cloud service and needs a key.
+    void placementAndKeyFollowTheEngine() {
+        SettingsModel model;
+        QCOMPARE(model.addProvider("fugue-helper"), QString());
+        QCOMPARE(model.addProvider("http"), QString());
+        const int helper = model.providers().size() - 2;
+        QVariantMap built = model.providers().at(helper).toMap();
+        QCOMPARE(built.value("placement").toString(), QStringLiteral("machine"));
+        QCOMPARE(built.value("status").toString(), QStringLiteral("ready"));
+        QVERIFY(!built.value("keyRequired").toBool());
+        QCOMPARE(model.setProviderField(helper + 1, "address", "https://api.example.com"), QString());
+        const QVariantMap http = model.providers().at(helper + 1).toMap();
+        QCOMPARE(http.value("placement").toString(), QStringLiteral("cloud"));
+        QCOMPARE(http.value("status").toString(), QStringLiteral("needsKey"));
+        QCOMPARE(model.setProviderField(helper, "address", "https://studio.example.ts.net"), QString());
+        QVERIFY(model.providers().at(helper).toMap().value("keyRequired").toBool());
+        QCOMPARE(model.providers().at(helper).toMap().value("placement").toString(), QStringLiteral("network"));
+    }
+
+    void theSearchFindsServicesByWordStart() {
+        SettingsModel model;
+        QCOMPARE(model.addPreset("fal"), QString());
+        const auto preset = [&](const QString &id) {
+            for (const QVariant &p : model.providerPresets())
+                if (p.toMap().value("id").toString() == id)
+                    return p.toMap();
+            return QVariantMap();
+        };
+        const QVariantMap fal = model.providers().last().toMap();
+        QVERIFY(model.providerMatches("", fal));
+        QVERIFY(model.providerMatches("fal", fal));
+        QVERIFY(model.providerMatches("flux", fal)); // a model family, not in its name
+        QVERIFY(model.providerMatches("FLUX kontext", fal)); // every word, any case
+        QVERIFY(!model.providerMatches("flux gemini", fal));
+        QVERIFY(!model.providerMatches("xyz", fal));
+        QVERIFY(!model.providerMatches("lux", fal)); // starts a word, never the middle
+        QVERIFY(model.providerMatches("cloud", fal)); // where it runs
+        QVERIFY(model.providerMatches("free", preset("cloudflare")));
+        QVERIFY(!model.providerMatches("free", preset("openai")));
+        QVERIFY(model.providerMatches("nano banana", preset("gemini")));
+        QVERIFY(model.providerMatches("lm studio", preset("local-openai")));
+        QVERIFY(model.providerMatches("local", preset("local-openai")));
+        QVERIFY(model.providerMatches("vllm", preset("local-openai")));
+        QVERIFY(model.providerMatches("gpt-image", preset("openai")));
+        QVERIFY(!model.providerMatches("xyz", preset("openai")));
+        QVERIFY(model.providerMatches("flux", model.providers().first().toMap()) == false);
+    }
 };
 
 QTEST_MAIN(TestSettingsModel)
