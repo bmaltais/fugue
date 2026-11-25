@@ -33,6 +33,11 @@ run with a shots folder), takes the offscreen platform and has no display to rea
 Set `FUGUE_TEST_ON_SCREEN=1` only to watch a test on purpose. `build/fugue` itself has no such guard: start it
 offscreen (`QT_QPA_PLATFORM=offscreen`) unless a person asked to see it.
 
+Offscreen has no GPU, so blur, frost and other effects only show their software fallback there. To see the real
+window as a person does, without touching the desktop, use `bin/look-shot <out.png> [--size WxH] [--wait S] --
+<fugue arguments>`: it runs Fugue in a hidden (headless) sway session on the real GPU, takes the picture with grim
+and stops both (a scratch `FUGUE_HOME` or a temporary home; never the owner's store).
+
 `bin/build` and `bin/test` share one machine-wide lock, so only one big build or run happens at a time.
 A new build folder uses Ninja and lld when they are installed (a folder made with Make keeps Make; delete
 `build/` to move). The window's resources are built once for all tests, so a `Main.qml` edit rebuilds in
