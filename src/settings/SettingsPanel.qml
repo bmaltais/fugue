@@ -61,6 +61,19 @@ Popup {
     }
     onClosed: if (opener) opener.forceActiveFocus()
 
+    // Scrolls the page so `item` shows whole, as far as the page allows (a service just added, below the fold).
+    function reveal(item) {
+        Qt.callLater(() => {
+            const r = item.mapToItem(scroller.contentItem, 0, 0)
+            const top = r.y - 3 * u
+            const bottom = r.y + item.height + 3 * u
+            if (bottom > scroller.contentY + scroller.height)
+                scroller.contentY = Math.max(0, Math.min(bottom - scroller.height, scroller.contentHeight - scroller.height))
+            if (r.y - 3 * u < scroller.contentY)
+                scroller.contentY = Math.max(0, top)
+        })
+    }
+
     // Runs a model call and keeps its refusal, if any.
     function apply(result) { error = result; return result === "" }
 

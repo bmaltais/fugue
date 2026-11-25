@@ -503,6 +503,32 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Add a service by keyboard alone (Tab to the dropdown, Down opens it, Enter picks): fal.ai is added, the focus lands in its key
+    // field, and what is typed there shows as dots.
+    void addingAServiceByKeyboardFocusesTheMaskedKey() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-providers"));
+        QQuickItem *add = NEED("providerAddService");
+        QVERIFY(add->property("activeFocusOnTab").toBool());
+        add->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_VERIFY(app.window->findChild<QObject *>("providerAddMenu") && app.window->findChild<QObject *>("providerAddMenu")->property("opened").toBool());
+        QTest::keyClick(app.window, Qt::Key_Return);
+        const int fal = app.settings.providers().size() - 1;
+        QTRY_VERIFY(find(app.window, QStringLiteral("providerKey-%1").arg(fal)));
+        QQuickItem *key = find(app.window, QStringLiteral("providerKey-%1").arg(fal));
+        QCOMPARE(app.settings.providers().last().toMap().value("name").toString(), QStringLiteral("fal.ai"));
+        QTRY_VERIFY(app.window->activeFocusItem() && key->isAncestorOf(app.window->activeFocusItem()));
+        QVERIFY(find(app.window, QStringLiteral("providerPrivacy-%1").arg(fal)));
+        for (const QChar c : QStringLiteral("sk-abc"))
+            QTest::keyClick(app.window, c.toLatin1());
+        QCOMPARE(app.window->activeFocusItem()->property("echoMode").toInt(), 2 /* TextInput.Password */);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void keymapPageOpensTheFileAndShowsItsProblems() {
         App app(load(emptyDoc));
         QVERIFY(app.open());

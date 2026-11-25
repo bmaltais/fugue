@@ -118,6 +118,8 @@ QtObject {
         property string value
         property string placeholder
         property bool secret: false
+        property bool reveal: false // a secret typed shows as typed (the eye chip); never what is stored, which this field does not know
+        property string label // the screen reader's name; the placeholder when empty
         property alias input: textInput
         signal committed(string text)
         Layout.fillWidth: true
@@ -139,13 +141,13 @@ QtObject {
             clip: true
             selectByMouse: true
             text: field.secret ? "" : field.value
-            echoMode: field.secret ? TextInput.Password : TextInput.Normal
+            echoMode: field.secret && !field.reveal ? TextInput.Password : TextInput.Normal
             color: App.theme.look.text
             selectionColor: App.theme.look.accent
             selectedTextColor: App.theme.look.accentForeground
             font.pixelSize: App.theme.look.textSize
             Accessible.role: Accessible.EditableText
-            Accessible.name: field.placeholder
+            Accessible.name: field.label !== "" ? field.label : field.placeholder
             onAccepted: field.commit()
             onActiveFocusChanged: if (!activeFocus && text !== (field.secret ? "" : field.value)) field.commit()
             Keys.onEscapePressed: event => {
