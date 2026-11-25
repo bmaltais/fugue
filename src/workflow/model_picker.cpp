@@ -18,6 +18,7 @@ QVariantMap modelRow(const ListedModel &model, const QString &type, const QHash<
                     {"provider", model.provider},
                     {"host", model.host},
                     {"hostOffline", model.hostOffline()},
+                    {"cloud", model.cloud},
                     {"note", model.note}};
     if (model.onDisk()) {
         row.insert("path", model.path);

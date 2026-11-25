@@ -2131,5 +2131,7 @@
   "Keep this app: add it to your apps and your app launcher": "Keep this app: add it to your apps and your app launcher",
   "Added to the app launcher": "Added to the app launcher",
   "Taken out of the app launcher": "Taken out of the app launcher",
-  "%1 is kept: it is in your apps and your app launcher.": "%1 is kept: it is in your apps and your app launcher."
+  "%1 is kept: it is in your apps and your app launcher.": "%1 is kept: it is in your apps and your app launcher.",
+  "Runs on %1": "Runs on %1",
+  " or ": " or "
 }

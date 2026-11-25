@@ -101,6 +101,12 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Placed on: the App view's `appError` and the panel's `appProblem`; the Workflows notice, the group banner and the Canvas task bar's error line (in Loaders, so the default window keeps its items); each row of the run pill's error list (copies `node: message hint`); the Canvas view's error lines; the Get ready sheet's message and row errors; the Packs page's problems and failure; the error lines of the batch, export, region, new canvas, group, projects and command dialogs. Not on: a hover-only tooltip, the run queue's failed row (it shows no message), the widget field bubble (`ErrorBubble`, a validation hint), the Providers page (rebuilt elsewhere).
 - Rules: Floor (6u is a chip inside its line, the line's row is at least 7u tall), Cohesion (one component, one glyph), Focus.
 
+### 2026-11-25 Cloud place badge (owner: "maybe we need a Cloud icon similar to the Computer icon"; confidence high)
+
+- Old: the fal.ai apps showed no badge, and a model of an address-less cloud instance with a key was counted as "this machine" (`monitor`) because only an address made a host.
+- New: `PlaceBadge` kind `cloud` (Lucide `cloud`), tooltip "Runs on <instance names>" ("Runs on fal.ai or Replicate"). One glyph means one place: `monitor` this machine, `server` a paired host, `cloud` a service off this machine; the same on app cards, Templates cards and model menu rows.
+- Rule: shown when an enabled provider instance whose `placementOf` is `OffMachine` offers the model (`ListedModel::cloud`); nothing configured, nothing shown. No network call.
+
 ### 2026-11-25 App | Graph switch always shown; App's action per state (owner report; UI consult: confidence high, App opening the builder medium-high)
 
 - Control: `src/apps/AppViewSwitch.qml` (`appViewSwitch`, `appViewSwitchApp`, `appViewSwitchGraph`), made by `src/menu/MenuBar.qml` (`appSwitchWanted` is only `appSwitchAllowed` and a bar at least 56u wide); `view.toggle-app` (Ctrl+Alt+A), whose handler is chosen by the tab's state (`bindAppView`, `bindViewSwitch` in `src/apps/app_window.cpp`); `AppShelf.showAgain()` and `AppShelf.landing`.

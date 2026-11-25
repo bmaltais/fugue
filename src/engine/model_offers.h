@@ -26,6 +26,9 @@ struct ListedModel {
     // The paired host that serves it (#164): the instance's name when the instance has an
     // address, else empty (a file on disk, or a server on this machine).
     QString host;
+    // The instance's name when it runs off this machine (fugue::placementOf is OffMachine: a cloud
+    // service such as fal.ai), else empty. Such a model is never "this machine" (#164).
+    QString cloud;
     QString title;      // the name people know it by; empty: the name
     QString note;       // for a model that is not ready: why, and how to make it ready
     // A file on disk: where it is, the type folder it was found in, and its size. Its handle

@@ -10,6 +10,12 @@ ModelPlaces placesOf(const QJsonObject &handle, bool onDisk, const QList<ListedM
     for (const ListedModel &model : offered) {
         if (!sameModel(handle, model.handle))
             continue;
+        if (!model.cloud.isEmpty()) {
+            if (!places.clouds.contains(model.cloud))
+                places.clouds << model.cloud;
+            places.cloudReady = places.cloudReady || model.status != QLatin1String("unavailable");
+            continue;
+        }
         if (model.host.isEmpty()) {
             // A local server counts when it answers (a file on disk is ready).
             if (model.status != QLatin1String("unavailable"))
@@ -32,6 +38,9 @@ TemplatePlaces summarizePlaces(const QList<ModelPlaces> &models) {
         for (const QString &host : model.hosts)
             if (!out.hosts.contains(host))
                 out.hosts << host;
+        for (const QString &cloud : model.clouds)
+            if (!out.clouds.contains(cloud))
+                out.clouds << cloud;
         if (!model.available())
             for (const QString &host : model.offlineHosts)
                 if (!out.offlineHosts.contains(host))
@@ -41,12 +50,14 @@ TemplatePlaces summarizePlaces(const QList<ModelPlaces> &models) {
     return out;
 }
 
-QStringList placeGlyphs(bool local, bool host) {
+QStringList placeGlyphs(bool local, bool host, bool cloud) {
     QStringList glyphs;
     if (local)
         glyphs << QStringLiteral("monitor");
     if (host)
         glyphs << QStringLiteral("server");
+    if (cloud)
+        glyphs << QStringLiteral("cloud");
     return glyphs;
 }
 

@@ -22,7 +22,7 @@ QVariantMap templ(const QString &id, bool app, bool ready = true, const QString 
     return {{"id", id},         {"title", "Title " + id},    {"description", "Does " + id},     {"app", app},
             {"ready", ready},   {"downloadSize", size},      {"missingModels", absent},         {"neededPacks", needed},
             {"status", "status of " + id}, {"preview", "file:///p/" + id + ".png"}, {"local", true}, {"hosts", QStringList()},
-            {"offlineHosts", QStringList()}};
+            {"offlineHosts", QStringList()}, {"clouds", QStringList()}};
 }
 
 } // namespace

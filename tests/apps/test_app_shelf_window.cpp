@@ -94,6 +94,22 @@ void makeApp(const QString &root, const QString &id, const QString &title, bool 
           QJsonObject{{"title", title}, {"description", "Makes " + title}, {"app", QJsonObject{{"title", title}, {"summary", "Does " + title}}}});
 }
 
+// An app that needs a provider's model (a served name, no hash), as the fal.ai apps do.
+void makeCloudApp(const QString &root, const QString &id, const QString &title) {
+    makeApp(root, id, title, false);
+    QFile in(root + "/" + id + "/workflow.fugue");
+    QVERIFY(in.open(QIODevice::ReadOnly));
+    QJsonObject flow = QJsonDocument::fromJson(in.readAll()).object();
+    in.close();
+    QJsonObject graph = flow.value("graph").toObject();
+    QJsonObject nodes = graph.value("nodes").toObject();
+    nodes.insert("models", QJsonObject{{"type", "fugue/load-models"}, {"version", "1.0.0"},
+                                       {"inputs", QJsonObject{{"diffusion_model", QJsonObject{{"resource", "fugue/image-model"}, {"name", "fal-ai/flux/schnell"}}}}}});
+    graph.insert("nodes", nodes);
+    flow.insert("graph", graph);
+    write(root + "/" + id + "/workflow.fugue", flow);
+}
+
 // What main.cpp makes: the App view (nothing runs here) and the shelf over the window's templates and its open.
 struct Rig {
     RunSetup setup;
@@ -175,6 +191,37 @@ private slots:
         QCOMPARE(app.workflows.count(), 1);
         app.workflows.readiness()->cancel();
         QTRY_VERIFY(!app.workflows.readiness()->isOpen());
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // A card whose model a configured cloud instance offers wears the cloud badge, with "Runs on <service>" (#164, canvas-look 16.3);
+    // an app that needs nothing wears none.
+    void anAppRunOnACloudServiceShowsTheCloudBadge() {
+        QTemporaryDir root;
+        makeCloudApp(root.path(), "cloud-app", "Cloud app");
+        makeApp(root.path(), "plain-app", "Plain app", false);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        app.workflows.setModelSource([](const QString &, const QStringList &, std::function<void(QList<ListedModel>)> done) {
+            ListedModel model;
+            model.name = "fal-ai/flux/schnell";
+            model.handle = QJsonObject{{"resource", "fugue/image-model"}, {"name", "fal-ai/flux/schnell"}};
+            model.status = "ready";
+            model.provider = "fal.ai";
+            model.cloud = "fal.ai";
+            done({model});
+        });
+        app.workflows.loadHostModels();
+        QVERIFY(app.open());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QTRY_VERIFY(find(app.window, "appCard-cloud-app"));
+        QTRY_VERIFY(shown(app.window->contentItem(), "appPlaceCloud-cloud-app"));
+        QQuickItem *badge = find(app.window, "appPlaceCloud-cloud-app");
+        QCOMPARE(badge->property("kind").toString(), QStringLiteral("cloud"));
+        QCOMPARE(badge->property("tip").toString(), QStringLiteral("Runs on fal.ai"));
+        QVERIFY(!shown(app.window->contentItem(), "appPlaceCloud-plain-app"));
+        QCOMPARE(find(app.window, "appReady-cloud-app")->property("text").toString(), QStringLiteral("Ready"));
         qDeleteAll(app.engine.rootObjects());
     }
 
