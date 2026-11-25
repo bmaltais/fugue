@@ -74,7 +74,8 @@ struct Template {
     QString id;       // the folder's name (or a .fugue file's stem); a person's own wins a clash
     QString folder;   // absolute
     QString workflow; // absolute path of the workflow file
-    QString preview;  // absolute path, empty when there is none
+    QString preview;  // absolute path of the still picture (the poster of a moving preview), empty when there is none
+    QString video;    // absolute path of the moving preview (a WebM), empty when there is none (11.10)
     QString title;
     QString description;
     QString category;      // id
@@ -100,6 +101,16 @@ QStringList packsNeeded(const Document &document, const Registry &registry);
 // dropped, hyphens as spaces, each word capitalized: "io.github.bmaltais.fugue-remove-background"
 // is "Remove Background".
 QString packTitle(const QString &id, const QString &name = {});
+
+// What a template's folder shows of itself (spec 11.10): the still picture and the moving preview. template.json's `preview` names
+// a file of the folder, a still (preview.webp, .png, .jpg) or a WebM; for a WebM, `poster` names its still, else poster.png, else
+// the conventional preview.webp|png|jpg. Without the key the conventional stills are found, and a preview.webm beside them is the
+// moving preview. A name that is not a plain file of the folder is ignored. Both absolute, empty when there is none.
+struct TemplatePreview {
+    QString still;
+    QString video;
+};
+TemplatePreview previewFilesIn(const QString &folder);
 
 class TemplateLibrary {
 public:
@@ -138,6 +149,14 @@ public:
     // preview, sample inputs and carried packs, and the new workflow; the copy hides the original (an own
     // template wins a clash, 11.10) and the original is never touched.
     Errors saveOwn(const Template &chosen, const QByteArray &workflow) const;
+
+    // A copy of the template as a new own template under a new id (`<id>-copy`, `-copy-2`...) titled `title`: the whole folder
+    // (workflow, preview, samples, carried packs) with the title written into template.json and the workflow's app block.
+    // `newId` says the id on success. The original is never touched.
+    Errors duplicate(const Template &chosen, const QString &title, QString *newId) const;
+    // Renames one of the session's own templates (not a bundled or inherited one): template.json's title and app title, and the
+    // workflow's app block title. The id (the folder) stays.
+    Errors rename(const Template &chosen, const QString &title) const;
 
 private:
     void scan(QList<Template> *out, Errors *problems) const;

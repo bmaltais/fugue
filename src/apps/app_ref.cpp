@@ -9,12 +9,7 @@ namespace fugue {
 
 namespace {
 
-QString previewIn(const QString &folder) {
-    for (const char *name : {"preview.webp", "preview.png", "preview.jpg"})
-        if (const QString path = QDir(folder).filePath(QLatin1String(name)); QFileInfo(path).isFile())
-            return path;
-    return {};
-}
+QString previewIn(const QString &folder) { return previewFilesIn(folder).still; }
 
 std::optional<AppRef> fail(QString *why, const QString &text) {
     if (why)

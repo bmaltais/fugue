@@ -2,55 +2,61 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Fugue
 import "../canvas"
+import "../kit"
 
-// One app on the shelf (#388): its picture, its name, one line of what it does, and one line of whether it is ready: a check and
-// "Ready", or what it still needs ("Needs 2.1 GB and 1 pack"). The whole card is the one button; choosing opens the app, and an
-// app that is not ready asks for what it needs once, on the one Get ready sheet. The Templates window's card, smaller: no
-// details chip and no download button, which are for browsing, not for starting (docs/ui-ergonomics.md, "Apps shelf").
+// One app on the shelf (#388, #463, #470): a kit card (raised, the Corners and Spacing sliders move it) with its picture, which
+// moves while the card is in view and the window is focused (the app's WebM, `entry.video`; KitVideo keeps the budget and the
+// poster stays under reduced motion), its name, one line of what it does, and one line of whether it is ready: a check and
+// "Ready", or what it still needs ("Needs 2.1 GB and 1 pack"). Over the picture, frosted: the bookmark (pins the app to the top)
+// and the menu (Duplicate, Rename). The whole card is the one button; choosing opens the app, and an app that is not ready asks
+// for what it needs once, on the one Get ready sheet. The Templates window's card, smaller: no details chip and no download
+// button, which are for browsing, not for starting (docs/ui-ergonomics.md, "Apps shelf").
 //
-// `entry` is one entry of AppShelf.apps (apps/app_shelf.h). The owner sets `current` (the grid's focused card) and listens to
-// `chosen`.
-Rectangle {
+// `entry` is one entry of AppShelf.apps (apps/app_shelf.h). The owner sets `current` (the grid's focused card), `inView` (the card
+// is on screen) and `renaming`, and listens to `chosen`, `bookmarkToggled`, `menuRequested` and `renamed`/`renameCancelled`.
+KitCard {
     id: card
 
-    required property CanvasLook look
-    required property var entry // the shelf's entry: {id, title, summary, preview, ready, needs, detail, local, hosts, offlineHosts}
-    property bool current: false
+    required property var entry // the shelf's entry: {id, title, summary, video, ready, needs, detail, local, hosts, offlineHosts, bookmarked...}
+    property bool inView: true
+    property bool renaming: false
     signal chosen
-    signal hovered
+    signal bookmarkToggled
+    signal menuRequested(Item anchor)
+    signal renamed(string title)
+    signal renameCancelled
 
     readonly property real u: look.unit
+    readonly property real pad: look.params.rowPadY * u
+    // The picture plays only while the card is hovered or has the keyboard's place (calm, and one clip at a time:
+    // the owner's "calm" and "not taxing" rules); KitVideo adds the window's focus and reduced motion.
+    readonly property bool playing: hovered || current
+    // The two frosted buttons show when the card is hovered, has the keyboard's place, or (the bookmark) holds a pin.
+    readonly property bool tools: hovered || current
+    readonly property alias picture: picture
 
-    radius: look.corner
-    color: hover.hovered || current ? look.well : "transparent"
-    border.width: current ? 2 : 0
-    border.color: look.accent
     Accessible.role: Accessible.Button
     Accessible.name: entry.title
     Accessible.description: entry.summary + ", " + (entry.ready ? qsTr("Ready") : entry.needs)
-    HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor; onHoveredChanged: if (hovered) card.hovered() }
-    TapHandler { onTapped: card.chosen() }
+                            + (entry.bookmarked ? ", " + qsTr("Pinned") : "")
+    onTapped: card.chosen()
 
     ColumnLayout {
-        anchors { fill: parent; margins: 2 * card.u }
+        anchors { fill: parent; margins: card.pad }
         spacing: card.u
 
-        Rectangle {
+        KitPicture {
+            id: picture
+            objectName: "appPicture-" + card.entry.id
             Layout.fillWidth: true
             Layout.preferredHeight: width * 10 / 16
-            radius: card.look.thumbCorner
-            color: card.look.well
-            clip: true
-            Image {
-                anchors.fill: parent
-                source: card.entry.preview
-                visible: source !== ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                sourceSize.width: 512
-            }
+            look: card.look
+            source: card.entry.preview
+            video: card.entry.video
+            playing: card.playing
+            radius: Math.max(2, card.look.params.cornerGroup * card.u - card.pad * 0.6)
+
             // Where its models are (#164): the same badges the Templates window draws.
             Rectangle {
                 objectName: "appPlaces-" + card.entry.id
@@ -76,9 +82,42 @@ Rectangle {
                     }
                 }
             }
+            Row {
+                anchors { right: parent.right; top: parent.top; margins: card.u * 1.5 }
+                spacing: card.u
+                KitChip {
+                    objectName: "appBookmark-" + card.entry.id
+                    visible: card.tools || card.entry.bookmarked
+                    look: card.look
+                    round: true
+                    frosted: true
+                    backdrop: picture.backdropItem
+                    backdropSource: card.entry.preview
+                    glyph: "pin"
+                    current: card.entry.bookmarked
+                    tip: card.entry.bookmarked ? qsTr("Unpin: let it take its place again") : qsTr("Pin to the top of the shelf")
+                    Accessible.name: card.entry.bookmarked ? qsTr("Unpin %1").arg(card.entry.title) : qsTr("Pin %1").arg(card.entry.title)
+                    onTapped: card.bookmarkToggled()
+                }
+                KitChip {
+                    id: more
+                    objectName: "appMore-" + card.entry.id
+                    visible: card.tools
+                    look: card.look
+                    round: true
+                    frosted: true
+                    backdrop: picture.backdropItem
+                    backdropSource: card.entry.preview
+                    glyph: "ellipsis"
+                    tip: qsTr("More: duplicate or rename")
+                    Accessible.name: qsTr("More about %1").arg(card.entry.title)
+                    onTapped: card.menuRequested(more)
+                }
+            }
         }
         Text {
             objectName: "appTitle-" + card.entry.id
+            visible: !card.renaming
             Layout.fillWidth: true
             text: card.entry.title
             wrapMode: Text.Wrap
@@ -87,6 +126,32 @@ Rectangle {
             color: card.look.text
             font.pixelSize: card.look.textSize
             font.weight: Font.DemiBold
+        }
+        Item { // the title as a field while it is renamed
+            visible: card.renaming
+            Layout.fillWidth: true
+            Layout.preferredHeight: 7 * card.u
+            KitWell { look: card.look; focused: nameInput.activeFocus }
+            TextInput {
+                id: nameInput
+                objectName: "appRename-" + card.entry.id
+                anchors { left: parent.left; right: parent.right; leftMargin: 2 * card.u; rightMargin: 2 * card.u
+                          verticalCenter: parent.verticalCenter }
+                clip: true
+                selectByMouse: true
+                text: card.entry.title
+                color: card.look.text
+                selectionColor: card.look.accent
+                selectedTextColor: card.look.accentForeground
+                font.pixelSize: card.look.textSize
+                Accessible.role: Accessible.EditableText
+                Accessible.name: qsTr("Name of the app")
+                onVisibleChanged: if (visible) { text = card.entry.title; selectAll(); forceActiveFocus() }
+                Keys.onReturnPressed: card.renamed(text)
+                Keys.onEnterPressed: card.renamed(text)
+                Keys.onEscapePressed: card.renameCancelled()
+                onActiveFocusChanged: if (!activeFocus && card.renaming) card.renameCancelled()
+            }
         }
         Text {
             objectName: "appSummary-" + card.entry.id

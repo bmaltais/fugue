@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
 // The Templates dialog (spec 11.10, #83), opened by file.templates (File > Browse templates):
 // the categories on the left, a search field and the templates as cards on the right. A card
@@ -61,13 +62,16 @@ Popup {
     width: Math.min(1200, (parent ? parent.width : 960) - 12 * u)
     height: Math.min(800, (parent ? parent.height : 640) - 12 * u)
     Overlay.modal: Rectangle { color: dialog.look.scrim }
-    background: PopupSurface { look: dialog.look }
+    background: Item {
+        Shadow { target: box; level: 3; look: dialog.look }
+        Item { id: box; anchors.fill: parent }
+    }
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
-        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 140; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: dialog.look.params.durColor * 1.4; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: dialog.look.params.durColor * 1.4; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
     }
     exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; to: 0; duration: dialog.look.params.durColor * 0.9; easing.type: Easing.OutCubic }
     }
     onAboutToShow: {
         // The paired hosts' models arrive later (templatesChanged), or at once when already known.
@@ -184,11 +188,33 @@ Popup {
             close()
     }
 
-    contentItem: Item {
+    contentItem: KitPanel {
+        id: panel
+        objectName: "templatesPanel"
+        look: dialog.look
+        tone: "sea"
+        clip: true
+        // Tab walks the window's controls: it is also the window's "Add a node by search" key.
+        Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab
+        ColumnLayout {
+            anchors { fill: parent; margins: 1 }
+            spacing: 0
+            enabled: dialog.detail === null
+            KitHero {
+                id: hero
+                objectName: "templatesHero"
+                Layout.fillWidth: true
+                look: dialog.look
+                title: qsTr("Templates")
+                subtitle: qsTr("Workflows to start from; the apps among them open as one simple screen.")
+                tone: panel.tone
+                showClose: true
+                onClosed: dialog.close()
+            }
         RowLayout {
             id: content
-            anchors.fill: parent
-            enabled: dialog.detail === null
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             spacing: 0
             LayoutMirroring.enabled: dialog.rightToLeft
             LayoutMirroring.childrenInherit: true
@@ -200,14 +226,6 @@ Popup {
                 Layout.fillHeight: true
                 Layout.margins: 4 * dialog.u
                 spacing: 0
-                Text {
-                    Layout.bottomMargin: 4 * dialog.u
-                    Layout.leftMargin: 2 * dialog.u
-                    text: qsTr("Templates")
-                    color: dialog.look.text
-                    font.pixelSize: dialog.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                }
                 Repeater {
                     model: dialog.categories
                     delegate: Rectangle {
@@ -218,8 +236,9 @@ Popup {
                         objectName: "templatesCategory-" + (modelData.id === "" ? "all" : modelData.id)
                         Layout.fillWidth: true
                         implicitHeight: 7 * dialog.u
-                        radius: dialog.look.smallCorner
-                        color: current ? dialog.look.selectedRow : tabHover.hovered ? dialog.look.well : "transparent"
+                        radius: Math.min(dialog.look.params.cornerChip * dialog.u, 0.45 * height)
+                        // The chosen category takes the window's tone, as a chip that is on does.
+                        color: current ? Qt.alpha(dialog.look.tone(panel.tone).glass, 0.34) : tabHover.hovered ? dialog.look.kitChipHover : "transparent"
                         Accessible.role: Accessible.PageTab
                         Accessible.name: modelData.title
                         Accessible.selected: current
@@ -270,39 +289,15 @@ Popup {
                     readonly property real others: (sourceBox.visible ? sourceBox.width + spacing : 0)
                                                    + (familyBox.visible ? familyBox.width + spacing : 0) + readyChip.width + spacing
                                                    + (appsChip.visible ? appsChip.width + spacing : 0)
-                // Fugue's well, as the settings' fields and the drop-downs: 7u high, the accent edge while focused.
-                Rectangle {
+                KitSearch {
+                    id: search
+                    objectName: "templatesSearch"
+                    look: dialog.look
                     width: filterRow.width - filterRow.others >= 28 * dialog.u ? filterRow.width - filterRow.others : filterRow.width
-                    height: 7 * dialog.u
-                    radius: dialog.look.smallCorner
-                    color: dialog.look.well
-                    border.width: 1
-                    border.color: search.activeFocus ? dialog.look.accent : dialog.look.hairlineStrong
-                    TextInput {
-                        id: search
-                        objectName: "templatesSearch"
-                        anchors { left: parent.left; right: parent.right; leftMargin: 2 * dialog.u; rightMargin: 2 * dialog.u
-                                  verticalCenter: parent.verticalCenter }
-                        clip: true
-                        selectByMouse: true
-                        color: dialog.look.text
-                        selectionColor: dialog.look.accent
-                        selectedTextColor: dialog.look.accentForeground
-                        font.pixelSize: dialog.look.textSize
-                        Accessible.role: Accessible.EditableText
-                        Accessible.name: qsTr("Search templates")
-                        Text {
-                            visible: search.text === ""
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: qsTr("Search templates")
-                            color: dialog.look.label
-                            font: search.font
-                        }
-                        // Enter opens the first match; Down goes to the cards.
-                        Keys.onDownPressed: { grid.currentIndex = 0; grid.forceActiveFocus() }
-                        Keys.onReturnPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
-                        Keys.onEnterPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
-                    }
+                    placeholder: qsTr("Search templates")
+                    // Enter opens the first match; Down goes to the cards.
+                    onDown: { grid.currentIndex = 0; grid.forceActiveFocus() }
+                    onAccepted: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
                 }
                 // The two filters (#369), one drop-down each with the count a choice would leave; a drop-down
                 // is there only when some template has a source, or a family, to choose.
@@ -326,25 +321,35 @@ Popup {
                     searchable: true
                     onPicked: v => dialog.family = v
                 }
-                // The filter chips: toggles (FilterChip.qml). Apps is there only when some template is an app (#387).
-                FilterChip {
+                // The filter chips: toggles, raised, tinted with the window's tone while on. Apps is there only when some template is an app (#387).
+                KitChip {
                     id: readyChip
                     objectName: "templatesReadyOnly"
                     look: dialog.look
+                    pill: true
+                    toned: true
                     text: qsTr("Ready to run")
+                    glyph: dialog.readyOnly ? "check" : ""
                     tip: qsTr("Only templates whose models are on this machine or on a paired host")
-                    checked: dialog.readyOnly
-                    onToggled: dialog.readyOnly = !dialog.readyOnly
+                    current: dialog.readyOnly
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: dialog.readyOnly
+                    onTapped: dialog.readyOnly = !dialog.readyOnly
                 }
-                FilterChip {
+                KitChip {
                     id: appsChip
                     objectName: "templatesApps"
                     visible: dialog.templates.some(t => t.app)
                     look: dialog.look
+                    pill: true
+                    toned: true
                     text: qsTr("Apps")
+                    glyph: dialog.appsOnly ? "check" : ""
                     tip: qsTr("Only apps: templates that open as one simple screen")
-                    checked: dialog.appsOnly
-                    onToggled: dialog.appsOnly = !dialog.appsOnly
+                    current: dialog.appsOnly
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: dialog.appsOnly
+                    onTapped: dialog.appsOnly = !dialog.appsOnly
                 }
                 }
 
@@ -369,7 +374,9 @@ Popup {
                     FontMetrics { id: bodyMetrics; font.pixelSize: dialog.look.labelSize }
                     readonly property real lineHeight: bodyMetrics.height
                     readonly property real footHeight: 2 * bodyMetrics.height + 8 * dialog.u
-                    cellHeight: Math.ceil((cellWidth - 6 * dialog.u) * 10 / 16 + 8 * dialog.u + 3 * dialog.u
+                    readonly property real margin: dialog.look.params.areaGap * dialog.u / 2
+                    readonly property real pad: dialog.look.params.rowPadY * dialog.u
+                    cellHeight: Math.ceil((cellWidth - 2 * margin - 2 * pad) * 10 / 16 + 2 * margin + 2 * pad + 4 * dialog.u
                                           + 2 * titleMetrics.height + 4 * bodyMetrics.height + footHeight)
                     Keys.onReturnPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                     Keys.onEnterPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
@@ -388,85 +395,51 @@ Popup {
                         width: grid.cellWidth
                         height: grid.cellHeight
 
-                        Rectangle {
+                        KitCard {
                             id: card
                             objectName: "templateCard-" + cell.modelData.id
                             anchors.fill: parent
-                            anchors.margins: dialog.u
-                            radius: dialog.look.corner
-                            color: cardHover.hovered || (grid.activeFocus && grid.currentIndex === cell.index)
-                                   ? dialog.look.well : "transparent"
-                            border.width: grid.activeFocus && grid.currentIndex === cell.index ? 2 : 0
-                            border.color: dialog.look.accent
+                            anchors.margins: dialog.look.params.areaGap * dialog.u / 2
+                            look: dialog.look
+                            current: grid.activeFocus && grid.currentIndex === cell.index
                             Accessible.role: Accessible.Button
                             Accessible.name: cell.modelData.title
                             Accessible.description: cell.modelData.description
-                            HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler {
-                                // The info chip sits over the card and shows the details instead.
-                                onTapped: eventPoint => {
-                                    // The chip's press target reaches 4px beyond it (a 28px target for a 20px chip).
-                                    const at = infoChip.mapFromItem(card, eventPoint.position)
-                                    if (at.x >= -4 && at.y >= -4 && at.x <= infoChip.width + 4 && at.y <= infoChip.height + 4)
-                                        return
-                                    grid.currentIndex = cell.index
-                                    dialog.openTemplate(cell.modelData.id)
-                                }
+                            onTapped: {
+                                // The info chip sits over the card and shows the details instead (its own press takes the tap).
+                                grid.currentIndex = cell.index
+                                dialog.openTemplate(cell.modelData.id)
                             }
 
                             ColumnLayout {
                                 anchors.fill: parent
-                                anchors.margins: 2 * dialog.u
+                                anchors.margins: dialog.look.params.rowPadY * dialog.u
                                 spacing: dialog.u
 
-                                Rectangle {
+                                KitPicture {
+                                    id: picture
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: width * 10 / 16
-                                    radius: dialog.look.thumbCorner
-                                    color: dialog.look.well
-                                    clip: true
-                                    Image {
-                                        anchors.fill: parent
-                                        source: cell.modelData.preview
-                                        visible: source !== ""
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
-                                        sourceSize.width: 512
-                                    }
-                                    // About this template: the details. The same chip as the models' place badge in the other
-                                    // corner (theme body, strong hairline, its height), always fully shown, a bold "i": it reads on
-                                    // any picture (the owner found the faint outlined one hard to see).
-                                    Rectangle {
+                                    look: dialog.look
+                                    source: cell.modelData.preview
+                                    video: cell.modelData.video
+                                    playing: card.hovered || card.current // a big catalog: only the card in hand moves
+                                    radius: Math.max(2, dialog.look.params.cornerGroup * dialog.u - dialog.look.params.rowPadY * dialog.u * 0.6)
+                                    // About this template: the details. A frosted round button (the kit's, adaptive ink) in the
+                                    // picture's corner; its own press, so the card does not open.
+                                    KitChip {
                                         id: infoChip
                                         objectName: "templateInfo-" + cell.modelData.id
                                         anchors { right: parent.right; bottom: parent.bottom; margins: dialog.u }
-                                        height: 16 + dialog.u
-                                        width: height
-                                        radius: height / 2
-                                        color: infoHover.hovered ? dialog.look.well : dialog.look.body
-                                        border.width: 1
-                                        border.color: infoHover.hovered ? dialog.look.accent : dialog.look.hairlineStrong
-                                        Accessible.role: Accessible.Button
+                                        look: dialog.look
+                                        round: true
+                                        frosted: true
+                                        backdrop: picture.backdropItem
+                                        backdropSource: cell.modelData.preview
+                                        glyph: "info"
+                                        tip: qsTr("About this template")
                                         Accessible.name: qsTr("About this template")
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "i"
-                                            color: infoHover.hovered ? dialog.look.accent : dialog.look.text
-                                            font.family: "serif"
-                                            font.bold: true
-                                            font.italic: false
-                                            font.pixelSize: Math.round(infoChip.height * 0.72)
-                                        }
-                                        ToolTip.visible: infoHover.hovered
-                                        ToolTip.delay: App.theme.look.tooltipDelay
-                                        ToolTip.text: qsTr("About this template")
-                                        // Its own press target (an exclusive grab, so the card's tap does not follow): the details, not the template.
-                                        HoverHandler { id: infoHover; margin: 4; cursorShape: Qt.PointingHandCursor }
-                                        TapHandler {
-                                            margin: 4
-                                            gesturePolicy: TapHandler.ReleaseWithinBounds
-                                            onTapped: dialog.showDetails(cell.modelData.id, cell.index)
-                                        }
+                                        onTapped: dialog.showDetails(cell.modelData.id, cell.index)
                                     }
                                     // Where its models are (#164): the same badges as the model pickers, on a
                                     // pill over the preview's corner so the card keeps its height.
@@ -611,6 +584,7 @@ Popup {
                     }
                 }
             }
+        }
         }
         TemplateDetails {
             anchors.fill: parent

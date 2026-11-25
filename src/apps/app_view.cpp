@@ -1,5 +1,7 @@
 #include "apps/app_view.h"
 
+#include "engine/templates.h"
+
 #include <QClipboard>
 #include <QDir>
 #include <QFile>
@@ -387,11 +389,15 @@ QString AppView::resolvedPath(const QString &path) const {
 QUrl AppView::preview() const {
     if (m_file.isEmpty())
         return {};
-    const QDir folder = QFileInfo(m_file).absoluteDir();
-    for (const char *name : {"preview.webp", "preview.png", "preview.jpg"})
-        if (folder.exists(QLatin1String(name)))
-            return QUrl::fromLocalFile(folder.filePath(QLatin1String(name)));
-    return {};
+    const QString still = previewFilesIn(QFileInfo(m_file).absolutePath()).still;
+    return still.isEmpty() ? QUrl() : QUrl::fromLocalFile(still);
+}
+
+QUrl AppView::previewVideo() const {
+    if (m_file.isEmpty())
+        return {};
+    const QString video = previewFilesIn(QFileInfo(m_file).absolutePath()).video;
+    return video.isEmpty() ? QUrl() : QUrl::fromLocalFile(video);
 }
 
 QUrl AppView::fileUrl(const QString &path) const {

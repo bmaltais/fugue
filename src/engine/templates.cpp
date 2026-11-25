@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 
 #include <algorithm>
+#include <functional>
 
 #include "engine/app_binding.h"
 #include "engine/atomic_file.h"
@@ -240,14 +241,44 @@ QList<CarriedPack> carriedPacksOf(const QString &templateId, const QString &fold
     return out;
 }
 
-QString previewOf(const QString &folder) {
-    for (const char *name : {"preview.webp", "preview.png", "preview.jpg"})
-        if (QFileInfo(QDir(folder).filePath(QLatin1String(name))).isFile())
-            return QDir(folder).filePath(QLatin1String(name));
-    return {};
-}
-
 } // namespace
+
+TemplatePreview previewFilesIn(const QString &folder) {
+    const QDir dir(folder);
+    // A plain file name of the folder that exists, else empty (no path parts: the key cannot reach outside the template).
+    const auto file = [&dir](const QString &name) -> QString {
+        if (name.isEmpty() || name != QFileInfo(name).fileName() || name.startsWith(QLatin1Char('.')))
+            return {};
+        const QString path = dir.filePath(name);
+        return QFileInfo(path).isFile() ? path : QString();
+    };
+    const auto conventional = [&file] {
+        for (const char *name : {"preview.webp", "preview.png", "preview.jpg"})
+            if (const QString path = file(QLatin1String(name)); !path.isEmpty())
+                return path;
+        return QString();
+    };
+    QString named, poster;
+    if (QFile about(dir.filePath(kAbout)); about.open(QIODevice::ReadOnly)) {
+        const QJsonObject json = QJsonDocument::fromJson(about.readAll()).object();
+        named = json.value(QStringLiteral("preview")).toString();
+        poster = json.value(QStringLiteral("poster")).toString();
+    }
+    TemplatePreview out;
+    if (named.endsWith(QLatin1String(".webm"), Qt::CaseInsensitive))
+        out.video = file(named);
+    else if (named.isEmpty())
+        out.video = file(QStringLiteral("preview.webm"));
+    else
+        out.still = file(named);
+    if (out.still.isEmpty() && !out.video.isEmpty())
+        out.still = file(poster);
+    if (out.still.isEmpty() && !out.video.isEmpty())
+        out.still = file(QStringLiteral("poster.png"));
+    if (out.still.isEmpty())
+        out.still = conventional();
+    return out;
+}
 
 TemplateLibrary::TemplateLibrary(QList<TemplateRoot> roots, const Registry *registry)
     : m_roots(std::move(roots)), m_registry(registry) {}
@@ -331,7 +362,9 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 seen.insert(t.id);
                 t.folder = entry.absoluteFilePath();
                 t.workflow = folder.filePath(kWorkflow);
-                t.preview = previewOf(t.folder);
+                const TemplatePreview shown = previewFilesIn(t.folder);
+                t.preview = shown.still;
+                t.video = shown.video;
                 if (!hasAbout) {
                     if (problems)
                         problems->append(problem(QStringLiteral("Template %1 has no %2.").arg(t.id, kAbout)));
@@ -507,6 +540,82 @@ Errors TemplateLibrary::saveOwn(const Template &chosen, const QByteArray &workfl
     if (Errors failed = replaceFile(QDir(target).filePath(kWorkflow), bytes, kWorkflow); !failed.isEmpty())
         return undo(failed);
     return {};
+}
+
+namespace {
+
+// Sets the title the app card and the App view say: template.json's `title` and `app.title` (an `app: true` becomes an object),
+// and the workflow's app block title. A template that is no app has no block to change.
+Errors writeTitle(const QString &folder, const QString &title) {
+    const auto edit = [](const QString &path, const std::function<void(QJsonObject &)> &change) -> Errors {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return {saveFailed(QStringLiteral("Cannot read %1").arg(path), file.errorString())};
+        QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+        file.close();
+        change(json);
+        return replaceFile(path, QJsonDocument(json).toJson(QJsonDocument::Indented), QFileInfo(path).fileName());
+    };
+    const QString about = QDir(folder).filePath(kAbout);
+    if (Errors failed = edit(about, [&title](QJsonObject &json) {
+            json.insert(QStringLiteral("title"), title);
+            if (json.value(QStringLiteral("app")).isBool() && json.value(QStringLiteral("app")).toBool())
+                json.insert(QStringLiteral("app"), QJsonObject{{QStringLiteral("title"), title}});
+            else if (json.value(QStringLiteral("app")).isObject()) {
+                QJsonObject card = json.value(QStringLiteral("app")).toObject();
+                card.insert(QStringLiteral("title"), title);
+                json.insert(QStringLiteral("app"), card);
+            }
+        }); !failed.isEmpty())
+        return failed;
+    return edit(QDir(folder).filePath(kWorkflow), [&title](QJsonObject &json) {
+        if (json.value(QStringLiteral("app")).isObject()) {
+            QJsonObject block = json.value(QStringLiteral("app")).toObject();
+            block.insert(QStringLiteral("title"), title);
+            json.insert(QStringLiteral("app"), block);
+        }
+    });
+}
+
+} // namespace
+
+Errors TemplateLibrary::duplicate(const Template &chosen, const QString &title, QString *newId) const {
+    const QString name = title.trimmed();
+    if (name.isEmpty())
+        return {makeError(QStringLiteral("usage"), QStringLiteral("A copy needs a title."))};
+    if (QFileInfo(chosen.workflow).fileName() != kWorkflow)
+        return {makeError(QStringLiteral("usage"), QStringLiteral("%1 is a loose workflow file, not a template folder.").arg(chosen.workflow))};
+    QString mine = ownFolder(); // the session's own folder: the first root that is its own and not inherited
+    for (const TemplateRoot &root : m_roots)
+        if (root.own && !root.inherited) {
+            mine = root.path;
+            break;
+        }
+    QString id = chosen.id + QStringLiteral("-copy");
+    for (int n = 2; QFileInfo::exists(QDir(mine).filePath(id)) || find(id).has_value(); ++n)
+        id = chosen.id + QStringLiteral("-copy-") + QString::number(n);
+    const QString target = QDir(mine).filePath(id);
+    const auto undo = [&target](Errors errors) {
+        QDir(target).removeRecursively();
+        return errors;
+    };
+    if (Errors failed = copyTree(chosen.folder, target); !failed.isEmpty())
+        return undo(failed);
+    if (Errors failed = writeTitle(target, name); !failed.isEmpty())
+        return undo(failed);
+    if (newId)
+        *newId = id;
+    return {};
+}
+
+Errors TemplateLibrary::rename(const Template &chosen, const QString &title) const {
+    const QString name = title.trimmed();
+    if (name.isEmpty())
+        return {makeError(QStringLiteral("usage"), QStringLiteral("A template needs a title."))};
+    if (!chosen.own || chosen.inherited || QFileInfo(chosen.workflow).fileName() != kWorkflow)
+        return {makeError(QStringLiteral("usage"), QStringLiteral("%1 is not one of your own templates, so it cannot be renamed.").arg(chosen.id),
+                          QStringLiteral("Make a copy and rename that."))};
+    return writeTitle(chosen.folder, name);
 }
 
 Errors TemplateLibrary::copyTo(const Template &chosen, const QString &path) const {

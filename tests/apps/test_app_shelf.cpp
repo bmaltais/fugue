@@ -2,6 +2,7 @@
 // choosing, and when the shelf is home. Seam: apps/app_shelf.h; no window (the wiring is test_app_shelf_window).
 
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include "apps/app_shelf.h"
@@ -121,6 +122,108 @@ private slots:
         shelf.setLanding(true);
         QVERIFY(!shelf.atHome());
         QCOMPARE(home.size(), 4);
+    }
+
+    // The search (#470): every word must be in the title, the summary or the kind, any case; `shown` follows live and says so only
+    // when it changes.
+    void theSearchNarrowsTheShelfByEveryWord() {
+        QVariantMap cat = templ("cat", true);
+        cat.insert("title", "Cat picker");
+        cat.insert("description", "Finds the cat in a photo");
+        cat.insert("appKind", "image");
+        QVariantMap song = templ("song", true);
+        song.insert("title", "Songwriter");
+        song.insert("description", "Writes a tune");
+        song.insert("appKind", "audio");
+        AppShelf shelf([&] { return QVariantList{cat, song}; }, [](const QString &) { return true; });
+        shelf.refresh();
+        QSignalSpy shown(&shelf, &AppShelf::shownChanged);
+        QCOMPARE(shelf.shown().size(), 2);
+        shelf.setQuery("CAT");
+        QCOMPARE(shelf.shown().size(), 1);
+        QCOMPARE(shelf.shown().first().toMap().value("id").toString(), QString("cat"));
+        shelf.setQuery("cat photo"); // both words, in the summary
+        QCOMPARE(shelf.shown().size(), 1);
+        shelf.setQuery("audio"); // the kind
+        QCOMPARE(shelf.shown().first().toMap().value("id").toString(), QString("song"));
+        shelf.setQuery("cat audio");
+        QVERIFY(shelf.shown().isEmpty());
+        QCOMPARE(shelf.apps().size(), 2); // the shelf itself keeps them all
+        const int before = shown.size();
+        shelf.setQuery("cat audio  "); // no change in what is shown
+        QCOMPARE(shown.size(), before);
+        shelf.setQuery({});
+        QCOMPARE(shelf.shown().size(), 2);
+    }
+
+    // Bookmarks (#470): a pinned app comes first, in the catalog's order among the pinned, and the pins last (a file, per user).
+    void aBookmarkPinsAnAppToTheTopAndIsKept() {
+        QTemporaryDir dir;
+        const QString file = dir.filePath("state/app-bookmarks.json");
+        const auto ids = [](const QVariantList &cards) {
+            QStringList out;
+            for (const QVariant &card : cards)
+                out << card.toMap().value("id").toString();
+            return out;
+        };
+        const auto source = [] { return QVariantList{templ("a", true), templ("b", true), templ("c", true, false, "1 GB", 1)}; };
+        {
+            AppShelf shelf(source, [](const QString &) { return true; });
+            shelf.setBookmarksFile(file);
+            shelf.refresh();
+            QCOMPARE(ids(shelf.apps()), (QStringList{"a", "b", "c"}));
+            QSignalSpy changed(&shelf, &AppShelf::appsChanged);
+            shelf.toggleBookmark("c"); // a waiting app, pinned, goes before the ready ones
+            QCOMPARE(ids(shelf.apps()), (QStringList{"c", "a", "b"}));
+            QVERIFY(shelf.apps().first().toMap().value("bookmarked").toBool());
+            QVERIFY(shelf.isBookmarked("c"));
+            shelf.toggleBookmark("b");
+            QCOMPARE(ids(shelf.apps()), (QStringList{"b", "c", "a"})); // the catalog's order (ready first) among the pinned
+            QCOMPARE(changed.size(), 2);
+        }
+        AppShelf again(source, [](const QString &) { return true; }); // another session of the same person
+        again.setBookmarksFile(file);
+        again.refresh();
+        QCOMPARE(ids(again.apps()), (QStringList{"b", "c", "a"}));
+        again.toggleBookmark("b");
+        QVERIFY(!again.isBookmarked("b"));
+        QCOMPARE(ids(again.apps()), (QStringList{"c", "a", "b"}));
+        AppShelf third(source, [](const QString &) { return true; });
+        third.setBookmarksFile(file);
+        QVERIFY(third.isBookmarked("c") && !third.isBookmarked("b"));
+        AppShelf alone(source, [](const QString &) { return true; }); // no file: the pins last the session
+        alone.refresh();
+        alone.toggleBookmark("a");
+        QVERIFY(alone.isBookmarked("a"));
+    }
+
+    // Duplicate and Rename (#470): the shelf asks, the store of templates does it. A copy opens in the App view; Rename is for the
+    // person's own apps only.
+    void duplicateOpensTheCopyAndRenameIsForTheOwn() {
+        QVariantMap mine = templ("mine", true);
+        mine.insert("own", true);
+        QVariantMap bundled = templ("bundled", true);
+        QStringList asked, opened, renamed;
+        AppShelf shelf([&] { return QVariantList{mine, bundled}; }, [&](const QString &id) { opened << id; return true; });
+        shelf.setActions(
+            [&](const QString &id, const QString &title) { asked << id + ":" + title; return id == "mine" ? QString() : id + "-copy"; },
+            [&](const QString &id, const QString &title) { renamed << id + ":" + title; return true; });
+        shelf.refresh();
+        QSignalSpy chosen(&shelf, &AppShelf::chosen);
+        QVERIFY(shelf.duplicate("bundled"));
+        QCOMPARE(asked, QStringList{"bundled:Title bundled copy"});
+        QCOMPARE(opened, QStringList{"bundled-copy"});
+        QCOMPARE(chosen.size(), 1);
+        QVERIFY(!shelf.duplicate("mine")); // the copy could not be made: nothing opens
+        QVERIFY(!shelf.duplicate("nobody"));
+        QCOMPARE(opened.size(), 1);
+
+        QVERIFY(shelf.apps().first().toMap().value("canRename").toBool());
+        QVERIFY(!shelf.rename("bundled", "Mine now")); // not the person's
+        QVERIFY(!shelf.rename("mine", "   ")); // a blank title
+        QVERIFY(shelf.rename("mine", " New name "));
+        QCOMPARE(renamed, QStringList{"mine:New name"});
+        QVERIFY(!shelf.rename("nobody", "x"));
     }
 };
 

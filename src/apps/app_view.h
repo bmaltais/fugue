@@ -74,6 +74,8 @@ class AppView : public QObject {
     Q_PROPERTY(QString file READ file NOTIFY appChanged)
     // The picture of the app (preview.webp|png|jpg beside its workflow: a template's), empty when there is none.
     Q_PROPERTY(QUrl preview READ preview NOTIFY appChanged)
+    // The moving preview (a WebM beside the workflow: template.json's `preview`, 11.10) played in the header; empty when none.
+    Q_PROPERTY(QUrl previewVideo READ previewVideo NOTIFY appChanged)
     Q_PROPERTY(QString description READ description NOTIFY appChanged)
     Q_PROPERTY(QVariantList fields READ fields NOTIFY appChanged)
     // Why Run cannot (the block does not fit the workflow), in one line; empty when it can.
@@ -122,6 +124,7 @@ public:
     QString title() const { return m_app ? m_app->title : QString(); }
     QString file() const { return m_file; }
     QUrl preview() const;
+    QUrl previewVideo() const;
     QString description() const { return m_app ? m_app->description : QString(); }
     QVariantList fields() const { return m_fields; }
     QString problem() const { return m_problem; }

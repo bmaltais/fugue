@@ -57,6 +57,11 @@ QByteArray readFile(const QString &path) {
 
 void writeJson(const QString &path, const QJsonObject &json) { writeFile(path, QJsonDocument(json).toJson()); }
 
+// The title of the workflow file's app block, as written.
+QString blockTitle(const QString &path) {
+    return QJsonDocument::fromJson(readFile(path)).object().value("app").toObject().value("title").toString();
+}
+
 QJsonObject node(const QString &type, const QJsonObject &inputs = {}, const QString &version = "1.0.0") {
     return {{"type", type}, {"version", version}, {"inputs", inputs}};
 }
@@ -99,6 +104,19 @@ QQuickItem *item(QQuickItem *from, const QString &name) {
             return found;
     }
     return nullptr;
+}
+
+// Scrolls the templates grid so that `target` (a card or something on it) is inside the grid's view: the header of the kit
+// window leaves room for fewer rows, and a click outside the dialog's clip would miss.
+void reveal(QQuickItem *window, QQuickItem *target) {
+    QQuickItem *grid = item(window, "templatesGrid");
+    QVERIFY(grid && target);
+    const QRectF at = target->mapRectToItem(grid, QRectF(QPointF(), target->size()));
+    const double over = at.bottom() - grid->height();
+    if (over > 0)
+        grid->setProperty("contentY", grid->property("contentY").toDouble() + over + 8);
+    else if (at.top() < 0)
+        grid->setProperty("contentY", grid->property("contentY").toDouble() + at.top() - 8);
 }
 
 // Why the bundled templates (the `templates` submodule) cannot be tested, or empty when they
@@ -576,6 +594,81 @@ private slots:
         QCOMPARE(third.graph.nodes.value("load").inputs.value("file").literal().toString(), QString("inputs/cat-2.png"));
     }
 
+    // The preview of a folder (11.10): template.json's `preview` may name a WebM, `poster` its still; without the keys the stills are
+    // found by name and a preview.webm beside them is the moving one; a name that leaves the folder is ignored.
+    void aTemplateMayHaveAMovingPreviewWithAPoster() {
+        Fixture f;
+        makeTemplate(f.bundled.filePath("still"), {{"title", "Still"}});
+        writeFile(f.bundled.filePath("still/preview.webp"), "webp");
+        makeTemplate(f.bundled.filePath("moving"), {{"title", "Moving"}, {"preview", "preview.webm"}, {"poster", "poster.png"}});
+        writeFile(f.bundled.filePath("moving/preview.webm"), "webm");
+        writeFile(f.bundled.filePath("moving/poster.png"), png());
+        writeFile(f.bundled.filePath("moving/preview.webp"), "webp");
+        makeTemplate(f.bundled.filePath("noposter"), {{"title", "No poster"}, {"preview", "preview.webm"}});
+        writeFile(f.bundled.filePath("noposter/preview.webm"), "webm");
+        writeFile(f.bundled.filePath("noposter/preview.webp"), "webp"); // the still fallback
+        makeTemplate(f.bundled.filePath("bymame"), {{"title", "By name"}});
+        writeFile(f.bundled.filePath("bymame/preview.webm"), "webm");
+        writeFile(f.bundled.filePath("bymame/poster.png"), png());
+        makeTemplate(f.bundled.filePath("outside"), {{"title", "Outside"}, {"preview", "../still/preview.webp"}, {"poster", "../still/preview.webp"}});
+        const TemplateLibrary library = f.library();
+        QVERIFY(library.problems().isEmpty());
+
+        const Template still = *library.find("still");
+        QVERIFY(still.preview.endsWith("still/preview.webp"));
+        QVERIFY(still.video.isEmpty());
+        const Template moving = *library.find("moving");
+        QVERIFY(moving.video.endsWith("moving/preview.webm"));
+        QVERIFY2(moving.preview.endsWith("moving/poster.png"), qPrintable(moving.preview)); // the poster, not the webp
+        const Template noposter = *library.find("noposter");
+        QVERIFY(noposter.video.endsWith("noposter/preview.webm"));
+        QVERIFY(noposter.preview.endsWith("noposter/preview.webp"));
+        const Template byName = *library.find("bymame");
+        QVERIFY(byName.video.endsWith("bymame/preview.webm"));
+        QVERIFY(byName.preview.endsWith("bymame/poster.png"));
+        const Template outside = *library.find("outside");
+        QVERIFY(outside.video.isEmpty() && outside.preview.isEmpty());
+    }
+
+    // Duplicate (#470): a whole copy as the person's own under a new id, titled as asked, the original untouched; Rename only for the
+    // person's own.
+    void duplicateAndRenameKeepTheOriginalAndOnlyRenameTheOwn() {
+        Fixture f;
+        QJsonObject app = workflow({{"prompt", node("fugue/text", {{"text", "a fox"}})}});
+        app.insert("app", QJsonObject{{"format", 1}, {"title", "Fox"}, {"inputs", QJsonArray{QJsonObject{{"role", "prompt"}, {"targets", QJsonArray{"prompt.text"}}}}},
+                                      {"outputs", QJsonArray{QJsonObject{{"node", "prompt"}}}}});
+        makeTemplate(f.bundled.filePath("fox"), {{"title", "Fox"}, {"app", true}}, app);
+        writeFile(f.bundled.filePath("fox/preview.webm"), "webm");
+        writeFile(f.bundled.filePath("fox/inputs/cat.png"), png());
+        const TemplateLibrary library = f.library();
+        const Template fox = *library.find("fox");
+
+        QString copy;
+        QVERIFY(library.duplicate(fox, "Fox copy", &copy).isEmpty());
+        QCOMPARE(copy, QString("fox-copy"));
+        QString second;
+        QVERIFY(library.duplicate(fox, "Fox copy", &second).isEmpty());
+        QCOMPARE(second, QString("fox-copy-2"));
+        QCOMPARE(library.duplicate(fox, "  ", &second).value(0).code, QString("usage")); // a title is needed
+        const Template made = *library.find("fox-copy");
+        QVERIFY(made.own && !made.inherited);
+        QCOMPARE(made.folder, f.own.filePath("fox-copy"));
+        QCOMPARE(made.app->title, QString("Fox copy"));
+        QCOMPARE(blockTitle(made.workflow), QString("Fox copy")); // the App view says it too
+        QVERIFY(QFileInfo(f.own.filePath("fox-copy/preview.webm")).isFile());
+        QVERIFY(QFileInfo(f.own.filePath("fox-copy/inputs/cat.png")).isFile());
+        QCOMPARE(library.find("fox")->app->title, QString("Fox")); // the original is untouched
+        QCOMPARE(blockTitle(fox.workflow), QString("Fox"));
+
+        QVERIFY(library.rename(made, "Silver fox").isEmpty());
+        QCOMPARE(library.find("fox-copy")->app->title, QString("Silver fox"));
+        QCOMPARE(library.find("fox-copy")->title, QString("Silver fox"));
+        QCOMPARE(blockTitle(made.workflow), QString("Silver fox"));
+        QCOMPARE(library.rename(fox, "Mine now").value(0).code, QString("usage")); // a bundled one is not the person's
+        QCOMPARE(library.find("fox")->app->title, QString("Fox"));
+        QCOMPARE(library.rename(made, " ").value(0).code, QString("usage"));
+    }
+
     // A sample that leads out of its template, by a link, is not read.
     void aSampleLinkedOutOfItsFolderIsNotCopied() {
         Fixture f;
@@ -786,6 +879,7 @@ private slots:
         };
         QQuickItem *info = item(window->contentItem(), "templateInfo-talk");
         QVERIFY(info);
+        reveal(window->contentItem(), info);
         // The card is laid out at the next polish: the chip is at the picture's bottom corner once the picture is 16:10.
         QTRY_VERIFY(info->parentItem()->height() > 0 && qAbs(info->parentItem()->height() - info->parentItem()->width() * 10 / 16) < 1);
         QTest::mouseClick(window, Qt::LeftButton, {}, info->mapToScene(QPointF(info->width() / 2, info->height() / 2)).toPoint());
@@ -811,6 +905,7 @@ private slots:
         QVERIFY(commands.run("file.templates"));
         QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
         card = item(window->contentItem(), "templateCard-gen");
+        reveal(window->contentItem(), card);
         const QPoint genCenter = card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint();
         QTest::mouseClick(window, Qt::LeftButton, {}, genCenter);
         QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Gen"));

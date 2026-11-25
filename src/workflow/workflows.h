@@ -185,6 +185,10 @@ public:
     bool openCopyOf(const QString &file, const QString &title);
     // Opens the template with this id (openTemplate); false when there is none.
     Q_INVOKABLE bool openTemplateById(const QString &id);
+    // The apps shelf's Duplicate and Rename (#470): a copy of the template as the person's own, titled `title`, and its new id
+    // (empty, with a notice, when it could not be made); and the new title of one of the person's own. templatesChanged follows.
+    QString duplicateTemplate(const QString &id, const QString &title);
+    bool renameTemplate(const QString &id, const QString &title);
     // The person's own templates folder, as the dialog names it.
     Q_INVOKABLE QString ownTemplatesFolder() const { return TemplateLibrary::ownFolder(); }
     // A package another Fugue exported (engine/share_package.h, #91), unpacked and opened as

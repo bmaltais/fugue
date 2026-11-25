@@ -79,6 +79,21 @@ Item {
                         KitToggle { id: weatherToggle; checked: gallery.following; onToggled: v => gallery.following = v }
                     }
                 }
+                KitSection { text: "Search and cards" }
+                KitGroup {
+                    KitRow {
+                        label: "Search"
+                        KitSearch { placeholder: "Search apps"; width: 30 * App.theme.look.unit }
+                    }
+                    KitRow {
+                        label: "A card, a pinned chip"
+                        KitCard {
+                            width: 16 * App.theme.look.unit; height: 9 * App.theme.look.unit
+                            Text { anchors.centerIn: parent; text: "Card"; color: App.theme.look.text; font.pixelSize: App.theme.look.textSize }
+                        }
+                        KitChip { text: "Ready"; pill: true; toned: true; current: true; glyph: "check" }
+                    }
+                }
                 KitSection { text: "Motion" }
                 KitGroup {
                     KitRow {
