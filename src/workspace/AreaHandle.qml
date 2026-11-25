@@ -69,7 +69,8 @@ Item {
         height: handle.row ? along : handle.look.unit
         radius: handle.look.unit / 2
         color: handle.keyFocus ? handle.look.accent
-             : Qt.alpha(handle.look.label, mouse.pressed || mouse.containsMouse ? 0.7 : handle.look.light ? 0.45 : 0.35)
+             : Qt.alpha(handle.look.label, mouse.pressed || mouse.containsMouse ? handle.look.params.thumbHover
+                                         : handle.look.light ? handle.look.params.thumbAlphaLight : handle.look.params.thumbAlpha)
         Behavior on color { ColorAnimation { duration: handle.look.params.durColor } }
     }
     MouseArea {

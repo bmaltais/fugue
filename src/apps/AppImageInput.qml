@@ -4,7 +4,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
 import Fugue
-import "../canvas"
 import "../canvas/widgets"
 import "../kit"
 import "../menu"

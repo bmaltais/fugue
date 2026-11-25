@@ -645,7 +645,8 @@ QVariantMap AppView::takeInputPicture() const {
     const int index = takeIndex();
     if (index < 0)
         return {};
-    const Take &take = m_state.value(m_tab).takes.at(index);
+    const TabState state = m_state.value(m_tab); // value() is a copy: hold it, or `take` dangles
+    const Take &take = state.takes.at(index);
     const QString key = m_app->compare ? m_app->compare->input : imageKey();
     if (key.isEmpty() || !take.values.contains(key))
         return {};
