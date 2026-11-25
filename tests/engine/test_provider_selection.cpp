@@ -103,10 +103,10 @@ private slots:
     void aRemoteHelperEntryHasAnAddressAndAKey() {
         const Result<QList<ProviderInstance>> parsed = parseProviderInstances(QJsonObject{
             {"providers", QJsonArray{QJsonObject{{"name", "gx10"}, {"type", "fugue-helper"},
-                                                 {"address", "http://100.84.169.13:8787"}, {"key", "secret"}}}}});
+                                                 {"address", "http://100.84.169.13:8787"}, {"key", " secret\n"}}}}});
         QVERIFY(parsed);
         QCOMPARE(parsed->first().address, QStringLiteral("http://100.84.169.13:8787"));
-        QCOMPARE(parsed->first().key, QStringLiteral("secret"));
+        QCOMPARE(parsed->first().key, QStringLiteral("secret")); // a pasted key's stray space and newline are trimmed
         QVERIFY(parsed->first().settings.isEmpty());
         QVERIFY(createProvider(parsed->first()));
     }
