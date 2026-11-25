@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "note": "The Workers AI image models the `cloudflare` provider offers (spec 8.7). Per model: how the request is sent (json or multipart) and which of Fugue's standard parameters (8.1) the model takes. A field left out is not sent. Prices are Cloudflare's published neuron prices (developers.cloudflare.com/workers-ai/platform/pricing, 2026-11-25) at $0.011 per 1,000 neurons, worked out for one 1024x1024 picture (4 tiles of 512x512); the Workers Free plan allows 10,000 neurons a day.",
+  "models": [
+    {
+      "id": "@cf/black-forest-labs/flux-1-schnell", "title": "FLUX.1 [schnell]", "price": "~$0.0006/picture", "format": "json",
+      "steps": true, "steps_max": 8, "seed": true,
+      "defaults": {"steps": 4}
+    },
+    {
+      "id": "@cf/black-forest-labs/flux-2-klein-4b", "title": "FLUX.2 [klein] 4B", "price": "~$0.0012/MP", "format": "multipart",
+      "size": true, "size_min": 256, "size_max": 1920, "guidance": true, "seed": true, "images": 4
+    },
+    {
+      "id": "@cf/black-forest-labs/flux-2-klein-9b", "title": "FLUX.2 [klein] 9B", "price": "$0.015/MP", "format": "multipart",
+      "size": true, "size_min": 256, "size_max": 1920, "guidance": true, "seed": true, "images": 4
+    },
+    {
+      "id": "@cf/black-forest-labs/flux-2-dev", "title": "FLUX.2 [dev]", "price": "~$0.0016/MP/step", "format": "multipart",
+      "size": true, "size_min": 256, "size_max": 1920, "steps": true, "guidance": true, "seed": true, "images": 4,
+      "defaults": {"steps": 25}
+    }
+  ]
+}

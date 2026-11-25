@@ -85,6 +85,12 @@ QList<ModuleField> moduleFields(const ProviderInstance &instance) {
         fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 300"), true, false});
         fields.append({QStringLiteral("poll_ms"), false, QCoreApplication::translate("fugue::SettingsModel", "Poll interval (ms)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 500"), true, false});
     }
+    if (instance.type == QLatin1String("cloudflare")) {
+        // Cloudflare's settings (spec 8.7, The `cloudflare` provider): the account id sits beside the token, the rest is advanced.
+        fields.append({QStringLiteral("account_id"), false, QCoreApplication::translate("fugue::SettingsModel", "Account id"), QCoreApplication::translate("fugue::SettingsModel", "On the dash.cloudflare.com overview page"), false, false});
+        fields.append({QStringLiteral("image_models"), false, QCoreApplication::translate("fugue::SettingsModel", "More models"), QCoreApplication::translate("fugue::SettingsModel", "Extra @cf/ model ids, separated by commas"), true, false});
+        fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 120"), true, false});
+    }
     if (instance.type == QLatin1String("http"))
         for (const char *name : {"api", "image_models", "text_models", "timeout_s"})
             fields.append({QLatin1String(name), false});

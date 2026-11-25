@@ -118,7 +118,14 @@ QList<ProviderModule> builtinProviderModules() {
     fal.transport = QStringLiteral("builtin");
     fal.when = QStringLiteral("never");
     fal.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
-    return {omarchy, http, helper, fal};
+    ProviderModule cloudflare;
+    cloudflare.id = QStringLiteral("cloudflare");
+    cloudflare.version = QStringLiteral("1");
+    cloudflare.name = QStringLiteral("Cloudflare Workers AI");
+    cloudflare.transport = QStringLiteral("builtin");
+    cloudflare.when = QStringLiteral("never");
+    cloudflare.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    return {omarchy, http, helper, fal, cloudflare};
 }
 
 Result<QList<ProviderModule>> loadProviderModules(const QString &root) {

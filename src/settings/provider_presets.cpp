@@ -26,6 +26,9 @@ QList<ProviderPreset> knownProviderPresets() {
     // `fal` provider type's own default, so it stays empty here.
     cloud(QStringLiteral("fal"), QStringLiteral("fal.ai"), QStringLiteral("fal"), {},
           QStringLiteral("https://fal.ai/dashboard/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Many image and video models, run in the cloud"));
+    // Cloudflare's API address is the `cloudflare` provider type's own default too.
+    cloud(QStringLiteral("cloudflare"), QStringLiteral("Cloudflare Workers AI"), QStringLiteral("cloudflare"), {},
+          QStringLiteral("https://dash.cloudflare.com/profile/api-tokens"), QCoreApplication::translate("fugue::ProviderPresets", "FLUX image models on Cloudflare, with a free daily allowance"));
     cloud(QStringLiteral("openai"), QStringLiteral("OpenAI"), QStringLiteral("http"), QStringLiteral("https://api.openai.com/v1"),
           QStringLiteral("https://platform.openai.com/settings/organization/api-keys"), QCoreApplication::translate("fugue::ProviderPresets", "GPT image and text models"));
     cloud(QStringLiteral("together"), QStringLiteral("Together AI"), QStringLiteral("http"), QStringLiteral("https://api.together.ai/v1"),
