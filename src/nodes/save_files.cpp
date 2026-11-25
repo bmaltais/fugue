@@ -178,7 +178,14 @@ Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &em
     ShareOptions options;
     options.withoutPrompts = embed == QLatin1String("no-prompts");
     QJsonObject document = shareCopy(context.document, *context.registry, options);
-    document.insert("run", QJsonObject{{"nodes", context.usedUpstream}});
+    QJsonObject used = context.usedUpstream;
+    if (options.withoutPrompts) // the picked text of a Dynamic Prompt is a prompt too
+        for (auto it = used.begin(); it != used.end(); ++it) {
+            QJsonObject entry = it.value().toObject();
+            entry.remove("prompt");
+            it.value() = entry;
+        }
+    document.insert("run", QJsonObject{{"nodes", used}});
     return compactJson(document);
 }
 

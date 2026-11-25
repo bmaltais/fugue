@@ -42,6 +42,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addPixelKernels(kernels);
     addSaveMediaKernels(kernels);
     addTextGenerationKernels(kernels);
+    addDynamicPromptKernels(kernels);
     addTextTemplateKernels(kernels);
     addUpscaleKernels(kernels);
     addToneKernels(kernels);

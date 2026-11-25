@@ -21,7 +21,7 @@ ColumnLayout {
     property string tabKey: "output_folder" // the last header used: the only one Tab stops on
     property string revealKey // the row that is opening scrolls itself into view while it grows
 
-    readonly property var keys: ["output_folder", "inputs_folder", "model_paths", "download_folder", "pack_paths"]
+    readonly property var keys: ["output_folder", "inputs_folder", "model_paths", "download_folder", "pack_paths", "wildcards"]
     readonly property bool downloadIsDefault: model.downloadFolders.length === 0 || model.downloadFolders[0].path === model.downloadFolder // Fugue's own folder comes first
     // The status column's width, shared: as wide as the widest word a row can say (a count up to 99).
     TextMetrics { id: tmDefault; font.pixelSize: page.look.labelSize; text: qsTr("Default") }
@@ -157,7 +157,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         Layout.leftMargin: 2 * page.u
-        text: qsTr("Where Fugue saves pictures, downloads models, and looks for models and packs.")
+        text: qsTr("Where Fugue saves pictures, downloads models, and looks for models, packs and wildcards.")
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: page.look.label
@@ -259,6 +259,16 @@ ColumnLayout {
                     value: page.model.packPaths
                     inherited: page.model.inheritedPackPaths
                 }
+            }
+            FolderRow {
+                objectName: "folderRow-wildcards"
+                rowKey: "wildcards"
+                bodyName: "folderBody-wildcards"
+                label: qsTr("Wildcards")
+                detail: page.model.wildcardsFolder
+                where: page.model.wildcardsFolder
+                status: qsTr("Default")
+                Note { text: qsTr("Where Dynamic Prompt looks for __name__ files: .txt (one value per line), .yaml and .json, in folders as they come from a collection. A pack's own wildcards folder is searched too, and a project that inherits prompts also reads the Default's.") }
             }
         }
     }
