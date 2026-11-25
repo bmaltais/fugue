@@ -1019,7 +1019,8 @@ public:
             raise(QStringLiteral("Every option has weight 0, so none can be picked."));
         const double u = unit() * total;
         const auto at = std::upper_bound(cum.begin(), cum.end(), u);
-        return at == cum.end() ? int(cum.size()) - 1 : int(at - cum.begin());
+        // u can round up to the total: then take the last option with a weight, never a trailing 0-weight one.
+        return at == cum.end() ? int(std::lower_bound(cum.begin(), cum.end(), total) - cum.begin()) : int(at - cum.begin());
     }
 
     // `k` different indexes by weight, as the order of picks one after another without putting back.
