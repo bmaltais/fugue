@@ -16,10 +16,12 @@
 #include "apps/app_shelf.h"
 #include "apps/app_takes.h"
 #include "apps/app_window.h"
+#include "canvas/mask_layer.h"
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 #include "../test_shard.h"
+#include "../window_grab.h"
 
 using namespace canvas_test;
 using namespace fugue;
@@ -986,6 +988,70 @@ private slots:
         QCOMPARE(rig.view.takeIndex(), -1);
         QVERIFY(!find(app.window, "appTakes"));
         qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The mask input of the form: Paint mask opens the editor on the form's picture, a stroke shows in the editor's layer, and OK
+    // sets the input to the stored file, which the run then binds (owner, 2026-11-25: "mask painting does not create or show the mask").
+    void paintingAMaskInTheFormShowsTheStrokeAndSetsTheInput() {
+        App app(load(mediaApp));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QTRY_VERIFY(find(app.window, "appInput-mask"));
+        QTemporaryDir files;
+        QImage picture(200, 150, QImage::Format_RGB32);
+        picture.fill(Qt::gray);
+        QVERIFY(picture.save(files.filePath("photo.png")));
+        rig.view.setValue("image", files.filePath("photo.png"));
+        QCOMPARE(rig.view.maskPicture().value("width").toInt(), 200);
+        paintAMask(app, rig);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+private:
+    // Paint mask is pressed, a stroke is dragged over the picture and OK is taken: the stroke is in the editor's layer and the input
+    // holds the stored mask, which the form says is Painted.
+    void paintAMask(App &app, Rig &rig) {
+        QPointF where; // the form settles as the picture loads: press where the button stopped
+        QTRY_VERIFY((where == find(app.window, "appInput-mask")->mapToScene(QPointF())) || ((where = find(app.window, "appInput-mask")->mapToScene(QPointF())) != QPointF() && false));
+        tap(app.window, find(app.window, "appInput-mask"));
+        QObject *editor = nullptr; // a Popup, not an item: the form's Loader holds it
+        const auto openEditor = [&] {
+            for (QQuickItem *child : find(app.window, "appInput-mask")->parentItem()->childItems())
+                if (QObject *made = child->property("item").value<QObject *>())
+                    editor = made;
+            return editor != nullptr;
+        };
+        QTRY_VERIFY(openEditor() && editor->property("opened").toBool());
+        const QSizeF size = editor->property("imageSize").toSizeF();
+        QCOMPARE(size, QSizeF(rig.view.maskPicture().value("width").toInt(), rig.view.maskPicture().value("height").toInt()));
+        QVERIFY(size.width() > 0);
+        auto *layer = editor->property("layer").value<fugue::MaskLayer *>();
+        QVERIFY(layer);
+        QTRY_VERIFY(layer->zoom() > 0);
+        editor->setProperty("brushSize", qMax(4.0, size.height() / 8));
+        QTest::qWait(60);
+        const auto at = [&](double x, double y) {
+            return layer->mapToScene(QPointF(layer->originX() + x * layer->zoom(), layer->originY() + y * layer->zoom())).toPoint();
+        };
+        const QPoint middle = at(size.width() / 2, size.height() / 2);
+        const QImage before = test_support::grab(app.window);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, at(size.width() / 4, size.height() / 2));
+        for (int i = 1; i <= 8; ++i)
+            QTest::mouseMove(app.window, at(size.width() * (0.25 + 0.05 * i), size.height() / 2));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, at(size.width() * 0.65, size.height() / 2));
+        QVERIFY(!layer->isEmpty());
+        QTest::qWait(60);
+        QVERIFY2(test_support::grab(app.window).pixel(middle) != before.pixel(middle), "the stroke is not drawn over the picture");
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) { // the editor as the form opens it, to look at
+            QTest::qWait(100);
+            test_support::grab(app.window).save(QString("%1/app-mask-editor.png").arg(QString::fromLocal8Bit(dir)));
+        }
+        QCOMPARE(layer->valueAt(int(size.width() / 2), int(size.height() / 2)), 255);
+        QMetaObject::invokeMethod(editor, "accept");
+        const QString stored = rig.view.valueOf("mask").toString();
+        QVERIFY2(!stored.isEmpty(), "OK left the mask input empty");
+        QVERIFY(QFileInfo(stored).isFile());
+        QTRY_COMPARE(find(app.window, "appMaskState-mask")->property("text").toString(), QStringLiteral("Painted"));
     }
 };
 

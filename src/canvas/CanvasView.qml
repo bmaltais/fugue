@@ -1703,6 +1703,7 @@ Item {
     // the Quick Mask selection (red where painted). Under the region's frame, over the picture.
     Item {
         anchors.fill: pictureView
+        clip: true // here, not on the layers: a MaskLayer with `clip: true` of its own draws nothing (Qt 6.12)
         LayoutMirroring.enabled: false
         LayoutMirroring.childrenInherit: true
         visible: pictureView.visible && !root.compareOn && !pictureView.paired && pictureView.mode !== "difference"
@@ -1710,7 +1711,6 @@ Item {
             id: layerMask
             objectName: "canvasViewLayerMask"
             anchors.fill: parent
-            clip: true
             visible: root.paintsMask && (root.maskOverlay || layerMask.stroking) // the live trace shows with the overlay off too
             originX: pictureView.imageX
             originY: pictureView.imageY
@@ -1726,7 +1726,6 @@ Item {
             id: selectionLayer
             objectName: "canvasViewSelection"
             anchors.fill: parent
-            clip: true
             // The red tint is optional in Quick Mask (\\); it shows by itself when the ants have nothing to outline (a stroke under 50%).
             // A stroke of the Selection Brush shows it live (#380), the ants take over on release.
             visible: selectionLayer.stroking || (root.quickMask && (root.selectionOverlay || (root.maskSelected && !ants.outlined)))
@@ -1862,7 +1861,6 @@ Item {
         LayoutMirroring.childrenInherit: true
         visible: pictureView.visible && !root.compareOn && !pictureView.paired && pictureView.mode !== "difference"
                  && (root.rectSelected || root.maskSelected)
-        clip: true
         originX: pictureView.imageX
         originY: pictureView.imageY
         zoom: pictureView.imageScale

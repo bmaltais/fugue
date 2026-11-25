@@ -293,6 +293,9 @@ LargeViewDialog {
     Item {
         id: board
         anchors.fill: parent
+        // The board clips, not its layers: a MaskLayer or PaintLayer with `clip: true` of its own draws nothing (Qt 6.12, the
+        // owner, 2026-11-25: no mask showed while painting).
+        clip: true
         anchors.rightMargin: root.layers ? layersPanel.width + 2 * root.look.unit : 0
 
         CompareView {
@@ -311,7 +314,6 @@ LargeViewDialog {
             objectName: "maskLayer"
             anchors.fill: parent
             visible: !root.layers
-            clip: true
             originX: pictureViewer.imageX
             originY: pictureViewer.imageY
             zoom: pictureViewer.imageScale
@@ -323,7 +325,6 @@ LargeViewDialog {
             objectName: "paintLayer"
             anchors.fill: parent
             visible: root.layers
-            clip: true
             originX: pictureViewer.imageX
             originY: pictureViewer.imageY
             zoom: pictureViewer.imageScale
