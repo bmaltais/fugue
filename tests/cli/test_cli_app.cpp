@@ -105,6 +105,13 @@ const char *kOptionalMask = R"({"fugue": 1,
    "match": {"type": "fugue/color-match", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "reference": {"from": "load.image"}, "mask": {"from": "region.image"}}},
    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "match.image"}, "name": "app"}}}}})";
 
+// A picture drawn by a provider: the app of the off-machine question (#404).
+const char *kDraws = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Draws", "inputs": [{"name": "prompt", "targets": ["gen.prompt"]}], "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a cat"}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}, "name": "app"}}}}})";
+
 const char *kPlain = R"({"fugue": 1, "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})";
 
 } // namespace
@@ -329,6 +336,24 @@ private slots:
 
     // #491: the run is refused up front, naming the node, when the paired helper cannot take it: a node pinned to a provider on this
     // machine, or a node whose capability the host did not offer when it last answered.
+    // 8.2, #404: an app that would send data to a service off this machine is refused like `fugue run`, and `--allow-remote` allows it.
+    void anAppToAnOffMachineServiceNeedsTheYes() {
+        template_("draws", "Draws", kDraws, "true");
+        const QString module = path("root/data/fugue/providers/io.example.toy");
+        QVERIFY(QDir().mkpath(module));
+        QVERIFY(QFile::copy(QStringLiteral(FUGUE_FAKE_MODULE_PROVIDER), module + "/toy"));
+        QFile(module + "/toy").setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        write(module + "/provider.json", "{\"manifest\": 1, \"id\": \"io.example.toy\", \"version\": \"0.1.0\", \"name\": \"Toy\", \"transport\": \"stdio\","
+                                         " \"start\": {\"command\": [\"./toy\", \"--stdio\"]}, \"capabilities\": [\"image.generate\"]}");
+        write(path("root/config/fugue/providers.json"), "{\"providers\": [{\"name\": \"Cloud\", \"type\": \"io.example.toy\", \"address\": \"https://cloud.example.com/v1\"}]}");
+        const Outcome refused = fugue({"app", "run", "draws", "--json"});
+        QCOMPARE(refused.code(), QString("consent_needed"));
+        QVERIFY2(refused.error().value("message").toString().contains("Cloud (cloud.example.com)"), refused.out);
+        QVERIFY(refused.error().value("hint").toString().contains("--allow-remote"));
+        QCOMPARE(fugue({"app", "run", "draws", "--allow-remote", "Nowhere", "--json"}).code(), QString("unknown_provider"));
+        QVERIFY(fugue({"app", "run", "draws", "--allow-remote", "Cloud", "--json"}).code() != QString("consent_needed"));
+    }
+
     void aRunTheHostCannotTakeIsRefusedNamingTheNode() {
         QByteArray staged = kSampled;
         staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"save\":");

@@ -178,18 +178,15 @@ std::optional<FileRoots> RunFolder::roots() const {
     return roots ? roots.value() : FileRoots{};
 }
 
-Errors RunFolder::writeRemoteAllowed(const QStringList &instances) const {
-    return writeJsonFile(m_path + QStringLiteral("/allow-remote.json"), QJsonArray::fromStringList(instances));
+Errors RunFolder::writeRemoteAllowed(const QJsonObject &fingerprints) const {
+    return writeJsonFile(m_path + QStringLiteral("/allow-remote.json"), fingerprints);
 }
 
-QStringList RunFolder::remoteAllowed() const {
+QJsonObject RunFolder::remoteAllowed() const {
     QFile file(m_path + QStringLiteral("/allow-remote.json"));
     if (!file.open(QIODevice::ReadOnly))
         return {};
-    QStringList names;
-    for (const QJsonValue &value : QJsonDocument::fromJson(file.readAll()).array())
-        names << value.toString();
-    return names;
+    return QJsonDocument::fromJson(file.readAll()).object();
 }
 
 bool RunFolder::requestCancel() const {

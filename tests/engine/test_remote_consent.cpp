@@ -1,5 +1,7 @@
 // Where an instance runs, what a node sends there, and the answers kept for off-machine services (spec 8.2, #404).
 
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -30,14 +32,55 @@ QJsonObject generateGraph() {
 class TestRemoteConsent : public QObject {
     Q_OBJECT
 
+    QTemporaryDir m_data; // XDG_DATA_HOME of the test: the provider modules are looked for in <it>/fugue/providers
+
+    void installModule(const QString &id, const QString &transport, const QString &address) {
+        const QString folder = m_data.filePath("fugue/providers/" + id);
+        QDir().mkpath(folder);
+        QJsonObject manifest{{"manifest", 1}, {"id", id}, {"version", "0.1.0"}, {"name", id}, {"transport", transport},
+                             {"capabilities", QJsonArray{"image.generate"}}};
+        if (transport == "stdio")
+            manifest.insert("start", QJsonObject{{"command", QJsonArray{"./toy"}}});
+        else
+            manifest.insert("address", address);
+        QFile file(folder + "/provider.json");
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(manifest).toJson());
+    }
+
 private slots:
+    void initTestCase() { qputenv("XDG_DATA_HOME", m_data.path().toUtf8()); }
+
+    // An http module's own default address is used when the instance has none (providers.cpp): that is where the data goes.
+    void aModulesDefaultAddressIsTheOneJudgedAndFingerprinted() {
+        installModule("io.example.cloud", "http", "https://api.example.com/v1");
+        installModule("io.example.lan", "http", "http://192.168.1.9:7860");
+        installModule("io.example.mine", "http", "http://127.0.0.1:{port}");
+        installModule("io.example.prog", "stdio", {});
+        const ProviderInstance cloud = instance("Cloud", "io.example.cloud");
+        QCOMPARE(placementOf(cloud), Placement::OffMachine);
+        QCOMPARE(hostOf(cloud), QStringLiteral("api.example.com"));
+        QCOMPARE(consentFingerprint(cloud), QStringLiteral("io.example.cloud|https://api.example.com/v1"));
+        QCOMPARE(placementOf(instance("Cloud", "io.example.cloud", "http://127.0.0.1:9")), Placement::ThisMachine); // the instance's own wins
+        QCOMPARE(placementOf(instance("Lan", "io.example.lan")), Placement::OwnHost);
+        QCOMPARE(placementOf(instance("Mine", "io.example.mine")), Placement::ThisMachine);
+        // A stdio module is a program run here: this machine, even if the program itself calls a cloud API (spec 8.2).
+        QCOMPARE(placementOf(instance("Prog", "io.example.prog")), Placement::ThisMachine);
+        QVERIFY(anyOffMachine({cloud}));
+    }
+
     void placementFollowsTheTypeAndTheAddress() {
         QCOMPARE(placementOf(instance("This machine", "omarchy")), Placement::ThisMachine);
         QCOMPARE(placementOf(instance("Local", "http", "http://127.0.0.1:8080/v1")), Placement::ThisMachine);
         QCOMPARE(placementOf(instance("Local", "http", "localhost:1234")), Placement::ThisMachine);
         // The person's own network: paired hosts, private, link-local and CGNAT addresses, .local names.
         QCOMPARE(placementOf(instance("gx10", "omarchy", "https://gx10.example.ts.net")), Placement::OwnHost);
-        QCOMPARE(placementOf(instance("helper", "fugue-helper", "http://gx10.example:8787")), Placement::OwnHost);
+        QCOMPARE(placementOf(instance("helper", "fugue-helper", "http://gx10.example.ts.net:8787")), Placement::OwnHost);
+        QCOMPARE(placementOf(instance("helper", "fugue-helper", "http://10.0.0.7:8787")), Placement::OwnHost);
+        QCOMPARE(placementOf(instance("Box", "http", "https://box.tail1234.ts.net")), Placement::OwnHost);
+        QCOMPARE(placementOf(instance("helper", "fugue-helper")), Placement::ThisMachine);
+        // A fugue-helper has no pairing step: a public address is a service off this machine like any other.
+        QCOMPARE(placementOf(instance("helper", "fugue-helper", "https://helper.example.com:8787")), Placement::OffMachine);
         QCOMPARE(placementOf(instance("Box", "http", "http://192.168.1.20:7860")), Placement::OwnHost);
         QCOMPARE(placementOf(instance("Tail", "http", "http://100.101.102.103:7860")), Placement::OwnHost);
         QCOMPARE(placementOf(instance("Mac", "http", "http://studio.local:7860")), Placement::OwnHost);
@@ -89,6 +132,12 @@ private slots:
         QVERIFY(consent.allow(cloud).isEmpty());
         QVERIFY(consent.prune({other}).isEmpty());
         QVERIFY(!consent.isAllowed(cloud));
+        // A yes is for what was shown: its fingerprint, not whatever the instance is at answer time.
+        QVERIFY(consent.allow("Cloud", consentFingerprint(instance("Cloud", "http", "https://shown.example.com"))).isEmpty());
+        QVERIFY(!consent.isAllowed(cloud));
+        QCOMPARE(RemoteConsent::matching(QJsonObject{{"Cloud", consentFingerprint(cloud)}, {"Other", "x"}}, {cloud, other}), QSet<QString>{"Cloud"});
+        // A write that cannot happen is reported.
+        QVERIFY(!RemoteConsent("/proc/nope/remote-consent.json").allow(cloud).isEmpty());
     }
 
     void aCheckSaysWhereEachNodeGoesAndARunRefusesWithoutTheYes() {

@@ -54,15 +54,30 @@ QList<ProviderInstance> registeredInstances(const Registry &registry) {
     return instances;
 }
 
-Errors remoteConsentProblems(const CompiledGraph &graph, Context &context, const QString &workflow, const QStringList &allowedNow) {
+Result<QJsonObject> allowRemoteFingerprints(const QStringList &names, const Context &context) {
+    const QList<ProviderInstance> instances = registeredInstances(context.registry);
+    QJsonObject fingerprints;
+    for (const QString &name : names) {
+        const auto known = std::find_if(instances.cbegin(), instances.cend(), [&](const ProviderInstance &i) { return i.name == name; });
+        if (known == instances.cend()) {
+            Error error = makeError("unknown_provider", QStringLiteral("--allow-remote names \"%1\", which is not a provider instance.").arg(name),
+                                    "Use the name of an instance in providers.json (Settings > Providers).");
+            for (const ProviderInstance &i : instances)
+                error.valid.append(i.name);
+            return Result<QJsonObject>(error);
+        }
+        fingerprints.insert(name, consentFingerprint(*known));
+    }
+    return fingerprints;
+}
+
+Errors remoteConsentProblems(const CompiledGraph &graph, Context &context, const QString &workflow, const QJsonObject &allowedNow) {
     const QList<ProviderInstance> instances = registeredInstances(context.registry);
     if (!anyOffMachine(instances))
         return {};
     RemoteConsent store;
     store.prune(instances);
-    QSet<QString> allowed = store.allowedNames(instances);
-    for (const QString &name : allowedNow)
-        allowed.insert(name);
+    const QSet<QString> allowed = store.allowedNames(instances) + RemoteConsent::matching(allowedNow, instances);
     const Process process(context);
     RunOptions options;
     options.workflow = QFileInfo(workflow).absoluteFilePath();

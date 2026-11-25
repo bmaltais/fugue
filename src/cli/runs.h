@@ -36,7 +36,7 @@ Reply startRun(const Command &command, Context &context);
 // workflow as compiled (empty for a compiled graph), `file` the path the run is recorded under. Returns the queued run's
 // folder, or why it could not start. The canvas batch (cli/canvas_batch.cpp) starts each picture's run this way.
 Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
-                                   const QStringList &allowRemote = {});
+                                   const QJsonObject &allowRemote = {});
 
 // `fugue runs cancel`: removes a waiting run's entry, or signals the worker.
 Reply cancelRun(const Command &command, Context &context);

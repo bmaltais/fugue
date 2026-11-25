@@ -151,6 +151,12 @@ public:
     void shutdown() {
         m_quitting = true;
         m_poll->stop();
+        if (m_checkAbort)
+            m_checkAbort->abort(); // a check under way (askRemote's) ends at once and the run it was for is not queued
+        for (const Asking &asking : std::as_const(m_askings))
+            for (const Parked &run : asking.runs)
+                emit event(run.id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+        m_askings.clear();
         for (const Parked &parked : std::as_const(m_parked))
             emit event(parked.id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
         m_parked.clear();
@@ -194,7 +200,8 @@ public:
         m_process.reset();
     }
 
-    void start(const QString &id, const RunRequest &request) {
+    // `consented`: the person has said yes to what the run sends off this machine (answerRemote), so it is not asked again.
+    void start(const QString &id, const RunRequest &request, bool consented = false) {
         if (m_quitting)
             return;
         // checkGraph waits on providers with an event loop of its own, which delivers what is
@@ -213,8 +220,11 @@ public:
                             {"errors", toJson(compilation.errors())}});
             return;
         }
-        if (askRemote(id, request, compilation.value()))
-            return;
+        if (!consented) {
+            const Consent consent = askRemote(id, request, compilation.value());
+            if (m_quitting || consent != Consent::Go)
+                return; // asked (it waits), or the check was cut short (it is started again first), or the window is closing
+        }
         const Result<RunFolder> folder = RunFolder::create(m_context.runsRoot, id);
         if (!folder) {
             emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Failed)},
@@ -246,13 +256,17 @@ public:
         poll();
     }
 
+    enum class Consent { Go, Asked, Again };
+
     // Before a run is queued: when some instance is off-machine, looks at the graph as the run would (a check) and, when it
-    // would send data to one the person has not allowed, keeps the request and asks (remoteConsentNeeded). True when it asks.
-    // The run is the same run (its id) once answered. A check that was aborted says nothing: the scheduler refuses at the node.
-    bool askRemote(const QString &id, const RunRequest &request, const CompiledGraph &graph) {
+    // would send data to one the person has not allowed, keeps the request and asks (remoteConsentNeeded). Asked: the run waits
+    // for answerRemote and is the same run (its id) afterwards; a run of the same batch that needs the same answer joins the
+    // question instead of asking again. Again: another start or a run's turn cut the check short, so the request goes back to
+    // the front of the parked ones and is checked again; it is never queued unasked.
+    Consent askRemote(const QString &id, const RunRequest &request, const CompiledGraph &graph) {
         const QList<ProviderInstance> instances = cli::registeredInstances(m_compileRegistry);
         if (!anyOffMachine(instances))
-            return false;
+            return Consent::Go;
         RemoteConsent consent(consentPath());
         consent.prune(instances);
         RunEnvironment environment = m_process->environment;
@@ -266,51 +280,88 @@ public:
         const GraphCheck check = checkGraph(graph, environment, options, &abort);
         m_checkAbort = nullptr;
         m_checking = false;
+        if (m_quitting)
+            return Consent::Asked; // shutdown has ended what waited; nothing is written
+        // What arrived during the check starts after this run, one by one from the event loop, never nested in this call.
+        QTimer::singleShot(0, this, [this] { settleAfterCheck(); });
+        if (check.aborted) {
+            m_parked.prepend({id, request});
+            return Consent::Again;
+        }
         QSet<QString> runs;
         for (auto it = check.states.cbegin(); it != check.states.cend(); ++it)
             if (it.value() == NodeState::Stale)
                 runs.insert(it.key());
         const QList<RemoteUse> uses = notAllowed(remoteUses(check.routes, runs, instances), consent.allowedNames(instances));
-        if (!check.aborted && !uses.isEmpty()) {
-            QJsonArray services;
-            QStringList names;
-            for (const RemoteUse &use : uses) {
-                names << use.instance;
-                services.append(QJsonObject{{"instance", use.instance}, {"host", use.host}, {"sends", QJsonArray::fromStringList(use.sends)},
-                                            {"text", sendsText(use.sends)}});
-            }
-            m_asking.insert(id, Asking{request, names});
-            emit remoteConsentNeeded(id, services);
+        if (uses.isEmpty())
+            return Consent::Go;
+        QStringList names;
+        QJsonObject fingerprints;
+        QJsonArray services;
+        for (const RemoteUse &use : uses) {
+            names << use.instance;
+            fingerprints.insert(use.instance, use.fingerprint);
+            services.append(QJsonObject{{"instance", use.instance}, {"host", use.host}, {"sends", QJsonArray::fromStringList(use.sends)},
+                                        {"text", sendsText(use.sends)}});
         }
-        settleAfterCheck();
-        return !check.aborted && !uses.isEmpty();
+        for (Asking &asking : m_askings) {
+            if (asking.fingerprints == fingerprints) { // the same question is up: this run is covered by its answer
+                asking.runs.append({id, request});
+                return Consent::Asked;
+            }
+        }
+        m_askings.append(Asking{{{id, request}}, fingerprints, services});
+        emit remoteConsentNeeded(id, services);
+        return Consent::Asked;
     }
 
     QString consentPath() const { return m_setup.consentPath.isEmpty() ? RemoteConsent::defaultPath() : m_setup.consentPath; }
 
-    // The person's answer: yes keeps the answer for the instances asked about and starts the run; no ends it as cancelled.
+    // The person's answer: yes keeps what was shown (the fingerprints kept with the question, not what the registry holds now) and
+    // starts every run of the question in order; no ends them as cancelled. A yes that cannot be kept fails the runs and says so.
     void answerRemote(const QString &id, bool allow) {
-        const auto asked = m_asking.find(id);
-        if (asked == m_asking.end())
+        int found = -1;
+        for (int i = 0; i < m_askings.size() && found < 0; ++i)
+            for (const Parked &run : m_askings.at(i).runs)
+                if (run.id == id)
+                    found = i;
+        if (found < 0)
             return;
-        const Asking asking = asked.value();
-        m_asking.erase(asked);
+        const Asking asking = m_askings.takeAt(found);
         if (!allow) {
-            emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+            for (const Parked &run : asking.runs)
+                emit event(run.id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
             return;
         }
         RemoteConsent consent(consentPath());
-        for (const ProviderInstance &instance : cli::registeredInstances(m_compileRegistry))
-            if (asking.instances.contains(instance.name))
-                consent.allow(instance);
-        start(id, asking.request);
+        Errors failed;
+        for (auto it = asking.fingerprints.begin(); it != asking.fingerprints.end(); ++it)
+            failed += consent.allow(it.key(), it.value().toString());
+        if (hasErrors(failed)) {
+            for (const Parked &run : asking.runs)
+                emit event(run.id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Failed)}, {"errors", toJson(failed)}});
+            return;
+        }
+        for (const Parked &run : asking.runs)
+            start(run.id, run.request, true);
     }
 
     void cancel(const QString &id) {
-        if (m_asking.contains(id)) {
-            m_asking.remove(id);
-            emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
-            return;
+        for (int i = 0; i < m_askings.size(); ++i) {
+            Asking &asking = m_askings[i];
+            for (int j = 0; j < asking.runs.size(); ++j) {
+                if (asking.runs.at(j).id != id)
+                    continue;
+                const bool lead = j == 0;
+                asking.runs.removeAt(j);
+                const Asking left = asking;
+                if (left.runs.isEmpty())
+                    m_askings.removeAt(i);
+                emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+                if (lead && !left.runs.isEmpty()) // the question is the next run's now
+                    emit remoteConsentNeeded(left.runs.first().id, left.services);
+                return;
+            }
         }
         for (int i = 0; i < m_parked.size(); ++i) {
             if (m_parked.at(i).id == id) {
@@ -666,6 +717,8 @@ private:
 
     // What waited for a check: runs started meanwhile, the queue, a newer check.
     void settleAfterCheck() {
+        if (m_checking)
+            return; // a check is under way: its end schedules this again, so the parked starts keep their order
         const QList<Parked> parked = std::exchange(m_parked, {});
         for (const Parked &p : parked)
             start(p.id, p.request);
@@ -698,12 +751,14 @@ private:
         QString id;
         RunRequest request;
     };
-    struct Asking {
-        RunRequest request;
-        QStringList instances;
-    };
-    QMap<QString, Asking> m_asking; // runs waiting for the answer to the off-machine question (#404)
     QList<Parked> m_parked; // started while a check was under way
+    // The off-machine question (#404) and the runs of one batch that wait for its answer, oldest first; the first is its lead.
+    struct Asking {
+        QList<Parked> runs;
+        QJsonObject fingerprints; // instance name -> consentFingerprint, as shown
+        QJsonArray services;
+    };
+    QList<Asking> m_askings;
     bool m_checking = false;
     CheckAbort *m_checkAbort = nullptr; // the check under way's, while m_checking
     QElapsedTimer m_pruned;

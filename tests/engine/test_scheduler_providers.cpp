@@ -78,7 +78,7 @@ public:
 
 // A paired helper: a remote instance that does not share this machine's files.
 std::shared_ptr<FakeProvider> pairedHelper(World &world, const QString &name) {
-    const auto helper = world.provider(name, {"any"}, "http://gx10.example:8787");
+    const auto helper = world.provider(name, {"any"}, "http://gx10.example.ts.net:8787");
     world.providers.last().instance.type = QStringLiteral("fugue-helper");
     Description description = imageDescription({"any"});
     description.sharesFilesystem = false;
@@ -995,7 +995,7 @@ private slots:
         World world;
         addStagedType(world);
         world.provider("This machine", {"any"});
-        const auto helper = world.provider("gx10", {"a", "b"}, "http://gx10.example:8787");
+        const auto helper = world.provider("gx10", {"a", "b"}, "http://gx10.example.ts.net:8787");
         world.providers.last().instance.type = QStringLiteral("fugue-helper");
         Description description = imageDescription({"a", "b"}, "fake@gx10");
         description.sharesFilesystem = false;

@@ -57,7 +57,7 @@ RemotePlacement placement(bool paired = true) {
     made.registry = &registry();
     made.instances = {instance("desk", "omarchy")};
     if (paired)
-        made.instances << instance("gx10", "fugue-helper", "http://gx10.example:8787");
+        made.instances << instance("gx10", "fugue-helper", "http://gx10.example.ts.net:8787");
     made.capabilityOf = [](const QString &type) {
         static const QMap<QString, QString> capabilities{{"fugue/text-encode", "text.encode"}, {"fugue/sampler", "latent.sample"},
                                                          {"fugue/vae-decode", "latent.decode"}, {"fugue/upscale-with-model", "image.upscale"}};

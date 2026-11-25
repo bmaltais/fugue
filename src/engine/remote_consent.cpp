@@ -6,6 +6,7 @@
 #include "engine/json.h"
 #include "engine/node_type.h"
 #include "engine/paths.h"
+#include "engine/provider_module.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -51,22 +52,43 @@ Errors writeInstances(const QString &path, const QJsonObject &instances) {
 
 } // namespace
 
-QString hostOf(const ProviderInstance &instance) { return instance.address.trimmed().isEmpty() ? QString() : urlOf(instance.address).host(); }
+QString effectiveAddress(const ProviderInstance &instance) {
+    if (!instance.address.trimmed().isEmpty())
+        return instance.address;
+    // A provider module's own default address is used when the instance has none (providers.cpp moduleProvider): that is where
+    // the data goes. A default with {port} is a loopback port the module starts for itself.
+    static const QStringList builtin{QStringLiteral("omarchy"), QStringLiteral("http"), QStringLiteral("fugue-helper")};
+    if (builtin.contains(instance.type))
+        return {};
+    const Result<QList<ProviderModule>> modules = providerModules();
+    if (!modules.ok())
+        return {};
+    for (const ProviderModule &module : modules.value())
+        if (module.id == instance.type && module.transport == QLatin1String("http") && !module.address.contains(QStringLiteral("{port}")))
+            return module.address;
+    return {};
+}
+
+QString hostOf(const ProviderInstance &instance) {
+    const QString address = effectiveAddress(instance).trimmed();
+    return address.isEmpty() ? QString() : urlOf(address).host();
+}
 
 Placement placementOf(const ProviderInstance &instance) {
     const QString host = hostOf(instance);
-    const bool paired = instance.type == QLatin1String("omarchy") || instance.type == QLatin1String("fugue-helper");
     if (host.isEmpty())
         return Placement::ThisMachine; // no address: this machine (a module that runs as a program here, or the model servers of 8.7)
     if (isLoopbackHost(host))
         return Placement::ThisMachine;
-    if (paired || isLocalHost(host))
+    // An omarchy instance is a host omarchy-local-ai paired with (8.7); a fugue-helper has no pairing step, so it is judged by its
+    // address like any other service. The person's own network includes their tailnet's *.ts.net names.
+    if (instance.type == QLatin1String("omarchy") || isLocalHost(host) || host.endsWith(QLatin1String(".ts.net"), Qt::CaseInsensitive))
         return Placement::OwnHost;
     return Placement::OffMachine;
 }
 
 QString consentFingerprint(const ProviderInstance &instance) {
-    QString address = instance.address.trimmed().toLower();
+    QString address = effectiveAddress(instance).trimmed().toLower();
     while (address.endsWith(QLatin1Char('/')))
         address.chop(1);
     return instance.type + QLatin1Char('|') + address;
@@ -111,7 +133,7 @@ QList<RemoteUse> remoteUses(const QMap<QString, NodeRoute> &routes, const QSet<Q
     for (const ProviderInstance &instance : instances) {
         if (!instance.enabled || placementOf(instance) != Placement::OffMachine)
             continue;
-        RemoteUse use{instance.name, hostOf(instance), {}, {}};
+        RemoteUse use{instance.name, hostOf(instance), consentFingerprint(instance), {}, {}};
         for (auto it = routes.cbegin(); it != routes.cend(); ++it) {
             if (it->instance != instance.name || !runs.contains(it.key()))
                 continue;
@@ -157,7 +179,7 @@ Error consentNeededError(const QList<RemoteUse> &uses) {
     }
     Error error = makeError(QStringLiteral("consent_needed"),
                             QStringLiteral("This run would send data off this machine, and you have not allowed that: %1.").arg(parts.join(QStringLiteral("; "))),
-                            QStringLiteral("Run again with --allow-remote <instance> to allow it for this run, or answer yes when the window asks."));
+                            QStringLiteral("Answer yes when the window asks, or pass --allow-remote <instance> to `fugue run` or `fugue app run` to allow it for that run."));
     for (const QString &name : names)
         error.valid.append(name);
     return error;
@@ -172,19 +194,24 @@ bool RemoteConsent::isAllowed(const ProviderInstance &instance) const {
 }
 
 QSet<QString> RemoteConsent::allowedNames(const QList<ProviderInstance> &instances) const {
-    const QJsonObject kept = readInstances(m_path);
+    return matching(readInstances(m_path), instances);
+}
+
+Errors RemoteConsent::allow(const ProviderInstance &instance) { return allow(instance.name, consentFingerprint(instance)); }
+
+Errors RemoteConsent::allow(const QString &name, const QString &fingerprint) {
+    QMutexLocker lock(&fileLock());
+    QJsonObject kept = readInstances(m_path);
+    kept.insert(name, fingerprint);
+    return writeInstances(m_path, kept);
+}
+
+QSet<QString> RemoteConsent::matching(const QJsonObject &kept, const QList<ProviderInstance> &instances) {
     QSet<QString> names;
     for (const ProviderInstance &instance : instances)
         if (kept.value(instance.name).toString() == consentFingerprint(instance))
             names.insert(instance.name);
     return names;
-}
-
-Errors RemoteConsent::allow(const ProviderInstance &instance) {
-    QMutexLocker lock(&fileLock());
-    QJsonObject kept = readInstances(m_path);
-    kept.insert(instance.name, consentFingerprint(instance));
-    return writeInstances(m_path, kept);
 }
 
 Errors RemoteConsent::prune(const QList<ProviderInstance> &instances) {

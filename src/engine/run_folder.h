@@ -73,10 +73,11 @@ public:
     // none for a run started without them (not limited).
     Errors writeRoots(const FileRoots &roots) const;
     std::optional<FileRoots> roots() const;
-    // The off-machine instances `fugue run --allow-remote` allowed for this run alone (allow-remote.json, #404); none when
-    // the run was started without. The worker adds the answers kept in remote-consent.json.
-    Errors writeRemoteAllowed(const QStringList &instances) const;
-    QStringList remoteAllowed() const;
+    // The off-machine instances `--allow-remote` allowed for this run alone (allow-remote.json, #404), {"<name>": "<fingerprint>"}
+    // (remote_consent.h consentFingerprint of the instance as it was when allowed, so a service changed meanwhile is not covered).
+    // Empty when the run was started without. The worker adds the answers kept in remote-consent.json.
+    Errors writeRemoteAllowed(const QJsonObject &fingerprints) const;
+    QJsonObject remoteAllowed() const;
 
     // What whoever queues the run writes (9.8): run.json with the status `queued`, and
     // the workflow's path when there is one, then the run.queued event.

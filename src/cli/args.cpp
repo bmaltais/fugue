@@ -62,7 +62,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
         {"app",
          {{"list", {0, 0, {}, {}, appList}},
           {"info", {1, 1, {}, {}, appInfo}},
-          {"run", {1, 1, {"input", "out"}, {}, appRun}},
+          {"run", {1, 1, {"input", "out", "allow-remote"}, {}, appRun}},
           {"export", {2, 2, {}, {}, appExport}}}},
         {"cache",
          {{"status", {0, 0, {}, {}, cacheStatus}},

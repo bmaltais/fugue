@@ -21,6 +21,7 @@
 #include <optional>
 
 #include "cli/canvas_run.h"
+#include "cli/compile_step.h"
 #include "cli/commands.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
@@ -654,8 +655,11 @@ Reply appRun(const Command &command, Context &context) {
             context.log(QStringLiteral("--out: no output of this app writes files, so it changes nothing."));
     }
 
+    const Result<QJsonObject> allowRemote = allowRemoteFingerprints(command.options.value("allow-remote"), context);
+    if (!allowRemote)
+        return Reply::failure(allowRemote.errors());
     installStopHandlers();
-    const Result<RunFolder> folder = startBoundRun(*bound, loaded->file, context);
+    const Result<RunFolder> folder = startBoundRun(*bound, loaded->file, context, *allowRemote);
     if (!folder)
         return Reply::failure(folder.errors());
     const canvas::BatchRunResult result = waitForRun(*folder, context, [&context](const QJsonObject &event) {

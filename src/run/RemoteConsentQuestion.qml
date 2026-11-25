@@ -8,7 +8,7 @@ import "../canvas"
 // The question a run waits on before it sends pictures, masks, audio or prompts to a service off this machine (spec 8.2, #404): which
 // service (the instance's name and host) and what leaves, once per instance. Yes keeps the answer (until the instance is removed or
 // its address changes) and the run goes on; No, Escape or closing it cancels the run. Reads App.runs.remoteQuestion; the answer is
-// App.runs.answerRemote. Keys alone: it opens with Yes focused (Enter), Tab goes to No, Escape is No.
+// App.runs.answerRemote. Keys alone: it opens with No focused (a stray Enter cancels, never sends), Tab reaches Yes, Escape is No.
 Question {
     id: ask
     objectName: "remoteConsentAsk"
@@ -16,8 +16,8 @@ Question {
     // Open while a run waits; the answer ends the wait, which closes it (the next question, if one is queued, takes its place).
     visible: services.length > 0
     closePolicy: Popup.NoAutoClose
-    onOpened: allowButton.forceActiveFocus()
-    onServicesChanged: if (services.length > 0) allowButton.forceActiveFocus()
+    onOpened: noButton.forceActiveFocus() // a stray Enter must never be a yes: it lands on No, and Yes takes Enter after Tab
+    onServicesChanged: if (services.length > 0) noButton.forceActiveFocus()
     function answer(allow) {
         App.runs.answerRemote(allow)
     }
@@ -51,6 +51,7 @@ Question {
         }
         QuestionAnswers {
             ThemedButton {
+                id: noButton
                 objectName: "remoteConsentNo"
                 text: qsTr("No, cancel the run")
                 onClicked: ask.answer(false)

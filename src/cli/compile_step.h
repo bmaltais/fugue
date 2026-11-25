@@ -52,6 +52,10 @@ QList<ProviderInstance> registeredInstances(const Registry &registry);
 // naming each service and what leaves, or none. The person's kept answers (remote-consent.json, pruned of instances that are
 // gone) and `allowedNow` (--allow-remote) count. Looks at the graph as a run would (checkGraph) only when some instance is
 // off-machine. `workflow` is as for validateDocument.
-Errors remoteConsentProblems(const CompiledGraph &graph, Context &context, const QString &workflow, const QStringList &allowedNow);
+Errors remoteConsentProblems(const CompiledGraph &graph, Context &context, const QString &workflow, const QJsonObject &allowedNow);
+
+// `--allow-remote` names as {"<name>": "<fingerprint>"} of the registered instances (what remoteConsentProblems and the worker
+// compare against), or unknown_provider for a name that is not one. The run folder keeps the fingerprints, not the names.
+Result<QJsonObject> allowRemoteFingerprints(const QStringList &names, const Context &context);
 
 } // namespace fugue::cli

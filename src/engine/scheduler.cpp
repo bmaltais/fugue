@@ -639,7 +639,7 @@ private:
         if (n.selection && n.instance >= 0 && placementOf(m_providers.at(n.instance).instance) == Placement::OffMachine &&
             !m_options.remoteAllowed.contains(n.selection->instance)) {
             const ProviderInstance &instance = m_providers.at(n.instance).instance;
-            Error error = consentNeededError({RemoteUse{instance.name, hostOf(instance), n.providerKernel ? sendsOf(*n.type, *n.node) : QStringList(), {n.path}}});
+            Error error = consentNeededError({RemoteUse{instance.name, hostOf(instance), consentFingerprint(instance), sendsOf(*n.type, *n.node), {n.path}}});
             error.node = n.path;
             return fail(n, error);
         }

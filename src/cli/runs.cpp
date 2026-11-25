@@ -150,7 +150,7 @@ Plan graphToRun(const Command &command, Context &context) {
 } // namespace
 
 Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
-                                   const QStringList &allowRemote) {
+                                   const QJsonObject &allowRemote) {
     const Result<RunFolder> folder = RunFolder::create(context.runsRoot);
     if (!folder)
         return folder.errors();
@@ -202,21 +202,12 @@ Reply startRun(const Command &command, Context &context) {
     if (!compilation.ok())
         return Reply::failure(compilation.errors());
     // Nothing is sent off this machine unless allowed (8.2, #404): refused here, with a code, before a worker is started.
-    const QStringList allowRemote = command.options.value("allow-remote");
-    const QList<ProviderInstance> instances = registeredInstances(context.registry);
-    for (const QString &name : allowRemote) {
-        const auto known = std::find_if(instances.cbegin(), instances.cend(), [&](const ProviderInstance &i) { return i.name == name; });
-        if (known == instances.cend()) {
-            Error error = makeError("unknown_provider", QStringLiteral("--allow-remote names \"%1\", which is not a provider instance.").arg(name),
-                                    "Use the name of an instance in providers.json (Settings > Providers).");
-            for (const ProviderInstance &i : instances)
-                error.valid.append(i.name);
-            return Reply::failure(error);
-        }
-    }
-    if (const Errors refused = remoteConsentProblems(*compilation, context, file, allowRemote); !refused.isEmpty())
+    const Result<QJsonObject> allowRemote = allowRemoteFingerprints(command.options.value("allow-remote"), context);
+    if (!allowRemote)
+        return Reply::failure(allowRemote.errors());
+    if (const Errors refused = remoteConsentProblems(*compilation, context, file, *allowRemote); !refused.isEmpty())
         return Reply::failure(refused);
-    const Result<RunFolder> folder = startCompiledRun(compilation, plan.document, file, command.has("first"), context, allowRemote);
+    const Result<RunFolder> folder = startCompiledRun(compilation, plan.document, file, command.has("first"), context, *allowRemote);
     if (!folder)
         return Reply::failure(folder.errors());
 
@@ -349,8 +340,7 @@ int work(const QString &runId, Context &context) {
     {
         const QList<ProviderInstance> instances = registeredInstances(context.registry);
         options.remoteAllowed = RemoteConsent().allowedNames(instances);
-        for (const QString &name : folder->remoteAllowed())
-            options.remoteAllowed.insert(name);
+        options.remoteAllowed += RemoteConsent::matching(folder->remoteAllowed(), instances);
     }
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);
