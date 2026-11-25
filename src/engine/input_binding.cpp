@@ -30,9 +30,43 @@ QString roleType(const QString &role) {
 
 enum class Target { Found, Stale, NotInstalled };
 
-// The spec of an input a target names: a top-level node's, or a group instance's exposed input (the type of its first
-// inner target). `why` says what is missing otherwise: Stale when the node or the input is gone, NotInstalled when the
-// node's type has no registered type (its inputs cannot be known).
+// The spec of `port` on a node of `type`: a registered type's own input, or a group's exposed input, which keeps its inner
+// input's spec (spec 5.4), however deep the groups nest. `why` says what is missing otherwise.
+Target portSpec(const Document &document, const Registry &registry, const QString &nodeId, const QString &type, int major,
+                const QString &port, const InputSpec **spec, QString *why, int depth = 0) {
+    *spec = nullptr;
+    if (const NodeType *nodeType = registry.nodeTypeFor(type, major)) {
+        *spec = nodeType->input(port);
+        if (*spec)
+            return Target::Found;
+        *why = QStringLiteral("%1 has no input %2").arg(nodeId, port);
+        return Target::Stale;
+    }
+    if (const GroupDefinition *group = document.group(type)) {
+        for (const GroupInput &exposed : group->inputs) {
+            if (exposed.name != port || exposed.targets.isEmpty())
+                continue;
+            const PortRef inner = exposed.targets.first();
+            const auto innerNode = group->nodes.constFind(inner.node);
+            if (innerNode == group->nodes.constEnd() || depth > 16)
+                break;
+            const Target found = portSpec(document, registry, inner.node, innerNode->type, innerNode->version.major, inner.port, spec, why, depth + 1);
+            if (found == Target::Found)
+                return found;
+            if (found == Target::NotInstalled) {
+                *why = QStringLiteral("%1 is a %2 node, which is not installed").arg(nodeId, innerNode->type);
+                return found;
+            }
+            break;
+        }
+        *why = QStringLiteral("the group %1 exposes no input %2").arg(nodeId, port);
+        return Target::Stale;
+    }
+    *why = QStringLiteral("%1 is a %2 node, which is not installed").arg(nodeId, type);
+    return Target::NotInstalled;
+}
+
+// The spec of an input a target names: a top-level node's, or a group instance's exposed input (its inner input's).
 Target targetSpec(const Document &document, const Registry &registry, const PortRef &target, const InputSpec **spec, QString *why) {
     *spec = nullptr;
     const auto node = document.graph.nodes.constFind(target.node);
@@ -40,33 +74,29 @@ Target targetSpec(const Document &document, const Registry &registry, const Port
         *why = QStringLiteral("the workflow has no node %1").arg(target.node);
         return Target::Stale;
     }
-    if (const NodeType *type = registry.nodeTypeFor(node->type, node->version.major)) {
-        *spec = type->input(target.port);
-        if (*spec)
-            return Target::Found;
-        *why = QStringLiteral("%1 has no input %2").arg(target.node, target.port);
-        return Target::Stale;
-    }
-    if (const GroupDefinition *group = document.group(node->type)) {
-        for (const GroupInput &exposed : group->inputs) {
-            if (exposed.name != target.port || exposed.targets.isEmpty())
-                continue;
-            const PortRef inner = exposed.targets.first();
-            const auto innerNode = group->nodes.constFind(inner.node);
-            const NodeType *innerType = innerNode == group->nodes.constEnd() ? nullptr
-                                                                             : registry.nodeTypeFor(innerNode->type, innerNode->version.major);
-            if ((*spec = innerType ? innerType->input(inner.port) : nullptr))
-                return Target::Found;
-            break;
-        }
-        *why = QStringLiteral("the group %1 exposes no input %2").arg(target.node, target.port);
-        return Target::Stale;
-    }
-    *why = QStringLiteral("%1 is a %2 node, which is not installed").arg(target.node, node->type);
-    return Target::NotInstalled;
+    return portSpec(document, registry, target.node, node->type, node->version.major, target.port, spec, why);
 }
 
 } // namespace
+
+const InputSpec *targetInputSpec(const Document &document, const Registry &registry, const PortRef &target) {
+    const InputSpec *spec = nullptr;
+    QString why;
+    targetSpec(document, registry, target, &spec, &why);
+    return spec;
+}
+
+InputBinding completedBy(InputBinding input, const InputSpec *spec) {
+    if (!spec)
+        return input;
+    if (!input.min)
+        input.min = spec->min;
+    if (!input.max)
+        input.max = spec->max;
+    if (!input.choices && !input.choiceValues && spec->choices)
+        input.choices = spec->choices;
+    return input;
+}
 
 const QStringList &sharedRoles() {
     static const QStringList roles{QStringLiteral("prompt"), QStringLiteral("negative_prompt"), QStringLiteral("strength"),

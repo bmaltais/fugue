@@ -29,6 +29,7 @@
 namespace fugue {
 
 class Registry;
+struct InputSpec;
 
 struct InputBinding {
     QString role;  // one of the reader's roles, or empty for a plain input
@@ -74,6 +75,15 @@ struct BindingReader {
 // The input as the block writes it: only the fields that are set, in the order the schema lists them.
 QJsonObject toJson(const InputBinding &input);
 QJsonArray toJson(const QList<InputBinding> &inputs);
+
+// The spec (type, default, min/max, choices) of the input a target names: a node's own input, or, for a group instance, the
+// inner input its exposed input stands for (spec 5.4), however deep the groups nest. Null when the node or input is gone
+// or the node's type is not installed. The one resolver the checks, the CLI and the App form share.
+const InputSpec *targetInputSpec(const Document &document, const Registry &registry, const PortRef &target);
+
+// `input` with what it leaves unsaid taken from its target's spec: min, max and, with no choice_values, the choices. A form
+// and `fugue app info` show these; the block's own words win. A null spec changes nothing.
+InputBinding completedBy(InputBinding input, const InputSpec *spec);
 
 // Drops the targets that name a node or an input the document no longer has, then the inputs left with none; returns a
 // sentence per drop, in words ("The prompt's target encode.prompt is gone: the workflow has no node encode.").

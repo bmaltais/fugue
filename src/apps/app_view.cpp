@@ -102,15 +102,16 @@ double newSeed(const InputBinding &input) {
     return high <= low ? low : low + double(QRandomGenerator::global()->bounded(quint64(high - low) + 1));
 }
 
-QString kindOf(const InputBinding &input, const QJsonValue &current) {
+QString kindOf(const InputBinding &input, const QJsonValue &current, const InputSpec *spec) {
     if (input.role == QLatin1String("image") || input.role == QLatin1String("mask") || input.role == QLatin1String("model")
         || input.role == QLatin1String("seed"))
         return input.role;
     if (input.choices && !input.choices->isEmpty())
         return QStringLiteral("choice");
-    if (current.isBool())
+    if (current.isBool() || (spec && spec->type.type.id == QLatin1String("bool") && !spec->type.list))
         return QStringLiteral("toggle");
-    if (input.role == QLatin1String("strength") || input.min || input.max || current.isDouble())
+    if (input.role == QLatin1String("strength") || input.min || input.max || current.isDouble()
+        || (spec && spec->type.type.id == QLatin1String("number") && !spec->type.list))
         return QStringLiteral("number");
     return QStringLiteral("text");
 }
@@ -203,9 +204,12 @@ void AppView::buildFields() {
         m_fields << fieldFor(input);
 }
 
-QVariantMap AppView::fieldFor(const InputBinding &input) const {
+QVariantMap AppView::fieldFor(const InputBinding &given) const {
+    // What the block leaves unsaid comes from the target's spec, through a group instance to its inner input (spec 5.4).
+    const InputSpec *spec = m_registry && !given.targets.isEmpty() ? targetInputSpec(m_document, *m_registry, given.targets.first()) : nullptr;
+    const InputBinding input = completedBy(given, spec);
     const QJsonValue current = currentOf(m_document, input);
-    const QString kind = kindOf(input, current);
+    const QString kind = kindOf(input, current, spec);
     TabState &state = const_cast<AppView *>(this)->m_state[m_tab];
     QVariantMap field{{"key", input.key()},
                       {"label", input.label.isEmpty() ? humanize(input.key()) : input.label},
@@ -228,6 +232,10 @@ QVariantMap AppView::fieldFor(const InputBinding &input) const {
     QJsonValue value = state.values.contains(input.key()) ? state.values.value(input.key())
                        : !input.defaultValue.isUndefined() ? input.defaultValue
                                                            : current;
+    // The workflow holds no value (a group instance left at its inner input's default): show the spec's default.
+    if (value.isUndefined() && spec && !spec->defaultValue.isUndefined()
+        && (kind == QLatin1String("number") || kind == QLatin1String("text") || kind == QLatin1String("toggle")))
+        value = spec->defaultValue;
     if (kind == QLatin1String("choice")) {
         QVariantList choices;
         if (input.choices) {
@@ -235,8 +243,11 @@ QVariantMap AppView::fieldFor(const InputBinding &input) const {
                 choices << QVariantMap{{"value", word}, {"text", word}};
             // A choice always has one in force: with no default and no value, the first, kept as the form's value so the
             // run binds what the form shows.
+            // The target's own default is the one in force when the workflow holds none.
+            const QJsonValue first = spec && input.choices->contains(spec->defaultValue.toString()) ? spec->defaultValue
+                                                                                                    : QJsonValue(input.choices->value(0));
             if (!choices.isEmpty() && (!value.isString() || !input.choices->contains(value.toString()))) {
-                value = QJsonValue(input.choices->first());
+                value = first;
                 state.values.insert(input.key(), value);
             }
         }
