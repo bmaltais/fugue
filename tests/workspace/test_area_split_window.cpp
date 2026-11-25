@@ -19,6 +19,7 @@
 #include "../canvas/canvas_app.h"
 #include "../window_grab.h"
 #include "engine/canvas_store.h"
+#include "engine/templates.h"
 #include "window_items.h"
 #include "../test_shard.h"
 
@@ -333,6 +334,56 @@ private slots:
         QVERIFY(app.commands.trigger("area.split-column"));
         QTRY_VERIFY([&] { QFile f(file.fileName()); return f.open(QIODevice::ReadOnly) && f.readAll() != was; }());
         QCOMPARE(AreaTree::load([&] { QFile f(file.fileName()); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }()).count(), 3);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #486: the workflow is fitted for the canvas as it is when the opener finishes; at start the host has not laid the areas out
+    // yet, so the fit is for the whole window and, in the Graph's half, the nodes land off to a side. It is fitted again for the
+    // area's size until the person has moved the view.
+    void aRestoredSplitFramesTheGraphInItsArea() {
+        App app(load(blank));
+        QFile file(app.dir.filePath("workspaces.json"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QStringLiteral(R"({"format": 1, "root": {"type": "branch", "axis": "row", "children": [
+            {"size": 0.5, "node": {"type": "leaf", "area": 1, "view": "graph", "state": {}}},
+            {"size": 0.5, "node": {"type": "leaf", "area": 2, "view": "canvas", "state": {"canvas": {"canvasId": "%1"}}}}]}})")
+                       .arg(m_canvas).toUtf8());
+        file.close();
+        app.workspace.restore();
+        QVERIFY(app.open());
+        Template chosen;
+        chosen.id = chosen.title = "z-image-turbo";
+        chosen.folder = QStringLiteral(FUGUE_SOURCE_DIR "/templates/z-image-turbo");
+        chosen.workflow = chosen.folder + "/workflow.fugue";
+        QVERIFY(app.workflows.openTemplate(chosen));
+        QTRY_VERIFY(host(app) && find(app.window, "canvasArea"));
+        // The window's size is the compositor's to give: it comes after the opener has fitted the graph.
+        app.window->resize(app.window->width() + 400, app.window->height() + 150);
+        settle();
+        QVERIFY(qAbs(app.canvas->width() - 0.5 * host(app)->width()) <= 1);
+        const NodeList *nodes = app.model.nodes();
+        QVERIFY(nodes->rowCount() > 1);
+        const QRectF area(0, 0, app.canvas->width(), app.canvas->height());
+        const qreal z = app.zoom();
+        QVERIFY(z < 1);
+        QRectF all;
+        for (int i = 0; i < nodes->rowCount(); ++i) {
+            const QModelIndex row = nodes->index(i);
+            const QRectF box(app.world->x() + nodes->data(row, NodeList::X).toReal() * z,
+                             app.world->y() + nodes->data(row, NodeList::Y).toReal() * z,
+                             nodes->data(row, NodeList::Width).toReal() * z, nodes->data(row, NodeList::Height).toReal() * z);
+            QVERIFY2(area.contains(box), qPrintable(nodes->data(row, NodeList::NodeId).toString() + " is inside the Graph area"));
+            all = all.united(box);
+        }
+        // Framed, not just inside: the nodes sit in the middle of the area, as a single-area window frames them.
+        QVERIFY2(qAbs(all.center().x() - area.center().x()) < area.width() * 0.1, qPrintable(QString::number(all.center().x()) + " of " + QString::number(area.width())));
+        QVERIFY2(qAbs(all.center().y() - area.center().y()) < area.height() * 0.15, qPrintable(QString::number(all.center().y()) + " of " + QString::number(area.height())));
+        // A view the person has moved is kept when the window is resized.
+        QVERIFY(QMetaObject::invokeMethod(app.canvas, "panBy", Q_ARG(QVariant, 40), Q_ARG(QVariant, 0)));
+        const QPointF at(app.world->x(), app.world->y());
+        app.window->resize(app.window->width() - 200, app.window->height());
+        settle();
+        QCOMPARE(QPointF(app.world->x(), app.world->y()), at);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

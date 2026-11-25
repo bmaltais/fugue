@@ -302,6 +302,7 @@ FocusScope {
         rememberView()
     }
     function rememberView() {
+        autoFramed = false
         const c = toWorld(width / 2, height / 2)
         model.setView(c.x, c.y, world.scale)
     }
@@ -312,11 +313,20 @@ FocusScope {
     // when the canvas is shown at its size.
     property bool placedHidden: false
     property bool fittedHidden: false
+    // The view is the one fit() chose and the person has not moved it: it is fitted again when the canvas's size changes (a split
+    // restored at start lays the areas out after the opener has fitted the graph for the whole window, #486). A pan or a zoom
+    // (rememberView) ends it, so a view the person set is never touched by a resize.
+    property bool autoFramed: false
     function fitUnlessViewed() {
         if (model.view.zoom === undefined) {
             fit()
             fittedHidden = !visible
+            autoFramed = true
         }
+    }
+    function refitAutoFramed() {
+        if (autoFramed && visible && !placedHidden && width > 0 && height > 0)
+            fit()
     }
     function placeAgain() {
         if (!visible || !placedHidden)
@@ -335,8 +345,8 @@ FocusScope {
         interval: 60
         onTriggered: canvas.placeAgain()
     }
-    onWidthChanged: if (placedHidden && visible) placeWhenSettled.restart()
-    onHeightChanged: if (placedHidden && visible) placeWhenSettled.restart()
+    onWidthChanged: { if (placedHidden && visible) placeWhenSettled.restart(); else refitAutoFramed() }
+    onHeightChanged: { if (placedHidden && visible) placeWhenSettled.restart(); else refitAutoFramed() }
     onVisibleChanged: if (placedHidden && visible) placeWhenSettled.restart()
     function fit() {
         if (model.fitView(width, height, reservedTop, reservedBottom))
@@ -399,6 +409,7 @@ FocusScope {
         // does (#162); documentReplaced comes just before the documentReset that follows it.
         function onDocumentReplaced() { canvas.fitOnReset = true }
         function onDocumentReset() {
+            canvas.autoFramed = false
             canvas.fittedHidden = false
             canvas.placedHidden = !canvas.visible
             canvas.applyView()
