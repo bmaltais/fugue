@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 import "../menu"
 
 // New canvas (#232, epic #206, spec 14.5): Photoshop's New Document, on a Question. A name; where the canvas
@@ -239,13 +240,25 @@ Question {
             }
         }
 
-        Label {
-            objectName: "newCanvasProblem"
+        RowLayout {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: backend.error !== "" ? backend.error : backend.problem
-            color: root.look.error
-            wrapMode: Text.Wrap
+            visible: errLabel.text !== ""
+            spacing: 2 * root.look.unit
+            Label {
+                id: errLabel
+                objectName: "newCanvasProblem"
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: backend.error !== "" ? backend.error : backend.problem
+                color: root.look.error
+                wrapMode: Text.Wrap
+            }
+            KitCopyButton {
+                objectName: "newCanvasProblemCopy"
+                look: root.look
+                Layout.alignment: Qt.AlignTop
+                copyText: backend.error !== "" ? backend.error : backend.problem
+            }
         }
 
         RowLayout {

@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 import "../menu"
 
 // Export with quality and scale… (#247) and Export layers as files… (#248), the Canvas view's two export dialogs, on a
@@ -280,13 +281,25 @@ Question {
             color: backend.problem !== "" ? root.look.error : root.look.label
             wrapMode: Text.Wrap
         }
-        Label {
-            objectName: "canvasExportError"
+        RowLayout {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: backend.error
-            color: root.look.error
-            wrapMode: Text.Wrap
+            visible: errLabel.text !== ""
+            spacing: 2 * root.look.unit
+            Label {
+                id: errLabel
+                objectName: "canvasExportError"
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: backend.error
+                color: root.look.error
+                wrapMode: Text.Wrap
+            }
+            KitCopyButton {
+                objectName: "canvasExportErrorCopy"
+                look: root.look
+                Layout.alignment: Qt.AlignTop
+                copyText: backend.error
+            }
         }
 
         RowLayout {

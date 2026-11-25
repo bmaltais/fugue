@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import QtQuick.Shapes
 import Fugue
 import "widgets"
+import "../kit"
 
 // The Canvas view's task bar (#231, docs/canvas-actions-design.md 4; Photoshop's Contextual Task Bar is the reference,
 // docs/ui-ergonomics.md References): edit the canvas from the view without opening a workflow. It lies over the picture
@@ -566,6 +567,15 @@ Item {
                     font.pixelSize: bar.look.labelSize
                     font.features: { "tnum": 1 }
                     text: statusRow.word
+                }
+                Loader { // made only for an error line
+                    Layout.alignment: Qt.AlignTop
+                    active: statusRow.isError
+                    sourceComponent: KitCopyButton {
+                        objectName: "canvasTaskStatusCopy"
+                        look: bar.look
+                        copyText: statusRow.word
+                    }
                 }
                 ViewButton {
                     objectName: "canvasTaskInstallPack"

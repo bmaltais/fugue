@@ -442,6 +442,24 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    void theCopyButtonOfAFailedRunPutsTheMessageAndItsDetailsOnTheClipboard() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QVERIFY(app.commands.run("run.start"));
+        const QJsonObject first{{"code", "model_missing"}, {"message", "No model can run this."}, {"hint", "Download one."}};
+        const QJsonObject second{{"code", "oom"}, {"message", "Not enough GPU memory (request abc123)."}};
+        emit rig.service.event("r1", {{"event", "run.done"}, {"status", "failed"}, {"errors", QJsonArray{first, second}}});
+        QTRY_VERIFY(find(app.window, "appErrorCopy"));
+        QGuiApplication::clipboard()->clear();
+        app.window->grabWindow(); // polish: the click lands on a laid-out window
+        tap(app.window, find(app.window, "appErrorCopy"));
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(),
+                     QStringLiteral("No model can run this. Download one.\nNot enough GPU memory (request abc123)."));
+        QTRY_VERIFY(find(app.window, "appErrorCopy")->property("copied").toBool());
+        QGuiApplication::clipboard()->clear();
+    }
+
     // Ctrl+Enter is the window's Run, also with the cursor in a prompt or a one-line field (#385 left this unverified), and
     // Tab leaves a prompt instead of typing a tab.
     void runIsReachableFromAFocusedTextFieldAndTabLeavesAPrompt() {

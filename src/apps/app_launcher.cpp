@@ -73,7 +73,7 @@ void AppLauncher::add() {
     entry.icon = m_app->preview;
     const QString why = m_entries.add(entry);
     emit changed();
-    emit notice(why.isEmpty() ? tr("%1 is in your launcher.").arg(entry.name) : why);
+    emit notice(why.isEmpty() ? tr("Added to the app launcher") : why);
 }
 
 bool AppLauncher::keepable() const {
@@ -121,7 +121,7 @@ void AppLauncher::keep() {
     }
     m_kept = id;
     emit changed();
-    emit notice(tr("%1 is kept: it is in your apps and your launcher.").arg(entry.name));
+    emit notice(tr("%1 is kept: it is in your apps and your app launcher.").arg(entry.name));
 }
 
 void AppLauncher::remove() {
@@ -129,7 +129,7 @@ void AppLauncher::remove() {
         return;
     const QString why = m_entries.remove(refOf());
     emit changed();
-    emit notice(why.isEmpty() ? tr("%1 is out of your launcher.").arg(m_view->title()) : why);
+    emit notice(why.isEmpty() ? tr("Taken out of the app launcher") : why);
 }
 
 void AppLauncher::openInFugue() {

@@ -75,3 +75,5 @@ navigation e127
 shuffle e162
 chevrons-up-down e211
 cloud e08c
+copy e0a2
+app-window e42b
