@@ -1200,3 +1200,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Minimum width 800 px: below it the page's 80u input panel is capped at 40% and its Live chooser overflowed (seen in a 570 px area).
 - Decisions taken without the owner (each to confirm): the App is `one-per-window` (one store, one form per tab), high; in a split the active area decides `AppView.shown`, so keys follow the area the person works in, medium-high; splitting from the one-area App view does not carry the App into the split, medium; no new `area.view-app` command (view.toggle-app has the key and the menus' rows), medium-high.
 - Not checked by a person: a real GPU window, right to left, a layout with the App area restored at start.
+
+### 2026-11-25 App view: "Runs on <host>" (#395, epic #397)
+
+- Control: `appRunsOn` in `src/apps/AppPage.qml`, a one-line Text (the label tone, `labelSize`) in the input panel's column just above Run, at the same side margins; `AppView::runsOn`.
+- Old: an app whose models were on the paired helper only showed "needs 3 models" and could not run.
+- New: when the models are not here and the paired helper answers, the line "Runs on gx10" shows and the models leave the Needs panel; a local run shows nothing.
+- Rules met: Floor (no new control; the line is text, not a button), Primary (Run stays the one accent), Learned place (where Run's status already is: the foot of the panel), no technical text (a host's name, no address or id).
+- Decision (confirm): a quiet line, not a chip or badge; the shelf and Templates window keep their where-badges (#164), which are about models by name on omarchy hosts.
+- Not checked by a person: the line in a real window (the offscreen tests cover the store, not the pixels).
