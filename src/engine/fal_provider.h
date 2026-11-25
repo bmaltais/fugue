@@ -44,6 +44,10 @@ namespace fugue {
 // The queue's root when an instance names no address, and fal's storage host.
 QString falDefaultAddress();
 QString falDefaultRestAddress();
+// The queue's address (the instance's, else the default) and the storage host's: the `rest_address` setting, else fal's own,
+// else `address` when that is a loopback one (a test's fake serves both).
+QString falQueueAddress(const ProviderInstance &instance);
+QString falRestAddress(const ProviderInstance &instance);
 
 // One endpoint: how Fugue's standard parameters (8.1) become the model's own input fields.
 struct FalModel {
@@ -107,7 +111,8 @@ private:
     void call(const QString &id, QNetworkReply *reply, std::function<void(QNetworkReply *)> then, bool always = false);
     void uploadNext(const QString &id);
     void sendJob(const QString &id);
-    void pollLater(const QString &id);
+    void pollLater(const QString &id, int atLeastMs = 0);
+    void giveUp(const QString &id);
     void pollNow(const QString &id);
     void fetchResult(const QString &id);
     void download(const QString &id, const QUrl &url);

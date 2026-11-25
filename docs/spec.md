@@ -1651,10 +1651,10 @@ with none, so the consent question of #404 is asked before anything is sent; a r
 | --- | --- |
 | `key` | Sent as `Authorization: Key <key>` to fal's own API hosts only: the queue (`address`) and the storage host (`rest_address`). Never to an upload URL, a result or picture URL, or a redirect (none is followed on an API call). Without a key the models are `unavailable` ("paste your key in Settings > Providers") and a job is refused before anything is sent. |
 | `address` | The queue's root, default `https://queue.fal.run`. Tests point it at a local fake. |
-| `rest_address` | fal's storage host, default `https://rest.fal.ai` (what fal's own client uses); `address` when that is set and this is not. |
+| `rest_address` | fal's storage host, default `https://rest.fal.ai` (what fal's own client uses), also when `address` is typed in; only a loopback `address` (a test's fake) serves both. The key goes to this host too, so consent judges both hosts (the more remote wins) and the answer is kept for the pair. |
 | `image_models` | More endpoint ids (a list, or text separated by commas), each with a generic mapping: `prompt`, `image_size`, `seed`, `image_url` (so an edit of one takes one picture), `num_images` 1 and `output_format` png. |
 | `store_io` | `true` leaves fal's default: it keeps a job's inputs and outputs 90 days. Unset, every job is sent with `X-Fal-Store-IO: 0`, and the pictures sent and the results asked to expire in an hour (below). |
-| `timeout_s` | How long a request may go silent before the job fails (default 300). A job is given up on (`node_timeout`, and cancelled at fal) after 6 times that. |
+| `timeout_s` | How long a request may go silent before the job fails (default 300). A job is given up on, in any phase (uploads, queue, result, download), after 6 times that (`node_timeout`; the transfer is cut and the job cancelled at fal), so a trickle of bytes cannot hold it. |
 | `poll_ms` | The first wait between polls (default 500, growing by half each time to 6 times it, 3 s; back to the first when the state changes). |
 
 - **Models.** A table shipped with Fugue (`share/providers/fal-models.json`, compiled in) lists each endpoint id with its title, its
@@ -1681,10 +1681,10 @@ with none, so the consent question of #404 is asked before anything is sent; a r
   safety checker flagged it (`has_nsfw_concepts`, a black picture) is `node_failed`, not a result.
 - **The flow.** Pictures first: each is uploaded to fal storage, `POST <rest_address>/storage/upload/initiate?storage_type=fal-cdn-v3`
   (`{content_type, file_name}`, with the key) answers `{file_url, upload_url}`, then the bytes are `PUT` to `upload_url` (no key, it is
-  presigned), and `file_url` goes into the input. The link is kept per content hash for the session (45 minutes at most, so a picture
-  sent twice is sent once). Then `POST <address>/<endpoint id>` with the input; the answer's `status_url`, `response_url` and
+  presigned), and `file_url` goes into the input. The link is kept per content hash for the session (30 minutes at most, of the hour the
+  file is asked to live, so a picture sent twice is sent once). Then `POST <address>/<endpoint id>` with the input; the answer's `status_url`, `response_url` and
   `cancel_url` are the only URLs used afterwards (building them from the endpoint id is a 405) and must be on the origin of the queue or
-  the storage host, or the job fails before the key goes there. `GET status_url` is polled (`IN_QUEUE` with its position, `IN_PROGRESS`:
+  the storage host, or the job fails before the key goes there. `GET status_url` is polled (answered 202 while the job waits or runs, 200 when it is done; `IN_QUEUE` with its position, `IN_PROGRESS`:
   both shown as the job's status text; `COMPLETED`, with an `error` when the job failed), then `GET response_url`, then the first
   picture is downloaded from its URL **without the key**, under the `http` provider's rules: `http(s)` only, no loopback, link-local or
   private address (unless the instance is at one), redirects checked, 3 hops, 512 MB. Cancel is at once: the job is `cancelled`, polling
@@ -1713,7 +1713,7 @@ with none, so the consent question of #404 is asked before anything is sent; a r
 | other 4xx | `node_failed` | the service's own message |
 | no answer in `timeout_s`, a refused connection | `provider_unreachable` | what happened; the hint names `timeout_s` |
 
-  A poll that gets no answer, a 429 or a 5xx is tried again up to 5 times in a row before it fails the job. There is no retry of a
+  A poll that gets no answer, a 429 (its `Retry-After`, up to 30 s, is waited) or a 5xx is tried again up to 5 times in a row before it fails the job. A key is never sent over plain `http://` to a host that is not loopback: the provider is `provider_unreachable` with a hint to use https. There is no retry of a
   submit (fal bills a job that ran; #403 is the place for what a retry costs).
 - **Wire details** confirmed against fal's own client (fal-js, 2026-11-25): the key header is `Key <key>`, sent only to fal hosts;
   the storage host is `https://rest.fal.ai`; the upload is `initiate` then a `PUT` of the bytes to `upload_url` with the file's
@@ -1725,7 +1725,7 @@ with none, so the consent question of #404 is asked before anything is sent; a r
 - **Decisions** (the builder's, each with its confidence; overturn any): the model offers are `unavailable` without a key rather than
   `ready` (high: a pick that can only fail is worse); an inpaint model is offered for `image.generate` with the `mask` input, as 8.1
   says, not as an edit (high); `Description.engine` is `fal@<host>` because selection reads one engine per instance, the endpoint being
-  in the model handle and in `used.engine` (high); uploads and results expire in one hour, the session's reuse window 45 minutes
+  in the model handle and in `used.engine` (high); uploads and results expire in one hour, the session's reuse window 30 minutes
   (medium: the header is in fal's client, its effect was not observed); a flagged (black) picture fails the node instead of being
   returned (medium-high); a cancel answers `cancelled` at once, without waiting for fal's reply to the PUT (medium-high); a job
   that names URLs on another origin than the queue's or the storage host's is refused, since the key travels with them (high).

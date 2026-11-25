@@ -6,7 +6,10 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QtTest>
 
 #include "engine/fal_provider.h"
@@ -60,10 +63,11 @@ public:
             if (!keyed(request))
                 return refused();
             ++polls;
+            // fal answers 202 while the job waits or runs, 200 when it is done.
             if (polls == 1)
-                return HttpResponse{200, json({{"status", "IN_QUEUE"}, {"queue_position", 2}})};
+                return HttpResponse{202, json({{"status", "IN_QUEUE"}, {"queue_position", 2}})};
             if (polls == 2 || endless)
-                return HttpResponse{200, json({{"status", "IN_PROGRESS"}})};
+                return HttpResponse{202, json({{"status", "IN_PROGRESS"}})};
             return HttpResponse{200, completed.isEmpty() ? json({{"status", "COMPLETED"}}) : completed};
         });
         api.on("GET", "/fal-ai/flux/requests/r1", [this](const HttpRequest &request) {
@@ -260,6 +264,7 @@ private slots:
         QCOMPARE(puts.size(), 1);
         QCOMPARE(puts.first().body, kPng);
         QCOMPARE(puts.first().headers.value("content-type"), QByteArray("image/png"));
+        QVERIFY(!puts.first().headers.contains("authorization")); // the upload URL is presigned: no key
         const QJsonObject body = fixture.lastBody("/fal-ai/flux-pro/kontext");
         QCOMPARE(body.value("image_url").toString(), fixture.cdnUrl("/files/in-image.png"));
         QCOMPARE(body.value("prompt").toString(), QStringLiteral("make it night"));
@@ -326,6 +331,80 @@ private slots:
         });
         QCOMPARE(run(*provider, fixture.request("image.generate", kDev, {{"prompt", "x"}})).error.code, QStringLiteral("provider_unreachable"));
         QVERIFY(fixture.cdn.requests().isEmpty());
+    }
+
+    void storageOnItsOwnHostGetsTheKeyAndTheQueueStillDoes() {
+        Fixture fixture;
+        FakeHttpServer storage;
+        storage.listen();
+        storage.on("POST", "/storage/upload/initiate?storage_type=fal-cdn-v3", [&](const HttpRequest &request) {
+            return HttpResponse{200, json({{"file_url", fixture.cdnUrl("/files/in-" + parse(request.body).value("file_name").toString())},
+                                           {"upload_url", fixture.cdnUrl("/upload/" + parse(request.body).value("file_name").toString())}})};
+        });
+        auto provider = fixture.provider({{"rest_address", QString::fromLatin1(storage.origin())}});
+        const JobStatus status = run(*provider, fixture.request("image.edit", "fal-ai/flux-pro/kontext", {{"prompt", "x"}}, {{"images", QJsonArray{fixture.picture("s.png")}}}));
+        QCOMPARE(status.state, QStringLiteral("done"));
+        QVERIFY(fixture.api.requestsTo("POST", "/storage/upload/initiate?storage_type=fal-cdn-v3").isEmpty());
+        QCOMPARE(storage.requests().size(), 1);
+        QCOMPARE(storage.requests().first().headers.value("authorization"), "Key " + kKey);
+    }
+
+    void storageLinksOnPrivateAddressesAreRefusedForARemoteQueue() {
+        Fixture fixture;
+        // The queue is "remote" (never reached: the job fails first); the storage is the loopback fake, which names a loopback upload URL.
+        ProviderInstance instance;
+        instance.name = QStringLiteral("fal.ai");
+        instance.type = QStringLiteral("fal");
+        instance.key = QString::fromLatin1(kKey);
+        instance.settings = QJsonObject{{"rest_address", fixture.apiUrl("")}, {"poll_ms", 10}};
+        FalProvider remote(instance);
+        const JobStatus status = run(remote, fixture.request("image.edit", "fal-ai/flux-pro/kontext", {{"prompt", "x"}}, {{"images", QJsonArray{fixture.picture("p.png")}}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+        QVERIFY(status.error.message.contains("Fugue does not use"));
+        QVERIFY(fixture.cdn.requests().isEmpty());
+    }
+
+    void theKeyIsNotSentOverPlainHttpToARemoteHost() {
+        ProviderInstance instance;
+        instance.name = QStringLiteral("fal.ai");
+        instance.type = QStringLiteral("fal");
+        instance.key = QString::fromLatin1(kKey);
+        instance.address = QStringLiteral("http://queue.example.com");
+        FalProvider provider(instance);
+        const auto described = await<Description>([&](auto reply) { provider.describe(reply); });
+        QCOMPARE(described.error().code, QStringLiteral("provider_unreachable"));
+        QVERIFY(described.error().hint.contains("https://"));
+    }
+
+    void aCancelWhileTheJobIsBeingSentIsPassedOnWhenItsUrlsArrive() {
+        Fixture fixture;
+        auto provider = fixture.provider();
+        const auto job = await<QString>([&](auto reply) { provider->submit(fixture.request("image.generate", kDev, {{"prompt", "x"}}), reply); });
+        QVERIFY(job.ok());
+        QCOMPARE(await<QString>([&](auto reply) { provider->cancel(job.value(), reply); }).value(), QStringLiteral("cancelled"));
+        QTRY_COMPARE(fixture.api.requestsTo("PUT", "/fal-ai/flux/requests/r1/cancel").size(), 1);
+        QCOMPARE(fixture.polls, 0);
+    }
+
+    void aPictureThatTricklesInIsGivenUpOnAtTheJobsDeadline() {
+        Fixture fixture;
+        // A file server that sends a huge picture one byte at a time: no byte-to-byte timeout ever trips.
+        QTcpServer drip;
+        QVERIFY(drip.listen(QHostAddress::LocalHost, 0));
+        QObject::connect(&drip, &QTcpServer::newConnection, &drip, [&drip] {
+            QTcpSocket *socket = drip.nextPendingConnection();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket] {
+                socket->readAll();
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 100000000\r\n\r\n");
+                auto *timer = new QTimer(socket);
+                QObject::connect(timer, &QTimer::timeout, socket, [socket] { socket->write("x"); });
+                timer->start(20);
+            });
+        });
+        fixture.result = HttpResponse{200, json({{"images", QJsonArray{QJsonObject{{"url", QString("http://127.0.0.1:%1/p.png").arg(drip.serverPort())}}}}})};
+        auto provider = fixture.provider({{"timeout_s", 0.15}}); // the job's deadline is 6 times that
+        const JobStatus status = run(*provider, fixture.request("image.generate", kDev, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_timeout"));
     }
 
     void errorsMapToTheCodesOfTheSpecAndNeverCarryTheKey() {

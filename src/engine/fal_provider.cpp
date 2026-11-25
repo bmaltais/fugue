@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -31,7 +32,7 @@ constexpr int kDefaultPollMs = 500;
 constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
 // Pictures sent to fal storage are asked to expire in an hour; a link older than 45 minutes is not reused.
 constexpr int kStorageLifetimeS = 3600;
-constexpr qint64 kUploadReuseMs = 45LL * 60 * 1000;
+constexpr qint64 kUploadReuseMs = 30LL * 60 * 1000;
 constexpr qint64 kJsonCap = 64LL << 20;
 constexpr qint64 kPictureCap = 512LL << 20;
 constexpr int kMaxHops = 3;
@@ -101,6 +102,34 @@ QString originOf(const QUrl &url) {
 QString falDefaultAddress() { return QStringLiteral("https://queue.fal.run"); }
 QString falDefaultRestAddress() { return QStringLiteral("https://rest.fal.ai"); }
 
+namespace {
+QString trimmedAddress(QString address) {
+    address = address.trimmed();
+    while (address.endsWith(QLatin1Char('/')))
+        address.chop(1);
+    return address;
+}
+bool loopbackHost(const QString &host) {
+    QHostAddress address;
+    return host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
+           (address.setAddress(host) && address.isLoopback());
+}
+} // namespace
+
+QString falQueueAddress(const ProviderInstance &instance) {
+    const QString address = trimmedAddress(instance.address);
+    return address.isEmpty() ? falDefaultAddress() : address;
+}
+
+QString falRestAddress(const ProviderInstance &instance) {
+    const QString set = trimmedAddress(instance.settings.value("rest_address").toString());
+    if (!set.isEmpty())
+        return set;
+    // The storage host is fal's own even when the queue's address is typed in; only a loopback fake serves both.
+    const QString address = trimmedAddress(instance.address);
+    return !address.isEmpty() && loopbackHost(QUrl(address).host()) ? address : falDefaultRestAddress();
+}
+
 QList<FalModel> falShippedModels() {
     QFile file(QStringLiteral(":/fugue/providers/fal-models.json"));
     if (!file.open(QIODevice::ReadOnly))
@@ -152,7 +181,6 @@ struct FalProvider::Job {
     QList<Upload> uploads;
     int uploadAt = 0;
     QString statusUrl, responseUrl, cancelUrl;
-    qint64 deadline = 0;
     int polls = 0;    // polls in the same state: the wait grows with it
     int failures = 0; // polls that got no usable answer in a row
     int hops = 0;
@@ -174,18 +202,9 @@ int FalProvider::timeoutMs() const {
     return int(std::clamp(seconds > 0 ? seconds : double(kDefaultTimeoutS), 0.05, 86400.0) * 1000);
 }
 
-QUrl FalProvider::queueUrl(const QString &path) const {
-    return QUrl((m_instance.address.isEmpty() ? falDefaultAddress() : m_instance.address) + path);
-}
+QUrl FalProvider::queueUrl(const QString &path) const { return QUrl(falQueueAddress(m_instance) + path); }
 
-QUrl FalProvider::restUrl(const QString &path) const {
-    QString base = m_instance.settings.value("rest_address").toString().trimmed();
-    if (base.isEmpty())
-        base = m_instance.address.isEmpty() ? falDefaultRestAddress() : m_instance.address;
-    while (base.endsWith(QLatin1Char('/')))
-        base.chop(1);
-    return QUrl(base + path);
-}
+QUrl FalProvider::restUrl(const QString &path) const { return QUrl(falRestAddress(m_instance) + path); }
 
 QString FalProvider::host() const { return queueUrl({}).host(); }
 
@@ -334,6 +353,17 @@ Result<Description> FalProvider::description() const {
     if (!wholeUrl(queue))
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 has no usable address.").arg(m_instance.name),
                                              QStringLiteral("Remove the address of %1 in %2: fal.ai needs none.").arg(m_instance.name, where())));
+    // The key goes with every call: only to https, or to a loopback fake.
+    if (!m_instance.key.isEmpty()) {
+        for (const QUrl &url : {queue, restUrl({})})
+            if (url.scheme() != QLatin1String("https") && !loopbackHost(url.host()))
+                return Result<Description>(makeError(QStringLiteral("provider_unreachable"),
+                                                      QStringLiteral("%1 would send its key over plain http to %2.").arg(m_instance.name, url.host()),
+                                                      QStringLiteral("Use https:// for the address of %1 in %2.").arg(m_instance.name, where())));
+    }
+    if (!wholeUrl(restUrl({})))
+        return Result<Description>(makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 has no usable storage address.").arg(m_instance.name),
+                                             QStringLiteral("Fix rest_address for %1 in %2.").arg(m_instance.name, where())));
     Description description;
     description.engine = QStringLiteral("fal@") + host();
     const bool keyed = !m_instance.key.isEmpty();
@@ -491,6 +521,8 @@ void FalProvider::submit(const JobRequest &request, Reply<QString> reply) {
     job->status.state = QStringLiteral("running");
     job->status.stage = job->uploads.isEmpty() ? QStringLiteral("submitting") : QStringLiteral("uploading");
     m_jobs.insert(id, job);
+    // One deadline for the whole job, every phase: a transfer timeout restarts with each byte, so a trickle never trips it.
+    QTimer::singleShot(timeoutMs() * 6, this, [this, id] { giveUp(id); });
     reply(Result<QString>(id));
     uploadNext(id);
 }
@@ -539,6 +571,9 @@ void FalProvider::uploadNext(const QString &id) {
                                                QStringLiteral("Run the node again.")));
                  Job::Upload &done = job->uploads[job->uploadAt];
                  done.url = fileUrl.toString();
+                 const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                 for (auto it = m_uploaded.begin(); it != m_uploaded.end();)
+                     it = now - it->at > kUploadReuseMs ? m_uploaded.erase(it) : std::next(it);
                  m_uploaded.insert(done.hash, Uploaded{done.url, QDateTime::currentMSecsSinceEpoch()});
                  ++job->uploadAt;
                  uploadNext(id);
@@ -624,7 +659,6 @@ void FalProvider::sendJob(const QString &id) {
              if (job->status.isTerminal()) // cancelled while the job was being sent
                  return sendCancel(job);
              job->phase = Phase::Waiting;
-             job->deadline = QDateTime::currentMSecsSinceEpoch() + qint64(timeoutMs()) * 6;
              pollLater(id);
          },
          true);
@@ -637,7 +671,7 @@ void FalProvider::sendCancel(const std::shared_ptr<Job> &job) {
     connect(put, &QNetworkReply::finished, put, &QObject::deleteLater);
 }
 
-void FalProvider::pollLater(const QString &id) {
+void FalProvider::pollLater(const QString &id, int atLeastMs) {
     const auto job = m_jobs.value(id);
     if (!job)
         return;
@@ -645,28 +679,37 @@ void FalProvider::pollLater(const QString &id) {
     // 0.5 s growing to 3 s; it starts over when the job's state changes.
     const int wait = int(std::min(double(base) * std::pow(1.5, job->polls), double(base) * 6));
     ++job->polls;
-    QTimer::singleShot(wait, this, [this, id] { pollNow(id); });
+    QTimer::singleShot(std::max(wait, atLeastMs), this, [this, id] { pollNow(id); });
+}
+
+void FalProvider::giveUp(const QString &id) {
+    const auto job = m_jobs.value(id);
+    if (!job || job->status.isTerminal())
+        return;
+    fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() * 6 / 1000),
+                       QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, where())));
+    if (job->reply && job->phase != Phase::Submitting)
+        job->reply->abort();
+    sendCancel(job);
 }
 
 void FalProvider::pollNow(const QString &id) {
     const auto job = m_jobs.value(id);
     if (!job || job->status.isTerminal())
         return;
-    if (QDateTime::currentMSecsSinceEpoch() > job->deadline) {
-        sendCancel(job);
-        return fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() * 6 / 1000),
-                                  QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, where())));
-    }
     call(id, send(QUrl(job->statusUrl), "GET"), [this, id, job](QNetworkReply *reply) {
         const int code = codeOf(reply);
         // No answer, a rate limit or a gateway hiccup: try again a few times, waiting longer each time.
         if (code == 0 || code == 429 || code == 500 || code == 502 || code == 503 || code == 504) {
             if (++job->failures >= kMaxTransientPolls)
                 return fail(id, failure(reply, answerOf(reply)));
-            return pollLater(id);
+            bool seconds = false;
+            const int retryAfter = QString::fromLatin1(reply->rawHeader("Retry-After")).trimmed().toInt(&seconds);
+            return pollLater(id, seconds ? std::clamp(retryAfter, 0, 30) * 1000 : 0);
         }
         job->failures = 0;
-        if (code != 200)
+        // fal answers 202 while the job is queued or running, 200 when it is done.
+        if (code != 200 && code != 202)
             return fail(id, failure(reply, answerOf(reply)));
         const QJsonObject answer = answerOf(reply);
         const QString state = answer.value("status").toString();
