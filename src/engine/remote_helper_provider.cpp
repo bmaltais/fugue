@@ -29,6 +29,13 @@ constexpr int kLostPolls = 3;              // status requests in a row that may 
 Error hostError(const QJsonObject &error) {
     const QString code = error.value("code").toString();
     const QString message = error.value("message").toString(QStringLiteral("The provider failed."));
+    // MOSS Image's tokenizer is a file the host's engine reads (#544): without it the engine says to pass one on its command line,
+    // which is not something a person here can do. The host's tokenizers folder is where it goes.
+    if (message.contains(QLatin1String("--tokenizer")) || message.contains(QLatin1String("qwen3.5_tokenizer")) ||
+        (message.contains(QLatin1String("requires")) && message.contains(QLatin1String("tokenizer"), Qt::CaseInsensitive)))
+        return makeError(QStringLiteral("model_missing"),
+                         QStringLiteral("The paired host has no Qwen3.5 tokenizer (qwen3.5_tokenizer.json), which MOSS Image reads."),
+                         QStringLiteral("Put qwen3.5_tokenizer.json in the tokenizers folder of the paired host (Get ready here downloads it to this machine only)."));
     // These keep their codes (8.5, 8.8, 9.5); everything else the host says is about this job's work.
     if (code == QLatin1String("out_of_memory") || code == QLatin1String("cancelled") ||
         code == QLatin1String("model_missing"))

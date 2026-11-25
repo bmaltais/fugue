@@ -21,6 +21,8 @@
 
 #include <vips/vips8>
 
+#include "engine/compile_for_run.h"
+#include "engine/document.h"
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
@@ -50,6 +52,7 @@ const QString kEmptyVideoLatent = QStringLiteral("fugue/empty-video-latent");
 const QString kVaeDecodeVideo = QStringLiteral("fugue/vae-decode-video");
 const QString kVaeEncode = QStringLiteral("fugue/vae-encode");
 const QString kVaeEncodeVideo = QStringLiteral("fugue/vae-encode-video");
+const QString kTokenizerFile = QStringLiteral("tokenizers/qwen3.5_tokenizer.json");
 
 void writeFile(const QString &path, const QByteArray &bytes) {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -223,6 +226,23 @@ MediaHandle maskPicture(Bench &bench, const QString &name, int width, int height
     if (!image)
         qFatal("cannot probe %s", qPrintable(path));
     return image.value();
+}
+
+// The tokenizers folder holds `bytes` as qwen3.5_tokenizer.json, and a person's catalog entry of the id `qwen3.5-tokenizer` (which
+// replaces Fugue's) names that file.
+void useCatalogTokenizer(Bench &bench, const QByteArray &bytes) {
+    bench.model("fugue/tokenizer", kTokenizerFile, bytes);
+    QDir().mkpath(dataDir() + "/catalog");
+    writeFile(dataDir() + "/catalog/test.json",
+              QJsonDocument(QJsonObject{{"catalog", 1},
+                                        {"models", QJsonArray{QJsonObject{{"id", "qwen3.5-tokenizer"},
+                                                                          {"resource", "fugue/tokenizer"},
+                                                                          {"title", "Qwen3.5 tokenizer"},
+                                                                          {"file", "qwen3.5_tokenizer.json"},
+                                                                          {"url", "https://example.com/tokenizer.json"},
+                                                                          {"size", bytes.size()},
+                                                                          {"sha256", QString(sha256(bytes)).remove("sha256:")}}}}})
+                  .toJson());
 }
 
 } // namespace
@@ -833,17 +853,7 @@ private slots:
         QVERIFY(!request);
         QCOMPARE(request.error().code, QStringLiteral("model_missing"));
         QVERIFY2(request.error().message.contains("qwen3.5_tokenizer.json"), qPrintable(request.error().message));
-        QVERIFY(request.error().hint.contains("Tokenizer"));
-    }
-
-    void mossTakesAPickedTokenizerAsTheTokenizerOption() {
-        Bench bench;
-        const QScopeGuard cleanup([] { QFile::remove(Bench::modelPath("tokenizers/my-tokenizer.json")); });
-        QJsonObject parts = moss(bench, "qwen3.5");
-        parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/my-tokenizer.json", "{}"));
-        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
-        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
-        QCOMPARE(request->params.value("context").toObject().value("tokenizer").toString(), Bench::modelPath("tokenizers/my-tokenizer.json"));
+        QVERIFY2(request.error().hint.contains("Get ready"), qPrintable(request.error().hint));
     }
 
     void mossFindsTheCatalogsTokenizerByItsHashWhenNoneIsPicked() {
@@ -893,30 +903,107 @@ private slots:
         QVERIFY(!bench.loaded(zImageWithHeaders(bench)).value("derived").toObject().contains("tokenizer"));
     }
 
-    void aTokenizerPickedForAModelThatReadsNoneIsRefusedBeforeTheHelper() {
+    // The tokenizer is a companion file of the model, never an input (#544): Load Models lists it missing on the Diffusion model
+    // input, as it would a missing model file, so the open's Get ready offer and a check say so before the run.
+    void loadModelsChecksTheTokenizerOfAMossModel() {
         Bench bench;
+        QFile::remove(Bench::modelPath(kTokenizerFile));
+        QFile::remove(dataDir() + "/catalog/test.json");
+        const auto check = [&](const QJsonObject &parts) {
+            Values inputs;
+            for (auto it = parts.begin(); it != parts.end(); ++it)
+                inputs.insert(it.key(), Value(it.value()));
+            return bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs));
+        };
+        const Errors absent = check(moss(bench, "qwen3.5"));
+        QCOMPARE(absent.size(), 1);
+        QCOMPARE(absent.first().code, QStringLiteral("model_missing"));
+        QCOMPARE(absent.first().input, QStringLiteral("diffusion_model"));
+        QVERIFY2(absent.first().message.contains("qwen3.5_tokenizer.json"), qPrintable(absent.first().message));
+        QVERIFY2(absent.first().hint.contains("Get ready"), qPrintable(absent.first().hint));
+        QVERIFY(check(zImageWithHeaders(bench)).isEmpty()); // a model that reads none
+        useCatalogTokenizer(bench, "{\"version\": \"3.0\"}");
+        const QScopeGuard cleanup([] {
+            QFile::remove(Bench::modelPath(kTokenizerFile));
+            QFile::remove(dataDir() + "/catalog/test.json");
+        });
+        QVERIFY(check(moss(bench, "qwen3.5")).isEmpty()); // on disk
+    }
+
+    // Get ready lists what a workflow's models need (the banner on open, the sheet, the download): the tokenizer of a MOSS model
+    // with the catalog's source and size, like a model file; not for another model, not when it is on disk.
+    void getReadyListsTheTokenizerOfAMossModelThatLacksIt() {
+        Bench bench;
+        QFile::remove(Bench::modelPath(kTokenizerFile));
+        QFile::remove(dataDir() + "/catalog/test.json");
+        const QScopeGuard cleanup([] {
+            QFile::remove(Bench::modelPath(kTokenizerFile));
+            QFile::remove(dataDir() + "/catalog/test.json");
+        });
+        const ModelLibrary library = ModelLibrary::current(&bench.registry);
+        const QJsonObject mossParts = moss(bench, "qwen3.5");
+        const QJsonArray models{mossParts.value("diffusion_model"), mossParts.value("text_encoder"), mossParts.value("vae")};
+        const QList<MissingModel> absent = library.missing(models, bench.hashes);
+        QCOMPARE(absent.size(), 1);
+        QCOMPARE(absent.first().handle.value("name").toString(), QStringLiteral("qwen3.5_tokenizer.json"));
+        QCOMPARE(absent.first().handle.value("resource").toString(), QStringLiteral("fugue/tokenizer"));
+        QCOMPARE(absent.first().size, qint64(12807982));
+        QVERIFY(absent.first().source.startsWith("https://huggingface.co/Qwen/Qwen3.5-9B/"));
+        QVERIFY(absent.first().folder.endsWith("/tokenizers"));
+
+        const QJsonObject zParts = zImageWithHeaders(bench);
+        QVERIFY(library.missing(QJsonArray{zParts.value("diffusion_model"), zParts.value("text_encoder"), zParts.value("vae")}, bench.hashes).isEmpty());
+
+        useCatalogTokenizer(bench, "{\"version\": \"3.0\"}");
+        QVERIFY(ModelLibrary::current(&bench.registry).missing(models, bench.hashes).isEmpty());
+    }
+
+    // The model is the same on a paired host, which finds the file in its own tokenizers folder: Fugue sends the catalog's handle.
+    void aMossModelOnAPairedHostIsSentTheCatalogsTokenizerHandle() {
+        Bench bench;
+        QFile::remove(Bench::modelPath(kTokenizerFile)); // none here: the host has it
+        QFile::remove(dataDir() + "/catalog/test.json");
+        const QJsonObject model = bench.loaded(moss(bench, "qwen3.5"));
+        const Result<JobRequest> request = bench.remoteRequest(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject sent = request->params.value("context").toObject().value("tokenizer").toObject();
+        QCOMPARE(sent.value("name").toString(), QStringLiteral("qwen3.5_tokenizer.json"));
+        QCOMPARE(sent.value("sha256").toString(), QStringLiteral("sha256:5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"));
+        const Result<JobRequest> other = bench.remoteRequest(kTextEncode, {{"model", Value(bench.loaded(zImageWithHeaders(bench)))}, {"prompt", Value("a fox")}});
+        QVERIFY2(other, other ? "" : qPrintable(other.error().message));
+        QVERIFY(!other->params.value("context").toObject().contains("tokenizer"));
+    }
+
+    // Load Models 1.1.0 had a Tokenizer input; a workflow saved with it opens and runs, the value ignored without a notice.
+    void aWorkflowSavedWithLoadModels110AndATokenizerStillCompiles() {
+        Bench bench;
+        const NodeType &type = bench.type(kLoadModels);
+        QVERIFY(!type.input("tokenizer"));
+        QVERIFY(type.retiredInputs.contains("tokenizer"));
+        const QJsonObject parts = moss(bench, "qwen3.5");
+        const QJsonObject picked = bench.model("fugue/tokenizer", "tokenizers/my-tokenizer.json", "{}");
         const QScopeGuard cleanup([] { QFile::remove(Bench::modelPath("tokenizers/my-tokenizer.json")); });
-        QJsonObject parts = zImageWithHeaders(bench);
-        parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/my-tokenizer.json", "{}"));
-        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
-        QVERIFY(!request);
-        QCOMPARE(request.error().code, QStringLiteral("model_mismatch"));
-        QVERIFY2(request.error().message.contains("reads no separate tokenizer"), qPrintable(request.error().message));
-        // Load Models says it too, on the Tokenizer input, before any run.
-        Values inputs;
-        for (auto it = parts.begin(); it != parts.end(); ++it)
-            inputs.insert(it.key(), Value(it.value()));
-        const Errors errors = bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs));
-        QCOMPARE(errors.size(), 1);
-        QCOMPARE(errors.first().input, QStringLiteral("tokenizer"));
+        QJsonObject inputs{{"diffusion_model", parts.value("diffusion_model")}, {"text_encoder", parts.value("text_encoder")},
+                           {"vae", parts.value("vae")}, {"tokenizer", picked}};
+        const QJsonObject document{{"fugue", 1},
+                                   {"graph", QJsonObject{{"nodes", QJsonObject{{"l", QJsonObject{{"type", "fugue/load-models"}, {"version", "1.1.0"}, {"inputs", inputs}}}}}}}};
+        const Result<Document> loaded = Document::fromJson(document);
+        QVERIFY(loaded);
+        const Compilation compiled = compileForRun(*loaded, bench.registry, {}, {});
+        QVERIFY2(compiled.ok(), qPrintable(compiled.errors().value(0).message));
+        for (const Error &warning : compiled.warnings()) // no notice about the value (the node feeds no sink here)
+            QVERIFY2(warning.input != QLatin1String("tokenizer") && warning.code != QLatin1String("unknown_input"), qPrintable(warning.message));
     }
 
     void aTokenizerPathTheEngineWouldReadAsSettingsIsRefused() {
         Bench bench;
         const QScopeGuard cleanup([] { QFile::remove(Bench::modelPath("tokenizers/a=b,c.json")); });
-        QJsonObject parts = moss(bench, "qwen3.5");
-        parts.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/a=b,c.json", "{}"));
-        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        // A model made with a tokenizer file of that name in its handle (the folder of the default one could hold such a character too).
+        QJsonObject model = bench.loaded(moss(bench, "qwen3.5"));
+        QJsonObject derived = model.value("derived").toObject();
+        derived.insert("tokenizer", bench.model("fugue/tokenizer", "tokenizers/a=b,c.json", "{}"));
+        model.insert("derived", derived);
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
         QVERIFY(!request);
         QCOMPARE(request.error().code, QStringLiteral("input_invalid"));
         QVERIFY2(request.error().message.contains("\"=\""), qPrintable(request.error().message));

@@ -12,6 +12,7 @@
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
+#include "engine/model_catalog.h"
 #include "engine/model_shape.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
@@ -361,7 +362,49 @@ QList<MissingModel> ModelLibrary::missing(const Document &document, FileHashes &
     return missing(document.models(), hashes);
 }
 
-QList<MissingModel> ModelLibrary::missing(const QJsonArray &models, FileHashes &hashes) const {
+QJsonObject companionTokenizer(const QString &diffusionFile) {
+    const std::optional<ModelShape> shape = diffusionFile.isEmpty() ? std::nullopt : ModelShapes::shared().of(diffusionFile);
+    if (!shape || !shape->needsQwen35Tokenizer)
+        return {};
+    const ModelCatalog catalog = ModelCatalog::load();
+    const CatalogModel *entry = catalog.find(QStringLiteral("qwen3.5-tokenizer"));
+    return entry ? entry->handle() : QJsonObject();
+}
+
+namespace {
+
+// `models` and the companion files of the diffusion models among them that are on this machine: the tokenizer of a MOSS Image model,
+// with its source and size from the catalog, so Get ready offers it like a model file of the workflow.
+QJsonArray withCompanions(const QJsonArray &models, const ModelLibrary &library, FileHashes &hashes) {
+    QJsonArray out = models;
+    QSet<QString> listed;
+    for (const QJsonValue entry : models)
+        listed.insert(entry.toObject().value(QStringLiteral("hash")).toString());
+    for (const QJsonValue entry : models) {
+        const QJsonObject handle = entry.toObject();
+        const QString resource = handle.value(QStringLiteral("resource")).toString();
+        if (resource != QLatin1String("fugue/diffusion-model") && resource != QLatin1String("fugue/model"))
+            continue;
+        const Result<QString> found = library.resolve(handle, hashes, ModelLibrary::Hashing::RememberedOnly);
+        if (!found)
+            continue; // not here: its own row is the first thing to get, and its shape cannot be read
+        QJsonObject tokenizer = companionTokenizer(found.value());
+        if (tokenizer.isEmpty() || listed.contains(tokenizer.value(QStringLiteral("hash")).toString()))
+            continue;
+        listed.insert(tokenizer.value(QStringLiteral("hash")).toString());
+        if (const CatalogModel *known = ModelCatalog::load().find(QStringLiteral("qwen3.5-tokenizer"))) {
+            tokenizer.insert(QStringLiteral("source"), known->url);
+            tokenizer.insert(QStringLiteral("size"), double(known->size));
+        }
+        out.append(tokenizer);
+    }
+    return out;
+}
+
+} // namespace
+
+QList<MissingModel> ModelLibrary::missing(const QJsonArray &named, FileHashes &hashes) const {
+    const QJsonArray models = withCompanions(named, *this, hashes);
     QList<MissingModel> out;
     for (const QJsonValue entry : models) {
         QJsonObject handle = entry.toObject();

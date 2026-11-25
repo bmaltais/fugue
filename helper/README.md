@@ -16,8 +16,10 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 The engine reports a component that cannot be built as "cannot load component from '<file>'" and logs the reason (a
 missing tokenizer, a tensor that is not there) as an error line. `helper/src/engine_error.h` keeps the last error line of
 the log (`logToStderr`) and `lastError()` appends it to such a message once: "... (the engine said: ...)". The engine reads
-MOSS Image's Qwen3.5 tokenizer from the context option `tokenizer` (a file; over `--serve-http` a handle, resolved in the
-host's `tokenizers` folder).
+MOSS Image's Qwen3.5 tokenizer from the context option `tokenizer` (a file; over `--serve-http` a handle {name, sha256}, resolved in
+the host's `tokenizers` folder). Fugue sends the catalog's handle itself for a model that reads it (Load Models has no
+Tokenizer input, #544); a host that lacks the file answers with the engine's "pass --tokenizer FILE" reason, which Fugue shows as
+a `model_missing` naming the host's tokenizers folder.
 
 ## Restore (`image.restore`, SeedVR2)
 
