@@ -64,10 +64,15 @@ ColumnLayout {
                 font.pixelSize: page.look.labelSize
                 text: ask.q.kind === "setup"
                       ? qsTr("%1\nIn %2, this command runs as you:\n%3").arg(ask.q.description).arg(ask.q.folder).arg(ask.q.command)
-                      : qsTr("%1\nRuns as: %2\nDeclares: %3\nNo sandbox: a trusted pack runs programs as you.")
+                      : qsTr("%1\nRuns as: %2\nDeclares: %3%4\nNo sandbox: a trusted pack runs programs as you.")
                             .arg(ask.q.source !== "" ? ask.q.id + "\n" + qsTr("From %1").arg(ask.q.source) : ask.q.id)
                             .arg(ask.q.runtime && ask.q.runtime.length ? ask.q.runtime.join(", ") : qsTr("no nodes"))
                             .arg(ask.q.permissions && ask.q.permissions.length ? ask.q.permissions.join(", ") : qsTr("nothing (network, files, GPU)"))
+                            .arg((ask.q.secrets && ask.q.secrets.length ? "\n" + qsTr("Reads secrets: %1").arg(ask.q.secrets.join(", ")) : "")
+                                 + (ask.q.secretsSet && ask.q.secretsSet.length ? "\n" + qsTr("Already set: %1").arg(ask.q.secretsSet.join(", ")) : "")
+                                 + (ask.q.secretsOtherSource && ask.q.secretsOtherSource.length
+                                    ? "\n" + qsTr("%1 already set for this pack id from another source; this pack does not get it.").arg(ask.q.secretsOtherSource.join(", ")) : "")
+                                 + (ask.q.secrets && ask.q.secrets.length ? "\n" + qsTr("Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.") : ""))
             }
             Row {
                 spacing: page.u
@@ -174,6 +179,89 @@ ColumnLayout {
                     text: card.modelData.warning
                     color: page.look.label
                     font.pixelSize: page.look.labelSize
+                }
+                // The secrets the pack declares (6.4, #402): set or not, never the value. Typing one and pressing Enter (or
+                // Set) stores it in pack-secrets.json (0600); Clear drops it. Only the pack's own nodes ever receive it.
+                Repeater {
+                    model: card.modelData.secrets
+                    delegate: ColumnLayout {
+                        id: keyed
+                        required property var modelData
+                        readonly property string key: card.modelData.id + "-" + modelData.name
+                        Layout.fillWidth: true
+                        spacing: page.u / 2
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: page.u
+                            Text {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                text: keyed.modelData.label
+                                color: page.look.text
+                                font.pixelSize: page.look.labelSize
+                            }
+                            Text {
+                                objectName: "packSecretState-" + keyed.key
+                                text: keyed.modelData.set ? qsTr("set") : qsTr("not set")
+                                color: keyed.modelData.set ? page.look.label : page.look.error
+                                font.pixelSize: page.look.captionSize
+                            }
+                        }
+                        Text {
+                            visible: keyed.modelData.description !== ""
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: keyed.modelData.description
+                            color: page.look.label
+                            font.pixelSize: page.look.captionSize
+                        }
+                        // Where the value may be sent: set with the value, then only shown (to change it, Clear and set again).
+                        Text {
+                            objectName: "packSecretOrigin-" + keyed.key
+                            visible: keyed.modelData.set && keyed.modelData.origin !== ""
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            text: qsTr("Only for %1").arg(keyed.modelData.origin)
+                            color: page.look.label
+                            font.pixelSize: page.look.captionSize
+                        }
+                        SettingsParts.Field {
+                            id: originField
+                            objectName: "packSecretOnlyFor-" + keyed.key
+                            visible: !keyed.modelData.set
+                            placeholder: keyed.modelData.originRequired ? qsTr("Only for (required), like https://api.example.com")
+                                                                        : qsTr("Only for (optional), like https://api.example.com")
+                            onCommitted: text => originField.value = text
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: page.u
+                            SettingsParts.Field {
+                                id: secretField
+                                objectName: "packSecret-" + keyed.key
+                                secret: true
+                                placeholder: keyed.modelData.set ? qsTr("Set; type a new one to replace it") : qsTr("Not set; type it and press Enter")
+                                onCommitted: text => {
+                                    // After this handler: the list is rebuilt by the change, and this field is in it.
+                                    if (text !== "") {
+                                        const origin = keyed.modelData.set ? keyed.modelData.origin : originField.input.text
+                                        Qt.callLater(() => page.model.setSecret(card.modelData.id, keyed.modelData.name, text, origin))
+                                    }
+                                }
+                            }
+                            SettingsParts.SmallButton {
+                                objectName: "packSecretSet-" + keyed.key
+                                text: qsTr("Set…")
+                                onClicked: secretField.commit()
+                            }
+                            SettingsParts.SmallButton {
+                                objectName: "packSecretClear-" + keyed.key
+                                visible: keyed.modelData.set
+                                text: qsTr("Clear")
+                                onClicked: Qt.callLater(() => page.model.clearSecret(card.modelData.id, keyed.modelData.name))
+                            }
+                        }
+                    }
                 }
                 Repeater {
                     model: card.modelData.problems

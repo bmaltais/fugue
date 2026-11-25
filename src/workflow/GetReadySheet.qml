@@ -163,6 +163,7 @@ Popup {
                                             + (modelData.source !== "" ? " · " + qsTr("from %1").arg(modelData.source) : "")
                                 more: modelData.pending ? ""
                                       : qsTr("Runs as: %1").arg(modelData.runtime) + "\n" + qsTr("Declares: %1").arg(modelData.permissions)
+                                        + (modelData.secrets !== "" ? "\n" + qsTr("Reads secrets: %1").arg(modelData.secrets) : "")
                                 open: sheet.expanded[key] === true
                                 stateText: sheet.stateText(modelData.state)
                                 failed: modelData.state === "failed"

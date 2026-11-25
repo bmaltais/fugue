@@ -21,7 +21,7 @@ what you need to write one.
 - `manifest`, `id`, `version`, `name`, `nodes` are required. The id is lowercase reverse-DNS, and
   the folder holding the pack is named after it (`io.github.alice.tools/`).
 - `nodes` lists subfolder names, each holding a `node.json`.
-- `types` declares port types ([types](types.md)); `setup` is `{"command": ["uv", "sync"], "description": "…"}`, a command that prepares the pack's
+- `types` declares port types ([types](types.md)); `settings` declares secrets the pack's nodes read (`[{"name": "token_1", "type": "text", "secret": true, "origin": "required", "label": "Token 1"}]`; `"origin": "required"` makes the person say which address the key may be sent to; the person sets the values under Settings > Packs or with `fugue pack secret set … --origin`, and a node's program gets them in the request's `secrets` object, see [protocol](protocol.md)); `setup` is `{"command": ["uv", "sync"], "description": "…"}`, a command that prepares the pack's
   own environment: it runs in the pack's folder, only after the person has seen the exact
   command and said yes. `catalog/*.json` in the pack lists models to download for its resource
   types, each with its licence shown first ([types](types.md#resource-types-models)).

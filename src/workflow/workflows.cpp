@@ -1241,8 +1241,15 @@ bool Workflows::addPendingTrust(const QList<PackUse> &uses) {
             known |= entry.toMap().value("id") == use.id && entry.toMap().value("version") == use.version;
         if (known)
             continue;
+        // The secrets the pack reads (6.4, #402): names only, from the node types the workflow uses.
+        QStringList secrets;
+        for (const QString &type : use.types)
+            if (const NodeType *node = m_registry->nodeType(type))
+                for (const QString &name : node->packSecrets)
+                    if (!secrets.contains(name))
+                        secrets << name;
         m_pendingTrust.append(QVariantMap{
-            {"id", use.id}, {"version", use.version}, {"source", use.source}, {"types", use.types}});
+            {"id", use.id}, {"version", use.version}, {"source", use.source}, {"types", use.types}, {"secrets", secrets}});
         changed = true;
     }
     return changed;

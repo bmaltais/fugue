@@ -6,5 +6,13 @@
   "description": "One node that calls a web API: a webhook, a REST lookup, an upload. It uses the network, so trust shows that.",
   "license": "MIT",
   "source": "https://github.com/bmaltais/fugue",
-  "nodes": ["request"]
+  "nodes": ["request"],
+  "settings": [
+    {"name": "token_1", "type": "text", "secret": true, "origin": "required", "label": "Token 1",
+     "description": "A key or token for one service: write its address under Only for, and use {secret:token_1} in a header or the URL path or query. Never stored in a workflow."},
+    {"name": "token_2", "type": "text", "secret": true, "origin": "required", "label": "Token 2",
+     "description": "Used as {secret:token_2}."},
+    {"name": "token_3", "type": "text", "secret": true, "origin": "required", "label": "Token 3",
+     "description": "Used as {secret:token_3}."}
+  ]
 }

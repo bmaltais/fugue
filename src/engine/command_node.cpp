@@ -28,8 +28,10 @@
 
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
+#include "engine/pack_secrets.h"
 #include "engine/registry.h"
 #include "engine/resident_models.h"
+#include "engine/trust_store.h"
 
 namespace fugue {
 namespace {
@@ -169,6 +171,19 @@ public:
                 kept.push_back(std::move(event));
         m_events.swap(kept);
     }
+    // A new run starts: the stderr tail of the one before is dropped (it may hold a value that has changed since), and
+    // `secrets` (this run's values) join those masked in everything the program writes, before a line is cut short.
+    void beginRun(const QStringList &secrets) {
+        QMutexLocker lock(&m_mutex);
+        m_tail.clear();
+        for (const QString &secret : secrets)
+            if (!m_secrets.contains(secret))
+                m_secrets << secret;
+    }
+    QString mask(const QString &text) const {
+        QMutexLocker lock(&m_mutex);
+        return maskSecrets(text, m_secrets);
+    }
     // The last lines the program wrote to stderr.
     QStringList tail() const {
         QMutexLocker lock(&m_mutex);
@@ -282,6 +297,7 @@ private:
         for (QString &line : lines) {
             if (line.trimmed().isEmpty())
                 continue;
+            line = maskSecrets(line, m_secrets); // before it is cut short: a value cut in two is no longer found
             if (line.size() > 500)
                 line = line.left(500) + QStringLiteral("…");
             m_tail.append(line);
@@ -305,6 +321,7 @@ private:
     QWaitCondition m_wake;
     std::deque<Event> m_events;
     QStringList m_tail;
+    QStringList m_secrets; // the values to mask, guarded by m_mutex
     bool m_gone = false;
     bool m_busy = true;     // a run owns it (or it is starting)
     bool m_retiring = false; // told to shut down for idling
@@ -434,7 +451,7 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
             const QJsonDocument document = QJsonDocument::fromJson(event->line, &parseError);
             if (!document.isObject()) {
                 protocolMessage = QStringLiteral("The node's program wrote a line that is not a JSON object: %1")
-                                      .arg(QString::fromUtf8(event->line.left(200)));
+                                      .arg(process.mask(QString::fromUtf8(event->line)).left(200));
                 stop(Why::Protocol);
             } else if (why != Why::Protocol) {
                 const QJsonObject line = document.object();
@@ -602,6 +619,81 @@ Result<QJsonValue> plainJson(const QString &name, const Value &value, const Node
         return QJsonValue(items);
     }
     return value.toJson();
+}
+
+// The values of the secrets the node's pack declares and has stored (6.4, #402), for the `secrets` of the
+// request. Only the names pack.json declares are read, so a pack never gets another's or an undeclared one.
+Result<QMap<QString, StoredSecret>> secretsFor(const NodeType &type) {
+    if (type.packSecrets.isEmpty())
+        return QMap<QString, StoredSecret>{};
+    // Stored under the pack's id and the source it came from: a pack from another source gets none.
+    Result<QMap<QString, StoredSecret>> stored =
+        PackSecretStore().values(packSecretKey(TrustStore::packOf(type.id), type.packSource), type.packSecrets);
+    if (!stored)
+        return stored;
+    // A value that needs an origin and was stored without one is not handed over (it could be sent anywhere).
+    for (const QString &name : type.packSecretsOriginRequired)
+        if (stored->contains(name) && stored->value(name).origin.isEmpty())
+            stored->remove(name);
+    return stored;
+}
+
+QJsonValue maskedJson(const QJsonValue &value, const QStringList &secrets) {
+    if (value.isString())
+        return maskSecrets(value.toString(), secrets);
+    if (value.isArray()) {
+        QJsonArray items;
+        for (const QJsonValue &item : value.toArray())
+            items.append(maskedJson(item, secrets));
+        return items;
+    }
+    if (value.isObject()) {
+        QJsonObject object;
+        const QJsonObject source = value.toObject();
+        for (auto it = source.begin(); it != source.end(); ++it)
+            object.insert(maskSecrets(it.key(), secrets), maskedJson(it.value(), secrets));
+        return object;
+    }
+    return value;
+}
+
+// A value with every text in it (a list's items, a JSON object's or array's strings, a data handle's meta) masked.
+Value maskedValue(const Value &value, const QStringList &secrets) {
+    if (value.kind() == Value::Kind::Json)
+        return Value(maskedJson(value.json(), secrets));
+    if (value.isList()) {
+        QList<Value> items;
+        for (const Value &item : value.items())
+            items.append(maskedValue(item, secrets));
+        return Value::list(items);
+    }
+    return value;
+}
+
+// An error with the secret values taken out of what it says: a program may echo a key it was sent (a
+// server's answer, a log line), and an error goes to run.json, events and the screen.
+Error maskedError(Error error, const QStringList &secrets) {
+    error.message = maskSecrets(error.message, secrets);
+    error.hint = maskSecrets(error.hint, secrets);
+    return error;
+}
+
+Result<Values> maskedOutputs(Result<Values> result, const QStringList &secrets) {
+    if (secrets.isEmpty())
+        return result;
+    if (!result) {
+        Errors errors;
+        for (const Error &error : result.errors())
+            errors << maskedError(error, secrets);
+        return errors;
+    }
+    Values values = result.value();
+    for (auto it = values.begin(); it != values.end(); ++it)
+        it.value() = maskedValue(it.value(), secrets);
+    Errors warnings;
+    for (const Error &warning : result.warnings())
+        warnings << maskedError(warning, secrets);
+    return Result<Values>(values, warnings);
 }
 
 Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
@@ -777,18 +869,40 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     const Result<QJsonObject> made = requestFor(context, id);
     if (!made)
         return made.error();
-    const QJsonObject &request = made.value();
+    QJsonObject request = made.value();
+    // The pack's own secrets, at run time and in this request only (never an input, 6.4): the node's
+    // program reads them from `secrets`, and what it says back is masked before it is reported.
+    const Result<QMap<QString, StoredSecret>> stored = secretsFor(type);
+    if (!stored)
+        return maskedError(stored.error(), {});
+    QStringList secretValues;
+    if (!stored->isEmpty()) {
+        QJsonObject secrets;
+        for (auto it = stored->begin(); it != stored->end(); ++it) {
+            secrets.insert(it.key(), QJsonObject{{"value", it.value().value}, {"origin", it.value().origin}});
+            secretValues << it.value().value;
+        }
+        request.insert("secrets", secrets);
+    }
+    // What the program says as it goes (progress lines) goes through the same mask.
+    NodeContext reported = context;
+    if (!secretValues.isEmpty() && context.progress)
+        reported.progress = [&context, &secretValues](double value, const QString &stage, const QString &message) {
+            context.progress(value, maskSecrets(stage, secretValues), maskSecrets(message, secretValues));
+        };
+    const auto finish = [&secretValues](Result<Values> result) { return maskedOutputs(std::move(result), secretValues); };
 
     if (!persistent) {
         Process process(program, context.workDir, environment, 0, d->grace);
+        process.beginRun(secretValues);
         process.sendLine(request);
         process.closeInput();
         Errors warnings;
         const Result<QJsonObject> result =
-            await(process, context, id, false, Expect::Result, timeoutMs, d->grace, &warnings);
+            await(process, reported, id, false, Expect::Result, timeoutMs, d->grace, &warnings);
         if (!result)
-            return result.error();
-        return withWarnings(outputsFrom(result.value(), context), warnings);
+            return finish(result.error());
+        return finish(withWarnings(outputsFrom(result.value(), reported), warnings));
     }
 
     {
@@ -821,21 +935,22 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
                 QMutexLocker guard(&slot->guard);
                 slot->process = std::move(fresh);
             }
-            const Result<QJsonObject> ready = await(*slot->process, context, id, true, Expect::Ready, 0, d->grace);
+            const Result<QJsonObject> ready = await(*slot->process, reported, id, true, Expect::Ready, 0, d->grace);
             if (!ready) {
                 QMutexLocker guard(&slot->guard);
                 slot->process.reset();
-                return ready.error();
+                return finish(ready.error());
             }
         }
         Process &process = *slot->process;
         process.setBusy(true);
         process.discardLines();
+        process.beginRun(secretValues); // its stderr tail starts empty, and the values of this run are masked from here
         process.sendLine(request);
         bool heard = false;
         Errors warnings;
         const Result<QJsonObject> result =
-            await(process, context, id, true, Expect::Result, timeoutMs, d->grace, &warnings, &heard);
+            await(process, reported, id, true, Expect::Result, timeoutMs, d->grace, &warnings, &heard);
         if (process.gone()) {
             QMutexLocker guard(&slot->guard);
             slot->process.reset();
@@ -845,10 +960,10 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         if (!result && reused && !heard && attempt == 0 && result.error().code == QLatin1String("node_failed"))
             continue;
         if (!result)
-            return result.error();
+            return finish(result.error());
         if (context.models && !residentProgramKey(type).isEmpty())
             Impl::keepResident(slot, *context.models, type.id);
-        return withWarnings(outputsFrom(result.value(), context), warnings);
+        return finish(withWarnings(outputsFrom(result.value(), reported), warnings));
     }
     return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's program could not be run."));
 }

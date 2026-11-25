@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <memory>
+#include <optional>
 
 #include "engine/document.h"
 #include "engine/file_hashes.h"
@@ -16,6 +17,7 @@
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
+#include "engine/pack_secrets.h"
 #include "engine/readiness.h"
 #include "engine/templates.h"
 #include "engine/trust_store.h"
@@ -42,6 +44,16 @@ void describe(const PackSummary &pack) {
                                                    pack.source.ref.isEmpty() ? QString() : QStringLiteral(" at %1 (%2)").arg(pack.source.ref, pack.source.commit.left(12))));
     say(QStringLiteral("  Runs as:     %1").arg(pack.runtimeKinds.isEmpty() ? QStringLiteral("(no nodes)") : pack.runtimeKinds.join(", ")));
     say(QStringLiteral("  Declares:    %1").arg(pack.permissions.isEmpty() ? QStringLiteral("nothing (network, files, GPU)") : pack.permissions.join(", ")));
+    if (!pack.secrets.isEmpty()) {
+        say(QStringLiteral("  Reads:       the secrets %1 (set under Settings > Packs, or `fugue pack secret set`)").arg(pack.secrets.join(", ")));
+        if (!pack.secretsSet.isEmpty())
+            say(QStringLiteral("  Already set: %1 (values are kept for this id from this source)").arg(pack.secretsSet.join(", ")));
+        if (!pack.secretsOtherSource.isEmpty())
+            say(QStringLiteral("  Warning:     %1 %2 already set for this pack id from ANOTHER source; this pack does not get %3.")
+                    .arg(pack.secretsOtherSource.join(", "), pack.secretsOtherSource.size() == 1 ? QStringLiteral("is") : QStringLiteral("are"),
+                         pack.secretsOtherSource.size() == 1 ? QStringLiteral("it") : QStringLiteral("them")));
+        say(QStringLiteral("  Isolation:   advisory. A trusted pack's programs run as you and can read Fugue's config folder, where every key is kept."));
+    }
     say(QStringLiteral("  Nodes:       %1").arg(pack.nodes.size()));
     if (!pack.setupCommand.isEmpty())
         say(QStringLiteral("  Setup:       %1").arg(displayCommand(pack.setupCommand)));
@@ -95,6 +107,9 @@ QJsonObject summaryJson(const PackSummary &pack) {
     QJsonObject object{{"id", pack.id}, {"version", pack.version}, {"name", pack.name}, {"path", pack.folder},
                        {"runtime", QJsonArray::fromStringList(pack.runtimeKinds)},
                        {"permissions", QJsonArray::fromStringList(pack.permissions)},
+                       {"secrets", QJsonArray::fromStringList(pack.secrets)}, // names only, never values
+                       {"secrets_set", QJsonArray::fromStringList(pack.secretsSet)},
+                       {"secrets_set_for_another_source", QJsonArray::fromStringList(pack.secretsOtherSource)},
                        {"nodes", QJsonArray::fromStringList(pack.nodes)}};
     if (!pack.setupCommand.isEmpty())
         object.insert("setup", QJsonObject{{"command", QJsonArray::fromStringList(pack.setupCommand)}, {"description", pack.setupDescription}});
@@ -351,6 +366,108 @@ Reply packTrust(const Command &command, Context &context) {
         return Reply::failure(done.errors());
     return Reply::success(QJsonObject{{"trusted", done->id}, {"version", done->version}},
                           QStringLiteral("Trusted %1 %2.").arg(done->id, done->version));
+}
+
+namespace {
+
+// The enabled pack `id` (or `<id>@<major>`) of the packs this session finds, with the secrets it declares.
+std::optional<LoadedPack> packDeclaring(const QString &id) {
+    Registry scratch;
+    const PackRef ref = parsePackRef(id);
+    const PackReport report = loadPacks(scratch, packSearchPaths(), inheritedPackPaths());
+    for (const LoadedPack &pack : report.packs)
+        if (pack.enabled && !pack.hidden && pack.id == ref.id)
+            return pack;
+    return std::nullopt;
+}
+
+// The store key of a loaded pack: its id and where it came from (6.4.1).
+QString keyOf(const LoadedPack &pack) { return packSecretKey(pack.id, readPackSource(pack.path).location); }
+
+QJsonObject secretsJson(const LoadedPack &pack, const PackSecretStore &store) {
+    const QString key = keyOf(pack);
+    const QStringList set = store.namesSet(key);
+    QJsonArray list;
+    for (const PackSecretSpec &spec : pack.secrets) {
+        QJsonObject entry{{"name", spec.name}, {"label", spec.label}, {"set", set.contains(spec.name)}, {"origin_required", spec.originRequired}};
+        if (set.contains(spec.name))
+            entry.insert("origin", store.originOf(key, spec.name)); // where it may be sent; never the value
+        list.append(entry);
+    }
+    return QJsonObject{{"id", pack.id}, {"version", pack.version}, {"secrets", list}};
+}
+
+} // namespace
+
+Reply packSecret(const Command &command, Context &) {
+    const QString action = command.positionals.at(0);
+    PackSecretStore store;
+    const QString packId = command.positionals.value(1);
+    const QString name = command.positionals.value(2);
+    if (action == QLatin1String("list")) {
+        if (command.positionals.size() > 2)
+            return Reply::failure(makeError(QStringLiteral("usage"), QStringLiteral("`pack secret list` takes a pack id at most.")));
+        Registry scratch;
+        const PackReport report = loadPacks(scratch, packSearchPaths(), inheritedPackPaths());
+        QJsonArray packs;
+        QStringList lines;
+        for (const LoadedPack &pack : report.packs) {
+            if (!pack.enabled || pack.hidden || pack.secrets.isEmpty() || (!packId.isEmpty() && parsePackRef(packId).id != pack.id))
+                continue;
+            packs.append(secretsJson(pack, store));
+            const QStringList set = store.namesSet(keyOf(pack));
+            for (const PackSecretSpec &spec : pack.secrets) {
+                const QString origin = store.originOf(keyOf(pack), spec.name);
+                lines << QStringLiteral("%1  %2  %3%4").arg(pack.id, spec.name, set.contains(spec.name) ? QStringLiteral("set") : QStringLiteral("not set"),
+                                                              origin.isEmpty() ? QString() : QStringLiteral("  only for %1").arg(origin));
+            }
+        }
+        return Reply::success(QJsonObject{{"packs", packs}},
+                              lines.isEmpty() ? QStringLiteral("No installed pack declares a secret.") : lines.join('\n'));
+    }
+    if ((action != QLatin1String("set") && action != QLatin1String("clear")) || packId.isEmpty() || name.isEmpty() || command.positionals.size() != 3)
+        return Reply::failure(makeError(QStringLiteral("usage"), QStringLiteral("Use `pack secret list [<pack>]`, `pack secret set <pack> <name>` or `pack secret clear <pack> <name>`."),
+                                        QStringLiteral("`set` reads the value from stdin, so it is never on a command line or in a shell history.")));
+    const std::optional<LoadedPack> pack = packDeclaring(packId);
+    if (!pack)
+        return Reply::failure(makeError(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed and loaded.").arg(packId),
+                                        QStringLiteral("`fugue pack list` shows the packs.")));
+    if (!packSecretNames(pack->secrets).contains(name)) {
+        Error error = makeError(QStringLiteral("usage"), QStringLiteral("%1 declares no secret named \"%2\".").arg(pack->id, name.left(40)));
+        for (const QString &known : packSecretNames(pack->secrets))
+            error.valid.append(known);
+        return Reply::failure(error);
+    }
+    if (action == QLatin1String("clear")) {
+        const Errors cleared = store.clear(keyOf(*pack), name);
+        if (hasErrors(cleared))
+            return Reply::failure(cleared);
+        return Reply::success(secretsJson(*pack, store), QStringLiteral("Cleared %1 of %2.").arg(name, pack->id));
+    }
+    if (isatty(STDIN_FILENO))
+        return Reply::failure(makeError(QStringLiteral("usage"), QStringLiteral("The value is read from stdin, and stdin is a terminal."),
+                                        QStringLiteral("Pipe it in: `read -rs v; printf %s \"$v\" | fugue pack secret set %1 %2`.").arg(pack->id, name)));
+    QFile in;
+    if (!in.open(stdin, QIODevice::ReadOnly))
+        return Reply::failure(makeError(QStringLiteral("usage"), QStringLiteral("Cannot read the value from stdin.")));
+    QByteArray bytes = in.read(4097);
+    if (bytes.size() > 4096)
+        return Reply::failure(makeError(QStringLiteral("usage"), QStringLiteral("A secret is at most 4096 bytes.")));
+    if (bytes.endsWith('\n'))
+        bytes.chop(1);
+    if (bytes.endsWith('\r'))
+        bytes.chop(1);
+    const QString value = QString::fromUtf8(bytes);
+    const bool required = [&] {
+        for (const PackSecretSpec &spec : pack->secrets)
+            if (spec.name == name)
+                return spec.originRequired;
+        return false;
+    }();
+    const Errors stored = store.set(keyOf(*pack), name, value, command.value("origin"), required);
+    if (hasErrors(stored))
+        return Reply::failure(stored);
+    return Reply::success(secretsJson(*pack, store), QStringLiteral("Stored %1 of %2.").arg(name, pack->id));
 }
 
 } // namespace fugue::cli

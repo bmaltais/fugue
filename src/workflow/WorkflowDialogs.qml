@@ -270,6 +270,7 @@ Item {
                     text: modelData.id + (modelData.version ? " " + modelData.version : "")
                           + (modelData.source ? "\n" + modelData.source : "")
                           + "\n" + modelData.types.join(", ")
+                          + (modelData.secrets.length > 0 ? "\n" + qsTr("Reads secrets: %1").arg(modelData.secrets.join(", ")) : "")
                 }
             }
             QuestionAnswers {

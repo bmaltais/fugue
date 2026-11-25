@@ -32,13 +32,14 @@ class PacksModel : public QObject {
     QML_UNCREATABLE("made in C++, read through the settings")
     // One map per pack found, in search order: id, version, name, path, enabled, trusted,
     // removable (it is in the packs folder), nodes (count), source, problems (lines), active
-    // (this window has loaded it).
+    // (this window has loaded it), secrets (one map per declared secret: name, label, description,
+    // set; never the value).
     Q_PROPERTY(QVariantList packs READ packs NOTIFY packsChanged)
     // The library's groups (#74): one map each, id (local/<name>), name, version.
     Q_PROPERTY(QVariantList library READ library NOTIFY packsChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     // The question waiting for a person, empty when none: kind (install, update, remove,
-    // trust, setup), id, name, version, oldVersion, source, runtime, permissions, nodes,
+    // trust, setup), id, name, version, oldVersion, source, runtime, permissions, secrets (names), nodes,
     // command and description (setup), folder.
     Q_PROPERTY(QVariantMap question READ question NOTIFY questionChanged)
     // What git and a setup printed, a line each, while the work runs.
@@ -76,6 +77,13 @@ public:
     Q_INVOKABLE void update(const QString &id);
     Q_INVOKABLE void remove(const QString &id);
     Q_INVOKABLE void trust(const QString &id);
+    // A secret a pack declares (6.4, #402): stored in pack-secrets.json (0600), or dropped. Quick, so they run on the
+    // window's thread; true when done, and `failure` says why not. The value is never read back into the page:
+    // the packs list says only whether each name is set and the origin it is for. A name the pack does not declare is
+    // refused, and so are a value the command line would refuse (more than one line, a NUL, over 4096 bytes) and a
+    // missing origin for a secret whose pack requires one (6.4.1).
+    Q_INVOKABLE bool setSecret(const QString &packId, const QString &name, const QString &value, const QString &origin = {});
+    Q_INVOKABLE bool clearSecret(const QString &packId, const QString &name);
     // A library group renamed (its folder and id follow) or removed (the page asks first, on
     // itself: these are quick and run on the window's thread, not through `question`; workflows
     // keep their own copy). The one call that deletes a library group: the page and the node
