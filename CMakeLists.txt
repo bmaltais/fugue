@@ -204,7 +204,9 @@ set_source_files_properties(${fugue_qml_sources} PROPERTIES QT_QML_SKIP_QMLDIR_E
 # is deprecated is switched off around the call (CMake 4.3's CMP0218 is set OLD so the switch is still read).
 qt_policy(SET QTP0004 OLD)
 cmake_policy(PUSH)
-cmake_policy(SET CMP0218 OLD)
+if(POLICY CMP0218) # CMake 4.3 and later; the AppImage job's pinned CMake does not know it (and has no switch to read)
+  cmake_policy(SET CMP0218 OLD)
+endif()
 set(CMAKE_WARN_DEPRECATED OFF)
 qt_target_qml_sources(fugue_core PREFIX / QML_FILES ${fugue_qml_sources})
 cmake_policy(POP)
