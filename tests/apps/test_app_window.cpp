@@ -990,6 +990,23 @@ private slots:
         QQuickItem *clear = nullptr;
         QTRY_VERIFY((clear = find(app.window, "appClear")));
         QVERIFY(clear->isEnabled());
+        // The "…" menu opens wide enough for its entries (owner, 2026-11-25: it opened as a 4px strip, no width was set).
+        QObject *more = app.window->findChild<QObject *>("appMoreMenu");
+        QVERIFY(more);
+        QQuickItem *chip = nullptr;
+        QTRY_VERIFY((chip = find(app.window, "appMore")));
+        for (int attempt = 0; attempt < 5 && !more->property("opened").toBool(); ++attempt) { // the toolbar can still be settling on a cold start
+            tap(app.window, chip);
+            QTest::qWait(200);
+        }
+        QTRY_VERIFY(more->property("opened").toBool());
+        QVERIFY2(more->property("width").toReal() >= 128, qPrintable(QString::number(more->property("width").toReal())));
+        const QPointF under = chip->mapToScene(QPointF(0, chip->height()));
+        QVERIFY(std::abs(more->property("y").toReal() - under.y()) < 16); // opens under the chip, not in the corner
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty())
+            test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/app-more-menu.png");
+        QMetaObject::invokeMethod(more, "close");
+        QTRY_VERIFY(!more->property("visible").toBool());
         QTRY_VERIFY(find(app.window, "appReuseInputs")); // the toolbar has all its buttons: the layout is settled before the press
         QPointF where;
         QTRY_VERIFY((where == clear->mapToScene(QPointF())) || ((where = clear->mapToScene(QPointF())) != QPointF() && false)); // stopped moving
