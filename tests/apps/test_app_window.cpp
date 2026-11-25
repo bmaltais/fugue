@@ -19,10 +19,29 @@ namespace {
 const char *appWorkflow = R"({
   "fugue": 1,
   "app": {"format": 1, "title": "Restyle", "defaultView": "app",
-          "inputs": [{"role": "prompt", "targets": ["encode.prompt"], "label": "Prompt"}],
+          "inputs": [{"role": "prompt", "targets": ["encode.prompt"], "label": "Prompt"},
+                     {"name": "title", "targets": ["save.name"], "label": "Name"}],
           "outputs": [{"node": "save", "label": "Picture"}]},
   "graph": {"nodes": {
     "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "old words"}},
+    "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
+  }}
+})";
+
+const char *mediaApp = R"({
+  "fugue": 1,
+  "app": {"format": 1, "title": "Media", "defaultView": "app",
+          "inputs": [{"role": "image", "targets": ["load.file"], "label": "Picture"},
+                     {"role": "mask", "targets": ["load.mask"]},
+                     {"name": "tapered", "targets": ["grow.tapered_corners"], "label": "Tapered"},
+                     {"role": "model", "targets": ["up.model"]},
+                     {"role": "seed", "targets": ["sample.seed"]}],
+          "outputs": [{"node": "save"}]},
+  "graph": {"nodes": {
+    "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {}},
+    "grow": {"type": "fugue/grow-mask", "version": "1.0.1", "inputs": {"tapered_corners": true}},
+    "up": {"type": "fugue/load-upscale-model", "version": "1.0.0", "inputs": {}},
+    "sample": {"type": "fugue/sampler", "version": "1.2.0", "inputs": {"seed": 3}},
     "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
   }}
 })";
@@ -143,11 +162,10 @@ private slots:
         QVERIFY(!find(app.window, "appShowApp"));
 
         // Typing in the form is the value a run binds; Run, the key and the button, reaches the app, not the graph.
-        QQuickItem *prompt = find(app.window, "appInput-prompt");
+        QQuickItem *prompt = find(app.window, "appInput-prompt-edit"); // a prompt is several lines
         QVERIFY(prompt);
         QCOMPARE(prompt->property("text").toString(), QStringLiteral("old words"));
         prompt->setProperty("text", "a red fox");
-        QMetaObject::invokeMethod(prompt, "textEdited");
         QVERIFY(app.commands.run("run.start"));
         QCOMPARE(started.size(), 1);
         QCOMPARE(started.first().document.graph.nodes.value("encode").inputs.value("prompt").toJson(), QJsonValue("a red fox"));
@@ -185,6 +203,87 @@ private slots:
         QTRY_VERIFY(find(app.window, "canvas"));
         QTRY_VERIFY(!find(app.window, "appPage"));
         QTRY_VERIFY(!find(app.window, "appShowApp"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // Ctrl+Enter is the window's Run, also with the cursor in a prompt or a one-line field (#385 left this unverified), and
+    // Tab leaves a prompt instead of typing a tab.
+    void runIsReachableFromAFocusedTextFieldAndTabLeavesAPrompt() {
+        App app(load(appWorkflow));
+        RunSetup setup;
+        const QString root = app.dir.path();
+        setup.runsRoot = root + "/runs";
+        setup.queueDir = root + "/queue";
+        setup.lockPath = root + "/engine.lock";
+        setup.cacheRoot = root + "/results";
+        setup.hashesPath = root + "/hashes.json";
+        setup.thumbnailDir = root + "/thumbnails";
+        setup.collectGarbage = false;
+        RunService service(setup);
+        CanvasRuns runs(&app.model, &app.workflows, &service, &app.registry);
+        runs.registerCommands(app.commands);
+        app.runs = &runs;
+        QList<RunRequest> started;
+        AppView view([&started](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
+                     [](const QString &) {}, &app.registry);
+        bindAppView(view, app.workflows, app.model, service, app.commands, runs);
+        app.appView = &view;
+        QVERIFY(app.open());
+
+        QQuickItem *prompt = find(app.window, "appInput-prompt-edit");
+        QQuickItem *title = find(app.window, "appInput-title");
+        QVERIFY(prompt && title);
+        prompt->forceActiveFocus();
+        QTRY_VERIFY(prompt->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(started.size(), 1);
+        emit service.event("r1", {{"event", "run.done"}, {"status", "ok"}});
+        QTRY_VERIFY(!find(app.window, "appCancel"));
+        QCOMPARE(prompt->property("text").toString(), QStringLiteral("old words")); // no newline typed
+
+        QTest::keyClick(app.window, Qt::Key_Tab);
+        QTRY_VERIFY(!prompt->hasActiveFocus());
+        QCOMPARE(prompt->property("text").toString(), QStringLiteral("old words")); // no tab typed
+        title->forceActiveFocus();
+        QTRY_VERIFY(title->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(started.size(), 2);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The per-type controls are in the form and one key flips a switch (the values are test_app_view's).
+    void everyKindOfInputHasItsControlAndASwitchTakesTheKeyboard() {
+        App app(load(mediaApp));
+        RunSetup setup;
+        const QString root = app.dir.path();
+        setup.runsRoot = root + "/runs";
+        setup.queueDir = root + "/queue";
+        setup.lockPath = root + "/engine.lock";
+        setup.cacheRoot = root + "/results";
+        setup.hashesPath = root + "/hashes.json";
+        setup.thumbnailDir = root + "/thumbnails";
+        setup.collectGarbage = false;
+        RunService service(setup);
+        CanvasRuns runs(&app.model, &app.workflows, &service, &app.registry);
+        runs.registerCommands(app.commands);
+        app.runs = &runs;
+        QList<RunRequest> started;
+        AppView view([&started](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
+                     [](const QString &) {}, &app.registry);
+        bindAppView(view, app.workflows, app.model, service, app.commands, runs);
+        app.appView = &view;
+        QVERIFY(app.open());
+        for (const char *name : {"appInput-image", "appInput-mask", "appInput-tapered", "appInput-model", "appInput-seed",
+                                 "appSeedMode-seed", "appImageBrowse-image"})
+            QVERIFY2(find(app.window, name), name);
+        QQuickItem *toggle = find(app.window, "appInput-tapered");
+        toggle->forceActiveFocus();
+        QTRY_VERIFY(toggle->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Space);
+        QTRY_COMPARE(view.valueOf("tapered").toBool(), false);
+        QCOMPARE(toggle->property("checked").toBool(), false);
+        QVERIFY(app.commands.run("run.start"));
+        QCOMPARE(started.first().document.graph.nodes.value("grow").inputs.value("tapered_corners").toJson(), QJsonValue(false));
         qDeleteAll(app.engine.rootObjects());
     }
 };

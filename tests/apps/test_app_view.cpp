@@ -6,7 +6,16 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include <QImage>
+#include <QMimeData>
+#include <QTemporaryDir>
+
+#include "apps/app_models.h"
 #include "apps/app_view.h"
+#include "engine/file_hashes.h"
+#include "engine/model_library.h"
+#include "engine/paths.h"
+#include "engine/port_type.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "run/run_service.h"
@@ -39,6 +48,28 @@ Document load(const QJsonObject &json) {
     if (!loaded)
         qFatal("fixture does not load: %s", qPrintable(loaded.error().message));
     return loaded.value();
+}
+
+// One input of every kind the form has besides the plain ones: a picture and its mask (Load Image), a toggle (Grow Mask),
+// a model (Load Upscale Model) and a seed that is a number the workflow holds.
+QJsonObject mediaWorkflow() {
+    return QJsonDocument::fromJson(R"({
+      "fugue": 1,
+      "app": {"format": 1, "title": "Media",
+              "inputs": [{"role": "image", "targets": ["load.file"], "label": "Picture"},
+                         {"role": "mask", "targets": ["load.mask"]},
+                         {"name": "tapered", "targets": ["grow.tapered_corners"]},
+                         {"role": "model", "targets": ["up.model"]},
+                         {"role": "seed", "targets": ["sample.seed"], "min": 0, "max": 10}],
+              "outputs": [{"node": "save"}]},
+      "graph": {"nodes": {
+        "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "inputs/sample.png"}},
+        "grow": {"type": "fugue/grow-mask", "version": "1.0.1", "inputs": {"tapered_corners": true}},
+        "up": {"type": "fugue/load-upscale-model", "version": "1.0.0", "inputs": {}},
+        "sample": {"type": "fugue/sampler", "version": "1.2.0", "inputs": {"seed": 3, "steps": 4}},
+        "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
+      }}
+    })").object();
 }
 
 QJsonValue inputOf(const Document &document, const char *node, const char *input) {
@@ -108,8 +139,10 @@ private slots:
         QCOMPARE(field("prompt").value("label"), QStringLiteral("Prompt"));
         // An input with no label is its role in words; a seed left random has no number.
         QCOMPARE(field("seed").value("label"), QStringLiteral("Seed"));
-        QCOMPARE(field("seed").value("kind"), QStringLiteral("number"));
+        QCOMPARE(field("seed").value("kind"), QStringLiteral("seed"));
+        QCOMPARE(field("seed").value("mode"), QStringLiteral("random"));
         QVERIFY(!field("seed").value("value").isValid());
+        QVERIFY(field("prompt").value("multiline").toBool()); // a prompt role is several lines
         QCOMPARE(field("steps").value("value").toInt(), 4);
         QCOMPARE(field("steps").value("max").toInt(), 8);
         QVERIFY(field("steps").value("advanced").toBool());
@@ -255,6 +288,179 @@ private slots:
         QCOMPARE(m_view->fields().size(), 3); // the prompt is gone
         m_view->run();
         QVERIFY(!m_started.first().document.graph.nodes.contains("encode"));
+    }
+
+    // --- one test per input type (#386): edit the value at the store, the run's bound copy uses it ---
+
+    void aToggleIsASwitchAndItsValueIsWhatTheRunBinds() {
+        m_view->show("a", load(mediaWorkflow()), {});
+        QVERIFY2(m_view->problem().isEmpty(), qPrintable(m_view->problem()));
+        QCOMPARE(field("tapered").value("kind"), QStringLiteral("toggle"));
+        QCOMPARE(field("tapered").value("value"), QVariant(true));
+        m_view->setValue("tapered", false);
+        m_view->run();
+        QCOMPARE(inputOf(m_started.first().document, "grow", "tapered_corners"), QJsonValue(false));
+    }
+
+    void aSeedKeepsItsModeAndEachModeBindsAsANodeDoes() {
+        m_view->show("a", load(mediaWorkflow()), {});
+        QCOMPARE(field("seed").value("mode"), QStringLiteral("fixed")); // the workflow holds a number
+        QCOMPARE(m_view->valueOf("seed").toInt(), 3);
+        // Random: the engine's own, a new number each run; the one shown stays for a return to Fixed.
+        m_view->setSeedMode("seed", "random");
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "sample", "seed"), QJsonValue(QJsonObject{{"auto", "random"}}));
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        // Increment: this run uses the number shown, the next one the next number, told to the control.
+        m_view->setSeedMode("seed", "increment");
+        QSignalSpy told(m_view.get(), &AppView::valueChanged);
+        m_view->setValue("seed", 9);
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "sample", "seed"), QJsonValue(9));
+        QCOMPARE(m_view->valueOf("seed").toInt(), 10);
+        QCOMPARE(told.count(), 1);
+        m_view->onEvent("run2", evt("run.done", {{"status", "ok"}}));
+        m_view->run(); // 10 is the range's end: the next one wraps to its start
+        QCOMPARE(inputOf(m_started.last().document, "sample", "seed"), QJsonValue(10));
+        QCOMPARE(m_view->valueOf("seed").toInt(), 0);
+        m_view->onEvent("run3", evt("run.done", {{"status", "ok"}}));
+        // A number typed is a fixed seed; the dice picks one in the range.
+        m_view->setSeedMode("seed", "random");
+        m_view->setValue("seed", 5);
+        QCOMPARE(m_view->seedMode("seed"), QStringLiteral("fixed"));
+        m_view->rollSeed("seed");
+        QVERIFY(m_view->valueOf("seed").toInt() >= 0 && m_view->valueOf("seed").toInt() <= 10);
+    }
+
+    void aPictureTakenIntoTheInputsFolderIsWhatTheRunBindsAndSamplesAreOffered() {
+        QTemporaryDir folder;
+        QVERIFY(QDir(folder.path()).mkpath("inputs"));
+        QVERIFY(QImage(8, 6, QImage::Format_RGB32).save(folder.filePath("inputs/sample.png")));
+        const QString file = folder.filePath("app.fugue");
+        m_view->show("a", load(mediaWorkflow()), file);
+        QCOMPARE(field("image").value("kind"), QStringLiteral("image"));
+        QCOMPARE(field("image").value("samples").toList().size(), 1); // the template's own
+        QCOMPARE(m_view->fileUrl("inputs/sample.png"), QUrl::fromLocalFile(folder.filePath("inputs/sample.png")));
+
+        // A picture from elsewhere (a drop, the file picker) is copied in, the same bytes once.
+        QTemporaryDir other;
+        const QString dropped = other.filePath("dropped.png");
+        QVERIFY(QImage(16, 12, QImage::Format_RGB32).save(dropped));
+        QSignalSpy told(m_view.get(), &AppView::valueChanged);
+        QVERIFY(m_view->setImageFiles("image", {QUrl::fromLocalFile(dropped)}).isEmpty());
+        const QString stored = m_view->valueOf("image").toString();
+        QVERIFY(stored.startsWith(inputsDir() + "/"));
+        QVERIFY(QFileInfo(stored).isFile());
+        QCOMPARE(told.count(), 1);
+        QVERIFY(m_view->setImageFiles("image", {QUrl::fromLocalFile(dropped)}).isEmpty());
+        QCOMPARE(m_view->valueOf("image").toString(), stored);
+        QVERIFY(!m_view->recentImages().isEmpty());
+        QVERIFY(!m_view->setImageFiles("image", {QUrl("https://example.com/a.png")}).isEmpty()); // a refusal says why
+
+        // A paste of pixels is stored as a PNG.
+        QMimeData mime;
+        mime.setImageData(QImage(4, 4, QImage::Format_RGB32));
+        QVERIFY(m_view->setImageFromMime("image", mime).isEmpty());
+        QVERIFY(m_view->valueOf("image").toString() != stored);
+
+        // The strip's pictures: the samples and the inputs folder's, never an arbitrary file.
+        m_view->useImage("image", dropped);
+        QVERIFY(m_view->valueOf("image").toString() != dropped);
+        m_view->useImage("image", folder.filePath("inputs/sample.png"));
+        QCOMPARE(m_view->valueOf("image").toString(), QFileInfo(folder.filePath("inputs/sample.png")).canonicalFilePath());
+        m_view->run();
+        QCOMPARE(inputOf(m_started.first().document, "load", "file"), QJsonValue(m_view->valueOf("image").toString()));
+    }
+
+    void aMaskIsPaintedOverTheChosenPictureAndItsFileIsWhatTheRunBinds() {
+        QTemporaryDir folder;
+        QVERIFY(QDir(folder.path()).mkpath("inputs"));
+        QVERIFY(QImage(8, 6, QImage::Format_RGB32).save(folder.filePath("inputs/sample.png")));
+        m_view->show("a", load(mediaWorkflow()), folder.filePath("app.fugue"));
+        const QVariantMap picture = m_view->maskPicture(); // the workflow's own picture, relative to its file
+        QCOMPARE(picture.value("width").toInt(), 8);
+        QCOMPARE(picture.value("height").toInt(), 6);
+        m_view->setValue("mask", "/in/mask.png");
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "load", "mask"), QJsonValue("/in/mask.png"));
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        m_view->setValue("mask", ""); // Clear: no mask, not the workflow's
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "load", "mask"), QJsonValue(""));
+        m_view->show("b", load(mediaWorkflow()), {}); // a picture with no file to resolve it against has none to paint on
+        QVERIFY(m_view->maskPicture().isEmpty());
+    }
+
+    void aModelIsPickedFromTheFilesOnDiskWithItsHashAndBoundAsAHandle() {
+        QTemporaryDir models;
+        QTemporaryDir state;
+        const QString type = QStringLiteral("fugue/upscale-model");
+        ModelLibrary library({models.path()}, &m_registry);
+        const QString folder = library.folders(*PortType::parse(type)).value(0);
+        QVERIFY(QDir().mkpath(folder));
+        const QString file = folder + "/x4.pth";
+        QFile weights(file);
+        QVERIFY(weights.open(QIODevice::WriteOnly));
+        weights.write("weights");
+        weights.close();
+        auto hashes = std::make_shared<FileHashes>(state.filePath("hashes.json"));
+        hashes->remember(file, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        AppModels *store = m_view->modelStore();
+        store->setLibrary(library);
+        store->setHashes(hashes);
+        store->setCatalog(ModelCatalog::parse(R"({"models": []})", "test"));
+        store->setSource([](const QString &, const QStringList &, std::function<void(QList<ListedModel>)> done) { done({}); });
+
+        m_view->show("a", load(mediaWorkflow()), {});
+        QCOMPARE(field("model").value("kind"), QStringLiteral("model"));
+        QCOMPARE(field("model").value("resource"), type);
+        m_view->requestModels("model");
+        const QVariantList listed = m_view->models("model");
+        QCOMPARE(listed.size(), 1);
+        QCOMPARE(listed.first().toMap().value("path").toString(), file);
+        m_view->pickModelFile("model", file); // its hash is remembered: no read
+        QVERIFY(m_view->waitingModels().isEmpty());
+        QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), QStringLiteral("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        m_view->run();
+        const QJsonObject handle = inputOf(m_started.first().document, "up", "model").toObject();
+        QCOMPARE(handle.value("resource").toString(), type);
+        QCOMPARE(handle.value("hash").toString(), QStringLiteral("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        // A handle a provider lists is picked as it is.
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        m_view->pickModel("model", {{"resource", type}, {"name", "served"}});
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("name").toString(), QStringLiteral("served"));
+    }
+
+    // A hash read on the pool answers the tab and the field that asked, even when another tab is shown by then.
+    void aModelReadAfterATabSwitchGoesToTheTabThatAskedForIt() {
+        QTemporaryDir models;
+        QTemporaryDir state;
+        const QString type = QStringLiteral("fugue/upscale-model");
+        ModelLibrary library({models.path()}, &m_registry);
+        const QString folder = library.folders(*PortType::parse(type)).value(0);
+        QVERIFY(QDir().mkpath(folder));
+        const QString file = folder + "/x4.pth";
+        QFile weights(file);
+        QVERIFY(weights.open(QIODevice::WriteOnly));
+        weights.write("weights");
+        weights.close();
+        AppModels *store = m_view->modelStore();
+        store->setLibrary(library);
+        store->setHashes(std::make_shared<FileHashes>(state.filePath("hashes.json"))); // nothing remembered: a read
+        store->setCatalog(ModelCatalog::parse(R"({"models": []})", "test"));
+
+        QSignalSpy answered(store, &AppModels::hashed);
+        m_view->show("a", load(mediaWorkflow()), {});
+        m_view->pickModelFile("model", file);
+        QCOMPARE(m_view->waitingModels(), QStringList{"model"});
+        m_view->show("b", load(mediaWorkflow()), {});
+        QVERIFY(m_view->waitingModels().isEmpty()); // b asked for nothing
+        QVERIFY(answered.count() || answered.wait());
+        QVERIFY(m_view->valueOf("model").toMap().value("hash").toString().isEmpty()); // not b's
+        m_view->show("a", load(mediaWorkflow()), {});
+        QVERIFY(m_view->waitingModels().isEmpty());
+        QVERIFY(m_view->valueOf("model").toMap().value("hash").toString().startsWith("sha256:"));
     }
 };
 

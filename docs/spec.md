@@ -3050,14 +3050,28 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   opens as a graph: <why>", or "...was made by a newer Fugue..." for a later format (#387).
 - **The screen** (`apps/AppPage.qml`, `appPage`): at the top the app's title and description, and at the end **Open in
   Graph** (`appOpenInGraph`). Below, at the start the form: each input of `inputs[]` in the block's order (`AppInput.qml`,
-  `appInput-<key>`: its label over a text field, a number (a drag field when the block gives `min` and `max`, else a text
-  field; empty means the workflow's own), a choice, or, until #386, a file's path as text), the `Advanced` ones folded under
+  `appInput-<key>`: its label over the control of its kind, see below), the `Advanced` ones folded under
   **Advanced**; under the form **Run** (`appRun`, the one primary control), and while a run is waiting or going **Cancel**
   (`appCancel`, danger, a chunk of its own) and one line of progress ("Waiting for its turn…", "Working… 40%") over a 2 px bar.
   At the end the output: the results of the block's `outputs[]` (a picture fits and a double click opens it in the large
   viewer (`LargeViewDialog` over the Compare viewer in its single mode); a video or sound plays; each is named by its `label`, else "Result"), or "The result appears here." A failed
   run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the rest and
   the hints; a cancelled run says nothing.
+- **Controls per kind** (#386, `AppInput.qml` picks, no control for an input the block does not bind): *text*, a well of
+  several lines for the prompt roles (Enter is a new line, Tab leaves it) and a line for the rest; *number*, a drag field with
+  its range (`min` and `max`), else a typed field (empty means the workflow's own); *toggle*, a switch (Space or Enter);
+  *choice*, a drop-down; *seed*, the number, a dice for a new one and its mode as a node's seed has it: Fixed, Randomize each
+  run (the engine's own `{"auto": "random"}`), Increment after each run (the run uses the number shown, the next the next
+  one, wrapping at `max`); a number typed makes it Fixed. *image*: a well that shows the picture and takes one dropped on
+  it, Browse, Paste (and Ctrl+V on the well) and a strip of pictures to try, the template's `inputs/` samples first, then
+  the inputs folder's newest; a picture from elsewhere is copied into the inputs folder as Load Image takes one (the same
+  bytes are one file). *mask*: Paint mask opens the mask editor (14.4) over the form's first picture input, "Painted" or
+  "None", Clear; with no picture chosen it says so. *model*: the model menu of a node's picker (the providers' models, the
+  files in the model folders with the Recommended one marked, #370, the catalog's models under Download, which asks first
+  with the license, size, source and folder and fetches through the window's one download line); a file whose hash is not
+  known is read first. Image from the canvas document (#206) is not a source yet.
+- **Keys.** Every control takes Tab; Enter or Space opens or flips it; Ctrl+Enter (Run) works from any text field, a prompt
+  included, and Ctrl+Shift+Enter, Run ahead of the queue, with it.
 - **Run** binds the form's values into a copy of the workflow (`bindApp`, 4.9) and queues it through RunService like any run:
   one queue, one GPU, the queue panel lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
   (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
@@ -3067,7 +3081,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   strip under the canvas has **Show as app** (`appShowApp`); it brings the form back, rebuilt from the workflow as the graph
   left it (values kept for inputs that still exist). The choice is per tab and kept for the session; a tab opens in the view its
   `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
-- **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `run`, `cancel`,
+- **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `setSeedMode`, `setImageFiles`, `pasteImage`, `useImage`, `maskPicture`, `models`, `pickModel`, `run`, `cancel`,
   `status`, `progress`, `error`, `details`, `results`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
   it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.
 
