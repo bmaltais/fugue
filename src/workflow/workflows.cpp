@@ -796,7 +796,13 @@ QVariantList Workflows::templates() const {
             });
             placed.append(placesOf(handle, !absentHere, m_served));
         }
-        const TemplatePlaces places = summarizePlaces(placed);
+        TemplatePlaces places = summarizePlaces(placed);
+        // The models a provider serves (a name, no hash) are not files to fetch: they add where they run when an
+        // off-machine instance offers them (the badge), and never change `ready`.
+        for (const QJsonValue value : t.providerModels)
+            for (const QString &cloud : placesOf(value.toObject(), false, m_served).clouds)
+                if (!places.clouds.contains(cloud))
+                    places.clouds << cloud;
         QStringList status;
         if (!missing.isEmpty())
             status << tr("Models missing: %1 of %2").arg(missing.size()).arg(t.models.size());
@@ -848,6 +854,7 @@ QVariantList Workflows::templates() const {
                                {"local", places.local},
                                {"hosts", places.hosts},
                                {"offlineHosts", places.offlineHosts},
+                               {"clouds", places.clouds},
                                {"download", offerText(absent)},
                                {"downloadSize", downloadSize(absent)},
                                {"neededPacks", t.neededPacks},

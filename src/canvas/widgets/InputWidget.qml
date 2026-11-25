@@ -465,11 +465,12 @@ Rectangle {
                 continue
             }
             // Where it lives (#164): a paired host's model says so, dimmed "host offline" when the
-            // host does not answer; one served on this machine is local.
+            // host does not answer; one a service off this machine offers is cloud; one served here is local.
             const status = m.hostOffline ? qsTr("host offline")
                            : m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("not running")
             entries.push({ text: m.title, detail: status, note: m.note, value: { handle: m.handle },
-                           place: m.host !== "" ? "host" : "local", placeHost: m.host, dim: m.hostOffline,
+                           place: m.cloud ? "cloud" : m.host !== "" ? "host" : "local",
+                           placeHost: m.cloud ? m.cloud : m.host, dim: m.hostOffline,
                            checked: m.name === current && currentHash === undefined })
         }
         if (downloadable.length > 0)

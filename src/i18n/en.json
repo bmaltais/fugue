@@ -2113,5 +2113,7 @@
   "Already last": "Already last",
   "No service yet": "No service yet",
   "Keep it": "Keep it",
-  "Remove %1? Its saved key is deleted from providers.json.": "Remove %1? Its saved key is deleted from providers.json."
+  "Remove %1? Its saved key is deleted from providers.json.": "Remove %1? Its saved key is deleted from providers.json.",
+  "Runs on %1": "Runs on %1",
+  " or ": " or "
 }

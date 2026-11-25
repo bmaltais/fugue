@@ -61,7 +61,7 @@ KitCard {
             Rectangle {
                 objectName: "appPlaces-" + card.entry.id
                 anchors { left: parent.left; bottom: parent.bottom; margins: card.u }
-                visible: card.entry.local || card.entry.hosts.length > 0 || card.entry.offlineHosts.length > 0
+                visible: card.entry.local || card.entry.hosts.length > 0 || card.entry.offlineHosts.length > 0 || card.entry.clouds.length > 0
                 width: placeRow.width + 2 * card.u
                 height: 16 + card.u
                 radius: height / 2
@@ -79,6 +79,13 @@ KitCard {
                         kind: "host"
                         hosts: card.entry.hosts.length > 0 ? card.entry.hosts : card.entry.offlineHosts
                         offline: card.entry.hosts.length === 0
+                    }
+                    PlaceBadge {
+                        objectName: "appPlaceCloud-" + card.entry.id
+                        visible: card.entry.clouds.length > 0
+                        look: card.look
+                        kind: "cloud"
+                        services: card.entry.clouds
                     }
                 }
             }

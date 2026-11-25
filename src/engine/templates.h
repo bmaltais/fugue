@@ -87,6 +87,7 @@ struct Template {
     bool own = false;
     bool inherited = false;    // the Default project's own template, read-only here (1.4.2); `own` is set too
     QJsonArray models;         // Document::models(): resource, hash, name, source
+    QJsonArray providerModels; // Document::providerModels(): resource, name; a provider's models (no hash), as the fal.ai apps name
     QStringList neededPacks;   // namespaces of its packs not installed, or installed at another version
     QList<CarriedPack> carriedPacks; // the packs the folder holds, whether or not installed here
 };

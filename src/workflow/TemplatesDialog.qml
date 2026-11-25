@@ -473,6 +473,13 @@ Popup {
                                                 hosts: cell.modelData.hosts.length > 0 ? cell.modelData.hosts : cell.modelData.offlineHosts
                                                 offline: cell.modelData.hosts.length === 0
                                             }
+                                            PlaceBadge {
+                                                objectName: "templatePlaceCloud-" + cell.modelData.id
+                                                visible: cell.modelData.clouds.length > 0
+                                                look: dialog.look
+                                                kind: "cloud"
+                                                services: cell.modelData.clouds
+                                            }
                                         }
                                     }
                                 }

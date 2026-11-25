@@ -1047,6 +1047,39 @@ QJsonArray Document::models() const {
     return list;
 }
 
+QJsonArray Document::providerModels() const {
+    QJsonArray list;
+    QSet<QString> seen;
+    const auto add = [&](const InputValue &value, const auto &self) -> void {
+        if (value.kind() == InputValue::Kind::Resource) {
+            const QJsonObject handle = value.handle();
+            const QString resource = handle.value("resource").toString();
+            const QString name = handle.value("name").toString();
+            const QString key = resource + QLatin1Char('\n') + name;
+            if (!resource.isEmpty() && !name.isEmpty() && handle.value("hash").toString().isEmpty() && !seen.contains(key)) {
+                seen.insert(key);
+                list << QJsonObject{{"resource", resource}, {"name", name}};
+            }
+        } else if (value.kind() == InputValue::Kind::List) {
+            for (const InputValue &item : value.items())
+                self(item, self);
+        }
+    };
+    const auto addNodes = [&](const Nodes &nodes) {
+        for (const Node &node : nodes)
+            for (const InputValue &value : node.inputs)
+                add(value, add);
+    };
+    addNodes(graph.nodes);
+    for (const GroupDefinition &group : groups) {
+        addNodes(group.nodes);
+        for (const GroupInput &input : group.inputs)
+            if (input.defaultValue)
+                add(*input.defaultValue, add);
+    }
+    return list;
+}
+
 void Document::refreshRequirements(const QString &appVersion, const Registry *registry) {
     QMap<QString, Version> types;
     const auto addNodes = [&](const Nodes &nodes) {

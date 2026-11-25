@@ -10,6 +10,7 @@
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
 #include "engine/providers.h"
+#include "engine/remote_consent.h"
 
 namespace fugue {
 
@@ -26,7 +27,7 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
     };
     auto pending = std::make_shared<Pending>();
     pending->done = std::move(done);
-    QList<std::tuple<std::shared_ptr<Provider>, QString, QString>> asked; // provider, name, host
+    QList<std::tuple<std::shared_ptr<Provider>, QString, QString, QString>> asked; // provider, name, host, cloud
     for (const ProviderInstance &instance : instances.value()) {
         if (!instance.enabled)
             continue;
@@ -34,15 +35,17 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
         if (!made.ok())
             continue;
         pending->providers.push_back(made.value());
-        asked.append({made.value(), instance.name, instance.address.isEmpty() ? QString() : instance.name});
+        const bool offMachine = placementOf(instance) == Placement::OffMachine;
+        asked.append({made.value(), instance.name, instance.address.isEmpty() || offMachine ? QString() : instance.name,
+                      offMachine ? instance.name : QString()});
     }
     pending->left = int(asked.size());
     pending->byInstance.resize(asked.size());
     if (asked.isEmpty())
         return pending->done({});
     for (qsizetype index = 0; index < asked.size(); ++index) {
-        const auto &[provider, name, host] = asked.at(index);
-        provider->describe([pending, type, capabilities, index, name = name, host = host](const Result<Description> &description) {
+        const auto &[provider, name, host, cloud] = asked.at(index);
+        provider->describe([pending, type, capabilities, index, name = name, host = host, cloud = cloud](const Result<Description> &description) {
             QList<ListedModel> &models = pending->byInstance[index];
             if (description.ok()) {
                 for (const CapabilityOffer &offer : description->capabilities) {
@@ -64,6 +67,7 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
                         entry.status = modelStatusName(model.status);
                         entry.provider = name;
                         entry.host = host;
+                        entry.cloud = cloud;
                         entry.title = model.title;
                         if (model.status != ModelStatus::Ready)
                             entry.note = (model.reason + QLatin1Char(' ') + model.hint).trimmed();
