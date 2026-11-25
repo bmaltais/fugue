@@ -82,6 +82,7 @@ const char *helpText =
     "      | canvas layer move <id> <layer>... --to <position> | canvas undo|redo <id>   (a layer is its position, 0 the bottom, or its name)\n"
     "  canvas resize <id> --to <x>,<y>,<w>,<h> [--fill edge-blur|edge|gray|transparent] [--blur <px>]   (grow, shift or cut the canvas; the rectangle is in the old canvas's pixels)\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
+    "  app list | app info <id|file> | app run <id|file> [--input <key>=<value>|<key>=@<file>]... [--out <dir>]   (an app: a workflow with an app block; prints the files it made)\n"
     "  cache status | cache clear [--kind results|thumbnails|runs|all] [--workflow <file>] [--node <id>]\n"
     "      [--older-than <age, 30d>] [--dry-run]\n"
     "  provider, command (later releases)\n"

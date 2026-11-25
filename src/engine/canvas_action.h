@@ -11,7 +11,7 @@
 //                          "choices", "choice_values", "optional", "fallback"}, {"name": "steps", "targets": ["sample.steps"]}, ...]}
 // It is a top-level key the document keeps as `extra` on a round trip (spec 4.1) and it is outside sourceHash(), so it
 // changes no cache key. A role is one of prompt, negative_prompt, strength, seed, model, layer; an input with no role
-// is a plain one with a `name`. `fallback` (research G8) is the prompt a run uses when the person leaves it empty.
+// is a plain one with a `name` (the list is the one an app block has, engine/input_binding.h). `fallback` (research G8) is the prompt a run uses when the person leaves it empty.
 //
 // The check (design 1.3): the Region that takes the selection is `region`, or the one Canvas Region; every Canvas Write
 // takes its canvas from a Region of the shown canvas (the selection's, or one with a blank canvas); every target is a
@@ -36,6 +36,7 @@
 
 #include "engine/canvas_router.h"
 #include "engine/document.h"
+#include "engine/input_binding.h"
 #include "engine/result.h"
 
 namespace fugue {
@@ -49,25 +50,8 @@ inline constexpr char regionType[] = "fugue/canvas-region";
 inline constexpr char writeType[] = "fugue/canvas-write";
 inline constexpr char newType[] = "fugue/canvas-new"; // a sink that makes a canvas of its own (Upscale, slice 8)
 
-struct ActionInput {
-    QString role;  // one of actionRoles(), or empty for a plain input
-    QString name;  // a plain input's name; empty for a role's
-    QList<PortRef> targets;
-    QString label;
-    QString section; // "Advanced" shows only in the bar's advanced state
-    QJsonValue defaultValue = QJsonValue::Undefined;
-    std::optional<double> min;
-    std::optional<double> max;
-    std::optional<QStringList> choices;
-    // `choice_values` (slice 4): the number each choice stands for, in the choices' order. The bar offers the words (Refine:
-    // Light, Default, Restyle) and a binding puts the number in the targets, which must take a number; `default` is then a word.
-    std::optional<QList<double>> choiceValues;
-    bool optional = false; // the prompt may be empty
-    QString fallback;      // the prompt used when it is left empty (G8)
-
-    // How the bar and a binding name it: the role, else the name.
-    QString key() const { return role.isEmpty() ? name : role; }
-};
+// The inputs are the list an app shares (engine/input_binding.h).
+using ActionInput = InputBinding;
 
 struct Action {
     int format = actionFormat;

@@ -469,6 +469,8 @@ A workflow is one UTF-8 JSON document, extension `.fugue`.
 | `groups` | no | Group definitions used by the graph ([4.4](#44-groups-section)). |
 | `layout` | no | Positions and everything visual. Removing it never changes what the graph does. |
 | `requires` | no | What the workflow needs. Written on save, informational on load. |
+| `action` | no | A canvas action's binding block ([14.5](#145-the-canvas-revision-store-206-208), docs/canvas-actions-design.md 1.2). Outside `sourceHash`. |
+| `app` | no | An app's binding block ([4.9](#49-app)). Outside `sourceHash`. |
 | `run` | no | Only in a copy embedded in an output ([11.7](#117-embedding-in-outputs)): the values used. Never affects a run. |
 
 A reader must reject a document whose `fugue` is greater than it supports, with the error
@@ -688,6 +690,51 @@ only ever execute this form, and `fugue compile` prints it.
   `--provider` change a compile, so with a compiled graph they are `usage` errors.
 
 ---
+
+### 4.9 `app`
+
+An **App** (#384, epic #397) is a workflow shown as one simple screen: the inputs worth changing, a Run button, the results.
+The graph stays the truth and the app is a list kept beside it, so a fix in the graph is a fix in the app. There is no node
+type and no second file format: the list is a top-level `app` block of `workflow.fugue`, the way a canvas action's binding is
+(an `action` block). Both are top-level keys, so an older Fugue keeps them on a round trip (4.1), they are outside
+`sourceHash` (no cache key changes), and save, save as, a template, a `.fuguepack` and the share copy (11.5) carry them with the document.
+
+```json
+"app": {
+  "format": 1,
+  "title": "Restyle",
+  "description": "Paints a picture in a style.",
+  "defaultView": "app",
+  "inputs": [
+    {"role": "image", "name": "subject", "targets": ["load.file"], "label": "Picture"},
+    {"role": "prompt", "targets": ["encode.prompt"], "label": "Prompt"},
+    {"role": "seed", "targets": ["sample.seed"]},
+    {"name": "steps", "targets": ["sample.steps"], "min": 1, "max": 8, "section": "Advanced"}
+  ],
+  "outputs": [{"node": "save", "label": "Result"}]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `format` | 1. A later format is `unsupported_format_version` ("Needs a newer Fugue"). |
+| `title`, `description` | What the app card and the app's screen show. A title is required. |
+| `defaultView` | `app` (default) or `graph`: what opening it shows first. |
+| `inputs[]` | The form, in order (the list's order is the form's order; there is no `order` field). One shared schema with an action's `inputs` (docs/canvas-actions-design.md 1.2): `role`, `name`, `targets`, `label`, `section` (`Advanced` folds), `default`, `min`, `max`, `choices`, `choice_values`, `optional`, `fallback`. `targets` are one or more `<node id>.<input>`, all of one type, a top-level node's input or a group instance's exposed input. `choices` on a target that has its own choices must be a subset of them (5.4). |
+| `inputs[].role` | `prompt`, `negative_prompt`, `strength`, `seed`, `model`, `layer`, plus `image` and `mask` (the `file` and `mask` inputs of a Load Image). A role with a `name` is keyed by the name, so an app can take two pictures. An input with no role needs a `name` (a-z, 0-9, `_`) and is plain. The key (the name, else the role) is unique in the list. |
+| `outputs[]` | `node` (the id of a Save or Preview node) and an optional `label`. The run's results of these nodes are the app's results; the app owns no store (results and History are the existing ones). At least one is needed to be valid. |
+
+**Deleting a node.** As for a group's exposed port (5.4), a target whose node or input is gone is dropped, an input left with no
+target is dropped, and an output whose node is gone is dropped; each is reported as the warning `app_stale`, in words. A node
+whose type is not installed (a pack is missing) is not stale: its targets stay, and checking says the pack is missing. What is
+still wrong after that (a target linked to another node, of a type the role does not take, an output that is not a sink, no
+output) is `app_invalid`, in words. Fugue never guesses a binding.
+
+**Engine** (`engine/app_binding.*`, `engine/input_binding.*`): `appOf`/`parseApp` read the block, `toJson`/`setApp`/`clearApp` write
+it, `pruneApp` and `checkApp` are the two passes above, and `bindApp(document, app, values)` returns the run's copy of the
+workflow with a form's values in (a missing value keeps the block's default, else the workflow's own; a number is held in
+`min`..`max`; a word of `choices` with `choice_values` becomes its number). The file is never changed. The reader of
+`inputs[]` is the one `engine/canvas_action.*` uses.
 
 ## 5. Groups
 
@@ -2974,6 +3021,38 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   is), a view following the selection or pinned beyond the Canvas's region, a new window, and the Corner Handles and
   Border Width settings.
 
+### 12.17 The App view (#385, epic #397)
+
+A workflow whose document has an `app` block (4.9) opens as one simple screen instead of the graph when its `defaultView` is
+`app`. The screen has no graph or node vocabulary in it.
+
+- **A tab mode, for now.** Until #217's view registry carries it, the App view is a mode of the workflow's tab: the window's
+  body shows it in the canvas's place, in a window with one area. With several areas the app stays the Graph's tab. A window
+  with no app tab has exactly the items it had (`tests/workspace/data/default-window.txt`). A block that does not read
+  (`app_invalid`, a later `format`) or a document with none opens as an ordinary workflow.
+- **The screen** (`apps/AppPage.qml`, `appPage`): at the top the app's title and description, and at the end **Open in
+  Graph** (`appOpenInGraph`). Below, at the start the form: each input of `inputs[]` in the block's order (`AppInput.qml`,
+  `appInput-<key>`: its label over a text field, a number (a drag field when the block gives `min` and `max`, else a text
+  field; empty means the workflow's own), a choice, or, until #386, a file's path as text), the `Advanced` ones folded under
+  **Advanced**; under the form **Run** (`appRun`, the one primary control), and while a run is waiting or going **Cancel**
+  (`appCancel`, danger, a chunk of its own) and one line of progress ("Waiting for its turn…", "Working… 40%") over a 2 px bar.
+  At the end the output: the results of the block's `outputs[]` (a picture fits and a double click opens it in the large
+  viewer (`LargeViewDialog` over the Compare viewer in its single mode); a video or sound plays; each is named by its `label`, else "Result"), or "The result appears here." A failed
+  run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the rest and
+  the hints; a cancelled run says nothing.
+- **Run** binds the form's values into a copy of the workflow (`bindApp`, 4.9) and queues it through RunService like any run:
+  one queue, one GPU, the queue panel lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
+  (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
+  outputs: a run's results are the existing run history's; the screen shows the last run of this session (past takes are a
+  later issue).
+- **Open in Graph** switches this tab to the graph, the same workflow as an ordinary tab. While an app tab shows the graph a
+  strip under the canvas has **Show as app** (`appShowApp`); it brings the form back, rebuilt from the workflow as the graph
+  left it (values kept for inputs that still exist). The choice is per tab and kept for the session; a tab opens in the view its
+  `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
+- **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `run`, `cancel`,
+  `status`, `progress`, `error`, `details`, `results`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
+  it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.
+
 ---
 
 ## 13. CLI and agent interface
@@ -3020,6 +3099,9 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue canvas batch <action> <in-folder> <out-folder> [--prompt <text>] [--seed <n>] [--keep] [picture options]` | A canvas action over a folder of pictures (#250; `engine/canvas_batch.h`, the code the Canvas view's Automate > Batch… dialog runs through the window's own runs). `<action>` is a file (an existing path) or the id of an action in the bundled actions (`share/actions`). Every picture directly in `<in-folder>` (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff`, `.ora`, in name order) is imported as a temporary canvas (producer `batch`), the action is bound to it as the Canvas view's Generate binds it with the **whole canvas** as the selection (padding and scale from the router), its workflow is run like `fugue run` (a queue entry and a detached worker, so it waits its turn for the GPU), and the head the run left is exported with the picture options of `canvas export` (`--format`, `--quality`, `--lossless`, `--scale`, `--size`, `--width`, `--height`, `--background`; PNG when none) to `<out-folder>/<input name>.<ext>`, made when missing. A name that exists, or that an earlier picture of the batch took, becomes `<name>-2`, `-3`, ...: nothing is replaced. The temporary canvas is removed afterwards unless `--keep`. `--prompt` fills the action's prompt input (`input_invalid` when the action needs one and none is given), `--seed` fixes the seed of every picture (else each gets a random one). A picture that cannot be read, whose run fails or whose file cannot be written is reported `failed` with its code and message and the batch goes on; SIGINT or SIGTERM cancels the run under way and the pictures not started are `cancelled`; the exit code is 1 when any is not `ok`. Output is a line per picture; with `--json` one JSON object per line: `batch.started` {total}, `item.started` {index, total, file}, `item.done` {index, total, file, status, output?, code?, error?}, `batch.done` {ok, failed, cancelled} and the last line `batch.report` {report: {folder, total, ok, failed, cancelled, items}}. Nothing starts (an ordinary error envelope) for `file_not_found` (no such action or folder), `input_invalid` (no pictures, a missing prompt), `action_invalid` (the file is not an action, it is broken, or its `selection` is `bounds`: Expand needs a crop frame), `usage`. |
 | `fugue canvas actions` (alias `canvas act --list`) | The canvas actions the Canvas view's task bar lists (#231 slice 10; `engine/canvas_act.h` `collectActions`, the listing the bar's `CanvasActions` uses): the template library's workflows with a valid `action` block first, then the files compiled into Fugue (`share/actions`), the first of an id winning. Per action: `id`, `name`, `description`, `selection`, `needs_prompt`, `has_seed`, `has_layer`, `needs` {`models`, `models_missing` (by the model library, nothing hashed beyond what is remembered), `pack` (the name of a pack its nodes need that is not installed, else empty)}, `broken` (+ `reason`) and `inputs` [{key, label, advanced, choices?, default?}]. |
 | `fugue canvas act <id>[@<revision>] <action> [--prompt <text>] [--seed <n>] [--count 1-4] [--layer <name\|position>] [--rect x,y,w,h \| --selection <mask.png>] [--expand left\|right\|top\|bottom --percent 25\|50 \| --pixels <n>] [--set <input>=<value>]... [--wait]` | A canvas action run as the task bar's Generate runs it (#231 slice 10): the checks, Expand's growth of the canvas, the router's padding and scale, the layer role, Count N and the bound copy of each run are `engine/canvas_act.h` `planAct`, which `CanvasActions::generate` calls too; this command only reads the arguments, queues each run like `fugue run` (`startBoundRun`) and, with `--wait`, waits (`waitForRun`; SIGINT or SIGTERM cancels the run under way and the rest). `<action>` is an id of `canvas actions` or a workflow file with an `action` block; `--rect` is in canvas pixels (held inside the canvas); `--selection` is a PNG the size of the canvas whose first channel is the selection (above 0 selects), stored by content with `CanvasStore::storeSelection` as the lasso's is and bounded by the painted area (`mask_empty` when nothing is, `usage` for another size); `--rect` and `--selection` are left out, with a note on stderr, by an action whose `selection` is `bounds` or `none`. `--count` is for an action with a seed (`usage` otherwise); the first layer is visible and 2..N hidden with ` (n of N)` after the name, seeds `--seed`+n (random each without). `--layer` is the layer a layer-role action works on (Remove background), else the one layer Canvas Region reads (a position, 0 the bottom, or a unique name). `--percent`/`--pixels` apply to `bounds` actions only. `--set <input>=<value>` sets an Advanced input of the block (not prompt, seed or layer; a choice input takes one of its words, case-insensitive; else JSON when it parses, as `fugue run --set`) and `--set <node>.<input>=<value>` an input of a node in the run's copy. Without `--wait` it answers at once `{canvas, action, previous, runs: [{run, seed?}], expanded?, status: "queued"}`. With `--wait` the answer is `{canvas, action, previous, head, status: "ok", layers: [{name, visible}] (those new on the head), canvases? (Canvas New's: Upscale makes a new canvas and leaves this one as it was), expanded?: {revision, width, height}, runs, notice?}` and a failed or cancelled run is an error (`cancelled`, or the run's code with the bar's plain words, `(n of N run(s) finished.)` appended) with exit 1; the runs not started are cancelled; a fully cached Write after an undo is placed on the head again when its run ended ok, and a failed or cancelled run places nothing of its own (#337): how a Generate ended is `engine/canvas_act_outcome.h` `ActOutcome`, which the bar reads too (design decision 5). A cached Write that cannot be placed is an error with exit 1. Progress is on stderr (`node ...`, `node 40%`, `node done`/`(cached)`, prefixed `[n of N]` for Count). Refused before anything is changed: `file_not_found` (no such action: `valid` lists the ids), `canvas_not_found`, `action_invalid`, `pack_missing`, `model_missing` (the message names the missing files, the hint says `fugue model get <action>`; this check comes before Expand's growth), `act_refused` (select an area, type a prompt, pick a side, name a layer), `mask_empty`, `usage`. |
+| `fugue app list` | The apps of this machine (#392, epic #397): the templates whose workflow has an `app` block (4.9), the person's own first, by the template's id. Per app `id`, `title`, `description`, `file`, `inputs` and `outputs` (counts); a template that cannot be read is a warning and left out. |
+| `fugue app info <id\|file>` | What an app takes and gives: `id`, `file`, `title`, `description`, `default_view`, `inputs` [{`key` (the name, else the role), `role`, `label`, `type` (`image`, `mask`, `text`, `number`, `bool`, `model`, `choice`, ...), `required` (a picture or mask with none in the workflow, a prompt that is not optional and has no fallback), `advanced`, `default` (the block's, else the workflow's own value), `min`, `max`, `choices`}], `outputs` [{`node`, `label`}], `ready` and, when not ready, `needs` (the `prepare` plan, 6.6). `<id\|file>` is a template id, or a workflow file (a path that exists wins over an id). Errors: `file_not_found` (no such app: `valid` lists the ids), `no_app` (the workflow or template has no `app` block), `app_invalid` (the block does not fit its graph; checked only when the app is ready, as a missing pack leaves its nodes unknown), `unsupported_format_version`. |
+| `fugue app run <id\|file> [--input <key>=<value>\|<key>=@<file>]... [--out <dir>]` | Run an app without the window (#392): `app::bindApp` puts the values in a copy of the workflow (an input left out keeps its block default, else the workflow's own value; a seed is never made random), the copy runs through the queue like `fugue run --wait` (`startBoundRun`, `waitForRun`; progress on stderr, Ctrl+C cancels), and the files the app's output nodes made are printed, one per line (`--json`: `{app, run, status: "ok", outputs: [{node, label, files}], files}`); results are the run's own (`fugue runs result <run>`, History), the app owns no store. `--input image=<file>` is a picture or mask path (it must exist, and a run may read it only under the home folder, 13.6); `<key>=@<file>` is that file's text, for a prompt; a number input takes a number, a choice input one of its words, a model input a model file's name (as `canvas act --set model=`) or a whole handle as JSON. `--out <dir>` (made when missing) sets the `folder` of every output node that writes files (Save Image, Save Video, Save Audio); a Preview has none. Refused before anything runs, in this order: `file_not_found`, `no_app`, `unknown_input` (`valid` lists the keys), `missing_input` (one error per input a run cannot do without), `usage` (a value of the wrong kind), `app_not_ready` (a pack to install or trust, a model to get; the hint says `fugue template prepare <id>` or `fugue workflow prepare <file>`), `app_invalid`; then `cancelled`, or the run's own code (`node_failed`, `out_of_memory`, ...), exit 1. |
 | `fugue canvas log <id>[@<revision>] [--limit <n>]` | The revisions from the head (or the one named) back along their parents, newest first, 20 by default: revision, time, producer. |
 | `fugue canvas show <id>[@<revision>]` | One revision: its tree hash, parent, producer, time and layers (position, name, kind, visibility, opacity, blend, layer mask, origin, tile count). |
 | `fugue canvas list` | The canvases of the store, newest first: id, creation time, name, head. |
@@ -3118,7 +3200,8 @@ Codes in v0.1:
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Canvas (#208) | `canvas_not_found` (no such canvas, revision or stored tree; or a canvas with no revision asked for its head), `canvas_ambiguous` (a revision prefix that starts more than one), `canvas_corrupt` (a stored object is not the content it is named for, or is not well formed); #210: `canvas_not_candidate` (accept or drop of a revision that is in the head's history or already accepted), `canvas_conflict` (a candidate made from an older revision that changed more than it added layers cannot be placed on the head), `canvas_head_moved` as an error of `fugue canvas accept` (the head moved while it ran; nothing changed); #226: `canvas_head_moved` also for a layer edit, `undo` or `redo` whose head moved, `canvas_no_step` (`undo` of the first revision, `redo` with nothing undone) ([14.5](#145-the-canvas-revision-store-206-208)) |
 | Canvas nodes (#209) | `padding_raised` (a warning, Canvas Region 1.3.0, #242: Padding was below Feather + 16, so Canvas Write's blend would end in a hard edge at the region's box; it was raised to that), `canvas_head_moved` (Canvas Write, an error since 1.4.0, #239: the canvas changed size while the workflow ran, so the run's layer could not be placed on the head; the run says so in plain words and writes nothing visible; when it can be placed, it is, with no warning); `input_invalid` on `revision` when Canvas Region got a revision that was not named in full at compile; a canvas or revision that is not there fails the compile with `canvas_not_found` on the node's `revision`; a canvas input left blank is the Active canvas ([14.5](#145-the-canvas-revision-store-206-208), #246): it compiles to the active canvas's id, and only with no canvas in the root at all `input_invalid` on `canvas` ("Choose a canvas") is raised when the node runs |
-| Canvas actions (#231) | `action_invalid` (a workflow's `action` block is not well formed, or does not fit its graph: a target node or input that is missing, linked or of the wrong type, no Canvas Region or Canvas Write, two Regions and no `region`, a Write onto another canvas; the message says which); a block of a later format is `unsupported_format_version`; `pack_missing` (the action's nodes are of a pack that is not installed, `fugue canvas act`, #231 slice 10), `act_refused` (`fugue canvas act`: the request is not one the action can run, in the words the task bar shows: select an area, type a prompt, pick a side, select a layer) ([14.5](#145-the-canvas-revision-store-206-208), docs/canvas-actions-design.md) |
+| Canvas actions (#231) | `action_invalid` (a workflow's `action` block is not well formed, or does not fit its graph: a target node or input that is missing, linked or of the wrong type, no Canvas Region or Canvas Write, two Regions and no `region`, a Write onto another canvas; the message says which); a block of a later format is `unsupported_format_version`; `app_invalid` (the same for an `app` block, 4.9) and `app_stale` (a warning: a target or output of the app's block was dropped because its node is gone); `pack_missing` (the action's nodes are of a pack that is not installed, `fugue canvas act`, #231 slice 10), `act_refused` (`fugue canvas act`: the request is not one the action can run, in the words the task bar shows: select an area, type a prompt, pick a side, select a layer) ([14.5](#145-the-canvas-revision-store-206-208), docs/canvas-actions-design.md) |
+| Apps (#392) | `no_app` (`fugue app info\|run`: the workflow or template has no `app` block), `app_not_ready` (`fugue app run`: the app's packs, trust or models are not here; the message says what, the hint names the `prepare` command); a missing or unknown input is `missing_input` and `unknown_input`, a block that does not fit its graph `app_invalid` (4.9) |
 | Masks (#167) | `mask_empty`, `mask_unsupported`, `stitch_mismatch`; warnings `mask_full`, `mask_resized` (Paint too) ([14.4](#144-masking-and-inpainting-167)) |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`, `node_test_failed` (`fugue node test`: an output is not what the test expects) |
 | Cache | `cache_busy` (a warning: `fugue cache clear` left the results and previews alone because a run is going) |
