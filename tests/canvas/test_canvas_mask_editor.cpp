@@ -116,8 +116,14 @@ private slots:
         QVERIFY(e.layer->isEmpty());
         e.editor->setProperty("brushSize", 40);
         e.editor->setProperty("brushHardness", 1);
-        // A stroke along a line, by the pointer in the window.
+        // A stroke along a line, by the pointer in the window; the overlay is drawn over the picture (a layer with `clip: true`
+        // of its own drew nothing, owner 2026-11-25).
+        const QImage before = test_support::grab(e.app.window);
         e.dragOver({100, 100}, {250, 100});
+        QTest::qWait(60);
+        const QImage after = test_support::grab(e.app.window);
+        QVERIFY(!before.isNull() && !after.isNull());
+        QVERIFY2(after.pixel(e.at(180, 100)) != before.pixel(e.at(180, 100)), "the stroke is not drawn over the picture");
         QCOMPARE(e.value(100, 100), 255);
         QCOMPARE(e.value(180, 100), 255);
         QCOMPARE(e.value(180, 140), 0);

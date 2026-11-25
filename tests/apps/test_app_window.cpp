@@ -1033,11 +1033,19 @@ private:
         const auto at = [&](double x, double y) {
             return layer->mapToScene(QPointF(layer->originX() + x * layer->zoom(), layer->originY() + y * layer->zoom())).toPoint();
         };
+        const QPoint middle = at(size.width() / 2, size.height() / 2);
+        const QImage before = test_support::grab(app.window);
         QTest::mousePress(app.window, Qt::LeftButton, {}, at(size.width() / 4, size.height() / 2));
         for (int i = 1; i <= 8; ++i)
             QTest::mouseMove(app.window, at(size.width() * (0.25 + 0.05 * i), size.height() / 2));
         QTest::mouseRelease(app.window, Qt::LeftButton, {}, at(size.width() * 0.65, size.height() / 2));
         QVERIFY(!layer->isEmpty());
+        QTest::qWait(60);
+        QVERIFY2(test_support::grab(app.window).pixel(middle) != before.pixel(middle), "the stroke is not drawn over the picture");
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) { // the editor as the form opens it, to look at
+            QTest::qWait(100);
+            test_support::grab(app.window).save(QString("%1/app-mask-editor.png").arg(QString::fromLocal8Bit(dir)));
+        }
         QCOMPARE(layer->valueAt(int(size.width() / 2), int(size.height() / 2)), 255);
         QMetaObject::invokeMethod(editor, "accept");
         const QString stored = rig.view.valueOf("mask").toString();
