@@ -258,16 +258,27 @@ ColumnLayout {
         font.pixelSize: page.look.labelSize
     }
 
-    Text {
-        objectName: "providersProblem"
+    RowLayout {
         visible: page.model.providersProblem !== ""
         Layout.fillWidth: true
         Layout.topMargin: 2 * page.u
-        wrapMode: Text.Wrap
-        color: page.look.error
-        font.pixelSize: page.look.labelSize
-        text: qsTr("%1 cannot be read, so nothing here can change until it is fixed: %2")
-                  .arg(page.model.providersPath).arg(page.model.providersProblem)
+        spacing: page.u
+        Text {
+            id: problemText
+            objectName: "providersProblem"
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: page.look.error
+            font.pixelSize: page.look.labelSize
+            text: qsTr("%1 cannot be read, so nothing here can change until it is fixed: %2")
+                      .arg(page.model.providersPath).arg(page.model.providersProblem)
+        }
+        KitCopyButton {
+            objectName: "providersProblemCopy"
+            look: page.look
+            Layout.alignment: Qt.AlignTop
+            copyText: problemText.text
+        }
     }
 
     KitSearch {
