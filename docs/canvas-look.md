@@ -748,71 +748,268 @@ The real window's screenshots: `FUGUE_LOOK_SHOTS=<folder> QT_QUICK_BACKEND=rhi b
 
 ## 20. Drift kit
 
-Shared QML for the chrome that is not the canvas: panels, dialogs, sheets and cards (epic #456). Its look is
-[omarchy-drift](https://github.com/bmaltais/omarchy-drift)'s settings card (MIT, same author; its `SettingsCard.qml` is the
-reference and the source of the shapes): grouped rounded cards on a dark ground, rows with a label, a dim hint and the control
-at the end, hairlines between rows, pill switches, round-thumb sliders, chips, a hero header with a serif title. The node
-graph keeps its Blender-convention look; the kit is for the surfaces around it. Colors follow the Omarchy theme through the
-tokens below (Drift hardcodes greys and a blue); sizes are in `u` and every press target is at least 7u (24px floor,
-docs/ui-ergonomics.md).
+Shared QML for the chrome that is not the canvas: panels, dialogs, sheets, cards and the App view (epic #456, brand
+"Dusk"). The look is [omarchy-drift](https://github.com/bmaltais/omarchy-drift)'s settings card (MIT, same author; its
+`SettingsCard.qml` is the source of the shapes) as the owner approved it on the mockup boards of 2026-11-24. The node graph
+keeps its own look (section 4) except for the node-card style setting (20.14). Colors follow the Omarchy theme through the
+tokens below; sizes are in `u` (1u = 4px at text size 12; every press target at least 7u = 28px, the floor 6u = 24px,
+docs/ui-ergonomics.md). Pixel numbers in this section are the boards' 1x pixels, with `u` beside them where it matters.
+Status per element: **Built**, **Partly**, **To build**, read from `src/kit/` at `f1e5f81c`.
 
-The files are `src/kit/Kit*.qml`, imported as `import "../kit"` (the QML module folder `/kit`; `src/canvas/` already holds
-about a hundred canvas files, and a folder of its own lets the kit be found, linted and tested as one). Each takes
-`look` (default `App.theme.look`, so no `required` boilerplate on every row). The controls are controlled: a value comes in, a
-signal asks for the change (`toggled(value)`, `moved(value)`, `tapped()`), and none sets its own value, so a binding stays a
-binding. The picture of all of them, dark and light, is `tests/kit/KitGallery.qml` (`FUGUE_KIT_SHOTS=<folder>
-QT_QUICK_BACKEND=rhi build/test_kit shots`).
+### 20.1 Principles
 
-| Component | For |
-| --- | --- |
-| `KitSection` | the bold small title (13px) above a group; a heading for assistive tools |
-| `KitGroup` | the rounded card (popup corner, `kit-group` fill) that holds rows; no gap between them |
-| `KitRow` | `label`, optional dim `hint` (`label` color, 11px), and trailing controls as children; at least 10u tall; draws the hairline above itself unless it is the first visible row. `target` (a control with `toggle()`) makes the whole row its hit area; a click on a trailing control stays that control's |
-| `KitSeparator` | the hairline, inset 3.5u, for a row that is not a KitRow |
-| `KitToggle` | the pill switch: `checked`, `toggled(value)`, Space, Tab, 10u by 7u to press, accent track when on |
-| `KitChip` | the small rounded button: `text`, Lucide `glyph`, `pill` (fully round; a glyph-only pill is 2:1), `round` (as wide as tall, for a corner button), `bordered` (a hairline, for Cancel), `frosted` + `backdrop` (glass over a picture, below), `current`, `tip`, `tapped()`; 7u |
-| `KitSlider` | `from`, `to`, `value`, `stepSize`, `ticks`, `startGlyph`, `endGlyph`, `showValue`, `valueText`, `moved(value)`; arrows, PageUp/Down, Home/End; the end slot has a fixed width so rails in a group align; right to left mirrors |
-| `KitWell` | the recessed field: the `kit-well` fill a shade darker than its group, a border nearly its own color, a 1px shadow along the top edge (22% black dark, 8% light) and a faint light line along the bottom (4.5% white dark, 60% light); `focused` is the 2px accent ring; `dashed` leaves the border to a picture well's own dashed edge. Put it first in a field, filling it |
-| `KitWell` over a picture | give it the `backdrop` item it sits over and it is smoked glass (`KitFrost` with `smoked`): a dark translucent tint (black 35 to 55% over a dark patch, 55 to 75% over a pale one, raised until white text reads at 4.5:1, by the same `PictureLuma` measure as the frosted chips), the blur, a 1px shadow along the top, a faint light line along the bottom, white text (`ink`); `labelInk` is dark for a label beside it over a pale picture. Frost 0, or no backdrop: the opaque recessed well. A field on a plain panel is never glass. Used in the kit gallery; no App panel field sits over a picture yet |
-| `KitRaise` | the raised look of a clickable thing: a 1px light edge along the top (7% white dark, 60% light) and a soft 1px shadow under it; used by `KitChip`, the rail items and the Run pill |
-| `KitFrost` | the glass behind a control over a picture (a frosted `KitChip`, the hero's pill and close button): the `backdrop` item blurred (a `ShaderEffectSource` of the rectangle behind the control through a `MultiEffect` blur, cut to the control's rounded shape), a black base at 22% that keeps white text at 4.5:1 over any picture, the `kit-frost` tint and a 1px `kit-frost-edge` line. The software renderer has no blur: the base (40%) and the tint remain. A hero's picture is `backdropItem`; the picture well's remove button blurs the picture it sits on |
-| `KitHero` | the header: a picture or the "dusk" gradient, `title`, `subtitle`, `status` pill (`statusTapped()`), `showClose` (`closed()`), `minHeight`, `cornerRadius` |
+1. **One calm look.** Every surface of the app (windows, panels, dialogs, sheets, popovers, cards, the App view) uses the kit's
+   components and tokens; no surface keeps its own rows, buttons or toggles. Quiet labels, one primary per screen (the accent
+   `Run`-style pill), motion only 100 to 260 ms and only on state.
+2. **Clickable is raised, fillable is recessed.** Buttons, chips, rail items, knobs and thumbs are raised (light top edge, soft
+   shadow under); text fields, number wells, the seed well, prompts, dropdown wells, slider tracks, the picture well and the
+   tracks of toggles and choosers are recessed (a shade darker, a soft inner shadow along the top, a faint light line below).
+3. **Glass over pictures.** Over a picture, clickable becomes frosted (lighter) and fillable becomes smoked (darker); each
+   control measures the picture behind it (`PictureLuma`) and picks its ink and tint to keep 4.5:1. Over plain panels the same
+   controls are the slightly raised chip and the slightly recessed opaque well. Frost = 0 makes all of it opaque.
+4. **A header's tone says what the window is for.** Dusk (Fugue, Apps), Sea (Templates), Ember (Results, media), Moss (Get ready,
+   downloads), Slate (Settings); an app's own header shows its preview picture. The tone tints its panel (20.4) and colours the
+   toggles, choosers and sliders inside it (20.8 to 20.10); outside a panel with a tone the accent is the tone.
+5. **Rounded spaces with gaps.** Every space of the window (workspace areas, the canvas area, side panels, docked panels, the
+   App view's rail, stage and panel, the run queue) is a rounded card (4.5u corner, 1px hairline) with a 2u gap of window
+   background between spaces; groups inside are 3u corners; dialogs and popovers use the panel corner.
+6. **Keyboard rules** (every dialog, sheet and popover as it moves onto the kit): Tab and Shift+Tab walk every control in reading
+   order (mirrored in right-to-left) with the kit's 2px accent focus ring; opening focuses the first useful control (the field
+   to type in, or the default button); Enter runs the default action; Escape cancels or closes and returns focus to what
+   opened it; arrows move inside lists, grids (Apps shelf, Templates, picture library) and segmented controls; Space flips a
+   toggle and presses a chip; no control is reachable only by pointer. One window test per dialog drives it by keys alone
+   (open, move, act, close) at the model/window seam; the final pass repeats it for every window.
 
-**One rule for the whole kit (owner, 2026-11-24): clickable things are raised and fillable things are recessed.** A chip, a button, a rail item and Run are raised (`KitRaise`, or frosted glass over a picture), never recessed; a field or a well is recessed (`KitWell`), never raised. The contrast is the point: a person sees at once what to press and what to fill. The look's `frost` (settings.json `frost`, Settings > Theme, 0 to 1, default 0.6) scales the glass; 0 makes every frosted control the plain raised chip. A frosted control measures the picture under it (`PictureLuma`, a downscaled grab, once per picture and position) and picks dark ink on a whiter tint over a pale patch or white ink over a dark base, raising the tint or base until the pair reads at 4.5:1.
+### 20.2 Files, conventions, components
 
-`KitHero` takes small buttons as children (`actions`: a row at its top end corner, the title elides before them); the app panel puts the launcher pin and Open in Fugue there as frosted round chips.
+Files are `src/kit/Kit*.qml`, imported as `import "../kit"`. Each takes `look` (default `App.theme.look`). Controls are
+controlled: a value comes in, a signal asks for the change (`toggled(value)`, `moved(value)`, `tapped()`), none sets its own
+value. The picture of all of them, dark and light, is `tests/kit/KitGallery.qml` (`FUGUE_KIT_SHOTS=<folder>
+QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is added to it.
 
-`KitHero` is compact: its height is the title, the subtitle and padding (about 84px for a 32px title at text size 12, the
-app panel's header) and `minHeight` asks for more picture (the Fugue header, 45u). The title is Fraunces (SIL OFL, bundled:
-`share/fonts/fraunces-latin.ttf`, the Latin subset of the variable font, licence in `share/fonts/LICENSE.fraunces`;
-`look.serifFont`), then Noto Serif, which the desktop has. Without a picture it draws "dusk", the brand default: lilac
-`#b98bd6`, rose `#e3828f` and blue `#6f86d6` blobs on a dark violet-grey `#2a2533`, with a darkening gradient toward the foot.
-The dusk colors are the brand's, the same on every theme, because the hero is a picture, not a surface; the same is true of
-its white title and its black pills. A picture's top corners are cut by the thumbnail shader (square on the software renderer).
+| Element | File | Status |
+| --- | --- | --- |
+| Tinted panel (card, tone, tint, border) | `KitPanel` (new) | To build |
+| Header, compact, tones, soft fade | `KitHero` | Partly |
+| Section title, group, row, separator | `KitSection`, `KitGroup`, `KitRow`, `KitSeparator` | Built (group fill and border adapt to the tint, 20.5) |
+| Recessed field, smoked mode | `KitWell` | Built (numbers to align, 20.6) |
+| Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7) |
+| Toggle | `KitToggle` | Partly (pill, white knob, 100 ms; no tone, glass, halo) |
+| Segmented chooser | `KitSegmented` (new) | To build |
+| Slider | `KitSlider` | Partly (accent fill, white knob; no tone, halo, recessed rail) |
+| Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | To build (Flat is today's face) |
+| App icon, wordmark | `share/icons`, `share/brand`, `fugueMark` | Built |
+| Settings Frost / Panel colour / Node style | `SettingsPanel.qml`, `settings.cpp` | Frost built; the other two To build |
 
-Tones (owner, 2026-11-24: a header's colours give a cue of what the window is for). `tone` picks the blend; an app's own
-header shows its preview picture instead, so each app stays distinct:
+### 20.3 Tokens
 
-| `tone` | Blobs on base | Where |
-|---|---|---|
-| `dusk` (default) | lilac, rose, blue on `#2a2533` | Fugue itself, the Apps shelf: the brand |
-| `sea` | teal, blue, mint on `#1d2a31` | Templates |
-| `ember` | amber, rose, gold on `#32251f` | Results and media |
-| `moss` | green, teal, lime on `#1f2e28` | Get ready, downloads |
-| `slate` | blue-grey, mist, blue on `#242933` | Settings |
-
-New tokens (`CanvasLook`, `look.cpp` and `derive.py` together; `fg` is the theme's text, `popup` is the card):
+`CanvasLook` (`look.h`, `look.cpp`) and `derive.py` change together; `fg` is the theme's text, `popup` the card, `mix(a, b, t)`
+as in section 6. Existing tokens keep their derivations (`kit-group`, `kit-separator`, `kit-track`, `kit-knob`, `kit-chip`,
+`kit-chip-hover`, `kit-well`, `kit-frost*`, `kit-hero-pill*`); the new and changed ones:
 
 | Token | Dark theme | Light theme | Use |
 | --- | --- | --- | --- |
-| `kit-group` | `mix(popup, fg, .07)` | `mix(popup, fg, .045)` | a group's fill |
-| `kit-separator` | `mix(kit-group, fg, .10)` | same | the hairline between rows |
-| `kit-track` | `mix(kit-group, fg, .28)` | `mix(kit-group, fg, .30)` | a slider's rail, a switch off |
-| `kit-knob` | white | white | the round thumb and the switch knob, on and off (Drift: always white) |
-| `kit-chip`, `kit-chip-hover` | `mix(kit-group, fg, .10 / .17)` | same | a chip or pill |
-| `kit-hero-shade` | black at 55% | same | the foot of the hero's darkening gradient |
-| `kit-hero-pill`, `kit-hero-pill-hover` | black at 44% / 60% | same | the old black pills over a picture (the hero's own pill and close are frosted now; kept for a flat control over a picture) |
-| `kit-well` | `mix(kit-group, black, .12)` | `mix(kit-group, black, .03)` | a field set into its group (a text field, the seed number, a prompt, the picture well) |
-| `kit-frost`, `kit-frost-hover`, `kit-frost-edge` | white at 20% / 30% / 28% | same | frosted glass: the tint, its hovered tint and the hairline (a picture is the same on every theme) |
+| `kit-panel` | `popup` | `popup` | a panel's base before the tint |
+| `kit-panel-edge` | white at 7% | black at 8% | the panel's 1px border |
+| `kit-tint-k` | `0.06 + 0.16 * 0.4` = 0.124 | the same x 0.75 | the strength of a panel's tint (the board's slider at its default 0.4; a constant, not a setting) |
+| `kit-group-glass` | white at 3.5%, border white at 6% | black at 4%, border black at 7% | a group's fill when Panel colour is Tinted (the tint shows through); Plain keeps the opaque `kit-group` |
+| `kit-hero-shade` (changed) | black: 5% at the top, 30% at 60%, 0 at the foot | the same | the title's shade, clearing toward the foot (was 55% at the foot) |
+| `kit-glass-track` | black at 30% (38% over a picture), 1px border black 25%, bottom edge white 10% | black at 12%, border black 16%, bottom edge white 60% | the recessed glass of a toggle's or chooser's track, off |
+| `kit-glass-shadow` | inset 0 1px 2px black 40% | black 15% | the same track's inner shadow |
+| `kit-knob-glass` | white 62% to 34% top to bottom, 1px white 55%, inset top white 75%, drop 0 1px 3px black 38% | same | the toggle's raised translucent knob (a glass, so it needs its own blur: 6px, saturate 140%) |
+| `kit-tone-<name>` | see 20.8 | the same colours | the tone's glass colour, `rgb`, with the alphas of 20.8 |
+| `kit-ring` | accent, 2px | same | the focus ring (the boards draw it as a border plus a 3px accent glow at 25 to 30%; the kit keeps the 2px ring, which survives the software renderer) |
+
+`derive.py` gets a `kit_tokens()` block that prints them (`--theme NAME` shows them; the contrast table gains the rows: white ink on
+`kit-hero` shade over the pale picture, ink on a tinted panel, `kit-knob-glass` on the on-track, the on-track against the group).
+The light derivations are proposals: the boards are dark; the first grab of each kit element in a light theme is checked against
+4.5:1 for text and 3:1 for control edges, and the derivation is adjusted, not the rule.
+
+### 20.4 KitPanel and the tinted panel background (To build)
+
+`KitPanel` is the card of one space: radius 4.5u (18px), 1px `kit-panel-edge`, clip, a `tone` (default `dusk`), an optional
+`KitHero` at its head, children below. It is the one place that knows the tone; the hero, toggles, choosers and sliders inside
+read it (a control outside any panel uses the accent). The tone reaches them without each row passing it (a parent-chain lookup
+of the nearest `kitTone`, bound, so a change shows live).
+
+| Tinted (Panel colour: Tinted, the default) | Plain (Panel colour: Plain, and the base under the tint) |
+| --- | --- |
+| `kit-panel` base, then three radial gradients of the tone's blobs, each fading to transparent at 70%: blob 0 at (15%, 0) size 70% x 45% alpha `k`; blob 1 at (90%, 30%) size 60% x 40% alpha `0.8k`; blob 2 at (60%, 100%) size 80% x 50% alpha `0.9k`; `k` = `kit-tint-k` (0.124) | `kit-panel`, no gradient; groups opaque `kit-group`; the hero still fades into it |
+
+Calm is the test: noticeable, never loud; it is a tint behind glass, so frosted chips and smoked fields have colour to catch.
+On the software renderer the gradients are drawn the same (they are plain `Rectangle` gradients and `Shape`s, no blur).
+A dialog is a `KitPanel`; so is each side panel.
+
+### 20.5 KitHero, compact, with the soft fade (Partly)
+
+Built: compact height (title + subtitle + padding, about 84px = 21u for a 32px title at text size 12), the five tones, the
+picture or the blend, Fraunces at weight 420 (`font.variableAxes`), white title and 88% white subtitle, `PictureLuma` legible
+shade (white title at 4.5:1 on a pale picture), the frosted status pill and close (6u), `actions`. **To change:**
+
+| Part | Recipe |
+| --- | --- |
+| Art box | the layout height stays the content's (about 84px); the picture or blend is drawn 5u (20px) taller than that and overlaps the first group (board: 104px art, margin-bottom -20px) |
+| Soft fade | the art is masked by a vertical gradient: opaque from 0 to 58% of the art height, then to transparent at 100% (about 44px of fade over the last 20px of overlap and the 24px above it); done with `MultiEffect` `maskEnabled` on the art layer; no inset, no rounded front pane, no glass edge, no foot square-off |
+| Corners | the art takes the panel's top corners (4.5u), as now |
+| Shade | `kit-hero-shade` as 20.3: top 5%, 60% at 30%, 0 at the foot, so no dark band; the `PictureLuma` legible shade stays and is uniform |
+| Blend | blobs unchanged (the table below); as radial gradients (60% x 140% at 22% 10%; 50% x 130% at 70% 0%; 70% x 140% at 85% 100%) fading to transparent at 70% on the base |
+| Title | Fraunces 420, `textSize * 8/3` (32px at 12), no letter spacing; subtitle `textSize`; pill and close frosted over the art (`KitFrost`) |
+| Software renderer | no mask: the art ends square at the content height and the old foot shade stays |
+| Frost 0 | pill and close are the opaque `kit-hero-pill` (black 44%); the fade is unchanged (it is not glass) |
+
+| Tone | Base | Blobs | Where |
+| --- | --- | --- | --- |
+| `dusk` (default) | `#2a2533` | `#b98bd6` lilac, `#e3828f` rose, `#6f86d6` blue | Fugue, Apps shelf: the brand |
+| `sea` | `#1d2a31` | `#6fc3c9`, `#6f9fd6`, `#8fd6c0` | Templates |
+| `ember` | `#32251f` | `#e8a87c`, `#e3828f`, `#d6b46f` | Results, media |
+| `moss` | `#1f2e28` | `#8fcf9a`, `#6fc3a8`, `#b7d67a` | Get ready, downloads |
+| `slate` | `#242933` | `#8fa6c9`, `#a9b4c9`, `#6f86d6` | Settings |
+
+The tone colours are the brand's, the same on every theme, because the hero is a picture. The tone table moves from `KitHero`
+into `CanvasLook` (`look.tone(name)`) so panels, toggles and `derive.py` read one source.
+
+### 20.6 Groups, rows, wells (Built; adapt)
+
+| Element | Recipe |
+| --- | --- |
+| `KitSection` | bold 13px title above a group, 5u above it, 1.5u to its group |
+| `KitGroup` | radius 3u (12px); Tinted: `kit-group-glass` fill and its border; Plain: opaque `kit-group`; no gap between rows |
+| `KitRow` | label (13px), dim hint (11px, `label` color), trailing controls; at least 10u; hairline above unless first; `target` makes the row the hit area for a switch |
+| `KitWell` (slightly recessed) | radius 2u (8px; 10px for a multi-line prompt); fill `kit-well` (a shade darker than the group: black at 12% dark, 3% light); border 1px nearly the fill (`kit-well` darkened 6% dark, 3% light), its bottom edge white 4.5% (light 60%); inset 0 1px 1.5px black 22% (light 8%); not translucent; focus: the 2px accent ring |
+| `KitWell` over a picture (smoked) | `backdrop` set, Frost above 0: blur 10px and saturate 120%; fill black 18% + 30% x s over a dark patch, rgb(20, 20, 26) 32% + 40% x s over a pale one (`s` = 0.5 at the default Frost 0.6, scaling with it), raised in 5% steps until white text reads 4.5:1; border 1px black 18%, bottom edge white 14%; inset 0 1px 1.5px black 30%; text white; a label beside it takes `labelInk` (dark over a pale patch, 2px black 50% shadow over a dark one) |
+| Picture well | a `KitWell` with `dashed` (its own dashed edge, `hairlineStrong`), radius 3u |
+
+Built values differ from the board for the smoked fill (the code uses black 35 to 55% dark and 55 to 75% pale): the board's
+numbers win (20.15). A field on a plain panel is never glass. Frost 0 or no backdrop: the opaque well.
+
+### 20.7 KitRaise, KitChip, frosted mode (Built; align numbers)
+
+| Element | Recipe |
+| --- | --- |
+| Raised chip (plain panel) | `kit-chip` fill (group mixed 10% toward fg), hover `kit-chip-hover` (17%), pressed `menuRow`, 100 ms color; `KitRaise`: top edge white 7% (light 60%), 1px soft shadow black 28% (light 10%); 7u tall, radius 2.5u or a pill; `current` uses `selectedRow`, never the accent |
+| Frosted chip (over a picture, Frost above 0) | blur `4 + 16 f` px, saturate `100 + 50 f` %; tint white `0.06 + 0.20 f`; edge 1px white `0.12 + 0.30 f`; inset top shine white `0.10 + 0.30 f`; white ink with a 0 1px 2px black 45% text shadow (`f` is the Frost setting, 0.6 by default) |
+| Frosted chip over a pale patch (luma above 0.55) | tint white `0.30 + 0.30 f`, raised in 5% steps until the dark ink `#17171b` reads 4.5:1; edge black `0.08 + 0.10 f`; inset top shine white 60%; drop 0 1px 2px black 10% |
+| Mixed pictures | each control measures its own patch (a 64px grab, once per picture and position); the ink is chosen per control |
+| Frost 0 | opaque `#3a3a40` equivalent (`kit-chip`), no edge, no blur, no measuring, ink `text` |
+| Focus | 2px accent ring; Enter or Space presses |
+
+Built differs from the board in two places, the tint (built `kit-frost` alpha x `f / 0.6`, about 0.20 at the default against the board's
+0.18; accept, it is the same at the default) and the blur (built: a small texture scaled up, not a radius in pixels; the board's
+radius is the target and is matched by the scale). The default Frost slider is the setting (`frost`, 0 to 1, 0.6).
+
+### 20.8 KitToggle: tone glass (Partly)
+
+Built: pill, white knob, `toggled(value)`, Space, 10u x 7u press area, 100 ms. **To change** (owner: toggles are glass in the
+window's tone):
+
+| Part | Recipe |
+| --- | --- |
+| Size | track 11u x 6.5u (44 x 26px) in an 11u x 7u press area; knob 5u (20px), 0.5u (2px) inset |
+| Track, off | recessed smoked glass: `kit-glass-track`, `kit-glass-shadow`, blur 10px |
+| Track, on | the tone as translucent colour: a vertical gradient `tone` at alpha 0.52 to 0.34, same border and inner shadow, blur 10px; 160 ms ease |
+| Knob | `kit-knob-glass`: white 62% to 34%, blur 6px saturate 140%, 1px white 55%, inset top white 75%, drop shadow; slides 160 ms ease (x from 2px to 20px) |
+| Halo | 20.11 |
+| Frost 0 | opaque: off `kit-track`; on the tone mixed 75% into `kit-group`; knob opaque white; no halo |
+| State without color | the knob's position carries state; a test checks on and off tracks differ by 3:1 or the knob's side is the cue |
+| Keys | Tab reaches, Space flips, the row's click flips (`target`); ring 2px accent |
+
+| Tone | Glass rgb | Status |
+| --- | --- | --- |
+| `dusk` | `rgb(150, 140, 235)` | board |
+| `sea` | `rgb(110, 200, 205)` | board |
+| `moss` | `rgb(120, 205, 140)` | board |
+| `slate` | `rgb(130, 160, 225)` | proposed: confirm in the first grab |
+| `ember` | `rgb(235, 165, 120)` | proposed: confirm in the first grab |
+
+Track alphas 0.52 and 0.34 (the gradient), 0.22 for the halo stop. Over a picture the off track is black 38%.
+
+### 20.9 KitSegmented: tone glass chooser (To build)
+
+For a few exclusive options (the seed's Fixed, Random, Increment; the window's App | Graph switch; Frost's levels if wanted).
+`options` (texts, optional glyphs), `currentIndex`, `moved(index)`; controlled like the others.
+
+| Part | Recipe |
+| --- | --- |
+| Track | recessed glass as the toggle's off track (`kit-glass-track`, inner shadow, blur 10px), 7u tall, fully round, 0.75u (3px) padding |
+| Option | height 5.5u (22px), padding 0 3u, 12px weight 500, white at 72% (the chosen option white); an option is at least 7u wide to press; labels elide never, the widest label sets every option's width |
+| Thumb | raised translucent piece in the tone: gradient `tone` at alpha 0.55 to 0.34, blur 8px, 1px white 28%, inset top white 35%, drop 0 1px 3px black 35%; slides in `left` and `width` over 180 ms ease |
+| Frost 0 | opaque track (`kit-track`), thumb the tone mixed 70% into the track, no blur |
+| Keys | one tab stop; Left and Right (mirrored in right-to-left) move and choose, Home and End jump; Space and Enter keep the choice; accessible role radio group with the checked option |
+
+### 20.10 KitSlider: tone fill (Partly)
+
+Built: 1u rail, accent fill, white `kit-knob` 4.5u thumb, optional ticks and glyphs, keys. **To change:** the rail is a recessed
+well (6px high, `KitWell` look); the fill is the panel's tone at 85% (4px high, 0.5u inside the rail); the thumb stays opaque white,
+18px, with a drop shadow 0 1px 3px black 45% (the board's); a focus ring on the thumb; the value box beside it is a `KitWell`
+(44px wide, right-aligned). Frost 0: the fill is the tone mixed 75% into the rail and no halo. The halo is 20.11.
+
+### 20.11 Local colour halo
+
+A coloured control tints the glass around it: an "on" toggle, and along a slider's filled part. Behind the control (z below it),
+clipped by the panel:
+
+| Part | Recipe |
+| --- | --- |
+| Shape | a radial gradient, closest-side, from the tone at alpha 0.22 to transparent, blurred 6px; a box 260 x 120px (65u x 30u) centred on the control's row, its centre 60px (15u) toward the row's start from the control's end; a slider's halo follows the fill's middle |
+| Strength | item opacity 0.18 when on (centre about 4% alpha), 0 when off; fades 260 ms ease |
+| Limits | never above 4% at the centre ("a hint of light, never a glow effect"); clipped to the panel; not drawn at Frost 0 |
+
+### 20.12 App icon and wordmark (Built)
+
+Dusk blend with a serif F: the icon is the blend behind a white Fraunces F (F height 64% of the icon), corner 23 to 25%
+(112px: 26; 56px: 14; 32px: 8), base `#2a2533` with lilac at (25%, 30%) 70%, rose at (78%, 28%) 60%, blue at (70%, 95%) 80%; a
+drop shadow 0 8px 24px black 35% on the large one only. The wordmark is Fraunces, white, 76px with -1px letter spacing, over the
+Dusk hero; tagline 15px "Workflows for local AI, woven together." Files: `share/icons/`, `share/brand/` (outlined from Fraunces, OFL),
+`scripts/make-app-icon.py`; Fugue's mark sits at the start of the window bar (`fugueMark`). Nothing left to build; the final
+pass checks the icon at 16 to 512px on a light and a dark launcher.
+
+### 20.13 Settings that control the look
+
+| Setting (settings.json) | Values | Where | Controls | Status |
+| --- | --- | --- | --- | --- |
+| `frost` | 0 to 1, default 0.6 | Settings > Theme (Frost slider, notes Off/Light/Medium/Strong) | glass of frosted chips and smoked wells, the halo (0 = off), the toggles' and choosers' glass (0 = opaque) | Built |
+| `panel_colour` | `tinted` (default), `plain` | Settings > Theme, a `KitSegmented` | 20.4 | To build |
+| `node_style` | `compact` (default), `flat` | Settings > Theme (Appearance), a `KitSegmented` | 20.14 | To build |
+
+All three apply live; none changes a workflow. The rest of the retheme is not switchable: one calm look.
+
+### 20.14 Node cards: Compact (Drift) and Flat (To build)
+
+Setting `node_style`: `compact` is the Drift card below; `flat` is today's Blender-like face (sections 4 to 9, kept as it is). Only the
+card's drawing switches (frame, header, rows, port dots, widgets); the model, ports, wire logic, sizes in the file, keys and
+gestures are shared, so switching needs no reload. Flat keeps today's widget delegates; Compact uses the kit's controls; a new
+widget type draws in both (one window test per style for the widget set, not per widget). The zoom tiers and the magnifier (section
+14) keep working; text stays at 12 to 13px.
+
+| Part | Compact recipe (board "Nodes") |
+| --- | --- |
+| Card | width 51 to 61u (204 to 244px), radius 3u (12px), fill `#222226` (group fill: `kit-group` over the canvas), 1px border `#34343a`, shadow 0 8px 22px black 35% |
+| Header | 7u (28px), padding 0 10px, a 2u (8px) dot in the node's category color, name 13px weight 600, a 14px fold chevron in `label`; 1px hairline below (`#2f2f35`) |
+| Rows | 6.5u (26px); label left 12px `label`; control right; a 1px hairline inset 10px between groups of rows |
+| Controls | value chip or dropdown: a `KitWell` at 20px, radius 6px, 12px text (fillable is recessed; the board draws a flat chip, the epic's rule wins); seed + mode: a well and a `KitChip`; slider: a compact `KitSlider` (4px rail, 14px thumb, value 18px wide); toggle: 32 x 18px pill with a 14px knob |
+| Ports | 10px dots (2.5u) on the card's edge, 6px outside it, aligned with their row, in the port type's color (section 6.2), a 2px ring in the canvas color; wires in the type's color, 2.5px, soft curves |
+| Pictures | previews inside the card (Load Image 70px, Save Image 118px high), radius 8px, with a size badge (20px high, pill, black 55%, 11px text, bottom right) |
+| Running | the header takes a faint Dusk tint (radials of lilac 35% at (15%, 0) and rose 30% at (85%, 0), 60% x 160%), a 2px accent progress line along its bottom edge and a 11px percentage |
+| Selected | the border becomes the accent and a 3px ring of accent at 18% |
+| Frost 0 | no change: cards are opaque; Panel colour does not apply to cards |
+
+### 20.15 Contradictions between the boards, the epic and the code, and what the spec follows
+
+| Where | Said | Followed |
+| --- | --- | --- |
+| Smoked fill | board black 18 + 30% x s dark, 32 + 40% x s pale (0.33 and 0.52 at s = 0.5); code 35 to 55% and 55 to 75% | the board, then raised for 4.5:1 |
+| Run button | TintedPanels board: a glossy tone-gradient pill, Main board and the built App view: the accent pill | the accent pill (one primary, D7); a tone-colored primary is not adopted |
+| Toggle in TintedPanels | solid tone knob track | the Toggles board (glass, approved later) |
+| Hero height | TintedPanels 104px, Main 84px | 84px layout, art 20px taller (the epic: compact, and a little taller than its content) |
+| Node value chips | flat `#303036` (Nodes board) | recessed wells (the epic: fillable is recessed) |
+| Group fill | board translucent white 3.5% (TintedPanels) and opaque greys (Main, Recessed) | translucent when Tinted, opaque when Plain |
+| Halo strength | first comment 20% then a third then a fifth | the fifth: opacity 0.18 on a 0.22 stop, about 4% |
+| Toggle size | built 10u x 5.5u | the board's 11u x 6.5u |
+
+### 20.16 Rejected directions (do not retry)
+
+- Layered-glass panes for headers (an inset, rounded front pane over the art, a glass edge) and the "accentuated long flow" variants of the header fade: tried on the TintedPanels board, dropped for the soft fade (20.5).
+- Brand directions B (woven lines) and C (monochrome ink), and the Voices and Ink boards: not taken; the brand is A, Dusk.
+- Translucent fillable fields on plain panels (glass only over pictures); a strongly recessed well (it must be slightly recessed); a loud tint or a glow-effect halo.
 
 Credit: the layout, proportions and the idea of every component are omarchy-drift's.

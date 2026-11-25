@@ -126,6 +126,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Rules met: Floor (chips and the rail items 7u or more, Run 9u), Primary (Run, the one accent pill), Gaps (2u between cards, 3u inside the panel), Learned place (Apps first on the rail, the mark where the app's name sits in other windows), Posture (a form on a quiet card).
 - Decisions taken without the owner (each to confirm): the Apps rail glyph stays `layout-template` (the bundled Lucide subset has no grid glyph; adding one is a font recipe); no per-input hint exists in the app block, so `KitRow`'s hint shows only when a field gives `hint`; the slider has no reset-on-double-click (KitSlider has none); choice and picture dropdowns are raised chips, not wells, because they are clicked; the slider shows its value in the row's heading, not in a box.
 
+### 2026-11-24 The Drift look rules: one calm look for every surface (epic #456, brand Dusk)
+
+- Control: the spec is docs/canvas-look.md section 20 (recipes, tokens, status per element); the kit is `src/kit/`.
+- Old: each surface drew its own rows, buttons and toggles; flat greys.
+- New: clickable is raised, fillable is recessed; over a picture frosted (adaptive ink, 4.5:1) and smoked glass, Frost 0 makes it opaque; headers fade softly into tinted panels (Panel colour: Tinted or Plain), header tones by area; toggles, choosers and sliders are glass in the panel's tone with a faint halo; every space is a rounded card with a 2u gap; node cards Compact or Flat (setting). Rejected: layered-glass header panes, Voices and Ink brands.
+- Keys: every dialog, sheet and popover: Tab order with a visible ring, first useful control focused, Enter default, Escape closes and returns focus, arrows in lists and choosers, Space flips and presses; one key-only window test per dialog.
+- Rules met: Floor (7u targets, 6u hero buttons), Primary (one accent pill per screen), Gaps (2u between spaces), Posture (calm surfaces).
+- Decisions taken without the owner (each to confirm): the slate and ember glass colours and every light-theme derivation are proposals checked in the first grabs; Run stays the accent pill, not the board's tone-gradient button (confidence high: one primary rule); node value controls are wells, not the Nodes board's flat chips (high: the owner's fillable rule); the smoked fill follows the board's numbers, not the code's (medium).
+
 ### 2026-11-24 App view: a workflow as one simple screen (#385, epic #397)
 
 - Control: `src/apps/AppPage.qml` (`appPage`; `appOpenInGraph`, `appForm`, `appAdvanced`, `appRun`, `appCancel`, `appProgressText`, `appError`, `appDetails`, `appResults`), `src/apps/AppInput.qml` (`appInput-<key>`), `src/apps/AppResultDialog.qml` (`appResultDialog`), and, since #397, the window bar's App | Graph switch (below) in place of the strip `appBackHost` with **Show as app**.
