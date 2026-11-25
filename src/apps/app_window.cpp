@@ -60,7 +60,9 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             return ReadinessPlan();
         }
         ReadinessPlan plan = workflows.readiness()->currentPlan();
-        const auto isDownloadProblem = [](const Error &problem) { return problem.code == QLatin1String("download_failed"); };
+        const auto isDownloadProblem = [](const Error &problem) {
+            return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
+        };
         view.askPlacement(!plan.models.isEmpty() || std::any_of(plan.problems.cbegin(), plan.problems.cend(), isDownloadProblem));
         if (!view.runsOn().isEmpty()) {
             plan.models.clear();

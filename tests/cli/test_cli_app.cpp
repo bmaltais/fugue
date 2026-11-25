@@ -313,7 +313,16 @@ private slots:
               "{\"providers\": [{\"name\": \"gx10\", \"type\": \"fugue-helper\", \"address\": \"http://gx10.invalid:8787\", \"key\": \"k\"}]}");
         const Outcome paired = fugue({"app", "info", "sampled.fugue", "--json"});
         QCOMPARE(paired.data().value("runs_on").toString(), QString("gx10"));
+        // The run does not stop at app_not_ready (the model has no source here, or a source that cannot be used): the host checks.
+        QVERIFY(fugue({"app", "run", "sampled.fugue", "--json"}).code() != QString("app_not_ready"));
+        QByteArray unsourced = kSampled;
+        unsourced.replace("\"source\": \"h.example/m.safetensors\", ", "");
+        write(path("work/unsourced.fugue"), unsourced);
+        QCOMPARE(fugue({"app", "info", "unsourced.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+        const Outcome ran = fugue({"app", "run", "unsourced.fugue", "--json"});
+        QVERIFY2(ran.code() != QString("app_not_ready"), ran.out + ran.err);
         QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
+        QCOMPARE(fugue({"app", "run", "unsourced.fugue", "--json"}).code(), QString("app_not_ready")); // no helper: refused as before
     }
 
     // `app export` (#394, spec 11.5): the bundle is the package's zip, read back with the package reader.

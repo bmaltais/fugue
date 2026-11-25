@@ -208,12 +208,13 @@ bool isReady(const ReadinessPlan &plan) { return plan.empty() && plan.problems.i
 
 // Only model files are missing here, and a helper on a paired host is configured: the run goes there and the host checks the
 // files (#395; a host that does not have them, or is gone, answers with an error of its own).
-// A model with no source to download from is a `download_failed` problem of the plan: the host may have it all the same.
+// A model with no source to download from, or with one that cannot be used, is a `model_missing` or `download_failed` problem of the
+// plan: the host may have it all the same.
 bool onlyModelsMissing(const ReadinessPlan &plan) {
     if (!plan.packs.isEmpty() || (plan.models.isEmpty() && plan.problems.isEmpty()))
         return false;
     return std::all_of(plan.problems.cbegin(), plan.problems.cend(), [](const Error &problem) {
-        return problem.code == QLatin1String("download_failed");
+        return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
     });
 }
 bool mayRunOnHost(const ReadinessPlan &plan) {

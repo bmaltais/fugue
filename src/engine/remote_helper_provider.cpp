@@ -21,8 +21,8 @@ namespace {
 
 constexpr int kDefaultPollMs = 500;
 constexpr int kTransferTimeoutMs = 120000; // of silence: a large upload or download is not one
-// describe is a few bytes: a host that does not answer it in this long is gone (#395), so a run or a check says so
-// at once instead of waiting out the transfer timeout.
+// describe on a paired helper is a few bytes: a host that does not answer it in this long is gone (#395), so a run or a check says so
+// at once instead of waiting out the transfer timeout. Other http providers (modules, which start_timeout_s governs) keep theirs.
 constexpr int kDescribeTimeoutMs = 10000;
 constexpr int kLostPolls = 3;              // status requests in a row that may fail before the job does
 
@@ -145,7 +145,7 @@ Error RemoteHelperProvider::unreachable(const QString &why) const {
 
 QNetworkReply *RemoteHelperProvider::request(const QString &method, const QString &path, const QByteArray &body) {
     QNetworkRequest request(QUrl(address() + path));
-    if (path.endsWith(QLatin1String("/describe")))
+    if (path.endsWith(QLatin1String("/describe")) && isPairedHelper(m_instance))
         request.setTransferTimeout(kDescribeTimeoutMs);
     if (!m_instance.key.isEmpty())
         request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());

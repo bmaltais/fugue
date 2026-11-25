@@ -417,15 +417,17 @@ bool sameModel(const QJsonObject &requested, const QJsonObject &offered) {
     return !name.isEmpty() && offered.value("name").toString() == name;
 }
 
+bool isPairedHelper(const ProviderInstance &instance) {
+    if (instance.type != QLatin1String("fugue-helper") || instance.address.isEmpty())
+        return false;
+    const QString host = QUrl(instance.address).host();
+    return !(host == QLatin1String("localhost") || host == QLatin1String("::1") || host.startsWith(QLatin1String("127.")));
+}
+
 QString pairedHelperName(const QList<ProviderInstance> &instances) {
-    for (const ProviderInstance &instance : instances) {
-        if (!instance.enabled || instance.address.isEmpty() || instance.type == QLatin1String("omarchy"))
-            continue;
-        const QString host = QUrl(instance.address).host();
-        if (host == QLatin1String("localhost") || host == QLatin1String("::1") || host.startsWith(QLatin1String("127.")))
-            continue;
-        return instance.name;
-    }
+    for (const ProviderInstance &instance : instances)
+        if (instance.enabled && isPairedHelper(instance))
+            return instance.name;
     return {};
 }
 
@@ -443,7 +445,11 @@ void probePairedHelper(const QList<ProviderInstance> &instances, std::function<v
         return;
     }
     const std::shared_ptr<Provider> held = provider.value(); // alive until it has answered
-    held->describe([held, name, done = std::move(done)](const Result<Description> &described) { done(described.ok() ? name : QString()); });
+    held->describe([held, name, done = std::move(done)](const Result<Description> &described) {
+        done(described.ok() ? name : QString());
+        // Not the last owner from inside the provider's own reply (it would delete the reply it is in), as model_offers does.
+        QTimer::singleShot(0, [held] {});
+    });
 }
 
 Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {
@@ -492,15 +498,15 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
     if (requirement.modelsElsewhere) {
         QList<const Candidate *> remote;
         for (const Candidate *candidate : std::as_const(usable))
-            if (!candidate->description->sharesFilesystem)
+            if (!candidate->description->sharesFilesystem && isPairedHelper(candidate->instance)
+                && candidate->description->offer(requirement.capability))
                 remote.append(candidate);
         if (!remote.isEmpty()) {
             usable = remote;
         } else {
             // A paired helper that does not answer: say so, not the model_missing of a machine that never had the files.
             for (const Candidate &candidate : candidates) {
-                if (!candidate.instance.enabled || candidate.description.ok() || candidate.instance.address.isEmpty()
-                    || candidate.instance.type == QLatin1String("omarchy"))
+                if (!candidate.instance.enabled || candidate.description.ok() || !isPairedHelper(candidate.instance))
                     continue;
                 const QString why = candidate.description.errors().isEmpty() ? QString()
                                                                              : candidate.description.errors().first().message;

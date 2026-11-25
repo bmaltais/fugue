@@ -154,6 +154,23 @@ private slots:
         }
     }
 
+    // #395: the probe holds the real provider until its reply is over; letting go inside the reply deleted the reply being delivered.
+    void theProbeOfARealRemoteProviderEndsCleanly() {
+        Host host;
+        host.op("describe", [](const QJsonObject &) { return HttpResponse{200, json(describeBody())}; });
+        ProviderInstance paired;
+        paired.name = QStringLiteral("gx10");
+        paired.type = QStringLiteral("fugue-helper");
+        paired.address = QStringLiteral("http://gx10.example:8787"); // named by the probe, but made by `make` at the fake
+        const auto make = [&](const ProviderInstance &) { return createProvider(instance(host)); };
+        for (int round = 0; round < 3; ++round) {
+            QString got = QStringLiteral("unset");
+            probePairedHelper({paired}, [&got](const QString &name) { got = name; }, make);
+            QTRY_COMPARE_WITH_TIMEOUT(got, QStringLiteral("gx10"), 5000);
+            QTest::qWait(50); // the deferred release, and any deleteLater, run
+        }
+    }
+
     void aKeyTheHostRefusesIsUnreachableWithAMessage() {
         Host host;
         host.op("describe", [](const QJsonObject &) { return HttpResponse{200, json(describeBody())}; });

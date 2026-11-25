@@ -64,8 +64,10 @@ QString pairedHostsProblem(const OmarchyPaths &omarchy);
 // http: {"name": "gx10", "type": "fugue-helper", "address": "http://host:port", "key": "..."}.
 // Without an address it is the helper on this machine.
 //
-// The first enabled instance that is a helper on a paired host (#395): not an omarchy instance (those serve models by
-// name, 8.7) and with an address that is not this machine's. Empty when there is none.
+// A helper on a paired host (#395): type `fugue-helper` (not an omarchy instance, which serves models by name, 8.7, nor a provider
+// module) with an address that is not this machine's.
+bool isPairedHelper(const ProviderInstance &instance);
+// The first enabled paired helper's name. Empty when there is none.
 QString pairedHelperName(const QList<ProviderInstance> &instances);
 
 // Asks the paired helper (pairedHelperName of the configured instances) to describe itself: `done` gets its name when it answers,

@@ -79,6 +79,7 @@ public:
 // A paired helper: a remote instance that does not share this machine's files.
 std::shared_ptr<FakeProvider> pairedHelper(World &world, const QString &name) {
     const auto helper = world.provider(name, {"any"}, "http://gx10.example:8787");
+    world.providers.last().instance.type = QStringLiteral("fugue-helper");
     Description description = imageDescription({"any"});
     description.sharesFilesystem = false;
     helper->setDescription(description);
@@ -879,6 +880,42 @@ private slots:
         QTRY_VERIFY(run.isFinished());
         QCOMPARE(helper->jobs().size(), 0);
         QVERIFY(QFile::remove(path));
+    }
+
+    // An input the provider serves by name (no sha256) is not a model file missing here: the run stays where the order puts it.
+    void aNameOnlyInputDoesNotSendTheNodeToThePairedHelper() {
+        World world;
+        addStagedType(world);
+        const auto local = world.provider("This machine", {"any"});
+        const auto helper = pairedHelper(world, "gx10");
+        const QJsonObject byName{{"resource", "fugue/lora"}, {"name", "served-by-name"}};
+        Run run(world.graph(stagedGraph(byName)), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(local->jobs().size(), 1);
+        local->finish(local->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(helper->jobs().size(), 0);
+    }
+
+    // A cached node did not run anywhere: run.json does not say it ran remotely.
+    void aCacheHitIsNotRecordedAsRemote() {
+        World world;
+        addStagedType(world);
+        const auto helper = pairedHelper(world, "gx10");
+        const CompiledGraph graph = world.graph(stagedGraph(elsewhere()));
+        {
+            Run run(graph, world.folder(), world.environment());
+            run.start();
+            QTRY_COMPARE(helper->jobs().size(), 1);
+            helper->finish(helper->jobs().first(), picture);
+            QTRY_VERIFY(run.isFinished());
+        }
+        const RunFolder folder = world.folder();
+        Run again(graph, folder, world.environment());
+        again.start();
+        QTRY_VERIFY(again.isFinished());
+        QCOMPARE(helper->jobs().size(), 1);
+        QVERIFY(!folder.state().value("providers").toObject().value("g").toObject().value("remote").toBool());
     }
 
     void aGoneHelperAndNoLocalCopyIsAClearErrorNotAHang() {
