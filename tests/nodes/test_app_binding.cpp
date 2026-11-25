@@ -271,6 +271,15 @@ private slots:
         QVERIFY(!refused);
         QCOMPARE(refused.error().code, QStringLiteral("app_invalid"));
     }
+
+    // A target whose node was deleted is skipped by the binding, never brought back as an empty node.
+    void bindingSkipsATargetWhoseNodeIsGone() {
+        const Document document = load(withoutNode(workflow(), "encode"));
+        const Result<Document> bound = bindApp(document, appOfFixture(document), {{"prompt", "a fox"}});
+        QVERIFY(bound);
+        QVERIFY(!bound->graph.nodes.contains("encode"));
+        QCOMPARE(bound->graph.nodes.size(), document.graph.nodes.size());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestAppBinding)

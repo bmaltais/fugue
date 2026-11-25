@@ -336,7 +336,8 @@ void setInputValue(Document &document, const InputBinding &input, const QJsonVal
     if (value.isUndefined())
         return;
     for (const PortRef &target : input.targets)
-        document.graph.nodes[target.node].inputs.insert(target.port, InputValue::fromJson(value));
+        if (const auto node = document.graph.nodes.find(target.node); node != document.graph.nodes.end()) // a deleted node stays deleted
+            node->inputs.insert(target.port, InputValue::fromJson(value));
 }
 
 } // namespace fugue

@@ -89,7 +89,7 @@ Errors checkInputTargets(const BindingReader &reader, const QList<InputBinding> 
 // none of the choices.
 Result<QJsonValue> resolveInputValue(const BindingReader &reader, const InputBinding &input, QJsonValue given);
 
-// Puts `value` in every target of `input`. Nothing for Undefined.
+// Puts `value` in every target of `input`. Nothing for Undefined; a target whose node is gone is skipped.
 void setInputValue(Document &document, const InputBinding &input, const QJsonValue &value);
 
 // "prompt role" or "input \"steps\"": how errors name an input.
