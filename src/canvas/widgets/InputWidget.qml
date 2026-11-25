@@ -429,49 +429,12 @@ Rectangle {
         const anyFits = listed.some(m => m.fits === true)
         const isOther = m => m.path !== undefined && (anyFits ? m.fits !== true : m.fits === false)
         listed = listed.filter(m => !isOther(m)).concat(listed.filter(isOther))
-        let group = null
-        let other = false
-        let fitsShown = false
-        let currentMarked = false
-        for (const m of listed) {
-            if (isOther(m) && !other) {
-                other = true
-                entries.push({ text: qsTr("Other"), heading: true, enabled: false })
-            }
-            if (anyFits && m.fits === true && !fitsShown) {
-                fitsShown = true
-                group = m.folder // one heading for them all
-                entries.push({ text: qsTr("Fits %1").arg(fitsFor), heading: true, enabled: false })
-            }
-            const heading = m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
-            if (heading !== group && !other && !(anyFits && m.fits === true)) {
-                group = heading
-                entries.push({ text: heading, heading: true, enabled: false })
-            }
-            if (m.path !== undefined) {
-                // The file a stored handle names: by its hash when both are known, else by its name (a file Fugue
-                // has not hashed yet has none, and the list must still open on the model in use, highlighted).
-                // One entry only, the first. The recommended file says why (#370), the star is in its detail.
-                const recommended = m.recommended === true
-                const isCurrent = !currentMarked && current !== undefined
-                                  && (currentHash !== undefined && m.handle.hash !== undefined ? m.handle.hash === currentHash
-                                                                                              : m.name === current)
-                if (isCurrent)
-                    currentMarked = true
-                entries.push({ text: m.title, detail: (recommended ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
-                               value: { disk: m.path }, dim: m.fits === false,
-                               place: "local", note: m.fitNote ? m.fitNote : (recommended ? m.recommendedWhy : ""),
-                               checked: isCurrent })
-                continue
-            }
-            // Where it lives (#164): a paired host's model says so, dimmed "host offline" when the
-            // host does not answer; one served on this machine is local.
-            const status = m.hostOffline ? qsTr("host offline")
-                           : m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("not running")
-            entries.push({ text: m.title, detail: status, note: m.note, value: { handle: m.handle },
-                           place: m.host !== "" ? "host" : "local", placeHost: m.host, dim: m.hostOffline,
-                           checked: m.name === current && currentHash === undefined })
-        }
+        // The rows are made one model at a time by modelRows(), its `m` and `state` plain var: qmllint takes ~20 s
+        // over this loop with `m` inferred from the list's type (2026-11-25).
+        const state = { group: null, other: false, fitsShown: false, currentMarked: false,
+                        anyFits: anyFits, fitsFor: fitsFor, current: current, currentHash: currentHash }
+        for (const m of listed)
+            modelRows(entries, m, state, isOther(m))
         if (downloadable.length > 0)
             entries.push({ text: qsTr("Download"), heading: true, enabled: false })
         // The row says the size; the note, what it is and its license; a filter also reads `keywords`.
@@ -487,6 +450,47 @@ Rectangle {
             entries.push(familyRow)
         entries.push({ text: qsTr("Type a name…"), value: { typeName: true }, keep: true })
         return entries
+    }
+    // The rows of one model: the headings it opens (Other, Fits, its folder or provider), then its own row. `state` carries
+    // what the earlier models decided (group, other, fitsShown, currentMarked) and what is the same for all.
+    function modelRows(entries: var, m: var, state: var, other: bool): void {
+        if (other && !state.other) {
+            state.other = true
+            entries.push({ text: qsTr("Other"), heading: true, enabled: false })
+        }
+        if (state.anyFits && m.fits === true && !state.fitsShown) {
+            state.fitsShown = true
+            state.group = m.folder // one heading for them all
+            entries.push({ text: qsTr("Fits %1").arg(state.fitsFor), heading: true, enabled: false })
+        }
+        const heading = m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
+        if (heading !== state.group && !state.other && !(state.anyFits && m.fits === true)) {
+            state.group = heading
+            entries.push({ text: heading, heading: true, enabled: false })
+        }
+        if (m.path !== undefined) {
+            // The file a stored handle names: by its hash when both are known, else by its name (a file Fugue
+            // has not hashed yet has none, and the list must still open on the model in use, highlighted).
+            // One entry only, the first. The recommended file says why (#370), the star is in its detail.
+            const recommended = m.recommended === true
+            const isCurrent = !state.currentMarked && state.current !== undefined
+                              && (state.currentHash !== undefined && m.handle.hash !== undefined ? m.handle.hash === state.currentHash
+                                                                                                 : m.name === state.current)
+            if (isCurrent)
+                state.currentMarked = true
+            entries.push({ text: m.title, detail: (recommended ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
+                           value: { disk: m.path }, dim: m.fits === false,
+                           place: "local", note: m.fitNote ? m.fitNote : (recommended ? m.recommendedWhy : ""),
+                           checked: isCurrent })
+            return
+        }
+        // Where it lives (#164): a paired host's model says so, dimmed "host offline" when the
+        // host does not answer; one served on this machine is local.
+        const status = m.hostOffline ? qsTr("host offline")
+                       : m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("not running")
+        entries.push({ text: m.title, detail: status, note: m.note, value: { handle: m.handle },
+                       place: m.host !== "" ? "host" : "local", placeHost: m.host, dim: m.hostOffline,
+                       checked: m.name === state.current && state.currentHash === undefined })
     }
     // The model families of the listed files, in order of first appearance.
     function familiesOf(files) {
