@@ -140,6 +140,8 @@ QString typeOf(const InputBinding &input, const Document &document, const Regist
 QJsonValue defaultOf(const InputBinding &input, const Document &document, const Registry &registry) {
     if (!input.defaultValue.isUndefined())
         return input.defaultValue;
+    if (input.optional && isFileRole(input))
+        return QJsonValue::Undefined; // left out means left out: the file the workflow holds is not a default (#484)
     if (input.targets.isEmpty())
         return QJsonValue::Undefined;
     const PortRef &target = input.targets.first();
@@ -162,7 +164,7 @@ bool isRequired(const InputBinding &input, const Document &document, const Regis
     if (!isBlank(defaultOf(input, document, registry)))
         return false;
     if (isFileRole(input))
-        return true;
+        return !input.optional; // left out, an optional picture takes its branch out of the run (#484)
     return input.role == QLatin1String("prompt") && !input.optional && input.fallback.isEmpty();
 }
 
@@ -173,6 +175,7 @@ QJsonObject inputJson(const InputBinding &given, const Document &document, const
                     {"label", input.label.isEmpty() ? input.key() : input.label},
                     {"type", typeOf(input, document, registry)},
                     {"required", isRequired(input, document, registry)},
+                    {"optional", input.optional},
                     {"advanced", input.section.compare(QStringLiteral("Advanced"), Qt::CaseInsensitive) == 0}};
     if (const QJsonValue value = defaultOf(input, document, registry); !value.isUndefined())
         row.insert("default", value);
@@ -419,6 +422,8 @@ Reply appInfo(const Command &command, Context &context) {
         QStringList facts{row.value("type").toString()};
         if (row.value("required").toBool())
             facts << QStringLiteral("required");
+        else if (row.value("optional").toBool())
+            facts << QStringLiteral("optional");
         if (row.contains("default") && !isBlank(row.value("default")))
             facts << QStringLiteral("default %1").arg(QString::fromUtf8(QJsonDocument(QJsonArray{row.value("default")}).toJson(QJsonDocument::Compact)).mid(1).chopped(1));
         if (row.contains("min") || row.contains("max"))

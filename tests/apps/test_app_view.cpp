@@ -485,6 +485,37 @@ private slots:
         QCOMPARE(inputOf(m_started.first().document, "load", "file"), QJsonValue(sample));
     }
 
+    // #484: an optional picture starts empty and says so; left empty its branch is out of the run, filled it is in.
+    void anOptionalPictureStartsEmptyIsHintedAndSwitchesItsBranch() {
+        QJsonObject json = mediaWorkflow();
+        QJsonObject block = json.value("app").toObject();
+        QJsonArray inputs = block.value("inputs").toArray();
+        inputs.append(QJsonObject{{"role", "image"}, {"name", "extra"}, {"targets", QJsonArray{"load2.file"}}, {"optional", true}});
+        block.insert("inputs", inputs);
+        json.insert("app", block);
+        QJsonObject nodes = json.value("graph").toObject().value("nodes").toObject();
+        nodes.insert("load2", QJsonObject{{"type", "fugue/load-image"}, {"version", "1.1.0"}, {"mode", "bypass"}, {"inputs", QJsonObject{{"file", "inputs/sample.png"}}}});
+        json.insert("graph", QJsonObject{{"nodes", nodes}});
+        QTemporaryDir folder;
+        QVERIFY(QDir(folder.path()).mkpath("inputs"));
+        QVERIFY(QImage(8, 6, QImage::Format_RGB32).save(folder.filePath("inputs/sample.png")));
+        m_view->show("a", load(json), folder.filePath("app.fugue"));
+        QCOMPARE(field("extra").value("hint").toString(), QStringLiteral("Optional"));
+        QVERIFY(field("extra").value("optional").toBool());
+        QVERIFY(field("extra").value("sample").toString().isEmpty()); // no sample needed, and the workflow's file is not one
+        QVERIFY(!m_view->valueOf("extra").isValid() || m_view->valueOf("extra").toString().isEmpty());
+        QVERIFY(field("image").value("hint").toString().isEmpty()); // a required picture carries no hint
+        QVERIFY(m_view->canRun());
+        const QString first = m_view->run();
+        QCOMPARE(m_started.last().document.graph.nodes.value("load2").mode, NodeMode::Bypass);
+        m_view->onEvent(first, evt("run.done", {{"status", "ok"}}));
+        QCOMPARE(m_started.last().document.graph.nodes.value("load").mode, NodeMode::Normal);
+        m_view->setValue("extra", folder.filePath("inputs/sample.png"));
+        m_view->run();
+        QCOMPARE(m_started.last().document.graph.nodes.value("load2").mode, NodeMode::Normal);
+        QVERIFY(!inputOf(m_started.last().document, "load2", "file").toString().isEmpty());
+    }
+
     // Takes (#389): each run is one, newest first, with the inputs it had; the stage shows the newest that made something or the one
     // picked; Reuse inputs puts a take's form back; a run cancelled with nothing made leaves none.
     void everyRunIsATakeWithItsInputsAndCanBeShownAndReused() {

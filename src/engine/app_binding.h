@@ -78,7 +78,8 @@ Errors pruneApp(App &app, const Document &document, const Registry &registry);
 Errors checkApp(const App &app, const Document &document, const Registry &registry);
 
 // The run's copy of the workflow with the values in (by InputBinding::key()); an input with no value keeps its block
-// default, else the workflow's own. The file is never changed.
+// default, else the workflow's own. An optional picture or mask left empty bypasses its branch (its `bypass` nodes, else the
+// nodes of its targets) in the copy, and a filled one puts it back (#484). The file is never changed.
 Result<Document> bindApp(const Document &document, const App &app, const QMap<QString, QJsonValue> &values);
 
 } // namespace app

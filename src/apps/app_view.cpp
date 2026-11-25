@@ -245,7 +245,9 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
     // What the block leaves unsaid comes from the target's spec, through a group instance to its inner input (spec 5.4).
     const InputSpec *spec = m_registry && !given.targets.isEmpty() ? targetInputSpec(m_document, *m_registry, given.targets.first()) : nullptr;
     const InputBinding input = completedBy(given, spec);
-    const QJsonValue current = currentOf(m_document, input);
+    // An optional picture or mask starts empty, whatever file its node holds: left empty it takes its branch out of the run (#484).
+    const bool optionalPicture = input.optional && (input.role == QLatin1String("image") || input.role == QLatin1String("mask"));
+    const QJsonValue current = optionalPicture ? QJsonValue(QJsonValue::Undefined) : currentOf(m_document, input);
     const QString kind = kindOf(input, current, spec);
     TabState &state = const_cast<AppView *>(this)->m_state[m_tab];
     QVariantMap field{{"key", input.key()},
@@ -257,6 +259,10 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
         field.insert("min", *input.min);
     if (input.max)
         field.insert("max", *input.max);
+    if (optionalPicture) {
+        field.insert("optional", true);
+        field.insert("hint", tr("Optional"));
+    }
     if (kind == QLatin1String("text"))
         field.insert("multiline", input.role == QLatin1String("prompt") || input.role == QLatin1String("negative_prompt"));
     if (kind == QLatin1String("seed"))

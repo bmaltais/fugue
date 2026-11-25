@@ -45,7 +45,9 @@ struct InputBinding {
     // words and a binding puts the number in the targets, which must take a number; `default` is then a word.
     std::optional<QStringList> choices;
     std::optional<QList<double>> choiceValues;
-    bool optional = false; // the prompt may be empty
+    bool optional = false; // a prompt may be empty; an app's picture or mask may be left out (its branch is then bypassed)
+    // Apps (#484): the nodes bypassed when an optional picture or mask is left empty; none means the targets' own nodes.
+    QStringList bypass;
     QString fallback;      // the prompt used when it is left empty (G8)
 
     // How a form and a binding name it: the name when it has one, else the role.

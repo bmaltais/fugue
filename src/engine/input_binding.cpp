@@ -190,6 +190,12 @@ QList<InputBinding> BindingReader::inputs(const QJsonValue &json, Errors &errors
                 errors << invalid(what + QStringLiteral(" has an `optional` that is not true or false."));
             input.optional = optional.toBool();
         }
+        if (const QJsonValue bypass = object.value(QLatin1String("bypass")); !bypass.isUndefined()) {
+            for (const QJsonValue &node : bypass.toArray())
+                input.bypass << node.toString();
+            if (!bypass.isArray() || input.bypass.contains(QString()))
+                errors << invalid(what + QStringLiteral(" has a `bypass` that is not a list of node ids."));
+        }
         if (const QJsonValue choices = object.value(QLatin1String("choices")); !choices.isUndefined()) {
             QStringList words;
             for (const QJsonValue &choice : choices.toArray())
@@ -260,6 +266,8 @@ QJsonObject toJson(const InputBinding &input) {
         o.insert(QStringLiteral("optional"), true);
     if (!input.fallback.isEmpty())
         o.insert(QStringLiteral("fallback"), input.fallback);
+    if (!input.bypass.isEmpty())
+        o.insert(QStringLiteral("bypass"), QJsonArray::fromStringList(input.bypass));
     return o;
 }
 
@@ -298,6 +306,9 @@ Errors checkInputTargets(const BindingReader &reader, const QList<InputBinding> 
     Errors errors;
     for (const InputBinding &input : inputs) {
         std::optional<PortType> seen;
+        for (const QString &node : input.bypass)
+            if (!document.graph.nodes.contains(node))
+                errors << reader.invalid(QStringLiteral("The %1 bypasses %2, which is not a node of the workflow.").arg(describe(input), node));
         for (const PortRef &target : input.targets) {
             const InputSpec *spec = nullptr;
             QString why;

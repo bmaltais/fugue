@@ -92,6 +92,17 @@ const char *kSampled = R"({"fugue": 1,
    "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "m.safetensors"}}},
    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}}}}})";
 
+// A second picture that is optional (#484): it is the mask of a Color Match, and left out its Load Image is bypassed, so the mask is absent.
+const char *kOptionalMask = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Match", "inputs": [{"role": "image", "targets": ["load.file"]},
+                                                  {"role": "image", "name": "region", "targets": ["region.file"], "optional": true}],
+         "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": ""}},
+   "region": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "old.png"}},
+   "match": {"type": "fugue/color-match", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "reference": {"from": "load.image"}, "mask": {"from": "region.image"}}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "match.image"}, "name": "app"}}}}})";
+
 const char *kPlain = R"({"fugue": 1, "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})";
 
 } // namespace
@@ -157,6 +168,7 @@ private slots:
         template_("plain", "Plain", kPlain);
         write(path("work/needs-pack.fugue"), kNeedsPack);
         write(path("work/invert.fugue"), kInvert);
+        write(path("work/optional.fugue"), kOptionalMask);
         write(path("work/shade.fugue"), kShade);
         write(path("work/shade-stale.fugue"), kShadeStale);
     }
@@ -332,6 +344,31 @@ private slots:
         const Outcome noSource = fugue({"app", "export", path("work/unsourced.fugue"), path("work/u.fugueapp"), "--json"});
         QCOMPARE(noSource.code(), QString("app_not_shareable"));
         QVERIFY(noSource.error().value("message").toString().contains("m.safetensors"));
+    }
+
+    // #484: an optional picture is listed as optional, with no default (the file its node holds is not one), and may be left out.
+    void anOptionalPictureMayBeLeftOut() {
+        const Outcome info = fugue({"app", "info", path("work/optional.fugue"), "--json"});
+        QVERIFY2(info.exitCode == 0, info.out + info.err);
+        const QJsonObject region = info.data().value("inputs").toArray().at(1).toObject();
+        QCOMPARE(region.value("key").toString(), QString("region"));
+        QVERIFY(region.value("optional").toBool());
+        QVERIFY(!region.value("required").toBool());
+        QVERIFY(!region.contains("default"));
+        QVERIFY(info.data().value("inputs").toArray().at(0).toObject().value("required").toBool());
+        const Outcome text = fugue({"app", "info", path("work/optional.fugue")});
+        QVERIFY2(QString::fromUtf8(text.out).contains("optional"), text.out + text.err);
+
+        const QString out = path("work/optional-results");
+        const Outcome left = fugue({"app", "run", path("work/optional.fugue"), "--input", "image=" + picture(), "--out", out, "--json"});
+        QVERIFY2(left.exitCode == 0, left.out + left.err);
+        QCOMPARE(left.data().value("files").toArray().size(), 1);
+        const Outcome given = fugue({"app", "run", path("work/optional.fugue"), "--input", "image=" + picture(), "--input", "region=" + picture(),
+                                     "--out", out, "--json"});
+        QVERIFY2(given.exitCode == 0, given.out + given.err);
+        // The required one left out still fails before anything runs.
+        const Outcome refused = fugue({"app", "run", path("work/optional.fugue"), "--json"});
+        QCOMPARE(refused.code(), QString("missing_input"));
     }
 
     void runPrintsTheFilesTheOutputNodeWroteInOut() {

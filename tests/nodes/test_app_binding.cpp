@@ -346,6 +346,66 @@ private slots:
         QVERIFY(!bound->graph.nodes.contains("encode"));
         QCOMPARE(bound->graph.nodes.size(), document.graph.nodes.size());
     }
+
+    // #484: an optional picture left empty takes its branch out of the run's copy; filled, it puts it back; a required one is never bypassed.
+    void anOptionalPictureLeftEmptyIsBypassedAndFilledIsNot() {
+        QJsonObject json = workflow();
+        QJsonObject block = json.value("app").toObject();
+        QJsonArray inputs = block.value("inputs").toArray();
+        inputs.append(QJsonObject{{"role", "image"}, {"name", "extra"}, {"targets", QJsonArray{"load2.file"}}, {"optional", true}});
+        inputs.append(QJsonObject{{"role", "image"}, {"name", "wide"}, {"targets", QJsonArray{"load3.file"}}, {"optional", true},
+                                  {"bypass", QJsonArray{"load3", "blur"}}});
+        block.insert("inputs", inputs);
+        json.insert("app", block);
+        QJsonObject nodes = json.value("graph").toObject().value("nodes").toObject();
+        nodes.insert("load2", QJsonObject{{"type", "fugue/load-image"}, {"version", "1.1.0"}, {"mode", "bypass"}, {"inputs", QJsonObject{{"file", "teacup.jpg"}}}});
+        nodes.insert("load3", QJsonObject{{"type", "fugue/load-image"}, {"version", "1.1.0"}, {"inputs", QJsonObject{{"file", "fox.jpg"}}}});
+        nodes.insert("blur", QJsonObject{{"type", "fugue/load-image"}, {"version", "1.1.0"}, {"inputs", QJsonObject{{"file", "x.jpg"}}}});
+        json.insert("graph", QJsonObject{{"nodes", nodes}});
+        const Document document = load(json);
+        const App app = appOfFixture(document);
+        QVERIFY(checkApp(app, document, m_registry).isEmpty());
+        const auto mode = [](const Document &d, const char *node) { return d.graph.nodes.value(node).mode; };
+
+        const Result<Document> empty = bindApp(document, app, {{"subject", "b.png"}, {"extra", ""}});
+        QVERIFY(empty);
+        QCOMPARE(mode(*empty, "load2"), NodeMode::Bypass);
+        QCOMPARE(mode(*empty, "load3"), NodeMode::Bypass); // left out altogether
+        QCOMPARE(mode(*empty, "blur"), NodeMode::Bypass);  // the block's `bypass` list, not the target's node alone
+        QCOMPARE(mode(*empty, "load"), NodeMode::Normal);  // a required picture is never bypassed
+        QCOMPARE(empty->graph.nodes.value("load2").inputs.value("file").literal(), QJsonValue("teacup.jpg")); // nothing is written to an empty one
+
+        const Result<Document> filled = bindApp(document, app, {{"subject", "b.png"}, {"extra", "c.png"}, {"wide", "d.png"}});
+        QVERIFY(filled);
+        QCOMPARE(mode(*filled, "load2"), NodeMode::Normal); // the file had it bypassed; the run's copy does not
+        QCOMPARE(mode(*filled, "load3"), NodeMode::Normal);
+        QCOMPARE(mode(*filled, "blur"), NodeMode::Normal);
+        QCOMPARE(filled->graph.nodes.value("load2").inputs.value("file").literal(), QJsonValue("c.png"));
+        QCOMPARE(mode(document, "load2"), NodeMode::Bypass); // the file's document is untouched
+        QCOMPARE(mode(document, "load3"), NodeMode::Normal);
+
+        // A required picture left empty is not switched off: the run fails on it as before.
+        const Result<Document> required = bindApp(document, app, {{"subject", ""}});
+        QVERIFY(required);
+        QCOMPARE(mode(*required, "load"), NodeMode::Normal);
+        QCOMPARE(required->graph.nodes.value("load").inputs.value("file").literal(), QJsonValue(""));
+    }
+
+    void aBypassListNamesNodesOfTheWorkflow() {
+        QJsonObject json = workflow();
+        QJsonObject block = json.value("app").toObject();
+        QJsonArray inputs = block.value("inputs").toArray();
+        QJsonObject first = inputs.at(0).toObject();
+        first.insert("optional", true);
+        first.insert("bypass", QJsonArray{"ghost"});
+        inputs.replace(0, first);
+        block.insert("inputs", inputs);
+        json.insert("app", block);
+        const Document document = load(json);
+        const Errors errors = checkApp(appOfFixture(document), document, m_registry);
+        QCOMPARE(errors.size(), 1);
+        QVERIFY(errors.first().message.contains("ghost"));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestAppBinding)
