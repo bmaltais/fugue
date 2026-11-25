@@ -295,7 +295,7 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
 }
 
 // corner_radius (a whole px, 0 to 16, or "omarchy") was replaced by the Look's Corners slider and its "follow Omarchy" option (#467).
-// The old value becomes the slider position that gives the same radius (8 px at 0.5, a factor 0.1 + 1.8 x position) or the option, unless
+// The old value becomes the slider position that gives the same radius (8 px at 0.5, a factor 2 x position: 0 is square) or the option, unless
 // the file already says its own; the old key goes. True when the document changed.
 bool migrateCornerRadius(QJsonObject &document) {
     if (!document.contains(QLatin1String("corner_radius")))
@@ -306,7 +306,7 @@ bool migrateCornerRadius(QJsonObject &document) {
             document.insert(QLatin1String("look_corners_omarchy"), true);
     } else if (old.isDouble() && !document.contains(QLatin1String("look_corners"))) {
         const double px = std::clamp(old.toDouble(), 0.0, 16.0);
-        const double position = std::clamp(std::round((px / 8.0 - 0.1) / 1.8 * 1000.0) / 1000.0, 0.0, 1.0);
+        const double position = std::clamp(std::round(px / 16.0 * 1000.0) / 1000.0, 0.0, 1.0);
         if (std::abs(position - 0.5) > 0.0005)
             document.insert(QLatin1String("look_corners"), position);
     }

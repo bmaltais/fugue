@@ -123,8 +123,8 @@ private slots:
         SettingsFile file = read(R"({"corner_radius": 12})");
         QVERIFY(file.problems.isEmpty());
         QVERIFY(!file.document.contains("corner_radius"));
-        QCOMPARE(file.settings.lookCorners, 0.778); // 8 px x (0.1 + 1.8 x 0.778) = 12
-        QCOMPARE(std::lround(8 * (0.1 + 1.8 * file.settings.lookCorners)), 12);
+        QCOMPARE(file.settings.lookCorners, 0.75); // 8 px x 2 x 0.75 = 12
+        QCOMPARE(std::lround(8 * 2 * file.settings.lookCorners), 12);
         QCOMPARE(file.settings.lookCornersOmarchy, false);
         file = read(R"({"corner_radius": 8})"); // the old default is the new one
         QCOMPARE(file.settings.lookCorners, 0.5);

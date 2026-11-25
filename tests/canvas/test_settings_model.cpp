@@ -275,8 +275,8 @@ private slots:
         model.attach(nullptr, nullptr, nullptr, &theme);
         QVERIFY(!model.lookCornersOmarchy());
         QCOMPARE(theme.look()->property("corner").toInt(), 8);
-        QCOMPARE(model.set("look_corners", 0.8), QString());
-        QCOMPARE(theme.look()->property("corner").toInt(), 12); // 8 x (0.1 + 1.8 x 0.8) = 12
+        QCOMPARE(model.set("look_corners", 0.75), QString());
+        QCOMPARE(theme.look()->property("corner").toInt(), 12); // 8 x 2 x 0.75 = 12
         QCOMPARE(model.set("look_corners_omarchy", true), QString());
         QVERIFY(model.lookCornersOmarchy());
         QCOMPARE(theme.look()->property("corner").toInt(), 0); // no Hyprland here: square

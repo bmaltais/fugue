@@ -320,18 +320,18 @@ private slots:
         }
     }
 
-    // The Corners slider owns the radius (#467, #63): 8 px at its default, the kit's factor 0.1 + 1.8 x position on top, or with
+    // The Corners slider owns the radius (#467, #63): 8 px at its default, the kit's factor 2 x position on top (0 is square), or with
     // "follow Omarchy" Hyprland's rounding as the base (the node corner held to 8 before the factor).
     void cornersComeFromTheSliderOrFromOmarchy() {
         const auto is = [](look::Corners c, int node, int popup) { return c.node == node && c.popup == popup; };
         QVERIFY(is(look::corners(0.5, false, 0), 8, 8));
         QVERIFY(is(look::corners(0.5, false, 12), 8, 8)); // Omarchy's rounding is ignored unless followed
-        QVERIFY(is(look::corners(1.0, false, 0), 15, 15));
-        QVERIFY(is(look::corners(0.0, false, 0), 1, 1));
+        QVERIFY(is(look::corners(1.0, false, 0), 16, 16));
+        QVERIFY(is(look::corners(0.0, false, 0), 0, 0)); // square, as an old corner_radius 0
         QVERIFY(is(look::corners(0.5, true, 10), 8, 10));
         QVERIFY(is(look::corners(0.5, true, 4), 4, 4));
         QVERIFY(is(look::corners(0.5, true, 0), 0, 0));
-        QVERIFY(is(look::corners(1.0, true, 10), 15, 19));
+        QVERIFY(is(look::corners(1.0, true, 10), 16, 20));
         QCOMPARE(look::omarchyCornerScale(false, 12), 1.0);
         QCOMPARE(look::omarchyCornerScale(true, 12), 1.5);
     }
@@ -414,8 +414,8 @@ private slots:
         QCOMPARE(theme.look()->property("corner").toInt(), 0);
         QVERIFY(changed.count() >= 1);
         theme.setCorners(1.0, false);
-        QCOMPARE(theme.look()->property("corner").toInt(), 15);
-        QCOMPARE(theme.look()->property("popupCorner").toInt(), 15);
+        QCOMPARE(theme.look()->property("corner").toInt(), 16);
+        QCOMPARE(theme.look()->property("popupCorner").toInt(), 16);
         const int count = changed.count();
         theme.setCorners(1.0, false);
         QCOMPARE(changed.count(), count); // the same again changes nothing

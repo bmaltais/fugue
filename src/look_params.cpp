@@ -97,7 +97,7 @@ double sliderFactor(const QString &slider, const Sliders &s) {
     if (slider == QLatin1String("depth"))
         return s.depth / Sliders::defaultDepth;
     if (slider == QLatin1String("corners")) // 0.1 to 1.9, 1 at the default
-        return s.cornerScale * (0.1 + 1.8 * s.corners);
+        return s.cornerScale * 2.0 * s.corners; // 0 square, 1 at the default 0.5, 2 at 1
     if (slider == QLatin1String("spacing")) // 0.25 to 1.75
         return 0.25 + 1.5 * s.spacing;
     return 1;

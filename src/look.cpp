@@ -364,7 +364,7 @@ QHash<QString, QColor> portColors(const QHash<QString, QColor> &colors, bool lig
 }
 
 Corners corners(double slider, bool followOmarchy, int omarchy) {
-    const double factor = 0.1 + 1.8 * std::clamp(slider, 0.0, 1.0);
+    const double factor = 2.0 * std::clamp(slider, 0.0, 1.0); // 0 is square (an old corner_radius 0 stays square)
     const int node = followOmarchy ? std::min(omarchy, 8) : 8;
     const int popup = followOmarchy ? omarchy : 8;
     return {static_cast<int>(std::lround(node * factor)), static_cast<int>(std::lround(popup * factor))};

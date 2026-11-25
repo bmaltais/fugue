@@ -190,7 +190,7 @@ private slots:
         writeDefault(old);
         enterProject({"preferences"});
         const EffectiveSettings effective = effectiveSettings();
-        QCOMPARE(effective.settings.lookCorners, 0.778);
+        QCOMPARE(effective.settings.lookCorners, 0.75); // 12 px = 8 x 2 x 0.75
         QCOMPARE(effective.origins.value("look_corners"), SettingOrigin::Default);
     }
 
