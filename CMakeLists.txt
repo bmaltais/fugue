@@ -467,6 +467,9 @@ foreach(chunk RANGE 1 ${fugue_qmllint_chunks})
            -P ${CMAKE_SOURCE_DIR}/tests/qmllint.cmake)
 endforeach()
 
+# The PKGBUILD's helper sources are the commits and hashes helper/CMakeLists.txt pins (CI's Helper job runs it too).
+add_test(NAME packaging_pins COMMAND bash ${CMAKE_SOURCE_DIR}/tests/pins.sh ${CMAKE_SOURCE_DIR})
+
 # A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and
 # worker, but nodes that do fake work. Not installed.
 add_executable(fugue_with_fakes tests/cli_support/fugue_with_fakes.cpp)

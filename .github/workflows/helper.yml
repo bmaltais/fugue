@@ -31,11 +31,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Check the PKGBUILD pins the helper's sources at the same commits
-        run: |
-          source packaging/PKGBUILD
-          for commit in "$_sdcpp" "$_ggml" "$_cutlass"; do
-            grep -q "$commit" helper/CMakeLists.txt || { echo "PKGBUILD pins $commit, helper/CMakeLists.txt does not"; exit 1; }
-          done
+        run: bash tests/pins.sh
 
       - name: Install the helper's build dependencies
         run: pacman -S --noconfirm --needed base-devel ccache cmake shaderc spirv-headers vulkan-headers vulkan-icd-loader

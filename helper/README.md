@@ -323,7 +323,7 @@ FUGUE_SDCPP_SOURCE=~/github/stable-diffusion.cpp bin/build-helper cuda
    without it afterwards goes back to the pinned tarball).
 2. Commit on `fugue`, with the Fugue issue number in the subject and a line `Fugue: bmaltais/fugue#NNN`. Push.
 3. Tag the commit `fugue-<date>` and push the tag. Bump the pin: `sdcpp_commit` and `sdcpp_sha256` in
-   `CMakeLists.txt`, `_sdcpp` and its `sha256sums` entry in `packaging/PKGBUILD` (CI checks the two name the same commit).
+   `CMakeLists.txt`, `_sdcpp` and its `sha256sums` entry in `packaging/PKGBUILD` (`tests/pins.sh` checks the two name the same commits and hashes; the local suite runs it as `packaging_pins`, and CI's Helper job too).
 4. Add a row to the table above, and in the Fugue PR describe the behaviour; reviewers read the engine diff in the
    fork's own commits, not here.
 
