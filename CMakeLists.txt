@@ -64,7 +64,7 @@ qt_add_resources(fugue_engine fugue_prompts PREFIX /fugue/prompts FILES ${fugue_
 # compiles once and a new file in src/ needs no line here.
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h
      src/commands/*.cpp src/commands/*.h src/menu/*.cpp src/menu/*.h src/search/*.cpp src/search/*.h
-     src/workflow/*.cpp src/workflow/*.h src/run/*.cpp src/run/*.h src/settings/*.cpp src/settings/*.h
+     src/workflow/*.cpp src/workflow/*.h src/apps/*.cpp src/apps/*.h src/run/*.cpp src/run/*.h src/settings/*.cpp src/settings/*.h
      src/panels/*.cpp src/panels/*.h src/media/*.cpp src/media/*.h src/workspace/*.cpp src/workspace/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core ${fugue_lib_type} ${fugue_sources})
@@ -143,6 +143,8 @@ fugue_add_qml(fugue_settings_qml src/settings /settings)
 fugue_add_qml(fugue_workflow_qml src/workflow /workflow)
 # The run toolbar and the queue panel (#60).
 fugue_add_qml(fugue_run_qml src/run /run)
+# The App view's page (Fugue Apps, #385).
+fugue_add_qml(fugue_apps_qml src/apps /apps)
 # The side panels (#56): the dock container, the node library and the workflows panel.
 fugue_add_qml(fugue_panels_qml src/panels /panels)
 # The media browser (#133): a standalone viewer of a list of images, videos and sounds.
@@ -309,6 +311,15 @@ endforeach()
 # queue, the run toolbar's state), like the canvas ones.
 file(GLOB fugue_run_tests CONFIGURE_DEPENDS tests/run/*.cpp)
 foreach(test_source ${fugue_run_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
+endforeach()
+
+# App view tests: each tests/apps/<name>.cpp is its own QtTest executable (the App view's store, Fugue Apps #385).
+file(GLOB fugue_apps_tests CONFIGURE_DEPENDS tests/apps/*.cpp)
+foreach(test_source ${fugue_apps_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)

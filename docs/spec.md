@@ -3021,6 +3021,38 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   is), a view following the selection or pinned beyond the Canvas's region, a new window, and the Corner Handles and
   Border Width settings.
 
+### 12.17 The App view (#385, epic #397)
+
+A workflow whose document has an `app` block (4.9) opens as one simple screen instead of the graph when its `defaultView` is
+`app`. The screen has no graph or node vocabulary in it.
+
+- **A tab mode, for now.** Until #217's view registry carries it, the App view is a mode of the workflow's tab: the window's
+  body shows it in the canvas's place, in a window with one area. With several areas the app stays the Graph's tab. A window
+  with no app tab has exactly the items it had (`tests/workspace/data/default-window.txt`). A block that does not read
+  (`app_invalid`, a later `format`) or a document with none opens as an ordinary workflow.
+- **The screen** (`apps/AppPage.qml`, `appPage`): at the top the app's title and description, and at the end **Open in
+  Graph** (`appOpenInGraph`). Below, at the start the form: each input of `inputs[]` in the block's order (`AppInput.qml`,
+  `appInput-<key>`: its label over a text field, a number (a drag field when the block gives `min` and `max`, else a text
+  field; empty means the workflow's own), a choice, or, until #386, a file's path as text), the `Advanced` ones folded under
+  **Advanced**; under the form **Run** (`appRun`, the one primary control), and while a run is waiting or going **Cancel**
+  (`appCancel`, danger, a chunk of its own) and one line of progress ("Waiting for its turn…", "Working… 40%") over a 2 px bar.
+  At the end the output: the results of the block's `outputs[]` (a picture fits and a double click opens it in the large
+  viewer (`LargeViewDialog` over the Compare viewer in its single mode); a video or sound plays; each is named by its `label`, else "Result"), or "The result appears here." A failed
+  run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the rest and
+  the hints; a cancelled run says nothing.
+- **Run** binds the form's values into a copy of the workflow (`bindApp`, 4.9) and queues it through RunService like any run:
+  one queue, one GPU, the queue panel lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
+  (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
+  outputs: a run's results are the existing run history's; the screen shows the last run of this session (past takes are a
+  later issue).
+- **Open in Graph** switches this tab to the graph, the same workflow as an ordinary tab. While an app tab shows the graph a
+  strip under the canvas has **Show as app** (`appShowApp`); it brings the form back, rebuilt from the workflow as the graph
+  left it (values kept for inputs that still exist). The choice is per tab and kept for the session; a tab opens in the view its
+  `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
+- **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `run`, `cancel`,
+  `status`, `progress`, `error`, `details`, `results`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
+  it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.
+
 ---
 
 ## 13. CLI and agent interface

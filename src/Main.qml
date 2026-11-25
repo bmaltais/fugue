@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Fugue
+import "apps"
 import "canvas"
 import "menu"
 import "panels"
@@ -33,6 +34,10 @@ ApplicationWindow {
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     // The settings (settings/settings_model.h); a test window may run without them.
     readonly property SettingsModel appSettingsModel: App.settings
+    // The shown workflow has an app block (#385), and the window shows it as the App view.
+    readonly property bool appIsApp: App.appView ? App.appView.isApp : false
+    // One area only: with several, the areas are the window's body and the app stays the graph's tab (#217 carries it later).
+    readonly property bool appShown: (App.appView ? App.appView.shown : false) && !areaHost
 
     HelperNotice { id: helperNotice }
     // The width, place and delay of every tooltip in the window (canvas/ToolTipStyle.qml).
@@ -181,7 +186,7 @@ ApplicationWindow {
                 Layout.preferredHeight: item ? 7 * App.theme.look.unit : 0
                 Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
                 Layout.rightMargin: win.sidePanelMargin("right")
-                active: !win.areaHost && !win.focusMode && App.workspace !== null
+                active: !win.areaHost && !win.focusMode && !win.appShown && App.workspace !== null
                 sourceComponent: AreaHeader {
                     areaId: App.workspace.graphArea
                     viewType: "graph"
@@ -191,6 +196,7 @@ ApplicationWindow {
             FugueCanvas {
                 id: fugueCanvas
                 objectName: "canvas"
+                visible: !win.appShown
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // The side panel (#56) takes its width from the canvas, on the side it docks.
@@ -262,6 +268,62 @@ ApplicationWindow {
         headerHeight: win.focusMode ? 0 : 7 * App.theme.look.unit
         leadingClear: Math.max(0, menuBarHost.handleEnd - win.body.x)
     }
+    // The App view (#385): a workflow with an app block as one simple screen, in the canvas's place, and for such a workflow
+    // opened in the graph the strip with the way back under the canvas. Made only while needed, as the areas' host is, so
+    // any other window has none of these items (test_area_window).
+    property Item appPageItem: null
+    property Item appBackItem: null
+    Component {
+        id: appPageComponent
+        AppPage {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
+            Layout.rightMargin: win.sidePanelMargin("right")
+        }
+    }
+    Component {
+        id: appBackComponent
+        Rectangle {
+            objectName: "appBackHost"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 7 * App.theme.look.unit
+            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
+            Layout.rightMargin: win.sidePanelMargin("right")
+            color: App.theme.look.popup
+            ViewButton {
+                objectName: "appShowApp"
+                anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 3 * App.theme.look.unit }
+                look: App.theme.look
+                text: qsTr("Show as app")
+                glyph: "layout-template"
+                flat: true
+                compact: true
+                tip: qsTr("Back to the simple screen of this app")
+                onTapped: App.appView.showApp()
+            }
+        }
+    }
+    function syncApp() {
+        const page = appShown
+        const back = appIsApp && !appShown && !focusMode && !areaHost
+        if (page && !appPageItem) {
+            appPageItem = appPageComponent.createObject(mainLayout) as Item
+        } else if (!page && appPageItem) {
+            appPageItem.destroy()
+            appPageItem = null
+        }
+        if (back && !appBackItem) {
+            appBackItem = appBackComponent.createObject(mainLayout) as Item
+        } else if (!back && appBackItem) {
+            appBackItem.destroy()
+            appBackItem = null
+        }
+    }
+    onAppShownChanged: syncApp()
+    onAppIsAppChanged: syncApp()
+    onFocusModeChanged: syncApp()
+    onAreaHostChanged: syncApp()
     // What the areas sit in: the canvas alone, or the host while there are several.
     property Item areaHost: null
     readonly property Item body: areaHost ?? fugueCanvas
@@ -428,6 +490,7 @@ ApplicationWindow {
         syncRunBar()
         syncSidePanel()
         syncAreas()
+        syncApp()
     }
     Connections {
         target: App.runBar

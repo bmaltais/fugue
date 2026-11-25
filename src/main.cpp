@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include "apps/app_window.h"
 #include "canvas/canvas_batch.h"
 #include "canvas/canvas_commands.h"
 #include "canvas/canvas_model.h"
@@ -157,6 +158,10 @@ int main(int argc, char *argv[]) {
     fugue::CanvasActions canvasActions(&runService, &registry, &workflows);
     // Canvas > Automate > Batch… (#250): an action over a folder of pictures, through the same runs.
     fugue::CanvasBatch canvasBatch(&runService, &canvasActions);
+    // The App view (#385): a workflow with an app block as one simple screen, its runs queued with the rest.
+    fugue::AppView appView([&runService](const fugue::RunRequest &request) { return runService.start(request); },
+                           [&runService](const QString &run) { runService.cancel(run); }, &registry);
+    fugue::bindAppView(appView, workflows, canvasModel, runService, commands, runs);
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
@@ -191,7 +196,7 @@ int main(int argc, char *argv[]) {
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas, &canvasBatch};
+                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas, &canvasBatch, &appView};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);
