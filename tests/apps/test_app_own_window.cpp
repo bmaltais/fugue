@@ -91,7 +91,7 @@ private slots:
 
         // The page, and none of the editing chrome.
         QTRY_VERIFY(find(app.window, "appPage"));
-        for (const char *chrome : {"menuBar", "canvas", "areas", "areaHost", "appShowApp"})
+        for (const char *chrome : {"menuBar", "canvas", "areas", "areaHost", "appViewSwitch"})
             QVERIFY2(!item(app.window->contentItem(), chrome), chrome);
         QVERIFY(!find(app.window, "appOpenInGraph")); // no graph to open
         QCOMPARE(app.window->title(), QStringLiteral("Block title")); // the app's own

@@ -306,10 +306,30 @@ FocusScope {
         model.setView(c.x, c.y, world.scale)
     }
     property bool fitOnReset: false
+    // A document opened while the canvas is hidden (the App view or the apps shelf is in its place) is placed for the size the
+    // canvas had when it was last laid out: a hidden item is not laid out, so a window resized or tiled since is not in it, and
+    // the nodes land off to a side or out of sight (the graph "empty" after Open in Graph, #397). Placed again, the same way,
+    // when the canvas is shown at its size.
+    property bool placedHidden: false
+    property bool fittedHidden: false
     function fitUnlessViewed() {
-        if (model.view.zoom === undefined)
+        if (model.view.zoom === undefined) {
             fit()
+            fittedHidden = !visible
+        }
     }
+    function placeAgain() {
+        if (!visible || !placedHidden)
+            return
+        placedHidden = false
+        if (fittedHidden)
+            fit()
+        else
+            applyView()
+        fittedHidden = false
+    }
+    onWidthChanged: if (placedHidden && visible) Qt.callLater(placeAgain)
+    onHeightChanged: if (placedHidden && visible) Qt.callLater(placeAgain)
     function fit() {
         if (model.fitView(width, height, reservedTop, reservedBottom))
             applyView()
@@ -369,6 +389,8 @@ FocusScope {
         // does (#162); documentReplaced comes just before the documentReset that follows it.
         function onDocumentReplaced() { canvas.fitOnReset = true }
         function onDocumentReset() {
+            canvas.fittedHidden = false
+            canvas.placedHidden = !canvas.visible
             canvas.applyView()
             // Not at once: the opener goes on (it checks the workflow, which changes the nodes' heights)
             // and the fit comes after, if the view is still unset then.

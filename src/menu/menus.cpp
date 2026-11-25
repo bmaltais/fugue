@@ -90,7 +90,9 @@ QVariantList areaItems() {
 // The Window menu (#262, Blender's): the window's own furniture, not a view's. Every bar and panel with a check, focus mode
 // and the way back, then the areas.
 QVariantList windowMenu() {
-    QVariantList items = windowItems();
+    QVariantList items = {command("view.toggle-app"), separator()};
+    for (const QVariant &item : windowItems())
+        items.append(item);
     items.append(separator());
     for (const QVariant &item : areaItems())
         items.append(item);
@@ -123,7 +125,7 @@ QVariantList bar() {
 QVariantList graph() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
-                {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
+                {command("view.toggle-app"), separator(), command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
                  command("view.toggle-links"), pictureMenu()}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Select"), {command("edit.select-all")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Add"), {command("node.search"), command("edit.paste-connected")}),

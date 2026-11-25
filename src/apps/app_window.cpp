@@ -36,6 +36,10 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     QObject::connect(&service, &RunService::event, &view, &AppView::onEvent);
     view.setDownloads(workflows.downloads()); // a model field's Download shares the window's one download line
 
+    commands.setHandler(QStringLiteral("view.toggle-app"), [&view] { view.toggle(); });
+    commands.setEnabledWhen(QStringLiteral("view.toggle-app"), [&view] { return view.isApp(); });
+    commands.setCheckedWhen(QStringLiteral("view.toggle-app"), [&view] { return view.shown(); });
+
     const auto run = [&view, &runs](bool first) {
         if (view.shown())
             view.run();

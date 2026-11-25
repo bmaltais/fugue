@@ -159,7 +159,7 @@ private slots:
         QVERIFY(!find(app.window, "areaHeader-1")); // no graph menus over the form
         QCOMPARE(find(app.window, "appTitle")->property("text").toString(), QStringLiteral("Restyle"));
         QVERIFY(!find(app.window, "appCancel"));
-        QVERIFY(!find(app.window, "appShowApp"));
+        QVERIFY(find(app.window, "appViewSwitch")); // the way to the graph, in the window bar
 
         // Typing in the form is the value a run binds; Run, the key and the button, reaches the app, not the graph.
         QQuickItem *prompt = find(app.window, "appInput-prompt-edit"); // a prompt is several lines
@@ -186,23 +186,28 @@ private slots:
         QCOMPARE(started.size(), 2);
         emit service.event("r2", {{"event", "run.done"}, {"status", "cancelled"}});
 
-        // Open in Graph: this tab shows the graph, with the way back; Show as app returns.
+        // Open in Graph: this tab shows the graph; the window bar's App | Graph switch (also view.toggle-app) goes back and forth.
         tap(app.window, find(app.window, "appOpenInGraph"));
         QTRY_VERIFY(find(app.window, "canvas"));
         QTRY_VERIFY(!find(app.window, "appPage"));
-        QTRY_VERIFY(find(app.window, "appShowApp")->mapToScene(QPointF()).y() > find(app.window, "canvas")->mapToScene(QPointF()).y());
+        QVERIFY(find(app.window, "appViewSwitch"));
+        QVERIFY(!find(app.window, "appShowApp")); // the strip under the canvas is gone
         app.commands.run("run.start"); // the graph's own run now
         QCOMPARE(started.size(), 2);
-        tap(app.window, find(app.window, "appShowApp"));
+        tap(app.window, find(app.window, "appViewSwitchApp"));
         QTRY_VERIFY(find(app.window, "appPage"));
         QVERIFY(!find(app.window, "canvas"));
-        QTRY_VERIFY(!find(app.window, "appShowApp"));
+        tap(app.window, find(app.window, "appViewSwitchGraph"));
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QVERIFY(app.commands.run("view.toggle-app"));
+        QTRY_VERIFY(find(app.window, "appPage"));
 
-        // A workflow with no block is the window it was: no page, no way back.
+        // A workflow with no block is the window it was: no page, no switch.
         app.workflows.newWorkflow();
         QTRY_VERIFY(find(app.window, "canvas"));
         QTRY_VERIFY(!find(app.window, "appPage"));
-        QTRY_VERIFY(!find(app.window, "appShowApp"));
+        QTRY_VERIFY(!find(app.window, "appViewSwitch"));
+        QVERIFY(!app.commands.isEnabled("view.toggle-app")); // nothing to switch
         qDeleteAll(app.engine.rootObjects());
     }
 
