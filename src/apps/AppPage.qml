@@ -147,6 +147,13 @@ Rectangle {
                         onTapped: page.launcher.listed ? page.launcher.remove() : page.launcher.add()
                     }
                     HeroButton {
+                        objectName: "appKeep"
+                        visible: page.launcher !== null && page.launcher.keepable
+                        glyph: "plus"
+                        tip: qsTr("Keep this app: add it to your apps and your launcher")
+                        onTapped: page.launcher.keep()
+                    }
+                    HeroButton {
                         objectName: "appOpenInFugue"
                         visible: page.standalone && page.launchable
                         glyph: "workflow"

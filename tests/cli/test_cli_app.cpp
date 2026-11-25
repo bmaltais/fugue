@@ -14,6 +14,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/share_package.h"
+
 namespace {
 
 struct Outcome {
@@ -78,6 +80,17 @@ const char *kShadeStale = R"({"fugue": 1,
          "outputs": [{"node": "save"}, {"node": "gone", "label": "Lost"}]},
  "graph": {"nodes": {
    "sample": {"type": "fugue/sampler", "version": "1.2.0", "inputs": {"seed": {"auto": "random"}}},)" SHADE_NODES R"(}})" SHADE_GROUP;
+
+// An app whose picture and another file (no image) are in its folder, and whose model has a source (app export).
+const char *kSampled = R"({"fugue": 1,
+ "requires": {"models": [{"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "m.safetensors", "source": "h.example/m.safetensors", "size": 7}]},
+ "app": {"format": 1, "title": "Sampled", "inputs": [{"role": "image", "targets": ["load.file"]}, {"name": "clip", "targets": ["clip.file"]}],
+         "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "inputs/pic.png"}},
+   "clip": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "inputs/clip.bin"}},
+   "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "m.safetensors"}}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}}}}})";
 
 const char *kPlain = R"({"fugue": 1, "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})";
 
@@ -273,6 +286,52 @@ private slots:
         QCOMPARE(fugue({"app", "run", "invert", "--input", "image=" + path("work/none.png"), "--json"}).code(), QString("file_not_found"));
         QCOMPARE(fugue({"app", "run", "invert", "--input", "image=" + picture(), "--input", "amount=lots", "--json"}).code(), QString("usage"));
         QCOMPARE(fugue({"app", "run", "needs-pack.fugue", "--json"}).code(), QString("app_not_ready"));
+    }
+
+    // `app export` (#394, spec 11.5): the bundle is the package's zip, read back with the package reader.
+    void exportWritesABundleWithItsSampleFilesAndRefusesWhatItCannotCarry() {
+        const QByteArray sampled = kSampled;
+        template_("sampled", "Sampled", sampled);
+        write(path("templates/sampled/inputs/pic.png"), QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="));
+        write(path("templates/sampled/inputs/clip.bin"), "clip bytes, no picture");
+
+        const QString out = path("work/sampled");
+        const Outcome wrote = fugue({"app", "export", "sampled", out, "--json"});
+        QVERIFY2(wrote.exitCode == 0, wrote.out + wrote.err);
+        QCOMPARE(wrote.data().value("file").toString(), out + ".fugueapp"); // its own extension, added
+        QCOMPARE(wrote.data().value("packs").toArray().size(), 0);
+        QStringList files;
+        for (const QJsonValue file : wrote.data().value("files").toArray())
+            files << file.toString();
+        files.sort();
+        QCOMPARE(files, (QStringList{"clip.bin", "pic.png"}));
+        // Read back with Fugue's own reader (the CI containers have no unzip).
+        QVERIFY(QDir().mkpath(path("work/unpacked")));
+        const fugue::Result<QString> unpacked = fugue::unpackSharePackage(out + ".fugueapp", path("work/unpacked"));
+        QVERIFY2(unpacked, unpacked ? "" : qPrintable(unpacked.error().message));
+        for (const char *entry : {"inputs/clip.bin", "inputs/pic.png", "workflow.fugue"})
+            QVERIFY2(QFileInfo::exists(unpacked.value() + "/" + entry), entry);
+
+        // Never over a file; a file as the app, and the codes of the rest.
+        QCOMPARE(fugue({"app", "export", "sampled", out, "--json"}).code(), QString("permission_denied"));
+        QVERIFY(fugue({"app", "export", path("work/invert.fugue"), path("work/from-file.fugueapp"), "--json"}).exitCode == 0);
+        QCOMPARE(fugue({"app", "export", "plain", path("work/p.fugueapp"), "--json"}).code(), QString("no_app"));
+        QCOMPARE(fugue({"app", "export", "nothing", path("work/n.fugueapp"), "--json"}).code(), QString("file_not_found"));
+        QCOMPARE(fugue({"app", "export", "sampled", "--json"}).code(), QString("usage")); // the file is missing
+
+        // A pack that is not installed and has no source: the receiver would be stuck, so it is refused, naming the pack.
+        const Outcome refused = fugue({"app", "export", "needs-pack.fugue", path("work/refused.fugueapp"), "--json"});
+        QCOMPARE(refused.code(), QString("app_not_shareable"));
+        QVERIFY(refused.error().value("message").toString().contains("Tools 1.0.0"));
+        QVERIFY(!QFileInfo::exists(path("work/refused.fugueapp")));
+
+        // A model with no source is refused too, and named.
+        QByteArray unsourced = sampled;
+        unsourced.replace(", \"source\": \"h.example/m.safetensors\", \"size\": 7", "");
+        write(path("work/unsourced.fugue"), unsourced);
+        const Outcome noSource = fugue({"app", "export", path("work/unsourced.fugue"), path("work/u.fugueapp"), "--json"});
+        QCOMPARE(noSource.code(), QString("app_not_shareable"));
+        QVERIFY(noSource.error().value("message").toString().contains("m.safetensors"));
     }
 
     void runPrintsTheFilesTheOutputNodeWroteInOut() {

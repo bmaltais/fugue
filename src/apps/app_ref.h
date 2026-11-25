@@ -1,7 +1,7 @@
 #pragma once
 
 // What `fugue --app <ref>` (and `--edit <ref>`) names (#398, epic #397): a template's id, a workflow file, a template folder or
-// a `.fuguepack`. Resolving is only reading the disk and the template catalog; opening is the window's Workflows (an app is a
+// a package (a `.fugueapp` or `.fuguepack`, told by its bytes, #394). Resolving is only reading the disk and the template catalog; opening is the window's Workflows (an app is a
 // tab like any other, shown as the App view). The same words as `fugue app info <id|file>` (src/cli/app.cpp): a path that
 // exists wins over an id.
 

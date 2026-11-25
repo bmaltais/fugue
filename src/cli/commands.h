@@ -85,6 +85,7 @@ Reply workflowPrepare(const Command &command, Context &context);
 Reply appList(const Command &command, Context &context);
 Reply appInfo(const Command &command, Context &context);
 Reply appRun(const Command &command, Context &context);
+Reply appExport(const Command &command, Context &context);
 // packs.cpp: the list of what a workflow still needs (packs, trust, models), the one `prepare` shows; nothing is changed.
 ReadinessPlan readinessPlanFor(const ReadinessRequest &request, Context &context);
 

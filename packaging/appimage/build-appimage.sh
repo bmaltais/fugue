@@ -155,6 +155,7 @@ need '*/qml/QtMultimedia/qmldir'
 need '*/share/fugue/templates/categories.json'
 need '*/share/mime/packages/fugue.xml'
 need '*/share/applications/fugue.desktop'
+need '*/share/applications/fugue-app.desktop'
 ((! missing)) || die "the bundle is incomplete"
 runpath=$(readelf -d "$appdir/usr/bin/fugue" | grep -E 'RUNPATH|RPATH' || true)
 [[ -n $runpath ]] || die "usr/bin/fugue has no RUNPATH: the bundled libraries would not be found"

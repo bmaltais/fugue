@@ -12,6 +12,8 @@
 #include "apps/app_launcher.h"
 #include "apps/app_shelf.h"
 #include "apps/app_window.h"
+#include "engine/share_package.h"
+#include "engine/templates.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 
@@ -155,6 +157,42 @@ private slots:
         app.workflows.readiness()->show();
         QTRY_VERIFY(app.window->findChild<QObject *>("getReadySheet"));
         QCOMPARE(app.window->findChild<QObject *>("getReadySheet")->property("visible").toBool(), true);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // `fugue --app x.fugueapp` (#394): the bundle opens as the app, and once it is ready "Keep this app" puts it in the person's
+    // apps (their templates folder) and the launcher; the bundle itself is left where it was.
+    void aBundleIsKeptIntoTheAppsAndTheLauncher() {
+        QTemporaryDir root, out;
+        makeApp(root.path(), "kept-app", "Kept app");
+        const Result<Document> document = Document::loadFile(root.path() + "/kept-app/workflow.fugue");
+        QVERIFY(document);
+        ShareRequest request;
+        request.title = "Kept app";
+        request.app = true;
+        request.workflowPath = root.path() + "/kept-app/workflow.fugue";
+        request.appVersion = "1.0.0";
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        const QString bundle = out.filePath("kept.fuguepack"); // renamed: the reader goes by content
+        QVERIFY(!hasErrors(writeSharePackage(*document, app.registry, request, bundle)));
+        Rig rig(app, root.path());
+        QVERIFY2(app.workflows.openPath(bundle), qPrintable(app.workflows.notice()));
+        rig.view.showApp();
+        const std::optional<AppRef> ref = resolveApp(bundle, {{root.path(), false}}, &app.registry);
+        QVERIFY(ref && ref->kind == AppRef::Kind::Package);
+        rig.launcher.setApp(*ref);
+        QVERIFY(app.open());
+        QTRY_VERIFY(find(app.window, "appKeep"));
+        QCOMPARE(app.window->title(), QStringLiteral("Kept app"));
+        tap(app.window, find(app.window, "appKeep"));
+        const QString kept = TemplateLibrary::ownFolder() + "/kept-app";
+        QVERIFY2(QFileInfo(kept + "/workflow.fugue").isFile(), qPrintable(app.workflows.notice()));
+        QVERIFY(QFileInfo::exists(rig.data.filePath("applications/fugue-app-kept-app.desktop")));
+        QTRY_VERIFY(!find(app.window, "appKeep")); // kept: the offer goes
+        QVERIFY(rig.launcher.listed());
+        QVERIFY(QFileInfo::exists(bundle));
+        QVERIFY(app.workflows.notice().contains("kept"));
+        QDir(kept).removeRecursively();
         qDeleteAll(app.engine.rootObjects());
     }
 

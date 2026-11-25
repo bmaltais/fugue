@@ -88,11 +88,17 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
 // is empty: a relative path in an unsaved workflow names nothing.
 void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from);
 
+// Copies any file (a video, a song, a document) into `folder` as <stem>-<first 10 hex of its SHA-256>.<its extension>, byte for
+// byte, and returns that path. The same bytes again are the file already there. At most maxImageBytes; a regular file, not a link.
+// `roots` must allow writing the folder. What an app bundle's sample media comes in by (#394).
+Result<QString> storeMediaFile(const QString &path, const QString &folder, const FileRoots &roots);
+
 // Takes into the inputs folder (storeImageFile) every image an input-file literal names, by
 // its full path, inside `folder` (a template's), and points the literal at the stored copy, so
 // the document no longer leans on that folder. The document is changed only when every image
-// was stored.
-Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder);
+// was stored. With `anyFile` (an app bundle's folder, #394) a video, a song or another file is taken in the same way
+// (storeMediaFile); without it such a file stays where it is.
+Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder, bool anyFile = false);
 
 // One image in the inputs folder, for the "Recent inputs" list.
 struct RecentInput {

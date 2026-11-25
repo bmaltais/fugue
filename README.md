@@ -78,7 +78,9 @@ Read it first at [install.sh](install.sh); `bash -s -- --dry-run` shows what it 
 - **Share packages.** File > Export for sharing writes one `.fuguepack`: the workflow, its
   groups, the input images and a preview, with models kept as references (hash, source, size)
   the receiver downloads. From the CLI: `fugue workflow export <file> --share`. The desktop
-  opens `.fuguepack` files with Fugue.
+  opens `.fuguepack` files with Fugue. An app is shared as one `.fugueapp` that also carries
+  its packs and sample files (`fugue app export <id> <file.fugueapp>`): double-click it, say yes
+  once on the Get ready sheet, and the app opens in a window of its own, ready to run.
 - **Agents.** Everything above works with no window and with `--json`, so an agent can build,
   validate, run and inspect workflows. `fugue skill install` teaches it how: one copy in
   `~/.agents/skills/fugue` (Pi and others) linked into Claude Code's skills folder; run it again to

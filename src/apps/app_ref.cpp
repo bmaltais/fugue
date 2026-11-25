@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include "engine/share_package.h"
 #include "workflow/workflows.h"
 
 namespace fugue {
@@ -23,7 +24,8 @@ std::optional<AppRef> resolveApp(const QString &ref, const QList<TemplateRoot> &
     const QFileInfo info(ref);
     if (info.isFile()) {
         AppRef out;
-        out.kind = ref.endsWith(QLatin1String(".fuguepack"), Qt::CaseInsensitive) ? AppRef::Kind::Package : AppRef::Kind::Workflow;
+        // A package is told by its bytes (a `.fugueapp` renamed `.fuguepack`, or `.zip`, is the same one, 11.5, #394).
+        out.kind = isSharePackage(info.absoluteFilePath()) ? AppRef::Kind::Package : AppRef::Kind::Workflow;
         out.ref = out.file = info.absoluteFilePath();
         out.preview = out.kind == AppRef::Kind::Package ? QString() : previewIn(info.absolutePath());
         return out;

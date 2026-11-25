@@ -25,6 +25,7 @@
 #include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
+#include "engine/app_binding.h"
 #include "engine/share_package.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
@@ -260,6 +261,7 @@ QVariantList Workflows::tabs() const {
                                 {"title", tab.title},
                                 {"path", tab.path},
                                 {"template", tab.templateFolder}, // where an unnamed tab of a template came from (#398)
+                                {"package", tab.packagePath},     // the package an unnamed tab was opened from (#394)
                                 {"unsaved", unsaved(i)},
                                 {"current", i == m_current},
                                 {"color", tab.color}});
@@ -554,12 +556,13 @@ bool Workflows::openPackage(const QString &path) {
     // Unpacked only for as long as it opens: its samples go into the inputs folder (openTemplate).
     // Under the cache, not /tmp, which is memory on Arch.
     QDir().mkpath(cacheDir());
-    QTemporaryDir unpacked(cacheDir() + QStringLiteral("/package-XXXXXX"));
-    if (!unpacked.isValid()) {
-        setNotice(tr("Could not open %1: %2").arg(shown, unpacked.errorString()));
+    // An app bundle (#394) carries packs, which the Get ready sheet reads from here: its folder lives as long as the tab.
+    const auto unpacked = std::make_shared<QTemporaryDir>(cacheDir() + QStringLiteral("/package-XXXXXX"));
+    if (!unpacked->isValid()) {
+        setNotice(tr("Could not open %1: %2").arg(shown, unpacked->errorString()));
         return false;
     }
-    const Result<QString> folder = unpackSharePackage(path, unpacked.path());
+    const Result<QString> folder = unpackSharePackage(path, unpacked->path());
     if (!folder) {
         setNotice(tr("Could not open %1: %2").arg(shown, firstMessage(folder.errors())));
         return false;
@@ -573,17 +576,33 @@ bool Workflows::openPackage(const QString &path) {
                                                      : firstMessage(problems)));
         return false;
     }
-    return openTemplate(*chosen, true);
+    m_pendingPackage = {QFileInfo(path).absoluteFilePath(), chosen->carriedPacks.isEmpty() ? nullptr : unpacked};
+    const bool opened = openTemplate(*chosen, true);
+    m_pendingPackage = {};
+    return opened;
+}
+
+QString Workflows::shareSuffix() const {
+    if (m_current < 0)
+        return QString::fromLatin1(workflowPackageSuffix);
+    const Result<std::optional<app::App>> block = app::appOf(documentOf(m_current));
+    return QString::fromLatin1(block && *block ? appPackageSuffix : workflowPackageSuffix);
 }
 
 bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
     if (m_current < 0)
         return false;
     QString path = toPath(pathOrUrl);
-    if (QFileInfo(path).suffix().compare(QLatin1String("fuguepack"), Qt::CaseInsensitive) != 0)
-        path += QStringLiteral(".fuguepack");
+    // An app (a workflow with an `app` block) is shared as a bundle that holds what it needs but the models (#394).
+    const bool app = shareSuffix() == QLatin1String(appPackageSuffix);
+    const QString suffix = QFileInfo(path).suffix();
+    if (suffix.compare(QLatin1String(workflowPackageSuffix), Qt::CaseInsensitive) != 0
+        && suffix.compare(QLatin1String(appPackageSuffix), Qt::CaseInsensitive) != 0)
+        path += QLatin1Char('.') + shareSuffix();
     const Tab &tab = m_tabs[size_t(m_current)];
     ShareRequest request;
+    request.app = app;
+    request.carried = tab.carried;
     request.title = tab.title.endsWith(QStringLiteral(".fugue")) ? tab.title.chopped(6) : tab.title;
     request.workflowPath = tab.path;
     request.preview = preview;
@@ -594,8 +613,10 @@ bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
         setNotice(tr("Could not export %1: %2").arg(request.title, withHints(errors)));
         return false;
     }
-    QString line = tr("Exported %1 for sharing to %2. Models are not in it: who opens it can download them.")
-                       .arg(request.title, path);
+    QString line = app ? tr("Exported the app %1 for sharing to %2. It carries its packs and sample files; models are not in it: who opens it downloads them after one approval.")
+                             .arg(request.title, path)
+                       : tr("Exported %1 for sharing to %2. Models are not in it: who opens it can download them.")
+                             .arg(request.title, path);
     if (!included.isEmpty())
         line += QLatin1Char(' ') + tr("Images in it: %1.").arg(included.join(QStringLiteral(", ")));
     if (!errors.isEmpty())
@@ -690,7 +711,7 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     Errors errors = document ? Errors() : document.errors();
     if (document) {
         makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
-        errors = takeInputsFrom(document.value(), *m_registry, chosen.folder);
+        errors = takeInputsFrom(document.value(), *m_registry, chosen.folder, fromPackage); // a package's samples are all taken in (#394)
     }
     if (document && fromPackage && errors.isEmpty()) {
         const QString folder = canonicalPath(chosen.folder);
@@ -728,8 +749,16 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     }
     addTab(document.value(), {}, chosen.title, true, true);
     // Its carried packs stay in the template's folder, so a package (unpacked only while it
-    // opens) offers none; the workflow's requires.packs source is its offer then (#91).
-    if (!fromPackage) {
+    // opens) offers none; the workflow's requires.packs source is its offer then (#91). An app bundle's folder lives as long
+    // as the tab (m_pendingPackage), so it offers the packs it carries (#394).
+    if (fromPackage) {
+        Tab &tab = m_tabs[size_t(m_current)];
+        tab.packagePath = m_pendingPackage.path;
+        tab.unpacked = m_pendingPackage.unpacked;
+        if (tab.unpacked)
+            tab.carried = chosen.carriedPacks;
+        emit tabsChanged();
+    } else {
         m_tabs[size_t(m_current)].carried = chosen.carriedPacks;
         m_tabs[size_t(m_current)].templateFolder = chosen.folder;
         emit tabsChanged(); // addTab's came before the folder was set, and the App view's launcher reads it (#398)

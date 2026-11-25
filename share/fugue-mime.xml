@@ -12,4 +12,11 @@
     <sub-class-of type="application/zip"/>
     <glob pattern="*.fuguepack"/>
   </mime-type>
+  <!-- An app bundle (#394): the same zip as a package, read by the same reader, but opened as an app in a window of its own
+       (share/fugue-app.desktop runs fugue with its app option). -->
+  <mime-type type="application/x-fugue-app">
+    <comment>Fugue app</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.fugueapp"/>
+  </mime-type>
 </mime-info>

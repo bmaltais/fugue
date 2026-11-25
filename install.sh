@@ -171,11 +171,12 @@ mkdir -p "$(dirname "$marker")" && printf '%s\n' "$new_name" >"$marker"
 if ((desktop)); then
   # What the pacman package installs under /usr/share, taken out of the AppImage (extracting needs no FUSE).
   data="${XDG_DATA_HOME:-$HOME/.local/share}"
-  (cd "$work" && "$dest" --appimage-extract 'usr/share/applications/fugue.desktop' 'usr/share/mime/packages/fugue.xml' 'usr/share/icons/hicolor/*' >/dev/null) \
+  (cd "$work" && "$dest" --appimage-extract 'usr/share/applications/fugue.desktop' 'usr/share/applications/fugue-app.desktop' 'usr/share/mime/packages/fugue.xml' 'usr/share/icons/hicolor/*' >/dev/null) \
     || die "could not read the launcher files out of $dest (it is installed; rerun with --no-desktop to skip them)"
   share="$work/squashfs-root/usr/share"
   mkdir -p "$data/applications" "$data/mime/packages" "$data/icons"
   sed "s|^Exec=fugue |Exec=$dest |" "$share/applications/fugue.desktop" >"$data/applications/fugue.desktop"
+  sed "s|^Exec=fugue |Exec=$dest |" "$share/applications/fugue-app.desktop" >"$data/applications/fugue-app.desktop" # opens a .fugueapp as an app
   cp "$share/mime/packages/fugue.xml" "$data/mime/packages/fugue.xml"
   cp -r "$share/icons/hicolor" "$data/icons/"
   command -v update-mime-database >/dev/null && update-mime-database "$data/mime" >/dev/null 2>&1 || true

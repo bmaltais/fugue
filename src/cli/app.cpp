@@ -8,6 +8,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -20,6 +21,7 @@
 #include "engine/document.h"
 #include "engine/readiness.h"
 #include "engine/registry.h"
+#include "engine/share_package.h"
 #include "engine/templates.h"
 
 namespace fugue::cli {
@@ -448,6 +450,45 @@ Reply appInfo(const Command &command, Context &context) {
     }
     Reply reply = Reply::success(data, lines.join(QLatin1Char('\n')));
     reply.errors = loaded->stale;
+    return reply;
+}
+
+// `fugue app export <id|file> <file.fugueapp>` (#394, spec 11.5): the app as a bundle that holds what it needs but the models.
+Reply appExport(const Command &command, Context &context) {
+    const QString ref = command.positionals.at(0);
+    const Result<Loaded> loaded = loadApp(ref, context);
+    if (!loaded)
+        return Reply::failure(loaded.errors());
+    QString out = command.positionals.at(1);
+    const QString suffix = QFileInfo(out).suffix();
+    if (suffix.compare(QLatin1String(appPackageSuffix), Qt::CaseInsensitive) != 0
+        && suffix.compare(QLatin1String(workflowPackageSuffix), Qt::CaseInsensitive) != 0)
+        out += QLatin1Char('.') + QString::fromLatin1(appPackageSuffix); // its own extension, which the desktop opens as an app
+    out = QFileInfo(out).absoluteFilePath();
+
+    Document document = loaded->document;
+    if (!loaded->stale.isEmpty())
+        app::setApp(document, loaded->app); // what the graph no longer has is not shared
+    ShareRequest request;
+    request.title = titleOf(*loaded);
+    request.workflowPath = loaded->file;
+    request.carried = loaded->carried;
+    request.app = true;
+    request.appVersion = QCoreApplication::applicationVersion();
+    if (!QFileInfo(ref).isFile()) // a template's own picture; a loose file has none of its own
+        request.preview = previewFilesIn(loaded->folder).still;
+    QStringList included, packs;
+    const Errors errors = writeSharePackage(document, context.registry, request, out, &included, &packs);
+    if (hasErrors(errors))
+        return Reply::failure(errors);
+    Reply reply = Reply::success(QJsonObject{{"file", out},
+                                             {"app", loaded->id},
+                                             {"packs", QJsonArray::fromStringList(packs)},
+                                             {"files", QJsonArray::fromStringList(included)}},
+                                 QStringLiteral("Wrote %1. It carries %2 and %3; models are not in it: who opens it downloads them after one approval.")
+                                     .arg(out, packs.isEmpty() ? QStringLiteral("no packs") : QStringLiteral("the pack%1 %2").arg(packs.size() == 1 ? QString() : QStringLiteral("s"), packs.join(QStringLiteral(", "))),
+                                          included.isEmpty() ? QStringLiteral("no sample files") : QStringLiteral("the sample files %1").arg(included.join(QStringLiteral(", ")))));
+    reply.errors = errors; // warnings: what was left out
     return reply;
 }
 

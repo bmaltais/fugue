@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fugue App
+Comment=Open a Fugue app in a window of its own
+Exec=fugue --app %f
+Icon=fugue
+Terminal=false
+NoDisplay=true
+Categories=Utility;
+MimeType=application/x-fugue-app;
+StartupWMClass=fugue
