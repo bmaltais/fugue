@@ -1,7 +1,5 @@
 <RCC>
     <qresource prefix="/">
-        <file alias="Main.qml">Main.qml</file>
-        <file alias="CommandUi.qml">commands/CommandUi.qml</file>
         <file alias="fugue-light.png">../share/icons/fugue-light.png</file>
         <file alias="fugue-dark.png">../share/icons/fugue-dark.png</file>
         <file alias="fonts/lucide.ttf">../share/fonts/lucide-fugue.ttf</file>

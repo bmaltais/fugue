@@ -132,17 +132,34 @@ qt_add_resources(fugue_engine fugue_provider_tables_cloudflare PREFIX /fugue/pro
 # others import them by folder. A new .qml file there needs no line here. The same files are
 # written as build/qmllint/<name>.qrc too, so the qmllint test reads them where the app does.
 set(fugue_qmllint_resources --resource ${CMAKE_SOURCE_DIR}/src/resources.qrc)
+# Every .qml and .js of the window goes into the Fugue QML module (fugue_core), so Qt compiles them ahead of time (qmlcachegen):
+# a plain qt_add_resources keeps the source, and every window the app (or a test) opens then compiles ~120 files again
+# (no disk cache for qrc files either), seconds per window. PREFIX / with the alias keeps each file where the app
+# imports it from (qrc:/canvas/X.qml).
+set(fugue_qml_sources)
 function(fugue_add_qml name folder prefix)
   file(GLOB names CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/${folder} ${folder}/*.qml ${folder}/*.js)
-  set(files)
+  file(GLOB scripts CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/${folder} ${folder}/*.js)
   set(qrc "<RCC>\n  <qresource prefix=\"${prefix}\">\n")
+  set(files)
   foreach(qml ${names})
-    set_source_files_properties(${folder}/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-    list(APPEND files ${folder}/${qml})
+    string(SUBSTRING ${prefix} 1 -1 alias_folder)
+    set_source_files_properties(${folder}/${qml} PROPERTIES QT_RESOURCE_ALIAS ${alias_folder}/${qml})
+    if(NOT qml IN_LIST scripts)
+      list(APPEND files ${folder}/${qml})
+    endif()
     string(APPEND qrc "    <file alias=\"${qml}\">${CMAKE_SOURCE_DIR}/${folder}/${qml}</file>\n")
   endforeach()
   string(APPEND qrc "  </qresource>\n</RCC>\n")
-  qt_add_resources(fugue_core ${name} PREFIX ${prefix} FILES ${files})
+  set(fugue_qml_sources ${fugue_qml_sources} ${files} PARENT_SCOPE)
+  set(js_files)
+  foreach(script ${scripts})
+    set_source_files_properties(${folder}/${script} PROPERTIES QT_RESOURCE_ALIAS ${script})
+    list(APPEND js_files ${folder}/${script})
+  endforeach()
+  if(js_files)
+    qt_add_resources(fugue_core ${name}_js PREFIX ${prefix} FILES ${js_files})
+  endif()
   file(WRITE ${CMAKE_BINARY_DIR}/qmllint/${name}.qrc "${qrc}")
   set(fugue_qmllint_resources ${fugue_qmllint_resources}
       --resource ${CMAKE_BINARY_DIR}/qmllint/${name}.qrc PARENT_SCOPE)
@@ -176,6 +193,21 @@ fugue_add_qml(fugue_media_qml src/media /media)
 fugue_add_qml(fugue_kit_qml src/kit /kit)
 # The window's areas and their views (#217): the area tree drawn (AreaNode.qml).
 fugue_add_qml(fugue_workspace_qml src/workspace /workspace)
+# The window itself and the command UI, at the top of the resource tree.
+set_source_files_properties(src/Main.qml PROPERTIES QT_RESOURCE_ALIAS Main.qml)
+set_source_files_properties(src/commands/CommandUi.qml PROPERTIES QT_RESOURCE_ALIAS CommandUi.qml)
+list(APPEND fugue_qml_sources src/Main.qml src/commands/CommandUi.qml)
+file(WRITE ${CMAKE_BINARY_DIR}/qmllint/fugue_top_qml.qrc "<RCC>\n  <qresource prefix=\"/\">\n    <file alias=\"Main.qml\">${CMAKE_SOURCE_DIR}/src/Main.qml</file>\n    <file alias=\"CommandUi.qml\">${CMAKE_SOURCE_DIR}/src/commands/CommandUi.qml</file>\n  </qresource>\n</RCC>\n")
+list(APPEND fugue_qmllint_resources --resource ${CMAKE_BINARY_DIR}/qmllint/fugue_top_qml.qrc)
+set_source_files_properties(${fugue_qml_sources} PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE) # not types of the Fugue module: they are found by folder
+# The folders import each other by path, with no qmldir of their own, so QTP0004 stays OLD; Qt's warning that OLD
+# is deprecated is switched off around the call (CMake 4.3's CMP0218 is set OLD so the switch is still read).
+qt_policy(SET QTP0004 OLD)
+cmake_policy(PUSH)
+cmake_policy(SET CMP0218 OLD)
+set(CMAKE_WARN_DEPRECATED OFF)
+qt_target_qml_sources(fugue_core PREFIX / QML_FILES ${fugue_qml_sources})
+cmake_policy(POP)
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
@@ -411,9 +443,24 @@ endforeach()
 # the app loads them in: any warning fails it (tests/qmllint.cmake), so `bin/test` keeps the
 # QML lint-clean.
 file(GLOB_RECURSE fugue_qml_files CONFIGURE_DEPENDS src/*.qml)
-add_test(NAME qmllint COMMAND ${CMAKE_COMMAND} "-DQMLLINT=$<TARGET_FILE:Qt6::qmllint>"
-         "-DARGS=-I;${CMAKE_BINARY_DIR}/qml;${fugue_qmllint_resources}" "-DFILES=${fugue_qml_files}"
-         -P ${CMAKE_SOURCE_DIR}/tests/qmllint.cmake)
+# In chunks (qmllint.1of4 ...), one process each, run at the same time: qmllint is one thread, and a long file list
+# slows it down more than in proportion.
+set(fugue_qmllint_chunks 4)
+foreach(chunk RANGE 1 ${fugue_qmllint_chunks})
+  set(chunk_files)
+  set(index 0)
+  foreach(qml ${fugue_qml_files})
+    math(EXPR slot "${index} % ${fugue_qmllint_chunks} + 1")
+    if(slot EQUAL chunk)
+      list(APPEND chunk_files ${qml})
+    endif()
+    math(EXPR index "${index} + 1")
+  endforeach()
+  add_test(NAME qmllint.${chunk}of${fugue_qmllint_chunks}
+           COMMAND ${CMAKE_COMMAND} "-DQMLLINT=$<TARGET_FILE:Qt6::qmllint>"
+           "-DARGS=-I;${CMAKE_BINARY_DIR}/qml;${fugue_qmllint_resources}" "-DFILES=${chunk_files}"
+           -P ${CMAKE_SOURCE_DIR}/tests/qmllint.cmake)
+endforeach()
 
 # A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and
 # worker, but nodes that do fake work. Not installed.

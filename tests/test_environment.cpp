@@ -65,6 +65,13 @@ void isolateFromTheDesktop() {
     // The FFmpeg backend of Qt Multimedia dumps every file it opens to stderr (main.cpp turns it off in the app).
     if (!qEnvironmentVariableIsSet("QT_LOGGING_RULES"))
         qputenv("QT_LOGGING_RULES", "qt.multimedia.ffmpeg.mediadataholder.info=false");
+    // Qt Multimedia's FFmpeg backend probes the machine's GPU decoders and encoders (VAAPI: opens the render node and
+    // creates a device per type) the first time a window loads a video or a sound, 1 to 3 s of the first window of
+    // every test and more when 12 tests do it at once (2026-11-25). Decoding by software is all a test needs.
+    if (!qEnvironmentVariableIsSet("QT_FFMPEG_DECODING_HW_DEVICE_TYPES"))
+        qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", "");
+    if (!qEnvironmentVariableIsSet("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES"))
+        qputenv("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES", "");
     qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/fugue-tests-have-no-session-bus");
     // Nor the machine's GPU helper (a source checkout's build-helper-*/ sits beside build/): none,
     // unless a test names one (empty FUGUE_HELPER: no helper, engine/helper_provider.h).

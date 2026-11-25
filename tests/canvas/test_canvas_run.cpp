@@ -224,11 +224,19 @@ struct RunApp {
     }
 };
 
-// Leaves a check of the window waiting on a describe() that never answers. The checks
-// asked before it (the one when the window opened: 300 ms pause, 300 ms describe) are over
-// first, so this one is the one that hangs.
-void hangACheck(RunApp &r) {
-    QTest::qWait(1000);
+// Leaves a check of the window waiting on a describe() that never answers. A check asked
+// and answered first (it replaces the one the open and the edit pause asked) is over, so
+// this one is the one that hangs. With a run waiting for its turn a check is never applied
+// (a run since it was asked knows better), so there the pause and the describe (300 ms each)
+// are waited out.
+void hangACheck(RunApp &r, bool runWaiting = false) {
+    if (runWaiting) {
+        QTest::qWait(700);
+    } else {
+        QSignalSpy applied(r.runs.get(), &fugue::CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QVERIFY(applied.wait(5000));
+    }
     const DescribeHangs hangs;
     r.runs->checkNow();
     QTest::qWait(200); // the check is waiting on describe
@@ -1245,7 +1253,7 @@ private slots:
         QVERIFY(worker.tryAcquire());
         r.app.key(Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(queue.entries().size(), 2);
-        hangACheck(r);
+        hangACheck(r, true);
         QVERIFY(queue.remove(QStringLiteral("cli-run")));
         worker.release();
         QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 5000);
