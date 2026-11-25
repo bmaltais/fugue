@@ -17,6 +17,9 @@ Item {
     property int currentIndex: 0
     property string text // the name assistive tools say
     property string tone: KitTone.nearest(seg) // the panel's tone; "" is the accent
+    // A press takes the keyboard's place, so the arrows then move the choice; a chooser in the window bar (App | Graph) leaves it
+    // where it was, as the bar's other buttons do.
+    property bool focusOnPress: true
     signal moved(int index)
 
     readonly property color toneColor: tone === "" || look.params.controlColour === "accent" ? look.accent : look.tone(tone).glass
@@ -29,6 +32,12 @@ Item {
     readonly property real naturalOption: Math.max(7 * look.unit, widest.implicitWidth + 6 * look.unit)
     readonly property real optionWidth: count > 0 ? Math.max(naturalOption, (width - 2 * pad) / count) : naturalOption
     readonly property bool mirrored: LayoutMirroring.enabled
+    // The focus ring is for the keyboard: a press gives the focus but no ring, as a browser's :focus-visible (owner, 2026-11-25:
+    // the App | Graph switch kept an accent outline after a click).
+    // (Item has no focusReason, only Control: a press marks the focus it gives, and losing the focus clears the mark.)
+    property bool pressFocus: false
+    onActiveFocusChanged: if (!activeFocus) pressFocus = false
+    readonly property bool ring: activeFocus && !pressFocus
 
     implicitWidth: count * naturalOption + 2 * pad
     implicitHeight: 7 * look.unit
@@ -58,8 +67,8 @@ Item {
         anchors.fill: parent
         radius: Math.min(seg.pm.cornerSegment * seg.look.unit, 0.5 * height)
         color: seg.glass ? Qt.rgba(0, 0, 0, seg.look.light ? seg.pm.glassTrackAlphaLight : seg.pm.glassTrackAlpha) : seg.look.kitTrack
-        border.width: seg.activeFocus ? 2 : seg.glass ? 1 : 0
-        border.color: seg.activeFocus ? seg.look.accent : Qt.rgba(0, 0, 0, seg.pm.trackEdge * (seg.look.light ? 0.64 : 1))
+        border.width: seg.ring ? 2 : seg.glass ? 1 : 0
+        border.color: seg.ring ? seg.look.accent : Qt.rgba(0, 0, 0, seg.pm.trackEdge * (seg.look.light ? 0.64 : 1))
         Rectangle { // the inner shadow along the top edge
             visible: seg.glass && height > 0.01
             x: track.radius * 0.6
@@ -125,7 +134,7 @@ Item {
                     }
                     TapHandler {
                         gesturePolicy: TapHandler.WithinBounds
-                        onTapped: { seg.forceActiveFocus(Qt.MouseFocusReason); seg.choose(option.index) }
+                        onTapped: { if (seg.focusOnPress) { if (!seg.activeFocus) seg.pressFocus = true; seg.forceActiveFocus(Qt.MouseFocusReason) } seg.choose(option.index) }
                     }
                 }
             }

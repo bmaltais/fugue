@@ -9,7 +9,7 @@ import "../canvas/widgets"
 import "../menu"
 
 // The stage of the App view, in the layout of ComfyUI App Mode (layout and behaviour only): the result large on the start side
-// of the page, a thin progress line at its top, a toolbar over it, the size and zoom under it, and under that the takes (the
+// of the page, a thin progress line along the result's top edge, a toolbar over it, the size and zoom under it, and under that the takes (the
 // runs of this session as thumbnails). AppView holds all the logic; this draws it.
 //
 //   toolbar  while a run goes: Cancel (a normal button: danger red is for deletion) and where the run is. Otherwise Run again,
@@ -77,20 +77,6 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         spacing: stage.u
-
-        // A thin line of progress along the top of the stage.
-        Rectangle {
-            objectName: "appProgressLine"
-            Layout.fillWidth: true
-            implicitHeight: 2
-            color: stage.appView.busy ? stage.look.well : "transparent"
-            Rectangle {
-                width: parent.width * Math.max(stage.appView.status === "waiting" ? 0 : 0.02, stage.appView.progress)
-                height: parent.height
-                color: stage.look.accent
-                visible: stage.appView.busy
-            }
-        }
 
         RowLayout {
             id: toolbar
@@ -340,6 +326,21 @@ Item {
                     text: stage.appView.status === "waiting" ? qsTr("Waiting for its turn…") : qsTr("Working…")
                     color: stage.look.label
                     font.pixelSize: stage.look.textSize
+                }
+            }
+            // A thin line of progress along the top edge of the well, over the picture: in a row of its own above the toolbar it
+            // pushed the toolbar down from the card's edge (owner, 2026-11-25).
+            Rectangle {
+                objectName: "appProgressLine"
+                x: well.radius
+                width: well.width - 2 * well.radius
+                height: 2
+                visible: stage.appView.busy
+                color: Qt.alpha(stage.look.accent, 0.25)
+                Rectangle {
+                    width: parent.width * Math.max(stage.appView.status === "waiting" ? 0 : 0.02, stage.appView.progress)
+                    height: parent.height
+                    color: stage.look.accent
                 }
             }
         }

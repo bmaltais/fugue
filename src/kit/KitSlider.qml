@@ -54,6 +54,10 @@ Item {
     width: implicitWidth
     height: implicitHeight
     activeFocusOnTab: enabled
+    // The focus ring is for the keyboard (KitSegmented): a press marks the focus it gives, losing the focus clears the mark.
+    property bool pressFocus: false
+    onActiveFocusChanged: if (!activeFocus) pressFocus = false
+    readonly property bool ring: activeFocus && !pressFocus
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Slider
     Accessible.name: text
@@ -131,8 +135,9 @@ Item {
             height: width
             radius: width / 2
             color: slider.look.kitKnob
-            border.width: slider.activeFocus ? 2 : slider.look.light ? 1 : 0
-            border.color: slider.activeFocus ? slider.look.accent : slider.look.hairlineStrong
+            // The ring is for the keyboard: a press focuses the slider (the arrows then move it) but shows none (KitSegmented).
+            border.width: slider.ring ? 2 : slider.look.light ? 1 : 0
+            border.color: slider.ring ? slider.look.accent : slider.look.hairlineStrong
             Rectangle { // the thumb's drop shadow
                 anchors { fill: parent; topMargin: slider.look.params.raiseShadowOffset; bottomMargin: -slider.look.params.raiseShadowOffset }
                 z: -1
@@ -151,7 +156,7 @@ Item {
         TapHandler {
             id: tap
             gesturePolicy: TapHandler.WithinBounds
-            onPressedChanged: if (pressed) { slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
+            onPressedChanged: if (pressed) { if (!slider.activeFocus) slider.pressFocus = true; slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
         }
         HoverHandler { cursorShape: slider.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
     }

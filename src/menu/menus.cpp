@@ -90,7 +90,7 @@ QVariantList areaItems() {
 // The Window menu (#262, Blender's): the window's own furniture, not a view's. Every bar and panel with a check, focus mode
 // and the way back, then the areas.
 QVariantList windowMenu() {
-    QVariantList items = {command("view.toggle-app"), separator()};
+    QVariantList items = {command("view.toggle-app"), command("view.toggle-app-inputs"), separator()};
     for (const QVariant &item : windowItems())
         items.append(item);
     items.append(separator());

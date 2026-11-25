@@ -34,6 +34,8 @@ QList<Row> rows() {
          QT_TRANSLATE_NOOP("Command", "Run status"), "run-status", {}},
         {"view.toggle-zoom-readout", QT_TRANSLATE_NOOP("Command", "Show or hide the zoom readout at the bottom left"),
          QT_TRANSLATE_NOOP("Command", "Zoom readout"), "zoom-readout", {}},
+        {"view.toggle-app-inputs", QT_TRANSLATE_NOOP("Command", "Show or hide the inputs panel of the App view"),
+         QT_TRANSLATE_NOOP("Command", "App inputs"), "app-inputs", {}},
     };
 }
 
@@ -81,6 +83,9 @@ void registerChromeCommands(CommandRegistry &commands, ChromeVisibility &chrome)
         commands.setHandler(command, [&chrome, id] { chrome.toggle(id); });
         commands.setCheckedWhen(command, [&chrome, id] { return chrome.isVisible(id); });
     }
+    // The App view's inputs panel: only while the App view is shown (view.toggle-app checked; no App view bound, never).
+    commands.setEnabledWhen("view.toggle-app-inputs",
+                            [&commands] { return commands.entry(QStringLiteral("view.toggle-app")).value("checked").toBool(); });
     commands.setHandler("view.focus-mode", [&chrome] { chrome.toggleFocusMode(); });
     commands.setCheckedWhen("view.focus-mode", [&chrome] { return chrome.focusMode(); });
     commands.setHandler("view.reset-bars", [&chrome] { chrome.reset(); });

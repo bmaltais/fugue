@@ -25,6 +25,7 @@ Rectangle {
     property bool frosted: false
     property Item backdrop: null
     property url backdropSource // the picture the backdrop shows, when it is one: a new one is measured again
+    property real maxTextWidth: 0 // more than 0: a longer text is cut with an ellipsis (a project name in the window bar)
     property bool round: false // as wide as tall, fully round (a glyph button in a corner)
     property bool bordered: false // a hairline edge, for a chip that stands on its own (Cancel)
     // A filter that is on takes the window's tone (the KitPanel above, KitTone.js) as translucent colour, as a toggle does, instead of
@@ -95,6 +96,8 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             text: chip.text
             textFormat: Text.PlainText
+            width: chip.maxTextWidth > 0 ? Math.min(implicitWidth, chip.maxTextWidth) : implicitWidth
+            elide: Text.ElideRight
             color: chip.ink
             style: chip.glass && !chip.darkInk ? Text.Raised : Text.Normal // white ink gets a soft 1px shadow
             styleColor: Qt.rgba(0, 0, 0, 0.35)
