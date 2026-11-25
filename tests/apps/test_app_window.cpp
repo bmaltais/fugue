@@ -433,12 +433,12 @@ private slots:
         QVERIFY(app.commands.run("view.toggle-app"));
         QTRY_VERIFY(find(app.window, "appPage"));
 
-        // A workflow with no block is the window it was: no page, no switch.
+        // A workflow with no block is the window it was: no page; the switch stays (Graph chosen, App opens the builder).
         app.workflows.newWorkflow();
         QTRY_VERIFY(find(app.window, "canvas"));
         QTRY_VERIFY(!find(app.window, "appPage"));
-        QTRY_VERIFY(!find(app.window, "appViewSwitch"));
-        QVERIFY(!app.commands.isEnabled("view.toggle-app")); // nothing to switch
+        QVERIFY(find(app.window, "appViewSwitch"));
+        QVERIFY(app.commands.isEnabled("view.toggle-app")); // its App segment is Make app
         qDeleteAll(app.engine.rootObjects());
     }
 

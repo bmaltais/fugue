@@ -132,8 +132,15 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             view.openInGraph();
     });
 
-    commands.setHandler(QStringLiteral("view.toggle-app"), [&view] { view.toggle(); });
-    commands.setEnabledWhen(QStringLiteral("view.toggle-app"), [&view] { return view.isApp(); });
+    // The App | Graph switch is always there (#397): the App view's other view for an app; for a plain graph, the App segment is the
+    // builder (Make app), and bindViewSwitch adds the shelf's two states.
+    commands.setHandler(QStringLiteral("view.toggle-app"), [&view, &commands] {
+        if (view.isApp())
+            view.toggle();
+        else
+            commands.trigger(QStringLiteral("app.make"));
+    });
+    commands.setEnabledWhen(QStringLiteral("view.toggle-app"), [] { return true; });
     commands.setCheckedWhen(QStringLiteral("view.toggle-app"), [&view] { return view.shown(); });
 
     const auto run = [&view, &runs](bool first) {
@@ -159,6 +166,22 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             runs.cancel();
     });
     give(true);
+}
+
+void bindViewSwitch(AppShelf &shelf, AppView &view, CommandRegistry &commands) {
+    const QString id = QStringLiteral("view.toggle-app");
+    commands.setHandler(id, [&shelf, &view, graphOrBuilder = commands.handlerOf(id)] {
+        if (view.isApp() || (!shelf.atHome() && !shelf.landing()))
+            graphOrBuilder();
+        else if (shelf.atHome())
+            shelf.dismiss(); // the shelf's Graph: Start blank
+        else
+            shelf.showAgain(); // the empty graph's App: back to the shelf
+    });
+    commands.setCheckedWhen(id, [&shelf, &view] { return view.shown() || shelf.atHome(); });
+    QObject::connect(&shelf, &AppShelf::homeChanged, &commands, &CommandRegistry::changed);
+    // App inputs (the App view's panel) only while the App view itself is shown: view.toggle-app is also checked on the shelf now.
+    commands.setEnabledWhen(QStringLiteral("view.toggle-app-inputs"), [&view] { return view.shown(); });
 }
 
 void bindOwnAppWindow(AppShelf &shelf, AppView &view, AppLauncher &launcher,

@@ -181,13 +181,19 @@ void AppShelf::dismiss() {
         emit homeChanged();
 }
 
+void AppShelf::showAgain() {
+    if (!m_dismissed)
+        return;
+    m_dismissed = false;
+    if (m_landing)
+        emit homeChanged();
+}
+
 void AppShelf::setLanding(bool landing) {
     if (landing == m_landing)
         return;
-    const bool was = atHome();
     m_landing = landing;
-    if (atHome() != was)
-        emit homeChanged();
+    emit homeChanged(); // atHome and landing both read it
 }
 
 } // namespace fugue

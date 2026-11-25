@@ -214,6 +214,8 @@ int main(int argc, char *argv[]) {
     fugue::SidePanels sidePanels(fugue::stateDir() + "/side-panels.json", &chrome);
     sidePanels.registerCommands(commands);
     fugue::registerChromeCommands(commands, chrome);
+    // After the chrome commands: it sets App inputs' rule, which the chrome rows would otherwise set again.
+    fugue::bindViewSwitch(appShelf, appView, commands);
     fugue::NodeLibrary nodeLibrary(&registry);
     fugue::RecentFiles recentFiles(fugue::stateDir() + "/recent-files.json");
     recentFiles.follow(&workflows);

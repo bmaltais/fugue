@@ -3110,7 +3110,7 @@ and the `?` overlay marks each one.
 | `view.focus-mode` | Hide all bars and panels; the same key brings them back as they were | H | added |
 | `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
 | `view.toggle-app-inputs` | Show or hide the App view's inputs panel; kept between runs, focus mode hides it (12.17) | none (Window > App inputs) | added |
-| `view.toggle-app` | Switch this workflow between its App view and the graph; off for a workflow with no app block (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
+| `view.toggle-app` | Switch this workflow between its App view and the graph; on a plain graph it opens the app builder, on the shelf it is Start blank, on the empty graph Start blank gave it brings the shelf back (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
 | `app.show-all` | The shelf of apps over the window, on the current app's card, to open another (12.17, #397) | Ctrl+Shift+A (File > All apps…, the rail's Apps item, Fugue's mark in the window bar) | added |
 | `app.make` | Make an app from this workflow, or edit the one it has: the builder (12.19, #393) | Ctrl+Alt+M (File > Make app…) | added |
 | `app.edit` | The same builder on the workflow's app block; off for a workflow with none (12.19, #393) | none (File > Edit app…, shown only with a block) | added |
@@ -3769,9 +3769,12 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
 - **Open in Graph** (the rail's Graph item, which runs `view.toggle-app`) switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
   workflow (window bar, tabs, the graph's header and its menus, the side panels), with the nodes fitted in the canvas as it is
   now, also when the window was resized or tiled while the shelf or the App view hid the canvas. **App | Graph** is the way back
-  and forth: two segments at the window bar's far end (`appViewSwitch`, before the project chip), shown for a tab whose workflow
-  has an app block, in the App view and the graph alike, the view in force marked; the same switch is `view.toggle-app`
-  (Ctrl+Alt+A, Window > App view, Graph > View > App view). It brings the form back rebuilt from the workflow as the graph
+  and forth: two segments at the window bar's far end (`appViewSwitch`, before the project chip), always shown (a
+  bar under 56u wide waits), the view in force marked, labels "App | Graph" in every state; pressing the chosen segment does
+  nothing and the other does what the tab needs: an app workflow, its other view; the apps shelf (App chosen), Start blank; a
+  plain graph with nodes (Graph chosen), the app builder (Make app, Ctrl+Alt+M; cancelling leaves Graph chosen); the empty graph
+  Start blank gave (Graph chosen), the shelf again (`AppShelf.showAgain`). The same switch is `view.toggle-app` (Ctrl+Alt+A,
+  Window > App view, checked on the shelf too, Graph > View > App view). It brings the form back rebuilt from the workflow as the graph
   left it (values kept for inputs that still exist). A workflow with no app block has no switch and the command is off. The choice is per tab and kept for the session; a tab opens in the view its
   `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
 - **The apps shelf** (#388, `apps/app_shelf.h`, `AppsHome.qml`, `AppsDialog.qml`). Fugue has no start screen; a window with nothing
