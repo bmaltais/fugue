@@ -48,7 +48,7 @@ QString providerModulesDir();
 // and name the file.
 Result<ProviderModule> parseProviderModule(const QJsonObject &manifest, const QString &folder);
 
-// The modules that come with Fugue: omarchy and fugue-helper.
+// The modules that come with Fugue: omarchy, http and fugue-helper.
 QList<ProviderModule> builtinProviderModules();
 
 // Every folder of `root` with a provider.json that reads, in folder-name order. A folder that
