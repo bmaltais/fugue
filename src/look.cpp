@@ -255,7 +255,7 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     t.kitGroup = mix(t.popup, fg, light ? .045 : .07);
     t.kitSeparator = mix(t.kitGroup, fg, .10);
     t.kitTrack = mix(t.kitGroup, fg, light ? .30 : .28);
-    t.kitKnob = light ? QColor(Qt::white) : fg;
+    t.kitKnob = QColor(Qt::white); // Drift: a white knob and thumb on every theme, on and off
     t.kitChip = mix(t.kitGroup, fg, .10);
     t.kitChipHover = mix(t.kitGroup, fg, .17);
     t.kitHeroShade = QColor(0, 0, 0, 140);

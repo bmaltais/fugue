@@ -789,7 +789,7 @@ New tokens (`CanvasLook`, `look.cpp` and `derive.py` together; `fg` is the theme
 | `kit-group` | `mix(popup, fg, .07)` | `mix(popup, fg, .045)` | a group's fill |
 | `kit-separator` | `mix(kit-group, fg, .10)` | same | the hairline between rows |
 | `kit-track` | `mix(kit-group, fg, .28)` | `mix(kit-group, fg, .30)` | a slider's rail, a switch off |
-| `kit-knob` | `fg` | white | the round thumb, the knob off (on: `accentForeground` over the accent) |
+| `kit-knob` | white | white | the round thumb and the switch knob, on and off (Drift: always white) |
 | `kit-chip`, `kit-chip-hover` | `mix(kit-group, fg, .10 / .17)` | same | a chip or pill |
 | `kit-hero-shade` | black at 55% | same | the foot of the hero's darkening gradient |
 | `kit-hero-pill`, `kit-hero-pill-hover` | black at 44% / 60% | same | the status pill and the close button over a picture |

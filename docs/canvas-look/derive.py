@@ -243,7 +243,7 @@ def tokens(colors, light):
     t["kit-group"] = mix(t["popup"], fg, 0.045 if light else 0.07)
     t["kit-separator"] = mix(t["kit-group"], fg, 0.10)
     t["kit-track"] = mix(t["kit-group"], fg, 0.30 if light else 0.28)
-    t["kit-knob"] = WHITE if light else fg
+    t["kit-knob"] = WHITE  # Drift: a white knob and thumb on every theme, on and off
     t["kit-chip"] = mix(t["kit-group"], fg, 0.10)
     t["kit-chip-hover"] = mix(t["kit-group"], fg, 0.17)
     t["kit-hero-shade"], t["kit-hero-pill"], t["kit-hero-pill-hover"] = (0, 0, 0, 0.55), (0, 0, 0, 0.44), (0, 0, 0, 0.60)

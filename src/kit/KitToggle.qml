@@ -1,8 +1,8 @@
 import QtQuick
 import Fugue
 
-// A pill switch (docs/canvas-look.md "Drift kit"): the accent track and a round knob when on, the `kitTrack` rail and
-// the `kitKnob` when off. It is 10u by 7u to press (the 7u floor, docs/ui-ergonomics.md), the track 5.5u inside it.
+// A pill switch (docs/canvas-look.md "Drift kit"): the accent track when on, the `kitTrack` rail when off, a white
+// `kitKnob` in both. It is 10u by 7u to press (the 7u floor, docs/ui-ergonomics.md), the track 5.5u inside it.
 // The value comes in through `checked` and the change goes out through `toggled(value)`: the switch never sets
 // `checked` itself, so a binding stays a binding and the model decides. Space flips it on the keyboard, Tab reaches
 // it; assistive tools hear a switch named by `text`. Put it in a KitRow's trailing slot and point the row's `target` at
@@ -50,7 +50,7 @@ Item {
             radius: width / 2
             anchors.verticalCenter: parent.verticalCenter
             x: control.checked ? track.width - width - gap : gap
-            color: control.checked ? control.look.accentForeground : control.look.kitKnob
+            color: control.look.kitKnob
             Behavior on x { NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
         }
     }
