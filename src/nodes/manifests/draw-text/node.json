@@ -1,0 +1,41 @@
+{
+  "manifest": 1,
+  "id": "fugue/draw-text",
+  "version": "1.0.0",
+  "name": "Draw Text",
+  "description": "Write text on a picture: a line or a block (a new line breaks it, a Max width wraps it), at a position, with a color, an optional outline and a box behind it. The font is the built-in Noto Sans.",
+  "category": "Image/Adjust",
+  "keywords": ["label", "caption", "watermark", "write", "font", "title", "annotate"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "text", "type": "text", "label": "Text", "default": "Text", "widget": "multiline"},
+    {"name": "anchor", "type": "text", "label": "Anchor", "default": "top-left",
+     "choices": ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"],
+     "description": "Which point of the text block is put at X and Y."},
+    {"name": "x", "type": "number", "label": "X", "default": 16, "min": -16384, "max": 16384, "step": 1, "integer": true,
+     "description": "Pixels from the left of the picture."},
+    {"name": "y", "type": "number", "label": "Y", "default": 16, "min": -16384, "max": 16384, "step": 1, "integer": true,
+     "description": "Pixels from the top of the picture."},
+    {"name": "size", "type": "number", "label": "Size", "default": 32, "min": 4, "max": 2000, "step": 1, "integer": true,
+     "description": "The height of a line in pixels."},
+    {"name": "color", "type": "text", "label": "Color", "default": "#ffffff", "widget": "color"},
+    {"name": "max_width", "type": "number", "label": "Max width", "default": 0, "min": 0, "max": 16384, "step": 1, "integer": true,
+     "description": "Wrap a line at this many pixels. 0 does not wrap."},
+    {"name": "align", "type": "text", "label": "Align", "default": "left", "choices": ["left", "center", "right"],
+     "description": "How the lines of a block sit against each other."},
+    {"name": "outline", "type": "number", "label": "Outline", "default": 0, "min": 0, "max": 16, "step": 1, "integer": true,
+     "description": "Pixels of outline around every letter. 0 is none."},
+    {"name": "outline_color", "type": "text", "label": "Outline color", "default": "#000000", "widget": "color",
+     "shown_when": {"outline": {"gt": 0}}},
+    {"name": "box", "type": "boolean", "label": "Box", "default": false, "widget": "toggle",
+     "description": "Draw a box behind the text."},
+    {"name": "box_color", "type": "text", "label": "Box color", "default": "#000000aa", "widget": "color",
+     "shown_when": {"box": [true]}},
+    {"name": "box_padding", "type": "number", "label": "Box padding", "default": 8, "min": 0, "max": 1000, "step": 1, "integer": true,
+     "shown_when": {"box": [true]}}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"}
+  ]
+}

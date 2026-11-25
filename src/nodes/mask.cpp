@@ -36,33 +36,6 @@ Result<Enum> choiceOf(const NodeContext &context, const QString &input, const st
                           QStringLiteral("\"%1\" is not a %2 this node knows.").arg(text, input));
 }
 
-// "#rrggbb", "#rrggbbaa" or "#rgb" as 0..1 floats: red, green, blue, alpha.
-Result<std::array<float, 4>> colorOf(const QString &input, const QString &text) {
-    QString hex = text.trimmed();
-    if (hex.startsWith('#'))
-        hex.remove(0, 1);
-    if (hex.size() == 3) {
-        QString wide;
-        for (const QChar c : hex)
-            wide += QString(2, c);
-        hex = wide;
-    }
-    if (hex.size() == 6)
-        hex += QStringLiteral("ff");
-    bool ok = hex.size() == 8;
-    std::array<float, 4> color{};
-    for (int i = 0; ok && i < 4; ++i) {
-        bool part = false;
-        const int v = hex.mid(i * 2, 2).toInt(&part, 16);
-        ok = part;
-        color[i] = float(v) / 255.0f;
-    }
-    if (!ok)
-        return makeInputError(QStringLiteral("value_out_of_range"), input,
-                              QStringLiteral("\"%1\" is not a color like #ff3b30.").arg(text));
-    return color;
-}
-
 class CompositeMaskedKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
@@ -104,6 +77,29 @@ public:
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("radius"),
                                   QStringLiteral("A radius of %1 is outside 0 to %2.").arg(radius).arg(kMaxFeather));
         return namedOutput(featherMask(mask.value(), radius, direction.value()), "mask");
+    }
+};
+
+// Mask from Color (#550): the pixels near a color, softened by Soften pixels with the Feather Mask blur (centered).
+class MaskFromColorKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> image = pixelsOf(context.input("image"), "image");
+        if (!image.ok())
+            return Result<Values>(image.errors());
+        const Result<std::array<float, 4>> color = colorOf(QStringLiteral("color"), context.input("color").text());
+        if (!color)
+            return color.errors();
+        const double tolerance = context.input("tolerance").number();
+        if (!(tolerance >= 0.0 && tolerance <= 1.0))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("tolerance"),
+                                  QStringLiteral("A tolerance of %1 is outside 0 to 1.").arg(tolerance));
+        const int soften = toInt(context.input("soften"));
+        if (soften < 0 || soften > kMaxFeather)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("soften"),
+                                  QStringLiteral("A soften of %1 is outside 0 to %2.").arg(soften).arg(kMaxFeather));
+        Pixels mask = maskFromColor(image.value(), {color.value()[0], color.value()[1], color.value()[2]}, float(tolerance));
+        return namedOutput(featherMask(mask, soften, FeatherDirection::Centered), "mask");
     }
 };
 
@@ -213,6 +209,7 @@ public:
 
 void addMaskKernels(Kernels &kernels) {
     kernels.add("fugue/composite-masked", std::make_shared<CompositeMaskedKernel>());
+    kernels.add("fugue/mask-from-color", std::make_shared<MaskFromColorKernel>());
     kernels.add("fugue/feather-mask", std::make_shared<FeatherMaskKernel>());
     kernels.add("fugue/threshold-mask", std::make_shared<ThresholdMaskKernel>());
     kernels.add("fugue/combine-masks", std::make_shared<CombineMasksKernel>());

@@ -35,6 +35,8 @@ void addBuiltinKernels(Kernels &kernels) {
     addCropStitchKernels(kernels);
     addImageGenerationKernels(kernels);
     addImageSizeKernels(kernels);
+    addDrawTextKernels(kernels);
+    addLutKernels(kernels);
     addMaskKernels(kernels);
     addMediaGenerationKernels(kernels);
     addPixelKernels(kernels);
@@ -42,6 +44,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addTextGenerationKernels(kernels);
     addTextTemplateKernels(kernels);
     addUpscaleKernels(kernels);
+    addToneKernels(kernels);
     addRestoreKernels(kernels);
     addUpscaleVideoModelKernels(kernels);
     // The programs of the packs on disk (7).

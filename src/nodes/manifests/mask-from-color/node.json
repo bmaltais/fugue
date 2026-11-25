@@ -1,0 +1,61 @@
+{
+  "manifest": 1,
+  "id": "fugue/mask-from-color",
+  "version": "1.0.0",
+  "name": "Mask from Color",
+  "description": "A mask of the pixels of a picture that are close to a color: 1 where the color is within Tolerance, 0 elsewhere, then given a soft edge Soften pixels wide. Tolerance is the distance in RGB (0 is the exact color, 1 takes every pixel).",
+  "category": "Image/Mask",
+  "keywords": [
+    "select",
+    "key",
+    "chroma",
+    "green screen",
+    "color range",
+    "magic wand"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "color",
+      "type": "text",
+      "label": "Color",
+      "default": "#00ff00",
+      "widget": "color"
+    },
+    {
+      "name": "tolerance",
+      "type": "number",
+      "label": "Tolerance",
+      "default": 0.1,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider"
+    },
+    {
+      "name": "soften",
+      "type": "number",
+      "label": "Soften",
+      "default": 0,
+      "min": 0,
+      "max": 512,
+      "step": 1,
+      "integer": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    }
+  ]
+}

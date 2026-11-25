@@ -1,0 +1,36 @@
+{
+  "manifest": 1,
+  "id": "fugue/desaturate",
+  "version": "1.0.0",
+  "name": "Desaturate",
+  "description": "Move the colors toward gray by Amount, gray being the Rec. 709 luma. 1 is a gray picture, 0 leaves it as it is. Alpha is left alone.",
+  "category": "Image/Adjust",
+  "keywords": ["gray", "grey", "black and white", "monochrome", "saturation"],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "amount",
+      "type": "number",
+      "label": "Amount",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

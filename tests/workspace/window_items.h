@@ -11,15 +11,22 @@
 
 namespace window_items {
 
+// Qt's shared ToolTip popup comes and goes with the pointer and the timing of a loaded machine (a hover during a busy
+// suite left one in the window, three items): it is not part of the window's structure, so it is not counted.
+inline bool transient(QQuickItem *item) { return item->objectName() == QLatin1String("ToolTip"); }
+
 inline int countItems(QQuickItem *from) {
     int count = 1;
     for (auto *child : from->childItems())
-        count += countItems(child);
+        if (!transient(child))
+            count += countItems(child);
     return count;
 }
 
 inline void collectNames(QQuickItem *from, QMap<QString, int> &names) {
     for (auto *child : from->childItems()) {
+        if (transient(child))
+            continue;
         if (!child->objectName().isEmpty())
             ++names[child->objectName()];
         collectNames(child, names);

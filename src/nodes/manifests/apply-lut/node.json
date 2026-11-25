@@ -1,0 +1,54 @@
+{
+  "manifest": 1,
+  "id": "fugue/apply-lut",
+  "version": "1.0.0",
+  "name": "Apply LUT",
+  "description": "Colour grading from a .cube look-up table (1D or 3D, trilinear for 3D). Strength mixes the graded picture with the original. Alpha is left alone.",
+  "category": "Image/Adjust",
+  "keywords": [
+    "cube",
+    "grade",
+    "grading",
+    "look",
+    "film",
+    "colour",
+    "color"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "needs": {
+    "files": true
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "file",
+      "type": "text",
+      "label": "LUT file",
+      "widget": "file",
+      "description": "A .cube file, 1D or 3D."
+    },
+    {
+      "name": "strength",
+      "type": "number",
+      "label": "Strength",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

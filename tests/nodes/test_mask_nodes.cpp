@@ -647,6 +647,7 @@ private slots:
             {"fugue/image-to-mask", {{}, {"mask"}}},
             {"fugue/mask-to-alpha", {{"mask"}, {}}},
             {"fugue/solid-mask", {{}, {"mask"}}},
+            {"fugue/mask-from-color", {{}, {"mask"}}},
             {"fugue/pad", {{"mask"}, {"mask"}}},
         };
         for (const auto &[id, ports] : expect) {

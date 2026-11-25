@@ -1,0 +1,36 @@
+{
+  "manifest": 1,
+  "id": "fugue/pixelize",
+  "version": "1.0.0",
+  "name": "Pixelize",
+  "description": "Fill every square of Block size pixels with its average color, as a mosaic. The picture keeps its size.",
+  "category": "Image/Adjust",
+  "keywords": ["pixel art", "mosaic", "blocks", "pixelate", "retro"],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "block_size",
+      "type": "number",
+      "label": "Block size",
+      "default": 8,
+      "min": 1,
+      "max": 4096,
+      "step": 1,
+      "integer": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

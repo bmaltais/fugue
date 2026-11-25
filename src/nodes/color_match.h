@@ -22,4 +22,18 @@ namespace fugue::nodes {
 Pixels colorMatch(const Pixels &image, const Pixels &reference, const Pixels *weights, float strength,
                   bool *allMasked = nullptr);
 
+// Match Color (#555), after Photoshop's Image > Adjustments > Match Color as cubiq's ImageColorMatchAdobe+ (ComfyUI_essentials,
+// MIT) reads it; Photoshop's own formula is unpublished. Both pictures go to CIELAB (D65); with the statistics of the
+// reference (weighted as above) and of the image: L moves to the reference's mean and is scaled by the ratio of the standard
+// deviations times `luminance`; `neutralize` first takes that fraction of the image's own mean a and b off (its color cast);
+// a and b are then scaled together by the ratio of the chroma spreads sqrt(var a + var b), times `colorIntensity`. The
+// result is mixed with the image by `strength` (the fade) and clamped. A ratio whose image spread is 0 is 1. Alpha is kept.
+struct MatchColorOptions {
+    float luminance = 1.0f;      // 0 to 2
+    float colorIntensity = 1.0f; // 0 to 2
+    float neutralize = 0.0f;     // 0 to 1
+};
+Pixels matchColor(const Pixels &image, const Pixels &reference, const Pixels *weights, float strength,
+                  const MatchColorOptions &options, bool *allMasked = nullptr);
+
 } // namespace fugue::nodes

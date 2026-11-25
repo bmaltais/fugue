@@ -192,6 +192,21 @@ Pixels thresholdMask(const Pixels &mask, float value) {
     return out;
 }
 
+Pixels maskFromColor(const Pixels &image, const std::array<float, 3> &rgb, float tolerance) {
+    Pixels mask(image.width, image.height, 1, 0.0f);
+    const float limit = tolerance * tolerance * 3.0f; // squared distance, with the sqrt(3) folded in
+    for (int y = 0; y < image.height; ++y)
+        for (int x = 0; x < image.width; ++x) {
+            float d = 0;
+            for (int c = 0; c < 3; ++c) {
+                const float diff = image.at(x, y, c) - rgb[size_t(c)];
+                d += diff * diff;
+            }
+            mask.at(x, y, 0) = d <= limit + 1e-9f ? 1.0f : 0.0f;
+        }
+    return mask;
+}
+
 Pixels combineMasks(const Pixels &destination, const Pixels &source, CombineOperation operation, int x, int y) {
     Pixels out = destination;
     const Overlap o = overlapOf(x, y, source.width, source.height, destination.width, destination.height);

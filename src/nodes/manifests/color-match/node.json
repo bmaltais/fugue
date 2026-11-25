@@ -1,9 +1,9 @@
 {
   "manifest": 1,
   "id": "fugue/color-match",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Color Match",
-  "description": "Move a picture's colors to a reference's (mean and spread of each color axis, Reinhard et al.'s color transfer), so a redrawn region does not show a color shift at its seam. With a mask, the colors are measured only where the mask is 0: the part that was kept.",
+  "description": "Move a picture's colors to a reference's, so a redrawn region does not show a color shift at its seam. Reinhard (the default) matches the mean and spread of each color axis (Reinhard et al.'s color transfer); Match Color follows Photoshop's Image > Adjustments > Match Color, with Luminance, Color Intensity and Neutralize. With a mask, the colors are measured only where the mask is 0: the part that was kept.",
   "category": "Image/Adjust",
   "keywords": [
     "color transfer",
@@ -13,7 +13,12 @@
     "outpaint",
     "tone",
     "match",
-    "grade"
+    "grade",
+    "match color",
+    "photoshop",
+    "lab",
+    "cast",
+    "neutralize"
   ],
   "runtime": {
     "kind": "builtin"
@@ -44,7 +49,67 @@
       "min": 0,
       "max": 1,
       "step": 0.01,
-      "widget": "slider"
+      "widget": "slider",
+      "description": "How much of the match to apply: the fade between the picture and the result."
+    },
+    {
+      "name": "method",
+      "type": "text",
+      "label": "Method",
+      "default": "reinhard",
+      "choices": [
+        "reinhard",
+        "match-color"
+      ],
+      "description": "Reinhard: mean and spread of each color axis. Match Color: Photoshop's Match Color in CIELAB, with the three sliders below."
+    },
+    {
+      "name": "luminance",
+      "type": "number",
+      "label": "Luminance",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "step": 0.01,
+      "widget": "slider",
+      "shown_when": {
+        "method": [
+          "match-color"
+        ]
+      },
+      "description": "Match Color only. How far the brightness is moved to the reference's: 1 matches it, 0 keeps the mean flat, 2 doubles the effect."
+    },
+    {
+      "name": "color_intensity",
+      "type": "number",
+      "label": "Color intensity",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "step": 0.01,
+      "widget": "slider",
+      "shown_when": {
+        "method": [
+          "match-color"
+        ]
+      },
+      "description": "Match Color only. How colorful the result is against the reference: 1 matches it, 0 is gray, 2 is twice as colorful."
+    },
+    {
+      "name": "neutralize",
+      "type": "number",
+      "label": "Neutralize",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider",
+      "shown_when": {
+        "method": [
+          "match-color"
+        ]
+      },
+      "description": "Match Color only. Takes this fraction of the picture's own color cast off before matching."
     }
   ],
   "outputs": [
