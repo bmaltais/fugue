@@ -154,7 +154,7 @@ Popup {
         Image {
             anchors { fill: parent; margins: 2; bottomMargin: caption.height + 2 }
             source: tile.url
-            fillMode: Image.PreserveAspectCrop
+            fillMode: Image.PreserveAspectFit // the whole picture, its own shape (owner, 2026-11-25)
             asynchronous: true
             sourceSize.height: 160
         }

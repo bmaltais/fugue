@@ -88,6 +88,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-25 Border grip instead of a line; rows stack when narrow; slider snap; takes in their own shape (owner's third look)
+
+- Control: `src/workspace/AreaHandle.qml` (every area border and the App view's `appPanelHandle`): hit area 4u (the gap and 1u into each card), the grip `areaHandleGrip`; `src/kit/KitRow.qml` `stacked`; `src/kit/KitSlider.qml` `snap` (the App view's ranges); `src/apps/AppTakes.qml` tiles at the picture's aspect, `src/apps/AppLibrary.qml` tiles fit the picture.
+- Old: a 24px press target that lit a 2px accent line (pale in the owner's theme: a white bar), left lit after a drag because a press gave it the focus; a row whose label and control did not fit squeezed the label to nothing and kept its gap, so Run again sat off centre; sliders over 0 to 1024 px stepped by 1 with no help to hit 256; takes and library tiles were square crops.
+- New: see canvas-look 20 (Border handle, Row stacking, Slider snap); takes keep the strip's 14u height at the picture's own width (0.5 to 2.5 squares); library tiles show the whole picture.
+- Why: the owner's words; the grip is Android's large-screen split divider (a centred pill), the other references show nothing at rest, and the owner asked for a visible cue; the stacked row is iOS settings on a narrow screen; magnetic snapping is Figma's and Blender's (Ctrl) help to hit round values, kept to the pointer so typed values stay exact.
+- Rules met: Floor (an exception, as the side panel's grip: the border is an edge hit along its whole length, 4u across, and Tab plus the arrows move it; a 24px target would reach over the cards' scroll gutters), Gaps (the stacked row 1.5u between label and control), Keys (unchanged: Tab, arrows, Enter on the border).
+- Decisions taken without the owner (each to confirm): a grip at rest, not only on hover (medium: the owner asked for a cue); no hover delay (medium); snap 64/16 by range, not set per app (medium: the app block has no step); the grip's alphas are the new scroll thumb's (one family).
+
 ### 2026-11-25 App view: Clear empties the takes; Repeat needs a seed that varies; one raised dropdown; a slider's value is typed (owner's second look)
 
 - Control: `src/apps/AppStage.qml` `appClear` (now also when only the strip has takes); `src/apps/AppPage.qml` `appLiveMode` (Repeat only when `AppView.canRepeat`), `appRepeatWaits`; `src/kit/KitDropdown.qml` (new) for `appImageChoose-<key>`, `AppChoice.qml` and `AppModelInput.qml` (`appInput-<key>`); `src/kit/KitSlider.qml` the value field `<objectName>-value` (App view ranges, Settings > Look sliders).

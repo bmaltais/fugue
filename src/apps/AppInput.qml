@@ -199,6 +199,8 @@ Item {
             from: root.field.min
             to: root.field.max
             stepSize: Number.isInteger(root.field.min) && Number.isInteger(root.field.max) ? 1 : 0.01
+            // Round values pull the pointer in a wide whole range (sizes in pixels): 64s from 512 up, 16s from 128.
+            snap: stepSize !== 1 ? 0 : root.field.max - root.field.min >= 512 ? 64 : root.field.max - root.field.min >= 128 ? 16 : 0
             value: Number(root.current ?? root.field.min)
             onMoved: v => {
                 root.current = v

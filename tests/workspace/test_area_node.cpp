@@ -254,7 +254,7 @@ private slots:
         QCOMPARE(madeItems(), 4);    // two views and two borders
         QQuickItem *row = handles.at(0)->property("axis").toString() == "row" ? handles.at(0) : handles.at(1);
         QQuickItem *column = row == handles.at(0) ? handles.at(1) : handles.at(0);
-        QVERIFY(row->width() >= 24);
+        QVERIFY(row->width() >= 16); // the gap and 1u into each card, at least 4u (canvas-look 20, Border handle)
         QCOMPARE(row->x() + row->width() / 2, 480.0);
         QCOMPARE(row->height(), 600.0);
         QCOMPARE(column->y() + column->height() / 2, 300.0);
