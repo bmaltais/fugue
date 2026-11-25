@@ -81,7 +81,7 @@ fail with `permission_denied`.
 
 | Command | Does |
 | --- | --- |
-| `fugue run <file>` | Start a run (`--wait`, `--first`, `--to`, `--provider`, `--set`) |
+| `fugue run <file>` | Start a run (`--wait`, `--first`, `--to`, `--provider`, `--set`, `--allow-remote <instance>` for this run only when a node would send pictures or prompts to a service off this machine) |
 | `fugue validate <file>` | Compile and report errors and warnings; runs nothing |
 | `fugue compile <file>` | Print the compiled graph |
 | `fugue workflow new <file>` | Write an empty workflow, or a template's (`--template <id>`) |
@@ -161,7 +161,8 @@ Every failure has a stable `code`. Fix by code, not by message text:
 - Packs: `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`
 - Groups: `group_invalid`
 - Inputs: `input_invalid` (a value the node cannot use, for example a canvas revision not named in full)
-- Providers: `capability_unavailable`, `model_not_running`, `provider_unreachable`
+- Providers: `capability_unavailable`, `model_not_running`, `provider_unreachable`, `consent_needed` (a node would send
+  pictures or prompts to a service off this machine that was not allowed: allow it in the window, or `--allow-remote <instance>`)
 - Running: `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`,
   `node_test_failed`
 - Masks: `mask_empty` (paint the part to change), `mask_unsupported` (the provider or model cannot take a mask: Generate Image's `mask` needs a model whose provider lists `mask` in its `inputs`; the error names the ones that can), `stitch_mismatch` (Stitch got a picture of another shape than its crop); warnings `mask_full` (everything is masked: plain generation), `mask_resized` (the mask was stretched to the picture); Canvas Region's warning `padding_raised` (Padding was below Feather + 16, so Canvas Write's blend would end in a hard edge at the region's box; the padding was raised to that)
