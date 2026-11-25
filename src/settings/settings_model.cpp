@@ -23,6 +23,7 @@
 #include "engine/paths.h"
 #include "engine/project.h"
 #include "engine/providers_file.h"
+#include "settings/provider_presets.h"
 #include "look_params.h"
 #include "theme.h"
 #include "translator.h"
@@ -59,6 +60,10 @@ QString folderValue(const QString &typed) {
 struct ModuleField {
     QString name;
     bool secret;
+    QString label = {};   // shown instead of the name when set
+    QString hint = {};    // one dim line under the label
+    bool advanced = false; // folded under the card's Advanced disclosure
+    bool isBool = false;   // a switch; on is stored as true, off removes the setting
 };
 
 // The settings a provider module declares beyond name, type, address, key and enabled (8.8).
@@ -71,6 +76,15 @@ QList<ModuleField> moduleFields(const ProviderInstance &instance) {
     QList<ModuleField> fields;
     if (instance.type == QLatin1String("fugue-helper"))
         fields.append({QStringLiteral("idle_timeout_s"), false});
+    if (instance.type == QLatin1String("fal")) {
+        // fal's settings (spec 8.7, The `fal` provider). The queue address is advanced too: leave it empty for fal's own.
+        fields.append({QStringLiteral("image_models"), false, QCoreApplication::translate("fugue::SettingsModel", "More models"), QCoreApplication::translate("fugue::SettingsModel", "Extra endpoint ids, separated by commas"), true, false});
+        fields.append({QStringLiteral("store_io"), false, QCoreApplication::translate("fugue::SettingsModel", "Let fal.ai keep my pictures"),
+                       QCoreApplication::translate("fugue::SettingsModel", "When off, fal.ai is asked to delete them after the run"), false, true});
+        fields.append({QStringLiteral("rest_address"), false, QCoreApplication::translate("fugue::SettingsModel", "Storage address"), QCoreApplication::translate("fugue::SettingsModel", "Empty is https://rest.fal.ai"), true, false});
+        fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 300"), true, false});
+        fields.append({QStringLiteral("poll_ms"), false, QCoreApplication::translate("fugue::SettingsModel", "Poll interval (ms)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 500"), true, false});
+    }
     if (instance.type == QLatin1String("http"))
         for (const char *name : {"api", "image_models", "text_models", "timeout_s"})
             fields.append({QLatin1String(name), false});
@@ -398,12 +412,29 @@ QVariantList SettingsModel::providers() const {
                                                   : value.isBool() ? (value.toBool() ? QStringLiteral("true") : QStringLiteral("false"))
                                                                    : QString();
             fields.append(QVariantMap{{"name", field.name},
+                                      {"label", field.label.isEmpty() ? field.name : field.label},
+                                      {"hint", field.hint},
+                                      {"advanced", field.advanced},
+                                      {"isBool", field.isBool},
                                       {"secret", field.secret},
                                       {"value", field.secret ? QString() : text},
                                       {"set", !text.isEmpty()}});
         }
+        // A well-known service by its type and address (provider_presets.h): where to get its key and what it is sent.
+        QString keyUrl, privacy, presetId;
+        for (const ProviderPreset &preset : knownProviderPresets())
+            if (preset.type == instance.type && preset.address == instance.address && (!preset.keyUrl.isEmpty() || !preset.privacy.isEmpty())) {
+                keyUrl = preset.keyUrl;
+                privacy = preset.privacy;
+                presetId = preset.id;
+                break;
+            }
         list.append(QVariantMap{{"name", instance.name},
                                 {"type", instance.type},
+                                {"keyUrl", keyUrl},
+                                {"preset", presetId},
+                                {"cloud", !privacy.isEmpty()}, // a service off this machine: its name and address are advanced, the key comes first
+                                {"privacy", privacy},
                                 {"address", instance.address},
                                 {"enabled", instance.enabled},
                                 {"keySet", !instance.key.isEmpty()},
@@ -471,13 +502,21 @@ QString SettingsModel::setProviderField(int row, const QString &field, const QVa
     } else if (field == QLatin1String("type")) {
         return tr("The type of a provider cannot change; add another.");
     } else {
-        bool known = false;
-        for (const ModuleField &declared : moduleFields(instance))
+        bool known = false, isBool = false;
+        for (const ModuleField &declared : moduleFields(instance)) {
             known = known || declared.name == field;
+            if (declared.name == field)
+                isBool = declared.isBool;
+        }
         if (!known)
             return tr("%1 has no setting %2.").arg(instance.type, field);
         const QString text = value.toString().trimmed();
-        if (text.isEmpty())
+        if (isBool) { // a switch: on is true, off is the module's default
+            if (value.toBool() || text == QLatin1String("true"))
+                instance.settings.insert(field, true);
+            else
+                instance.settings.remove(field);
+        } else if (text.isEmpty())
             instance.settings.remove(field);
         else
             instance.settings.insert(field, text);
@@ -498,6 +537,28 @@ QString SettingsModel::addProvider(const QString &type) {
     added.name = tr("New provider");
     for (int n = 2; names.contains(added.name); ++n)
         added.name = tr("New provider %1").arg(n);
+    QList<ProviderInstance> instances = m_instances;
+    instances.append(added);
+    return saveProviders(instances);
+}
+
+QVariantList SettingsModel::providerPresets() const { return providerPresetsVariant(); }
+
+QString SettingsModel::addPreset(const QString &id) {
+    if (!m_providersProblem.isEmpty())
+        return saveProviders({});
+    const ProviderPreset preset = providerPresetById(id);
+    if (preset.id.isEmpty())
+        return tr("Fugue has no service %1.").arg(id);
+    QSet<QString> names;
+    for (const ProviderInstance &instance : m_instances)
+        names.insert(instance.name);
+    ProviderInstance added;
+    added.type = preset.type;
+    added.address = preset.address;
+    added.name = preset.name;
+    for (int n = 2; names.contains(added.name); ++n)
+        added.name = QStringLiteral("%1 %2").arg(preset.name).arg(n);
     QList<ProviderInstance> instances = m_instances;
     instances.append(added);
     return saveProviders(instances);

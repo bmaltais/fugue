@@ -203,6 +203,10 @@ public:
     // module's settings; an empty key or secret clears it.
     Q_INVOKABLE QString setProviderField(int row, const QString &field, const QVariant &value);
     Q_INVOKABLE QString addProvider(const QString &type);
+    // The well-known services of "Add a service…" (provider_presets.h), translated now. addPreset() adds an instance from one:
+    // its name (a second one is "fal.ai 2"), type and address; the key is the person's to type. Returns "" or why not.
+    Q_INVOKABLE QVariantList providerPresets() const;
+    Q_INVOKABLE QString addPreset(const QString &id);
     Q_INVOKABLE QString removeProvider(int row);
     Q_INVOKABLE QString moveProvider(int row, int to);
 

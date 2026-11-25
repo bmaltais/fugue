@@ -26,7 +26,8 @@ Rectangle {
     radius: Math.min(look.params.cornerWell * look.unit, 0.45 * height)
     color: glass ? "transparent" : Qt.tint(look.kitGroup, Qt.rgba(0, 0, 0, look.light ? look.params.wellDarkenLight : look.params.wellDarken))
     border.width: dashed ? 0 : 1
-    border.color: focused ? Qt.rgba(look.label.r, look.label.g, look.label.b, 0.45) : Qt.tint(color, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
+    // The flat look has no hairlines: its lift is softer (30%), not a white box (the owner's "white surround").
+    border.color: focused ? Qt.rgba(look.label.r, look.label.g, look.label.b, look.params.borders === "hairline" ? 0.45 : 0.3) : Qt.tint(color, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
     enabled: false
     Loader {
         id: glassLoader

@@ -2,11 +2,14 @@
 
 #include "engine/atomic_file.h"
 #include "engine/compiler.h"
+#include "engine/fal_provider.h"
 #include "engine/http_provider.h"
 #include "engine/json.h"
 #include "engine/node_type.h"
 #include "engine/paths.h"
 #include "engine/provider_module.h"
+
+#include <algorithm>
 
 #include <QFile>
 #include <QFileInfo>
@@ -57,6 +60,9 @@ QString effectiveAddress(const ProviderInstance &instance) {
         return instance.address;
     // A provider module's own default address is used when the instance has none (providers.cpp moduleProvider): that is where
     // the data goes. A default with {port} is a loopback port the module starts for itself.
+    // fal.ai's queue is the default of a `fal` instance: a key alone must not skip the question (#407).
+    if (instance.type == QLatin1String("fal"))
+        return falQueueAddress(instance);
     static const QStringList builtin{QStringLiteral("omarchy"), QStringLiteral("http"), QStringLiteral("fugue-helper")};
     if (builtin.contains(instance.type))
         return {};
@@ -74,8 +80,20 @@ QString hostOf(const ProviderInstance &instance) {
     return address.isEmpty() ? QString() : urlOf(address).host();
 }
 
+namespace {
+Placement placementOfHost(const ProviderInstance &instance, const QString &host);
+}
+
 Placement placementOf(const ProviderInstance &instance) {
-    const QString host = hostOf(instance);
+    const Placement placement = placementOfHost(instance, hostOf(instance));
+    // A fal instance's key and pictures also go to its storage host: the more remote of the two decides.
+    if (instance.type == QLatin1String("fal"))
+        return std::max(placement, placementOfHost(instance, urlOf(falRestAddress(instance)).host()));
+    return placement;
+}
+
+namespace {
+Placement placementOfHost(const ProviderInstance &instance, const QString &host) {
     if (host.isEmpty())
         return Placement::ThisMachine; // no address: this machine (a module that runs as a program here, or the model servers of 8.7)
     if (isLoopbackHost(host))
@@ -86,11 +104,15 @@ Placement placementOf(const ProviderInstance &instance) {
         return Placement::OwnHost;
     return Placement::OffMachine;
 }
+} // namespace
 
 QString consentFingerprint(const ProviderInstance &instance) {
     QString address = effectiveAddress(instance).trimmed().toLower();
     while (address.endsWith(QLatin1Char('/')))
         address.chop(1);
+    // The storage host of a fal instance is part of what was agreed to.
+    if (instance.type == QLatin1String("fal"))
+        address += QLatin1Char('|') + falRestAddress(instance).toLower();
     return instance.type + QLatin1Char('|') + address;
 }
 

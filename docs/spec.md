@@ -1472,6 +1472,19 @@ A provider instance is a configured use of a provider module, stored in
   When a `fugue-helper` is installed, the default ends with `Fugue helper` (type
   `fugue-helper`): last, so "any ready model" stays the model servers', while only the helper
   runs models from disk.
+- **Well-known services (presets).** Settings > Providers > "Add a service…" lists them by group, each with a one-line description;
+  choosing one adds an instance with its name, type and address filled, and the focus goes to the key (or the address when that is what
+  is missing). The table is one place, `src/settings/provider_presets.{h,cpp}` (`knownProviderPresets()`; the model's `providerPresets()`
+  and `addPreset(id)` expose it to QML), a row being id, name, group, type, address, `needsKey`, `needsAddress`, `keyUrl`, a
+  description and, for an off-machine service, a privacy line. A preset is a starting point only: the instance written is the one
+  typing it in would write, and adding the same preset again names the second "fal.ai 2". "Get a key" opens `keyUrl` in the browser,
+  the only network action of the page. **Cloud services:** fal.ai (`fal`, no address: the type's own `https://queue.fal.run`,
+  keys at fal.ai/dashboard/keys), OpenAI (`http`, `https://api.openai.com/v1`), Together AI (`http`, `https://api.together.ai/v1`),
+  OpenRouter (`http`, `https://openrouter.ai/api/v1`). Each says "Sends your pictures and prompts to <name>" under its title.
+  **Your own machines:** a local OpenAI-compatible server (`http`, `http://localhost:1234/v1`, no key: LM Studio, llama.cpp, vLLM),
+  an Omarchy host (`omarchy`, address to fill), a Fugue helper on another machine (`fugue-helper`, address and key to fill).
+  A card of a `fal` instance shows its key, `image_models` and `store_io`; its address, `rest_address`, `timeout_s` and `poll_ms`
+  sit under an Advanced disclosure.
 - **Local or remote is only the address.** It is never a property of a graph.
 - Keys live only here. They are never written into a workflow, an export or an embedded graph.
 - **Where an instance runs, and consent (#404).** Fugue is local-first: pictures, masks, audio and prompts leave the machine only
@@ -1481,7 +1494,7 @@ A provider instance is a configured use of a provider module, stored in
   (Tailscale) address or a `.local`, `.internal` or `.ts.net` name: the test the `http` provider applies to the pictures a
   service may make Fugue fetch, 8.7, plus the tailnet's names, so there is one idea of "local"), or *off-machine* (any
   other type at any other address: a cloud service). The address is the one the provider really uses: an http provider
-  module's default `address` (8.8) when the instance has none. Nothing is asked for the first two: the person typed the
+  module's default `address` (8.8) when the instance has none, and `https://queue.fal.run` for a `fal` instance. Nothing is asked for the first two: the person typed the
   address in and it is their own network. **The limit:** a stdio provider module is a program that runs here, so it counts as
   this machine even if its program calls a cloud API itself; Fugue cannot see that, and the module's description should say it.
   - **The question.** Before a run whose plan would run a node on an off-machine instance (the nodes that are not cached, found
@@ -1566,11 +1579,12 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | --- | --- | --- |
 | `omarchy` | The model servers omarchy-local-ai runs, on this machine or a paired host. | M0 |
 | `http` | A generic endpoint: OpenAI-compatible images and text, and the stable-diffusion.cpp native API. | M4 |
+| `fal` | fal.ai's image models, from a key alone: `image.generate`, `image.edit` and inpainting with a mask ([the `fal` provider](#87-shipped-providers), #407). | M6 |
 | `fugue-helper` | Fugue's own out-of-process generation helper and a Fugue-managed server, started on demand ([8.10](#810-gpu-memory-and-the-helper)). | M5 |
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http` and `fugue-helper` are
+third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal` and `fugue-helper` are
 listed as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
 Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, the helper's
 program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)), and `http` needs what a module
@@ -1639,6 +1653,99 @@ service speaks), and because it shares the omarchy provider's request and result
   a plain `http://` address that is not on this machine: use `https://`.
 - Checked by hand against: a stable-diffusion.cpp server whose key was not at hand (the 401 above, as
   `fugue run` shows it). Not against a real OpenAI-compatible text or picture service.
+
+**The `fal` provider** (#407, approved by the owner 2026-11-25) gives a person who pastes only their fal.ai key fal's image
+models in the model pickers: `{"name": "fal.ai", "type": "fal", "key": "…"}` in `providers.json`. It is compiled in, like `http`, for
+the same reason (a module is not given its instance's key). It serves `image.generate`, `image.edit` and, with a mask, inpainting.
+It is off-machine ([8.2](#82-provider-instances)): `placementOf` takes the default address `https://queue.fal.run` for an instance
+with none, so the consent question of #404 is asked before anything is sent; a run that is allowed sends what the question named.
+
+| Setting | Meaning |
+| --- | --- |
+| `key` | Sent as `Authorization: Key <key>` to fal's own API hosts only: the queue (`address`) and the storage host (`rest_address`). Never to an upload URL, a result or picture URL, or a redirect (none is followed on an API call). Without a key the models are `unavailable` ("paste your key in Settings > Providers") and a job is refused before anything is sent. |
+| `address` | The queue's root, default `https://queue.fal.run`. Tests point it at a local fake. |
+| `rest_address` | fal's storage host, default `https://rest.fal.ai` (what fal's own client uses), also when `address` is typed in; only a loopback `address` (a test's fake) serves both. The key goes to this host too, so consent judges both hosts (the more remote wins) and the answer is kept for the pair. |
+| `image_models` | More endpoint ids (a list, or text separated by commas), each with a generic mapping: `prompt`, `image_size`, `seed`, `image_url` (so an edit of one takes one picture), `num_images` 1 and `output_format` png. |
+| `store_io` | `true` leaves fal's default: it keeps a job's inputs and outputs 90 days. Unset, every job is sent with `X-Fal-Store-IO: 0`, and the pictures sent and the results asked to expire in an hour (below). |
+| `timeout_s` | How long a request may go silent before the job fails (default 300). A job is given up on, in any phase (uploads, queue, result, download), after 6 times that (`node_timeout`; the transfer is cut and the job cancelled at fal), so a trickle of bytes cannot hold it. |
+| `poll_ms` | The first wait between polls (default 500, growing by half each time to 6 times it, 3 s; back to the first when the state changes). |
+
+- **Models.** A table shipped with Fugue (`share/providers/fal-models.json`, compiled in) lists each endpoint id with its title, its
+  published price, its kind (generate, edit, inpaint) and how Fugue's standard parameters ([8.1](#81-capabilities)) become the model's own
+  fields: `prompt`; the size as `image_size: {width, height}` when the node gave both sides (a model that follows its picture has none);
+  `seed` (sent when it is 0 or more; the seed of the answer is what is reported); steps as `num_inference_steps` (cut to the model's
+  limit: schnell takes 4 at most), guidance as `guidance_scale`, a negative prompt where the model has one; the start or edit picture as
+  `image_url`; the mask as `mask_url`; and fixed fields: `num_images` 1, `output_format` png, and the model's own safety setting
+  (`enable_safety_checker` true, or `safety_tolerance` "2", fal's defaults). A parameter the model has no field for is not sent.
+  Each model is a handle of `fugue/image-model` with the endpoint id as its served name and no hash, offered `ready` (the person pays
+  per run; nothing is downloaded), titled with its price. The shipped list, with fal.ai's published prices (checked 2026-11-25):
+
+| Endpoint id | Offered for | Price |
+| --- | --- | --- |
+| `fal-ai/flux/schnell` | `image.generate` | $0.003 per megapixel |
+| `fal-ai/flux/dev` | `image.generate` | $0.025 per megapixel |
+| `fal-ai/flux-pro/v1.1` | `image.generate` | $0.04 per megapixel |
+| `fal-ai/qwen-image` | `image.generate` | $0.02 per megapixel |
+| `fal-ai/flux-pro/kontext` | `image.edit` (one picture) | $0.04 per image |
+| `fal-ai/flux-pro/v1/fill` | `image.generate` with a picture and a mask (property `inputs: ["mask"]`) | $0.05 per megapixel |
+
+  A text-to-picture model given a start picture is `input_invalid` (the picture would leave the machine for nothing); a mask for a model
+  with no mask field is `mask_unsupported`; an edit with no picture, or an inpaint with no mask, is `missing_input`. A picture whose
+  safety checker flagged it (`has_nsfw_concepts`, a black picture) is `node_failed`, not a result.
+- **The flow.** Pictures first: each is uploaded to fal storage, `POST <rest_address>/storage/upload/initiate?storage_type=fal-cdn-v3`
+  (`{content_type, file_name}`, with the key) answers `{file_url, upload_url}`, then the bytes are `PUT` to `upload_url` (no key, it is
+  presigned), and `file_url` goes into the input. The link is kept per content hash for the session (30 minutes at most, of the hour the
+  file is asked to live, so a picture sent twice is sent once). Then `POST <address>/<endpoint id>` with the input; the answer's `status_url`, `response_url` and
+  `cancel_url` are the only URLs used afterwards (building them from the endpoint id is a 405) and must be on the origin of the queue or
+  the storage host, or the job fails before the key goes there. `GET status_url` is polled (answered 202 while the job waits or runs, 200 when it is done; `IN_QUEUE` with its position, `IN_PROGRESS`:
+  both shown as the job's status text; `COMPLETED`, with an `error` when the job failed), then `GET response_url`, then the first
+  picture is downloaded from its URL **without the key**, under the `http` provider's rules: `http(s)` only, no loopback, link-local or
+  private address (unless the instance is at one), redirects checked, 3 hops, 512 MB. Cancel is at once: the job is `cancelled`, polling
+  stops and `PUT cancel_url` is sent (a cancel made while the job is being sent is sent when its URLs arrive); fal may still finish a
+  job already running (202 `CANCELLATION_REQUESTED`), whose result Fugue drops. The engine id of the description is `fal@<host>`; the
+  `engine` used (in the run record) is `fal@<endpoint id>`, and the cache key holds the endpoint through the model handle.
+- **What still leaves the machine.** The prompt and the other fields, and every picture and mask of the node, go to fal.ai (and the
+  pictures to fal's storage CDN, where a link is readable by anyone who has it until it expires). With `store_io` unset, the requests
+  carry `X-Fal-Store-IO: 0` (fal then keeps no copy of the job's inputs and outputs), `X-Fal-Object-Lifecycle-Preference` and the
+  uploads `X-Fal-Object-Lifecycle` with `expiration_duration_seconds` 3600. Fal still sees the request while it runs, and its terms let it
+  derive anonymised usage data from them; ask fal for more. The key is in no message, status, result, run record or log: the error
+  texts are scrubbed of it (a service that repeats it is `***`).
+- **Errors**, in the codes of [13.3](#133-errors), each with a hint:
+
+| The service | Code | Said |
+| --- | --- | --- |
+| no key | `provider_unreachable` | the provider has no key; the hint names Settings > Providers |
+| 401, 403 | `provider_unreachable` | refused the key, with the service's words ("Exhausted balance"); the hint names Settings > Providers |
+| 404 on submit | `model_missing` | no such model (the endpoint id) |
+| 404, 410 later | `node_failed` | no longer has the job |
+| 422 | `node_failed` | the service's `detail` message (`loc: msg`); `content_policy_violation` and `no_media_generated` say so |
+| 429 | `node_failed` | rate limited, with the `Retry-After` it sent (fal's concurrency limit starts at 2 jobs) |
+| 502, 503, 504 | `provider_unreachable` | not available right now |
+| other 5xx | `node_failed` | the service's message; "out of memory" is `out_of_memory` |
+| `COMPLETED` with an `error` | `node_failed` | the service's message (a `timeout` type is `provider_unreachable`) |
+| other 4xx | `node_failed` | the service's own message |
+| no answer in `timeout_s`, a refused connection | `provider_unreachable` | what happened; the hint names `timeout_s` |
+
+  A poll that gets no answer, a 429 (its `Retry-After`, up to 30 s, is waited) or a 5xx is tried again up to 5 times in a row before it fails the job. A key is never sent over plain `http://` to a host that is not loopback: the provider is `provider_unreachable` with a hint to use https. There is no retry of a
+  submit (fal bills a job that ran; #403 is the place for what a retry costs).
+- **Wire details** confirmed against fal's own client (fal-js, 2026-11-25): the key header is `Key <key>`, sent only to fal hosts;
+  the storage host is `https://rest.fal.ai`; the upload is `initiate` then a `PUT` of the bytes to `upload_url` with the file's
+  `Content-Type` and no key; the `X-Fal-Object-Lifecycle` (uploads) and `X-Fal-Object-Lifecycle-Preference` (jobs) headers carry
+  `{"expiration_duration_seconds": n}`; the client builds the status and cancel URLs from `owner/alias` only, so the URLs the queue
+  returns must be used. Not confirmed anywhere: whether a white mask means "redraw" for `flux-pro/v1/fill` (Fugue sends white as redrawn,
+  [14.4](#144-masking-and-inpainting-167)); the result of a rate limit on the queue (`429` body); whether `num_images`,
+  `output_format` and the safety fields are accepted by every model of the table (taken from each model's published input list).
+- **Decisions** (the builder's, each with its confidence; overturn any): the model offers are `unavailable` without a key rather than
+  `ready` (high: a pick that can only fail is worse); an inpaint model is offered for `image.generate` with the `mask` input, as 8.1
+  says, not as an edit (high); `Description.engine` is `fal@<host>` because selection reads one engine per instance, the endpoint being
+  in the model handle and in `used.engine` (high); uploads and results expire in one hour, the session's reuse window 30 minutes
+  (medium: the header is in fal's client, its effect was not observed); a flagged (black) picture fails the node instead of being
+  returned (medium-high); a cancel answers `cancelled` at once, without waiting for fal's reply to the PUT (medium-high); a job
+  that names URLs on another origin than the queue's or the storage host's is refused, since the key travels with them (high).
+- **Not built**, and said so here: fal's cost estimate before a run, discovery of any endpoint's inputs from its OpenAPI schema,
+  multi-image Kontext, upscale, video, webhooks and the synchronous `fal.run` API.
+- **Not checked against the real service**: no fal key was at hand when this was built. The tests use a fake queue, storage and file
+  server on the loopback, whose answers follow fal's documentation and client; a real run with a key is pending.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:

@@ -84,6 +84,27 @@ private slots:
         QCOMPARE(placementOf(instance("Box", "http", "http://192.168.1.20:7860")), Placement::OwnHost);
         QCOMPARE(placementOf(instance("Tail", "http", "http://100.101.102.103:7860")), Placement::OwnHost);
         QCOMPARE(placementOf(instance("Mac", "http", "http://studio.local:7860")), Placement::OwnHost);
+        // A fal instance with only a key goes to fal's queue by default: off-machine, so the question is asked (#407).
+        const ProviderInstance fal = instance("fal.ai", "fal");
+        QCOMPARE(placementOf(fal), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(fal), QStringLiteral("https://queue.fal.run"));
+        QCOMPARE(hostOf(fal), QStringLiteral("queue.fal.run"));
+        QCOMPARE(consentFingerprint(fal), QStringLiteral("fal|https://queue.fal.run|https://rest.fal.ai"));
+        QVERIFY(anyOffMachine({fal}));
+        QCOMPARE(placementOf(instance("fal.ai", "fal", "http://127.0.0.1:9")), Placement::ThisMachine); // a test's fake serves both
+        // The key and the pictures also go to the storage host: a loopback queue with fal's own storage is off-machine, and
+        // changing the storage host is another thing to agree to.
+        ProviderInstance split = instance("fal.ai", "fal", "http://127.0.0.1:9");
+        split.settings.insert("rest_address", "https://rest.fal.ai");
+        QCOMPARE(placementOf(split), Placement::OffMachine);
+        ProviderInstance typed = instance("fal.ai", "fal", "https://queue.fal.run"); // the typed default still has fal's storage
+        QCOMPARE(consentFingerprint(typed), consentFingerprint(fal));
+        ProviderInstance moved = fal;
+        moved.settings.insert("rest_address", "https://storage.example.com");
+        QVERIFY(consentFingerprint(moved) != consentFingerprint(fal));
+        ProviderInstance ownStorage = instance("fal.ai", "fal", "http://127.0.0.1:9");
+        ownStorage.settings.insert("rest_address", "http://127.0.0.1:10");
+        QCOMPARE(placementOf(ownStorage), Placement::ThisMachine);
         // A public name or address is off this machine, whatever the scheme.
         QCOMPARE(placementOf(instance("Cloud", "http", "https://api.example.com/v1")), Placement::OffMachine);
         QCOMPARE(placementOf(instance("Cloud", "http", "8.8.8.8:80")), Placement::OffMachine);

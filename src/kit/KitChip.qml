@@ -35,6 +35,8 @@ Rectangle {
     property bool primary: false
     // A removal or a cancel of work: the red tint while it can act (docs/canvas-look.md 11).
     property bool danger: false
+    // Looks disabled (dimmed) but still hovers, so its `tip` can say why it does nothing (a Move up on the first row); `tapped` is the host's to ignore.
+    property bool dimmed: false
     readonly property string tone: toned ? KitTone.nearest(chip) : ""
     readonly property color currentFill: tone === "" || look.params.controlColour === "accent" ? look.selectedRow
                                          : Qt.alpha(look.tone(tone).glass, 0.34)
@@ -60,7 +62,7 @@ Rectangle {
     border.width: ring ? 2 : bordered ? 1 : 0
     border.color: ring ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
-    opacity: enabled ? 1 : 0.4
+    opacity: enabled && !dimmed ? 1 : 0.4
     Accessible.role: Accessible.Button
     Accessible.name: text !== "" ? text : tip
     Accessible.onPressAction: chip.tapped()

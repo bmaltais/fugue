@@ -19,6 +19,7 @@
 #include "engine/providers_file.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
+#include "settings/provider_presets.h"
 #include "settings/settings_model.h"
 #include "theme.h"
 #include "translator.h"
@@ -524,6 +525,65 @@ private slots:
         QVERIFY(loaded.ok());
         QCOMPARE(loaded.value().size(), 2);
         QCOMPARE(loaded.value().last().name, QStringLiteral("studio"));
+    }
+
+    // "Add a service…" (spec 8.2): the table is one place, its rows are well formed, and a cloud row can only be https.
+    void providerPresetsAreWellFormed() {
+        QSet<QString> ids;
+        for (const ProviderPreset &p : knownProviderPresets()) {
+            QVERIFY2(!ids.contains(p.id), qPrintable(p.id));
+            ids.insert(p.id);
+            QVERIFY(!p.name.isEmpty() && !p.description.isEmpty());
+            QVERIFY(QStringList({"omarchy", "http", "fugue-helper", "fal"}).contains(p.type));
+            QVERIFY(QStringList({"cloud", "own"}).contains(p.group));
+            if (p.group == QLatin1String("cloud")) {
+                QVERIFY2(p.address.isEmpty() || p.address.startsWith("https://"), qPrintable(p.id));
+                QVERIFY(p.needsKey && p.keyUrl.startsWith("https://") && !p.privacy.isEmpty());
+            } else {
+                QVERIFY(p.privacy.isEmpty() && p.keyUrl.isEmpty());
+            }
+            QVERIFY(p.needsAddress == p.address.isEmpty() || p.type == "fal");
+        }
+        QVERIFY(ids.contains("fal"));
+        QCOMPARE(providerPresetById("fal").address, QString()); // the fal type's own default
+        QVERIFY(providerPresetById("nope").id.isEmpty());
+    }
+
+    void addingAPresetWritesTheInstanceAndNamesAreUnique() {
+        SettingsModel model;
+        QCOMPARE(model.addPreset("openai"), QString());
+        QCOMPARE(model.addPreset("openai"), QString());
+        QCOMPARE(model.addPreset("fal"), QString());
+        QVERIFY(!model.addPreset("nope").isEmpty());
+        const auto loaded = loadProviderInstances(providersFile());
+        QVERIFY(loaded.ok());
+        const QList<ProviderInstance> list = loaded.value();
+        QVERIFY(providersFile().startsWith(m_home.path()));
+        QCOMPARE(list.at(list.size() - 3).name, QStringLiteral("OpenAI"));
+        QCOMPARE(list.at(list.size() - 3).type, QStringLiteral("http"));
+        QCOMPARE(list.at(list.size() - 3).address, QStringLiteral("https://api.openai.com/v1"));
+        QCOMPARE(list.at(list.size() - 3).key, QString());
+        QCOMPARE(list.at(list.size() - 2).name, QStringLiteral("OpenAI 2"));
+        QCOMPARE(list.last().name, QStringLiteral("fal.ai"));
+        QCOMPARE(list.last().type, QStringLiteral("fal"));
+        QCOMPARE(list.last().address, QString());
+        const QVariantMap card = model.providers().last().toMap();
+        // fal's own settings: labelled, the rare ones advanced, store_io a switch stored as a real true.
+        QVariantMap seen;
+        for (const QVariant &f : card.value("fields").toList())
+            seen.insert(f.toMap().value("name").toString(), f);
+        QVERIFY(seen.contains("store_io") && seen.value("store_io").toMap().value("isBool").toBool());
+        QVERIFY(seen.value("image_models").toMap().value("advanced").toBool());
+        QVERIFY(seen.value("poll_ms").toMap().value("advanced").toBool() && seen.value("rest_address").toMap().value("advanced").toBool());
+        QVERIFY(card.value("cloud").toBool());
+        const int fal = model.providers().size() - 1;
+        QCOMPARE(model.setProviderField(fal, "store_io", true), QString());
+        QCOMPARE(loadProviderInstances(providersFile()).value().last().settings.value("store_io"), QJsonValue(true));
+        QCOMPARE(model.setProviderField(fal, "store_io", false), QString());
+        QVERIFY(!loadProviderInstances(providersFile()).value().last().settings.contains("store_io"));
+        // The page learns where to get the key and what is sent, without the key.
+        QVERIFY(card.value("keyUrl").toString().startsWith("https://fal.ai/"));
+        QVERIFY(!card.value("privacy").toString().isEmpty());
     }
 };
 

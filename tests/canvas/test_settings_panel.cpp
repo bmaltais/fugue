@@ -503,6 +503,32 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Add a service by keyboard alone (Tab to the dropdown, Down opens it, Enter picks): fal.ai is added, the focus lands in its key
+    // field, and what is typed there shows as dots.
+    void addingAServiceByKeyboardFocusesTheMaskedKey() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-providers"));
+        QQuickItem *add = NEED("providerAddService");
+        QVERIFY(add->property("activeFocusOnTab").toBool());
+        add->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_VERIFY(app.window->findChild<QObject *>("providerAddMenu") && app.window->findChild<QObject *>("providerAddMenu")->property("opened").toBool());
+        QTest::keyClick(app.window, Qt::Key_Return);
+        const int fal = app.settings.providers().size() - 1;
+        QTRY_VERIFY(find(app.window, QStringLiteral("providerKey-%1").arg(fal)));
+        QQuickItem *key = find(app.window, QStringLiteral("providerKey-%1").arg(fal));
+        QCOMPARE(app.settings.providers().last().toMap().value("name").toString(), QStringLiteral("fal.ai"));
+        QTRY_VERIFY(app.window->activeFocusItem() && key->isAncestorOf(app.window->activeFocusItem()));
+        QVERIFY(find(app.window, QStringLiteral("providerPrivacy-%1").arg(fal)));
+        for (const QChar c : QStringLiteral("sk-abc"))
+            QTest::keyClick(app.window, c.toLatin1());
+        QCOMPARE(app.window->activeFocusItem()->property("echoMode").toInt(), 2 /* TextInput.Password */);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void keymapPageOpensTheFileAndShowsItsProblems() {
         App app(load(emptyDoc));
         QVERIFY(app.open());
@@ -597,6 +623,40 @@ private slots:
                 QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2-%3x%4.png").arg(out, page).arg(size.width()).arg(size.height())));
             }
         }
+    }
+
+    // FUGUE_SETTINGS_SHOTS=<dir> (as screenshots()): the Providers page as a person meets it: as it starts, the Add a service menu, a fresh fal.ai card.
+    void providerShots() {
+        const QString out = qEnvironmentVariable("FUGUE_SETTINGS_SHOTS");
+        if (out.isEmpty())
+            QSKIP("Set FUGUE_SETTINGS_SHOTS to a folder to write the pages there.");
+        QDir().mkpath(out);
+        App app(load(emptyDoc), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night")), 12});
+        QVERIFY(app.open());
+        for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
+            const QStringList kv = part.split('=');
+            QVERIFY(kv.size() == 2);
+            QCOMPARE(kv[0] == "preset" ? app.settings.applyLookPreset(kv[1]) : app.settings.set(kv[0], kv[1].toDouble()), QString());
+        }
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG", QStringLiteral("dark"));
+        app.window->resize(1300, 850);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-providers"));
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-1-start-%2.png").arg(out, tag)));
+        QQuickItem *add = NEED("providerAddService");
+        add->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-2-menu-%2.png").arg(out, tag)));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTest::qWait(500);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-3-fal-%2.png").arg(out, tag)));
+        // Advanced open, with a key typed and shown.
+        click(app, NEED(QStringLiteral("providerAdvanced-%1").arg(app.settings.providers().size() - 1)));
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-4-advanced-%2.png").arg(out, tag)));
     }
 };
 
