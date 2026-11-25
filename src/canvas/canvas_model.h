@@ -214,6 +214,9 @@ class CanvasModel : public QObject {
     Q_PROPERTY(CanvasGesture *gesture READ gesture CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
+    // The node card's face, "compact" (the Drift card) or "flat" (today's); only the metrics below differ, so a port's y and a wire's end follow
+    // the style (docs/canvas-look.md 20.14, #466). The model alone is flat; FugueCanvas binds it to the look's node style.
+    Q_PROPERTY(QString nodeStyle READ nodeStyle WRITE setNodeStyle NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
     Q_PROPERTY(qreal rowHeight READ rowHeight NOTIFY metricsChanged)
     Q_PROPERTY(qreal unit READ unit NOTIFY metricsChanged)
@@ -330,6 +333,8 @@ public:
     int textSize() const { return m_textSize; }
     // Lays every node and wire out again: one reset of each list.
     void setTextSize(int size);
+    QString nodeStyle() const { return m_compact ? QStringLiteral("compact") : QStringLiteral("flat"); }
+    void setNodeStyle(const QString &style);
     qreal headerHeight() const { return m_headerHeight; }
     qreal rowHeight() const { return m_rowHeight; }
     qreal unit() const { return m_textSize / 3.0; }
@@ -892,6 +897,9 @@ private:
     qreal m_padTop = 4;         // 1u
     qreal m_padBottom = 8;      // 2u
     qreal m_defaultWidth = 240; // 60u
+    qreal m_thumbInset = 6;     // 1.5u: a picture's inset from the sides
+    bool m_compact = false;     // the Compact node style (setNodeStyle)
+    void applyMetrics();        // the face metrics above, from the text size and the node style
     QHash<QString, RunInfo> m_run;
     QHash<QString, QVariantMap> m_comparePeek; // the view before a peek, while Z is held
     QHash<QString, QVariantMap> m_compareView; // a Compare Images node's viewer state, never saved

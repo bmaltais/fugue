@@ -122,6 +122,12 @@ private slots:
         QCOMPARE(loadPreset("nope").id, QString("calm")); // unknown: Calm
         QCOMPARE(loadPreset("flat").params.value("titleFont").toString(), QString("ui"));
         QCOMPARE(loadPreset("flat").sliders.value("frost").toDouble(), 0.0);
+        // The node style is data in the preset (#466), never a branch on its name: Flat sets flat, Calm compact.
+        QCOMPARE(loadPreset("flat").settings.value("node_style").toString(), QString("flat"));
+        QCOMPARE(loadPreset("calm").settings.value("node_style").toString(), QString("compact"));
+        QStringList own;
+        QVERIFY(parsePreset("x", R"({"settings": {"node_style": "flat", "frost": "1"}})", &own).settings.size() == 1);
+        QCOMPARE(own.size(), 1);
     }
 
     // The look reads the file at once and again when it changes, in a scratch folder.

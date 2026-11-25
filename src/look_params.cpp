@@ -195,6 +195,16 @@ Preset parsePreset(const QString &id, const QByteArray &json, QStringList *probl
         }
         preset.sliders.insert(it.key(), it.value().toDouble());
     }
+    // Settings the preset also sets (settings.json keys, a string each); checked where they are applied.
+    const QJsonObject settings = object.value(QLatin1String("settings")).toObject();
+    for (auto it = settings.begin(); it != settings.end(); ++it) {
+        if (it.key() != QLatin1String("node_style") || !it.value().isString()) {
+            if (problems)
+                *problems << QStringLiteral("look preset %1: setting %2 is not one a preset sets (node_style).").arg(id, it.key());
+            continue;
+        }
+        preset.settings.insert(it.key(), it.value().toString());
+    }
     return preset;
 }
 
@@ -204,7 +214,7 @@ Preset loadPreset(const QString &id, QStringList *problems) {
     if (!file.open(QIODevice::ReadOnly)) {
         if (problems)
             *problems << QStringLiteral("The look preset %1 is missing.").arg(use);
-        return {use, use, {}, {}};
+        return {use, use, {}, {}, {}};
     }
     return parsePreset(use, file.readAll(), problems);
 }

@@ -70,6 +70,7 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QString lookPreset READ lookPreset NOTIFY changed)
     Q_PROPERTY(QVariantList lookPresets READ lookPresets CONSTANT) // [{value, text}] of the shipped presets
     Q_PROPERTY(double lookSpacing READ lookSpacing NOTIFY changed)
+    Q_PROPERTY(QString nodeStyle READ nodeStyle NOTIFY changed) // "compact" or "flat": the node card's face (#466)
     // The hover magnifier (#74, #123): off unless turned on; the canvas binds it.
     Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
     // Reopen the last session's saved tabs at start (#212): on unless turned off; the window follows it live.
@@ -153,6 +154,7 @@ public:
     Q_INVOKABLE void openLookFile();
     double lookCorners() const { return m_effective.settings.lookCorners; }
     double lookSpacing() const { return m_effective.settings.lookSpacing; }
+    QString nodeStyle() const { return m_effective.settings.nodeStyle; }
     bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
     bool restoreTabs() const { return m_effective.settings.restoreTabs; }
     QVariantMap origins() const;

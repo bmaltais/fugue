@@ -27,6 +27,8 @@
 // |                  | picture are; 0 is off (docs/canvas-look.md)|                          |
 // | look_preset      | a look preset's id (share/looks, docs/     | "calm"                   |
 // |                  | canvas-look.md 20.13): the base parameters |                          |
+// | node_style       | "compact" or "flat": the node card's face  | "compact"                |
+// |                  | (docs/canvas-look.md 20.14, #466)         |                          |
 // | look_colour      | 0 to 1: how much colour the kit's panels, | 0.4                      |
 // |                  | toggles and sliders carry; 0 is plain     |                          |
 // | look_glow        | 0 to 1: the halo of an on switch and the   | 0.5                      |
@@ -83,6 +85,7 @@ struct Settings {
     QString stepPreview = QStringLiteral("fast"); // the Sampler's picture while it runs (#297)
     double frost = 0.6;          // the frosted glass of the kit's controls over a picture, 0 (off) to 1
     QString lookPreset = QStringLiteral("calm"); // the look preset whose parameters are the base of the look
+    QString nodeStyle = QStringLiteral("compact"); // the node card's face: the Drift card, or today's flat one (#466)
     double lookColour = 0.4;  // how much colour the kit's panels, toggles and sliders carry, 0 (plain) to 1
     double lookGlow = 0.5;    // the halo and the shine of raised controls, 0 (none) to 1; 0.5 as designed
     double lookDepth = 0.5;   // how recessed fields and how raised controls are, 0 (flat) to 1; 0.5 as designed

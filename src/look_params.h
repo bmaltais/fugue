@@ -47,6 +47,7 @@ struct Preset {
     QString title;
     QVariantMap params;
     QVariantMap sliders; // colour, glow, frost, depth, corners, spacing, each a number
+    QVariantMap settings; // structural settings the preset also sets, by settings.json key (node_style: compact | flat, #466)
 };
 QStringList presetIds(); // the shipped presets, in the order they are listed
 Preset loadPreset(const QString &id, QStringList *problems = nullptr); // an unknown id is Calm

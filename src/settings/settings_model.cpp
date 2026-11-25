@@ -220,6 +220,8 @@ void SettingsModel::pushLive() {
         m_theme->setLookSliders({m_effective.settings.lookColour, m_effective.settings.lookGlow, m_effective.settings.lookCorners,
                                  m_effective.settings.lookSpacing, m_effective.settings.lookDepth});
     if (m_theme)
+        m_theme->setNodeStyle(m_effective.settings.nodeStyle);
+    if (m_theme)
         m_theme->setLookPreset(look::loadPreset(m_effective.settings.lookPreset).params);
     if (m_theme)
         m_theme->setLookFile(configDir() + QStringLiteral("/look.json"));
@@ -567,6 +569,9 @@ QString SettingsModel::applyLookPreset(const QString &id) {
     put("look_depth", at("depth", look::Sliders::defaultDepth));
     put("look_corners", at("corners", look::Sliders::defaultCorners));
     put("look_spacing", at("spacing", look::Sliders::defaultSpacing));
+    // What the preset also sets (node_style): data in the preset file, never a branch on its name.
+    for (auto it = preset.settings.cbegin(); it != preset.settings.cend() && error.isEmpty(); ++it)
+        error = set(it.key(), it.value().toString());
     return error;
 }
 

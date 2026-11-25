@@ -366,13 +366,38 @@ void CanvasModel::setTextSize(int size) {
     m_nodeList->beginResetModel();
     m_linkList->beginResetModel();
     m_textSize = size;
-    const qreal u = size / 3.0;
+    applyMetrics();
+    for (NodeRow &row : m_rows)
+        layOut(row);
+    for (int i = 0; i < int(m_links.size()); ++i)
+        refreshLinkEnds(i);
+    m_nodeList->endResetModel();
+    m_linkList->endResetModel();
+    emit metricsChanged();
+}
+
+// The face metrics (docs/canvas-look.md 4 and 20.14). Flat: 7u header, 6u rows, 60u wide. Compact: the same header, 6.5u rows,
+// 56u wide (224 px) and a picture inset of 2.5u (the board's 10px padding), so the card is a little denser across and airier down.
+// They are the layout's only inputs from the style, so the stored sizes in the file mean the same in both.
+void CanvasModel::applyMetrics() {
+    const qreal u = m_textSize / 3.0;
     m_headerHeight = qRound(7 * u);
-    m_rowHeight = qRound(6 * u);
+    m_rowHeight = qRound((m_compact ? 6.5 : 6) * u);
     m_tallRowHeight = qRound(16 * u);
-    m_padTop = qRound(u);
-    m_padBottom = qRound(2 * u);
-    m_defaultWidth = qRound(60 * u);
+    m_padTop = qRound((m_compact ? 0.5 : 1) * u);
+    m_padBottom = qRound((m_compact ? 1.5 : 2) * u);
+    m_defaultWidth = qRound((m_compact ? 56 : 60) * u);
+    m_thumbInset = qRound((m_compact ? 2.5 : 1.5) * u);
+}
+
+void CanvasModel::setNodeStyle(const QString &style) {
+    const bool compact = style == QLatin1String("compact");
+    if (compact == m_compact)
+        return;
+    m_nodeList->beginResetModel();
+    m_linkList->beginResetModel();
+    m_compact = compact;
+    applyMetrics();
     for (NodeRow &row : m_rows)
         layOut(row);
     for (int i = 0; i < int(m_links.size()); ++i)
@@ -663,7 +688,7 @@ void CanvasModel::layOut(NodeRow &row) const {
         if (hasThumbnail) {
             // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1, so a tall picture
             // never grows the node over its neighbours, #163; a sound's, 0.2 to 1).
-            const qreal inset = qRound(1.5 * unit());
+            const qreal inset = m_thumbInset;
             const qreal width = row.width - 2 * inset;
             // A sound's player is a bar (its aspect is below the least a picture has).
             const qreal least = run->media.value(QStringLiteral("type")) == QLatin1String("audio") ? 0.2 : 0.5;

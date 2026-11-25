@@ -26,6 +26,13 @@ Rectangle {
     property var canvasView     // the FugueCanvas: takes the focus back when an edit ends, opens the mask editor
     property Item nodeItem      // its rows, for Tab
     property Item row           // raised while the multiline editor covers the rows below
+    // The Compact node style (docs/canvas-look.md 20.14, set by CanvasNode.qml, never by a form that borrows this widget): the well is
+    // the kit's recessed KitWell, 20px high at the right of its row with the value inside it, a toggle is a pill with no well, a
+    // slider fills with the tone, text is the 12px interface size. The model, the gestures and the edits are the Flat widget's.
+    property bool compact: false
+    readonly property int labelPx: compact ? look.textSize : look.labelSize
+    readonly property color toneColor: look.params.controlColour === "accent" ? look.accent : look.tone("dusk").glass
+    readonly property bool hasWell: !compact || kind !== "toggle"
 
     readonly property string name: port.name
     readonly property string kind: port.widgetType !== undefined ? port.widgetType : ""
@@ -52,7 +59,7 @@ Rectangle {
     // A Load Image's file has a Paste button beside its picker (workflow/image_inputs.h).
     readonly property bool pasteable: editable && kind === "file" && edits.canPasteImage(nodeId, name)
     readonly property int pasteWidth: Math.round(look.textSize * 3.6)
-    readonly property int decorWidth: !editable ? 0 : kind === "toggle" ? 26 : kind === "color" ? glyphZone
+    readonly property int decorWidth: !editable ? 0 : kind === "toggle" ? (compact ? 0 : 26) : kind === "color" ? glyphZone
                                       : pasteable ? pasteWidth + pad : 0
     // A toggle's state, the default when unset.
     readonly property bool on: kind === "toggle"
@@ -112,14 +119,35 @@ Rectangle {
         return ""
     }
 
-    radius: smallCorner
-    color: editable ? wellColor : "transparent"
+    // Compact: the well is KitWell's own recipe (the kit's rule: fillable is recessed; the same look parameters), drawn by this item itself
+    // (a fill, a 1px edge, a gradient for the shadow along the top and the light along the bottom) instead of by a KitWell under it, which
+    // would be four more items on every widget of every node; only a widget that is typed into or chosen from has one, a toggle has none.
+    readonly property bool fillable: editable && hasWell
+    readonly property var pm: look.params
+    readonly property color wellBase: Qt.tint(look.kitGroup, Qt.rgba(0, 0, 0, look.light ? pm.wellDarkenLight : pm.wellDarken))
+    property Gradient wellGradient: Gradient {
+        GradientStop {
+            position: 0
+            color: Qt.tint(root.wellBase, Qt.rgba(0, 0, 0, root.look.light ? root.pm.wellShadowAlphaLight : root.pm.wellShadowAlpha))
+        }
+        GradientStop { position: Math.min(0.3, (root.border.width + root.pm.wellShadowHeight) / Math.max(1, root.height)); color: root.wellBase }
+        GradientStop { position: 1 - Math.min(0.3, (root.border.width + 1) / Math.max(1, root.height)); color: root.wellBase }
+        GradientStop {
+            position: 1
+            color: Qt.tint(root.wellBase, root.look.light ? Qt.rgba(1, 1, 1, root.pm.wellBottomLightLight) : Qt.rgba(1, 1, 1, root.pm.wellBottomLight))
+        }
+    }
+    radius: compact ? Math.min(pm.cornerWell * look.unit, 0.45 * height) : smallCorner
+    color: compact ? (fillable ? wellBase : "transparent") : editable ? wellColor : "transparent"
+    gradient: compact && fillable ? wellGradient : null
+    border.width: compact && fillable ? 1 : 0
+    border.color: Qt.tint(wellBase, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
 
     Text {
         id: valueLabel
         objectName: "widgetValue"
-        visible: !root.editingText
-        x: root.tall ? root.pad : root.width * 0.45
+        visible: !root.editingText && !(root.compact && root.kind === "toggle" && root.editable)
+        x: root.tall || root.compact ? root.pad : root.width * 0.45
         y: root.tall ? Math.round(1.5 * root.look.unit) + 16 : 0 // under the caption line (#74)
         z: 1
         width: root.width - x - root.pad - root.decorWidth - (glyphMark.visible ? glyphMark.width + root.look.unit : 0)
@@ -138,7 +166,7 @@ Rectangle {
                : root.linked || root.isDefault || root.kind === "model" && root.literal === undefined
                  || root.kind === "canvas" && root.canvasId === ""
                ? root.look.label : root.look.text
-        font.pixelSize: root.look.labelSize
+        font.pixelSize: root.labelPx
         font.weight: root.tall ? Font.Normal : Font.Medium
         font.italic: root.linked
         font.features: { "tnum": 1 }
@@ -174,7 +202,7 @@ Rectangle {
                 anchors.centerIn: parent
                 text: qsTr("Paste")
                 color: root.look.label
-                font.pixelSize: root.look.labelSize
+                font.pixelSize: root.labelPx
             }
             MouseArea {
                 id: pasteArea

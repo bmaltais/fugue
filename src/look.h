@@ -165,6 +165,8 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor error MEMBER m_error NOTIFY changed)
     // How frosted the controls over a picture are, 0 (off: plain opaque chips) to 1; settings.json's `frost` (default 0.6).
     Q_PROPERTY(qreal frost READ frost WRITE setFrost NOTIFY changed)
+    // The node card's face (docs/canvas-look.md 20.14, #466): "compact" (the Drift card) or "flat" (today's face); settings.json's node_style.
+    Q_PROPERTY(QString nodeStyle READ nodeStyle WRITE setNodeStyle NOTIFY changed)
     // Every number of the Drift kit's look by name (look_params.h, docs/canvas-look.md 20.3): the default or look.json's value, times its
     // slider's factor, clamped. Read it as `look.params.cornerCard`; it changes with the sliders and the file, live.
     Q_PROPERTY(QVariantMap params READ params NOTIFY changed)
@@ -226,6 +228,14 @@ public:
         m_frost = frost;
         emit changed();
     }
+    QString nodeStyle() const { return m_nodeStyle; }
+    void setNodeStyle(const QString &style) {
+        const QString use = style == QLatin1String("flat") ? style : QStringLiteral("compact");
+        if (use == m_nodeStyle)
+            return;
+        m_nodeStyle = use;
+        emit changed();
+    }
     const QVariantMap &params() const { return m_params; }
     QStringList lookProblems() const { return m_lookProblems; }
     // The five sliders' positions (settings.json look_colour, look_glow, look_corners, look_spacing, look_depth, each 0 to 1).
@@ -279,6 +289,7 @@ private:
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     qreal m_frost = 0.6;
+    QString m_nodeStyle = QStringLiteral("compact");
     fugue::look::Sliders m_sliders;
     QVariantMap m_overrides, m_preset, m_params;
     QStringList m_lookProblems;
