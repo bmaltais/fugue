@@ -2,6 +2,7 @@
 
 #include "engine/atomic_file.h"
 #include "engine/compiler.h"
+#include "engine/cloudflare_provider.h"
 #include "engine/fal_provider.h"
 #include "engine/gemini_provider.h"
 #include "engine/replicate_provider.h"
@@ -70,6 +71,9 @@ QString effectiveAddress(const ProviderInstance &instance) {
         return geminiAddress(instance);
     if (instance.type == QLatin1String("replicate"))
         return replicateAddress(instance);
+    // Cloudflare's API is the default of a `cloudflare` instance, for the same reason.
+    if (instance.type == QLatin1String("cloudflare"))
+        return cloudflareAddress(instance);
     static const QStringList builtin{QStringLiteral("omarchy"), QStringLiteral("http"), QStringLiteral("fugue-helper")};
     if (builtin.contains(instance.type))
         return {};

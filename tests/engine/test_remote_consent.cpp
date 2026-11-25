@@ -118,6 +118,14 @@ private slots:
         QCOMPARE(consentFingerprint(replicate), QStringLiteral("replicate|https://api.replicate.com"));
         QCOMPARE(consentFingerprint(instance("Replicate", "replicate", "https://api.replicate.com/")), consentFingerprint(replicate));
         QCOMPARE(placementOf(instance("Replicate", "replicate", "http://127.0.0.1:9")), Placement::ThisMachine);
+        // A cloudflare instance goes to Cloudflare's API by default: off-machine, so the question is asked (#407).
+        const ProviderInstance cloudflare = instance("Cloudflare Workers AI", "cloudflare");
+        QCOMPARE(placementOf(cloudflare), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(cloudflare), QStringLiteral("https://api.cloudflare.com"));
+        QCOMPARE(hostOf(cloudflare), QStringLiteral("api.cloudflare.com"));
+        QCOMPARE(consentFingerprint(cloudflare), QStringLiteral("cloudflare|https://api.cloudflare.com"));
+        QVERIFY(anyOffMachine({cloudflare}));
+        QCOMPARE(placementOf(instance("Cloudflare Workers AI", "cloudflare", "http://127.0.0.1:9")), Placement::ThisMachine);
         // A public name or address is off this machine, whatever the scheme.
         QCOMPARE(placementOf(instance("Cloud", "http", "https://api.example.com/v1")), Placement::OffMachine);
         QCOMPARE(placementOf(instance("Cloud", "http", "8.8.8.8:80")), Placement::OffMachine);

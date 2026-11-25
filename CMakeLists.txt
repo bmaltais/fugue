@@ -124,6 +124,9 @@ qt_add_resources(fugue_engine fugue_provider_tables PREFIX /fugue/providers FILE
 # The `replicate` provider's model table (spec 8.7): share/providers/replicate-models.json, under :/fugue/providers too.
 set_source_files_properties(share/providers/replicate-models.json PROPERTIES QT_RESOURCE_ALIAS replicate-models.json)
 qt_add_resources(fugue_engine fugue_replicate_table PREFIX /fugue/providers FILES share/providers/replicate-models.json)
+# The `cloudflare` provider's model table (spec 8.7), the same way.
+set_source_files_properties(share/providers/cloudflare-models.json PROPERTIES QT_RESOURCE_ALIAS cloudflare-models.json)
+qt_add_resources(fugue_engine fugue_provider_tables_cloudflare PREFIX /fugue/providers FILES share/providers/cloudflare-models.json)
 
 # A folder of the window's QML: its .qml files compiled in under qrc:<prefix>, where the
 # others import them by folder. A new .qml file there needs no line here. The same files are

@@ -1,6 +1,7 @@
 #include "providers.h"
 
 #include "engine/helper_provider.h"
+#include "engine/cloudflare_provider.h"
 #include "engine/fal_provider.h"
 #include "engine/gemini_provider.h"
 #include "engine/replicate_provider.h"
@@ -392,6 +393,8 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
         return Result<std::shared_ptr<Provider>>(std::make_shared<GeminiProvider>(instance));
     if (instance.type == QLatin1String("replicate"))
         return Result<std::shared_ptr<Provider>>(std::make_shared<ReplicateProvider>(instance));
+    if (instance.type == QLatin1String("cloudflare"))
+        return Result<std::shared_ptr<Provider>>(std::make_shared<CloudflareProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty())
         return Result<std::shared_ptr<Provider>>(std::make_shared<RemoteHelperProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper")) {

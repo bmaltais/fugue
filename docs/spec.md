@@ -1482,12 +1482,13 @@ A provider instance is a configured use of a provider module, stored in
   keys at fal.ai/dashboard/keys), Google Gemini (`gemini`, no address: the type's own `https://generativelanguage.googleapis.com`,
   keys at aistudio.google.com/apikey), OpenAI (`http`, `https://api.openai.com/v1`), Together AI (`http`, `https://api.together.ai/v1`),
   Replicate (`replicate`, no address: the type's own `https://api.replicate.com`, keys at replicate.com/account/api-tokens),
-  OpenRouter (`http`, `https://openrouter.ai/api/v1`). Each says "Sends your pictures and prompts to <name>" under its title.
+  OpenRouter (`http`, `https://openrouter.ai/api/v1`), Cloudflare Workers AI (`cloudflare`, no address: the type's own `https://api.cloudflare.com`,
+  tokens at dash.cloudflare.com/profile/api-tokens). Each says "Sends your pictures and prompts to <name>" under its title.
   **Your own machines:** a local OpenAI-compatible server (`http`, `http://localhost:1234/v1`, no key: LM Studio, llama.cpp, vLLM),
   an Omarchy host (`omarchy`, address to fill), a Fugue helper on another machine (`fugue-helper`, address and key to fill).
   A card of a `fal` instance shows its key, `image_models` and `store_io`; its address, `rest_address`, `timeout_s` and `poll_ms`
   sit under an Advanced disclosure.
-  A card of a `gemini` instance shows its key and `image_models`; its address and `timeout_s` sit under Advanced.
+  A card of a `gemini` instance shows its key and `image_models`; its address and `timeout_s` sit under Advanced. A card of a `cloudflare` instance shows its token and `account_id` (both are needed); `image_models` and `timeout_s` sit under Advanced.
 - **Local or remote is only the address.** It is never a property of a graph.
 - Keys live only here. They are never written into a workflow, an export or an embedded graph.
 - **Where an instance runs, and consent (#404).** Fugue is local-first: pictures, masks, audio and prompts leave the machine only
@@ -1497,7 +1498,7 @@ A provider instance is a configured use of a provider module, stored in
   (Tailscale) address or a `.local`, `.internal` or `.ts.net` name: the test the `http` provider applies to the pictures a
   service may make Fugue fetch, 8.7, plus the tailnet's names, so there is one idea of "local"), or *off-machine* (any
   other type at any other address: a cloud service). The address is the one the provider really uses: an http provider
-  module's default `address` (8.8) when the instance has none, `https://queue.fal.run` for a `fal` instance, `https://generativelanguage.googleapis.com` for a `gemini` instance and `https://api.replicate.com` for a `replicate` one. Nothing is asked for the first two: the person typed the
+  module's default `address` (8.8) when the instance has none, `https://queue.fal.run` for a `fal` instance, `https://generativelanguage.googleapis.com` for a `gemini` instance, `https://api.replicate.com` for a `replicate` one and `https://api.cloudflare.com` for a `cloudflare` one. Nothing is asked for the first two: the person typed the
   address in and it is their own network. **The limit:** a stdio provider module is a program that runs here, so it counts as
   this machine even if its program calls a cloud API itself; Fugue cannot see that, and the module's description should say it.
   - **The question.** Before a run whose plan would run a node on an off-machine instance (the nodes that are not cached, found
@@ -1585,11 +1586,12 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | `fal` | fal.ai's image models, from a key alone: `image.generate`, `image.edit` and inpainting with a mask ([the `fal` provider](#87-shipped-providers), #407). | M6 |
 | `gemini` | Google's Gemini image models (Nano Banana), from a key alone: `image.generate` and `image.edit` with pictures ([the `gemini` provider](#87-shipped-providers), #407). | M6 |
 | `replicate` | Replicate's official image models, from a token alone: `image.generate`, `image.edit` and inpainting with a mask ([the `replicate` provider](#87-shipped-providers), #407). | M6 |
+| `cloudflare` | Cloudflare Workers AI's image models, from an API token and an account id: `image.generate` and `image.edit` ([the `cloudflare` provider](#87-shipped-providers), #407). | M6 |
 | `fugue-helper` | Fugue's own out-of-process generation helper and a Fugue-managed server, started on demand ([8.10](#810-gpu-memory-and-the-helper)). | M5 |
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal`, `gemini`, `replicate` and `fugue-helper` are
+third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal`, `gemini`, `replicate`, `cloudflare` and `fugue-helper` are
 listed as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
 Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, the helper's
 program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)), and `http` needs what a module
@@ -1898,6 +1900,72 @@ consent question of #404 is asked before anything is sent. Unlike fal there is o
   without the key is not observed: the retry costs nothing if it does not. A refusal after the retry is `node_failed` ("would not serve
   the picture"), without a hint of expiry.
   Not built: a cost estimate, community models by version id, several outputs, upscale, video, webhooks and `Prefer: wait`.
+
+**The `cloudflare` provider** (#407, approved by the owner 2026-11-25) gives a person who pastes a Cloudflare API token and their
+account id Workers AI's image models in the model pickers: `{"name": "Cloudflare Workers AI", "type": "cloudflare", "key": "<token>",
+"account_id": "…"}` in `providers.json`. It is compiled in, like `fal`, for `image.generate` and, for the models that take reference
+pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `placementOf` takes the default address
+`https://api.cloudflare.com`, so the first use asks for consent, naming Cloudflare.
+
+| Setting | Meaning |
+| --- | --- |
+| `key` | The API token (it needs the Workers AI permission), sent as `Authorization: Bearer <token>` to the origin of `address` only; no redirect is followed. Without it, or without `account_id`, the models are `unavailable` ("paste your API token / account id in Settings > Providers") and a job is refused before anything is sent. |
+| `account_id` | Required: the account the calls are made for (dash.cloudflare.com overview). Letters, digits, `-` and `_` only, as it is part of the URL. |
+| `address` | The API's root, default `https://api.cloudflare.com`. Tests point it at a local fake. |
+| `image_models` | More `@cf/...` model ids (a list, or text separated by commas), with a generic JSON mapping: `prompt`, `width`, `height`, `seed`. Ids that are not of the form `@xx/owner/name` are ignored. |
+| `timeout_s` | How long the call may go silent before the job fails (default 120). The job is given up on after 6 times that (`node_timeout`), so a trickle of bytes cannot hold it. |
+
+- **Models.** A table shipped with Fugue (`share/providers/cloudflare-models.json`, compiled in) lists each model with its title, its
+  published price, how the request is sent and which of Fugue's standard parameters the model takes (a parameter with no field is
+  not sent). Each is a `fugue/image-model` handle whose `name` is the model id, no hash. The list, with Cloudflare's published
+  neuron prices (developers.cloudflare.com/workers-ai/platform/pricing, checked 2026-11-25; $0.011 per 1,000 neurons above the free
+  allocation), the title showing the price of a 1024x1024 picture (4 tiles of 512x512):
+
+| Model id | Offers | Published price | One 1 MP picture |
+| --- | --- | --- | --- |
+| `@cf/black-forest-labs/flux-1-schnell` | `image.generate` (JSON: `prompt`, `steps` up to 8, default 4, `seed`; no size field is documented) | 4.80 neurons per 512x512 tile, 9.60 per step | 57.6 neurons, about $0.0006 |
+| `@cf/black-forest-labs/flux-2-klein-4b` | `image.generate`, `image.edit` (up to 4 reference pictures) | 26.05 neurons per output tile, 5.37 per input tile | 104 neurons, about $0.0012 |
+| `@cf/black-forest-labs/flux-2-klein-9b` | `image.generate`, `image.edit` (up to 4) | 1363.64 neurons per first MP, 181.82 per further or input MP | 1364 neurons, $0.015 |
+| `@cf/black-forest-labs/flux-2-dev` | `image.generate`, `image.edit` (up to 4) | 37.50 neurons per output tile per step, 18.75 per input tile per step | 150 neurons a step, about $0.0016 a step |
+
+- **Free plan.** The Workers Free plan has 10,000 neurons a day (reset 00:00 UTC). None of these models is on Cloudflare's list of
+  models that need Workers Paid (the pricing page and the July 2026 changelog name only text models), so they run on it: about 170
+  pictures a day of 1 MP with schnell, 95 with klein 4B, 7 with klein 9B and 2 with dev at 25 steps. When the allocation is used up
+  the answer says so and the error's hint names the reset time.
+- **The flow.** One synchronous call: `POST <address>/client/v4/accounts/<account_id>/ai/run/<model id>`. schnell takes JSON
+  (`prompt`, `steps`, `seed`); the FLUX.2 models take `multipart/form-data` even for a prompt (`prompt`, `width` and `height` clamped
+  to 256..1920, `guidance`, `seed`, `steps` for dev only, and each reference picture as `input_image_0`..`input_image_3`; the
+  documentation asks for pictures under 512x512, so each is scaled down with libvips to fit 511x511, keeping its aspect and never
+  enlarging, and sent as a PNG; more pictures than the model takes are refused with `input_invalid`). The answer is Cloudflare's envelope
+  `{"result": {"image": "<base64>"}, "success": true, "errors": [], "messages": []}`; a bare `{"image": ...}` and a raw `image/*` body
+  are read too. The picture is saved from the base64 at once: nothing is downloaded. Cancel aborts the request and answers
+  `cancelled` at once. The engine id is `cloudflare@<host>`; the `engine` used is `cloudflare@<model id>`.
+- **What still leaves the machine.** The prompt, the fields and the reference pictures go to Cloudflare. The FLUX.2 models are
+  partner models served with zero data retention according to their model pages. The token is in no message, status, result, run
+  record or log (error texts are scrubbed of it) and is never sent over plain `http://` to a host that is not loopback.
+- **Errors**, in the codes of [13.3](#133-errors), each with a hint:
+
+| The service | Code | Said |
+| --- | --- | --- |
+| no token, no account id | `provider_unreachable` | what is missing; the hint names Settings > Providers |
+| 401, 403 | `provider_unreachable` | refused the token, with the service's words; the hint names the Workers AI permission and the account id |
+| 404, code 5007 | `model_missing` | no such model |
+| other 404 | `provider_unreachable` | does not know the account or model; the hint names the account id |
+| 413 | `input_invalid` | too large; use smaller pictures |
+| 429, or a message about neurons | `node_failed` | rate limited, or the daily allocation used up (resets 00:00 UTC) |
+| a message about NSFW, flagged or policy | `node_failed` | content policy |
+| 502, 503, 504 | `provider_unreachable` | not available right now |
+| other 5xx | `node_failed` | the service's message; "out of memory" is `out_of_memory` |
+| other 4xx | `node_failed` | the service's own message (`errors[].message`) |
+| no answer in `timeout_s`, a refused connection | `provider_unreachable` | what happened; the hint names `timeout_s` |
+
+- **Decisions** (the builder's, each with its confidence; overturn any): FLUX.1 [schnell], FLUX.2 [klein] 4B and 9B and FLUX.2 [dev]
+  are the table, the others (Leonardo, Stable Diffusion models, some being deprecated on 2026-11-20) are left to `image_models`
+  (medium-high: their request fields were not read); reference pictures are scaled to fit 511x511 (medium-high: the limit is in the FLUX.2 [dev] changelog, not in every model page); a seed is reduced modulo 2^31-1 (medium: no range is documented) and the one sent is what the run record holds; no retry of a call (high: neurons are billed per run).
+- **Not checked against the real service**: no Cloudflare token was at hand. The tests use a fake API on the loopback whose answers
+  follow Cloudflare's documentation; the exact REST envelope for the image models, the error codes (5007, the neuron-limit message),
+  whether the partner FLUX.2 models draw on the free allocation, and `seed` for schnell (used in Cloudflare's examples, not in its
+  parameter list) are unconfirmed; a real run with a token is pending.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:
