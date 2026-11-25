@@ -2,11 +2,18 @@
 // between the buttons, Enter is the yes, Escape cancels, and the focus goes back to what had it. The sheet shows a fake model (what
 // the real one does is test_readiness and test_templates; nothing is installed or downloaded here).
 
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlProperty>
 #include <QQuickItem>
 #include <QtTest>
 
 #include "canvas_app.h"
+#include "engine/hash.h"
+#include "engine/paths.h"
 #include "../test_shard.h"
 #include "../window_grab.h"
 
@@ -139,6 +146,54 @@ private slots:
         QTRY_VERIFY(!sheet->property("visible").toBool());
         QTRY_COMPARE(app.window->activeFocusItem(), before);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #544: a workflow with a MOSS Image model whose Qwen3.5 tokenizer is not on disk opens with the real plan offering the tokenizer
+    // (not a made-up view): the banner's Get ready sheet lists qwen3.5_tokenizer.json with its size and license, like a model file.
+    void aMossWorkflowWithoutTheTokenizerOffersItsDownload() {
+        QFile::remove(fugue::dataDir() + "/models/tokenizers/qwen3.5_tokenizer.json");
+        QFile::remove(fugue::dataDir() + "/catalog/test.json");
+        const QString file = fugue::dataDir() + "/models/diffusion_models/moss-test.safetensors";
+        QJsonObject header;
+        const auto tensor = [&](const QString &name, const QJsonArray &shape) {
+            header.insert(name, QJsonObject{{"dtype", "F16"}, {"shape", shape}, {"data_offsets", QJsonArray{0, 0}}});
+        };
+        tensor("video_embedder.weight", QJsonArray{3072, 128});
+        tensor("shared_block_modulation.weight", QJsonArray{18432, 3072});
+        tensor("text_embedder.proj.weight", QJsonArray{3072, 4096});
+        const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+        QByteArray bytes;
+        for (int i = 0; i < 8; ++i)
+            bytes.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+        bytes += json;
+        QDir().mkpath(QFileInfo(file).absolutePath());
+        QFile out(file);
+        QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        out.write(bytes);
+        out.close();
+        const QJsonObject handle{{"resource", "fugue/diffusion-model"}, {"name", "moss-test.safetensors"}, {"hash", fugue::sha256(bytes)}};
+        const QJsonObject loader{{"type", "fugue/load-models"}, {"version", "1.2.0"}, {"inputs", QJsonObject{{"diffusion_model", handle}}}};
+        const QByteArray text = QJsonDocument(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", QJsonObject{{"l", loader}}}}}}).toJson();
+        App app(load(text));
+        QVERIFY(app.open());
+        app.workflows.readiness()->show();
+        QObject *sheet = nullptr;
+        QTRY_VERIFY((sheet = app.window->findChild<QObject *>("getReadySheet")));
+        QTRY_VERIFY(find(app.window, "getReadyModel-qwen3.5_tokenizer.json"));
+        const QVariantMap view = app.workflows.readiness()->view();
+        const QVariantList models = view.value("models").toList();
+        QCOMPARE(models.size(), 1);
+        QCOMPARE(models.first().toMap().value("name").toString(), QStringLiteral("qwen3.5_tokenizer.json"));
+        QCOMPARE(models.first().toMap().value("license").toString(), QStringLiteral("Apache-2.0"));
+        QVERIFY2(models.first().toMap().value("size").toString().contains("13 MB"), qPrintable(models.first().toMap().value("size").toString()));
+        const QString out2 = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (!out2.isEmpty()) {
+            QDir().mkpath(out2);
+            app.window->resize(1100, 700);
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(out2 + "/get-ready-moss-tokenizer.png"));
+        }
+        QFile::remove(file);
     }
 
     // FUGUE_SHOT_DIR=<dir> [FUGUE_SHOT_THEME=..] [FUGUE_SHOT_LOOK="preset=flat"]: the sheet in review and part-way through, at the two sizes.

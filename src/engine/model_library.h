@@ -63,6 +63,11 @@ struct MissingModel {
     qint64 size = -1;   // in bytes, as `requires` records it; -1 when it does not
 };
 
+// MOSS Image reads the official Qwen3.5 tokenizer.json, which no model file holds (#542, #544). It is a companion file of the model,
+// never a person's choice: the handle of the catalog's (`qwen3.5-tokenizer`, in the tokenizers folder) for the diffusion model file
+// `diffusionFile` when its shape says it needs it (`ModelShape::needsQwen35Tokenizer`), else an empty object.
+QJsonObject companionTokenizer(const QString &diffusionFile);
+
 class ModelLibrary {
 public:
     // How far resolve() may go to tell a handle's file.
@@ -140,7 +145,8 @@ public:
     // the handle has no hash (a model a provider serves), or its type is not a resource type here.
     Result<QString> resolve(const QJsonObject &handle, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 
-    // The models `document` names (Document::models()) that are not here, in its order. A check:
+    // The models `document` names (Document::models()) that are not here, in its order, then the companion files of its models
+    // (the Qwen3.5 tokenizer of a MOSS Image model, with the catalog's source and size). A check:
     // it reads no model file (Hashing::RememberedOnly).
     QList<MissingModel> missing(const Document &document, FileHashes &hashes) const;
     // The same for a list in Document::models()'s form (a template's).

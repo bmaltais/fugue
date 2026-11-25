@@ -405,6 +405,26 @@ private slots:
         QCOMPARE(over.error.code, QStringLiteral("node_failed"));
     }
 
+    // The engine's reason for a MOSS Image model given no tokenizer is about a command line (#544): Fugue says where the file goes.
+    void aHostWithoutTheTokenizerSaysSoInFuguesWords() {
+        Host host;
+        host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });
+        host.op("status", [](const QJsonObject &) {
+            return HttpResponse{200, json({{"state", "error"},
+                                           {"error", QJsonObject{{"code", "node_failed"},
+                                                                 {"message", "cannot load component from 'm.safetensors' (the engine said: MOSS-Image requires the official Qwen3.5 tokenizer, pass --tokenizer FILE)"}}}})};
+        });
+        const auto remote = provider(host);
+        const Result<QString> job = await<QString>([&](Reply<QString> r) { remote->submit(sample(newDir("outTok")), r); });
+        QVERIFY(job.ok());
+        const JobStatus failed = waitDone(*remote, *job);
+        QCOMPARE(failed.state, QStringLiteral("error"));
+        QCOMPARE(failed.error.code, QStringLiteral("model_missing"));
+        QVERIFY2(!failed.error.message.contains("--tokenizer"), qPrintable(failed.error.message));
+        QVERIFY2(failed.error.message.contains("paired host"), qPrintable(failed.error.message));
+        QVERIFY2(failed.error.hint.contains("tokenizers folder"), qPrintable(failed.error.hint));
+    }
+
     void modelMissingAndOutOfMemoryKeepTheirCodes() {
         Host host;
         host.op("submit", [](const QJsonObject &) { return failure(404, QStringLiteral("model_missing"), QStringLiteral("No m.gguf on gx10.")); });
