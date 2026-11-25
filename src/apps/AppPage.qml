@@ -270,6 +270,20 @@ Rectangle {
                         }
                     }
                 }
+                // Where the app runs, when not here (#395): a quiet line above Run, nothing for a local run.
+                Text {
+                    objectName: "appRunsOn"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: page.look.params.panelPad * page.u
+                    Layout.rightMargin: page.look.params.panelPad * page.u
+                    visible: page.appView.runsOn !== ""
+                    text: qsTr("Runs on %1").arg(page.appView.runsOn)
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: page.look.label
+                    font.pixelSize: page.look.labelSize
+                    Accessible.name: text
+                }
                 // Run: the screen's one primary control, a full-width pill in the accent.
                 Rectangle {
                     id: run

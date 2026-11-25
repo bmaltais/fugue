@@ -1514,6 +1514,19 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   `$XDG_STATE_HOME/fugue/model-hashes.json`, inside the job, stage `models`); no such file is `model_missing`,
   naming the folders searched, and the files found with another content. A string path outside the host's
   folders is refused: the host reads no other file.
+- **Where a node runs when its model is not here (#395).** A node that takes its model files in the job (the stage nodes) and whose
+  files are not in this machine's model folders (checked as 8.9 does, reading no file) asks `selectProvider` with
+  `Requirement::modelsElsewhere`: only an instance that does not share this machine's filesystem, a paired helper, can serve it, and
+  the first one that answers does (the user's order among them). A model that is here keeps the ordinary choice, so a paired helper
+  never takes over a run that can be local. When no paired helper answers, the node fails with `provider_unreachable`, "The model
+  files are not on this machine, and the paired host gx10 is not answering", with the host's reason, instead of the `model_missing` of
+  a machine that never had the files; with no paired helper configured at all nothing changes. A pin still wins. `describe` on a
+  paired host gives up after 10 s (a black-holed address is "Operation timed out" in 10 s, a name that does not resolve at once),
+  not after the 120 s transfer timeout. `run.json` records `"remote": true` on the node's provider entry; `fugue app run` says
+  "Ran on gx10." on stderr and has `"ran_on": ["gx10"]` in its JSON; `fugue app info` says "Runs on gx10" and has `"runs_on"` when
+  models are missing here and a paired helper is configured (the app is then runnable: `app run` does not stop at the missing models,
+  and the host answers `model_missing` itself when it does not have them either). Not the same as the omarchy hosts' models
+  (8.7), which are chosen by the model's name.
 - Memory: a job on a paired host is not on this machine's GPU lane and Fugue does not measure this machine's
   memory for it (9.2). The host reports its free memory in `describe` (`free_memory_bytes`), which is shown,
   not compared with a node's estimate; the host frees its own least recently used contexts before a load and
@@ -3262,6 +3275,14 @@ needs 2 models (6.0 GB)"), one row per item, **Download** for one model, **Downl
 store). Download all goes through the Get ready path: a plan of models only starts at once (the click is the yes, nothing to approve);
 a plan with a pack opens the sheet for the one yes, as does a pack row's button. One model downloads on the window's download line. The
 panel clears by itself when a refresh finds the app ready. Keys: Tab reaches Download all first, then each row's buttons.
+
+**Runs on a host (#395, epic #397).** When the app's models are not on this machine and the paired helper (8.7) answers, the form
+shows a quiet line above Run, "Runs on gx10" (`appRunsOn`; nothing for a local run), and the Needs panel stops asking to download the
+models the host has (its plan keeps the pack rows). The helper is asked once for the shown tab (`probePairedHelper`, `describe`,
+10 s at most), again when another tab is shown; one that does not answer leaves the form as it was, with its Needs rows. The run goes
+where the scheduler puts it (8.7, "Where a node runs when its model is not here"): a host that has gone, with no copy of the models
+here, ends the run with the error "The model files are not on this machine, and the paired host gx10 is not answering." in the form's
+error line and Details, like any run error; with a copy here the run is local. Choosing a host or a mesh peer is #203's, not this.
 
 ### 12.18 An app as its own application (#398, epic #397)
 

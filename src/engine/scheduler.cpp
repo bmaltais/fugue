@@ -342,6 +342,8 @@ public:
 private:
     // --- small helpers ---
 
+    std::optional<ModelLibrary> m_library; // read when a node first needs it (modelFilesElsewhere)
+
     QDateTime now() const { return utcNow(m_env.clock); }
 
     void later(std::function<void()> call) { QMetaObject::invokeMethod(this, std::move(call), Qt::QueuedConnection); }
@@ -360,6 +362,17 @@ private:
 
     // run.json while the run goes. Its end (the final status, `ended`, run.done) is
     // RunFolder::finish's, in finish() below.
+    // A paired helper did the node's work in this run: not a cache hit (nothing ran), not a module on this machine.
+    bool ranRemotely(const NodeRun &n) const {
+        if (!n.selection || n.selection->sharesFilesystem)
+            return false;
+        if (n.phase != Phase::Running && !m_outcome.ran.contains(n.path)) // a cache hit ran nowhere
+            return false;
+        return std::any_of(m_providers.cbegin(), m_providers.cend(), [&](const ProviderEntry &entry) {
+            return entry.instance.name == n.selection->instance && isPairedHelper(entry.instance);
+        });
+    }
+
     void writeState() {
         if (m_dry)
             return;
@@ -377,7 +390,8 @@ private:
             if (n.selection)
                 providers.insert(path, QJsonObject{{"instance", n.selection->instance},
                                                    {"engine", n.selection->engine},
-                                                   {"model", n.selection->model.handle}});
+                                                   {"model", n.selection->model.handle},
+                                                   {"remote", ranRemotely(n)}});
             QJsonObject node;
             const NodeState shown = n.phase == Phase::Running ? NodeState::Running : n.state;
             node.insert("state", nodeStateName(shown));
@@ -539,6 +553,9 @@ private:
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
             requirement.workflowPin.clear();
+            // A node that takes its model files in the job and whose files are not here can only run on a paired host (#395).
+            if (requirement.model.isEmpty() && modelFilesElsewhere(n))
+                requirement.modelsElsewhere = true;
             const Result<Selection> selection = selectProvider(m_candidates, requirement);
             if (!selection) {
                 if (!m_dry)
@@ -617,6 +634,47 @@ private:
             warning.node = n.path;
             m_outcome.errors.append(warning);
         }
+    }
+
+    // The node is given a model file that is known to be missing here: a handle with a sha256 of a resource type that is installed,
+    // which the model folders do not have (a check reads no file, as warnMissingModels). A handle a provider serves by name, or of
+    // a type no installed pack declares, is not this (#395). Only asked when a paired helper is configured: no folder walk otherwise.
+    bool modelFilesElsewhere(const NodeRun &n) {
+        const bool pairedHelper = std::any_of(m_candidates.cbegin(), m_candidates.cend(), [](const Candidate &candidate) {
+            return candidate.instance.enabled && isPairedHelper(candidate.instance);
+        });
+        if (!pairedHelper || !m_env.registry || !m_env.hashes)
+            return false;
+        for (auto it = n.inputs.begin(); it != n.inputs.end(); ++it) {
+            const InputSpec *spec = n.type->input(it.key());
+            if (!spec || it.value().isEmpty() || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
+                continue;
+            if (!m_library)
+                m_library.emplace(ModelLibrary::current(m_env.registry)); // one for the run
+            if (hashedHandleMissing(it.value().toJson()))
+                return true;
+        }
+        return false;
+    }
+
+    bool hashedHandleMissing(const QJsonValue &value) {
+        if (value.isArray()) {
+            for (const QJsonValue &item : value.toArray())
+                if (hashedHandleMissing(item))
+                    return true;
+            return false;
+        }
+        const QJsonObject object = value.toObject();
+        if (object.contains("resource") && object.contains("hash")) {
+            const std::optional<PortType> type = PortType::parse(object.value("resource").toString());
+            return type && m_env.registry->portKind(*type) == PortKind::Resource
+                   && object.value("hash").toString().startsWith(QLatin1String("sha256:"))
+                   && !m_library->resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+        }
+        for (const QJsonValue &part : object) // a derived model's parts, its LoRAs
+            if ((part.isObject() || part.isArray()) && hashedHandleMissing(part))
+                return true;
+        return false;
     }
 
     void warnMissingModels(const NodeRun &n) {

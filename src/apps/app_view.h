@@ -115,6 +115,9 @@ class AppView : public QObject {
     Q_PROPERTY(bool canClear READ canClear NOTIFY runChanged)
     // What the app still needs (a missing model or pack), listed while it is not ready (#469).
     Q_PROPERTY(fugue::NeedsModel *needs READ needs CONSTANT)
+    // The paired host the app runs on, when its models are not on this machine and that host answers (#395); empty when it runs here.
+    // The form says "Runs on <host>" near Run.
+    Q_PROPERTY(QString runsOn READ runsOn NOTIFY runsOnChanged)
 
 public:
     using Start = std::function<QString(const RunRequest &)>;
@@ -228,6 +231,15 @@ public:
     AppModels *modelStore() const { return m_models; }
     NeedsModel *needs() const { return m_needs; }
 
+    // Where the app runs (#395). `source` asks the paired helper whether it answers and calls back with its name (empty: it does not,
+    // or there is none; engine/providers.h probePairedHelper); the window gives it. askPlacement(true) is said by whoever knows the app's
+    // models are not here (the Needs plan has model rows): the source is asked once for the shown tab, and its answer is `runsOn`;
+    // askPlacement(false) clears it. A tab seen again asks again.
+    using PlacementSource = std::function<void(std::function<void(const QString &host)> done)>;
+    void setPlacementSource(PlacementSource source) { m_placement = std::move(source); }
+    void askPlacement(bool modelsAreElsewhere);
+    QString runsOn() const { return m_runsOn; }
+
     // Queues a run of the shown tab's workflow with the form's values in. Returns its id, empty when it cannot run
     // (`error` says why).
     Q_INVOKABLE QString run();
@@ -285,6 +297,7 @@ signals:
     void runChanged();
     void progressChanged();
     void liveChanged();
+    void runsOnChanged();
 
 private:
     // One run of the tab: what it was given and what it made (the shown results are the newest take's, kept as they come).
@@ -328,6 +341,7 @@ private:
     void liveFire();
     void scheduleLive(const QString &tab);
     void syncTake(TabState &state);
+    void setRunsOn(const QString &host);
     void buildFields();
     QVariantMap fieldFor(const InputBinding &input) const;
     // The key's input, in this form; null when none.
@@ -359,6 +373,9 @@ private:
     bool m_split = false;   // the window has several areas (setAreas)
     bool m_areaApp = false; // and the active one shows the App view
     QString m_problem;
+    PlacementSource m_placement;
+    QString m_runsOn;
+    QString m_placementTab; // the tab the source was asked for (or is being asked for); empty before any
     QVariantList m_fields;
     AppModels *m_models = nullptr;
     NeedsModel *m_needs = nullptr;

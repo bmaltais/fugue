@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/fake_provider.h"
 #include "engine/helper_provider.h"
 #include "engine/omarchy_provider.h"
 #include "engine/providers.h"
@@ -49,6 +50,18 @@ Requirement wants(const QString &capability) {
     Requirement requirement;
     requirement.capability = capability;
     return requirement;
+}
+
+// A local instance first, then the paired helper, as the default order has them.
+QList<Candidate> localAndHost(bool hostAnswers) {
+    Candidate local = candidate("This machine", {generate({model("any")})});
+    Candidate host = candidate("gx10", {generate({model("any")})});
+    host.instance.type = QStringLiteral("fugue-helper");
+    host.instance.address = QStringLiteral("http://gx10.example:8787");
+    host.description.value().sharesFilesystem = false;
+    if (!hostAnswers)
+        host.description = Result<Description>(makeError("provider_unreachable", "cannot reach it: timed out."));
+    return {local, host};
 }
 
 QStringList strings(const QJsonArray &array) {
@@ -442,6 +455,112 @@ private slots:
         QCOMPARE(chosen.errors().first().code, QStringLiteral("model_missing"));
         QCOMPARE(chosen.errors().first().severity, Error::Severity::Error);
         QCOMPARE(strings(chosen.errors().first().valid), QStringList{"z-image"});
+    }
+    // --- model files that are not on this machine (#395) ---
+
+    // The window's probe (#395): the paired helper by name, or empty when none is configured or it does not answer.
+    void theProbeNamesThePairedHelperThatAnswersAndNoOtherCase() {
+        ProviderInstance local;
+        local.name = "This machine";
+        local.type = "omarchy";
+        ProviderInstance loopback;
+        loopback.name = "local-helper";
+        loopback.type = "fugue-helper";
+        loopback.address = "http://127.0.0.1:8787";
+        ProviderInstance host;
+        host.name = "gx10";
+        host.type = "fugue-helper";
+        host.address = "http://gx10.example:8787";
+        ProviderInstance module;
+        module.name = "mod";
+        module.type = "comfyui";
+        module.address = "http://mod.example:1";
+        QCOMPARE(pairedHelperName({local, loopback, module}), QString()); // only a fugue-helper is a paired helper
+        QCOMPARE(pairedHelperName({local, loopback}), QString());
+        QCOMPARE(pairedHelperName({local, loopback, host}), QString("gx10"));
+        host.enabled = false;
+        QCOMPARE(pairedHelperName({local, loopback, host}), QString());
+        host.enabled = true;
+
+        const auto probe = [&](const QList<ProviderInstance> &instances, bool answers, QString &got) {
+            got = QStringLiteral("unset");
+            const auto make = [answers](const ProviderInstance &) {
+                auto fake = std::make_shared<FakeProvider>(Description{});
+                if (!answers)
+                    fake->setDescribeErrors({makeError("provider_unreachable", "timed out.")});
+                return Result<std::shared_ptr<Provider>>(std::static_pointer_cast<Provider>(fake));
+            };
+            probePairedHelper(instances, [&got](const QString &name) { got = name; }, make);
+            QTRY_VERIFY_WITH_TIMEOUT(got != QStringLiteral("unset"), 2000);
+        };
+        QString got;
+        probe({local}, true, got);
+        QCOMPARE(got, QString());
+        probe({local, host}, true, got);
+        QCOMPARE(got, QString("gx10"));
+        probe({local, host}, false, got);
+        QCOMPARE(got, QString());
+    }
+
+    void modelFilesElsewhereGoToThePairedHelper() {
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider(localAndHost(true), requirement);
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("gx10"));
+        QVERIFY(!chosen->sharesFilesystem);
+    }
+
+    void modelFilesHereKeepTheOrderEvenWithAPairedHelper() {
+        const auto chosen = selectProvider(localAndHost(true), wants("image.generate"));
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("This machine"));
+    }
+
+    void modelFilesElsewhereAndTheHelperGoneIsAClearError() {
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider(localAndHost(false), requirement);
+        QVERIFY(!chosen);
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("provider_unreachable"));
+        QVERIFY(chosen.errors().first().message.contains("gx10"));
+        QVERIFY(chosen.errors().first().message.contains("timed out"));
+    }
+
+    void aDownLoopbackModuleIsNotAPairedHostAndKeepsTheOldAnswer() {
+        Candidate module = candidate("module", {generate({model("any")})});
+        module.instance.type = QStringLiteral("some-module");
+        module.instance.address = QStringLiteral("http://127.0.0.1:9");
+        module.description = Result<Description>(makeError("provider_unreachable", "refused."));
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider({candidate("This machine", {generate({model("any")})}), module}, requirement);
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("This machine"));
+        // Nor does one that is up and says it does not share files count as a host.
+        Candidate up = candidate("module", {generate({model("any")})});
+        up.instance.type = QStringLiteral("some-module");
+        up.instance.address = QStringLiteral("http://127.0.0.1:9");
+        up.description.value().sharesFilesystem = false;
+        const auto again = selectProvider({candidate("This machine", {generate({model("any")})}), up}, requirement);
+        QCOMPARE(again->instance, QStringLiteral("This machine"));
+    }
+
+    void aHostThatDoesNotOfferTheCapabilityIsNotChosenForIt() {
+        QList<Candidate> candidates = localAndHost(true);
+        candidates[1].description.value().capabilities = {CapabilityOffer{QStringLiteral("text.generate"), {model("any")}}};
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        QCOMPARE(selectProvider(candidates, requirement)->instance, QStringLiteral("This machine"));
+    }
+
+    void modelFilesElsewhereWithNoPairedHelperKeepTheOldAnswer() {
+        const QList<Candidate> candidates{candidate("This machine", {generate({model("any")})})};
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("This machine"));
     }
 };
 

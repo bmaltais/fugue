@@ -66,6 +66,43 @@ private:
     int m_parts;
 };
 
+// A stage-like node (#395): it names no model to the provider (any ready one) and is given a model's files in the job.
+class StagedKernel : public FakeGenerateKernel {
+public:
+    Requirement requirement(const NodeType &type, const Values &inputs) const override {
+        Requirement requirement = FakeGenerateKernel::requirement(type, inputs);
+        requirement.model = {};
+        return requirement;
+    }
+};
+
+// A paired helper: a remote instance that does not share this machine's files.
+std::shared_ptr<FakeProvider> pairedHelper(World &world, const QString &name) {
+    const auto helper = world.provider(name, {"any"}, "http://gx10.example:8787");
+    world.providers.last().instance.type = QStringLiteral("fugue-helper");
+    Description description = imageDescription({"any"});
+    description.sharesFilesystem = false;
+    helper->setDescription(description);
+    return helper;
+}
+
+QJsonObject elsewhere() {
+    return QJsonObject{{"resource", "fugue/lora"}, {"hash", sha256(QByteArray("only-on-the-host"))}, {"name", "only-on-the-host.safetensors"}};
+}
+
+QJsonObject stagedGraph(const QJsonObject &modelHandle) {
+    return QJsonObject{{"g", node("fugue/staged", {{"prompt", "a cat"}, {"model", modelHandle}})},
+                       {"s", node("fugue/save", {{"value", from("g.text")}})}};
+}
+
+void addStagedType(World &world) {
+    world.type("fugue/staged",
+               "'inputs': [{'name': 'prompt', 'type': 'text'}, {'name': 'model', 'type': 'fugue/lora', 'optional': true}],"
+               "'outputs': [{'name': 'text', 'type': 'text'}, {'name': 'model', 'type': 'text'}]",
+               nullptr);
+    world.kernels.add("fugue/staged", std::make_shared<StagedKernel>());
+}
+
 // A provider whose one job reports a preview frame and then finishes.
 class PreviewingProvider : public Provider {
 public:
@@ -801,6 +838,100 @@ private slots:
         check = checkGraph(world.graph(nodes), world.environment());
         QCOMPARE(check.warnings.size(), 1);
         QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));
+    }
+
+    // --- model files that are not on this machine (#395) ---
+
+    void anAppWhoseModelIsOnlyOnThePairedHelperRunsThereAndRunJsonSaysSo() {
+        World world;
+        addStagedType(world);
+        const auto local = world.provider("This machine", {"any"});
+        const auto helper = pairedHelper(world, "gx10");
+        const RunFolder folder = world.folder();
+        Run run(world.graph(stagedGraph(elsewhere())), folder, world.environment());
+        run.start();
+        QTRY_COMPARE(helper->jobs().size(), 1);
+        helper->finish(helper->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
+        QCOMPARE(local->jobs().size(), 0);
+        const QJsonObject served = folder.state().value("providers").toObject().value("g").toObject();
+        QCOMPARE(served.value("instance").toString(), QStringLiteral("gx10"));
+        QVERIFY(served.value("remote").toBool());
+    }
+
+    void aGoneHelperWithALocalCopyRunsHere() {
+        World world;
+        addStagedType(world);
+        const auto local = world.provider("This machine", {"any"});
+        const auto helper = pairedHelper(world, "gx10");
+        helper->setDescribeErrors({makeError("provider_unreachable", "cannot reach it: timed out.")});
+        const QString path = dataDir() + "/models/lora/staged-here.safetensors";
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("staged-here");
+        file.close();
+        const QJsonObject here{{"resource", "fugue/lora"}, {"hash", sha256Of("staged-here")}, {"name", "staged-here.safetensors"}};
+        Run run(world.graph(stagedGraph(here)), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(local->jobs().size(), 1);
+        local->finish(local->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(helper->jobs().size(), 0);
+        QVERIFY(QFile::remove(path));
+    }
+
+    // An input the provider serves by name (no sha256) is not a model file missing here: the run stays where the order puts it.
+    void aNameOnlyInputDoesNotSendTheNodeToThePairedHelper() {
+        World world;
+        addStagedType(world);
+        const auto local = world.provider("This machine", {"any"});
+        const auto helper = pairedHelper(world, "gx10");
+        const QJsonObject byName{{"resource", "fugue/lora"}, {"name", "served-by-name"}};
+        Run run(world.graph(stagedGraph(byName)), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(local->jobs().size(), 1);
+        local->finish(local->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(helper->jobs().size(), 0);
+    }
+
+    // A cached node did not run anywhere: run.json does not say it ran remotely.
+    void aCacheHitIsNotRecordedAsRemote() {
+        World world;
+        addStagedType(world);
+        const auto helper = pairedHelper(world, "gx10");
+        const CompiledGraph graph = world.graph(stagedGraph(elsewhere()));
+        {
+            Run run(graph, world.folder(), world.environment());
+            run.start();
+            QTRY_COMPARE(helper->jobs().size(), 1);
+            helper->finish(helper->jobs().first(), picture);
+            QTRY_VERIFY(run.isFinished());
+        }
+        const RunFolder folder = world.folder();
+        Run again(graph, folder, world.environment());
+        again.start();
+        QTRY_VERIFY(again.isFinished());
+        QCOMPARE(helper->jobs().size(), 1);
+        QVERIFY(!folder.state().value("providers").toObject().value("g").toObject().value("remote").toBool());
+    }
+
+    void aGoneHelperAndNoLocalCopyIsAClearErrorNotAHang() {
+        World world;
+        addStagedType(world);
+        world.provider("This machine", {"any"});
+        const auto helper = pairedHelper(world, "gx10");
+        helper->setDescribeErrors({makeError("provider_unreachable", "cannot reach it: timed out.")});
+        Run run(world.graph(stagedGraph(elsewhere())), world.folder(), world.environment());
+        run.start();
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Failed);
+        const Error error = run.outcome().errors.first();
+        QCOMPARE(error.code, QStringLiteral("provider_unreachable"));
+        QVERIFY(error.message.contains("gx10"));
+        QCOMPARE(error.node, QStringLiteral("g"));
     }
 
 private:
