@@ -55,9 +55,12 @@ Item {
                 tint += 0.05
             return {tint: tint, base: 0}
         }
+        // The base and the tint are blended on the gamma-encoded colour, as the scene graph does: the luminance under white ink is
+        // the picture darkened by `base`, then lightened by `tint`, both mixed in sRGB-ish space (power 2.2), not in linear light.
         const tint = Math.min(0.5, look.kitFrost.a * strength)
+        const under = base => Math.pow(Math.pow(lum, 1 / 2.2) * (1 - base) * (1 - tint) + tint, 2.2)
         let base = blurred ? 0.22 : 0.40
-        while (base < 0.8 && contrast(1, (lum * (1 - base)) * (1 - tint) + tint) < 4.5)
+        while (base < 0.8 && contrast(1, under(base)) < 4.5)
             base += 0.05
         return {tint: tint, base: base}
     }
@@ -67,8 +70,10 @@ Item {
 
     // Measuring: a grab of the backdrop at 64 px, the mean taken over the rectangle behind this control. Where the renderer has
     // source textures the grab is taken from a hidden probe of the backdrop (the hero hides its own picture under a shader).
+    // The window is asked through the attached `Window.window`: an Item has no `window` property in QML, so `backdrop.window` was
+    // always undefined, the measuring never ran and every glass stayed at its unmeasured, nearly black base.
     function measure() {
-        if (frozen || !backdrop || !backdrop.window || backdrop.width <= 0 || backdrop.height <= 0 || width <= 0)
+        if (frozen || !backdrop || !backdrop.Window.window || backdrop.width <= 0 || backdrop.height <= 0 || width <= 0)
             return
         const at = frost.mapToItem(backdrop, 0, 0, width, height)
         const nx = at.x / backdrop.width, ny = at.y / backdrop.height, nw = at.width / backdrop.width, nh = at.height / backdrop.height

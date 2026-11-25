@@ -88,6 +88,12 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-25 Frosted chips over a hero: real glass, not a dark disc (owner's screenshot)
+
+- Control: `src/kit/KitFrost.qml` (the glass of every `KitChip` with `frosted`, the hero's status pill and close button), seen on the App view's `appLauncherToggle`, `appKeep`, `appHideInputs`, `appOpenInFugue`.
+- Old: the chips came out near-black opaque discs. `measure()` asked `backdrop.window`, which an Item does not have in QML, so the picture under the glass was never measured and the glass kept its unmeasured plan; that plan's dark base saturated at 80% black because the contrast estimate mixed the white tint in linear light (it can never get white ink under 4.5:1 that way).
+- New: the window is asked through `Window.window`, so the measuring runs; the base and tint are mixed on the gamma-encoded colour, as the scene graph blends them, so over a dark hero the base stays a light smoke and the translucent tint and blur show. Frost at 0 is unchanged: the plain opaque chip. Size and press targets unchanged (7u, above the 6u floor); keys, focus ring and tooltips unchanged.
+
 ### 2026-11-25 App view: the inputs panel resizes and slides shut; the toolbar at the card's edge; the focus ring for keys only; the project chip (owner's look at the night build)
 
 - Control: `src/apps/AppPage.qml`: `appPanelHandle` (the area border's `AreaHandle`, 24px across, centred on the gap between the stage and the panel, full height), `appHideInputs` (a frosted round chip in the hero's corner, chevron toward the window's edge), the shut strip `appInputsStrip` (9u wide: `appShowInputs`, a round chip at the top, and `appStripRun`, a round primary chip at the foot); `view.toggle-app-inputs` (Window > App inputs, after App view; registry id `app-inputs`, kept between runs; focus mode hides it like any panel); the dragged width in `side-panels.json` `appWidth` (0 automatic). `src/apps/AppStage.qml`: `appProgressLine` now lies along the top edge of the result well instead of a row of its own above the toolbar. `src/kit/KitSegmented.qml`, `KitSlider.qml`: the accent ring only when the focus did not come from a press; `focusOnPress: false` on the window bar's App | Graph. `src/menu/MenuBar.qml` `projectChip`: a pill `KitChip`, no accent, reached by Tab, made only inside a project.
