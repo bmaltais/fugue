@@ -17,7 +17,7 @@ ListView {
     required property CanvasLook look
     readonly property real size: 14 * look.unit
 
-    implicitHeight: size + look.unit
+    implicitHeight: size + look.unit + (ScrollBar.horizontal as FugueScrollBar).inset
     orientation: ListView.Horizontal
     spacing: look.unit
     clip: true
@@ -38,18 +38,21 @@ ListView {
             event.accepted = true
         }
     }
-    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+    ScrollBar.horizontal: FugueScrollBar { look: strip.look }
 
     delegate: Rectangle {
         id: take
         required property var modelData
         required property int index
         readonly property bool failed: modelData.status === "failed"
-        width: strip.size
+        // The picture's own shape at the strip's height (owner, 2026-11-25: takes were all square crops), kept between half a square
+        // and two and a half; a square until the picture has loaded, and for a take with no picture.
+        readonly property real aspect: thumb.status === Image.Ready && thumb.implicitHeight > 0 ? thumb.implicitWidth / thumb.implicitHeight : 1
+        width: Math.round(strip.size * Math.max(0.5, Math.min(2.5, aspect)))
         height: strip.size
         radius: strip.look.params.cornerWell * strip.look.unit
         color: strip.look.kitChip
-        border.width: modelData.shown || (strip.activeFocus && ListView.isCurrentItem) ? 2 : 0
+        border.width: modelData.shown || (strip.activeFocus && FocusInput.keyboard && ListView.isCurrentItem) ? 2 : 0
         border.color: strip.look.accent
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Take %1").arg(strip.appView.takes.length - index)
@@ -59,10 +62,11 @@ ListView {
         ToolTip.delay: strip.look.tooltipDelay
         ToolTip.text: modelData.line
         Image {
+            id: thumb
             anchors { fill: parent; margins: 2 }
             visible: take.modelData.url !== ""
             source: take.modelData.url
-            fillMode: Image.PreserveAspectCrop
+            fillMode: Image.PreserveAspectFit
             asynchronous: true
             sourceSize.height: 128
             opacity: take.modelData.pending ? 0.5 : 1

@@ -29,7 +29,7 @@ Rectangle {
     height: 7 * look.unit
     radius: look.smallCorner
     color: look.well
-    border.width: activeFocus ? 2 : 0
+    border.width: activeFocus && FocusInput.keyboard ? 2 : 0
     border.color: look.accent
     activeFocusOnTab: true
     Accessible.role: Accessible.Slider

@@ -4,7 +4,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
 import Fugue
-import "../canvas"
 import "../canvas/widgets"
 import "../kit"
 import "../menu"
@@ -162,8 +161,8 @@ ColumnLayout {
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
-                strokeWidth: well.activeFocus || dropArea.containsDrag ? 2 : 1
-                strokeColor: well.activeFocus || dropArea.containsDrag ? root.look.accent : root.look.hairlineStrong
+                strokeWidth: well.activeFocus && FocusInput.keyboard || dropArea.containsDrag ? 2 : 1
+                strokeColor: well.activeFocus && FocusInput.keyboard || dropArea.containsDrag ? root.look.accent : root.look.hairlineStrong
                 strokeStyle: ShapePath.DashLine
                 dashPattern: [4, 3]
                 fillColor: "transparent"

@@ -369,6 +369,37 @@ private slots:
         QTRY_VERIFY(find(app.window, "appResultViewer")); // the picture in the stage
         QTRY_COMPARE(find(app.window, "appTakes")->property("count").toInt(), 1); // and its take in the strip
         QTRY_VERIFY(find(app.window, "appSizeLine")->property("text").toString().startsWith(QStringLiteral("8 × 8 · "))); // fitted (the percentage is the stage's size)
+        // Compare with B placed inside A (the block's `compare`): B's picture sits at its rect of A's frame, and without one fills it.
+        {
+            QQuickItem *viewer = find(app.window, "appResultViewer");
+            QVERIFY(viewer);
+            viewer->setProperty("mode", "slider");
+            QQuickItem *layerB = find(app.window, "layerB");
+            QVERIFY(layerB && !layerB->childItems().isEmpty());
+            QQuickItem *picture = layerB->childItems().first();
+            QTRY_COMPARE(picture->width(), 8 * viewer->property("imageScale").toReal()); // unset: A's whole frame
+            viewer->setProperty("placeB", QRectF(0, 2, 8, 4));
+            const qreal scale = viewer->property("imageScale").toReal();
+            QTRY_COMPARE(picture->height(), 4 * scale);
+            QCOMPARE(picture->width(), 8 * scale);
+            QCOMPARE(picture->y(), viewer->property("imageY").toReal() + 2 * scale);
+            QCOMPARE(picture->x(), viewer->property("imageX").toReal());
+            // 100% is of the larger picture: B placed at 8 x 4 over a 16 x 8 file is denser than A (2 file pixels per A pixel).
+            viewer->setProperty("sizeB", QSizeF(16, 8));
+            QCOMPARE(viewer->property("bLarger").toBool(), true);
+            QMetaObject::invokeMethod(viewer, "actualSize");
+            QCOMPARE(viewer->property("actualB").toBool(), true);
+            QCOMPARE(viewer->property("imageScale").toReal(), 2.0);
+            viewer->setProperty("sizeB", QSizeF(4, 2)); // sparser than A: A's pixels are the 100%
+            QMetaObject::invokeMethod(viewer, "fit");
+            QMetaObject::invokeMethod(viewer, "actualSize");
+            QCOMPARE(viewer->property("actualB").toBool(), false);
+            QCOMPARE(viewer->property("imageScale").toReal(), 1.0);
+            QMetaObject::invokeMethod(viewer, "fit");
+            viewer->setProperty("sizeB", QSizeF(0, 0));
+            viewer->setProperty("placeB", QRectF());
+            viewer->setProperty("mode", "single");
+        }
         if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) { // FUGUE_SHOT_DIR=<dir>: a picture of the view
             QTest::qWait(300);
             test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/app-view.png");

@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Fugue
-import "../canvas"
 import "../canvas/widgets"
 import "../kit"
 

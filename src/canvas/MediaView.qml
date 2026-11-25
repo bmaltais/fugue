@@ -170,7 +170,7 @@ Item {
                 anchors.fill: parent
                 radius: view.look.smallCorner
                 color: "transparent"
-                border.width: button.activeFocus ? 2 : 0
+                border.width: button.activeFocus && FocusInput.keyboard ? 2 : 0
                 border.color: view.look.accent
             }
             activeFocusOnTab: enabled

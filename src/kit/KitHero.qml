@@ -173,7 +173,7 @@ Item {
         radius: height / 2
         color: "transparent"
         activeFocusOnTab: hero.statusTappable
-        border.width: activeFocus ? 2 : 0
+        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
         border.color: hero.look.accent
         Accessible.role: hero.statusTappable ? Accessible.Button : Accessible.StaticText
         Accessible.name: hero.status
@@ -229,7 +229,7 @@ Item {
         radius: width / 2
         color: "transparent"
         activeFocusOnTab: true
-        border.width: activeFocus ? 2 : 0
+        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
         border.color: hero.look.accent
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Close")

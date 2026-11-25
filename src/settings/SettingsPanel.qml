@@ -23,6 +23,8 @@ Popup {
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     property string page: "general" // a page id (pages)
+    // Another page starts at its top, not where the last one was scrolled to (owner, 2026-11-25).
+    onPageChanged: scroller.contentY = 0
     // Why the last change was refused, until the next change.
     property string error: ""
 
@@ -145,7 +147,7 @@ Popup {
                         radius: Math.min(panel.look.params.cornerChip * panel.u, 0.45 * height)
                         // The chosen page takes the window's tone, as a chip that is on does (Templates' categories).
                         color: panel.page === tab.pageId ? Qt.alpha(panel.look.tone(card.tone).glass, 0.34) : tabHover.hovered ? panel.look.kitChipHover : "transparent"
-                        border.width: activeFocus ? 2 : 0
+                        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
                         border.color: panel.look.accent
                         activeFocusOnTab: true
                         Accessible.role: Accessible.PageTab

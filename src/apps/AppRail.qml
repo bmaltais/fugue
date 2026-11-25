@@ -42,7 +42,7 @@ KitPanel {
             anchors.fill: parent
             radius: Math.min(rail.look.params.cornerChip * rail.look.unit, 0.45 * height)
             color: tap.pressed ? rail.look.menuRow : hover.hovered ? rail.look.kitChipHover : rail.look.kitChip
-            border.width: item.activeFocus ? 2 : 0
+            border.width: item.activeFocus && FocusInput.keyboard ? 2 : 0
             border.color: rail.look.accent
             KitRaise { look: rail.look; radius: parent.radius }
         }

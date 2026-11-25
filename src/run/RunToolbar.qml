@@ -116,7 +116,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "⋮⋮"
-                    color: grab.activeFocus ? bar.look.accent : bar.look.label
+                    color: grab.activeFocus && FocusInput.keyboard ? bar.look.accent : bar.look.label
                     font.pixelSize: 14
                 }
             }

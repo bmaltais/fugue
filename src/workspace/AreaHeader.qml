@@ -9,8 +9,9 @@ import "../canvas/widgets"
 // the view-type menu at the start (the view's glyph, its name and a chevron; Blender's editor-type menu), then, at
 // the end, split side by side, split top and bottom and, a chunk of its own, close. Between them, the view's own menus
 // (#262, as Blender's editor headers: the Graph's View, Select, Add and Node, the Canvas view's Canvas, Edit, Select,
-// Layer and View; folded into one Menu button where they do not fit; menus.h `viewMenus` says which a view type has). The window's global menus are the window bar's. The active area's bar has an
-// accent line along its foot and its name in the text color; the others are quieter. AreaNode.qml makes one per
+// Layer and View; folded into one Menu button where they do not fit; menus.h `viewMenus` says which a view type has). The window's global menus are the window bar's. The active area's bar is
+// tinted a little more (Blender's brighter active header), its glyph in the accent and its name in the text color; the others are
+// quieter. Its foot is a hairline for every area: an accent line there read as a drag line (owner, 2026-11-25). AreaNode.qml makes one per
 // area (none while the window has one area: the default window has no header). It reads App.workspace and runs the
 // area commands of the area it heads, which it makes the active one first.
 Rectangle {
@@ -33,7 +34,7 @@ Rectangle {
     // (docs/canvas-look.md 20.21); with the Colour slider at 0 it is the plain popup fill.
     readonly property string tone: viewType === "graph" || viewType === "app" ? "dusk" : viewType === "canvas" ? "sea" : "slate"
     readonly property color toneColor: look.tone(tone).blobs[0]
-    color: Qt.tint(look.popup, Qt.alpha(toneColor, look.params.panelTint * (active ? 1.5 : 1.0)))
+    color: Qt.tint(look.popup, Qt.alpha(toneColor, look.params.panelTint * (active ? 2.0 : 1.0)))
     Accessible.role: Accessible.ToolBar
     Accessible.name: qsTr("%1 area").arg(App.workspace ? App.workspace.views.name(viewType) : viewType)
 
@@ -91,7 +92,7 @@ Rectangle {
         height: 6 * header.u
         radius: header.look.smallCorner
         color: typeTap.pressed ? header.look.selectedRow : typeHover.hovered ? header.look.menuRow : "transparent"
-        border.width: activeFocus ? 2 : 0
+        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
         border.color: header.look.accent
         activeFocusOnTab: true
         Accessible.role: Accessible.ButtonMenu
@@ -188,10 +189,10 @@ Rectangle {
         }
     }
 
-    // The foot: a hairline, the accent on the active area.
+    // The foot: a hairline on every area (the active one is told by its tint, glyph and name).
     Rectangle {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: header.active ? 2 : 1
-        color: header.active ? header.look.accent : header.look.hairline
+        height: 1
+        color: header.look.hairline
     }
 }

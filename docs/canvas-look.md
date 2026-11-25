@@ -684,7 +684,7 @@ labels and batch with them; an SVG `Image` would need a separate texture per col
 
 ### 16.1 Scroll bars
 
-One component, `src/canvas/FugueScrollBar.qml`, attached as `ScrollBar.vertical` or `.horizontal` on every list, grid, Flickable and ScrollView that can overflow (node library, workflows panel, media grid, details and filmstrip, node search, templates, settings pages, the command help, the run queue, the group editor, the widget menus, the multiline editor, command menus). 10px wide gutter over the view's edge. It lies over the view, but content never sits under it: the bar's `inset` is its breadth while it shows (else 0) and every host pads its content by `view.ScrollBar.vertical.inset` (the bottom edge for a horizontal bar). The templates grid and the media grid keep the gutter free always, so cards do not reflow as the bar appears. A panel's width grip (8px on its outer edge) is not over the content either: the panel's body stops short of it, or the grip would take the presses meant for the bar's thumb, track `well` at 60%, a 6px round thumb in `label` at 45% (70% hovered, 90% pressed). It shows while the content is longer than the view, whether or not the pointer is near, and hides when it fits. The thumb is never shorter than 32px, so a list of hundreds of rows keeps one to grab; a press on the track outside the thumb moves one page toward it. The bar also gives its view the mouse wheel (a Mouse or TouchPad device; Wayland reports an ordinary mouse as a TouchPad with no scroll phase, which Qt's own handling of a Flickable and a bare `WheelHandler` do not hear): a notch moves 60px, a touchpad its own pixels.
+One component, `src/canvas/FugueScrollBar.qml`, attached as `ScrollBar.vertical` or `.horizontal` on every list, grid, Flickable and ScrollView that can overflow (node library, workflows panel, the export file list, the paint layers list, the App form, library, builder preview and takes strip, media grid, details and filmstrip, node search, templates, settings pages, the command help, the run queue, the group editor, the widget menus, the multiline editor, command menus). a gutter 2.5u wide along the view's edge, the whole of it the hit area (owner, 2026-11-25: the old flat grey track covered the rows' values). At rest there is no track; while the gutter is hovered or pressed the track shows as `kitTrack` (recessed, like a slider rail), rounded. The thumb is a round pill in `label`, at least 8u long, 1u wide at rest and 1.5u hovered or pressed, at alpha `thumbAlpha` 0.35 (`thumbAlphaLight` 0.45 on a light theme) at rest, `thumbHover` 0.7 and `thumbPress` 0.9; width and alpha animate over `durColor` (0 under reduced motion). It shows while the content is longer than the view, whether or not the pointer is near (no auto-hide), and hides when it fits. Nothing lies under it: a host whose padding on the bar's side is at least 2.5u puts the bar inside that padding (the App panel's form and the library: the ScrollView takes no margin on that side and pads by `panelPad`, so the content does not shrink and `inset` reads 0); any other host pads its content by the bar's `inset` (its breadth while it shows, else 0; the bottom edge for a horizontal bar). The templates grid and the media grid keep the gutter free always, so cards do not reflow as the bar appears. A panel's width grip (8px on its outer edge) is not over the content either: the panel's body stops short of it, or the grip would take the presses meant for the bar's thumb. In right-to-left the bar mirrors to the left edge with the padding. The bar takes no focus. A press on the track outside the thumb moves one page toward it. The bar also gives its view the mouse wheel (a Mouse or TouchPad device; Wayland reports an ordinary mouse as a TouchPad with no scroll phase, which Qt's own handling of a Flickable and a bare `WheelHandler` do not hear): a notch moves 60px, a touchpad its own pixels.
 
 ### 16.1b Place badges
 
@@ -776,7 +776,7 @@ Status per element: **Built**, **Partly**, **To build**, read from `src/kit/` at
    App view's rail, stage and panel, the run queue) is a rounded card (4.5u corner, 1px hairline) with a 2u gap of window
    background between spaces; groups inside are 3u corners; dialogs and popovers use the panel corner.
 6. **Keyboard rules** (every dialog, sheet and popover as it moves onto the kit): Tab and Shift+Tab walk every control in reading
-   order (mirrored in right-to-left) with the kit's 2px accent focus ring; opening focuses the first useful control (the field
+   order (mirrored in right-to-left) with the kit's 2px accent focus ring (keyboard focus only: after a mouse press, or for the focus a dialog gives on opening from a click, no ring; a text field never draws it, its edge lifts to 1px of `label` at 45% instead); opening focuses the first useful control (the field
    to type in, or the default button); Enter runs the default action; Escape cancels or closes and returns focus to what
    opened it; arrows move inside lists, grids (Apps shelf, Templates, picture library) and segmented controls; Space flips a
    toggle and presses a chip; no control is reachable only by pointer. One window test per dialog drives it by keys alone
@@ -803,6 +803,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Picture, still or moving | `KitPicture`, `KitVideo` | Built (20.19); `KitHero` plays a clip (`video`, `videoActive`) |
 | Apps shelf (page, dialog), Templates window | `AppShelfView`, `AppCard`, `TemplatesDialog` | Built (20.19): Dusk and Sea panels, hero, search, cards, tinted chips |
 | Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | Built (20.14, #466) |
+| Scroll bar | `src/canvas/FugueScrollBar.qml` | Built (16.1): 2.5u gutter, no track at rest, `kitTrack` while hovered, a 1u to 1.5u `label` pill; params `thumbAlpha`, `thumbAlphaLight`, `thumbHover`, `thumbPress` |
 | App icon, wordmark | `share/icons`, `share/brand`, `fugueMark` | Built |
 | Settings window, Get ready sheet, Needs panel | `SettingsPanel`, `SettingsParts`, `GetReadySheet`, `NeedsPanel` | Built (20.20); Panel colour is the Colour slider, Node style a chooser in Theme > Look |
 
@@ -823,7 +824,7 @@ as in section 6. Existing tokens keep their derivations (`kit-group`, `kit-separ
 | `kit-glass-shadow` | inset 0 1px 2px black 40% | black 15% | the same track's inner shadow |
 | `kit-knob-glass` | white 62% to 34% top to bottom, 1px white 55%, inset top white 75%, drop 0 1px 3px black 38% | same | the toggle's raised translucent knob (a glass, so it needs its own blur: 6px, saturate 140%) |
 | `kit-tone-<name>` | see 20.8 | the same colours | the tone's glass colour, `rgb`, with the alphas of 20.8 |
-| `kit-ring` | accent, 2px | same | the focus ring (the boards draw it as a border plus a 3px accent glow at 25 to 30%; the kit keeps the 2px ring, which survives the software renderer) |
+| `kit-ring` | accent, 2px | same | the focus ring, for keyboard focus only (`FocusInput.keyboard`; never on a text field) (the boards draw it as a border plus a 3px accent glow at 25 to 30%; the kit keeps the 2px ring, which survives the software renderer) |
 
 `derive.py` gets a `kit_tokens()` block that prints them (`--theme NAME` shows them; the contrast table gains the rows: white ink on
 `kit-hero` shade over the pale picture, ink on a tinted panel, `kit-knob-glass` on the on-track, the on-track against the group).
@@ -880,7 +881,7 @@ into `CanvasLook` (`look.tone(name)`) so panels, toggles and `derive.py` read on
 | `KitSection` | bold 13px title above a group, 5u above it, 1.5u to its group |
 | `KitGroup` | radius 3u (12px); Tinted: `kit-group-glass` fill and its border; Plain: opaque `kit-group`; no gap between rows |
 | `KitRow` | label (13px), dim hint (11px, `label` color), trailing controls; at least 10u; hairline above unless first; `target` makes the row the hit area for a switch |
-| `KitWell` (slightly recessed) | radius 2u (8px; 10px for a multi-line prompt); fill `kit-well` (a shade darker than the group: black at 12% dark, 3% light); border 1px nearly the fill (`kit-well` darkened 6% dark, 3% light), its bottom edge white 4.5% (light 60%); inset 0 1px 1.5px black 22% (light 8%); not translucent; focus: the 2px accent ring |
+| `KitWell` (slightly recessed) | radius 2u (8px; 10px for a multi-line prompt); fill `kit-well` (a shade darker than the group: black at 12% dark, 3% light); border 1px nearly the fill (`kit-well` darkened 6% dark, 3% light), its bottom edge white 4.5% (light 60%); inset 0 1px 1.5px black 22% (light 8%); not translucent; focus: the edge lifts to 1px of `label` at 45%, same width, no accent ring (the caret shows where typing goes) |
 | `KitWell` over a picture (smoked) | `backdrop` set, Frost above 0: blur 10px and saturate 120%; fill black 18% + 30% x s over a dark patch, rgb(20, 20, 26) 32% + 40% x s over a pale one (`s` = 0.5 at the default Frost 0.6, scaling with it), raised in 5% steps until white text reads 4.5:1; border 1px black 18%, bottom edge white 14%; inset 0 1px 1.5px black 30%; text white; a label beside it takes `labelInk` (dark over a pale patch, 2px black 50% shadow over a dark one) |
 | Picture well | a `KitWell` with `dashed` (its own dashed edge, `hairlineStrong`), radius 3u |
 
@@ -892,6 +893,9 @@ numbers win (20.15). A field on a plain panel is never glass. Frost 0 or no back
 | Element | Recipe |
 | --- | --- |
 | Raised chip (plain panel) | `kit-chip` fill (group mixed 10% toward fg), hover `kit-chip-hover` (17%), pressed `menuRow`, 100 ms color; `KitRaise`: top edge white 7% (light 60%), 1px soft shadow black 28% (light 10%); 7u tall, radius 2.5u or a pill; `current` uses `selectedRow`, never the accent |
+| Border handle (`AreaHandle`) | hit area the gap and 1u into each card, at least 4u, full length, split cursor at once; no line along the border (panes keep their 1px `hairline` divider); a grip pill 1u x 8u centred in the gap in `label` at 35% (light 45%), 70% under the pointer or dragged, over `durColor`; Tab's focus (not a press's) makes it the accent and 12u long; no grip on a border shorter than 24u (owner, 2026-11-25: "no white drag bar", "a visual cue when such a space can be dragged") |
+| Row stacking (`KitRow`) | when the label (at least 16u of it, or all of a shorter one) and the controls do not fit side by side, the label goes above and the controls under it at the start, 1.5u apart; margins stay the row's own (owner, 2026-11-25: Run again sat off centre in a narrow panel) |
+| Slider snap (`KitSlider.snap`) | a drag within 1.5u of a multiple of `snap` lands on it; keys and a typed value are exact; the App view gives whole ranges of 512 or more a snap of 64, of 128 or more 16 |
 | Chip padding | content 2.5u from each end (a pill's too: its round end needs it), 1.75u between a glyph and its text; a glyph 14px; this holds for every raised chip, button and dropdown, so their contents line up down a panel |
 | Dropdown (`KitDropdown`) | a raised chip (it is clicked; a value picked from a menu is not typed, so it is not a well): the chosen text at the start in `text` (`label` for a prompt such as "Choose a picture"), elided, a 14px `chevron-down` in `label` at the end, 1u between them, both 2.5u from the ends; `menuRow` fill while its menu is open; the App view's picture, choice and model inputs (owner, 2026-11-25) |
 | Frosted chip (over a picture, Frost above 0) | blur `4 + 16 f` px, saturate `100 + 50 f` %; tint white `0.06 + 0.20 f`; edge 1px white `0.12 + 0.30 f`; inset top shine white `0.10 + 0.30 f`; white ink with a 0 1px 2px black 45% text shadow (`f` is the Frost setting, 0.6 by default) |
@@ -1063,6 +1067,10 @@ range is said once in the log and ignored or clamped; the sliders apply on top.
 | `durColor` | 100 | 0 to 1000 | - | a colour change in ms |
 | `durToggle` | 160 | 0 to 1000 | - | a toggle's knob and track in ms |
 | `durThumb` | 180 | 0 to 1000 | - | a chooser's thumb in ms |
+| `thumbAlpha` | 0.35 | 0 to 1 | - | a scroll bar thumb's alpha at rest (16.1) |
+| `thumbAlphaLight` | 0.45 | 0 to 1 | - | the same on a light theme |
+| `thumbHover` | 0.7 | 0 to 1 | - | the thumb's alpha while hovered |
+| `thumbPress` | 0.9 | 0 to 1 | - | the thumb's alpha while pressed |
 | `titleFont` | `serif` | `serif` \| `ui` | - | the header's title: the serif (Fraunces) or the interface font |
 | `heroStyle` | `picture` | `picture` \| `tone` \| `plain` | - | a header: its picture (else the tone), the tone's blend always, or a plain fill |
 | `chipShape` | `pill` | `pill` \| `rounded` | - | a chip: fully round or rounded like a field |

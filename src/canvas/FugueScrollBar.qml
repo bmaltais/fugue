@@ -6,7 +6,8 @@ import Fugue
 // `ScrollBar.vertical: FugueScrollBar { look: ... }` (or `.horizontal`) on a ListView, GridView,
 // Flickable or ScrollView. It shows while the content is longer than the view, always (not only
 // on hover), and hides when it fits. It lies over the view's edge, so every host keeps its
-// content clear of it by `inset` (the bar's breadth while it shows, else 0). The thumb never
+// content clear of it by `inset` (the bar's breadth while it shows, else 0), unless the host's
+// own padding on that side holds the bar. The thumb never
 // gets shorter than `minThumb`, so a list of hundreds of rows keeps a thumb to grab, and a press
 // on the track outside the thumb moves one page toward it. It also gives its view the mouse wheel
 // (below): Qt's own wheel handling of a Flickable does not hear the wheel as the owner's Wayland
@@ -17,22 +18,36 @@ ScrollBar {
     objectName: "fugueScrollBar"
     required property CanvasLook look // App.theme.look
 
-    // The shortest thumb, in px, along the bar.
-    property int minThumb: 32
-    // Breadth of the bar; the thumb is drawn narrower inside it.
-    readonly property int breadth: 10
-    // The room the bar takes from the view's edge while it shows, else 0. The bar lies over the
-    // view, so a host pads its content by this (`list.ScrollBar.vertical.inset`): no row, key chip
-    // or button ever sits under the bar.
-    readonly property real inset: visible ? (vertical ? width : height) : 0
+    readonly property real u: look.unit
+    // The shortest thumb, in px, along the bar: 8u.
+    property int minThumb: Math.round(8 * u)
+    // Breadth of the gutter (2.5u), the whole of which is the press target; the thumb is drawn
+    // narrower inside it (1u, 1.5u while hovered or pressed).
+    readonly property int breadth: Math.round(2.5 * u)
+    // The host's padding on the bar's side (a ScrollView's `rightPadding`, or `leftPadding` mirrored;
+    // `bottomPadding` for a horizontal bar), 0 for a host without one. A padding of at least the
+    // gutter holds the bar: it lies in the padding and the content does not shrink.
+    readonly property real hostPadding: {
+        const v = bar.parent as ScrollView
+        if (!v)
+            return 0
+        const p = bar.vertical ? (bar.mirrored ? v.leftPadding : v.rightPadding) : v.bottomPadding
+        return p === undefined ? 0 : p
+    }
+    // The room the bar takes from the content while it shows, else 0 (also 0 when the host's
+    // padding holds it). Otherwise the bar lies over the view, so a host pads its content by this
+    // (`list.ScrollBar.vertical.inset`): no row, key chip or button ever sits under the bar.
+    readonly property real inset: visible && hostPadding < breadth ? (vertical ? width : height) : 0
 
     policy: size < 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
     minimumSize: (vertical ? height : width) > 0 ? Math.min(1, minThumb / (vertical ? height : width)) : 0
-    // Below the 24px floor on purpose: the bar is a gutter along an edge, 10px wide, and
-    // its press target is the whole gutter; wheel and keys remain the main way to scroll.
+    // Below the 24px floor on purpose: the bar is a gutter along an edge, and its press target is
+    // the whole gutter; wheel and keys remain the main way to scroll.
     implicitWidth: vertical ? breadth : 0
     implicitHeight: vertical ? 0 : breadth
     padding: 0
+    focusPolicy: Qt.NoFocus
+    hoverEnabled: true
 
     // The wheel over the whole view, not only the bar. A notch moves the view 60px; a touchpad,
     // told by its scroll phase alone, moves it by its own pixels. The view's own wheel handling
@@ -75,16 +90,32 @@ ScrollBar {
         }
     }
 
-    contentItem: Rectangle {
-        implicitWidth: bar.vertical ? 6 : bar.minThumb
-        implicitHeight: bar.vertical ? bar.minThumb : 6
-        radius: 3
-        color: bar.look.label
-        opacity: bar.pressed ? 0.9 : bar.hovered ? 0.7 : 0.45
+    // The thumb: a round pill in `label`, centred in the gutter, thin at rest and thicker (and
+    // stronger) while the pointer is on the gutter or presses it. It animates over durColor (0
+    // under reduced motion).
+    contentItem: Item {
+        implicitWidth: bar.vertical ? bar.breadth : bar.minThumb
+        implicitHeight: bar.vertical ? bar.minThumb : bar.breadth
+        Rectangle {
+            property real thick: (bar.hovered || bar.pressed ? 1.5 : 1) * bar.u
+            width: bar.vertical ? thick : parent.width
+            height: bar.vertical ? parent.height : thick
+            x: bar.vertical ? (parent.width - width) / 2 : 0
+            y: bar.vertical ? 0 : (parent.height - height) / 2
+            radius: thick / 2
+            color: Qt.alpha(bar.look.label, bar.pressed ? bar.look.params.thumbPress
+                                                         : bar.hovered ? bar.look.params.thumbHover
+                                                                       : bar.look.light ? bar.look.params.thumbAlphaLight : bar.look.params.thumbAlpha)
+            Behavior on thick { NumberAnimation { duration: bar.look.params.durColor } }
+            Behavior on color { ColorAnimation { duration: bar.look.params.durColor } }
+        }
     }
+    // No track at rest; the recessed `kitTrack`, rounded, while hovered or pressed.
     background: Rectangle {
-        color: bar.look.well
-        opacity: 0.6
+        radius: (bar.vertical ? width : height) / 2
+        color: bar.look.kitTrack
+        opacity: bar.hovered || bar.pressed ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: bar.look.params.durColor } }
         MouseArea {
             // A press on the track pages toward it; one on the thumb is the bar's own drag.
             anchors.fill: parent

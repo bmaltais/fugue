@@ -639,6 +639,66 @@ QVariantMap AppView::maskPicture() const {
     return {};
 }
 
+QVariantMap AppView::takeInputPicture() const {
+    if (!m_app)
+        return {};
+    const int index = takeIndex();
+    if (index < 0)
+        return {};
+    const TabState state = m_state.value(m_tab); // value() is a copy: hold it, or `take` dangles
+    const Take &take = state.takes.at(index);
+    const QString key = m_app->compare ? m_app->compare->input : imageKey();
+    if (key.isEmpty() || !take.values.contains(key))
+        return {};
+    const QUrl url = fileUrl(take.values.value(key).toString());
+    if (!url.isValid())
+        return {};
+    QImageReader reader(url.toLocalFile());
+    reader.setAutoTransform(true);
+    const QSize size = reader.size();
+    if (!size.isValid())
+        return {};
+    return {{"url", url}, {"width", size.width()}, {"height", size.height()}};
+}
+
+QRectF AppView::inputPlacement(int resultWidth, int resultHeight) const {
+    if (!m_app || !m_app->compare)
+        return {};
+    const TabState state = m_state.value(m_tab);
+    const int index = takeIndex();
+    if (index < 0)
+        return {};
+    const Take &take = state.takes.at(index);
+    const app::AppCompare &place = *m_app->compare;
+    // What the take ran with; an input it left alone has the block's default, else the workflow's own (what bindApp used).
+    const auto valueIn = [&](const QString &key) -> QJsonValue {
+        if (take.values.contains(key))
+            return take.values.value(key);
+        const InputBinding *input = inputOf(key);
+        if (!input)
+            return {};
+        if (!input->defaultValue.isUndefined())
+            return input->defaultValue;
+        const InputSpec *spec = m_registry && !input->targets.isEmpty() ? targetInputSpec(m_document, *m_registry, input->targets.first()) : nullptr;
+        return currentOf(m_document, completedBy(*input, spec));
+    };
+    const auto side = [&](const QString &key) { return key.isEmpty() ? 0.0 : qMax(0.0, valueIn(key).toDouble()); };
+    const QUrl url = fileUrl(valueIn(place.input).toString());
+    if (!url.isValid())
+        return {};
+    QImageReader reader(url.toLocalFile());
+    reader.setAutoTransform(true);
+    const QSize size = reader.size();
+    if (!size.isValid())
+        return {};
+    const double left = side(place.left), top = side(place.top), right = side(place.right), bottom = side(place.bottom);
+    const double wide = size.width() + left + right, tall = size.height() + top + bottom;
+    const double scale = resultWidth > 0 ? resultWidth / wide : resultHeight > 0 ? resultHeight / tall : 0;
+    if (scale <= 0)
+        return {};
+    return {left * scale, top * scale, size.width() * scale, size.height() * scale};
+}
+
 // --- models --------------------------------------------------------------------
 
 void AppView::requestModels(const QString &key) {

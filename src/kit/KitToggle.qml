@@ -59,8 +59,8 @@ Item {
             GradientStop { position: 1; color: control.checked ? (control.glass ? Qt.alpha(control.toneColor, control.pm.toggleOnBottom) : Qt.tint(control.look.kitGroup, Qt.alpha(control.toneColor, 0.75)))
                                                          : (control.glass ? Qt.rgba(0, 0, 0, control.look.light ? control.pm.glassTrackAlphaLight : control.pm.glassTrackAlpha) : control.look.kitTrack) }
         }
-        border.width: control.activeFocus ? 2 : control.glass ? 1 : 0
-        border.color: control.activeFocus ? control.look.accent : Qt.rgba(0, 0, 0, control.pm.trackEdge * (control.look.light ? 0.64 : 1))
+        border.width: control.activeFocus && FocusInput.keyboard ? 2 : control.glass ? 1 : 0
+        border.color: control.activeFocus && FocusInput.keyboard ? control.look.accent : Qt.rgba(0, 0, 0, control.pm.trackEdge * (control.look.light ? 0.64 : 1))
         Rectangle { // the inner shadow along the top edge
             visible: control.glass
             x: track.radius * 0.6

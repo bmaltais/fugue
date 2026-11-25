@@ -39,13 +39,17 @@ Item {
     property bool detailsOpen: false
     readonly property alias viewer: view
 
-    function refreshInput() { inputPicture = appView.maskPicture() }
+    // B of the Compare: the picture the shown take ran with, else (an older take, a file gone) the form's own.
+    function refreshInput() {
+        const taken = appView.takeInputPicture()
+        inputPicture = taken.url !== undefined ? taken : appView.maskPicture()
+    }
     Component.onCompleted: refreshInput()
     Connections {
         target: stage.appView
         function onValueChanged() { stage.refreshInput() }
         function onAppChanged() { stage.refreshInput(); stage.comparing = false; stage.detailsOpen = false; stage.notice = "" }
-        function onRunChanged() { if (stage.appView.busy) stage.notice = ""; if (stage.resultIndex >= stage.results.length) stage.resultIndex = 0 }
+        function onRunChanged() { stage.refreshInput(); if (stage.appView.busy) stage.notice = ""; if (stage.resultIndex >= stage.results.length) stage.resultIndex = 0 }
     }
     onCurrentChanged: view.fit()
     function toggleCompare() {
@@ -281,6 +285,9 @@ Item {
                 sourceB: stage.comparing ? stage.inputPicture.url : ""
                 sizeB: stage.comparing ? Qt.size(stage.inputPicture.width, stage.inputPicture.height) : Qt.size(0, 0)
                 labelB: qsTr("Input")
+                // Where the input sits in the result, when the app says (Expand): A shows whole, B at its place in it.
+                placeB: stage.comparing && stage.isImage ? stage.appView.inputPlacement(stage.current.width, stage.current.height)
+                                                          : Qt.rect(0, 0, 0, 0)
                 chrome: stage.comparing
                 showZoom: true
                 background: "transparent"

@@ -71,8 +71,9 @@ Rectangle {
          : flat ? (hovered ? look.menuRow : "transparent")
          : hovered ? look.kitChipHover : look.kitChip
     // The edge: the focus ring first, then a form button's hairline, then a plain well button's hover edge.
-    border.width: activeFocus ? 2 : bordered && !toned ? 1 : 0
-    border.color: activeFocus ? (alarmed ? look.error : look.accent) : look.hairlineStrong
+    readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
+    border.width: ring ? 2 : bordered && !toned ? 1 : 0
+    border.color: ring ? (alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button

@@ -1633,7 +1633,7 @@ Item {
                     height: 8 * root.u
                     radius: root.look.smallCorner
                     color: shown ? root.look.selectedRow : stepHover.hovered ? root.look.menuRow : "transparent"
-                    border.width: shown && historyList.activeFocus ? 2 : 0
+                    border.width: shown && historyList.activeFocus && FocusInput.keyboard ? 2 : 0
                     border.color: root.look.accent
                     Accessible.role: Accessible.ListItem
                     Accessible.name: modelData.name

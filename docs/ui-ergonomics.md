@@ -46,7 +46,7 @@ Before a new surface or control is done, find the long-standing surface that doe
 - [ ] **Order.** Cancel or Back first, the primary last at the right, as the Crop window and the questions (D9).
 - [ ] **Words.** The same action has the same verb everywhere (Accept, Drop, Export…, OK for a commit that closes); a button is a verb; an ellipsis only when a dialog or file picker follows; sentence case; status words capitalized (Current, Missing, Candidate); Head capitalized as a name; a node by its title, never its id; "Canvas" is the picture, "graph" the node view, in code names too only where a person reads them (D10); **candidate** for a run's pending result, never "result" or "fill" (D3).
 - [ ] **Glyphs.** Lucide from the subset (`share/fonts/lucide-fugue.txt`), never a text "×", "▾" or "‹"; a glyph means one thing in the whole window.
-- [ ] **States.** Hover, pressed, focus (the 2px accent ring), disabled (dimmed, with a tip saying why: `ViewButton` shows it on hover even though Qt gives a disabled item no hover, #281) and error (`look.error`) as `ViewButton` draws them; a toggle tells assistive tools it is on.
+- [ ] **States.** Hover, pressed, focus (the 2px accent ring for keyboard focus only, `activeFocus && FocusInput.keyboard`, never after a mouse press; a text field takes no ring, its edge lifts to 1px of `label` at 45%, `KitWell.focused`), disabled (dimmed, with a tip saying why: `ViewButton` shows it on hover even though Qt gives a disabled item no hover, #281) and error (`look.error`) as `ViewButton` draws them; a toggle tells assistive tools it is on.
 - [ ] **Keys.** One keymap for a picture and the graph: Home fits, 1 is 100%, + and - zoom, Escape closes or cancels, Enter takes the surface's primary when the focus is not in a text field (D5); a new key is checked against the registry and the References, and a tooltip names it.
 - [ ] **Keyboard.** Every control and list row is reached by Tab or the arrows, in reading order.
 - [ ] **Right-to-left.** A popup sets `LayoutMirroring` on its content (it is outside the window's mirrored root); a picture is never mirrored.
@@ -88,6 +88,37 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-25 Border grip instead of a line; rows stack when narrow; slider snap; takes in their own shape (owner's third look)
+
+- Control: `src/workspace/AreaHandle.qml` (every area border and the App view's `appPanelHandle`): hit area 4u (the gap and 1u into each card), the grip `areaHandleGrip`; `src/kit/KitRow.qml` `stacked`; `src/kit/KitSlider.qml` `snap` (the App view's ranges); `src/apps/AppTakes.qml` tiles at the picture's aspect, `src/apps/AppLibrary.qml` tiles fit the picture.
+- Old: a 24px press target that lit a 2px accent line (pale in the owner's theme: a white bar), left lit after a drag because a press gave it the focus; a row whose label and control did not fit squeezed the label to nothing and kept its gap, so Run again sat off centre; sliders over 0 to 1024 px stepped by 1 with no help to hit 256; takes and library tiles were square crops.
+- New: see canvas-look 20 (Border handle, Row stacking, Slider snap); takes keep the strip's 14u height at the picture's own width (0.5 to 2.5 squares); library tiles show the whole picture.
+- Why: the owner's words; the grip is Android's large-screen split divider (a centred pill), the other references show nothing at rest, and the owner asked for a visible cue; the stacked row is iOS settings on a narrow screen; magnetic snapping is Figma's and Blender's (Ctrl) help to hit round values, kept to the pointer so typed values stay exact.
+- Rules met: Floor (an exception, as the side panel's grip: the border is an edge hit along its whole length, 4u across, and Tab plus the arrows move it; a 24px target would reach over the cards' scroll gutters), Gaps (the stacked row 1.5u between label and control), Keys (unchanged: Tab, arrows, Enter on the border).
+- Decisions taken without the owner (each to confirm): a grip at rest, not only on hover (medium: the owner asked for a cue); no hover delay (medium); snap 64/16 by range, not set per app (medium: the app block has no step); the grip's alphas are the new scroll thumb's (one family).
+
+### 2026-11-25 App view: Compare lines the input up where it sits in the result (owner; decided by the coordinator, medium-high)
+
+- Control: `src/apps/AppStage.qml` `appResultViewer` (`placeB`), `src/canvas/CompareView.qml` `placeB`, `AppView::inputPlacement`; the app block's `compare` (spec 4.9).
+- Old: Compare fitted the input to the result's frame, so a 1024 x 1024 input stretched over a taller expanded result.
+- New: an app that grows a picture names the picture and the padding inputs in `compare`; Compare shows the result whole and the input at its own place in it (a square stays square, the added area shows around it), for slider and flip; side by side and difference keep the old fit.
+- 100% while comparing is of the larger picture (owner, same day): by area as before; with a placement, by density (the input's file pixels per result pixel over its place), so an input as dense as the result or denser is at 100% of its own pixels, a sparser one leaves A's. Z, 1 and the 100% chip already take the larger first; a second press toggles A and B as in the Compare node.
+- Why: the owner's ask (the square fully visible, the extension above and below, as a sliding A/B); the Compare Images node's fit is right for two pictures of one subject, wrong for a picture and its extension. Placement comes from the take's values, so it stays right after the form changes. Not asked of the graph's Compare node: it has no padding to read.
+
+### 2026-11-25 Scroll bar: a calm pill in a 2.5u gutter, kept out of the content (owner's feedback)
+
+- Control: `src/canvas/FugueScrollBar.qml`; hosts `src/apps/AppPage.qml` (`appForm`), `AppLibrary.qml`, `AppBuilderDialog.qml` (`builderPreview`), `AppTakes.qml`.
+- Old: a 10px gutter with a full-height `well` track at 60% always on; in the App view the bar was Qt's default, a wide flat grey bar over the rows' right-aligned values.
+- New: a 2.5u gutter, all of it the hit area; no track at rest, `kitTrack` while hovered or pressed; a round `label` pill at least 8u long, 1u wide (1.5u hovered or pressed), alpha 0.35 (0.45 light) at rest, 0.7 hovered, 0.9 pressed (`thumbAlpha`, `thumbAlphaLight`, `thumbHover`, `thumbPress`), animated over `durColor`. A host padded by at least 2.5u on that side holds the bar in the padding (the App form does not shrink); others pad by `inset`. Mirrors in right-to-left; takes no focus.
+- Why: the bar rests quietly like the rest of the Drift kit, grows when reached, and never sits over a value.
+
+### 2026-11-25 Focus rings are for the keyboard; a text field never draws one (owner)
+
+- Control: new `src/focus_input.h` (`FocusInput.keyboard`, an application event filter: a key press sets it, a mouse, touch or tablet press clears it); `src/kit/KitWell.qml` (the `focused` edge), `src/canvas/ThemedTextField.qml` (own background, no Material accent underline), `CanvasTaskBar` prompt, `CommandUi` filter, `DragNumberField` while typing; the ring (`activeFocus && FocusInput.keyboard`) in `KitSegmented`, `KitSlider`, `KitDropdown`, `KitChip`, `KitToggle`, `KitHero`, `ViewButton`, `ThemedDropDown`, `ValueSlider`, `MenuBar`, `AreaHeader`, `SettingsPanel`, `GetReadyRow`, `TemplatesDialog`, `AppRail`, `AppImageInput`, layer and history lists, `MediaView`, `MediaThumb`, `ColorPickerPane`, `RowTrashButton`, `SidePanel`, `SideTabStrip`, `RunToolbar`.
+- Old: the Apps dialog's search field (it takes the focus on opening) drew a 2px accent ring, a pale cream in the owner's theme, read as a white surround; every control drew the ring after a click.
+- New: a text field never draws the accent ring; focused, its edge is 1px in `label` at 45% (no width change, so nothing jumps) and the caret shows where typing goes. Every other control draws the 2px accent ring only when the last input was the keyboard (Tab, arrows), as a browser's :focus-visible; a click, or focus given on opening by a click, shows none, and the next key press shows it on the focused control.
+- Why: Item has no focusReason in QML (only Control has), and a per-control "pressFocus" mark (the earlier App | Graph fix) cannot see focus given on opening; one application-wide "last input" flag does, in one place. Confidence medium-high (coordinator's call): a dialog opened by a shortcut still shows its default control's ring, which keeps "every dialog works by keyboard alone, with a visible ring".
+
 ### 2026-11-25 App view: Clear empties the takes; Repeat needs a seed that varies; one raised dropdown; a slider's value is typed (owner's second look)
 
 - Control: `src/apps/AppStage.qml` `appClear` (now also when only the strip has takes); `src/apps/AppPage.qml` `appLiveMode` (Repeat only when `AppView.canRepeat`), `appRepeatWaits`; `src/kit/KitDropdown.qml` (new) for `appImageChoose-<key>`, `AppChoice.qml` and `AppModelInput.qml` (`appInput-<key>`); `src/kit/KitSlider.qml` the value field `<objectName>-value` (App view ranges, Settings > Look sliders).
@@ -96,6 +127,12 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: ComfyUI's queue panel clears its history without deleting outputs (the same split here: the strip versus the files); Repeat exists to make new pictures, so it follows what can change; one component per control so a look change lands everywhere (the owner's "change in one place"); Blender and Photoshop sliders show an editable number beside the track.
 - Rules met: Floor (the field 6u/24px tall, 11u or 14u wide; dropdowns 7u), Primary (none added), Destructive (Clear loses nothing: the files and History keep every run; no question), Gaps (1u between rail and field, the chip padding), Keys (Tab reaches the field after its slider; Enter, Escape, Up and Down as above; dropdowns: Enter, Space or Down open), Cohesion (one dropdown, one slider value, the kit's).
 - Decisions taken without the owner (each to confirm): choice and model dropdowns become raised like the picture's (the owner's rule "clickable is raised" over the earlier "a value is chosen in it, so recessed"; medium-high); Clear asks nothing (high: nothing is deleted); Repeat waits rather than switching itself off (medium); typing beyond the range clamps rather than refusing (medium).
+
+### 2026-11-25 Frosted chips over a hero: real glass, not a dark disc (owner's screenshot)
+
+- Control: `src/kit/KitFrost.qml` (the glass of every `KitChip` with `frosted`, the hero's status pill and close button), seen on the App view's `appLauncherToggle`, `appKeep`, `appHideInputs`, `appOpenInFugue`.
+- Old: the chips came out near-black opaque discs. `measure()` asked `backdrop.window`, which an Item does not have in QML, so the picture under the glass was never measured and the glass kept its unmeasured plan; that plan's dark base saturated at 80% black because the contrast estimate mixed the white tint in linear light (it can never get white ink under 4.5:1 that way).
+- New: the window is asked through `Window.window`, so the measuring runs; the base and tint are mixed on the gamma-encoded colour, as the scene graph blends them, so over a dark hero the base stays a light smoke and the translucent tint and blur show. Frost at 0 is unchanged: the plain opaque chip. Size and press targets unchanged (7u, above the 6u floor); keys, focus ring and tooltips unchanged.
 
 ### 2026-11-25 App view: the inputs panel resizes and slides shut; the toolbar at the card's edge; the focus ring for keys only; the project chip (owner's look at the night build)
 

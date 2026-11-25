@@ -25,6 +25,9 @@ Item {
     property real to: 1
     property real value: 0
     property real stepSize: 0
+    // A magnet for the pointer: a drag that comes within 1.5u of a multiple of `snap` (from `from`) lands on it, so round values
+    // such as 256 are easy to hit (owner, 2026-11-25). Keys and a typed value are exact. 0: none.
+    property real snap: 0
     property bool ticks: false
     property string startGlyph
     property string endGlyph
@@ -51,7 +54,12 @@ Item {
     // The value a position along the rail stands for, snapped to the steps.
     function valueAt(x) {
         const f = Math.max(0, Math.min(1, (x - thumbSize / 2) / (rail.width - thumbSize)))
-        const v = from + (mirrored ? 1 - f : f) * (to - from)
+        let v = from + (mirrored ? 1 - f : f) * (to - from)
+        if (snap > 0 && to !== from) {
+            const near = from + Math.round((v - from) / snap) * snap
+            if (Math.abs(near - v) / Math.abs(to - from) * (rail.width - thumbSize) <= 1.5 * look.unit)
+                v = near
+        }
         return clamp(stepSize > 0 ? from + Math.round((v - from) / stepSize) * stepSize : v)
     }
     function clamp(v) { return Math.max(Math.min(from, to), Math.min(Math.max(from, to), v)) }
@@ -71,10 +79,8 @@ Item {
     width: implicitWidth
     height: implicitHeight
     activeFocusOnTab: enabled
-    // The focus ring is for the keyboard (KitSegmented): a press marks the focus it gives, losing the focus clears the mark.
-    property bool pressFocus: false
-    onActiveFocusChanged: if (!activeFocus) pressFocus = false
-    readonly property bool ring: activeFocus && !pressFocus
+    // The focus ring is for the keyboard (KitSegmented).
+    readonly property bool ring: activeFocus && FocusInput.keyboard
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Slider
     Accessible.name: text
@@ -173,7 +179,7 @@ Item {
         TapHandler {
             id: tap
             gesturePolicy: TapHandler.WithinBounds
-            onPressedChanged: if (pressed) { if (!slider.activeFocus) slider.pressFocus = true; slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
+            onPressedChanged: if (pressed) { slider.forceActiveFocus(Qt.MouseFocusReason); slider.moved(slider.valueAt(tap.point.position.x)) }
         }
         HoverHandler { cursorShape: slider.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
     }
