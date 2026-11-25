@@ -328,8 +328,16 @@ FocusScope {
             applyView()
         fittedHidden = false
     }
-    onWidthChanged: if (placedHidden && visible) Qt.callLater(placeAgain)
-    onHeightChanged: if (placedHidden && visible) Qt.callLater(placeAgain)
+    // The layout can set the width and the height in separate passes (a loaded machine spreads them over frames): place
+    // once the size has stopped changing, not at the first change, or the nodes are centred for the size in between.
+    Timer {
+        id: placeWhenSettled
+        interval: 60
+        onTriggered: canvas.placeAgain()
+    }
+    onWidthChanged: if (placedHidden && visible) placeWhenSettled.restart()
+    onHeightChanged: if (placedHidden && visible) placeWhenSettled.restart()
+    onVisibleChanged: if (placedHidden && visible) placeWhenSettled.restart()
     function fit() {
         if (model.fitView(width, height, reservedTop, reservedBottom))
             applyView()
