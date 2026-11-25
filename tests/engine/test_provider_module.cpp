@@ -186,7 +186,7 @@ private slots:
 
         const Result<QList<ProviderModule>> all = providerModules(m_root);
         QVERIFY(all.ok());
-        QCOMPARE(ids(all.value()), (QStringList{"omarchy", "fugue-helper", "a.good", "b.good"}));
+        QCOMPARE(ids(all.value()), (QStringList{"omarchy", "http", "fugue-helper", "a.good", "b.good"}));
         QVERIFY(all->first().isBuiltin());
         QCOMPARE(all.warnings().size(), 2); // broken, and the one that took omarchy's id
         QVERIFY(all.warnings().first().severity == Error::Severity::Warning);
@@ -203,7 +203,7 @@ private slots:
         QStringList valid;
         for (const QJsonValue &item : provider.error().valid)
             valid << item.toString();
-        QCOMPARE(valid, (QStringList{"fugue-helper", "io.example.toy", "omarchy"}));
+        QCOMPARE(valid, (QStringList{"fugue-helper", "http", "io.example.toy", "omarchy"}));
     }
 
     void aThirdPartyStdioModuleLoadsWithNoChangeToFugue() {

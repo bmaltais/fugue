@@ -1,6 +1,7 @@
 #include "providers.h"
 
 #include "engine/helper_provider.h"
+#include "engine/http_provider.h"
 #include "engine/json.h"
 #include "engine/paths.h"
 #include "engine/queue.h"
@@ -375,6 +376,8 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
     if (instance.type == QLatin1String("omarchy"))
         return Result<std::shared_ptr<Provider>>(
             std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()));
+    if (instance.type == QLatin1String("http"))
+        return Result<std::shared_ptr<Provider>>(std::make_shared<HttpProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty())
         return Result<std::shared_ptr<Provider>>(std::make_shared<RemoteHelperProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper")) {

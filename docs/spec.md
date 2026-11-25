@@ -1458,12 +1458,69 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.11](#811-the-provider-interface)). `omarchy` and `fugue-helper` are listed
-as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
-Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, and the helper's
-program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)). `http` and `comfyui` are
-not built yet: each is a module folder (`http` for OpenAI-compatible and sd.cpp native endpoints,
-`comfyui` for ComfyUI's own API), written against 8.8 when its milestone comes, with no change to Fugue.
+third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http` and `fugue-helper` are
+listed as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
+Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, the helper's
+program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)), and `http` needs what a module
+is not given (below). `comfyui` is not built yet: a module folder for ComfyUI's own API, written
+against 8.8 when its milestone comes, with no change to Fugue.
+
+**The `http` provider** (#401) is a generic endpoint: an instance of type `http` with an `address`
+(the service's API root, such as `https://api.openai.com/v1` or `http://localhost:1234/v1`), a `key`
+and a few settings (`providers.json`, [8.2](#82-provider-instances)). It serves `image.generate`,
+`image.edit` and `text.generate` (with a picture) from two dialects. It is compiled in, not a module
+folder as the first plan had it, because a module is not given its instance's key, address or settings
+(a `stdio` module gets none, and an `http` one is spoken to in the protocol of 8.8, which no OpenAI
+service speaks), and because it shares the omarchy provider's request and result code
+(`engine/server_api.h`).
+
+| Setting | Meaning |
+| --- | --- |
+| `address` | The API root. Required: with none, or one that is not `http(s)://`, describe is `provider_unreachable`. |
+| `key` | Sent as `Authorization: Bearer <key>` to the address and nowhere else (never to a redirect, never to a picture the service names by URL). Optional: a local server takes none. |
+| `api` | `auto` (default), `openai` or `sdcpp`. Auto asks `<root>/sdcpp/v1/capabilities` (the address without its `/v1`): an answer means the native server, anything else the OpenAI dialect. Another value is `invalid_document`. |
+| `image_models`, `text_models` | The served names (a list, or text separated by commas). Without them `GET <address>/models` lists the models: an id that looks like a picture model (`dall-e`, `gpt-image`, `imagen`, `flux`, `stable-diffusion`, `sdxl`, `qwen-image`, `z-image` and the like) is an image model, one that looks like embeddings or speech is none, the rest are text models. A setting replaces that guess. A service with no model list works when the models are named here. |
+| `timeout_s` | How long a request may go silent before the job fails (default 300). |
+
+- **OpenAI-compatible.** `image.generate` is `POST <address>/images/generations` (`model`, `prompt`,
+  `n` 1 and `size` `WxH` when the node gave both sides); with a start image, and for `image.edit`, it is
+  `POST <address>/images/edits` as a multipart form (`image[]` for each picture). The answer is
+  one picture, as `b64_json` or as a `url` (fetched without the key). `text.generate` is
+  `POST <address>/chat/completions`, streamed, with a picture as a data URL, as the omarchy provider
+  does it. Each model is a handle of `fugue/image-model` or `fugue/text-model` with its served name
+  and no hash, offered `ready`; every image model is offered for edits too (the service says no in
+  its own words when one cannot). A service has no seed, steps or negative prompt, so none is sent or
+  reported as used; the width and height used are the picture's own. The engine id is
+  `openai@<host>`. A mask is `mask_unsupported` (an OpenAI mask marks by transparency, not by white),
+  as is any model of a server that does not list `mask_image`.
+- **The stable-diffusion.cpp native server** is the omarchy provider's job API (8.7 below): submit,
+  poll, cancel, step previews, the server's defaults and limits, `mask_image` and `ref_images` from
+  its capabilities. Its one model is the one it has loaded (`model.name`). Engine id `sdcpp@<host>`.
+- **The key.** It lives in `providers.json` only. It is in no message, status, result, run record,
+  log or file: a service that repeats it in an error text (they do) is scrubbed before the text is
+  used.
+- **Errors**, in the codes of [13.3](#133-errors), each with a hint:
+
+| The service | Code | Said |
+| --- | --- | --- |
+| 401, 403 | `provider_unreachable` | refused the key; the hint names providers.json (or says the service needs one) |
+| 404 for a model (`model_not_found`, or a message that names the model) | `model_missing` | no such model |
+| 404 otherwise | `node_failed` | nothing at the URL; the hint says the address is the API root, usually ending in `/v1` |
+| 429 | `node_failed` | the key is rate limited, with the `Retry-After` it sent ("wait 17 seconds"); `insufficient_quota` says there is no quota left |
+| 503 that says it is loading | `model_not_running` | |
+| 502, 503, 504 | `provider_unreachable` | not available right now |
+| other 5xx | `node_failed` | with the service's message; "out of memory" is `out_of_memory` |
+| other 4xx (400 and the like) | `node_failed` | the service's own message |
+| no answer in `timeout_s`, a refused connection, a stream cut short | `provider_unreachable` | what happened; the timeout hint names `timeout_s` |
+| an answer that is not JSON, or has no picture | `node_failed` | the hint says the address should be the API root |
+
+  There is no new code: a rate limit is `node_failed` ("a later run succeeds") and Fugue does not
+  retry it (what a retry would cost on a paid service is the business of #403).
+- Not built, and said so here: video and music (`video.generate`, `audio.generate`), a model's
+  parameters beyond those above, and any cost or privacy notice (#403, #404). The key goes in clear to
+  a plain `http://` address that is not on this machine: use `https://`.
+- Checked by hand against: a stable-diffusion.cpp server whose key was not at hand (the 401 above, as
+  `fugue run` shows it). Not against a real OpenAI-compatible text or picture service.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:
@@ -1629,7 +1686,7 @@ A third party adds a provider as a folder in `~/.local/share/fugue/providers/<id
 | Field | Meaning |
 | --- | --- |
 | `manifest` | 1. |
-| `id` | Letters, digits and `. - _`. The folder is named after it. A module cannot use the id of a provider that comes with Fugue (`omarchy`, `fugue-helper`). |
+| `id` | Letters, digits and `. - _`. The folder is named after it. A module cannot use the id of a provider that comes with Fugue (`omarchy`, `http`, `fugue-helper`). |
 | `version`, `name` | Required, and for people (`name` defaults to the id). |
 | `transport` | `http` or `stdio`. (`builtin`, in the registry only, marks a provider compiled into Fugue.) |
 | `start` | Optional for `http`, required for `stdio`. How Fugue starts it: `command` (a list; a first item with a slash is a file of the module's folder, a bare name is looked up on PATH; the folder is the working directory), `when` (`on_demand` or `never`), `idle_timeout_s` (default 600, 0 never stops it), `start_timeout_s` (`http`: how long it has to answer `describe`, default 30). Without `start` the user runs it. |
@@ -1947,7 +2004,7 @@ interface.
   third-party program: `HelperProvider` (`stdio`) and `RemoteHelperProvider` (`http`) are the two
   adapters, each used by the shipped helper and by modules, with a `StdioLaunch` or
   `RemoteProviderOptions` that says what differs (the program and its arguments, the wording of
-  messages, whether describe is asked of the process). The registry lists `omarchy` and
+  messages, whether describe is asked of the process). The registry lists `omarchy`, `http` and
   `fugue-helper` as modules with transport `builtin`, ahead of the installed ones, so shipped and
   third-party providers are listed the same way; `omarchy` itself stays an adapter to its servers'
   own APIs, because those servers do not speak 8.8.
