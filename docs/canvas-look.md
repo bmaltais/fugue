@@ -745,3 +745,53 @@ The mockups' shared CSS and JavaScript live in `canvas-look/src/`; `--write` inl
 `.html` file stays self-contained. Screenshots: headless Chromium at 1600 × 1000,
 `file://…/canvas.html#theme=ethereal&r=8&shot` (`r` is the corner radius setting, 8 when left out).
 The real window's screenshots: `FUGUE_LOOK_SHOTS=<folder> QT_QUICK_BACKEND=rhi build/test_canvas_look screenshots`.
+
+## 20. Drift kit
+
+Shared QML for the chrome that is not the canvas: panels, dialogs, sheets and cards (epic #456). Its look is
+[omarchy-drift](https://github.com/bmaltais/omarchy-drift)'s settings card (MIT, same author; its `SettingsCard.qml` is the
+reference and the source of the shapes): grouped rounded cards on a dark ground, rows with a label, a dim hint and the control
+at the end, hairlines between rows, pill switches, round-thumb sliders, chips, a hero header with a serif title. The node
+graph keeps its Blender-convention look; the kit is for the surfaces around it. Colors follow the Omarchy theme through the
+tokens below (Drift hardcodes greys and a blue); sizes are in `u` and every press target is at least 7u (24px floor,
+docs/ui-ergonomics.md).
+
+The files are `src/kit/Kit*.qml`, imported as `import "../kit"` (the QML module folder `/kit`; `src/canvas/` already holds
+about a hundred canvas files, and a folder of its own lets the kit be found, linted and tested as one). Each takes
+`look` (default `App.theme.look`, so no `required` boilerplate on every row). The controls are controlled: a value comes in, a
+signal asks for the change (`toggled(value)`, `moved(value)`, `tapped()`), and none sets its own value, so a binding stays a
+binding. The picture of all of them, dark and light, is `tests/kit/KitGallery.qml` (`FUGUE_KIT_SHOTS=<folder>
+QT_QUICK_BACKEND=rhi build/test_kit shots`).
+
+| Component | For |
+| --- | --- |
+| `KitSection` | the bold small title (13px) above a group; a heading for assistive tools |
+| `KitGroup` | the rounded card (popup corner, `kit-group` fill) that holds rows; no gap between them |
+| `KitRow` | `label`, optional dim `hint` (`label` color, 11px), and trailing controls as children; at least 10u tall; draws the hairline above itself unless it is the first visible row. `target` (a control with `toggle()`) makes the whole row its hit area; a click on a trailing control stays that control's |
+| `KitSeparator` | the hairline, inset 3.5u, for a row that is not a KitRow |
+| `KitToggle` | the pill switch: `checked`, `toggled(value)`, Space, Tab, 10u by 7u to press, accent track when on |
+| `KitChip` | the small rounded button: `text`, Lucide `glyph`, `pill` (fully round; a glyph-only pill is 2:1), `current`, `tip`, `tapped()`; 7u |
+| `KitSlider` | `from`, `to`, `value`, `stepSize`, `ticks`, `startGlyph`, `endGlyph`, `showValue`, `valueText`, `moved(value)`; arrows, PageUp/Down, Home/End; the end slot has a fixed width so rails in a group align; right to left mirrors |
+| `KitHero` | the header: a picture or the "dusk" gradient, `title`, `subtitle`, `status` pill (`statusTapped()`), `showClose` (`closed()`), `minHeight`, `cornerRadius` |
+
+`KitHero` is compact: its height is the title, the subtitle and padding (about 84px for a 32px title at text size 12, the
+app panel's header) and `minHeight` asks for more picture (the Fugue header, 45u). The title is Fraunces (SIL OFL, bundled:
+`share/fonts/fraunces-latin.ttf`, the Latin subset of the variable font, licence in `share/fonts/LICENSE.fraunces`;
+`look.serifFont`), then Noto Serif, which the desktop has. Without a picture it draws "dusk", the brand default: lilac
+`#b98bd6`, rose `#e3828f` and blue `#6f86d6` blobs on a dark violet-grey `#2a2533`, with a darkening gradient toward the foot.
+The dusk colors are the brand's, the same on every theme, because the hero is a picture, not a surface; the same is true of
+its white title and its black pills. A picture's top corners are cut by the thumbnail shader (square on the software renderer).
+
+New tokens (`CanvasLook`, `look.cpp` and `derive.py` together; `fg` is the theme's text, `popup` is the card):
+
+| Token | Dark theme | Light theme | Use |
+| --- | --- | --- | --- |
+| `kit-group` | `mix(popup, fg, .07)` | `mix(popup, fg, .045)` | a group's fill |
+| `kit-separator` | `mix(kit-group, fg, .10)` | same | the hairline between rows |
+| `kit-track` | `mix(kit-group, fg, .28)` | `mix(kit-group, fg, .30)` | a slider's rail, a switch off |
+| `kit-knob` | `fg` | white | the round thumb, the knob off (on: `accentForeground` over the accent) |
+| `kit-chip`, `kit-chip-hover` | `mix(kit-group, fg, .10 / .17)` | same | a chip or pill |
+| `kit-hero-shade` | black at 55% | same | the foot of the hero's darkening gradient |
+| `kit-hero-pill`, `kit-hero-pill-hover` | black at 44% / 60% | same | the status pill and the close button over a picture |
+
+Credit: the layout, proportions and the idea of every component are omarchy-drift's.
