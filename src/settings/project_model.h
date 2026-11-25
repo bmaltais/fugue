@@ -121,7 +121,6 @@ private:
     QString m_currentRoot;
     QStringList m_currentInherits;
     QString m_registryProblem;
-    int m_registered = 0;
 };
 
 } // namespace fugue

@@ -206,7 +206,7 @@ private slots:
 
     // The title and the chip
 
-    void theDefaultHasAnUnnamedTitleAndNoChipUntilThereIsAProject() {
+    void theDefaultHasAnUnnamedTitleAndNoChipEvenWithOtherProjects() {
         std::unique_ptr<ProjectModel> model; // made before the window, so it outlives its QML
         App app(load(emptyDoc));
         model = makeModel(app);
@@ -214,8 +214,8 @@ private slots:
         QCOMPARE(app.window->title(), QString("Untitled — Fugue"));
         QVERIFY(!find(app.window, "projectChip"));
         QVERIFY(model->create("Acme", QString(), {}).value("error").toString().isEmpty());
-        QQuickItem *chip = NEED("projectChip");
-        QCOMPARE(textOf(chip), QString("Default project"));
+        QTest::qWait(50);
+        QVERIFY(!find(app.window, "projectChip")); // no chip reads as the Default (owner, 2026-11-25)
         QCOMPARE(app.window->title(), QString("Untitled — Fugue"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }

@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Fugue
 import "../canvas"
 import "../kit"
+import "../workspace"
 
 // The App view (#385, epic #397, spec 12.17): a workflow as one simple screen, in the layout of ComfyUI App Mode (the layout
 // and behaviour only, from its docs and screenshots) and the look of the Drift kit (docs/canvas-look.md, epic #456). AppView
@@ -14,7 +15,10 @@ import "../kit"
 //           (Open in Graph, the one way out to the nodes; not in an app's own window, `standalone`, whose quiet way out is
 //           Open in Fugue in the panel's header)
 //   stage   wide, next to the rail (AppStage): the result with zoom and pan, its toolbar, the size line and the takes
-//   panel   at the end, about a quarter of the window (80u to 40%): a KitHero header with the app's preview picture (the Dusk
+//   panel   at the end, about a quarter of the window (80u to 40%) until a person drags its border (then that width, kept between
+//           runs: App.sidePanels.appWidth); dragged under half its least width, or its hero's hide button, or Window > App inputs, it
+//           slides shut to a slim strip with Show the inputs and Run (shown or not is the registry's "app-inputs", kept between runs).
+//           It is a KitHero header with the app's preview picture (the Dusk
 //           gradient without one), its serif title and one-line description, the launcher pin and Open in Fugue as small round
 //           buttons in its corner; the inputs as KitGroup rows (AppInput) scrolling; Advanced a quiet disclosure row at the foot
 //           of the group; and Run, the screen's one primary control, a full-width accent pill pinned at the panel's foot
@@ -39,8 +43,50 @@ Rectangle {
     property bool advancedOpen: false
     readonly property var visibleFields: appView.fields.filter(f => !f.advanced)
     readonly property var advancedFields: appView.fields.filter(f => f.advanced)
-    // The form's width: a quarter of the window, at least 80u (320px at the default size), at most 40%.
-    readonly property real panelWidth: Math.min(0.4 * width, Math.max(80 * u, 0.25 * width))
+    // The form's width. Automatic: a quarter of the window, at least 80u (320px at the default size), at most 40%. Once its border
+    // was dragged: that width, kept between 80u (less in a narrow area) and what leaves the stage 100u.
+    readonly property real autoPanelWidth: Math.min(0.4 * width, Math.max(80 * u, 0.25 * width))
+    readonly property real maxPanelWidth: Math.max(autoPanelWidth, width - 2 * gap - 14 * u - 2 * gap - 100 * u)
+    readonly property real minPanelWidth: Math.min(80 * u, autoPanelWidth)
+    property real keptHere: 0 // the dragged width when there is no App.sidePanels to keep it
+    readonly property real chosenPanelWidth: App.sidePanels !== null ? App.sidePanels.appWidth : keptHere
+    readonly property real panelWidth: chosenPanelWidth > 0 ? Math.max(minPanelWidth, Math.min(maxPanelWidth, chosenPanelWidth)) : autoPanelWidth
+    function choosePanelWidth(wanted) {
+        const w = wanted > 0 ? Math.round(Math.max(minPanelWidth, Math.min(maxPanelWidth, wanted))) : 0
+        if (App.sidePanels !== null)
+            App.sidePanels.appWidth = w
+        else
+            keptHere = w
+    }
+
+    // The inputs panel shown, or slid shut to the strip (owner, 2026-11-25: "a way to hide it with a UI element to bring it back").
+    // The registry keeps it (Window > App inputs, focus mode); the app's own window has none, so it is the page's there.
+    readonly property bool inputsInRegistry: App.chrome !== null && App.chrome.shown["app-inputs"] !== undefined
+    property bool hiddenHere: false
+    readonly property bool inputsShown: inputsInRegistry ? App.chrome.shown["app-inputs"] : !hiddenHere
+    function showInputs(on) {
+        if (on === inputsShown)
+            return
+        const hadFocus = hideInputs.activeFocus || showInputsChip.activeFocus
+        if (inputsInRegistry)
+            App.commands.trigger("view.toggle-app-inputs")
+        else
+            hiddenHere = !on
+        if (hadFocus) // the keyboard's place follows to the button that brings it back
+            Qt.callLater(() => (page.inputsShown ? hideInputs : showInputsChip).forceActiveFocus(Qt.TabFocusReason))
+    }
+    // The strip the panel slides shut to: one 7u chip and 1u each side.
+    readonly property real stripWidth: 9 * u
+    // 1 while the form shows in full, 0 shut: it slides (look.params.durThumb, 0 under reduced motion) when the panel is shown or
+    // hidden, never while the page is being made; the end card's width follows it, so a drag or a resized window is followed at once.
+    property real openness: inputsShown ? 1 : 0
+    property bool made: false
+    Component.onCompleted: Qt.callLater(() => page.made = true)
+    Behavior on openness {
+        enabled: page.made && page.visible
+        NumberAnimation { duration: page.look.params.durThumb; easing.type: Easing.OutCubic }
+    }
+    readonly property real endWidth: stripWidth + Math.max(0, panelWidth - stripWidth) * openness
 
     // The gap between the cards: the window's background shows through it.
     readonly property real gap: look.params.areaLayout === "panes" ? 0 : look.params.areaGap * u
@@ -111,17 +157,56 @@ Rectangle {
             }
         }
 
-        // The input panel card.
+        // The input panel card. Its content keeps the panel's width and is clipped while the card slides shut, so it moves with the
+        // card's edge instead of squeezing.
         KitPanel {
             id: panel
             objectName: "appPanel"
             Layout.fillHeight: true
-            Layout.preferredWidth: page.panelWidth
+            Layout.preferredWidth: page.endWidth
             look: page.look
             tone: page.tone
+            clip: page.openness < 1
+
+            // Shut: a slim strip with the way back and Run (Ctrl+Enter runs too).
+            Column {
+                objectName: "appInputsStrip"
+                anchors { top: parent.top; topMargin: page.u; horizontalCenter: parent.horizontalCenter }
+                spacing: page.u
+                visible: !page.inputsShown
+                opacity: 1 - page.openness
+                KitChip {
+                    id: showInputsChip
+                    objectName: "appShowInputs"
+                    look: page.look
+                    round: true
+                    glyph: LayoutMirroring.enabled ? "chevron-right" : "chevron-left"
+                    tip: qsTr("Show the inputs")
+                    Accessible.name: qsTr("Show the inputs")
+                    onTapped: page.showInputs(true)
+                }
+            }
+            KitChip {
+                objectName: "appStripRun"
+                anchors { bottom: parent.bottom; bottomMargin: page.u; horizontalCenter: parent.horizontalCenter }
+                visible: !page.inputsShown
+                opacity: 1 - page.openness
+                look: page.look
+                round: true
+                primary: true
+                glyph: "play"
+                enabled: page.appView.canRun
+                tip: qsTr("Run (Ctrl+Enter)")
+                Accessible.name: qsTr("Run")
+                onTapped: page.appView.run()
+            }
+
             ColumnLayout {
-                anchors { fill: parent; margins: 1 }
+                anchors { top: parent.top; bottom: parent.bottom; left: parent.left; margins: 1 }
+                width: page.panelWidth - 2
                 spacing: 0
+                visible: page.inputsShown || page.openness > 0
+                opacity: page.openness
 
                 KitHero {
                     id: hero
@@ -152,6 +237,13 @@ Rectangle {
                         glyph: "plus"
                         tip: qsTr("Keep this app: add it to your apps and your launcher")
                         onTapped: page.launcher.keep()
+                    }
+                    HeroButton {
+                        id: hideInputs
+                        objectName: "appHideInputs"
+                        glyph: LayoutMirroring.enabled ? "chevron-left" : "chevron-right"
+                        tip: qsTr("Hide the inputs: more room for the result")
+                        onTapped: page.showInputs(false)
                     }
                     HeroButton {
                         objectName: "appOpenInFugue"
@@ -333,6 +425,34 @@ Rectangle {
                 }
             }
         }
+    }
+    // The border between the stage and the inputs panel, over the gap between the cards (Blender's region edge: drag to resize, drag
+    // under half the least width to hide; the area border's handle, so it looks and answers alike). Enter or a double click gives the
+    // automatic width back.
+    AreaHandle {
+        id: panelHandle
+        objectName: "appPanelHandle"
+        visible: page.inputsShown && page.openness >= 1
+        look: page.look
+        axis: "row"
+        rightToLeft: LayoutMirroring.enabled
+        readonly property real border: rightToLeft ? panel.x + panel.width + page.gap / 2 : panel.x - page.gap / 2
+        x: border - width / 2
+        y: panel.y
+        width: thickness
+        height: panel.height
+        z: 2
+        name: qsTr("Border of the inputs panel")
+        description: qsTr("Arrow keys resize it; Enter gives the automatic width")
+        tip: qsTr("Drag to resize; drag to the edge to hide; double-click for the automatic width")
+        onMoveRequested: delta => {
+            const wanted = page.panelWidth - delta
+            if (wanted < 0.5 * page.minPanelWidth)
+                page.showInputs(false)
+            else
+                page.choosePanelWidth(Math.max(wanted, page.minPanelWidth))
+        }
+        onEqualizeRequested: page.choosePanelWidth(0)
     }
     // A small round frosted button over the hero's picture (KitChip frosted: the picture blurred behind it).
     component HeroButton: KitChip {

@@ -68,6 +68,7 @@ SidePanels::SidePanels(QString path, ChromeVisibility *chrome)
         }
         m_dock = read->value("dock").toString() == QLatin1String("right") ? QStringLiteral("right") : QStringLiteral("left");
         m_width = std::clamp(read->value("width").toInt(kDefaultWidth), kMinWidth, kMaxWidth);
+        m_appWidth = std::clamp(read->value("appWidth").toInt(0), 0, kMaxAppWidth);
     }
     m_shownTab = this->tab();
     connect(m_chrome, &ChromeVisibility::changed, this, [this] {
@@ -133,6 +134,15 @@ void SidePanels::setWidth(int width) {
     emit widthChanged();
 }
 
+void SidePanels::setAppWidth(int width) {
+    const int wanted = std::clamp(width, 0, kMaxAppWidth);
+    if (wanted == m_appWidth)
+        return;
+    m_appWidth = wanted;
+    save();
+    emit appWidthChanged();
+}
+
 void SidePanels::toggle(const QString &tab) {
     setTab(this->tab() == tab ? QString() : tab);
     if (!this->tab().isEmpty())
@@ -142,7 +152,7 @@ void SidePanels::toggle(const QString &tab) {
 void SidePanels::save() const {
     if (m_path.isEmpty())
         return;
-    writeJsonFile(m_path, QJsonObject{{"dock", m_dock}, {"width", m_width}});
+    writeJsonFile(m_path, QJsonObject{{"dock", m_dock}, {"width", m_width}, {"appWidth", m_appWidth}});
 }
 
 void SidePanels::registerCommands(CommandRegistry &commands) {

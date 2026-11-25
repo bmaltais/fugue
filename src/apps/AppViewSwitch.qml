@@ -21,6 +21,7 @@ Item {
         id: seg
         look: sw.look
         tone: "dusk"
+        focusOnPress: false // a click leaves the keys with the page; Tab still reaches it
         options: [qsTr("App"), qsTr("Graph")]
         optionNames: ["appViewSwitchApp", "appViewSwitchGraph"]
         currentIndex: sw.appShown ? 0 : 1

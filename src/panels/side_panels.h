@@ -12,7 +12,9 @@
 // the registry's file remembers it: a window starts with the panel it closed with. A "tab" in this
 // file from before is read once, when the registry has nothing for the panels.
 //
-// Kept in a small file of the state folder: {"dock": "left"|"right", "width"}.
+// Kept in a small file of the state folder: {"dock": "left"|"right", "width", "appWidth"}. `appWidth` is the App view's inputs
+// panel (src/apps/AppPage.qml): its width once a person dragged its border, 0 for the automatic quarter of the window. Whether that
+// panel is shown is the visibility registry's, id "app-inputs" (panels/chrome_commands.cpp).
 //
 // The panels are a table in side_panels.cpp (kind, tab id, registry id, command, glyph, name): a new
 // panel is one row there, and so is an action (#192: a tab that runs a command, such as Templates or Settings;
@@ -49,11 +51,14 @@ class SidePanels : public QObject {
     Q_PROPERTY(int width READ width WRITE setWidth NOTIFY widthChanged)
     Q_PROPERTY(int minWidth READ minWidth CONSTANT)
     Q_PROPERTY(int maxWidth READ maxWidth CONSTANT)
+    // The App view's inputs panel, px; 0 is automatic. The page keeps it inside the window; this only keeps it sane.
+    Q_PROPERTY(int appWidth READ appWidth WRITE setAppWidth NOTIFY appWidthChanged)
 
 public:
     static constexpr int kMinWidth = 200;
     static constexpr int kMaxWidth = 640;
     static constexpr int kDefaultWidth = 288;
+    static constexpr int kMaxAppWidth = 4000;
 
     // `path` is the file it is kept in (empty: not kept). `chrome` is the registry the panels
     // register with; none: a registry of its own, which keeps nothing.
@@ -64,10 +69,12 @@ public:
     int width() const { return m_width; }
     int minWidth() const { return kMinWidth; }
     int maxWidth() const { return kMaxWidth; }
+    int appWidth() const { return m_appWidth; }
     QVariantList panels() const;
     void setTab(const QString &tab); // anything but "nodes" and "workflows" is none
     void setDock(const QString &dock); // anything but "right" is "left"
     void setWidth(int width);          // kept between kMinWidth and kMaxWidth
+    void setAppWidth(int width);       // under 0 is 0 (automatic), at most kMaxAppWidth
 
     // Opens `tab`, or closes it when it is the open one. Opening asks for the focus.
     Q_INVOKABLE void toggle(const QString &tab);
@@ -80,6 +87,7 @@ signals:
     void tabChanged();
     void dockChanged();
     void widthChanged();
+    void appWidthChanged();
 
 private:
     void save() const;
@@ -90,6 +98,7 @@ private:
     QString m_shownTab;
     QString m_dock = QStringLiteral("left");
     int m_width = kDefaultWidth;
+    int m_appWidth = 0;
 };
 
 } // namespace fugue

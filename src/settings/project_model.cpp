@@ -75,7 +75,8 @@ void ProjectModel::registerCommands(CommandRegistry &registry) {
 
 QString ProjectModel::indicator() const { return m_currentRoot.isEmpty() ? tr("Default project") : m_currentName; }
 
-bool ProjectModel::indicatorShown() const { return !m_currentRoot.isEmpty() || m_registered > 0; }
+// The Default project has no chip: "Default project" told nobody anything (owner, 2026-11-25), and no chip reads as the Default.
+bool ProjectModel::indicatorShown() const { return !m_currentRoot.isEmpty(); }
 
 QVariantList ProjectModel::inheritChoices() const {
     // The words of project.json, with what each hands to the project (spec 1.4.2).
@@ -105,7 +106,6 @@ QString ProjectModel::nameOfRoot(const QString &root) const {
 void ProjectModel::refresh() {
     m_projects.clear();
     m_registryProblem.clear();
-    m_registered = 0;
     const QString current = fugueHome();
     // The current project's own entry, whether registered or not (a project started by path).
     m_currentRoot.clear();
@@ -126,7 +126,6 @@ void ProjectModel::refresh() {
     if (!entries) {
         m_registryProblem = firstProblem(entries.errors());
     } else {
-        m_registered = int(entries->size());
         for (const ProjectEntry &entry : *entries) {
             const bool isCurrent = !current.isEmpty() && QDir::cleanPath(entry.root) == QDir::cleanPath(current);
             currentListed = currentListed || isCurrent;

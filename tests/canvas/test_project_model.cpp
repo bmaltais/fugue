@@ -105,7 +105,7 @@ private slots:
 
     // The list
 
-    void theDefaultIsFirstAndCurrentAndTheChipWaitsForAProject() {
+    void theDefaultIsFirstAndCurrentAndHasNoChip() {
         const auto model = make();
         QCOMPARE(model->projects().size(), 1);
         const QVariantMap row = model->projects().first().toMap();
@@ -114,9 +114,9 @@ private slots:
         QCOMPARE(row.value("name").toString(), QString("Default project"));
         QVERIFY(model->currentIsDefault());
         QCOMPARE(model->indicator(), QString("Default project"));
-        QVERIFY(!model->indicatorShown()); // nothing to mix it up with yet
+        QVERIFY(!model->indicatorShown());
         QVERIFY(model->create("Acme", QString(), {}).value("error").toString().isEmpty());
-        QVERIFY(model->indicatorShown()); // now there is
+        QVERIFY(!model->indicatorShown()); // other projects change nothing: no chip reads as the Default
     }
 
     void aNewProjectInheritsWhatTheDefaultsListSaysAndGoesToTheDefaultPlace() {

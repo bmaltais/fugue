@@ -311,7 +311,8 @@ Rectangle {
     }
 
     // The project chip (spec 1.4.2): which project this window is in, at the bar's far end; a press opens the
-    // Projects dialog. Made only when there is something to tell (a project, or projects to mix up).
+    // Projects dialog. Made only inside a project: in the Default there is nothing to tell (File > Projects… is the way in).
+    // A KitChip like the bar's other buttons, with no accent (D7: the accent is the primary's and the focus ring's).
     Loader {
         id: chipLoader
         objectName: "projectChipLoader"
@@ -319,34 +320,16 @@ Rectangle {
         anchors.right: closeButton.left
         anchors.rightMargin: 2 * bar.u
         anchors.verticalCenter: parent.verticalCenter
-        sourceComponent: AbstractButton {
-            id: chip
+        sourceComponent: KitChip {
             objectName: "projectChip"
-            readonly property bool inProject: !App.projects.currentIsDefault
+            look: bar.look
+            pill: true
             text: App.projects.indicator
-            focusPolicy: Qt.NoFocus
-            hoverEnabled: true
-            height: 6 * bar.u
-            width: Math.min(implicitWidth, 30 * bar.u)
-            leftPadding: 2.5 * bar.u
-            rightPadding: 2.5 * bar.u
-            onClicked: App.commands.trigger("file.projects")
+            maxTextWidth: 25 * bar.u
+            tip: qsTr("Project: %1. Switch or manage projects (File > Projects…)").arg(text)
+            onTapped: App.commands.trigger("file.projects")
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Project: %1").arg(text)
-            background: Rectangle {
-                radius: bar.look.smallCorner
-                color: chip.hovered ? Qt.tint(bar.look.well, Qt.alpha(bar.look.text, 0.05)) : "transparent"
-                border.width: 1
-                border.color: chip.inProject ? bar.look.accent : bar.look.hairlineStrong
-            }
-            contentItem: Text {
-                text: chip.text
-                elide: Text.ElideRight
-                font.pixelSize: bar.look.labelSize
-                font.weight: chip.inProject ? Font.DemiBold : Font.Normal
-                color: chip.inProject ? bar.look.accent : bar.look.label
-                verticalAlignment: Text.AlignVCenter
-            }
         }
     }
 

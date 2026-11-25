@@ -285,6 +285,55 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // The inputs panel (owner, 2026-11-25): its border resizes it and the width is kept; the hero's hide button slides it shut to a
+    // strip whose button brings it back, and Window > App inputs does the same; a drag far past its least width hides it too.
+    void theInputsPanelResizesHidesAndComesBack() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QQuickItem *panel = nullptr;
+        QTRY_VERIFY((panel = find(app.window, "appPanel")) != nullptr);
+        QQuickItem *handle = find(app.window, "appPanelHandle");
+        QVERIFY(handle);
+        const qreal before = panel->width();
+
+        handle->forceActiveFocus();
+        QTest::keyClick(app.window, Qt::Key_Left, Qt::ShiftModifier); // the border moves toward the stage: the panel grows
+        QTRY_VERIFY(panel->width() > before);
+        QVERIFY(app.sidePanels.appWidth() > 0);
+        QTest::keyClick(app.window, Qt::Key_Return); // the automatic width again
+        QTRY_COMPARE(panel->width(), before);
+        QCOMPARE(app.sidePanels.appWidth(), 0);
+
+        tap(app.window, find(app.window, "appHideInputs"));
+        QTRY_VERIFY(find(app.window, "appShowInputs"));
+        QVERIFY(!app.chrome.isVisible("app-inputs"));
+        QTRY_VERIFY(panel->width() < before / 2);
+        QTRY_VERIFY(!find(app.window, "appForm")); // once it has slid shut
+        QVERIFY(find(app.window, "appStripRun"));
+        QVERIFY(!find(app.window, "appPanelHandle"));
+
+        tap(app.window, find(app.window, "appShowInputs"));
+        QTRY_VERIFY(find(app.window, "appForm"));
+        QTRY_COMPARE(panel->width(), before);
+
+        QVERIFY(app.commands.trigger("view.toggle-app-inputs"));
+        QTRY_VERIFY(find(app.window, "appShowInputs"));
+        QVERIFY(app.commands.trigger("view.toggle-app-inputs"));
+        QTRY_VERIFY(find(app.window, "appPanelHandle"));
+
+        // A drag of the border to the window's end edge hides the panel.
+        handle = find(app.window, "appPanelHandle");
+        QTRY_VERIFY(handle->isVisible());
+        const QPoint from = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        for (int x = from.x(); x < app.window->width() - 2; x += 20)
+            QTest::mouseMove(app.window, QPoint(x, from.y()));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, QPoint(app.window->width() - 2, from.y()));
+        QTRY_VERIFY(find(app.window, "appShowInputs"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     void anAppOpensAsTheFormRunsAndGoesToTheGraphAndBack() {
         App app(load(appWorkflow));
         Rig rig(app);

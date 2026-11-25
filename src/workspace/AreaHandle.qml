@@ -22,13 +22,18 @@ Item {
     property real step: 2 * look.unit
     readonly property bool row: axis === "row"
     readonly property bool lit: mouse.pressed || mouse.containsMouse || activeFocus
+    readonly property bool pressed: mouse.pressed
+    // The words, for a border that is not between two areas (the App view's inputs panel, AppPage.qml).
+    property string name: row ? qsTr("Border between the areas side by side") : qsTr("Border between the areas one over the other")
+    property string description: qsTr("Arrow keys move it; Enter shares the space equally")
+    property string tip: qsTr("Drag to resize; double-click to share equally")
     signal moveRequested(real delta)
     signal equalizeRequested
 
     activeFocusOnTab: true
     Accessible.role: Accessible.Splitter
-    Accessible.name: row ? qsTr("Border between the areas side by side") : qsTr("Border between the areas one over the other")
-    Accessible.description: qsTr("Arrow keys move it; Enter shares the space equally")
+    Accessible.name: name
+    Accessible.description: description
 
     // Where the pointer wants the border: its distance from the border along the axis, from the start edge.
     function ask(along) {
@@ -82,5 +87,5 @@ Item {
     }
     ToolTip.visible: mouse.containsMouse && !mouse.pressed
     ToolTip.delay: App.theme.look.tooltipDelay
-    ToolTip.text: qsTr("Drag to resize; double-click to share equally")
+    ToolTip.text: tip
 }

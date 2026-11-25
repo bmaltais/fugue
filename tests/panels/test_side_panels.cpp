@@ -57,12 +57,16 @@ private slots:
             panels.setTab("workflows");
             panels.setDock("right");
             panels.setWidth(333);
+            panels.setAppWidth(-5);
+            QCOMPARE(panels.appWidth(), 0); // automatic
+            panels.setAppWidth(420); // the App view's inputs panel, dragged
         }
         ChromeVisibility chrome(dir.filePath("chrome.json"));
         SidePanels again(dir.filePath("side-panels.json"), &chrome);
         QCOMPARE(again.tab(), QString("workflows"));
         QCOMPARE(again.dock(), QString("right"));
         QCOMPARE(again.width(), 333);
+        QCOMPARE(again.appWidth(), 420);
     }
     void aTabKeptByAnOlderFileIsReadOnceAndThenTheRegistryDecides() {
         QTemporaryDir dir;
