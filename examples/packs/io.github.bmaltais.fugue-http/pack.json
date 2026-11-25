@@ -1,0 +1,10 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-http",
+  "version": "1.0.0",
+  "name": "HTTP Request",
+  "description": "One node that calls a web API: a webhook, a REST lookup, an upload. It uses the network, so trust shows that.",
+  "license": "MIT",
+  "source": "https://github.com/bmaltais/fugue",
+  "nodes": ["request"]
+}
