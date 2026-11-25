@@ -8,7 +8,9 @@ import "../canvas"
 // The App view (#385, epic #397, spec 12.17): a workflow as one simple screen. Inputs at the start, the output beside
 // them, nothing about how it is made. AppView (apps/app_view.h) holds all the logic; this draws it.
 //
-//   header: the app's title and description; at the end, Open in Graph (the one way out to the nodes)
+//   header: the app's title and description; at the end, Open in Graph (the one way out to the nodes) and, quietly, Add to
+//           launcher (#398). In an app's own window (`standalone`) there is no graph to open: its quiet way out is Open in
+//           Fugue, the full window in a process of its own
 //   form:   the inputs (AppInput), the Advanced ones folded; under them Run, the screen's one primary control, with Cancel
 //           in a chunk of its own while a run goes, and one line of progress
 //   output: what the last run made (a picture is drawn to fit, a double click opens it large; a video or sound plays),
@@ -21,6 +23,10 @@ Rectangle {
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property AppView appView: App.appView
+    readonly property AppLauncher launcher: App.appLauncher
+    readonly property bool launchable: launcher !== null && launcher.available
+    // The app's own window (apps/AppWindow.qml): the page is the whole window and has no graph behind it.
+    property bool standalone: false
     property bool detailsOpen: false
     property bool advancedOpen: false
     readonly property var visibleFields: appView.fields.filter(f => !f.advanced)
@@ -65,14 +71,39 @@ Rectangle {
                     wrapMode: Text.Wrap
                 }
             }
-            ViewButton {
-                objectName: "appOpenInGraph"
-                look: page.look
-                text: qsTr("Open in Graph")
-                glyph: "workflow"
-                bordered: true
-                tip: qsTr("Show the workflow behind this app")
-                onTapped: page.appView.openInGraph()
+            RowLayout {
+                spacing: 2 * page.u
+                ViewButton {
+                    objectName: "appLauncherToggle"
+                    visible: page.launchable
+                    look: page.look
+                    text: page.launcher && page.launcher.listed ? qsTr("Remove from launcher") : qsTr("Add to launcher")
+                    glyph: "pin"
+                    flat: true
+                    tip: page.launcher && page.launcher.listed ? qsTr("Take this app out of the desktop launcher")
+                                                               : qsTr("Start this app from the desktop launcher, in a window of its own")
+                    onTapped: page.launcher.listed ? page.launcher.remove() : page.launcher.add()
+                }
+                ViewButton {
+                    objectName: "appOpenInFugue"
+                    visible: page.standalone && page.launchable
+                    look: page.look
+                    text: qsTr("Open in Fugue")
+                    glyph: "workflow"
+                    flat: true
+                    tip: qsTr("Open the workflow behind this app in the full Fugue window")
+                    onTapped: page.launcher.openInFugue()
+                }
+                ViewButton {
+                    objectName: "appOpenInGraph"
+                    visible: !page.standalone
+                    look: page.look
+                    text: qsTr("Open in Graph")
+                    glyph: "workflow"
+                    bordered: true
+                    tip: qsTr("Show the workflow behind this app")
+                    onTapped: page.appView.openInGraph()
+                }
             }
         }
 

@@ -259,6 +259,7 @@ QVariantList Workflows::tabs() const {
         list.append(QVariantMap{{"id", tab.id},
                                 {"title", tab.title},
                                 {"path", tab.path},
+                                {"template", tab.templateFolder}, // where an unnamed tab of a template came from (#398)
                                 {"unsaved", unsaved(i)},
                                 {"current", i == m_current},
                                 {"color", tab.color}});
@@ -361,7 +362,7 @@ void Workflows::refreshRegistry() {
         return;
     m_commands->setUnsavedWork(unsaved());
     // Ctrl+W on a lone, empty, untitled workflow has nothing to close: it quits.
-    m_commands->setWorkflowOpen(!(count() == 1 && isPristine(0)));
+    m_commands->setWorkflowOpen(!nothingOpen());
 }
 
 bool Workflows::isPristine(int index) const {
@@ -728,8 +729,11 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     addTab(document.value(), {}, chosen.title, true, true);
     // Its carried packs stay in the template's folder, so a package (unpacked only while it
     // opens) offers none; the workflow's requires.packs source is its offer then (#91).
-    if (!fromPackage)
+    if (!fromPackage) {
         m_tabs[size_t(m_current)].carried = chosen.carriedPacks;
+        m_tabs[size_t(m_current)].templateFolder = chosen.folder;
+        emit tabsChanged(); // addTab's came before the folder was set, and the App view's launcher reads it (#398)
+    }
     analyze(document.value(), chosen.title);
     offerReadiness();
     return true;

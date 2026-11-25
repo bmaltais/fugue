@@ -35,6 +35,7 @@ struct Loaded {
     QList<CarriedPack> carried;
     Document document;
     App app;
+    Errors stale; // what pruneApp dropped (`app_stale` warnings): shown, never silent
 };
 
 Error usageProblem(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("usage"), message, hint); }
@@ -49,7 +50,7 @@ Result<std::optional<Loaded>> readApp(const QString &id, const QString &file, co
         return block.errors();
     if (!*block)
         return std::optional<Loaded>();
-    return std::optional<Loaded>(Loaded{id, QFileInfo(file).absoluteFilePath(), folder, carried, *document, **block});
+    return std::optional<Loaded>(Loaded{id, QFileInfo(file).absoluteFilePath(), folder, carried, *document, **block, {}}); // stale: filled by loadApp
 }
 
 // The apps of the template library, in its order: the templates the catalog flags (`Template::app`, 11.10). A flagged one that
@@ -74,7 +75,7 @@ QList<Loaded> templateApps(Context &context, Errors *problems) {
     return apps;
 }
 
-Result<Loaded> loadApp(const QString &ref, Context &context) {
+Result<Loaded> readNamedApp(const QString &ref, Context &context) {
     const auto noApp = [](const QString &what) {
         return makeError(QStringLiteral("no_app"), QStringLiteral("%1 has no app block.").arg(what),
                          QStringLiteral("An app is a workflow with a top-level \"app\" block (spec 4.9); `fugue app list` shows the apps there are."));
@@ -104,14 +105,19 @@ Result<Loaded> loadApp(const QString &ref, Context &context) {
     return error;
 }
 
+// The app as the workflow now is: a target or output the graph no longer has is dropped and said (spec 4.9), as the App view does.
+Result<Loaded> loadApp(const QString &ref, Context &context) {
+    Result<Loaded> loaded = readNamedApp(ref, context);
+    if (!loaded)
+        return loaded;
+    Loaded value = *loaded;
+    value.stale = app::pruneApp(value.app, value.document, context.registry);
+    return value;
+}
+
+// The spec of the first target, through a group instance to its inner input (spec 5.4).
 const InputSpec *specOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (input.targets.isEmpty())
-        return nullptr;
-    const auto node = document.graph.nodes.constFind(input.targets.first().node);
-    if (node == document.graph.nodes.constEnd())
-        return nullptr;
-    const NodeType *type = registry.nodeTypeFor(node->type, node->version.major);
-    return type ? type->input(input.targets.first().port) : nullptr;
+    return input.targets.isEmpty() ? nullptr : targetInputSpec(document, registry, input.targets.first());
 }
 
 bool isFileRole(const InputBinding &input) { return input.role == QLatin1String("image") || input.role == QLatin1String("mask"); }
@@ -120,9 +126,10 @@ bool isFileRole(const InputBinding &input) { return input.role == QLatin1String(
 QString typeOf(const InputBinding &input, const Document &document, const Registry &registry) {
     if (isFileRole(input))
         return input.role;
-    if (input.choices)
+    const InputSpec *spec = specOf(input, document, registry);
+    if (input.choices || (spec && spec->choices))
         return QStringLiteral("choice");
-    if (const InputSpec *spec = specOf(input, document, registry))
+    if (spec)
         return registry.portKind(spec->type.type) == PortKind::Resource ? QStringLiteral("model") : spec->type.type.toString();
     return input.role == QLatin1String("model") ? QStringLiteral("model") : QStringLiteral("any");
 }
@@ -139,6 +146,8 @@ QJsonValue defaultOf(const InputBinding &input, const Document &document, const 
         const InputValue held = node->inputs.value(target.port);
         if (held.kind() == InputValue::Kind::Literal)
             return held.literal();
+        if (held.kind() == InputValue::Kind::Auto) // a seed left to the engine: the workflow's own value is {"auto": "random"}
+            return held.toJson();
     }
     const InputSpec *spec = specOf(input, document, registry);
     return spec ? spec->defaultValue : QJsonValue(QJsonValue::Undefined);
@@ -155,7 +164,8 @@ bool isRequired(const InputBinding &input, const Document &document, const Regis
     return input.role == QLatin1String("prompt") && !input.optional && input.fallback.isEmpty();
 }
 
-QJsonObject inputJson(const InputBinding &input, const Document &document, const Registry &registry) {
+QJsonObject inputJson(const InputBinding &given, const Document &document, const Registry &registry) {
+    const InputBinding input = completedBy(given, specOf(given, document, registry));
     QJsonObject row{{"key", input.key()},
                     {"role", input.role},
                     {"label", input.label.isEmpty() ? input.key() : input.label},
@@ -413,7 +423,12 @@ Reply appInfo(const Command &command, Context &context) {
             facts << QStringLiteral("%1 to %2").arg(row.contains("min") ? QString::number(row.value("min").toDouble()) : QStringLiteral("..."),
                                                     row.contains("max") ? QString::number(row.value("max").toDouble()) : QStringLiteral("..."));
         if (row.contains("choices"))
-            facts << QStringLiteral("one of %1").arg(input.choices->join(QStringLiteral(", ")));
+            {
+            QStringList words;
+            for (const QJsonValue &word : row.value("choices").toArray())
+                words << word.toString();
+            facts << QStringLiteral("one of %1").arg(words.join(QStringLiteral(", ")));
+        }
         lines << QStringLiteral("  %1  %2  (%3)").arg(row.value("key").toString(), row.value("label").toString(), facts.join(QStringLiteral(", ")));
     }
     lines << QStringLiteral("Outputs:");
@@ -431,7 +446,9 @@ Reply appInfo(const Command &command, Context &context) {
         data.insert("needs", plan.toJson());
         lines << QStringLiteral("Not ready: %1").arg(notReady(*loaded, plan).message);
     }
-    return Reply::success(data, lines.join(QLatin1Char('\n')));
+    Reply reply = Reply::success(data, lines.join(QLatin1Char('\n')));
+    reply.errors = loaded->stale;
+    return reply;
 }
 
 Reply appRun(const Command &command, Context &context) {
@@ -483,8 +500,10 @@ Reply appRun(const Command &command, Context &context) {
 
     QStringList files;
     const QJsonArray results = resultsOf(*loaded, *folder, files);
-    return Reply::success(QJsonObject{{"app", loaded->id}, {"run", folder->id()}, {"status", "ok"}, {"outputs", results}, {"files", QJsonArray::fromStringList(files)}},
-                          files.join(QLatin1Char('\n')));
+    Reply reply = Reply::success(QJsonObject{{"app", loaded->id}, {"run", folder->id()}, {"status", "ok"}, {"outputs", results}, {"files", QJsonArray::fromStringList(files)}},
+                                 files.join(QLatin1Char('\n')));
+    reply.errors = loaded->stale;
+    return reply;
 }
 
 } // namespace fugue::cli

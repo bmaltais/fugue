@@ -45,6 +45,40 @@ const char *kNeedsPack = R"({"fugue": 1, "requires": {"packs": {"io.example.tool
    "other": {"type": "io.example.tools/tool", "version": "1.0.0", "inputs": {}},
    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "other.image"}}}}}})";
 
+// A picture through a library group instance (spec 5.4): the Blend's `opacity` and `mode` are exposed by the group, so the app's
+// inputs bind to a group's exposed inputs, with the inner spec (number 0..1, a choice). The text is split so a second app can
+// add what the workflow does not have (see kShadeStale).
+#define SHADE_GROUP R"(,
+ "groups": {"local/shade": {"version": "1.0.0", "name": "Shade",
+   "inputs": [{"name": "image", "targets": ["mix.base", "mix.top"]},
+              {"name": "opacity", "targets": ["mix.opacity"]},
+              {"name": "mode", "targets": ["mix.mode"]}],
+   "outputs": [{"name": "image", "from": "mix.image"}],
+   "nodes": {"mix": {"type": "fugue/blend", "version": "1.0.0", "inputs": {}}}}}})"
+#define SHADE_NODES R"(
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": ""}},
+   "shade": {"type": "local/shade", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "opacity": 0.25}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "shade.image"}, "name": "app"}})"
+
+const char *kShade = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Shade",
+         "inputs": [{"role": "image", "targets": ["load.file"]},
+                    {"name": "opacity", "targets": ["shade.opacity"]},
+                    {"name": "mode", "targets": ["shade.mode"]}],
+         "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {)" SHADE_NODES R"(}})" SHADE_GROUP;
+
+// The same app with an input and an output the workflow does not have (`gone`), and a sampler whose seed is the workflow's own
+// {"auto": "random"}.
+const char *kShadeStale = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Shade",
+         "inputs": [{"role": "image", "targets": ["load.file"]},
+                    {"name": "old", "targets": ["shade.gone"]},
+                    {"role": "seed", "targets": ["sample.seed"]}],
+         "outputs": [{"node": "save"}, {"node": "gone", "label": "Lost"}]},
+ "graph": {"nodes": {
+   "sample": {"type": "fugue/sampler", "version": "1.2.0", "inputs": {"seed": {"auto": "random"}}},)" SHADE_NODES R"(}})" SHADE_GROUP;
+
 const char *kPlain = R"({"fugue": 1, "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})";
 
 } // namespace
@@ -110,6 +144,8 @@ private slots:
         template_("plain", "Plain", kPlain);
         write(path("work/needs-pack.fugue"), kNeedsPack);
         write(path("work/invert.fugue"), kInvert);
+        write(path("work/shade.fugue"), kShade);
+        write(path("work/shade-stale.fugue"), kShadeStale);
     }
 
     void listShowsTheAppsAndNotThePlainTemplates() {
@@ -166,6 +202,51 @@ private slots:
             QCOMPARE(amount.value("max").toInt(), 5);
             QCOMPARE(data.value("outputs").toArray().at(0).toObject().value("label").toString(), QString("Result"));
         }
+    }
+
+    // An input bound to a group instance's exposed input has the inner input's type, range and choices; what the graph no
+    // longer has is dropped and said as `app_stale` (spec 4.9), never listed; a seed left to the engine shows as it is.
+    void infoTypesAGroupInstanceInput() {
+        const Outcome info = fugue({"app", "info", "shade.fugue", "--json"});
+        QCOMPARE(info.exitCode, 0);
+        QMap<QString, QJsonObject> rows;
+        for (const QJsonValue row : info.data().value("inputs").toArray())
+            rows.insert(row.toObject().value("key").toString(), row.toObject());
+        QCOMPARE(rows.value("opacity").value("type").toString(), QString("number"));
+        QCOMPARE(rows.value("opacity").value("default").toDouble(), 0.25);
+        QCOMPARE(rows.value("opacity").value("min").toDouble(), 0.0);
+        QCOMPARE(rows.value("opacity").value("max").toDouble(), 1.0);
+        QCOMPARE(rows.value("mode").value("type").toString(), QString("choice"));
+        QVERIFY(rows.value("mode").value("choices").toArray().contains("multiply"));
+        QVERIFY(!info.json().contains("warnings"));
+    }
+
+    void infoDropsAndSaysWhatTheWorkflowNoLongerHas() {
+        const Outcome info = fugue({"app", "info", "shade-stale.fugue", "--json"});
+        QCOMPARE(info.exitCode, 0);
+        QStringList keys;
+        for (const QJsonValue row : info.data().value("inputs").toArray())
+            keys << row.toObject().value("key").toString();
+        QCOMPARE(keys, (QStringList{"image", "seed"})); // `old` is dropped, not listed
+        QCOMPARE(info.data().value("inputs").toArray().at(1).toObject().value("default").toObject(), (QJsonObject{{"auto", "random"}}));
+        QCOMPARE(info.data().value("outputs").toArray().size(), 1); // `gone` is dropped, not listed
+        QStringList codes, said;
+        for (const QJsonValue w : info.json().value("warnings").toArray()) {
+            codes << w.toObject().value("code").toString();
+            said << w.toObject().value("message").toString();
+        }
+        QCOMPARE(codes, (QStringList{"app_stale", "app_stale", "app_stale"}));
+        QVERIFY2(said.join(' ').contains("shade.gone"), qPrintable(said.join(' ')));
+        QVERIFY2(said.join(' ').contains("output gone"), qPrintable(said.join(' ')));
+    }
+
+    void runTakesANumberForAGroupInstanceInput() {
+        const QString out = path("work/shade-results");
+        const Outcome ran = fugue({"app", "run", "shade.fugue", "--input", "image=" + picture(), "--input", "opacity=0.7", "--input", "mode=multiply",
+                                   "--out", out, "--json"});
+        QVERIFY2(ran.exitCode == 0, ran.out + ran.err);
+        QCOMPARE(ran.data().value("files").toArray().size(), 1);
+        QCOMPARE(fugue({"app", "run", "shade.fugue", "--input", "image=" + picture(), "--input", "opacity=lots", "--json"}).code(), QString("usage"));
     }
 
     void infoSaysWhenTheAppIsNotReady() {

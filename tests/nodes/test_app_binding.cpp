@@ -8,6 +8,7 @@
 
 #include "engine/app_binding.h"
 #include "engine/document.h"
+#include "engine/node_type.h"
 #include "engine/registry.h"
 #include "engine/share_copy.h"
 #include "nodes/builtin.h"
@@ -51,6 +52,27 @@ App appOfFixture(const Document &document) {
     if (!parsed || !parsed->has_value())
         qFatal("fixture has no app");
     return **parsed;
+}
+
+// A picture through a library group instance (spec 5.4) whose exposed `opacity` and `mode` are a Blend's, and a block that binds them.
+QJsonObject groupWorkflow() {
+    return QJsonDocument::fromJson(R"({
+      "fugue": 1,
+      "app": {"format": 1, "title": "Shade",
+              "inputs": [{"name": "opacity", "targets": ["shade.opacity"]},
+                         {"name": "mode", "targets": ["shade.mode"]}],
+              "outputs": [{"node": "save"}]},
+      "graph": {"nodes": {
+        "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "a.png"}},
+        "shade": {"type": "local/shade", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "opacity": 0.25}},
+        "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"image": {"from": "shade.image"}, "name": "out"}}}},
+      "groups": {"local/shade": {"version": "1.0.0", "name": "Shade",
+        "inputs": [{"name": "image", "targets": ["mix.base", "mix.top"]},
+                   {"name": "opacity", "targets": ["mix.opacity"]},
+                   {"name": "mode", "targets": ["mix.mode"]}],
+        "outputs": [{"name": "image", "from": "mix.image"}],
+        "nodes": {"mix": {"type": "fugue/blend", "version": "1.0.0", "inputs": {}}}}}
+    })").object();
 }
 
 QJsonObject withBlock(const std::function<void(QJsonObject &)> &change) {
@@ -163,6 +185,50 @@ private slots:
         const Document document = load(workflow());
         const Errors errors = checkApp(appOfFixture(document), document, m_registry);
         QVERIFY2(errors.isEmpty(), qPrintable(messages(errors)));
+    }
+
+    // An exposed input of a group instance keeps its inner input's spec (spec 5.4): type, range, choices, default.
+    void aGroupInstanceTargetHasTheInnerInputsSpec() {
+        const Document document = load(groupWorkflow());
+        const InputSpec *opacity = targetInputSpec(document, m_registry, PortRef{"shade", "opacity"});
+        QVERIFY(opacity);
+        QCOMPARE(opacity->type.type.id, QStringLiteral("number"));
+        QCOMPARE(opacity->min, std::optional<double>(0));
+        QCOMPARE(opacity->max, std::optional<double>(1));
+        QCOMPARE(opacity->defaultValue.toDouble(), 0.5);
+        const InputSpec *mode = targetInputSpec(document, m_registry, PortRef{"shade", "mode"});
+        QVERIFY(mode && mode->choices && mode->choices->contains("multiply"));
+        QVERIFY(!targetInputSpec(document, m_registry, PortRef{"shade", "nope"}));
+        QVERIFY(!targetInputSpec(document, m_registry, PortRef{"gone", "opacity"}));
+        const App app = appOfFixture(document);
+        const InputBinding completed = completedBy(*app.input("opacity"), opacity);
+        QCOMPARE(completed.max, std::optional<double>(1));
+        QVERIFY(!completed.choices);
+        QCOMPARE(completedBy(*app.input("mode"), mode).choices, mode->choices);
+        QVERIFY2(checkApp(app, document, m_registry).isEmpty(), qPrintable(messages(checkApp(app, document, m_registry))));
+    }
+
+    void aWrongTypedGroupInstanceTargetIsCaught() {
+        QJsonObject json = groupWorkflow();
+        QJsonObject block = json.value("app").toObject();
+        block.insert("inputs", QJsonArray{QJsonObject{{"role", "prompt"}, {"targets", QJsonArray{"shade.opacity"}}},
+                                          QJsonObject{{"name", "mode"}, {"targets", QJsonArray{"shade.mode"}}, {"choices", QJsonArray{"multiply", "wobble"}}}});
+        json.insert("app", block);
+        const Document document = load(json);
+        const QString said = messages(checkApp(appOfFixture(document), document, m_registry));
+        QVERIFY2(said.contains("takes number, not text"), qPrintable(said));
+        QVERIFY2(said.contains("\"wobble\""), qPrintable(said));
+    }
+
+    void aGroupInstanceInputThatIsGoneIsStale() {
+        QJsonObject json = groupWorkflow();
+        QJsonObject block = json.value("app").toObject();
+        block.insert("inputs", QJsonArray{QJsonObject{{"name", "opacity"}, {"targets", QJsonArray{"shade.gone"}}}});
+        json.insert("app", block);
+        const Document document = load(json);
+        App app = appOfFixture(document);
+        QVERIFY2(messages(pruneApp(app, document, m_registry)).contains("shade.gone"), "stale");
+        QVERIFY(app.inputs.isEmpty());
     }
 
     void aDeletedNodeIsDroppedAndReported() {

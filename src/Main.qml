@@ -38,6 +38,8 @@ ApplicationWindow {
     readonly property bool appIsApp: App.appView ? App.appView.isApp : false
     // One area only: with several, the areas are the window's body and the app stays the graph's tab (#217 carries it later).
     readonly property bool appShown: (App.appView ? App.appView.shown : false) && !areaHost
+    // Nothing is open and the person has not asked for a blank graph: the apps shelf is the body (#388).
+    readonly property bool homeShown: (App.appShelf ? App.appShelf.atHome : false) && !appShown && !areaHost
 
     HelperNotice { id: helperNotice }
     // The width, place and delay of every tooltip in the window (canvas/ToolTipStyle.qml).
@@ -186,7 +188,7 @@ ApplicationWindow {
                 Layout.preferredHeight: item ? 7 * App.theme.look.unit : 0
                 Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
                 Layout.rightMargin: win.sidePanelMargin("right")
-                active: !win.areaHost && !win.focusMode && !win.appShown && App.workspace !== null
+                active: !win.areaHost && !win.focusMode && !win.appShown && !win.homeShown && App.workspace !== null
                 sourceComponent: AreaHeader {
                     areaId: App.workspace.graphArea
                     viewType: "graph"
@@ -196,7 +198,7 @@ ApplicationWindow {
             FugueCanvas {
                 id: fugueCanvas
                 objectName: "canvas"
-                visible: !win.appShown
+                visible: !win.appShown && !win.homeShown
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // The side panel (#56) takes its width from the canvas, on the side it docks.
@@ -272,6 +274,17 @@ ApplicationWindow {
     // opened in the graph the strip with the way back under the canvas. Made only while needed, as the areas' host is, so
     // any other window has none of these items (test_area_window).
     property Item appPageItem: null
+    // The apps shelf in the same place while nothing is open (#388), made only then, for the same reason.
+    property Item homeItem: null
+    Component {
+        id: homeComponent
+        AppsHome {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
+            Layout.rightMargin: win.sidePanelMargin("right")
+        }
+    }
     property Item appBackItem: null
     Component {
         id: appPageComponent
@@ -320,6 +333,15 @@ ApplicationWindow {
             appBackItem = null
         }
     }
+    function syncHome() {
+        if (homeShown && !homeItem) {
+            homeItem = homeComponent.createObject(mainLayout) as Item
+        } else if (!homeShown && homeItem) {
+            homeItem.destroy()
+            homeItem = null
+        }
+    }
+    onHomeShownChanged: syncHome()
     onAppShownChanged: syncApp()
     onAppIsAppChanged: syncApp()
     onFocusModeChanged: syncApp()
@@ -409,6 +431,12 @@ ApplicationWindow {
                 win.templatesDialog.open()
                 return
             }
+            if (id === "file.apps") {
+                if (!win.appsDialog)
+                    win.appsDialog = appsComponent.createObject(win.contentItem)
+                win.appsDialog.open()
+                return
+            }
             if (id === "file.projects") {
                 if (App.projects === null)
                     return
@@ -444,6 +472,12 @@ ApplicationWindow {
             win.settingsPanel.open()
             win.appSettingsModel.packs.add(source, ref)
         }
+    }
+    // The Apps dialog (#388), made the first time file.apps asks for it.
+    property var appsDialog: null
+    Component {
+        id: appsComponent
+        AppsDialog {}
     }
     // The Templates dialog (#83), made the first time file.templates asks for it.
     property var templatesDialog: null
@@ -491,6 +525,7 @@ ApplicationWindow {
         syncSidePanel()
         syncAreas()
         syncApp()
+        syncHome()
     }
     Connections {
         target: App.runBar
