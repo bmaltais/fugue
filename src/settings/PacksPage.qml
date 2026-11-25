@@ -12,7 +12,7 @@ import "../kit"
 // sandbox, and the page says so.
 //
 // The list is made again on every change, so the page keeps its state by the pack's ID, not its place: which row is open
-// (`expandedId`) and which row had the focus (`keepId`, put back by `restoreFocus()` when the rows are made again).
+// (`expandedKey`) and which row had the focus (`keepKey`, put back by `restoreFocus()` when the rows are made again).
 ColumnLayout {
     id: page
     required property var host // the SettingsPanel
@@ -21,30 +21,38 @@ ColumnLayout {
     readonly property PacksModel model: host.model.packs
     spacing: 0
 
-    property string expandedId // the one open row ("" none)
-    property string tabId // the last header used: the only one Tab stops on
-    property string revealId // the row that is opening scrolls itself into view while it grows
-    property string keepId // the row whose header gets the focus back once the list is made again
+    property string expandedKey // the one open row ("" none)
+    property string tabKey // the last header used: the only one Tab stops on
+    property string revealKey // the row that is opening scrolls itself into view while it grows
+    property string keepKey // the row whose header gets the focus back once the list is made again
     property bool addOpen: false
 
     readonly property string query: search.text.trim().toLowerCase()
     readonly property bool searching: query !== ""
     function packMatches(p) { return [p.name, p.id, p.version, p.path].join("\n").toLowerCase().includes(query) }
     function groupMatches(g) { return [g.name, g.id].join("\n").toLowerCase().includes(query) }
-    readonly property var shownIds: model.packs.filter(p => !searching || packMatches(p)).map(p => p.id)
+    readonly property var shownKeys: model.packs.filter(p => !searching || packMatches(p)).map(p => p.path) // a pack's path is the one thing no two share (two majors of one id, a broken pack)
     readonly property var shownLibrary: model.library.filter(g => !searching || groupMatches(g))
-    readonly property bool nothing: searching && shownIds.length === 0 && shownLibrary.length === 0
-    readonly property string tabRow: shownIds.includes(tabId) ? tabId : (shownIds.length > 0 ? shownIds[0] : "")
+    readonly property bool nothing: searching && shownKeys.length === 0 && shownLibrary.length === 0
+    readonly property string tabRow: shownKeys.includes(tabKey) ? tabKey : (shownKeys.length > 0 ? shownKeys[0] : "")
 
     // The status column's width, shared: as wide as the widest word. The trust slot is as wide as the Trust... chip while any pack asks for it.
     TextMetrics { id: tmTrusted; font.pixelSize: page.look.labelSize; text: qsTr("trusted") }
     TextMetrics { id: tmNotTrusted; font.pixelSize: page.look.labelSize; text: qsTr("not trusted") }
     TextMetrics { id: tmDisabled; font.pixelSize: page.look.labelSize; text: qsTr("disabled") }
-    readonly property real statusWidth: Math.ceil(Math.max(tmTrusted.advanceWidth, tmNotTrusted.advanceWidth, tmDisabled.advanceWidth))
+    TextMetrics { id: tmInheritedNot; font.pixelSize: page.look.labelSize; text: qsTr("inherited, %1").arg(qsTr("not trusted")) }
+    TextMetrics { id: tmInheritedDis; font.pixelSize: page.look.labelSize; text: qsTr("inherited, %1").arg(qsTr("disabled")) }
+    readonly property real statusWidth: Math.ceil(Math.max(tmTrusted.advanceWidth, tmNotTrusted.advanceWidth, tmDisabled.advanceWidth,
+                                                            model.packs.some(p => p.inherited) ? Math.max(tmInheritedNot.advanceWidth, tmInheritedDis.advanceWidth) : 0))
+    // What the row says about trust; a pack of the Default project says so too, so the Trust... beside it is never read alone.
+    function statusOf(p) {
+        const word = !p.enabled ? qsTr("disabled") : p.trusted ? qsTr("trusted") : qsTr("not trusted")
+        return p.inherited ? qsTr("inherited, %1").arg(word) : word
+    }
     KitChip { id: trustMeasure; look: page.look; visible: false; text: qsTr("Trust…") }
     readonly property real trustSlot: model.packs.some(p => p.enabled && !p.trusted) ? Math.ceil(trustMeasure.implicitWidth) : 0
 
-    function indexOfId(id) {
+    function indexOfKey(id) {
         for (let i = 0; i < rows.count; ++i) {
             const r = rows.itemAt(i) as KitDisclosureRow
             if (r && r.rowKey === id)
@@ -52,68 +60,68 @@ ColumnLayout {
         }
         return -1
     }
-    function rowById(id) { return rows.itemAt(indexOfId(id)) as KitDisclosureRow }
+    function rowByKey(id) { return rows.itemAt(indexOfKey(id)) as KitDisclosureRow }
     // Remembers which row holds the focus, to put it back when the rows are made again (a change rebuilds them all).
     function noteFocus() {
-        keepId = ""
+        keepKey = ""
         for (let p = page.Window.activeFocusItem; p; p = p.parent) {
             const r = p as KitDisclosureRow
             if (r && r.rowKey !== "") {
-                keepId = r.rowKey
+                keepKey = r.rowKey
                 return
             }
         }
     }
     function restoreFocus() {
-        const r = keepId !== "" ? rowById(keepId) : null
-        keepId = ""
+        const r = keepKey !== "" ? rowByKey(keepKey) : null
+        keepKey = ""
         if (r)
             r.focusHeader()
     }
     function setExpanded(id, open) {
         if (!open) {
-            if (expandedId === id)
-                expandedId = ""
+            if (expandedKey === id)
+                expandedKey = ""
             return
         }
-        if (expandedId === id)
+        if (expandedKey === id)
             return
-        const was = rowById(expandedId)
-        const now = rowById(id)
+        const was = rowByKey(expandedKey)
+        const now = rowByKey(id)
         // The row that was open closes at once; when it is above, the page drops by its body so the new row stays under the pointer.
         if (was) {
             was.animate = false
             if (now && was.y < now.y)
                 page.host.scrollBy(-was.shown)
         }
-        revealId = id
+        revealKey = id
         revealTimer.restart()
-        expandedId = id
+        expandedKey = id
         if (was)
             Qt.callLater(() => was.animate = true)
     }
-    Timer { id: revealTimer; interval: 400; onTriggered: page.revealId = "" }
+    Timer { id: revealTimer; interval: 400; onTriggered: page.revealKey = "" }
 
-    function focusId(id) {
-        const r = rowById(id)
+    function focusKey(id) {
+        const r = rowByKey(id)
         if (r)
             r.focusHeader()
     }
     // Up, Down, Home and End on a header: the next visible header, none past the ends (Down from the last goes on to "Add a pack").
     function step(id, delta) {
-        const at = shownIds.indexOf(id)
+        const at = shownKeys.indexOf(id)
         if (at < 0)
             return
         if (Math.abs(delta) >= 1000)
-            focusId(shownIds[delta < 0 ? 0 : shownIds.length - 1])
-        else if (at + delta >= shownIds.length)
+            focusKey(shownKeys[delta < 0 ? 0 : shownKeys.length - 1])
+        else if (at + delta >= shownKeys.length)
             addRow.focusHeader()
         else if (at + delta >= 0)
-            focusId(shownIds[at + delta])
+            focusKey(shownKeys[at + delta])
     }
     function focusFirst() {
-        if (shownIds.length > 0)
-            focusId(shownIds[0])
+        if (shownKeys.length > 0)
+            focusKey(shownKeys[0])
         else if (shownLibrary.length > 0 || !nothing)
             addRow.focusHeader()
     }
@@ -155,6 +163,7 @@ ColumnLayout {
             spacing: page.u
             Text {
                 Layout.fillWidth: true
+                textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 color: page.look.text
                 font.pixelSize: page.look.textSize
@@ -173,10 +182,11 @@ ColumnLayout {
             Text {
                 objectName: "packQuestionDetail"
                 Layout.fillWidth: true
+                textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 color: page.look.label
                 font.pixelSize: page.look.labelSize
-                text: ask.q.kind === "setup"
+                text: (ask.q.inheritedWarning ? ask.q.inheritedWarning + "\n" : "") + (ask.q.kind === "setup"
                       ? qsTr("%1\nIn %2, this command runs as you:\n%3").arg(ask.q.description).arg(ask.q.folder).arg(ask.q.command)
                       : qsTr("%1\nRuns as: %2\nDeclares: %3%4\nNo sandbox: a trusted pack runs programs as you.")
                             .arg(ask.q.source !== "" ? ask.q.id + "\n" + qsTr("From %1").arg(ask.q.source) : ask.q.id)
@@ -186,7 +196,7 @@ ColumnLayout {
                                  + (ask.q.secretsSet && ask.q.secretsSet.length ? "\n" + qsTr("Already set: %1").arg(ask.q.secretsSet.join(", ")) : "")
                                  + (ask.q.secretsOtherSource && ask.q.secretsOtherSource.length
                                     ? "\n" + qsTr("%1 already set for this pack id from another source; this pack does not get it.").arg(ask.q.secretsOtherSource.join(", ")) : "")
-                                 + (ask.q.secrets && ask.q.secrets.length ? "\n" + qsTr("Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.") : ""))
+                                 + (ask.q.secrets && ask.q.secrets.length ? "\n" + qsTr("Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.") : "")))
             }
             Row {
                 spacing: page.u
@@ -247,7 +257,7 @@ ColumnLayout {
         KitRow {
             objectName: "packNoMatch"
             look: page.look
-            visible: page.nothing || (page.searching && page.model.packs.length > 0 && page.shownIds.length === 0)
+            visible: page.nothing || (page.searching && page.model.packs.length > 0 && page.shownKeys.length === 0)
             label: page.nothing ? qsTr("Nothing matches \"%1\"").arg(search.text.trim()) : qsTr("None of your packs match")
             KitChip {
                 objectName: "packClearSearch"
@@ -261,38 +271,39 @@ ColumnLayout {
             id: rows
             model: page.model.packs
             onItemAdded: (index, item) => {
-                if (page.keepId !== "" && (item as KitDisclosureRow).rowKey === page.keepId)
+                if (page.keepKey !== "" && (item as KitDisclosureRow).rowKey === page.keepKey)
                     Qt.callLater(page.restoreFocus)
             }
             delegate: KitDisclosureRow {
                 id: row
                 required property var modelData
                 required property int index
-                readonly property string pid: modelData.id !== "" ? modelData.id : modelData.folder // a pack that did not load has no id
+                readonly property string pid: modelData.id !== "" ? modelData.id : modelData.folder // names the parts for tests; a pack that did not load has no id
+                readonly property string pkey: modelData.path // the row's state key: unique
                 readonly property bool attention: !modelData.enabled || !modelData.trusted
 
                 objectName: "pack-" + pid
-                rowKey: pid
+                rowKey: pkey
                 statusName: "packState-" + pid
                 bodyName: "packBody-" + pid
                 look: page.look
-                visible: !page.searching || page.shownIds.includes(pid)
+                visible: !page.searching || page.shownKeys.includes(pkey)
                 label: modelData.name !== "" ? modelData.name : modelData.id !== "" ? modelData.id : modelData.folder.split("/").pop()
                 glyph: !modelData.enabled ? "triangle-alert" : "boxes"
                 detail: modelData.version
                 where: modelData.path
                 detailWidth: 14 * page.u
                 statusWidth: page.statusWidth
-                status: !modelData.enabled ? qsTr("disabled") : modelData.trusted ? qsTr("trusted") : qsTr("not trusted")
+                status: page.statusOf(modelData)
                 statusStrong: attention
-                expanded: page.expandedId === pid
-                tabStop: page.tabRow === pid
-                onExpandRequested: value => page.setExpanded(pid, value)
-                onStepRequested: delta => page.step(pid, delta)
-                onShownChanged: if (page.revealId === pid) page.host.showAll(row, header.height + shown)
+                expanded: page.expandedKey === pkey
+                tabStop: page.tabRow === pkey
+                onExpandRequested: value => page.setExpanded(pkey, value)
+                onStepRequested: delta => page.step(pkey, delta)
+                onShownChanged: if (page.revealKey === pkey) page.host.showAll(row, header.height + shown)
                 Connections {
                     target: row.header
-                    function onActiveFocusChanged() { if (row.header.activeFocus) page.tabId = row.pid }
+                    function onActiveFocusChanged() { if (row.header.activeFocus) page.tabKey = row.pkey }
                 }
 
                 // Trust... where the status is, in a slot as wide for every row, so the columns line up.
@@ -305,6 +316,7 @@ ColumnLayout {
                         look: page.look
                         visible: row.modelData.enabled && !row.modelData.trusted
                         enabled: !page.model.busy
+                        activeFocusOnTab: enabled && row.tabStop
                         text: qsTr("Trust…")
                         Accessible.name: qsTr("Trust %1").arg(row.label)
                         onTapped: { page.noteFocus(); page.model.trust(row.modelData.folder) }
@@ -331,7 +343,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                             elide: Text.ElideMiddle
                             textFormat: Text.PlainText
-                            text: qsTr("%1 · %n nodes", "", row.modelData.nodes).arg(row.modelData.path)
+                            text: qsTr("%1 · %2 · %n nodes", "", row.modelData.nodes).arg(row.modelData.version).arg(row.modelData.path)
                             color: page.look.label
                             font.pixelSize: page.look.labelSize
                         }
@@ -385,12 +397,25 @@ ColumnLayout {
                         KitRow {
                             look: page.look
                             label: keyed.modelData.label
-                            hint: keyed.modelData.description
-                            hintLines: 3
                             KitBadge {
                                 objectName: "packSecretState-" + keyed.key
                                 look: page.look
                                 text: keyed.modelData.set ? qsTr("set") : qsTr("not set")
+                            }
+                        }
+                        Item { // what the secret is for, in full, under its name
+                            visible: keyed.modelData.description !== ""
+                            width: parent.width
+                            height: visible ? descText.implicitHeight + 2 * page.u : 0
+                            Text {
+                                id: descText
+                                x: page.look.params.rowPadLeft * page.u
+                                width: parent.width - (page.look.params.rowPadLeft + page.look.params.rowPadRight) * page.u
+                                text: keyed.modelData.description
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                                color: page.look.label
+                                font.pixelSize: page.look.labelSize
                             }
                         }
                         // Where the value may be sent: set with the value, then only shown (to change it, Clear and set again).
@@ -406,6 +431,7 @@ ColumnLayout {
                             label: qsTr("Only for")
                             hint: keyed.modelData.originRequired ? qsTr("Required") : qsTr("Optional")
                             SettingsParts.Field {
+                                implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u) // never wider than the tray, narrow or wide
                                 id: originField
                                 objectName: "packSecretOnlyFor-" + keyed.key
                                 label: qsTr("Only for")
@@ -418,6 +444,7 @@ ColumnLayout {
                             label: qsTr("Key")
                             hint: keyed.modelData.set ? qsTr("Saved") : ""
                             SettingsParts.Field {
+                                implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u - 26 * page.u) // never wider than the tray, narrow or wide
                                 id: secretField
                                 objectName: "packSecret-" + keyed.key
                                 secret: true
@@ -428,7 +455,7 @@ ColumnLayout {
                                     if (text !== "") {
                                         const origin = keyed.modelData.set ? keyed.modelData.origin : originField.input.text
                                         page.noteFocus()
-                                        Qt.callLater(() => page.model.setSecret(row.pid, keyed.modelData.name, text, origin))
+                                        Qt.callLater(() => page.model.setSecret(row.modelData.id, keyed.modelData.name, text, origin, row.modelData.path))
                                     }
                                 }
                             }
@@ -443,7 +470,7 @@ ColumnLayout {
                                 look: page.look
                                 visible: keyed.modelData.set
                                 text: qsTr("Clear")
-                                onTapped: { page.noteFocus(); Qt.callLater(() => page.model.clearSecret(row.pid, keyed.modelData.name)) }
+                                onTapped: { page.noteFocus(); Qt.callLater(() => page.model.clearSecret(row.modelData.id, keyed.modelData.name, row.modelData.path)) }
                             }
                         }
                     }
@@ -516,6 +543,7 @@ ColumnLayout {
                 label: confirming ? qsTr("Remove %1 from the library?").arg(modelData.name) : modelData.name
                 hint: confirming ? "" : modelData.version
                 SettingsParts.Field {
+                    implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u) // never wider than the tray, narrow or wide
                     visible: entry.renaming
                     objectName: "libraryName-" + entry.modelData.id
                     label: qsTr("Rename %1").arg(entry.modelData.name)
@@ -581,8 +609,8 @@ ColumnLayout {
             expanded: page.addOpen || page.model.packs.length === 0
             onExpandRequested: value => page.addOpen = value
             onStepRequested: delta => {
-                if (delta < 0 && page.shownIds.length > 0)
-                    page.focusId(page.shownIds[page.shownIds.length - 1])
+                if (delta < 0 && page.shownKeys.length > 0)
+                    page.focusKey(page.shownKeys[page.shownKeys.length - 1])
             }
             KitRow {
                 look: page.look
@@ -590,6 +618,7 @@ ColumnLayout {
                 hint: qsTr("A folder with a pack.json, or a git address")
                 hintLines: 2
                 SettingsParts.Field {
+                    implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u) // never wider than the tray, narrow or wide
                     id: where
                     objectName: "packLocation"
                     label: qsTr("Folder or git address")
@@ -602,6 +631,7 @@ ColumnLayout {
                 label: qsTr("Tag or commit")
                 hint: qsTr("Git only: pins the version")
                 SettingsParts.Field {
+                    implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u) // never wider than the tray, narrow or wide
                     id: pin
                     objectName: "packRef"
                     label: qsTr("Tag or commit")
@@ -617,7 +647,6 @@ ColumnLayout {
                 KitChip {
                     objectName: "packAdd"
                     look: page.look
-                    primary: true
                     enabled: !page.model.busy
                     text: qsTr("Add…")
                     onTapped: {

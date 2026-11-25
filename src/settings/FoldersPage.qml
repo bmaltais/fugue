@@ -23,6 +23,12 @@ ColumnLayout {
 
     readonly property var keys: ["output_folder", "inputs_folder", "model_paths", "download_folder", "pack_paths"]
     readonly property bool downloadIsDefault: model.downloadFolders.length === 0 || model.downloadFolders[0].path === model.downloadFolder // Fugue's own folder comes first
+    // The status column's width, shared: as wide as the widest word a row can say (a count up to 99).
+    TextMetrics { id: tmDefault; font.pixelSize: page.look.labelSize; text: qsTr("Default") }
+    TextMetrics { id: tmCustom; font.pixelSize: page.look.labelSize; text: qsTr("Custom") }
+    TextMetrics { id: tmNone; font.pixelSize: page.look.labelSize; text: qsTr("None") }
+    TextMetrics { id: tmMany; font.pixelSize: page.look.labelSize; text: qsTr("%n folders", "", 99) }
+    readonly property real statusWidth: Math.ceil(Math.max(tmDefault.advanceWidth, tmCustom.advanceWidth, tmNone.advanceWidth, tmMany.advanceWidth))
     function count(n) { return n === 0 ? qsTr("None") : qsTr("%n folders", "", n) }
 
     function rowOf(key) {
@@ -91,7 +97,7 @@ ColumnLayout {
         expanded: page.expandedKey === rowKey
         tabStop: page.tabKey === rowKey
         detailElide: Text.ElideMiddle
-        statusWidth: 14 * page.u
+        statusWidth: page.statusWidth
         statusName: "folderStatus-" + rowKey
         onExpandRequested: value => page.setExpanded(rowKey, value)
         onStepRequested: delta => page.step(rowKey, delta)
@@ -119,6 +125,7 @@ ColumnLayout {
                 look: page.look
                 label: qsTr("Folder")
                 SettingsParts.Field {
+                    implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u) // never wider than the tray, narrow or wide
                     objectName: body.settingKey
                     label: qsTr("Folder")
                     value: body.value

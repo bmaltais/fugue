@@ -2,6 +2,9 @@
 // mouse and keys, each only after the question on the page is answered. The packs, the trust
 // file and the settings live in temporary XDG folders, never the owner's.
 
+#include <algorithm>
+#include <functional>
+
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -9,6 +12,7 @@
 #include "canvas_app.h"
 #include "engine/json.h"
 #include "engine/pack_manager.h"
+#include "engine/pack_secrets.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -364,6 +368,122 @@ private slots:
         QCOMPARE(list.size(), 1);
         QCOMPARE(list.first().toMap().value("enabled").toBool(), false);
         QVERIFY(!list.first().toMap().value("problems").toStringList().isEmpty());
+    }
+
+    // Writes a pack of `id` at `version` into `folder` (a name under the packs folder), from `source`, declaring one secret.
+    void writeKeyedPack(const QString &folder, const QString &id, const QString &version, const QString &source) const {
+        const QString dir = packs() + "/" + folder;
+        QDir().mkpath(dir);
+        QFile pack(dir + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write(QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id}, {"version", version}, {"name", "Dup"}, {"nodes", QJsonArray{}},
+                                             {"settings", QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "Token"}, {"origin", "required"}}}}}).toJson());
+        pack.close();
+        QFile from(dir + "/.fugue-source.json");
+        QVERIFY(from.open(QIODevice::WriteOnly));
+        from.write(QJsonDocument(QJsonObject{{"kind", "path"}, {"location", source}}).toJson());
+    }
+
+    // A secret is bound to the pack's source (#402): with two packs of one id from different sources, the key set on one row
+    // is stored for that row's source, never the other's.
+    void aSecretIsBoundToThePacksOwnSourceWhenTwoShareAnId() {
+        writeKeyedPack("io.example.dup", "io.example.dup", "2.0.0", "/src/two");
+        writeKeyedPack("io.example.dup@1", "io.example.dup", "1.0.0", "/src/one");
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        fugue::PacksModel *model = app.settings.packs();
+        QString two, one;
+        for (const QVariant &entry : model->packs()) {
+            const QVariantMap pack = entry.toMap();
+            if (pack.value("id") == "io.example.dup")
+                (pack.value("version") == "2.0.0" ? two : one) = pack.value("path").toString();
+        }
+        QVERIFY2(!two.isEmpty() && !one.isEmpty() && two != one, "both packs load");
+        const fugue::PackSecretStore store;
+        const QString keyOne = fugue::packSecretKey("io.example.dup", "/src/one");
+        const QString keyTwo = fugue::packSecretKey("io.example.dup", "/src/two");
+        QVERIFY(model->setSecret("io.example.dup", "token_1", "made-up-key-1234", "https://api.example.com", one));
+        QVERIFY(store.namesSet(keyOne).contains("token_1"));
+        QVERIFY(!store.namesSet(keyTwo).contains("token_1"));
+        QVERIFY(model->setSecret("io.example.dup", "token_1", "made-up-key-5678", "https://api.example.com", two));
+        QVERIFY(store.namesSet(keyTwo).contains("token_1"));
+        QVERIFY(model->clearSecret("io.example.dup", "token_1", two));
+        QVERIFY(!store.namesSet(keyTwo).contains("token_1"));
+        QVERIFY(store.namesSet(keyOne).contains("token_1")); // the other source's key is untouched
+        QVERIFY(model->clearSecret("io.example.dup", "token_1", one));
+        QVERIFY(!store.namesSet(keyOne).contains("token_1"));
+    }
+
+    // Rows are keyed by path: a broken pack (no id) and two packs sharing an id each have their own row, key, tray and tab stop.
+    void rowsOfTheSameIdAndABrokenPackAreSeparate() {
+        writeKeyedPack("io.example.dup", "io.example.dup", "2.0.0", "/src/two");
+        writeKeyedPack("io.example.dup@1", "io.example.dup", "1.0.0", "/src/one");
+        QDir().mkpath(packs() + "/io.example.broken");
+        QFile broken(packs() + "/io.example.broken/pack.json");
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write("{ not json");
+        broken.close();
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.window->resize(1300, 850);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
+        click(app, NEED("settingsPage-packs"));
+        const auto rowsNow = [&] { // the visible pack rows, top to bottom
+            QList<QQuickItem *> list;
+            std::function<void(QQuickItem *)> walk = [&](QQuickItem *item) {
+                for (QQuickItem *child : item->childItems()) {
+                    if (child->isVisible() && child->objectName().startsWith("pack-") && child->property("header").isValid())
+                        list << child;
+                    walk(child);
+                }
+            };
+            QQuickItem *root = app.window->contentItem();
+            walk(root);
+            std::sort(list.begin(), list.end(), [](QQuickItem *a, QQuickItem *b) { return a->mapToScene(QPointF()).y() < b->mapToScene(QPointF()).y(); });
+            return list;
+        };
+        const auto headerOf = [](QQuickItem *row) { return row->property("header").value<QQuickItem *>(); };
+        QTRY_COMPARE_WITH_TIMEOUT(rowsNow().size(), 3, 20000);
+        // One header is a Tab stop, and only its row's Trust… chip: Tab does not walk every row.
+        int stops = 0;
+        for (QQuickItem *row : rowsNow())
+            stops += headerOf(row)->property("activeFocusOnTab").toBool();
+        QCOMPARE(stops, 1);
+        // Arrows, Home and End step through every row, each its own.
+        QMetaObject::invokeMethod(rowsNow().first(), "focusHeader");
+        QTRY_VERIFY(app.window->activeFocusItem() == headerOf(rowsNow().first()));
+        for (int i = 1; i < 3; ++i) {
+            QTest::keyClick(app.window, Qt::Key_Down);
+            QTRY_VERIFY(app.window->activeFocusItem() == headerOf(rowsNow().at(i)));
+        }
+        QTest::keyClick(app.window, Qt::Key_Home);
+        QTRY_VERIFY(app.window->activeFocusItem() == headerOf(rowsNow().first()));
+        QTest::keyClick(app.window, Qt::Key_End);
+        QTRY_VERIFY(app.window->activeFocusItem() == headerOf(rowsNow().last()));
+        // One tray at a time, even for rows of one id.
+        const auto clickRow = [&](int at) { // the header of the row now at `at`, once the layout has settled
+            QTest::qWait(300);
+            QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(headerOf(rowsNow().at(at))));
+        };
+        clickRow(0);
+        QTRY_VERIFY(rowsNow().at(0)->property("expanded").toBool());
+        QTRY_VERIFY(rowsNow().at(1)->property("expanded").toBool() == false);
+        clickRow(1);
+        QTRY_VERIFY(rowsNow().at(1)->property("expanded").toBool());
+        QTRY_VERIFY(!rowsNow().at(0)->property("expanded").toBool());
+        int open = 0;
+        for (QQuickItem *row : rowsNow())
+            open += row->property("expanded").toBool();
+        QCOMPARE(open, 1);
+        // The search finds the broken pack by where it is.
+        QQuickItem *input = NEED("packSearch")->findChild<QQuickItem *>("packSearchInput");
+        input->setProperty("text", "example.broken");
+        QTRY_COMPARE(rowsNow().size(), 1);
+        QVERIFY(rowsNow().first()->objectName().contains("broken"));
+        input->setProperty("text", "");
+        QTRY_COMPARE(rowsNow().size(), 3);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     // FUGUE_SETTINGS_SHOTS=<dir> [FUGUE_SHOT_THEME=<omarchy theme>] [FUGUE_SHOT_TAG=<word>]: the Packs and Folders pages as a person meets them, as PNGs to

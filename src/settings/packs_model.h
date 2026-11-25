@@ -82,8 +82,8 @@ public:
     // the packs list says only whether each name is set and the origin it is for. A name the pack does not declare is
     // refused, and so are a value the command line would refuse (more than one line, a NUL, over 4096 bytes) and a
     // missing origin for a secret whose pack requires one (6.4.1).
-    Q_INVOKABLE bool setSecret(const QString &packId, const QString &name, const QString &value, const QString &origin = {});
-    Q_INVOKABLE bool clearSecret(const QString &packId, const QString &name);
+    Q_INVOKABLE bool setSecret(const QString &packId, const QString &name, const QString &value, const QString &origin = {}, const QString &path = {});
+    Q_INVOKABLE bool clearSecret(const QString &packId, const QString &name, const QString &path = {});
     // A library group renamed (its folder and id follow) or removed (the page asks first, on
     // itself: these are quick and run on the window's thread, not through `question`; workflows
     // keep their own copy). The one call that deletes a library group: the page and the node

@@ -63,9 +63,9 @@
   "%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.": "%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.",
   "%1 works on a layer of a canvas, so it cannot run over a folder.": "%1 works on a layer of a canvas, so it cannot run over a folder.",
   "%1 · %2": "%1 · %2",
-  "%1 · %n nodes": {
-    "one": "%1 · %n node",
-    "other": "%1 · %n nodes"
+  "%1 · %2 · %n nodes": {
+    "one": "%1 · %2 · %n node",
+    "other": "%1 · %2 · %n nodes"
   },
   "%1 · pinned": "%1 · pinned",
   "%1 × %2": "%1 × %2",
@@ -2148,5 +2148,6 @@
   "%n folders": {
     "one": "%n folder",
     "other": "%n folders"
-  }
+  },
+  "inherited, %1": "inherited, %1"
 }

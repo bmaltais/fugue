@@ -133,7 +133,6 @@ Column {
                         KitBadge {
                             objectName: paths.key + "-inherited-tag-" + inheritedRow.index
                             look: paths.look
-                            visible: paths.width >= 90 * paths.u
                             text: qsTr("Inherited from Default")
                         }
                         KitChip {
@@ -166,6 +165,7 @@ Column {
         label: qsTr("Add a folder")
         hint: qsTr("Type its path and press Enter")
         SettingsParts.Field {
+            implicitWidth: Math.min(60 * paths.u, paths.width - 16 * paths.u) // never wider than the tray, narrow or wide
             id: addField
             objectName: paths.key + "-add"
             label: qsTr("Add a folder")
