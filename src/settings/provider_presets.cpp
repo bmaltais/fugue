@@ -5,10 +5,18 @@
 
 namespace fugue {
 
+QString providerPlacementText(const QString &placement) {
+    if (placement == QLatin1String("cloud"))
+        return QCoreApplication::translate("fugue::ProviderPresets", "Cloud");
+    if (placement == QLatin1String("network"))
+        return QCoreApplication::translate("fugue::ProviderPresets", "Your network");
+    return QCoreApplication::translate("fugue::ProviderPresets", "This machine");
+}
+
 QList<ProviderPreset> knownProviderPresets() {
     QList<ProviderPreset> rows;
     const auto cloud = [&](const QString &id, const QString &name, const QString &type, const QString &address,
-                           const QString &keyUrl, const QString &description, bool textOnly = false) {
+                           const QString &keyUrl, const QString &description, const QStringList &keywords = {}, bool textOnly = false) {
         ProviderPreset p;
         p.id = id;
         p.name = name;
@@ -18,6 +26,7 @@ QList<ProviderPreset> knownProviderPresets() {
         p.needsKey = true;
         p.keyUrl = keyUrl;
         p.description = description;
+        p.keywords = keywords;
         p.privacy = textOnly ? QCoreApplication::translate("fugue::ProviderPresets", "Runs in the cloud: your prompts go to %1").arg(name)
                              : QCoreApplication::translate("fugue::ProviderPresets", "Runs in the cloud: your prompts and pictures go to %1").arg(name);
         rows.append(p);
@@ -25,21 +34,27 @@ QList<ProviderPreset> knownProviderPresets() {
     // The addresses and key pages are the services' own documentation (checked 2026-11-25); fal's queue address is the
     // `fal` provider type's own default, so it stays empty here.
     cloud(QStringLiteral("fal"), QStringLiteral("fal.ai"), QStringLiteral("fal"), {},
-          QStringLiteral("https://fal.ai/dashboard/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Many image and video models, run in the cloud"));
+          QStringLiteral("https://fal.ai/dashboard/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Many image and video models, run in the cloud"),
+          {QStringLiteral("flux"), QStringLiteral("kontext"), QStringLiteral("qwen")});
     // Gemini's API address is the `gemini` provider type's own default too. Its image models have no free quota (spec 8.7).
     cloud(QStringLiteral("gemini"), QStringLiteral("Google Gemini"), QStringLiteral("gemini"), {},
-          QStringLiteral("https://aistudio.google.com/apikey"), QCoreApplication::translate("fugue::ProviderPresets", "Nano Banana image models, run in the cloud"));
+          QStringLiteral("https://aistudio.google.com/apikey"), QCoreApplication::translate("fugue::ProviderPresets", "Nano Banana image models, run in the cloud"),
+          {QStringLiteral("nano banana"), QStringLiteral("imagen")});
     cloud(QStringLiteral("replicate"), QStringLiteral("Replicate"), QStringLiteral("replicate"), {},
-          QStringLiteral("https://replicate.com/account/api-tokens"), QCoreApplication::translate("fugue::ProviderPresets", "Open image models, run in the cloud"));
+          QStringLiteral("https://replicate.com/account/api-tokens"), QCoreApplication::translate("fugue::ProviderPresets", "Open image models, run in the cloud"),
+          {QStringLiteral("flux"), QStringLiteral("qwen")});
     // Cloudflare's API address is the `cloudflare` provider type's own default too.
     cloud(QStringLiteral("cloudflare"), QStringLiteral("Cloudflare Workers AI"), QStringLiteral("cloudflare"), {},
-          QStringLiteral("https://dash.cloudflare.com/profile/api-tokens"), QCoreApplication::translate("fugue::ProviderPresets", "FLUX image models on Cloudflare, with a free daily allowance"));
+          QStringLiteral("https://dash.cloudflare.com/profile/api-tokens"), QCoreApplication::translate("fugue::ProviderPresets", "FLUX image models on Cloudflare, with a free daily allowance"),
+          {QStringLiteral("flux")});
+    rows.last().freeTier = true;
     cloud(QStringLiteral("openai"), QStringLiteral("OpenAI"), QStringLiteral("http"), QStringLiteral("https://api.openai.com/v1"),
-          QStringLiteral("https://platform.openai.com/settings/organization/api-keys"), QCoreApplication::translate("fugue::ProviderPresets", "GPT image and text models"));
+          QStringLiteral("https://platform.openai.com/settings/organization/api-keys"), QCoreApplication::translate("fugue::ProviderPresets", "GPT image and text models"),
+          {QStringLiteral("gpt-image")});
     cloud(QStringLiteral("together"), QStringLiteral("Together AI"), QStringLiteral("http"), QStringLiteral("https://api.together.ai/v1"),
           QStringLiteral("https://api.together.ai/settings/api-keys"), QCoreApplication::translate("fugue::ProviderPresets", "Open image and text models, run in the cloud"));
     cloud(QStringLiteral("openrouter"), QStringLiteral("OpenRouter"), QStringLiteral("http"), QStringLiteral("https://openrouter.ai/api/v1"),
-          QStringLiteral("https://openrouter.ai/settings/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Text models from many makers through one key"), true);
+          QStringLiteral("https://openrouter.ai/settings/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Text models from many makers through one key"), {}, true);
 
     ProviderPreset local;
     local.id = QStringLiteral("local-openai");
@@ -48,6 +63,7 @@ QList<ProviderPreset> knownProviderPresets() {
     local.type = QStringLiteral("http");
     local.address = QStringLiteral("http://localhost:1234/v1");
     local.description = QCoreApplication::translate("fugue::ProviderPresets", "LM Studio, llama.cpp or vLLM on this machine");
+    local.keywords = {QStringLiteral("lm studio"), QStringLiteral("llama.cpp"), QStringLiteral("vllm")};
     rows.append(local);
 
     ProviderPreset omarchy;
@@ -80,7 +96,9 @@ ProviderPreset providerPresetById(const QString &id) {
 
 QVariantList providerPresetsVariant() {
     QVariantList list;
-    for (const ProviderPreset &p : knownProviderPresets())
+    for (const ProviderPreset &p : knownProviderPresets()) {
+        // Where the service runs: a cloud one is sent your work, a local address stays on this machine, the rest is on the network.
+        const QString placement = !p.privacy.isEmpty() ? QStringLiteral("cloud") : p.type == QLatin1String("http") ? QStringLiteral("machine") : QStringLiteral("network");
         list.append(QVariantMap{{"id", p.id},
                                 {"name", p.name},
                                 {"group", p.group},
@@ -91,7 +109,12 @@ QVariantList providerPresetsVariant() {
                                 {"needsAddress", p.needsAddress},
                                 {"keyUrl", p.keyUrl},
                                 {"description", p.description},
-                                {"privacy", p.privacy}});
+                                {"privacy", p.privacy},
+                                {"keywords", p.keywords},
+                                {"freeTier", p.freeTier},
+                                {"placement", placement},
+                                {"placementText", providerPlacementText(placement)}});
+    }
     return list;
 }
 

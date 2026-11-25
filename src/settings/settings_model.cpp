@@ -23,6 +23,7 @@
 #include "engine/paths.h"
 #include "engine/project.h"
 #include "engine/providers_file.h"
+#include "engine/template_search.h"
 #include "settings/provider_presets.h"
 #include "look_params.h"
 #include "theme.h"
@@ -64,6 +65,7 @@ struct ModuleField {
     QString hint = {};    // one dim line under the label
     bool advanced = false; // folded under the card's Advanced disclosure
     bool isBool = false;   // a switch; on is stored as true, off removes the setting
+    bool required = false; // the service cannot run without it (Cloudflare's account id): the status says "Needs the account id"
 };
 
 // The settings a provider module declares beyond name, type, address, key and enabled (8.8).
@@ -98,7 +100,7 @@ QList<ModuleField> moduleFields(const ProviderInstance &instance) {
     }
     if (instance.type == QLatin1String("cloudflare")) {
         // Cloudflare's settings (spec 8.7, The `cloudflare` provider): the account id sits beside the token, the rest is advanced.
-        fields.append({QStringLiteral("account_id"), false, QCoreApplication::translate("fugue::SettingsModel", "Account id"), QCoreApplication::translate("fugue::SettingsModel", "On the dash.cloudflare.com overview page"), false, false});
+        fields.append({QStringLiteral("account_id"), false, QCoreApplication::translate("fugue::SettingsModel", "Account id"), QCoreApplication::translate("fugue::SettingsModel", "On the dash.cloudflare.com overview page"), false, false, true});
         fields.append({QStringLiteral("image_models"), false, QCoreApplication::translate("fugue::SettingsModel", "More models"), QCoreApplication::translate("fugue::SettingsModel", "Extra @cf/ model ids, separated by commas"), true, false});
         fields.append({QStringLiteral("timeout_s"), false, QCoreApplication::translate("fugue::SettingsModel", "Timeout (seconds)"), QCoreApplication::translate("fugue::SettingsModel", "Empty is 120"), true, false});
     }
@@ -423,6 +425,7 @@ QVariantList SettingsModel::providers() const {
     QVariantList list;
     for (const ProviderInstance &instance : m_instances) {
         QVariantList fields;
+        QString missingRequired;
         for (const ModuleField &field : moduleFields(instance)) {
             const QJsonValue value = instance.settings.value(field.name);
             const QString text = value.isString() ? value.toString() : value.isDouble() ? QString::number(value.toDouble())
@@ -435,23 +438,59 @@ QVariantList SettingsModel::providers() const {
                                       {"isBool", field.isBool},
                                       {"secret", field.secret},
                                       {"value", field.secret ? QString() : text},
-                                      {"set", !text.isEmpty()}});
+                                      {"set", !text.isEmpty()},
+                                      {"required", field.required}});
+            if (field.required && text.isEmpty())
+                missingRequired = field.label.isEmpty() ? field.name : field.label;
         }
         // A well-known service by its type and address (provider_presets.h): where to get its key and what it is sent.
-        QString keyUrl, privacy, presetId;
+        QString keyUrl, privacy, presetId, description, groupTitle;
+        QStringList keywords;
+        bool freeTier = false;
         for (const ProviderPreset &preset : knownProviderPresets())
             if (preset.type == instance.type && preset.address == instance.address && (!preset.keyUrl.isEmpty() || !preset.privacy.isEmpty())) {
                 keyUrl = preset.keyUrl;
                 privacy = preset.privacy;
                 presetId = preset.id;
+                description = preset.description;
+                keywords = preset.keywords;
+                freeTier = preset.freeTier;
                 break;
             }
+        const bool cloud = !privacy.isEmpty();
+        groupTitle = cloud ? tr("Cloud services") : tr("Your own machines");
+        const Placement where = fugue::placementOf(instance); // the engine's rule, the one the privacy question uses
+        const QString placement = where == Placement::ThisMachine ? QStringLiteral("machine")
+                                  : where == Placement::OwnHost ? QStringLiteral("network") : QStringLiteral("cloud");
+        // A key is needed by every off-machine service and by a Fugue helper on another machine (the built-in one has no address); else optional.
+        const bool keyRequired = placement == QLatin1String("cloud") || (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty());
+        // What the row says: Off beats everything; else what blocks it (it is "strong"), else Ready.
+        QString status = QStringLiteral("ready");
+        if (!instance.enabled)
+            status = QStringLiteral("off");
+        else if (keyRequired && instance.key.isEmpty())
+            status = QStringLiteral("needsKey");
+        else if (!missingRequired.isEmpty())
+            status = QStringLiteral("needsAccount");
+        const QString statusText = status == QLatin1String("off") ? tr("Off") : status == QLatin1String("needsKey") ? tr("Needs a key")
+                                   : status == QLatin1String("needsAccount") ? tr("Needs the account id") : tr("Ready");
         list.append(QVariantMap{{"name", instance.name},
                                 {"type", instance.type},
                                 {"keyUrl", keyUrl},
                                 {"preset", presetId},
-                                {"cloud", !privacy.isEmpty()}, // a service off this machine: its name and address are advanced, the key comes first
+                                {"cloud", cloud}, // a service off this machine: its name and address are advanced, the key comes first
                                 {"privacy", privacy},
+                                {"description", description},
+                                {"groupTitle", groupTitle},
+                                {"keywords", keywords},
+                                {"freeTier", freeTier},
+                                {"placement", placement},
+                                {"placementText", providerPlacementText(placement)},
+                                {"host", QUrl(instance.address).host()},
+                                {"keyRequired", keyRequired},
+                                {"status", status},
+                                {"statusText", statusText},
+                                {"statusStrong", status != QLatin1String("ready") && status != QLatin1String("off")},
                                 {"address", instance.address},
                                 {"enabled", instance.enabled},
                                 {"keySet", !instance.key.isEmpty()},
@@ -560,6 +599,21 @@ QString SettingsModel::addProvider(const QString &type) {
 }
 
 QVariantList SettingsModel::providerPresets() const { return providerPresetsVariant(); }
+
+// Whether `item` (an entry of providers() or of providerPresets()) answers the query: every word starts a word of its name, description,
+// privacy line, where it runs, group title, "Free tier" or one of its model-family keywords (spec: the Providers page's search).
+bool SettingsModel::providerMatches(const QString &query, const QVariantMap &item) const {
+    QStringList fields;
+    for (const char *key : {"name", "description", "privacy", "placementText", "groupTitle"})
+        fields << item.value(QLatin1String(key)).toString();
+    if (item.value(QStringLiteral("freeTier")).toBool())
+        fields << tr("Free tier");
+    fields << item.value(QStringLiteral("keywords")).toStringList();
+    for (const QString &word : query.split(QLatin1Char(' '), Qt::SkipEmptyParts))
+        if (!std::any_of(fields.begin(), fields.end(), [&](const QString &field) { return matchesWordStart(field, word); }))
+            return false;
+    return true;
+}
 
 QString SettingsModel::addPreset(const QString &id) {
     if (!m_providersProblem.isEmpty())

@@ -18,6 +18,7 @@ Item {
     property real grain: 0.4
     property real blobs: 6
     property bool paused: false
+    property bool diskOpen: true
     width: cardWidth + 40
     height: card.height + 40
 
@@ -92,6 +93,28 @@ Item {
                             Text { anchors.centerIn: parent; text: "Card"; color: App.theme.look.text; font.pixelSize: App.theme.look.textSize }
                         }
                         KitChip { text: "Ready"; pill: true; toned: true; current: true; glyph: "check" }
+                    }
+                }
+                KitSection { text: "Open rows" }
+                KitGroup {
+                    KitDisclosureRow {
+                        label: "fal.ai"; glyph: "cloud"; detail: "Cloud"; detailWidth: 12 * App.theme.look.unit
+                        status: "Needs a key"; statusStrong: true
+                        expanded: gallery.diskOpen
+                        onExpandRequested: v => gallery.diskOpen = v
+                        trailing: KitToggle { checked: true }
+                        KitRow { label: "Key"; hint: "Needed before fal.ai can run"; KitChip { text: "Paste" } }
+                        KitRow { label: "Advanced"; KitChip { pill: true; glyph: "chevron-down" } }
+                    }
+                    KitDisclosureRow {
+                        label: "This machine"; glyph: "monitor"; detail: "This machine"; detailWidth: 12 * App.theme.look.unit
+                        status: "Ready"
+                        trailing: KitToggle { checked: true }
+                    }
+                    KitDisclosureRow {
+                        label: "Add a service"; glyph: "plus"; status: "10 services"; tray: false
+                        expanded: true
+                        KitRow { label: "Cloudflare Workers AI"; hint: "FLUX image models"; KitBadge { text: "Free tier" } KitChip { text: "Add" } }
                     }
                 }
                 KitSection { text: "Motion" }

@@ -70,6 +70,22 @@ Popup {
         })
     }
 
+    // Moves the page by `dy` (a row above the pointer closed: what is under the pointer stays under it).
+    function scrollBy(dy) {
+        scroller.contentY = Math.max(0, scroller.contentY + dy)
+    }
+    // Scrolls the page as little as it takes to show `item` whole; one taller than the page shows from its top, 2u below the page's edge.
+    function showAll(item, height) {
+        Qt.callLater(() => {
+            const h = height ?? item.height // a row that is still growing says how tall it will be
+            const r = item.mapToItem(scroller.contentItem, 0, 0)
+            if (h > scroller.height - 4 * u || r.y < scroller.contentY)
+                scroller.contentY = Math.max(0, r.y - 2 * u)
+            else if (r.y + h > scroller.contentY + scroller.height)
+                scroller.contentY = r.y + h - scroller.height + 2 * u
+        })
+    }
+
     // Runs a model call and keeps its refusal, if any.
     function apply(result) { error = result; return result === "" }
 

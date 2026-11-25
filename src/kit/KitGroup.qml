@@ -13,10 +13,11 @@ Rectangle {
     implicitHeight: column.implicitHeight
     height: implicitHeight
     // Over a tinted panel (Colour above 0) the fill is translucent, so the tint shows through; plain, it is the opaque `kitGroup`.
+    property bool bare: false // no fill and no border: the rows only (the body of a KitDisclosureRow that holds its own rows)
     readonly property bool glass: look.params.panelTint > 0.001
     radius: Math.min(look.params.cornerGroup * look.unit, 0.3 * height)
-    color: glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
-    border.width: look.params.borders === "hairline" && glass ? 1 : 0
+    color: bare ? "transparent" : glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
+    border.width: look.params.borders === "hairline" && glass && !bare ? 1 : 0
     border.color: look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
     Column {
         id: column

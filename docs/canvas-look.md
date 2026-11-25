@@ -800,6 +800,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Segmented chooser | `KitSegmented` | Built (20.9) |
 | Slider | `KitSlider` | Built (20.10, 20.11) |
 | Card (pressable, raised), search field | `KitCard`, `KitSearch` | Built (20.19) |
+| Row that opens, small static label | `KitDisclosureRow`, `KitBadge` | Built (20.6) |
 | Picture, still or moving | `KitPicture`, `KitVideo` | Built (20.19); `KitHero` plays a clip (`video`, `videoActive`) |
 | Apps shelf (page, dialog), Templates window | `AppShelfView`, `AppCard`, `TemplatesDialog` | Built (20.19): Dusk and Sea panels, hero, search, cards, tinted chips |
 | Node cards, Compact and Flat | `src/canvas/CanvasNode.qml` and delegates | Built (20.14, #466) |
@@ -884,6 +885,8 @@ into `CanvasLook` (`look.tone(name)`) so panels, toggles and `derive.py` read on
 | `KitWell` (slightly recessed) | radius 2u (8px; 10px for a multi-line prompt); fill `kit-well` (a shade darker than the group: black at 12% dark, 3% light); border 1px nearly the fill (`kit-well` darkened 6% dark, 3% light), its bottom edge white 4.5% (light 60%); inset 0 1px 1.5px black 22% (light 8%); not translucent; focus: the edge lifts to 1px of `label` at 45%, same width, no accent ring (the caret shows where typing goes) |
 | `KitWell` over a picture (smoked) | `backdrop` set, Frost above 0: blur 10px and saturate 120%; fill black 18% + 30% x s over a dark patch, rgb(20, 20, 26) 32% + 40% x s over a pale one (`s` = 0.5 at the default Frost 0.6, scaling with it), raised in 5% steps until white text reads 4.5:1; border 1px black 18%, bottom edge white 14%; inset 0 1px 1.5px black 30%; text white; a label beside it takes `labelInk` (dark over a pale patch, 2px black 50% shadow over a dark one) |
 | Picture well | a `KitWell` with `dashed` (its own dashed edge, `hairlineStrong`), radius 3u |
+| `KitDisclosureRow` | a row of a group that opens: 10u, `[glyph] name ... where ... status [switch] [chevron]` (glyph 14px `label`, name 13px `text`, the other words 11px `label`; the "where" column is shared by the list and drops under 110u, under 80u the status moves under the name and the row is 13u); the header is the button (Enter, Space, click; Right and Left open and close, mirrored; Up, Down, Home, End step; Alt+Up and Alt+Down ask to move; Escape closes); hover fills `menuRow` inset 1u, keyboard focus the 2px accent ring; the chevron turns down over `durToggle`, the body grows over the same and fades over `durColor`. The body is a tray inset 2u from each side and 2u above the next row, black 16% (dark) or 4% (light) over the group, holding rows; `tray: false` leaves the body to its caller. Controlled: it asks (`expandRequested`), the host sets `expanded` |
+| `KitBadge` | a 5u pill in the `kitChip` fill, 11px `label` text, 2u padding: "Free tier", "Added". Static: no focus, no press |
 
 Built values differ from the board for the smoked fill (the code uses black 35 to 55% dark and 55 to 75% pale): the board's
 numbers win (20.15). A field on a plain panel is never glass. Frost 0 or no backdrop: the opaque well.

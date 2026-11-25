@@ -2054,7 +2054,6 @@
   "Show the inputs": "Show the inputs",
   "Repeat waits: set a seed to Random or Increment, or each run makes the same picture.": "Repeat waits: set a seed to Random or Increment, or each run makes the same picture.",
   "Add a service": "Add a service",
-  "Add a service…": "Add a service…",
   "Another Omarchy machine's model servers": "Another Omarchy machine's model servers",
   "Clear key": "Clear key",
   "Cloud services": "Cloud services",
@@ -2070,9 +2069,6 @@
   "Nano Banana image models, run in the cloud": "Nano Banana image models, run in the cloud",
   "Omarchy host": "Omarchy host",
   "Open image and text models, run in the cloud": "Open image and text models, run in the cloud",
-  "Order": "Order",
-  "Remove this service": "Remove this service",
-  "Services are tried top to bottom": "Services are tried top to bottom",
   "Show the key as you type it": "Show the key as you type it",
   "Text models from many makers through one key": "Text models from many makers through one key",
   "Your own machines": "Your own machines",
@@ -2101,7 +2097,6 @@
   "When off, fal.ai is asked to delete them after the run": "When off, fal.ai is asked to delete them after the run",
   "Services that run models, tried top to bottom.": "Services that run models, tried top to bottom.",
   "Added": "Added",
-  "On your network": "On your network",
   "At %1": "At %1",
   " · Built in": " · Built in",
   "Saved": "Saved",
@@ -2113,5 +2108,25 @@
   "Already last": "Already last",
   "No service yet": "No service yet",
   "Keep it": "Keep it",
-  "Remove %1? Its saved key is deleted from providers.json.": "Remove %1? Its saved key is deleted from providers.json."
+  "Remove %1? Its saved key is deleted from providers.json.": "Remove %1? Its saved key is deleted from providers.json.",
+  "Search services": "Search services",
+  "Add one below": "Add one below",
+  "Nothing matches \"%1\"": "Nothing matches \"%1\"",
+  "None of your services match": "None of your services match",
+  "Fix providers.json first": "Fix providers.json first",
+  "Clear the search to change the order": "Clear the search to change the order",
+  "%n matches": {
+    "one": "%n match",
+    "other": "%n matches"
+  },
+  "%n services": {
+    "one": "%n service",
+    "other": "%n services"
+  },
+  "Free tier": "Free tier",
+  "Needs a key": "Needs a key",
+  "Needs the account id": "Needs the account id",
+  "Cloud": "Cloud",
+  "Your network": "Your network",
+  "This machine": "This machine"
 }

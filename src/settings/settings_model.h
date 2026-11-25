@@ -207,6 +207,9 @@ public:
     // its name (a second one is "fal.ai 2"), type and address; the key is the person's to type. Returns "" or why not.
     Q_INVOKABLE QVariantList providerPresets() const;
     Q_INVOKABLE QString addPreset(const QString &id);
+    // Whether a provider (an entry of `providers` or `providerPresets()`) answers the search box: every word starts a word of its name,
+    // description, privacy line, where it runs, group title, "Free tier" or model families. An empty query matches all.
+    Q_INVOKABLE bool providerMatches(const QString &query, const QVariantMap &item) const;
     Q_INVOKABLE QString removeProvider(int row);
     Q_INVOKABLE QString moveProvider(int row, int to);
 
