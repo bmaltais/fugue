@@ -46,7 +46,7 @@ Before a new surface or control is done, find the long-standing surface that doe
 - [ ] **Order.** Cancel or Back first, the primary last at the right, as the Crop window and the questions (D9).
 - [ ] **Words.** The same action has the same verb everywhere (Accept, Drop, Export…, OK for a commit that closes); a button is a verb; an ellipsis only when a dialog or file picker follows; sentence case; status words capitalized (Current, Missing, Candidate); Head capitalized as a name; a node by its title, never its id; "Canvas" is the picture, "graph" the node view, in code names too only where a person reads them (D10); **candidate** for a run's pending result, never "result" or "fill" (D3).
 - [ ] **Glyphs.** Lucide from the subset (`share/fonts/lucide-fugue.txt`), never a text "×", "▾" or "‹"; a glyph means one thing in the whole window.
-- [ ] **States.** Hover, pressed, focus (the 2px accent ring), disabled (dimmed, with a tip saying why: `ViewButton` shows it on hover even though Qt gives a disabled item no hover, #281) and error (`look.error`) as `ViewButton` draws them; a toggle tells assistive tools it is on.
+- [ ] **States.** Hover, pressed, focus (the 2px accent ring for keyboard focus only, `activeFocus && FocusInput.keyboard`, never after a mouse press; a text field takes no ring, its edge lifts to 1px of `label` at 45%, `KitWell.focused`), disabled (dimmed, with a tip saying why: `ViewButton` shows it on hover even though Qt gives a disabled item no hover, #281) and error (`look.error`) as `ViewButton` draws them; a toggle tells assistive tools it is on.
 - [ ] **Keys.** One keymap for a picture and the graph: Home fits, 1 is 100%, + and - zoom, Escape closes or cancels, Enter takes the surface's primary when the focus is not in a text field (D5); a new key is checked against the registry and the References, and a tooltip names it.
 - [ ] **Keyboard.** Every control and list row is reached by Tab or the arrows, in reading order.
 - [ ] **Right-to-left.** A popup sets `LayoutMirroring` on its content (it is outside the window's mirrored root); a picture is never mirrored.
@@ -87,6 +87,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 | Selection toolbar | one row of glyphs | canvas-look §11, the ComfyUI toolbox |
 
 ## Decisions
+
+### 2026-11-25 Focus rings are for the keyboard; a text field never draws one (owner)
+
+- Control: new `src/focus_input.h` (`FocusInput.keyboard`, an application event filter: a key press sets it, a mouse, touch or tablet press clears it); `src/kit/KitWell.qml` (the `focused` edge), `src/canvas/ThemedTextField.qml` (own background, no Material accent underline), `CanvasTaskBar` prompt, `CommandUi` filter, `DragNumberField` while typing; the ring (`activeFocus && FocusInput.keyboard`) in `KitSegmented`, `KitSlider`, `KitDropdown`, `KitChip`, `KitToggle`, `KitHero`, `ViewButton`, `ThemedDropDown`, `ValueSlider`, `MenuBar`, `AreaHeader`, `SettingsPanel`, `GetReadyRow`, `TemplatesDialog`, `AppRail`, `AppImageInput`, layer and history lists, `MediaView`, `MediaThumb`, `ColorPickerPane`, `RowTrashButton`, `SidePanel`, `SideTabStrip`, `RunToolbar`.
+- Old: the Apps dialog's search field (it takes the focus on opening) drew a 2px accent ring, a pale cream in the owner's theme, read as a white surround; every control drew the ring after a click.
+- New: a text field never draws the accent ring; focused, its edge is 1px in `label` at 45% (no width change, so nothing jumps) and the caret shows where typing goes. Every other control draws the 2px accent ring only when the last input was the keyboard (Tab, arrows), as a browser's :focus-visible; a click, or focus given on opening by a click, shows none, and the next key press shows it on the focused control.
+- Why: Item has no focusReason in QML (only Control has), and a per-control "pressFocus" mark (the earlier App | Graph fix) cannot see focus given on opening; one application-wide "last input" flag does, in one place. Confidence medium-high (coordinator's call): a dialog opened by a shortcut still shows its default control's ring, which keeps "every dialog works by keyboard alone, with a visible ring".
 
 ### 2026-11-25 App view: Clear empties the takes; Repeat needs a seed that varies; one raised dropdown; a slider's value is typed (owner's second look)
 

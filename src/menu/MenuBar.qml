@@ -171,7 +171,7 @@ Rectangle {
         objectName: "fugueMark"
         color: "transparent"
         radius: bar.look.smallCorner + 2
-        border.width: activeFocus ? 2 : 0
+        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
         border.color: bar.look.accent
         anchors.left: parent.left
         anchors.leftMargin: 1.5 * bar.u

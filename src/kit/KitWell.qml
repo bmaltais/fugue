@@ -5,7 +5,8 @@ import Fugue
 // The recessed surface of a field (docs/canvas-look.md "Drift kit", the rule: clickable things are raised, fillable things are
 // recessed): the `kitWell` fill a shade darker than the group it sits in, a border nearly the fill's own color, a 1px shadow along
 // the top edge (about 22% black on a dark theme, 8% on a light one) and a faint light hairline along the bottom edge, so a field
-// reads as "set in", not as a hole. `focused` swaps the edge for the 2px accent ring. Put it first in the field, filling it; it
+// reads as "set in", not as a hole. `focused` lifts the edge to 1px of `label` at 45%
+// (never the accent ring: a field shows its caret, owner 2026-11-25, same width so nothing jumps). Put it first in the field, filling it; it
 // takes no input and carries no text.
 Rectangle {
     id: well
@@ -24,8 +25,8 @@ Rectangle {
     anchors.fill: parent
     radius: Math.min(look.params.cornerWell * look.unit, 0.45 * height)
     color: glass ? "transparent" : Qt.tint(look.kitGroup, Qt.rgba(0, 0, 0, look.light ? look.params.wellDarkenLight : look.params.wellDarken))
-    border.width: focused ? 2 : dashed ? 0 : 1
-    border.color: focused ? look.accent : Qt.tint(color, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
+    border.width: dashed ? 0 : 1
+    border.color: focused ? Qt.rgba(look.label.r, look.label.g, look.label.b, 0.45) : Qt.tint(color, Qt.rgba(0, 0, 0, look.light ? 0.03 : 0.06))
     enabled: false
     Loader {
         id: glassLoader

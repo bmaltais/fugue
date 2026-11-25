@@ -422,8 +422,8 @@ Item {
                     background: Rectangle {
                         radius: bar.look.smallCorner
                         color: bar.look.well
-                        border.width: promptField.activeFocus ? 2 : 1
-                        border.color: promptField.activeFocus ? bar.look.accent : bar.look.hairline
+                        border.width: 1
+                        border.color: promptField.activeFocus ? Qt.rgba(bar.look.label.r, bar.look.label.g, bar.look.label.b, 0.45) : bar.look.hairline
                     }
                     onTextEdited: if (bar.actions && bar.mine && bar.actions.error !== "") bar.actions.clearError()
                     // Enter generates; Ctrl+Enter is the Graph's Run (run.start) and passes on.

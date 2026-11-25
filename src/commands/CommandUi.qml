@@ -283,7 +283,7 @@ Item {
                     radius: Math.min(root.look.popupCorner, 4)
                     color: root.look.well
                     border.width: 1
-                    border.color: filterField.activeFocus ? root.look.accent : root.look.hairlineStrong
+                    border.color: filterField.activeFocus ? Qt.rgba(root.look.label.r, root.look.label.g, root.look.label.b, 0.45) : root.look.hairlineStrong
                     Glyph {
                         id: filterGlyph
                         x: 3 * root.u

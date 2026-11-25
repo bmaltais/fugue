@@ -89,7 +89,7 @@ Rectangle {
         }
         Rectangle {
             anchors { fill: parent; margins: 2 }
-            visible: tab.activeFocus
+            visible: tab.activeFocus && FocusInput.keyboard
             color: "transparent"
             border { width: 2; color: strip.look.accent }
             radius: strip.look.smallCorner

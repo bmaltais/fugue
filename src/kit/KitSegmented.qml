@@ -32,12 +32,9 @@ Item {
     readonly property real naturalOption: Math.max(7 * look.unit, widest.implicitWidth + 6 * look.unit)
     readonly property real optionWidth: count > 0 ? Math.max(naturalOption, (width - 2 * pad) / count) : naturalOption
     readonly property bool mirrored: LayoutMirroring.enabled
-    // The focus ring is for the keyboard: a press gives the focus but no ring, as a browser's :focus-visible (owner, 2026-11-25:
-    // the App | Graph switch kept an accent outline after a click).
-    // (Item has no focusReason, only Control: a press marks the focus it gives, and losing the focus clears the mark.)
-    property bool pressFocus: false
-    onActiveFocusChanged: if (!activeFocus) pressFocus = false
-    readonly property bool ring: activeFocus && !pressFocus
+    // The focus ring is for the keyboard, as a browser's :focus-visible (owner, 2026-11-25: the App | Graph switch kept an accent
+    // outline after a click): FocusInput says whether the last input was a key.
+    readonly property bool ring: activeFocus && FocusInput.keyboard
 
     implicitWidth: count * naturalOption + 2 * pad
     implicitHeight: 7 * look.unit
@@ -134,7 +131,7 @@ Item {
                     }
                     TapHandler {
                         gesturePolicy: TapHandler.WithinBounds
-                        onTapped: { if (seg.focusOnPress) { if (!seg.activeFocus) seg.pressFocus = true; seg.forceActiveFocus(Qt.MouseFocusReason) } seg.choose(option.index) }
+                        onTapped: { if (seg.focusOnPress) seg.forceActiveFocus(Qt.MouseFocusReason); seg.choose(option.index) }
                     }
                 }
             }

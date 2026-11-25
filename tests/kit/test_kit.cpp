@@ -224,6 +224,13 @@ private slots:
         const QPointF mid = slider->mapToScene(QPointF(slider->property("railWidth").toDouble() / 2, slider->height() / 2));
         QTest::mouseClick(window, Qt::LeftButton, {}, mid.toPoint());
         QTRY_COMPARE(window->property("level").toDouble(), 5.0);
+        // The accent ring is for the keyboard: the press gave the focus but no ring, the next key shows it (owner, 2026-11-25).
+        QVERIFY(slider->hasActiveFocus());
+        QVERIFY(!slider->property("ring").toBool());
+        QTest::keyClick(window, Qt::Key_Right);
+        QVERIFY(slider->property("ring").toBool());
+        QTest::keyClick(window, Qt::Key_Left);
+        QTRY_COMPARE(window->property("level").toDouble(), 5.0);
         // Its value is a field (owner, 2026-11-25): a typed number is asked for, kept in the range; words change nothing.
         auto *typed = window->findChild<QQuickItem *>("slider-value");
         QVERIFY(typed);

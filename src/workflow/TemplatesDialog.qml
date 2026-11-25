@@ -243,7 +243,7 @@ Popup {
                         Accessible.name: modelData.title
                         Accessible.selected: current
                         activeFocusOnTab: true
-                        border.width: activeFocus ? 2 : 0
+                        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
                         border.color: dialog.look.accent
                         Keys.onSpacePressed: dialog.category = modelData.id
                         Keys.onReturnPressed: dialog.category = modelData.id

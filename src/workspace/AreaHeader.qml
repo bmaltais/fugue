@@ -91,7 +91,7 @@ Rectangle {
         height: 6 * header.u
         radius: header.look.smallCorner
         color: typeTap.pressed ? header.look.selectedRow : typeHover.hovered ? header.look.menuRow : "transparent"
-        border.width: activeFocus ? 2 : 0
+        border.width: activeFocus && FocusInput.keyboard ? 2 : 0
         border.color: header.look.accent
         activeFocusOnTab: true
         Accessible.role: Accessible.ButtonMenu

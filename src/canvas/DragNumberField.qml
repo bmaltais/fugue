@@ -32,8 +32,8 @@ Rectangle {
     height: 7 * look.unit
     radius: look.smallCorner
     color: look.well
-    border.width: activeFocus || editor.visible ? 1 : 0
-    border.color: look.accent
+    border.width: editor.visible || activeFocus && FocusInput.keyboard ? (editor.visible ? 1 : 2) : 0
+    border.color: editor.visible ? Qt.rgba(look.label.r, look.label.g, look.label.b, 0.45) : look.accent // typing: the soft lift of a field; the ring only for keys
     opacity: enabled ? 1 : 0.5
     activeFocusOnTab: true
     Accessible.role: Accessible.Slider

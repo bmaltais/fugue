@@ -139,10 +139,10 @@ Item {
         Accessible.name: qsTr("Panel width")
         Rectangle {
             x: panel.onLeft ? parent.width - width : 0
-            width: grip.activeFocus || drag.pressed || hover.hovered ? 3 : 0
+            width: grip.activeFocus && FocusInput.keyboard || drag.pressed || hover.hovered ? 3 : 0
             height: parent.height
             color: panel.look.accent
-            opacity: drag.pressed || grip.activeFocus ? 1 : 0.6
+            opacity: drag.pressed || grip.activeFocus && FocusInput.keyboard ? 1 : 0.6
         }
         HoverHandler {
             id: hover

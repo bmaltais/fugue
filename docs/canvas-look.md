@@ -776,7 +776,7 @@ Status per element: **Built**, **Partly**, **To build**, read from `src/kit/` at
    App view's rail, stage and panel, the run queue) is a rounded card (4.5u corner, 1px hairline) with a 2u gap of window
    background between spaces; groups inside are 3u corners; dialogs and popovers use the panel corner.
 6. **Keyboard rules** (every dialog, sheet and popover as it moves onto the kit): Tab and Shift+Tab walk every control in reading
-   order (mirrored in right-to-left) with the kit's 2px accent focus ring; opening focuses the first useful control (the field
+   order (mirrored in right-to-left) with the kit's 2px accent focus ring (keyboard focus only: after a mouse press, or for the focus a dialog gives on opening from a click, no ring; a text field never draws it, its edge lifts to 1px of `label` at 45% instead); opening focuses the first useful control (the field
    to type in, or the default button); Enter runs the default action; Escape cancels or closes and returns focus to what
    opened it; arrows move inside lists, grids (Apps shelf, Templates, picture library) and segmented controls; Space flips a
    toggle and presses a chip; no control is reachable only by pointer. One window test per dialog drives it by keys alone
@@ -823,7 +823,7 @@ as in section 6. Existing tokens keep their derivations (`kit-group`, `kit-separ
 | `kit-glass-shadow` | inset 0 1px 2px black 40% | black 15% | the same track's inner shadow |
 | `kit-knob-glass` | white 62% to 34% top to bottom, 1px white 55%, inset top white 75%, drop 0 1px 3px black 38% | same | the toggle's raised translucent knob (a glass, so it needs its own blur: 6px, saturate 140%) |
 | `kit-tone-<name>` | see 20.8 | the same colours | the tone's glass colour, `rgb`, with the alphas of 20.8 |
-| `kit-ring` | accent, 2px | same | the focus ring (the boards draw it as a border plus a 3px accent glow at 25 to 30%; the kit keeps the 2px ring, which survives the software renderer) |
+| `kit-ring` | accent, 2px | same | the focus ring, for keyboard focus only (`FocusInput.keyboard`; never on a text field) (the boards draw it as a border plus a 3px accent glow at 25 to 30%; the kit keeps the 2px ring, which survives the software renderer) |
 
 `derive.py` gets a `kit_tokens()` block that prints them (`--theme NAME` shows them; the contrast table gains the rows: white ink on
 `kit-hero` shade over the pale picture, ink on a tinted panel, `kit-knob-glass` on the on-track, the on-track against the group).
@@ -880,7 +880,7 @@ into `CanvasLook` (`look.tone(name)`) so panels, toggles and `derive.py` read on
 | `KitSection` | bold 13px title above a group, 5u above it, 1.5u to its group |
 | `KitGroup` | radius 3u (12px); Tinted: `kit-group-glass` fill and its border; Plain: opaque `kit-group`; no gap between rows |
 | `KitRow` | label (13px), dim hint (11px, `label` color), trailing controls; at least 10u; hairline above unless first; `target` makes the row the hit area for a switch |
-| `KitWell` (slightly recessed) | radius 2u (8px; 10px for a multi-line prompt); fill `kit-well` (a shade darker than the group: black at 12% dark, 3% light); border 1px nearly the fill (`kit-well` darkened 6% dark, 3% light), its bottom edge white 4.5% (light 60%); inset 0 1px 1.5px black 22% (light 8%); not translucent; focus: the 2px accent ring |
+| `KitWell` (slightly recessed) | radius 2u (8px; 10px for a multi-line prompt); fill `kit-well` (a shade darker than the group: black at 12% dark, 3% light); border 1px nearly the fill (`kit-well` darkened 6% dark, 3% light), its bottom edge white 4.5% (light 60%); inset 0 1px 1.5px black 22% (light 8%); not translucent; focus: the edge lifts to 1px of `label` at 45%, same width, no accent ring (the caret shows where typing goes) |
 | `KitWell` over a picture (smoked) | `backdrop` set, Frost above 0: blur 10px and saturate 120%; fill black 18% + 30% x s over a dark patch, rgb(20, 20, 26) 32% + 40% x s over a pale one (`s` = 0.5 at the default Frost 0.6, scaling with it), raised in 5% steps until white text reads 4.5:1; border 1px black 18%, bottom edge white 14%; inset 0 1px 1.5px black 30%; text white; a label beside it takes `labelInk` (dark over a pale patch, 2px black 50% shadow over a dark one) |
 | Picture well | a `KitWell` with `dashed` (its own dashed edge, `hairlineStrong`), radius 3u |
 
