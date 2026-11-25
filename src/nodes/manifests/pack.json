@@ -24,6 +24,7 @@
     "describe-image",
     "describe-song",
     "detail-regions",
+    "draw-text",
     "edit-image",
     "empty-latent",
     "empty-video-latent",

@@ -36,33 +36,6 @@ Result<Enum> choiceOf(const NodeContext &context, const QString &input, const st
                           QStringLiteral("\"%1\" is not a %2 this node knows.").arg(text, input));
 }
 
-// "#rrggbb", "#rrggbbaa" or "#rgb" as 0..1 floats: red, green, blue, alpha.
-Result<std::array<float, 4>> colorOf(const QString &input, const QString &text) {
-    QString hex = text.trimmed();
-    if (hex.startsWith('#'))
-        hex.remove(0, 1);
-    if (hex.size() == 3) {
-        QString wide;
-        for (const QChar c : hex)
-            wide += QString(2, c);
-        hex = wide;
-    }
-    if (hex.size() == 6)
-        hex += QStringLiteral("ff");
-    bool ok = hex.size() == 8;
-    std::array<float, 4> color{};
-    for (int i = 0; ok && i < 4; ++i) {
-        bool part = false;
-        const int v = hex.mid(i * 2, 2).toInt(&part, 16);
-        ok = part;
-        color[i] = float(v) / 255.0f;
-    }
-    if (!ok)
-        return makeInputError(QStringLiteral("value_out_of_range"), input,
-                              QStringLiteral("\"%1\" is not a color like #ff3b30.").arg(text));
-    return color;
-}
-
 class CompositeMaskedKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {

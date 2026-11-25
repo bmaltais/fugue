@@ -35,6 +35,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addCropStitchKernels(kernels);
     addImageGenerationKernels(kernels);
     addImageSizeKernels(kernels);
+    addDrawTextKernels(kernels);
     addLutKernels(kernels);
     addMaskKernels(kernels);
     addMediaGenerationKernels(kernels);

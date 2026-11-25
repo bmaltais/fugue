@@ -6,6 +6,8 @@
 
 #include <QString>
 
+#include <array>
+
 #include <vips/vips8>
 
 #include "engine/mask_paint.h"
@@ -35,6 +37,9 @@ Result<Pixels> maskOf(const Value &value, const QString &input);
 // (engine/mask_paint.h); and back, 4 channels or 1 as the buffer has.
 mask::MaskPaint pixelsToLayer(const Pixels &in);
 Pixels layerToPixels(const mask::MaskPaint &in);
+
+// "#rrggbb", "#rrggbbaa" or "#rgb" as 0..1 floats (red, green, blue, alpha); `value_out_of_range` on `input` otherwise.
+Result<std::array<float, 4>> colorOf(const QString &input, const QString &text);
 
 // A result image under the output name `name` ("image", or "mask" for a one-channel mask).
 Result<Values> namedOutput(Pixels pixels, const char *name);

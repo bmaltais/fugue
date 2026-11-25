@@ -250,6 +250,9 @@ foreach(definition ${fugue_group_definitions})
   list(APPEND fugue_node_manifest_files src/nodes/manifests/${definition})
 endforeach()
 qt_add_resources(fugue_nodes fugue_node_manifests PREFIX /fugue/nodes FILES ${fugue_node_manifest_files})
+# The font Draw Text uses when none is given (src/nodes/text_raster.h): Noto Sans, Latin subset, SIL OFL 1.1 (share/fonts/LICENSE.notosans).
+set_source_files_properties(share/fonts/notosans-latin.ttf PROPERTIES QT_RESOURCE_ALIAS notosans-latin.ttf)
+qt_add_resources(fugue_nodes fugue_node_fonts PREFIX /fugue/fonts FILES share/fonts/notosans-latin.ttf)
 
 add_executable(fugue src/main.cpp)
 target_link_libraries(fugue PRIVATE fugue_core fugue_cli fugue_nodes fugue_app_resources)
