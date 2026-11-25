@@ -233,10 +233,10 @@ Item {
                 x: root.u
                 width: parent.width - 2 * root.u - row.edge
                 height: parent.height
-                radius: root.look.smallCorner
+                radius: Math.min(root.look.params.cornerChip * root.u, 0.45 * height)
                 color: list.activeFocus && list.currentIndex === row.index ? root.look.selectedRow
                        : hover.hovered ? root.look.menuRow
-                       : row.modelData.current ? root.look.well : "transparent"
+                       : row.modelData.current ? root.look.kitGroup : "transparent"
             }
             // The tab's own color, as along the tab strip.
             Rectangle {

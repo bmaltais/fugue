@@ -54,7 +54,7 @@ MenuItem {
     indicator: null
     arrow: null
     background: Rectangle {
-        radius: Math.max(0, row.look.popupCorner - 1.5 * row.u)
+        radius: Math.min(row.look.params.cornerChip * row.u, 0.45 * height)
         color: (row.highlighted || (!!row.subMenu && row.subMenu.visible)) && row.enabled ? row.look.menuRow : "transparent"
     }
     contentItem: Item {

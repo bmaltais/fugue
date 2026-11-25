@@ -82,7 +82,7 @@ Item {
         y: grab.position.y
         width: row.implicitWidth + 2 * bar.u
         height: 9 * bar.u
-        radius: Math.min(bar.look.popupCorner, 14)
+        radius: Math.min(bar.look.params.cornerCard * bar.u, height / 2)
         color: bar.look.popup
         border.width: 1
         border.color: bar.look.hairline

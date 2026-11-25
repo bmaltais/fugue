@@ -202,6 +202,9 @@ struct App {
         const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects, &workspace, canvasActions, &activeCanvas, canvasBatch, appView, appLauncher, appShelf};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
+        // The window tests measure the layout of the canvas and the areas, not the gaps of the Calm look (docs/canvas-look.md 20.21): they run
+        // with no gap between cards; test_panels_kit_window applies the Calm preset to check the gaps.
+        theme.look()->setPreset({{"areaGap", 0.0}});
         engine.load(windowUrl);
         if (engine.rootObjects().isEmpty())
             return false;

@@ -45,6 +45,11 @@ QtObject {
     // bar's handle): the header of the area there keeps its menu clear of it.
     property real leadingClear: 0
     property Component handle: null
+    // The outline of each card (AreaFrame.qml), made with the header; null: none.
+    property Component frame: null
+    // The gap of window background between two cards, in px (the Cards layout; 0 for Panes): each card keeps half of it off
+    // every side that borders another area. A side on the host's own edge is left to the host's margin.
+    property real gap: 0
     // This node's place in the tree: the child indexes from the root.
     property var path: []
     // The tree's root node (null: this one), which keeps the views a rebuild may use again.
@@ -60,6 +65,7 @@ QtObject {
     property bool adopted: false
     property string viewKey: ""
     property Item headerItem: null
+    property Item frameItem: null
     property var handleItems: []
     property var childNodes: []
 
@@ -107,7 +113,7 @@ QtObject {
     }
     // The items this node and its children made (adopted views are not counted): none for the window's one area.
     function madeItems(): int {
-        let count = (view && !adopted ? 1 : 0) + (headerItem ? 1 : 0) + handleItems.length
+        let count = (view && !adopted ? 1 : 0) + (headerItem ? 1 : 0) + (frameItem ? 1 : 0) + handleItems.length
         for (const child of childNodes)
             count += (child as AreaNode).madeItems()
         return count
@@ -142,6 +148,9 @@ QtObject {
         if (headerItem)
             headerItem.destroy()
         headerItem = null
+        if (frameItem)
+            frameItem.destroy()
+        frameItem = null
         if (view && !adopted)
             view.destroy()
         view = null
@@ -182,6 +191,8 @@ QtObject {
         }
         if (host && header)
             headerItem = header.createObject(host, {areaId: id, viewType: type, areaView: view, z: 2}) as Item
+        if (host && frame)
+            frameItem = frame.createObject(host, {areaId: id, z: 3}) as Item
     }
     // A child's node as a plain object of its own: a part of this node read from a property is a reference into
     // it, which a new tree for this node would change under the child.
@@ -196,7 +207,7 @@ QtObject {
             made.push(component.createObject(areaNode, {node: childNode(i), host: host, registry: registry, views: views,
                                                         rightToLeft: rightToLeft, controller: controller, header: header,
                                                         headerHeight: headerHeight, leadingClear: leadingClear,
-                                                        handle: handle, path: path.concat([i]), top: root}))
+                                                        handle: handle, frame: frame, gap: gap, path: path.concat([i]), top: root}))
         childNodes = made
         const handles = []
         if (host && handle) {
@@ -214,27 +225,47 @@ QtObject {
     function length(): real {
         return node?.axis === "column" ? area.height : area.width
     }
+    // The leaf's card: its area less half the gap on each side that borders another area (an outer side is the host's own edge).
+    function cardRect(): rect {
+        const half = gap / 2
+        if (half <= 0)
+            return area
+        const outer = topNode().area
+        const edge = 0.5
+        const left = area.x > outer.x + edge ? half : 0
+        const top = area.y > outer.y + edge ? half : 0
+        const right = area.x + area.width < outer.x + outer.width - edge ? half : 0
+        const bottom = area.y + area.height < outer.y + outer.height - edge ? half : 0
+        return Qt.rect(area.x + left, area.y + top, Math.max(0, area.width - left - right), Math.max(0, area.height - top - bottom))
+    }
     function relayout() {
         if (!ready || !host)
             return
         if (node?.type === "leaf") {
+            const card = cardRect()
             const shown = headerItem !== null && headerHeight > 0
-            const above = shown ? Math.min(headerHeight, area.height) : 0
+            const above = shown ? Math.min(headerHeight, card.height) : 0
             if (headerItem) {
                 headerItem.visible = shown
-                headerItem.x = area.x
-                headerItem.y = area.y
-                headerItem.width = area.width
+                headerItem.x = card.x
+                headerItem.y = card.y
+                headerItem.width = card.width
                 headerItem.height = above
+            }
+            if (frameItem) {
+                frameItem.x = card.x
+                frameItem.y = card.y
+                frameItem.width = card.width
+                frameItem.height = card.height
             }
             const bar = headerItem as AreaHeader
             if (bar)
                 bar.leadingClear = area.x <= 0.5 && area.y <= 0.5 ? leadingClear : 0
             if (view) {
-                view.x = area.x
-                view.y = area.y + above
-                view.width = area.width
-                view.height = area.height - above
+                view.x = card.x
+                view.y = card.y + above
+                view.width = card.width
+                view.height = card.height - above
             }
             return
         }
@@ -245,6 +276,7 @@ QtObject {
             child.rightToLeft = rightToLeft
             child.headerHeight = headerHeight
             child.leadingClear = leadingClear
+            child.gap = gap
             child.area = rects[i]
         }
         const row = node.axis !== "column"
@@ -305,6 +337,7 @@ QtObject {
     onRightToLeftChanged: relayout()
     onHeaderHeightChanged: relayout()
     onLeadingClearChanged: relayout()
+    onGapChanged: relayout()
     Component.onCompleted: {
         ready = true
         rebuild()

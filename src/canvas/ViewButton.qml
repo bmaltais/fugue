@@ -1,6 +1,9 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Fugue
+import "../kit"
+import "../kit/KitTone.js" as KitTone
 
 // The window's one button (docs/ui-ergonomics.md D4): a large view's bar and footer (#62, #73), the run toolbar and
 // queue panel (#60), the Canvas view, and through thin aliases the settings' SmallButton (SettingsParts.qml) and the
@@ -18,7 +21,10 @@ import Fugue
 // `glyph` (a Lucide name, docs/canvas-look.md 16) puts an icon before the label, or alone; `trailingGlyph` one after it
 // (`chevron-down` for a button that opens a menu). A button without a label names itself through `tip`, which is also
 // its tooltip. States as every button draws them: hover (an edge, or the menu-row fill when flat), pressed, the 2px
-// accent focus ring (the error color on a danger button), disabled at 40%. It takes Tab focus; Enter and Space press it.
+// accent focus ring (the error color on a danger button), disabled at 40%.
+// On the Drift kit (docs/canvas-look.md 20.21): a button that acts is raised (KitRaise: a light top edge, a soft shadow under) on the
+// kit's chip fill, with the kit's chip corner, and a choice that holds (`current`) inside a KitPanel is the panel's tone as
+// translucent colour, as KitChip.toned is; with no panel above, or Colour at 0, the accent or the selection colour as before. It takes Tab focus; Enter and Space press it.
 // It knows nothing of what it does: `tapped` says it was pressed.
 Rectangle {
     id: button
@@ -42,9 +48,12 @@ Rectangle {
     property bool altAction: false
     signal altTapped
 
+    readonly property string tone: KitTone.nearest(button)
+    readonly property bool toned: current && tone !== "" && look.params.controlColour !== "accent" && look.params.panelTint > 0.001
+    readonly property bool raised: !flat && !marked && !alarmed && !toned
     readonly property bool hovered: hover.hovered
     readonly property bool pressed: tap.pressed
-    readonly property bool marked: primary || (current && accented)
+    readonly property bool marked: primary || (current && accented && !toned)
     readonly property bool alarmed: danger && enabled && !marked
     readonly property color ink: marked ? look.accentForeground
                                 : flat && !current && !hovered && !activeFocus ? look.label : look.text
@@ -52,16 +61,17 @@ Rectangle {
     implicitHeight: (compact ? 6 : 7) * look.unit
     width: implicitWidth
     height: implicitHeight
-    radius: look.smallCorner
+    radius: Math.min(look.params.cornerChip * look.unit, 0.45 * height)
     color: marked ? look.accent
          : alarmed && flat ? (hovered || pressed ? look.dangerHover : "transparent") // chrome: red only when aimed at
          : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
          : pressed ? look.menuRow
+         : toned ? Qt.alpha(look.tone(tone).glass, 0.34)
          : current ? look.selectedRow
          : flat ? (hovered ? look.menuRow : "transparent")
-         : bordered && hovered ? look.selectedRow : look.well
+         : hovered ? look.kitChipHover : look.kitChip
     // The edge: the focus ring first, then a form button's hairline, then a plain well button's hover edge.
-    border.width: activeFocus ? 2 : bordered || (hovered && !flat && !marked && !alarmed && enabled) ? 1 : 0
+    border.width: activeFocus ? 2 : bordered && !toned ? 1 : 0
     border.color: activeFocus ? (alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
@@ -69,6 +79,12 @@ Rectangle {
     Accessible.name: text !== "" ? text : tip
     Accessible.checkable: checkable
     Accessible.checked: checkable && current
+    // Made only while the button is raised (the window keeps few items).
+    Loader {
+        anchors.fill: parent
+        active: button.raised
+        sourceComponent: KitRaise { look: button.look; radius: button.radius }
+    }
     Row {
         id: content
         anchors.centerIn: parent

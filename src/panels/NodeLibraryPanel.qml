@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../kit"
 
 // The node library (#56, ComfyUI's Node Library tab): a search field over the node types by
 // category. It shows the caller's `rows` (the shape of search/node_library.h: category, depth, key,
@@ -69,13 +70,7 @@ Item {
         y: root.u
         width: parent.width - 4 * root.u
         height: 8 * root.u
-        Rectangle {
-            anchors.fill: parent
-            radius: root.look.smallCorner
-            color: root.look.well
-            border.width: field.activeFocus ? 1 : 0
-            border.color: root.look.accent
-        }
+        KitWell { look: root.look; focused: field.activeFocus } // the recessed field of the kit
         Glyph {
             id: searchGlyph
             x: 2 * root.u
@@ -213,7 +208,7 @@ Item {
                 x: root.u
                 width: parent.width - 2 * root.u - (list.ScrollBar.vertical as FugueScrollBar).inset
                 height: parent.height
-                radius: root.look.smallCorner
+                radius: Math.min(root.look.params.cornerChip * root.u, 0.45 * height)
                 color: list.activeFocus && list.currentIndex === row.index ? root.look.selectedRow
                        : hover.hovered ? root.look.menuRow : "transparent"
             }
@@ -334,7 +329,7 @@ Item {
         z: 1000
         width: ghostText.implicitWidth + 4 * root.u
         height: 7 * root.u
-        radius: root.look.smallCorner
+        radius: Math.min(root.look.params.cornerChip * root.u, 0.45 * height)
         color: root.look.popup
         border.width: 1
         border.color: root.look.accent

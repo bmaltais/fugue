@@ -39,7 +39,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: root.look.thumbCorner
+        radius: Math.min(root.look.params.cornerGroup * root.look.unit, 0.2 * Math.min(width, height))
         color: root.look.well
     }
     Loader {

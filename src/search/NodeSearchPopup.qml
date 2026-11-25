@@ -185,7 +185,7 @@ Popup {
                     x: 4 * root.u
                     width: chipRow.implicitWidth + 4 * root.u
                     height: 6 * root.u
-                    radius: Math.min(root.look.popupCorner, 12)
+                    radius: Math.min(root.look.params.cornerChip * root.u, height / 2)
                     color: "transparent"
                     border.width: 1
                     border.color: root.look.hairlineStrong
@@ -259,7 +259,7 @@ Popup {
                     font.weight: Font.DemiBold
                 }
                 highlight: Rectangle {
-                    radius: Math.max(0, root.look.popupCorner - 6)
+                    radius: Math.min(root.look.params.cornerChip * root.u, 0.45 * height)
                     color: root.look.selectedRow
                 }
 

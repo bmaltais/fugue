@@ -236,6 +236,30 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // By keys alone: opening puts the focus on New, Tab and Shift+Tab walk the buttons in reading order, Space presses, Escape closes.
+    void theProjectsDialogIsKeyboardOnly() {
+        enterProject("Acme", {"models"});
+        std::unique_ptr<ProjectModel> model;
+        App app(load(emptyDoc));
+        model = makeModel(app);
+        QVERIFY(app.open());
+        click(app, NEED("projectChip"));
+        QTRY_VERIFY(open(app.window, "projectsDialog"));
+        QTRY_VERIFY(NEED("projectNew")->hasActiveFocus());
+        app.key(Qt::Key_Tab);
+        QTRY_VERIFY(NEED("projectOpenFolder")->hasActiveFocus());
+        app.key(Qt::Key_Tab);
+        QTRY_VERIFY(NEED("projectSettings")->hasActiveFocus());
+        app.key(Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_VERIFY(NEED("projectOpenFolder")->hasActiveFocus());
+        app.key(Qt::Key_Backtab);
+        QTRY_VERIFY(NEED("projectNew")->hasActiveFocus());
+        app.key(Qt::Key_Space); // the form for a new project, its name field first
+        QTRY_VERIFY(NEED("newProjectName")->property("input").value<QQuickItem *>()->hasActiveFocus());
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!open(app.window, "projectsDialog"));
+    }
+
     void renamingTheProjectChangesTheTitle() {
         enterProject("Acme", {});
         std::unique_ptr<ProjectModel> model; // made before the window, so it outlives its QML

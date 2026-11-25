@@ -1160,3 +1160,13 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: the screen's one primary stays Run (the switches are quiet kit rows, not accent); a switch is the kit's control for a mode that stays on, as the canvas Live toggle (#315); two rows rather than a three-way control so each reads on its own and Space flips the one with the focus.
 - Rules met: Floor (the kit's 7u switch in a 10u row), Primary (Run alone is the accent), Gaps (the group is the panel's padding from its sides and Run), Learned place (above Run, with the other per-app state; the canvas's Live is in its task bar), Keys (R and the switches reachable by Tab; checked against the registry: no bare-letter command).
 - Not checked by a person: the two rows at the narrowest panel and the shortest window (the form scrolls above them; with the Needs panel open at 971px the Advanced row is cut by the scroll's edge until scrolled).
+
+### 2026-11-25 Rounded spaces: areas, side panels, popups, menus, run queue (#465, epic #456 slice 5)
+
+- Controls: workspace areas (`AreaNode`, `AreaFrame`, `AreaHeader`, `AreaHandle`), the Graph's card (`graphFrame`), the side panel (`SidePanel` on `KitPanel`), `PopupSurface` (every dialog, menu and popover), `ViewButton` (every button), the run queue, menu rows.
+- Old: areas and panels edge to edge with hairlines; popups with the theme's corner; flat well-coloured buttons.
+- New: Calm draws each space as a rounded card a gap apart (half of `areaGap` on each side of a border); Flat (`areaLayout` panes) keeps edge to edge with 1px dividers, one code path. A border handle in Calm shows its line only while in use. Buttons are raised chips, a current choice in a panel is its tone; popups are calm tinted cards of the panel corner.
+- Keys: opening the node library puts the focus in its search, Down goes to the list and Up from the first row back, Right and Left open and close a category, Escape closes the panel and the keys return to the canvas (new; before, the focus was lost). The Projects dialog opens on New, Tab and Shift+Tab walk its buttons, Escape closes. The border handle keeps its arrows and Enter.
+- Tests: `cardsKeepAGapAndPanesNone`, `theNodeLibraryIsKeyboardOnly`, `anIdleWindowWithPanelsDoesNotRedraw` (test_panels_kit_window), `theProjectsDialogIsKeyboardOnly` (test_projects_window). The window fixtures run with `areaGap` 0 so the older geometry tests measure layout.
+- Not done: KitHero headers on dialogs, the Large view dialog, the paint window, export, canvas dialogs, notices and toasts, the layers panel and the media browser's own rows (see canvas-look.md 20.21).
+

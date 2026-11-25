@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../kit"
 import "../media"
 
 // The run queue panel (#60, as ComfyUI's queue sidebar): the runs going and waiting, then the last few
@@ -108,13 +109,12 @@ Item {
         level: 3
         look: panel.look
     }
-    Rectangle {
+    // A calm card of the kit (docs/canvas-look.md 20.21), its tint the window's tone.
+    KitPanel {
         id: surface
+        look: panel.look
         anchors.fill: parent
-        radius: Math.min(panel.look.popupCorner, 14)
-        color: panel.look.popup
-        border.width: 1
-        border.color: panel.look.hairline
+        calm: true
         // Nothing under the panel hears a press or the wheel that lands on it.
         MouseArea {
             anchors.fill: parent
@@ -171,7 +171,7 @@ Item {
                     height: 9 * panel.u
                     Rectangle {
                         anchors.fill: parent
-                        radius: panel.look.smallCorner
+                        radius: Math.min(panel.look.params.cornerChip * panel.u, 0.45 * height)
                         color: hoverEntry.hovered ? panel.look.menuRow : "transparent"
                     }
                     HoverHandler { id: hoverEntry }
@@ -320,7 +320,7 @@ Item {
                     height: 9 * panel.u
                     Rectangle {
                         anchors.fill: parent
-                        radius: panel.look.smallCorner
+                        radius: Math.min(panel.look.params.cornerChip * panel.u, 0.45 * height)
                         color: hoverDone.hovered ? panel.look.menuRow : "transparent"
                     }
                     HoverHandler { id: hoverDone }

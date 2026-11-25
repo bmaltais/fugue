@@ -144,6 +144,7 @@ struct App {
         QElapsedTimer timer;
         timer.start();
         const qint64 cpuStart = test_support::cpuMs();
+        theme.look()->setPreset({{"areaGap", 0.0}}); // no gap between cards: these tests measure the canvas (docs/canvas-look.md 20.21)
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
             return false;
