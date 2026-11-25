@@ -1272,7 +1272,7 @@ or check never runs it (only a run starts a command node).
 | Input | Meaning |
 | --- | --- |
 | `method`, `url` | `GET`, `POST`, `PUT`, `PATCH` or `DELETE`, and the address. |
-| `headers` | One `Name: value` per line. A line break in a value after filling is refused. |
+| `headers` | One `Name: value` per line. A line break in a value after filling is refused, and so are `Host` and `Proxy-*` headers: the URL alone decides where the call goes (a shared edge routes by `Host`, so it could take a key past the origin check). |
 | `body_kind`, `body` | `none`; `text` (sent as it is); `json` (the body is parsed as JSON, then the placeholders inside its strings are filled, so a value can never break the JSON). |
 | `a`, `b`, `c`, `d` | Text inputs that fill `{a}` to `{d}` in the URL (percent-encoded), the header values and the body. A JSON string that is exactly `{a:json}` becomes the JSON value the input holds (`42`, `true`, `[1,2]`). A value is never expanded again. |
 | `picture`, `audio`, `video` | The first one set goes up as `multipart/form-data` in the field `upload_field` (default `file`), with its file name and type. A JSON object body (or a text body, as the field `body`) becomes the other form fields. |

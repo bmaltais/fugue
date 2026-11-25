@@ -198,6 +198,11 @@ def parse_headers(text, values, secrets):
         name = name.strip()
         if not colon or not HEADER_NAME.match(name):
             fail("bad_input", "Header line %r is not Name: value." % name[:40])
+        # Host would route the call past the URL's origin (a shared edge sends it to another app), and Proxy-* goes to a
+        # proxy rather than the service: either could carry a key somewhere the origin check never saw. The URL decides.
+        if name.lower() == "host" or name.lower().startswith("proxy-"):
+            fail("bad_input", "The %s header cannot be set here; the URL decides where the call goes." % name,
+                 "Put the service's address in the URL.")
         filled = fill_text(value.strip(), values, secrets=secrets)
         if "\r" in filled or "\n" in filled:
             fail("bad_input", "The value of header %s has a line break after the placeholders are filled." % name)

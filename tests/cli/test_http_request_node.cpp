@@ -411,6 +411,17 @@ private slots:
         QCOMPARE(answer.code, QString("bad_input"));
     }
 
+    // Host (a shared edge routes by it) and Proxy-* would let a workflow send the call, and a key in it, past the URL's origin.
+    void aHostOrProxyHeaderIsRefusedBeforeAnyCall() {
+        const qsizetype before = m_server.requests().size();
+        for (const char *header : {"Host: attacker.example", "host: attacker.example", "Proxy-Authorization: Basic eA=="}) {
+            const Answer answer = call("/hook", {{"headers", header}});
+            QVERIFY2(!answer.ok, header);
+            QCOMPARE(answer.code, QString("bad_input"));
+        }
+        QCOMPARE(m_server.requests().size(), before);
+    }
+
     // The method's choices are the manifest's; the script holds to them too, whatever reaches it.
     void aMethodOutsideTheChoicesIsABadInput() {
         const Answer answer = call("/hook", {{"method", "GET /other HTTP/1.1\r\nX-Evil: 1\r\n"}});
