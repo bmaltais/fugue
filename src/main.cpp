@@ -183,6 +183,12 @@ int main(int argc, char *argv[]) {
     QObject::connect(&appLauncher, &fugue::AppLauncher::notice, &workflows, &fugue::Workflows::notify);
     if (appArgument) // closing an app's window never asks about unsaved work: it has none of its own
         commands.setHandler(QStringLiteral("app.quit"), [] { QCoreApplication::quit(); });
+    // The apps shelf (#388): the catalog's apps for a window with nothing open, and File > Apps…. It reads nothing until the
+    // window shows it, so a window started on a file or on the last session's tabs pays nothing for it.
+    fugue::AppShelf appShelf([&workflows] { return workflows.templates(); },
+                             [&workflows](const QString &id) { return workflows.openTemplateById(id); });
+    QObject::connect(&workflows, &fugue::Workflows::tabsChanged, &appShelf,
+                     [&appShelf, &workflows] { appShelf.setLanding(workflows.nothingOpen()); });
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
@@ -217,7 +223,7 @@ int main(int argc, char *argv[]) {
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas, &canvasBatch, &appView, &appLauncher};
+                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas, &canvasBatch, &appView, &appLauncher, &appShelf};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);
@@ -277,6 +283,7 @@ int main(int argc, char *argv[]) {
     } else {
         workflows.openStartup(parser.positionalArguments());
     }
+    appShelf.setLanding(workflows.nothingOpen()); // after the files and tabs are in: a window with something open never shows it
 
     // `omarchy agent look app` runs the app offscreen with these set, to see
     // the window without a display: size it to OMARCHY_LOOK_SIZE when given,

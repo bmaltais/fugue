@@ -118,6 +118,8 @@ public:
     QUrl suggestedFolder() const;
     ModelDownloads *downloads() const { return m_downloads; }
     ReadinessSheet *readiness() const { return m_readiness; }
+    // Nothing is open: the one tab is empty, untitled and unsaved. What a window shows apps for (#388, AppShelf).
+    bool nothingOpen() const { return count() == 1 && isPristine(0); }
     // The banner names a pack to install or models to download for the shown workflow: Get ready… is offered.
     bool getReadyOffer() const { return !packOffers().isEmpty() || !downloadOffer().isEmpty(); }
     QString downloadOffer() const;

@@ -362,7 +362,7 @@ void Workflows::refreshRegistry() {
         return;
     m_commands->setUnsavedWork(unsaved());
     // Ctrl+W on a lone, empty, untitled workflow has nothing to close: it quits.
-    m_commands->setWorkflowOpen(!(count() == 1 && isPristine(0)));
+    m_commands->setWorkflowOpen(!nothingOpen());
 }
 
 bool Workflows::isPristine(int index) const {

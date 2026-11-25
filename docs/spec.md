@@ -3089,6 +3089,19 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   strip under the canvas has **Show as app** (`appShowApp`); it brings the form back, rebuilt from the workflow as the graph
   left it (values kept for inputs that still exist). The choice is per tab and kept for the session; a tab opens in the view its
   `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
+- **The apps shelf** (#388, `apps/app_shelf.h`, `AppsHome.qml`, `AppsDialog.qml`). Fugue has no start screen; a window with nothing
+  open (one empty, untitled, unsaved workflow) shows the shelf in the canvas's place, and File > Apps… (`file.apps`) shows it
+  as a dialog over open tabs. It lists the templates that are apps, the same list the Templates window reads
+  (`Workflows::templates()`, 11.10), never a second catalog: a card has the app's name, its one line (`summary`), its
+  preview, the models-where badges (#164) and one line of readiness, a check and "Ready" when its models are on this machine
+  or on a paired host and no pack is missing, else what is missing in few words ("Needs 2.1 GB and 1 pack": the models'
+  download size when known, else their number; and the packs not installed). Ready apps come first. Choosing a card opens the
+  template as any template opens (`openTemplateById`, 11.10): a ready app lands in the App view; an app that is not ready
+  opens the same tab with the one Get ready sheet (6.6, 6.7, 8.9, #379) over it, and once the sheet's one yes has run the
+  tab is shown ready to Run. Nothing is installed, trusted or downloaded before that yes. **Start blank** ends the shelf
+  for the session (an empty graph). A window that is given a workflow or reopens its tabs never makes the shelf: the
+  catalog is read only when the shelf is shown (`AppShelf::refresh`). With no apps it says so and offers **Browse
+  templates…**.
 - **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `setSeedMode`, `setImageFiles`, `pasteImage`, `useImage`, `maskPicture`, `models`, `pickModel`, `run`, `cancel`,
   `status`, `progress`, `error`, `details`, `results`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
   it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.

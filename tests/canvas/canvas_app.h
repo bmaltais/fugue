@@ -126,6 +126,7 @@ struct App {
     fugue::AppView *appView = nullptr;             // the App view's store (test_app_window), likewise
     fugue::AppLauncher *appLauncher = nullptr;     // Add to launcher and Open in Fugue (test_app_window), likewise
     QUrl windowUrl{"qrc:/Main.qml"};               // an app's own window (qrc:/apps/AppWindow.qml, test_app_window) has no canvas
+    fugue::AppShelf *appShelf = nullptr;           // the apps shelf's store (test_app_shelf_window), likewise
     // The side panels (#56), with their state in the test's own folder.
     fugue::ChromeVisibility chrome{dir.path() + "/chrome.json"};
     fugue::SidePanels sidePanels{dir.path() + "/side-panels.json", &chrome};
@@ -190,7 +191,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects, &workspace, canvasActions, &activeCanvas, canvasBatch, appView, appLauncher};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects, &workspace, canvasActions, &activeCanvas, canvasBatch, appView, appLauncher, appShelf};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(windowUrl);
