@@ -1,0 +1,36 @@
+{
+  "manifest": 1,
+  "id": "fugue/posterize",
+  "version": "1.0.0",
+  "name": "Posterize",
+  "description": "Cut every color channel to Levels evenly spaced values, for flat bands of color. Alpha is left alone.",
+  "category": "Image/Adjust",
+  "keywords": ["levels", "bands", "quantize", "reduce colors", "poster"],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "levels",
+      "type": "number",
+      "label": "Levels",
+      "default": 4,
+      "min": 2,
+      "max": 256,
+      "step": 1,
+      "integer": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

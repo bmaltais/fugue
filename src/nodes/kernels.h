@@ -17,6 +17,7 @@ void addImageGenerationKernels(Kernels &kernels); // image_generation.cpp
 void addImageSizeKernels(Kernels &kernels);       // image_size.cpp
 void addMaskKernels(Kernels &kernels);            // mask.cpp
 void addLutKernels(Kernels &kernels);             // lut.cpp
+void addToneKernels(Kernels &kernels);            // tone_ops.cpp
 void addDrawTextKernels(Kernels &kernels);        // draw_text.cpp
 void addMediaGenerationKernels(Kernels &kernels); // media_generation.cpp
 void addPixelKernels(Kernels &kernels);           // pixel.cpp
