@@ -21,6 +21,10 @@ import Fugue
 // the keys cycle through.
 // B is drawn in A's frame, cropped to A's shape and centered (the same fit as the Compare Images
 // node's difference), and a notice says so when the sizes differ.
+// `placeB`: where B sits inside A, a rect in A's pixels (an App that grows a picture knows where the input went, the
+// block's `compare`). Set, the slider modes and flip draw B at that rect over A's whole frame, so the two line up, and the
+// notice about sizes is not said. Side by side and difference ignore it (they have no shared frame to place B in). Empty (the
+// default, and the graph's Compare node and dialogs): B is fitted to A's frame as above. Zoom and pan move both together.
 Item {
     id: view
     required property CanvasLook look
@@ -37,6 +41,7 @@ Item {
     property size sizeB: Qt.size(0, 0)
     property string labelA: "A"
     property string labelB: "B"
+    property rect placeB: Qt.rect(0, 0, 0, 0)
 
     property string mode: "slider"
     property real position: 0.5
@@ -60,13 +65,18 @@ Item {
     readonly property var modes: ["slider", "slider_horizontal", "side_by_side", "flip", "difference"]
     readonly property bool single: mode === "single"
     readonly property bool sliding: mode === "slider" || mode === "slider_horizontal"
-    readonly property bool differs: sizeA.width > 0 && sizeB.width > 0
+    readonly property bool placed: placeB.width > 0 && placeB.height > 0
+    readonly property bool differs: !placed && sizeA.width > 0 && sizeB.width > 0
                                     && (sizeA.width !== sizeB.width || sizeA.height !== sizeB.height)
     // One image pixel is `imageScale` screen pixels, so the zoom in percent is that.
     // 100% is of B: B is larger, and the view asked for it (CompareDetail, engine/compare_scale.h).
-    readonly property bool actualOfB: actual && actualB && CompareDetail.bIsLarger(sizeA, sizeB)
+    // B is the larger picture: by area as the node's Compare is; placed, by pixel density (B's pixels per A pixel over its rect: the
+    // input of an expanded result is as large as the result's own pixels, or larger, never "larger" by being only part of it).
+    readonly property real densityB: placed ? sizeB.width / placeB.width : 1
+    readonly property bool bLarger: placed ? sizeB.width > 0 && sizeA.width > 0 && densityB > 1 : CompareDetail.bIsLarger(sizeA, sizeB)
+    readonly property bool actualOfB: actual && actualB && bLarger
     readonly property string zoomText: qsTr("%1%").arg(Math.round(imageScale * 100))
-    readonly property string sizeNotice: differs && actual && CompareDetail.bIsLarger(sizeA, sizeB)
+    readonly property string sizeNotice: (differs || placed) && actual && bLarger
         ? (actualOfB ? qsTr("100% of B · %1 × %2").arg(sizeB.width).arg(sizeB.height)
                      : qsTr("100% of A · %1 × %2").arg(sizeA.width).arg(sizeA.height))
         : differs
@@ -108,7 +118,10 @@ Item {
     function flip() { if (!single) setView(mode === "flip" ? {showB: !showB} : {mode: "flip", showB: false}) }
     function fit() { setView({zoom: 1, actual: false, actualB: false, centerX: 0.5, centerY: 0.5}) }
     // 100% of the larger picture; pressed again with the sizes differing, of the other (#420).
-    function actualSize() { setView(CompareDetail.nextActual(sizeA, sizeB, actual, actualB)) }
+    function actualSize() {
+        setView(placed ? {actual: true, actualB: bLarger && (actual ? !actualB : true)}
+                       : CompareDetail.nextActual(sizeA, sizeB, actual, actualB))
+    }
     // Zooms by `factor` keeping the image point under (x, y) of the view where it is.
     function zoomAt(x, y, factor) {
         const before = imageScale
@@ -131,7 +144,8 @@ Item {
     // A panel is the region one image fills: all of the view, or half of it side by side.
     readonly property real panelW: paired ? width / 2 : width
     readonly property real fitScale: Math.min(panelW / aw, height / ah)
-    readonly property real imageScale: actual ? CompareDetail.actualScale(sizeA, sizeB, actualB) : fitScale * zoom
+    readonly property real imageScale: actual ? (placed ? (actualB && bLarger ? densityB : 1) : CompareDetail.actualScale(sizeA, sizeB, actualB))
+                                               : fitScale * zoom
     // The panel of the image under x: its center on screen.
     function panelFor(x) {
         const right = paired && x >= width / 2
@@ -163,10 +177,12 @@ Item {
         component Picture: Image {
             required property real panelCx
             required property point origin // the layer's top left
-            x: view.edgeX(panelCx) - origin.x
-            y: view.edgeY() - origin.y
-            width: view.aw * view.imageScale
-            height: view.ah * view.imageScale
+            required property rect place   // where the picture sits in A's pixels; empty: A's whole frame
+            readonly property bool placedIn: place.width > 0 && place.height > 0
+            x: view.edgeX(panelCx) - origin.x + (placedIn ? place.x * view.imageScale : 0)
+            y: view.edgeY() - origin.y + (placedIn ? place.y * view.imageScale : 0)
+            width: (placedIn ? place.width : view.aw) * view.imageScale
+            height: (placedIn ? place.height : view.ah) * view.imageScale
             asynchronous: true
             cache: false
             fillMode: Image.PreserveAspectCrop
@@ -182,8 +198,10 @@ Item {
             property url source
             property url sharpSource
             property real panelCx: view.panelW / 2
+            property rect place: Qt.rect(0, 0, 0, 0)
             clip: true
             Picture {
+                place: piece.place
                 panelCx: piece.panelCx
                 origin: Qt.point(piece.x, piece.y)
                 source: piece.source
@@ -191,6 +209,7 @@ Item {
             }
             Picture {
                 id: sharp
+                place: piece.place
                 panelCx: piece.panelCx
                 origin: Qt.point(piece.x, piece.y)
                 readonly property bool ready: status === Image.Ready
@@ -203,6 +222,7 @@ Item {
         Layer {
             objectName: "layerB"
             visible: view.sliding || (view.mode === "flip" && view.showB)
+            place: view.placeB
             source: view.sourceB
             sharpSource: view.fileB
             width: view.width

@@ -724,6 +724,7 @@ type and no second file format: the list is a top-level `app` block of `workflow
 | `inputs[].role` | `prompt`, `negative_prompt`, `strength`, `seed`, `model`, `layer`, plus `image` and `mask` (the `file` and `mask` inputs of a Load Image). A role with a `name` is keyed by the name, so an app can take two pictures. An input with no role needs a `name` (a-z, 0-9, `_`) and is plain. The key (the name, else the role) is unique in the list. |
 | `inputs[].optional`, `bypass` | On a prompt: it may be empty. On a picture (`image`, `mask`): the picture may be left out (#484). Left empty (nothing given and no `default`, or an empty value given) the run's copy of the workflow has the input's branch **bypassed** (3.5): the nodes in `bypass` (node ids), else the nodes of the input's targets, which is the Load Image or the group instance the picture feeds. Filled, those nodes are put back to normal in the copy, whatever mode the file had them in, and the target gets the picture. The file on disk is never changed. The form starts an optional picture empty (the file its node holds is not a default), marks it "Optional" and needs no sample; `fugue app info` lists it as `optional` and `app run` may leave it out. A required picture left out is the same error as before (`missing_input`). |
 | `outputs[]` | `node` (the id of a Save or Preview node) and an optional `label`. The run's results of these nodes are the app's results; the app owns no store (results and History are the existing ones). At least one is needed to be valid. |
+| `compare` | Optional, `{"input": "<image input key>", "left": "<number input key>", "top": ..., "right": ..., "bottom": ...}`: where the input picture sits inside the result, for Compare in the App view (12.17). `input` is required and must be an `image` input of the list; each side is the key of a number input that holds the pixels the result gained on that side (a side left out is 0). The App view scales by `resultWidth / (inputWidth + left + right)` (the height when the width is unknown) and puts the input at `(left, top, inputWidth, inputHeight)` of that scale, from the values the take ran with. A name the list does not have is `app_invalid`, in words; deleting the input a name points at drops the whole `compare` with an `app_stale` warning. An older block has none, and the format stays 1 (an optional field, as `optional` and `bypass` were). |
 
 **Deleting a node.** As for a group's exposed port (5.4), a target whose node or input is gone is dropped, an input left with no
 target is dropped, and an output whose node is gone is dropped; each is reported as the warning `app_stale`, in words. A node
@@ -3363,7 +3364,13 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   **…** (`appMore`: Open large, Show in folder, Use as input, Compare with the input). The **result** is a picture in
   `CompareView` (single mode, the large view's viewer): the wheel zooms about the pointer, a drag pans once zoomed, a double
   click fits (at Fit it opens `LargeViewDialog`), **Z** toggles 100%, **C** compares with the input picture (slider mode over
-  the form's first picture), Home or 0 fits, 1 is 100%, + and - zoom. A video or sound plays, a text is text; with more than
+  the form's first picture), Home or 0 fits, 1 is 100%, + and - zoom. When the block has a `compare` (4.9; Expand), the
+  result is A shown whole and the input is B drawn at its place in it (`CompareView.placeB`, from `AppView::inputPlacement`,
+  computed from the shown take's own values, not the form's): an original square picture is a square, the room the app added
+  above and below it shows as the strip around it, and the slider wipes between the two as an A/B. Placement applies in the
+  slider modes and flip; side by side and difference keep fitting B to A's frame (no shared frame to place B in). Without a
+  `compare`, or when a size or the take's picture file is unknown, B is fitted to A as before. The graph's Compare node and its
+  dialogs never place. A video or sound plays, a text is text; with more than
   one output a small row names them by `label`, else "Result". While a run goes the Sampler's step picture (`node.preview`,
   `AppView::liveFrame`) shows over the result, else the previous result stays; the empty stage says in one line what to do.
   A failed run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the

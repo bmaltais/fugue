@@ -74,6 +74,31 @@ QJsonObject mediaWorkflow() {
     })").object();
 }
 
+// An Expand-like app: a picture and the room added on each side, with `compare` naming them (the right side is left out of the block).
+QJsonObject expandWorkflow(bool withCompare = true) {
+    QJsonObject json = QJsonDocument::fromJson(R"({
+      "fugue": 1,
+      "app": {"format": 1, "title": "Expand",
+              "inputs": [{"role": "image", "targets": ["load.file"]},
+                         {"name": "left", "targets": ["pad.left"], "min": 0, "max": 1024},
+                         {"name": "top", "targets": ["pad.top"], "min": 0, "max": 1024},
+                         {"name": "bottom", "targets": ["pad.bottom"], "min": 0, "max": 1024}],
+              "outputs": [{"node": "save"}],
+              "compare": {"input": "image", "left": "left", "top": "top", "bottom": "bottom"}},
+      "graph": {"nodes": {
+        "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "inputs/sample.png"}},
+        "pad": {"type": "fugue/pad", "version": "1.0.1", "inputs": {"left": 0, "top": 0, "right": 0, "bottom": 16}},
+        "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
+      }}
+    })").object();
+    if (!withCompare) {
+        QJsonObject app = json.value("app").toObject();
+        app.remove("compare");
+        json.insert("app", app);
+    }
+    return json;
+}
+
 QJsonValue inputOf(const Document &document, const char *node, const char *input) {
     return document.graph.nodes.value(QLatin1String(node)).inputs.value(QLatin1String(input)).toJson();
 }
@@ -593,6 +618,7 @@ private slots:
         QCOMPARE(m_view->takeIndex(), 1);
         QCOMPARE(m_view->shownResults().size(), 1);
         m_view->onEvent("run2", saved("save", "two.png"));
+        m_view->onEvent("run2", evt("run.done", {{"status", "ok"}}));
         QCOMPARE(m_view->takeIndex(), 0);
         m_view->onEvent("run2", evt("run.done", {{"status", "ok"}}));
         QCOMPARE(m_view->shownResults().first().toMap().value("full").toString(), QStringLiteral("file:///t/two.png"));
@@ -612,6 +638,51 @@ private slots:
         m_view->cancel();
         m_view->onEvent(again, evt("run.done", {{"status", "cancelled"}}));
         QCOMPARE(m_view->takes().size(), 2); // nothing made, no take
+    }
+
+    // Compare in the App view (the block's `compare`): where the input picture sits in the result, from the take's own values.
+    void theInputSitsInTheResultWhereTheTakesPaddingPutsIt() {
+        QTemporaryDir folder;
+        const QString picture = folder.filePath("square.png");
+        QVERIFY(QImage(100, 100, QImage::Format_RGB32).save(picture));
+        m_view->show("a", load(expandWorkflow()), {});
+        QCOMPARE(m_view->inputPlacement(100, 300), QRectF()); // no take yet
+        m_view->setValue("image", picture);
+        m_view->setValue("top", 100);
+        m_view->setValue("bottom", 100);
+        m_view->run();
+        m_view->onEvent("run1", saved("save", "one.png"));
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        // The square whole, the new rows above and below it; a side left out of the block is none, one left alone is the workflow's.
+        QCOMPARE(m_view->inputPlacement(100, 300), QRectF(0, 100, 100, 100));
+        // A result at another scale: the same place in its pixels.
+        QCOMPARE(m_view->inputPlacement(50, 150), QRectF(0, 50, 50, 50));
+        // The width unknown: the height says the scale.
+        QCOMPARE(m_view->inputPlacement(0, 150), QRectF(0, 50, 50, 50));
+        QCOMPARE(m_view->inputPlacement(0, 0), QRectF());
+        // The take is what was run: the form changing after it moves nothing.
+        m_view->setValue("top", 0);
+        m_view->setValue("left", 100);
+        QCOMPARE(m_view->inputPlacement(100, 300), QRectF(0, 100, 100, 100));
+
+        // A take that left a side alone has the workflow's value for it (a bottom of 16 here).
+        m_view->show("b", load(expandWorkflow()), {});
+        m_view->setValue("image", picture);
+        m_view->run();
+        m_view->onEvent("run2", saved("save", "two.png"));
+        QCOMPARE(m_view->inputPlacement(100, 116), QRectF(0, 0, 100, 100));
+    }
+
+    void anAppWithNoCompareBlockPlacesNothing() {
+        QTemporaryDir folder;
+        const QString picture = folder.filePath("square.png");
+        QVERIFY(QImage(100, 100, QImage::Format_RGB32).save(picture));
+        m_view->show("a", load(expandWorkflow(false)), {});
+        m_view->setValue("image", picture);
+        m_view->setValue("top", 100);
+        m_view->run();
+        m_view->onEvent("run1", saved("save", "one.png"));
+        QCOMPARE(m_view->inputPlacement(100, 300), QRectF());
     }
 
     // --- takes that outlive the window (#389) ---

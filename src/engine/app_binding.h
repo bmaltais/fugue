@@ -5,7 +5,8 @@
 //
 //   "app": {"format": 1, "title": "Remove background", "description": "...", "defaultView": "app" | "graph",
 //           "inputs":  [{"role": "image", "targets": ["load.file"], "label": "Picture"}, {"role": "seed", ...}, ...],
-//           "outputs": [{"node": "save", "label": "Result"}]}
+//           "outputs": [{"node": "save", "label": "Result"}],
+//           "compare": {"input": "image", "left": "left", "top": "top", "right": "right", "bottom": "bottom"}}   (optional)
 //
 // `inputs` is the list an `action` block has (engine/input_binding.h: role, name, targets, label, section, default, min,
 // max, choices, choice_values), in the order a form shows it; an app is an action with no canvas Region. A role is one of
@@ -48,6 +49,17 @@ struct AppOutput {
     QString label; // what the result is called; empty: the node's own name
 };
 
+// Where the input picture sits inside the result (Compare in the App view): the names (keys) of the inputs that say it.
+// `input` is the picture input; each side is a number input, the pixels the result gained on that side of the picture
+// (empty: none). Optional in the block; older blocks have none.
+struct AppCompare {
+    QString input;
+    QString left;
+    QString top;
+    QString right;
+    QString bottom;
+};
+
 struct App {
     int format = appFormat;
     QString title;
@@ -55,6 +67,7 @@ struct App {
     QString defaultView = QStringLiteral("app"); // "app" or "graph": what opening shows first
     QList<InputBinding> inputs;                  // in the order a form shows them
     QList<AppOutput> outputs;
+    std::optional<AppCompare> compare;
 
     const InputBinding *input(const QString &key) const;
     QStringList outputNodes() const;

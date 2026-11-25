@@ -281,6 +281,9 @@ Item {
                 sourceB: stage.comparing ? stage.inputPicture.url : ""
                 sizeB: stage.comparing ? Qt.size(stage.inputPicture.width, stage.inputPicture.height) : Qt.size(0, 0)
                 labelB: qsTr("Input")
+                // Where the input sits in the result, when the app says (Expand): A shows whole, B at its place in it.
+                placeB: stage.comparing && stage.isImage ? stage.appView.inputPlacement(stage.current.width, stage.current.height)
+                                                          : Qt.rect(0, 0, 0, 0)
                 chrome: stage.comparing
                 showZoom: true
                 background: "transparent"
