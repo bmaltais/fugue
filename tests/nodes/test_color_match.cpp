@@ -252,6 +252,140 @@ private slots:
         }
     }
 
+    // ---- Match Color (#555) ----
+
+    static nodes::MatchColorOptions options(float luminance = 1.0f, float intensity = 1.0f, float neutralize = 0.0f) {
+        nodes::MatchColorOptions o;
+        o.luminance = luminance;
+        o.colorIntensity = intensity;
+        o.neutralize = neutralize;
+        return o;
+    }
+
+    void matchColorUndoesAKnownShiftAndIsTheIdentityOnItself() {
+        const Pixels reference = pattern(40, 40, 21);
+        Pixels image = reference; // the same picture, much darker
+        for (float &v : image.data)
+            v = v * v * 0.6f;
+        const Pixels out = nodes::matchColor(image, reference, nullptr, 1.0f, options());
+        // L moves to the reference's mean: the mean brightness is nearer the reference's than the shifted picture's was.
+        const auto luma = [](const Pixels &p) {
+            double sum = 0;
+            for (size_t i = 0; i < p.data.size(); i += 3)
+                sum += 0.2126 * p.data[i] + 0.7152 * p.data[i + 1] + 0.0722 * p.data[i + 2];
+            return sum / double(p.data.size() / 3);
+        };
+        QVERIFY2(std::fabs(luma(out) - luma(reference)) < 0.35 * std::fabs(luma(image) - luma(reference)), qPrintable(QString("ref %1 img %2 out %3").arg(luma(reference)).arg(luma(image)).arg(luma(out))));
+        // A picture matched to itself is untouched: the ratios are 1 and the means are its own.
+        QVERIFY(maxDiff(nodes::matchColor(reference, reference, nullptr, 1.0f, options()), reference) < 2e-3f);
+    }
+
+    void matchColorMovesTheColorsToTheReferences() {
+        // A warm picture matched to a cool one turns cool, as Photoshop's Match Color does (cubiq's formula kept the hue).
+        Pixels warm = pattern(30, 30, 24), cool = pattern(30, 30, 25);
+        for (size_t i = 0; i < warm.data.size(); i += 3) {
+            warm.data[i] = std::min(1.0f, warm.data[i] * 0.5f + 0.5f);
+            warm.data[i + 2] *= 0.4f;
+            cool.data[i] *= 0.4f;
+            cool.data[i + 2] = std::min(1.0f, cool.data[i + 2] * 0.5f + 0.5f);
+        }
+        const Pixels out = nodes::matchColor(warm, cool, nullptr, 1.0f, options());
+        QVERIFY(channelMean(warm, 0) > channelMean(warm, 2));
+        QVERIFY(channelMean(out, 2) > channelMean(out, 0));
+        QVERIFY(std::fabs((channelMean(out, 2) - channelMean(out, 0)) - (channelMean(cool, 2) - channelMean(cool, 0))) < 0.1);
+    }
+
+    void theSlidersDoWhatTheirNamesSay() {
+        const Pixels reference = pattern(30, 30, 22);
+        const Pixels image = shifted(pattern(30, 30, 23));
+        // Color intensity 0 removes all color: every pixel is gray.
+        const Pixels flat = nodes::matchColor(image, reference, nullptr, 1.0f, options(1.0f, 0.0f));
+        for (int i = 0; i < 30 * 30; ++i) {
+            QVERIFY(std::fabs(flat.data[size_t(i) * 3] - flat.data[size_t(i) * 3 + 1]) < 2e-3f);
+            QVERIFY(std::fabs(flat.data[size_t(i) * 3 + 1] - flat.data[size_t(i) * 3 + 2]) < 2e-3f);
+        }
+        // Luminance 0 gives every pixel the reference's mean brightness: the gray one has no spread left.
+        const Pixels dull = nodes::matchColor(image, reference, nullptr, 1.0f, options(0.0f, 0.0f));
+        double lo = 1, hi = 0;
+        for (size_t i = 0; i < dull.data.size(); i += 3) {
+            lo = std::min<double>(lo, dull.data[i]);
+            hi = std::max<double>(hi, dull.data[i]);
+        }
+        QVERIFY(hi - lo < 2e-3);
+        // Neutralize takes the cast off the result: matched to a warm reference, the channel means draw together.
+        Pixels warm = reference;
+        for (size_t i = 0; i < warm.data.size(); i += 3) {
+            warm.data[i] = std::min(1.0f, warm.data[i] * 1.0f + 0.15f);
+            warm.data[i + 2] = warm.data[i + 2] * 0.6f;
+        }
+        const Pixels kept = nodes::matchColor(image, warm, nullptr, 1.0f, options(1.0f, 1.0f, 0.0f));
+        const Pixels neutral = nodes::matchColor(image, warm, nullptr, 1.0f, options(1.0f, 1.0f, 1.0f));
+        QVERIFY(maxDiff(kept, neutral) > 0.02f);
+        QVERIFY(std::fabs(channelMean(neutral, 0) - channelMean(neutral, 2)) < std::fabs(channelMean(kept, 0) - channelMean(kept, 2)));
+    }
+
+    void matchColorFadesWithStrengthKeepsAlphaAndSurvivesAFlatPicture() {
+        const Pixels reference = pattern(16, 16, 24);
+        const Pixels image = shifted(reference);
+        QCOMPARE(nodes::matchColor(image, reference, nullptr, 0.0f, options()).data, image.data);
+        const Pixels full = nodes::matchColor(image, reference, nullptr, 1.0f, options());
+        const Pixels half = nodes::matchColor(image, reference, nullptr, 0.5f, options());
+        for (size_t i = 0; i < image.data.size(); ++i)
+            QVERIFY(std::fabs(half.data[i] - (full.data[i] + image.data[i]) / 2) < 1e-5f);
+        Pixels flat(8, 8, 4, 0.4f);
+        flat.at(0, 0, 3) = 0.25f;
+        const Pixels out = nodes::matchColor(flat, reference, nullptr, 1.0f, options());
+        for (float v : out.data)
+            QVERIFY(std::isfinite(v));
+        QCOMPARE(out.at(0, 0, 3), 0.25f);
+    }
+
+    void matchColorMeasuresOnlyWhereTheMaskLeavesThePicture() {
+        const Pixels base = pattern(40, 20, 25);
+        Pixels image = shifted(base);
+        Pixels mask(40, 20, 1, 0.0f);
+        for (int y = 0; y < 20; ++y)
+            for (int x = 20; x < 40; ++x) {
+                mask.at(x, y, 0) = 1.0f;
+                image.at(x, y, 0) = 0.0f;
+                image.at(x, y, 1) = 1.0f;
+                image.at(x, y, 2) = 0.0f;
+            }
+        Pixels spoiled = image; // another redraw under the mask: the kept half's result must not change
+        for (int y = 0; y < 20; ++y)
+            for (int x = 20; x < 40; ++x)
+                spoiled.at(x, y, 2) = 1.0f;
+        const Pixels a = nodes::matchColor(image, base, &mask, 1.0f, options());
+        const Pixels b = nodes::matchColor(spoiled, base, &mask, 1.0f, options());
+        for (int y = 0; y < 20; ++y)
+            for (int x = 0; x < 20; ++x)
+                for (int c = 0; c < 3; ++c)
+                    QCOMPARE(a.at(x, y, c), b.at(x, y, c));
+    }
+
+    void theNodeKeepsOldWorkflowsAndTakesTheMethod() {
+        const Pixels reference = pattern(16, 16, 26);
+        const Pixels image = shifted(reference);
+        const Values base{{"image", Value(handleOf(image))}, {"reference", Value(handleOf(reference))}, {"strength", 1.0}};
+        const auto go = [&](Values more) {
+            Values in = base;
+            for (auto it = more.begin(); it != more.end(); ++it)
+                in.insert(it.key(), it.value());
+            return run(in);
+        };
+        // No method (a node saved as 1.0.0), and "reinhard": the same pixels as before.
+        const Pixels old = pixelsFrom(go({}).value().value("image").media());
+        QVERIFY(maxDiff(old, nodes::colorMatch(image, reference, nullptr, 1.0f)) < 1e-5f);
+        QCOMPARE(pixelsFrom(go({{"method", "reinhard"}, {"luminance", 0.5}}).value().value("image").media()).data, old.data);
+        const Result<Values> match = go({{"method", "match-color"}, {"luminance", 1.0}, {"color_intensity", 1.0}, {"neutralize", 0.0}});
+        QVERIFY2(match.ok(), qPrintable(match.errors().value(0).message));
+        QVERIFY(maxDiff(pixelsFrom(match.value().value("image").media()), nodes::matchColor(image, reference, nullptr, 1.0f, options())) < 1e-5f);
+        QCOMPARE(go({{"method", "bogus"}}).errors().value(0).code, QString("value_not_in_choices"));
+        const Result<Values> bad = go({{"method", "match-color"}, {"luminance", 3.0}});
+        QCOMPARE(bad.errors().value(0).code, QString("value_out_of_range"));
+        QCOMPARE(bad.errors().value(0).input, QString("luminance"));
+    }
+
     void theManifestHasTheDesignsPorts() {
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);
@@ -264,7 +398,8 @@ private slots:
             if (input.name == "strength")
                 QCOMPARE(input.defaultValue.toDouble(), 1.0);
         }
-        QCOMPARE(type->inputs.size(), 4);
+        QCOMPARE(type->inputs.size(), 8); // 1.1.0 added method, luminance, color_intensity and neutralize (#555)
+        QCOMPARE(type->version.toString(), QString("1.1.0"));
     }
 };
 

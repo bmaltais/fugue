@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <tuple>
 #include <utility>
 
 #include "nodes/kernels.h"
@@ -67,6 +68,28 @@ std::array<float, 3> fromLab(const Vec3 &lab) {
     return out;
 }
 
+// CIELAB (D65), for Match Color: L 0..100, a and b about -128..127. Linear sRGB to XYZ and back with the sRGB matrices.
+Vec3 toCielab(float r, float g, float b) {
+    const double lr = toLinear(r), lg = toLinear(g), lb = toLinear(b);
+    const double x = (0.4124564 * lr + 0.3575761 * lg + 0.1804375 * lb) / 0.95047;
+    const double y = 0.2126729 * lr + 0.7151522 * lg + 0.0721750 * lb;
+    const double z = (0.0193339 * lr + 0.1191920 * lg + 0.9503041 * lb) / 1.08883;
+    const auto f = [](double t) { return t > 0.008856 ? std::cbrt(t) : 7.787 * t + 16.0 / 116.0; };
+    return {116.0 * f(y) - 16.0, 500.0 * (f(x) - f(y)), 200.0 * (f(y) - f(z))};
+}
+
+std::array<float, 3> fromCielab(const Vec3 &lab) {
+    const double fy = (lab[0] + 16.0) / 116.0, fx = fy + lab[1] / 500.0, fz = fy - lab[2] / 200.0;
+    const auto inv = [](double t) { return t * t * t > 0.008856 ? t * t * t : (t - 16.0 / 116.0) / 7.787; };
+    const double x = inv(fx) * 0.95047, y = inv(fy), z = inv(fz) * 1.08883;
+    const double lin[3] = {3.2404542 * x - 1.5371385 * y - 0.4985314 * z, -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
+                           0.0556434 * x - 0.2040259 * y + 1.0572252 * z};
+    std::array<float, 3> out{};
+    for (int i = 0; i < 3; ++i)
+        out[i] = float(fromLinear(std::clamp(lin[i], 0.0, 1.0)));
+    return out;
+}
+
 struct Stats {
     Vec3 mean{};
     Vec3 deviation{};
@@ -74,8 +97,8 @@ struct Stats {
 };
 
 // Weighted mean and standard deviation of each l-alpha-beta axis. `weightAt` gives a pixel's weight.
-template <typename WeightAt>
-Stats statsOf(const Pixels &p, WeightAt weightAt) {
+template <typename WeightAt, typename Convert>
+Stats statsOf(const Pixels &p, WeightAt weightAt, Convert convert) {
     Stats s;
     Vec3 sum{}, square{};
     for (int y = 0; y < p.height; ++y)
@@ -83,7 +106,7 @@ Stats statsOf(const Pixels &p, WeightAt weightAt) {
             const double w = weightAt(x, y);
             if (w <= 0)
                 continue;
-            const Vec3 lab = toLab(p.at(x, y, 0), p.at(x, y, 1), p.at(x, y, 2));
+            const Vec3 lab = convert(p.at(x, y, 0), p.at(x, y, 1), p.at(x, y, 2));
             s.weight += w;
             for (int i = 0; i < 3; ++i) {
                 sum[i] += w * lab[i];
@@ -99,6 +122,30 @@ Stats statsOf(const Pixels &p, WeightAt weightAt) {
     return s;
 }
 
+// The statistics of the image and the reference in the space `convert` makes, the mask's weights applied as the header says.
+struct Measured {
+    Stats source, target;
+};
+
+template <typename Convert>
+Measured measure(const Pixels &image, const Pixels &reference, const Pixels *weights, bool *allMasked, Convert convert) {
+    const bool sameSize = reference.width == image.width && reference.height == image.height;
+    // A weight is 1 - m: the pixels the mask leaves count, the masked ones do not.
+    const auto weightAt = [&](int x, int y) { return weights ? 1.0 - double(std::clamp(weights->at(x, y, 0), 0.0f, 1.0f)) : 1.0; };
+    const auto whole = [](int, int) { return 1.0; };
+    Measured m;
+    m.source = statsOf(image, weightAt, convert);
+    bool fallback = false;
+    if (m.source.weight <= 0) {
+        fallback = true;
+        m.source = statsOf(image, whole, convert);
+        if (allMasked)
+            *allMasked = true;
+    }
+    m.target = (sameSize && !fallback) ? statsOf(reference, weightAt, convert) : statsOf(reference, whole, convert);
+    return m;
+}
+
 } // namespace
 
 Pixels colorMatch(const Pixels &image, const Pixels &reference, const Pixels *weights, float strength, bool *allMasked) {
@@ -107,20 +154,8 @@ Pixels colorMatch(const Pixels &image, const Pixels &reference, const Pixels *we
     if (image.width == 0 || image.height == 0 || reference.width == 0 || reference.height == 0 || !(strength > 0.0f))
         return image;
     const float amount = std::min(strength, 1.0f);
-    const bool sameSize = reference.width == image.width && reference.height == image.height;
-    // A weight is 1 - m: the pixels the mask leaves count, the masked ones do not.
-    const auto weightAt = [&](int x, int y) { return weights ? 1.0 - double(std::clamp(weights->at(x, y, 0), 0.0f, 1.0f)) : 1.0; };
-
-    Stats source = statsOf(image, weightAt);
-    bool fallback = false;
-    if (source.weight <= 0) {
-        fallback = true;
-        source = statsOf(image, [](int, int) { return 1.0; });
-        if (allMasked)
-            *allMasked = true;
-    }
-    const Stats target = (sameSize && !fallback) ? statsOf(reference, weightAt)
-                                                 : statsOf(reference, [](int, int) { return 1.0; });
+    const Measured measured = measure(image, reference, weights, allMasked, toLab);
+    const Stats &source = measured.source, &target = measured.target;
 
     // out = (x - mean_s) * (dev_t / dev_s) + mean_t, mixed with x by strength. An axis with no
     // spread in the image has no scale to match: it is moved only.
@@ -139,6 +174,39 @@ Pixels colorMatch(const Pixels &image, const Pixels &reference, const Pixels *we
             const std::array<float, 3> rgb = fromLab(moved);
             for (int i = 0; i < 3; ++i)
                 out.at(x, y, i) = rgb[i];
+        }
+    return out;
+}
+
+Pixels matchColor(const Pixels &image, const Pixels &reference, const Pixels *weights, float strength,
+                  const MatchColorOptions &options, bool *allMasked) {
+    if (allMasked)
+        *allMasked = false;
+    if (image.width == 0 || image.height == 0 || reference.width == 0 || reference.height == 0 || !(strength > 0.0f))
+        return image;
+    const float fade = std::min(strength, 1.0f);
+    // Per pixel (L, a, b): the statistics are the means of L, a and b, and the spread of L and of the chroma sqrt(var a + var b).
+    const Measured measured = measure(image, reference, weights, allMasked, toCielab);
+    const Stats &src = measured.source, &ref = measured.target;
+    const auto ratio = [](double target, double source) { return source > 1e-6 ? target / source : 1.0; };
+    const double lScale = ratio(ref.deviation[0], src.deviation[0]) * double(options.luminance);
+    const double abScale = ratio(std::hypot(ref.deviation[1], ref.deviation[2]), std::hypot(src.deviation[1], src.deviation[2]));
+    const double intensity = double(options.colorIntensity); // scales the whole color, as Photoshop's: 0 is gray
+    const double neutral = double(options.neutralize);
+
+    Pixels out = image;
+    for (int y = 0; y < image.height; ++y)
+        for (int x = 0; x < image.width; ++x) {
+            const Vec3 lab = toCielab(image.at(x, y, 0), image.at(x, y, 1), image.at(x, y, 2));
+            // a and b keep their spread around their own mean, scaled, and move to the reference's mean (Photoshop moves the
+            // colors to the source's; cubiq's code adds no reference mean, so a picture kept its own hue). Neutralize pulls
+            // that target mean to gray (a = b = 0): 1 removes every cast, the reference's included.
+            const Vec3 moved = {(lab[0] - src.mean[0]) * lScale + ref.mean[0],
+                                ((lab[1] - src.mean[1]) * abScale + (1.0 - neutral) * ref.mean[1]) * intensity,
+                                ((lab[2] - src.mean[2]) * abScale + (1.0 - neutral) * ref.mean[2]) * intensity};
+            const std::array<float, 3> rgb = fromCielab(moved);
+            for (int i = 0; i < 3; ++i)
+                out.at(x, y, i) = std::clamp(fade * rgb[i] + (1.0f - fade) * image.at(x, y, i), 0.0f, 1.0f);
         }
     return out;
 }
@@ -179,9 +247,29 @@ public:
                 mask = maskResized(mask, image->width, image->height);
             }
         }
+        // A saved 1.0.0 node has no method: Reinhard, as before.
+        const QString method = context.input("method").text();
+        const bool matchColorMethod = method == QLatin1String("match-color");
+        if (!method.isEmpty() && !matchColorMethod && method != QLatin1String("reinhard"))
+            return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("method"),
+                                  QStringLiteral("\"%1\" is not a method this node knows.").arg(method));
+        MatchColorOptions options;
+        for (const auto &[name, target, low, high] :
+             {std::tuple{"luminance", &options.luminance, 0.0, 2.0}, std::tuple{"color_intensity", &options.colorIntensity, 0.0, 2.0},
+              std::tuple{"neutralize", &options.neutralize, 0.0, 1.0}}) {
+            const Value &value = context.input(name);
+            if (value.isEmpty())
+                continue; // absent in a workflow saved before 1.1.0: the default
+            const double v = value.number();
+            if (!(v >= low && v <= high))
+                return makeInputError(QStringLiteral("value_out_of_range"), QString::fromLatin1(name),
+                                      QStringLiteral("%1 is outside %2 to %3.").arg(v).arg(low).arg(high));
+            *target = float(v);
+        }
         bool allMasked = false;
-        Result<Values> out = imageOutput(colorMatch(image.value(), reference.value(), masked ? &mask : nullptr,
-                                                    float(strength), &allMasked));
+        Result<Values> out = imageOutput(matchColorMethod
+                                             ? matchColor(image.value(), reference.value(), masked ? &mask : nullptr, float(strength), options, &allMasked)
+                                             : colorMatch(image.value(), reference.value(), masked ? &mask : nullptr, float(strength), &allMasked));
         if (allMasked)
             warnings << warning(makeInputError(QStringLiteral("mask_full"), QStringLiteral("mask"),
                                                QStringLiteral("The mask covers the whole picture, so there is nothing to measure the colors from; the whole picture was measured.")));
