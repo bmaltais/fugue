@@ -355,12 +355,26 @@ Rectangle {
                             objectName: "appLiveMode"
                             look: page.look
                             text: qsTr("Run again")
-                            readonly property var modes: ["off", "live", "repeat"]
-                            options: [qsTr("Off"), qsTr("On change"), qsTr("Repeat")]
+                            // Repeat only for an app with a seed: with none every run is the same (AppView.canRepeat).
+                            readonly property var modes: page.appView.canRepeat ? ["off", "live", "repeat"] : ["off", "live"]
+                            options: page.appView.canRepeat ? [qsTr("Off"), qsTr("On change"), qsTr("Repeat")] : [qsTr("Off"), qsTr("On change")]
                             currentIndex: Math.max(0, modes.indexOf(page.appView.liveMode))
                             onMoved: index => page.appView.setLiveMode(modes[index])
                         }
                     }
+                }
+                // Repeat chosen while no seed varies: the next run would be the same picture, so it waits and says why.
+                Text {
+                    objectName: "appRepeatWaits"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: page.look.params.panelPad * page.u
+                    Layout.rightMargin: page.look.params.panelPad * page.u
+                    Layout.topMargin: page.u
+                    visible: page.appView.repeatWaits && page.appView.problem === ""
+                    text: qsTr("Repeat waits: set a seed to Random or Increment, or each run makes the same picture.")
+                    wrapMode: Text.Wrap
+                    color: page.look.label
+                    font.pixelSize: page.look.labelSize
                 }
                 // Where the app runs, when not here (#395): a quiet line above Run, nothing for a local run.
                 Text {

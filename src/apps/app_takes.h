@@ -12,6 +12,10 @@
 // picture. The record sits in the document's `extra` (spec 4.1), outside the source hash, so it changes no cache key and a
 // run of the graph never has one. Runs are kept as long as History keeps them (run folders go 7 days after the run ends, 10.5).
 //
+// Clear in the App view empties the strip without touching a run folder (History and Results keep them): it records, per app, the
+// newest run it cleared, in `app-takes.json` beside the runs root ({"cleared": {<key>: <run id>}}), and only runs started after it
+// come back as takes.
+//
 // Pure file reading, no Qt objects: tested alone (tests/apps/test_app_view.cpp).
 
 #include <QJsonObject>
@@ -33,7 +37,11 @@ struct StoredTake {
 QJsonObject takeRecord(const QString &app, const QJsonObject &values, const QJsonObject &modes);
 
 // The ended runs of the app `key` (an absolute workflow path) that were started from the App view, newest first, at most `max`. Only the
-// newest `scan` run folders are looked at, so a long history costs a bounded read.
-QList<StoredTake> storedTakes(const QString &runsRoot, const QString &key, int max, int scan = 400);
+// newest `scan` run folders are looked at, so a long history costs a bounded read. Runs up to `clearedThrough` (a run id) are left out.
+QList<StoredTake> storedTakes(const QString &runsRoot, const QString &key, int max, int scan = 400, const QString &clearedThrough = {});
+
+// The newest run of the app `key` that Clear took off the strip, or empty; and recording it.
+QString clearedThrough(const QString &runsRoot, const QString &key);
+void setClearedThrough(const QString &runsRoot, const QString &key, const QString &run);
 
 } // namespace fugue::app

@@ -11,8 +11,6 @@ Item {
     property CanvasLook look: App.theme.look
     property string label
     property string hint
-    // The text at the label's end (a slider's value).
-    property string value
     default property alias content: slot.data
 
     width: parent ? parent.width : implicitWidth
@@ -37,21 +35,12 @@ Item {
             height: heading.implicitHeight + (row.hint !== "" ? hintText.implicitHeight + row.look.unit / 2 : 0)
             Text {
                 id: heading
-                anchors { left: parent.left; right: valueText.left; rightMargin: 2 * row.look.unit }
+                anchors { left: parent.left; right: parent.right }
                 text: row.label
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: row.look.text
                 font.pixelSize: Math.round(row.look.textSize * 7 / 6)
-            }
-            Text {
-                id: valueText
-                anchors { right: parent.right; baseline: heading.baseline }
-                visible: row.value !== ""
-                text: row.value
-                color: row.look.label
-                font.pixelSize: row.look.textSize
-                font.features: { "tnum": 1 }
             }
             Text {
                 id: hintText

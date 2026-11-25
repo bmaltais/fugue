@@ -86,22 +86,16 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: root.look.unit
-        Rectangle {
+        KitDropdown {
             id: drop
             objectName: "appImageChoose-" + root.field.key
             Layout.fillWidth: true
-            implicitHeight: 7 * root.look.unit
-            radius: height / 2
-            color: dropHover.hovered ? root.look.kitChipHover : root.look.kitChip
-            border.width: activeFocus || menu.opened ? 2 : 0
-            border.color: root.look.accent
-            activeFocusOnTab: true
-            Accessible.role: Accessible.ComboBox
+            look: root.look
+            text: root.currentName !== "" ? root.currentName : qsTr("Choose a picture")
+            ink: root.currentName !== "" ? root.look.text : root.look.label
+            open: menu.opened
             Accessible.name: root.field.label
-            Accessible.description: root.currentName
-            Keys.onSpacePressed: drop.show()
-            Keys.onReturnPressed: drop.show()
-            Keys.onDownPressed: drop.show()
+            onTapped: drop.show()
             function show() {
                 root.recents = root.appView.recentImages()
                 root.results = root.appView.resultPictures()
@@ -110,25 +104,6 @@ ColumnLayout {
                 menu.wantY = at.y
                 menu.anchorHeight = drop.height
                 menu.open()
-            }
-            HoverHandler { id: dropHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: { drop.forceActiveFocus(); drop.show() } }
-            Text {
-                anchors { left: parent.left; leftMargin: 2 * root.look.unit; right: chevron.left; rightMargin: root.look.unit
-                          verticalCenter: parent.verticalCenter }
-                text: root.currentName !== "" ? root.currentName : qsTr("Choose a picture")
-                elide: Text.ElideMiddle
-                textFormat: Text.PlainText
-                color: root.currentName !== "" ? root.look.text : root.look.label
-                font.pixelSize: root.look.textSize
-            }
-            Glyph {
-                id: chevron
-                anchors { right: parent.right; rightMargin: root.look.unit; verticalCenter: parent.verticalCenter }
-                look: root.look
-                name: "chevron-down"
-                color: root.look.label
-                font.pixelSize: 12
             }
             WidgetMenu {
                 id: menu

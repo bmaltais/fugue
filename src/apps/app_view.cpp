@@ -12,6 +12,7 @@
 #include <QJsonArray>
 #include <QRandomGenerator>
 
+#include <algorithm>
 #include <cmath>
 
 #include "apps/app_models.h"
@@ -444,6 +445,12 @@ void AppView::setSeedMode(const QString &key, const QString &mode) {
         state.values.insert(key, newSeed(*inputOf(key)));
     emit valueChanged(key);
     inputEdited();
+    // Repeat that waited for a seed to vary goes on now.
+    if (state.live == QLatin1String("repeat") && !busy() && repeatVaries()) {
+        state.liveDirty = true;
+        liveFire();
+    }
+    emit liveChanged(); // repeatWaits
 }
 
 void AppView::rollSeed(const QString &key) {
@@ -815,7 +822,30 @@ QString AppView::run() {
 
 bool AppView::canClear() const {
     const TabState state = m_state.value(m_tab);
-    return m_app && state.run.isEmpty() && state.status != QLatin1String("idle");
+    return m_app && state.run.isEmpty() && (state.status != QLatin1String("idle") || !state.takes.isEmpty());
+}
+
+bool AppView::canRepeat() const {
+    for (const QVariant &field : std::as_const(m_fields))
+        if (field.toMap().value("kind").toString() == QLatin1String("seed"))
+            return true;
+    return false;
+}
+
+bool AppView::repeatVaries() const {
+    for (const QVariant &field : std::as_const(m_fields)) {
+        const QVariantMap map = field.toMap();
+        if (map.value("kind").toString() != QLatin1String("seed"))
+            continue;
+        const QString mode = seedMode(map.value("key").toString());
+        if (mode == QLatin1String("random") || mode == QLatin1String("increment"))
+            return true;
+    }
+    return false;
+}
+
+bool AppView::repeatWaits() const {
+    return m_app && liveMode() == QLatin1String("repeat") && !busy() && !repeatVaries();
 }
 
 void AppView::clearResults() {
@@ -829,6 +859,13 @@ void AppView::clearResults() {
     state.results.clear();
     state.cleared = true;
     state.pinned.clear();
+    // The strip too (owner, 2026-11-25); the run folders stay. The newest run cleared is recorded, so a restart does not bring the
+    // older ones back.
+    QString newest;
+    for (const Take &take : std::as_const(state.takes))
+        newest = std::max(newest, take.run);
+    state.takes.clear();
+    app::setClearedThrough(m_runsRoot, m_takesKey, newest);
     emit runChanged();
     emit progressChanged();
 }
@@ -976,9 +1013,12 @@ void AppView::end(const QString &tab, const QString &status) {
         emit runChanged();
         emit progressChanged();
     }
-    // Repeat: the next run when this one made something; an edit made while it ran (Live) is owed the same way.
-    if (state.live == QLatin1String("repeat") && state.status == QLatin1String("done"))
+    // Repeat: the next run when this one made something and the next would differ (a seed varies: a tab not shown is checked when
+    // it is); an edit made while it ran (Live) is owed the same way.
+    if (state.live == QLatin1String("repeat") && state.status == QLatin1String("done") && (tab != m_tab || repeatVaries()))
         state.liveDirty = true;
+    if (tab == m_tab)
+        emit liveChanged(); // repeatWaits
     if (state.liveDirty && state.live != QLatin1String("off"))
         scheduleLive(tab);
 }
@@ -1171,7 +1211,8 @@ void AppView::loadStored(TabState &state) {
     QSet<QString> have;
     for (const Take &take : std::as_const(state.takes))
         have.insert(take.run);
-    for (const app::StoredTake &stored : app::storedTakes(m_runsRoot, m_takesKey, maxTakes)) {
+    for (const app::StoredTake &stored :
+         app::storedTakes(m_runsRoot, m_takesKey, maxTakes, 400, app::clearedThrough(m_runsRoot, m_takesKey))) {
         if (have.contains(stored.run) || state.takes.size() >= maxTakes)
             continue;
         Take take;
@@ -1212,7 +1253,7 @@ void AppView::replayEvent(const QString &tab, const QString &run, const QJsonObj
 // --- Live (#471) ------------------------------------------------------------------
 
 void AppView::setLiveMode(const QString &mode) {
-    if (!m_app || !QStringList{"off", "live", "repeat"}.contains(mode))
+    if (!m_app || !QStringList{"off", "live", "repeat"}.contains(mode) || (mode == QLatin1String("repeat") && !canRepeat()))
         return;
     TabState &state = m_state[m_tab];
     if (state.live == mode)

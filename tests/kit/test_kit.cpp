@@ -224,6 +224,31 @@ private slots:
         const QPointF mid = slider->mapToScene(QPointF(slider->property("railWidth").toDouble() / 2, slider->height() / 2));
         QTest::mouseClick(window, Qt::LeftButton, {}, mid.toPoint());
         QTRY_COMPARE(window->property("level").toDouble(), 5.0);
+        // Its value is a field (owner, 2026-11-25): a typed number is asked for, kept in the range; words change nothing.
+        auto *typed = window->findChild<QQuickItem *>("slider-value");
+        QVERIFY(typed);
+        QCOMPARE(typed->property("text").toString(), QStringLiteral("5"));
+        const auto type = [&](const QString &text) {
+            typed->forceActiveFocus();
+            QTRY_VERIFY(typed->hasActiveFocus());
+            QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+            for (const QChar c : text)
+                QTest::keyClick(window, c.toLatin1());
+            QTest::keyClick(window, Qt::Key_Return);
+        };
+        type("7");
+        QTRY_COMPARE(window->property("level").toDouble(), 7.0);
+        type("99");
+        QTRY_COMPARE(window->property("level").toDouble(), 8.0);
+        type("x");
+        QTest::qWait(20);
+        QCOMPARE(window->property("level").toDouble(), 8.0);
+        QTRY_COMPARE(typed->property("text").toString(), QStringLiteral("8"));
+        slider->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_Home);
+        QTRY_COMPARE(window->property("level").toDouble(), 2.0);
+        QTest::mouseClick(window, Qt::LeftButton, {}, mid.toPoint());
+        QTRY_COMPARE(window->property("level").toDouble(), 5.0);
 
         // The chooser: one tab stop, the arrows move and choose (never past the ends), Home and End jump, a press on an option chooses it,
         // Space and Enter keep the choice, and it asks (`moved`) rather than sets.

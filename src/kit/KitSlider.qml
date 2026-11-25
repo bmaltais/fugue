@@ -12,8 +12,12 @@ import "KitTone.js" as KitTone
 // sets `value` itself, so a binding stays a binding and the model decides what to keep. A `stepSize` above 0 snaps
 // to steps from `from` (and `ticks` draws one dot at each, up to 24 of them). Keys, when focused: arrows move one step
 // (a fortieth of the range when `stepSize` is 0), PageUp and PageDown ten, Home and End the ends; in a right to left
-// window Left and Right swap with the rail. `valueText` is what the value looks like (a number by default); the end
-// slot has a fixed width (`endWidth`), so every rail in a group starts and ends at the same x.
+// window Left and Right swap with the rail. With `showValue` the end slot is the value as a small recessed field the person can
+// type in (owner, 2026-11-25: "the values should be input fields the user can edit"): Enter or leaving it takes the number,
+// kept in the range and snapped to the steps, through `moved`; Escape puts the shown value back; Up and Down step it. The
+// value is shown times `displayScale` with `suffix` (100 and "%" for a 0..1 amount), whole for whole steps, else to 2
+// places; `valueText` is that text. The end slot has a fixed width (`endWidth`), so every rail in a group starts and ends at
+// the same x.
 Item {
     id: slider
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
@@ -25,10 +29,14 @@ Item {
     property string startGlyph
     property string endGlyph
     property bool showValue: false
-    property string valueText: String(Math.round(value * 100) / 100)
+    property real displayScale: 1
+    property string suffix
+    readonly property bool wholeSteps: stepSize > 0 && Math.abs(stepSize * displayScale - Math.round(stepSize * displayScale)) < 1e-9
+    readonly property string valueText: (wholeSteps ? String(Math.round(value * displayScale))
+                                                    : String(Math.round(value * displayScale * 100) / 100)) + suffix
     property string text // the name assistive tools say; a KitRow with a label names its own slider
     property real railWidth: 40 * look.unit
-    property real endWidth: 6.5 * look.unit
+    property real endWidth: (showValue && endGlyph === "" ? 11 : 6.5) * look.unit // a typed value needs room for "100%"
     property string tone: KitTone.nearest(slider) // the panel's tone; "" is the accent
     signal moved(real value)
 
@@ -48,6 +56,15 @@ Item {
     }
     function clamp(v) { return Math.max(Math.min(from, to), Math.min(Math.max(from, to), v)) }
     function nudge(steps) { moved(clamp(value + steps * step)) }
+    // A typed value: a number (a comma as the decimal point too, the suffix optional), in the range and on the steps; anything
+    // else changes nothing.
+    function typed(text) {
+        const n = parseFloat(String(text).replace(suffix, "").replace(",", ".").trim())
+        if (isNaN(n))
+            return
+        const v = clamp(n / displayScale)
+        moved(stepSize > 0 ? clamp(from + Math.round((v - from) / stepSize) * stepSize) : v)
+    }
 
     implicitWidth: (startGlyph !== "" ? endWidth + look.unit : 0) + railWidth + (endGlyph !== "" || showValue ? look.unit + endWidth : 0)
     implicitHeight: 7 * look.unit
@@ -174,15 +191,40 @@ Item {
             font.pixelSize: Math.round(slider.look.textSize * 7 / 6)
             anchors.centerIn: parent
         }
-        Text {
+        Item { // the value, a field to type in
             visible: slider.endGlyph === "" && slider.showValue
             anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            text: slider.valueText
-            textFormat: Text.PlainText
-            color: slider.look.label
-            font.pixelSize: Math.round(slider.look.textSize * 13 / 12)
-            font.features: { "tnum": 1 }
+            width: parent.width
+            height: 6 * slider.look.unit
+            KitWell { look: slider.look; focused: valueField.activeFocus }
+            TextInput {
+                id: valueField
+                objectName: slider.objectName !== "" ? slider.objectName + "-value" : ""
+                anchors { fill: parent; leftMargin: slider.look.unit; rightMargin: slider.look.unit }
+                verticalAlignment: TextInput.AlignVCenter
+                horizontalAlignment: TextInput.AlignRight
+                clip: true
+                selectByMouse: true
+                activeFocusOnTab: slider.enabled
+                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                color: slider.look.text
+                selectionColor: slider.look.selectedRow
+                selectedTextColor: slider.look.text
+                font.pixelSize: slider.look.textSize
+                font.features: { "tnum": 1 }
+                Accessible.role: Accessible.EditableText
+                Accessible.name: slider.text
+                // The shown value while the field is not being typed in.
+                Binding on text { value: slider.valueText; when: !valueField.activeFocus; restoreMode: Binding.RestoreNone }
+                onActiveFocusChanged: if (activeFocus) selectAll()
+                onEditingFinished: {
+                    slider.typed(text)
+                    Qt.callLater(() => { valueField.text = slider.valueText; if (valueField.activeFocus) valueField.selectAll() })
+                }
+                Keys.onEscapePressed: event => { valueField.text = slider.valueText; valueField.selectAll(); event.accepted = true }
+                Keys.onUpPressed: slider.nudge(1)
+                Keys.onDownPressed: slider.nudge(-1)
+            }
         }
     }
     }

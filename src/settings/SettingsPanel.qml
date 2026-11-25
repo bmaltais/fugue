@@ -481,7 +481,8 @@ Popup {
                                 stepSize: 0.05
                                 value: lookRow.amount
                                 showValue: true
-                                valueText: Math.round(lookRow.amount * 100) + "%"
+                                displayScale: 100
+                                suffix: "%"
                                 text: lookRow.caption
                                 onMoved: v => panel.apply(panel.model.set(lookRow.settingKey, Math.round(v * 20) / 20))
                             }
@@ -546,7 +547,8 @@ Popup {
                                     value: themePage.frostAmount
                                     text: qsTr("Frost")
                                     showValue: true
-                                    valueText: Math.round(themePage.frostAmount * 100) + "%"
+                                    displayScale: 100
+                                    suffix: "%"
                                     onMoved: v => panel.apply(panel.model.set("frost", Math.round(v * 10) / 10))
                                 }
                             }
