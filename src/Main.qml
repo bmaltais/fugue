@@ -262,6 +262,7 @@ ApplicationWindow {
         // The file pickers, the save and trust and recovery questions, the drop area.
         WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas; noticeInset: win.stripWidth }
         GroupDialogs { anchors.fill: parent }
+        RemoteConsentQuestion {}
         AppBuilderDialog { anchors.fill: parent }
         LayoutColorPicker {}
         ImageSaveDialog {}

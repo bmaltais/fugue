@@ -5,6 +5,7 @@
 #include "cli/process.h"
 #include "engine/input_use.h"
 #include "engine/compile_for_run.h"
+#include "engine/remote_consent.h"
 #include "engine/trust_store.h"
 
 namespace fugue::cli {
@@ -44,6 +45,34 @@ Validation validateDocument(const Document &document, Context &context, const QS
         validation.nodes.insert(it.key(), node);
     }
     return validation;
+}
+
+QList<ProviderInstance> registeredInstances(const Registry &registry) {
+    QList<ProviderInstance> instances;
+    for (const ProviderEntry &entry : registry.providers())
+        instances << entry.instance;
+    return instances;
+}
+
+Errors remoteConsentProblems(const CompiledGraph &graph, Context &context, const QString &workflow, const QStringList &allowedNow) {
+    const QList<ProviderInstance> instances = registeredInstances(context.registry);
+    if (!anyOffMachine(instances))
+        return {};
+    RemoteConsent store;
+    store.prune(instances);
+    QSet<QString> allowed = store.allowedNames(instances);
+    for (const QString &name : allowedNow)
+        allowed.insert(name);
+    const Process process(context);
+    RunOptions options;
+    options.workflow = QFileInfo(workflow).absoluteFilePath();
+    const GraphCheck check = checkGraph(graph, process.environment, options);
+    QSet<QString> runs;
+    for (auto it = check.states.cbegin(); it != check.states.cend(); ++it)
+        if (it.value() == NodeState::Stale)
+            runs.insert(it.key());
+    const QList<RemoteUse> uses = notAllowed(remoteUses(check.routes, runs, instances), allowed);
+    return uses.isEmpty() ? Errors() : Errors{consentNeededError(uses)};
 }
 
 } // namespace fugue::cli

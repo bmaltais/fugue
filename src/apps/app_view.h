@@ -238,7 +238,10 @@ public:
     using PlacementSource = std::function<void(std::function<void(const QString &host)> done)>;
     void setPlacementSource(PlacementSource source) { m_placement = std::move(source); }
     void askPlacement(bool modelsAreElsewhere);
-    QString runsOn() const { return m_runsOn; }
+    // The service off this machine the shown app's nodes are routed to ("<service> (<host>)", 8.2, #404): said by whoever checks the
+    // graph (CanvasRuns::runsOn). It takes the place of the paired host in `runsOn`, the same "Runs on" line.
+    void setOffMachine(const QString &services);
+    QString runsOn() const { return m_offMachine.isEmpty() ? m_runsOn : m_offMachine; }
 
     // Queues a run of the shown tab's workflow with the form's values in. Returns its id, empty when it cannot run
     // (`error` says why).
@@ -375,6 +378,7 @@ private:
     QString m_problem;
     PlacementSource m_placement;
     QString m_runsOn;
+    QString m_offMachine;
     QString m_placementTab; // the tab the source was asked for (or is being asked for); empty before any
     QVariantList m_fields;
     AppModels *m_models = nullptr;

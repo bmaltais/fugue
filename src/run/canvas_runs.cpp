@@ -93,6 +93,20 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     });
     connect(m_service, &RunService::event, this, &CanvasRuns::onEvent);
     connect(m_service, &RunService::checked, this, &CanvasRuns::onChecked);
+    connect(m_service, &RunService::remoteConsentNeeded, this, [this](const QString &run, const QJsonArray &services) {
+        m_remoteAsks.append({run, services});
+        if (m_remoteAsks.size() == 1)
+            emit remoteQuestionChanged();
+    });
+    // A run that ended without an answer (cancelled while it waited) takes its question away.
+    connect(m_service, &RunService::event, this, [this](const QString &run, const QJsonObject &event) {
+        if (event.value("event").toString() != QLatin1String("run.done"))
+            return;
+        const bool first = !m_remoteAsks.isEmpty() && m_remoteAsks.first().first == run;
+        m_remoteAsks.removeIf([&](const auto &ask) { return ask.first == run; });
+        if (first)
+            emit remoteQuestionChanged();
+    });
     m_checkTimer.setSingleShot(true);
     m_checkTimer.setInterval(300);
     connect(&m_checkTimer, &QTimer::timeout, this, &CanvasRuns::checkNow);
@@ -348,7 +362,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     const NodeView view = m_tabs.value(tab).nodes.value(node);
     QVariantMap state{{"state", aggregate(view)}, {"progress", progressOf(view)}, {"seconds", view.seconds},
                       {"error", view.error},      {"warnings", view.warnings}, {"values", view.values},
-                      {"notice", view.notice},    {"errorDetail", view.errorDetail}, {"errorPack", view.pack}};
+                      {"notice", view.notice},    {"errorDetail", view.errorDetail}, {"errorPack", view.pack}, {"runsOn", view.runsOn}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
         const QString size = QStringLiteral("%1 \u00d7 %2").arg(width).arg(height);
         state.insert("thumbnail", url);
@@ -419,6 +433,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
 
 void CanvasRuns::showTab() {
     m_shownTab = currentTab();
+    noteRunsOn();
     readNodes();
     // The cards made already asked with the last tab's files.
     for (const QString &node : std::as_const(m_rowsMade))
@@ -744,6 +759,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
             view.inner.clear();
             view.warnings.clear();
             view.notice.clear();
+            view.runsOn.clear();
             if (asked.edit || !failed) {
                 view.clearError();
                 view.state.clear();
@@ -754,6 +770,8 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         }
         NodeView &view = next[top];
         const QString state = it.value().toObject().value("state").toString();
+        if (top == it.key())
+            view.runsOn = it.value().toObject().value("runsOn").toString();
         if (top != it.key()) {
             const bool failed = runs.nodes.value(top).inner.value(it.key()) == QLatin1String("error");
             view.inner.insert(it.key(), failed && !asked.edit ? QStringLiteral("error") : state);
@@ -783,6 +801,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         view.inner.clear();
         view.warnings.clear();
         view.notice.clear();
+        view.runsOn.clear();
         if (asked.edit || !failed) {
             view.state.clear();
             view.clearError();
@@ -794,6 +813,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
     if (asked.edit)
         runs.errors.clear();
     runs.nodes = next;
+    noteRunsOn();
     if (asked.tab == m_shownTab) {
         for (auto it = runs.nodes.cbegin(); it != runs.nodes.cend(); ++it)
             show(asked.tab, it.key());
@@ -1057,5 +1077,37 @@ QString CanvasRuns::lastPicture() const {
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }
 
 QString CanvasRuns::lastStatus() const { return m_tabs.value(m_shownTab).lastStatus; }
+
+QString CanvasRuns::runsOn() const {
+    QStringList services;
+    const TabRuns runs = m_tabs.value(m_shownTab);
+    for (auto it = runs.nodes.cbegin(); it != runs.nodes.cend(); ++it)
+        if (!it->runsOn.isEmpty() && !services.contains(it->runsOn))
+            services << it->runsOn;
+    services.sort();
+    return services.join(QStringLiteral(", "));
+}
+
+void CanvasRuns::noteRunsOn() {
+    const QString now = runsOn();
+    if (now == m_runsOn)
+        return;
+    m_runsOn = now;
+    emit runsOnChanged();
+}
+
+QVariantMap CanvasRuns::remoteQuestion() const {
+    if (m_remoteAsks.isEmpty())
+        return {};
+    return {{"run", m_remoteAsks.first().first}, {"services", m_remoteAsks.first().second.toVariantList()}};
+}
+
+void CanvasRuns::answerRemote(bool allow) {
+    if (m_remoteAsks.isEmpty())
+        return;
+    const QString run = m_remoteAsks.takeFirst().first;
+    emit remoteQuestionChanged();
+    m_service->answerRemote(run, allow);
+}
 
 } // namespace fugue

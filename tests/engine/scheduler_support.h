@@ -279,7 +279,7 @@ public:
         auto fake = std::make_shared<FakeProvider>(imageDescription(models));
         ProviderInstance instance;
         instance.name = name;
-        instance.type = QStringLiteral("fake");
+        instance.type = QStringLiteral("omarchy"); // a paired host when it has an address (remote_consent.h)
         instance.address = address;
         providers.append(ProviderEntry{instance, fake});
         return fake;

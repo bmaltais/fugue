@@ -82,6 +82,7 @@
 #include "engine/node_kernel.h"
 #include "engine/providers.h"
 #include "engine/registry.h"
+#include "engine/remote_consent.h"
 #include "engine/resident_models.h"
 #include "engine/result_cache.h"
 #include "engine/run_folder.h"
@@ -138,6 +139,9 @@ struct RunOptions {
     Errors warnings;
     // The folders nodes may read and write under (13.6), or none: not limited.
     std::optional<FileRoots> roots;
+    // The off-machine provider instances (remote_consent.h) the person has allowed, by name. A node that would run on another
+    // one fails with consent_needed before anything is sent (8.2, #404).
+    QSet<QString> remoteAllowed;
 };
 
 // The state of a node (10.3).
@@ -159,6 +163,7 @@ struct RunOutcome {
     QMap<QString, QString> keys;      // the cache key of each node that got one
     QMap<QString, Values> outputs;    // what each finished node produced
     QStringList ran;                  // the nodes whose kernel ran, in finishing order
+    QMap<QString, NodeRoute> routes;  // the instance each provider node was routed to, and what it sends (cached nodes too)
 };
 
 // One run. start() returns at once; finished() comes later from the event
@@ -211,6 +216,9 @@ struct GraphCheck {
     // cached, frozen or stale for every node of the graph.
     QMap<QString, NodeState> states;
     QMap<QString, QString> keys; // of the nodes whose key could be made
+    // The instance each provider node would be routed to (8.3) with what it would send there; a node with no instance
+    // (nothing serves it) has none. With the stale states, remoteUses() says what a run would send off this machine.
+    QMap<QString, NodeRoute> routes;
     // Warnings only: frozen_result_missing, and what would stop a provider
     // node (model_missing and the other 8.5 codes), which a run that reaches
     // the node reports as errors.

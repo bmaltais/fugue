@@ -39,6 +39,7 @@ Item {
     required property var errorPack      // a node of a pack that is not installed: {id, name, text, installable}, else empty
     required property var warnings
     required property string notice // why it cannot run now, and the fix (8.5), from a check
+    required property string runsOn // "<service> (<host>)" for a node routed to a service off this machine (8.2, #404), else empty
     required property string thumbnail
     required property string thumbnailInfo
     required property string thumbnailFile
@@ -1054,6 +1055,22 @@ Item {
                         elide: Text.ElideRight
                         color: node.look.label
                         font.pixelSize: node.look.captionSize
+                    }
+
+                    // Routed to a service off this machine (8.2, #404): a quiet mark above the node, so what a run sends
+                    // there is never a surprise. It clears no other chip: those are under the node.
+                    Text {
+                        objectName: "runsOnMark"
+                        visible: node.runsOn !== "" && face.full
+                        x: 0
+                        y: -height - Math.round(0.5 * face.u)
+                        width: node.width
+                        text: qsTr("Runs on %1").arg(node.runsOn)
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        color: node.look.label
+                        font.pixelSize: node.look.captionSize
+                        Accessible.name: text
                     }
 
                     // Cannot run now (8.5): what is missing and how to fix it, in a chip under the

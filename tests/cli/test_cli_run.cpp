@@ -78,6 +78,7 @@ class TestCliRun : public QObject {
     Q_OBJECT
 
     QTemporaryDir *m_dir = nullptr;
+    QString m_dataHome; // set by a test that installs a provider module
 
     QString path(const QString &name) const { return m_dir->filePath(name); }
     QString runsRoot() const { return path("cache/fugue/runs"); }
@@ -101,6 +102,8 @@ class TestCliRun : public QObject {
         env.insert("XDG_CONFIG_HOME", path("config"));
         // Not the developer's Omarchy state: its paired hosts would be instances (8.2).
         env.insert("HOME", path("home"));
+        if (!m_dataHome.isEmpty())
+            env.insert("XDG_DATA_HOME", m_dataHome);
         env.insert("FUGUE_NODE_MANIFESTS", path("manifests"));
         env.insert("FUGUE_TEST_GATE", gate());
         QProcess process;
@@ -504,6 +507,40 @@ private slots:
         const QJsonObject done = RunFolder::open(runsRoot(), b)->events().last();
         QCOMPARE(done.value("event").toString(), QString("run.done"));
         QCOMPARE(done.value("errors").toArray().at(0).toObject().value("code").toString(), QString("invalid_json"));
+    }
+
+    // 8.2, #404: a run that would send data to a service off this machine is refused with consent_needed, before a worker is
+    // started, unless the person allowed it earlier or `--allow-remote <instance>` says so for this run.
+    void aRunToAnOffMachineServiceNeedsTheYes() {
+        m_dataHome = path("data");
+        const QString module = m_dataHome + "/fugue/providers/io.example.toy";
+        QDir().mkpath(module);
+        QVERIFY(QFile::copy(QStringLiteral(FUGUE_FAKE_MODULE_PROVIDER), module + "/toy"));
+        QFile(module + "/toy").setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        write(module + "/provider.json", "{\"manifest\": 1, \"id\": \"io.example.toy\", \"version\": \"0.1.0\", \"name\": \"Toy\", \"transport\": \"stdio\", \"start\": {\"command\": [\"./toy\", \"--stdio\"]}, \"capabilities\": [\"image.generate\"]}");
+        write(path("config/fugue/providers.json"),
+              "{\"providers\": [{\"name\": \"Cloud\", \"type\": \"io.example.toy\", \"address\": \"https://cloud.example.com/v1\"}]}");
+
+        const Outcome refused = fugue({"run", path("gen.fugue"), "--json"});
+        QCOMPARE(refused.exitCode, 1);
+        QCOMPARE(refused.firstCode(), QString("consent_needed"));
+        QVERIFY(refused.json().value("errors").toArray().at(0).toObject().value("message").toString().contains("Cloud (cloud.example.com)"));
+        QVERIFY(queued().isEmpty()); // no run was made
+
+        const Outcome unknown = fugue({"run", path("gen.fugue"), "--allow-remote", "Nowhere", "--json"});
+        QCOMPARE(unknown.firstCode(), QString("unknown_provider"));
+
+        const Outcome allowed = fugue({"run", path("gen.fugue"), "--allow-remote", "Cloud", "--json"});
+        QCOMPARE(allowed.exitCode, 0);
+        QVERIFY(!allowed.data().value("run").toString().isEmpty());
+
+        // An answer the window kept (remote-consent.json beside trust.json) allows it as well, until the instance changes.
+        QVERIFY(QFile::exists(path("state/fugue")) || QDir().mkpath(path("state/fugue")));
+        write(path("state/fugue/remote-consent.json"), "{\"instances\": {\"Cloud\": \"io.example.toy|https://cloud.example.com/v1\"}}");
+        QCOMPARE(fugue({"run", path("gen.fugue"), "--json"}).exitCode, 0);
+        write(path("config/fugue/providers.json"),
+              "{\"providers\": [{\"name\": \"Cloud\", \"type\": \"io.example.toy\", \"address\": \"https://other.example.com/v1\"}]}");
+        QCOMPARE(fugue({"run", path("gen.fugue"), "--json"}).firstCode(), QString("consent_needed"));
     }
 
     void validateWarnsWhenNoProviderCanServeANode() {

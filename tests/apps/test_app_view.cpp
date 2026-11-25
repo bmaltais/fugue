@@ -154,6 +154,19 @@ private slots:
         QVERIFY(m_view->runsOn().isEmpty());
     }
 
+    // #404: a node routed to a service off this machine is said on the same line, and takes the paired host's place.
+    void theSameLineNamesAServiceOffThisMachine() {
+        QSignalSpy changed(m_view.get(), &AppView::runsOnChanged);
+        m_view->show("a", load(workflow()), {});
+        m_view->setOffMachine("Cloud (api.example.com)");
+        QCOMPARE(m_view->runsOn(), QString("Cloud (api.example.com)"));
+        QCOMPARE(changed.size(), 1);
+        m_view->setOffMachine("Cloud (api.example.com)"); // nothing changed
+        QCOMPARE(changed.size(), 1);
+        m_view->setOffMachine({});
+        QVERIFY(m_view->runsOn().isEmpty());
+    }
+
     void aWorkflowWithoutABlockIsNoApp() {
         QJsonObject plain = workflow();
         plain.remove("app");

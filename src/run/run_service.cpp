@@ -25,6 +25,8 @@
 #include "engine/paths.h"
 #include "engine/cache_manager.h"
 #include "engine/queue.h"
+#include "engine/remote_consent.h"
+#include "cli/compile_step.h"
 #include "engine/result_cache.h"
 #include "engine/run_folder.h"
 #include "engine/scheduler.h"
@@ -211,6 +213,8 @@ public:
                             {"errors", toJson(compilation.errors())}});
             return;
         }
+        if (askRemote(id, request, compilation.value()))
+            return;
         const Result<RunFolder> folder = RunFolder::create(m_context.runsRoot, id);
         if (!folder) {
             emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Failed)},
@@ -242,7 +246,72 @@ public:
         poll();
     }
 
+    // Before a run is queued: when some instance is off-machine, looks at the graph as the run would (a check) and, when it
+    // would send data to one the person has not allowed, keeps the request and asks (remoteConsentNeeded). True when it asks.
+    // The run is the same run (its id) once answered. A check that was aborted says nothing: the scheduler refuses at the node.
+    bool askRemote(const QString &id, const RunRequest &request, const CompiledGraph &graph) {
+        const QList<ProviderInstance> instances = cli::registeredInstances(m_compileRegistry);
+        if (!anyOffMachine(instances))
+            return false;
+        RemoteConsent consent(consentPath());
+        consent.prune(instances);
+        RunEnvironment environment = m_process->environment;
+        environment.registry = &m_compileRegistry;
+        RunOptions options;
+        options.workflow = request.workflow;
+        options.roots = m_setup.roots;
+        CheckAbort abort;
+        m_checking = true;
+        m_checkAbort = &abort;
+        const GraphCheck check = checkGraph(graph, environment, options, &abort);
+        m_checkAbort = nullptr;
+        m_checking = false;
+        QSet<QString> runs;
+        for (auto it = check.states.cbegin(); it != check.states.cend(); ++it)
+            if (it.value() == NodeState::Stale)
+                runs.insert(it.key());
+        const QList<RemoteUse> uses = notAllowed(remoteUses(check.routes, runs, instances), consent.allowedNames(instances));
+        if (!check.aborted && !uses.isEmpty()) {
+            QJsonArray services;
+            QStringList names;
+            for (const RemoteUse &use : uses) {
+                names << use.instance;
+                services.append(QJsonObject{{"instance", use.instance}, {"host", use.host}, {"sends", QJsonArray::fromStringList(use.sends)},
+                                            {"text", sendsText(use.sends)}});
+            }
+            m_asking.insert(id, Asking{request, names});
+            emit remoteConsentNeeded(id, services);
+        }
+        settleAfterCheck();
+        return !check.aborted && !uses.isEmpty();
+    }
+
+    QString consentPath() const { return m_setup.consentPath.isEmpty() ? RemoteConsent::defaultPath() : m_setup.consentPath; }
+
+    // The person's answer: yes keeps the answer for the instances asked about and starts the run; no ends it as cancelled.
+    void answerRemote(const QString &id, bool allow) {
+        const auto asked = m_asking.find(id);
+        if (asked == m_asking.end())
+            return;
+        const Asking asking = asked.value();
+        m_asking.erase(asked);
+        if (!allow) {
+            emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+            return;
+        }
+        RemoteConsent consent(consentPath());
+        for (const ProviderInstance &instance : cli::registeredInstances(m_compileRegistry))
+            if (asking.instances.contains(instance.name))
+                consent.allow(instance);
+        start(id, asking.request);
+    }
+
     void cancel(const QString &id) {
+        if (m_asking.contains(id)) {
+            m_asking.remove(id);
+            emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+            return;
+        }
         for (int i = 0; i < m_parked.size(); ++i) {
             if (m_parked.at(i).id == id) {
                 m_parked.removeAt(i);
@@ -325,6 +394,9 @@ signals:
     void event(const QString &run, const QJsonObject &event);
     void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
+    // A run would send data to off-machine services the person has not allowed (8.2, #404): `services` is
+    // [{"instance", "host", "sends": [..], "text"}]. The run waits for answerRemote.
+    void remoteConsentNeeded(const QString &run, const QJsonArray &services);
 
 private:
     struct Waiting {
@@ -463,6 +535,7 @@ private:
             pruneThumbnails();
         }
         waiting.options.warnings += providerProblems;
+        waiting.options.remoteAllowed = RemoteConsent(consentPath()).allowedNames(cli::registeredInstances(m_context.registry));
         // The limit may have changed in Settings since the last run (10.6).
         m_process->cache.setLimit(CachePolicy::current().resultsBytes);
         m_activeId = id;
@@ -565,8 +638,17 @@ private:
             m_checkAbort = nullptr;
             aborted = graphCheck.aborted;
             problems += graphCheck.warnings;
-            for (auto it = graphCheck.states.begin(); it != graphCheck.states.end(); ++it)
-                nodes.insert(it.key(), QJsonObject{{"state", nodeStateName(it.value())}});
+            const QList<ProviderInstance> instances = cli::registeredInstances(m_compileRegistry);
+            for (auto it = graphCheck.states.begin(); it != graphCheck.states.end(); ++it) {
+                QJsonObject node{{"state", nodeStateName(it.value())}};
+                // A node routed to an off-machine service says so on its face (#404).
+                const auto route = graphCheck.routes.constFind(it.key());
+                if (route != graphCheck.routes.cend())
+                    for (const ProviderInstance &instance : instances)
+                        if (instance.name == route->instance && placementOf(instance) == Placement::OffMachine)
+                            node.insert("runsOn", QStringLiteral("%1 (%2)").arg(instance.name, hostOf(instance)));
+                nodes.insert(it.key(), node);
+            }
             for (auto it = compilation->skipped.begin(); it != compilation->skipped.end(); ++it)
                 nodes.insert(it.key(), QJsonObject{{"state", nodeStateName(NodeState::Skipped)}, {"reason", it.value()}});
         }
@@ -579,7 +661,11 @@ private:
             emit checked(ticket, nodes, toJson(problems));
         else if (m_checkTicket < 0)
             m_checkTicket = ticket;
-        // What waited for the check: runs started meanwhile, the queue, a newer check.
+        settleAfterCheck();
+    }
+
+    // What waited for a check: runs started meanwhile, the queue, a newer check.
+    void settleAfterCheck() {
         const QList<Parked> parked = std::exchange(m_parked, {});
         for (const Parked &p : parked)
             start(p.id, p.request);
@@ -612,6 +698,11 @@ private:
         QString id;
         RunRequest request;
     };
+    struct Asking {
+        RunRequest request;
+        QStringList instances;
+    };
+    QMap<QString, Asking> m_asking; // runs waiting for the answer to the off-machine question (#404)
     QList<Parked> m_parked; // started while a check was under way
     bool m_checking = false;
     CheckAbort *m_checkAbort = nullptr; // the check under way's, while m_checking
@@ -630,6 +721,7 @@ RunService::RunService(RunSetup setup, QObject *parent)
     connect(m_worker, &RunThread::event, this, &RunService::event);
     connect(m_worker, &RunThread::checked, this, &RunService::checked);
     connect(m_worker, &RunThread::filePreviewed, this, &RunService::filePreviewed);
+    connect(m_worker, &RunThread::remoteConsentNeeded, this, &RunService::remoteConsentNeeded);
     m_thread->start();
     QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->init(); }, Qt::BlockingQueuedConnection);
 }
@@ -651,6 +743,10 @@ QString RunService::start(const RunRequest &request) {
 
 void RunService::cancel(const QString &run) {
     QMetaObject::invokeMethod(m_worker, [w = m_worker, run] { w->cancel(run); }, Qt::QueuedConnection);
+}
+
+void RunService::answerRemote(const QString &run, bool allow) {
+    QMetaObject::invokeMethod(m_worker, [w = m_worker, run, allow] { w->answerRemote(run, allow); }, Qt::QueuedConnection);
 }
 
 void RunService::check(const RunRequest &request, int ticket) {

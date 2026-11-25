@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QMutex>
 #include <QMutexLocker>
@@ -175,6 +176,20 @@ std::optional<FileRoots> RunFolder::roots() const {
         return FileRoots{}; // unreadable: allow nothing rather than everything
     const Result<FileRoots> roots = FileRoots::fromJson(*json);
     return roots ? roots.value() : FileRoots{};
+}
+
+Errors RunFolder::writeRemoteAllowed(const QStringList &instances) const {
+    return writeJsonFile(m_path + QStringLiteral("/allow-remote.json"), QJsonArray::fromStringList(instances));
+}
+
+QStringList RunFolder::remoteAllowed() const {
+    QFile file(m_path + QStringLiteral("/allow-remote.json"));
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QStringList names;
+    for (const QJsonValue &value : QJsonDocument::fromJson(file.readAll()).array())
+        names << value.toString();
+    return names;
 }
 
 bool RunFolder::requestCancel() const {

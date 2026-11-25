@@ -417,8 +417,9 @@ foreach(test_source ${fugue_cli_tests})
   target_link_libraries(${test_name} PRIVATE fugue_cli Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>"
                              FUGUE_FAKE_BINARY="$<TARGET_FILE:fugue_with_fakes>"
+                             FUGUE_FAKE_MODULE_PROVIDER="$<TARGET_FILE:fake_module_provider>"
                              FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-  add_dependencies(${test_name} fugue fugue_with_fakes)
+  add_dependencies(${test_name} fugue fugue_with_fakes fake_module_provider)
   fugue_add_test(${test_name})
 endforeach()
 
