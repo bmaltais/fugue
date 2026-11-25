@@ -35,6 +35,24 @@
       "size": "image_size", "steps": "num_inference_steps", "guidance": "guidance_scale", "negative_prompt": "negative_prompt", "seed": "seed",
       "defaults": {"steps": 30, "guidance": 2.5},
       "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
+    },
+    {
+      "id": "fal-ai/z-image/turbo", "title": "Z-Image Turbo", "price": "$0.005/MP", "capability": "generate",
+      "size": "image_size", "steps": "num_inference_steps", "steps_max": 8, "seed": "seed",
+      "defaults": {"steps": 8},
+      "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
+    },
+    {
+      "id": "fal-ai/flux-2/klein/4b", "title": "FLUX.2 [klein] 4B", "price": "$0.005/MP", "capability": "generate",
+      "size": "image_size", "steps": "num_inference_steps", "steps_max": 8, "seed": "seed",
+      "defaults": {"steps": 4},
+      "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
+    },
+    {
+      "id": "fal-ai/flux-2/klein/4b/edit", "title": "FLUX.2 [klein] 4B edit", "price": "$0.01/MP", "capability": "edit",
+      "steps": "num_inference_steps", "steps_max": 8, "seed": "seed", "image": "image_urls", "image_list": true,
+      "defaults": {"steps": 4},
+      "fixed": {"num_images": 1, "output_format": "png", "enable_safety_checker": true}
     }
   ]
 }

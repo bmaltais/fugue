@@ -52,7 +52,7 @@ public:
             cdn.on("PUT", QByteArray("/upload/") + name, [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
         cdn.on("GET", "/files/out.png", [](const HttpRequest &) { return HttpResponse{200, kPng, "image/png"}; });
         // Queue: submit gives the three URLs; the status goes in queue, then runs, then completes.
-        for (const char *endpoint : {"fal-ai/flux/dev", "fal-ai/flux-pro/kontext", "fal-ai/flux-pro/v1/fill", "my-org/my-model"})
+        for (const char *endpoint : {"fal-ai/flux/dev", "fal-ai/flux-2/klein/4b/edit", "fal-ai/flux-pro/kontext", "fal-ai/flux-pro/v1/fill", "my-org/my-model"})
             api.on("POST", QByteArray("/") + endpoint, [this](const HttpRequest &request) {
                 if (!keyed(request))
                     return refused();
@@ -181,10 +181,11 @@ private slots:
         };
         const QStringList generate = names(described->offer("image.generate"));
         QVERIFY(generate.contains("fal-ai/flux/schnell") && generate.contains("fal-ai/flux-pro/v1.1") && generate.contains("fal-ai/qwen-image"));
+        QVERIFY(generate.contains("fal-ai/z-image/turbo") && generate.contains("fal-ai/flux-2/klein/4b"));
         QVERIFY(generate.contains("my-org/my-model")); // the setting's, with the generic mapping
         QCOMPARE(generate.count("fal-ai/flux/dev"), 1);
         QVERIFY(!generate.contains("fal-ai/flux-pro/kontext")); // an edit model needs its picture
-        QCOMPARE(names(described->offer("image.edit")), (QStringList{"fal-ai/flux-pro/kontext", "my-org/my-model"}));
+        QCOMPARE(names(described->offer("image.edit")), (QStringList{"fal-ai/flux-pro/kontext", "fal-ai/flux-2/klein/4b/edit", "my-org/my-model"}));
         const OfferedModel *fill = nullptr;
         for (const OfferedModel &model : described->offer("image.generate")->models)
             if (model.handle.value("name").toString() == QLatin1String("fal-ai/flux-pro/v1/fill"))
@@ -275,6 +276,14 @@ private slots:
         QCOMPARE(run(*provider, edit).state, QStringLiteral("done"));
         QCOMPARE(fixture.api.requestsTo("POST", "/storage/upload/initiate?storage_type=fal-cdn-v3").size(), 1);
         QCOMPARE(fixture.api.requestsTo("POST", "/fal-ai/flux-pro/kontext").size(), 2);
+
+        // The cheap Klein edit takes its pictures as a list (`image_urls`), steps cut to its 8.
+        QCOMPARE(run(*provider, fixture.request("image.edit", "fal-ai/flux-2/klein/4b/edit", {{"prompt", "make it night"}, {"steps", 20}}, {{"images", QJsonArray{image}}})).state,
+                 QStringLiteral("done"));
+        const QJsonObject klein = fixture.lastBody("/fal-ai/flux-2/klein/4b/edit");
+        QCOMPARE(klein.value("image_urls").toArray(), QJsonArray{fixture.cdnUrl("/files/in-image.png")});
+        QCOMPARE(klein.value("num_inference_steps").toInt(), 8);
+        QVERIFY(!klein.contains("image_url") && !klein.contains("guidance_scale") && !klein.contains("image_size"));
 
         // A model with no picture field refuses a start picture; an edit with none is missing it.
         QCOMPARE(run(*provider, fixture.request("image.generate", kDev, {{"prompt", "x"}}, {{"image", image}})).error.code, QStringLiteral("input_invalid"));
