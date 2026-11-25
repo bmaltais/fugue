@@ -284,11 +284,11 @@ Rectangle {
         height: parent.height - 1
     }
 
-    // The App | Graph switch (#397): only while the shown workflow has an app block, in the App view and the graph alike, so the
-    // person can flip back and forth; 2u from the project chip. Made only then (the window keeps few items: test_area_window), and
-    // the tabs end 2u before it.
+    // The App | Graph switch (#397): always shown, in every state (only focus mode or a hidden bar removes it), 2u from the project chip,
+    // and the tabs end 2u before it. Made once the bar is (the window keeps few items: test_area_window).
     property Item appSwitch: null
-    readonly property bool appSwitchWanted: appSwitchAllowed && App.appView !== null && App.appView.isApp
+    // A bar narrower than 56u has no room for it beside the menu button and the close button (it would cover them): then it waits.
+    readonly property bool appSwitchWanted: appSwitchAllowed && width >= 56 * u
     function syncAppSwitch() {
         if (appSwitchWanted && !appSwitch) {
             appSwitch = appSwitchComponent.createObject(bar) as Item
@@ -303,7 +303,9 @@ Rectangle {
         id: appSwitchComponent
         AppViewSwitch {
             look: bar.look
-            appShown: App.appView.shown
+            appShown: App.appView !== null && App.appView.shown
+            atHome: App.appShelf !== null && App.appShelf.atHome
+            plainGraph: App.appView !== null && !App.appView.isApp && !(App.appShelf !== null && App.appShelf.landing)
             anchors.right: chipLoader.left
             anchors.rightMargin: 2 * bar.u
             anchors.verticalCenter: parent.verticalCenter

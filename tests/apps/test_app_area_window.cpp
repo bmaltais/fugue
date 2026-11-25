@@ -187,7 +187,7 @@ private slots:
         QTRY_VERIFY(find(app.window, "appAreaNote"));
         QTRY_VERIFY(!find(app.window, "appPage"));
         QVERIFY(!rig.view.shown());
-        QTRY_VERIFY(!find(app.window, "appViewSwitch"));
+        QVERIFY(find(app.window, "appViewSwitch")); // always shown (App | Graph, owner 2026-11-25)
         app.workflows.setCurrent(0);
         QTRY_VERIFY(find(app.window, "appPage"));
         QVERIFY(!find(app.window, "appAreaNote"));

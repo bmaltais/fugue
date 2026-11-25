@@ -120,6 +120,7 @@ struct Rig {
         runs.registerCommands(app.commands);
         app.runs = &runs;
         bindAppView(view, app.workflows, app.model, service, app.commands, runs);
+        bindViewSwitch(shelf, view, app.commands);
         app.appView = &view;
         shelf.setBookmarksFile(app.dir.path() + "/app-bookmarks.json");
         shelf.setActions([&app](const QString &id, const QString &title) { return app.workflows.duplicateTemplate(id, title); },
@@ -152,7 +153,7 @@ private slots:
         rig.shelf.setLanding(app.workflows.nothingOpen()); // main.cpp does it once the files are in
         QTRY_VERIFY(find(app.window, "appsHome"));
         QVERIFY(!find(app.window, "canvas"));
-        QVERIFY(!find(app.window, "appViewSwitch")); // the shelf is no app: nothing to switch
+        QVERIFY(find(app.window, "appViewSwitch")); // always shown: on the shelf App is chosen (apps below)
         QTRY_VERIFY(find(app.window, "appCard-ready-app"));
         QTRY_VERIFY(find(app.window, "appCard-needs-app"));
         QVERIFY(!find(app.window, "appCard-plain"));
@@ -513,6 +514,72 @@ private slots:
         QTest::keyClick(app.window, Qt::Key_Escape);
         QTRY_VERIFY(!app.window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
         QTRY_VERIFY(shelfSearch->hasActiveFocus());
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The App | Graph switch in its four states (owner 2026-11-25): which segment is chosen, what pressing the other does, and that
+    // Ctrl+Alt+A (view.toggle-app) does the same.
+    void theSwitchIsAlwaysThereAndTheOtherSegmentDoesWhatTheStateNeeds() {
+        QTemporaryDir root;
+        makeApp(root.path(), "ready-app", "Ready app", false);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QVERIFY(app.open());
+        rig.shelf.setLanding(app.workflows.currentIsPristine());
+        const auto chosen = [&] { return find(app.window, "appViewSwitchApp")->property("chosen").toBool(); };
+
+        // 1. The shelf: App chosen; pressing App does nothing; Graph is Start blank; the Window menu row is checked.
+        QTRY_VERIFY(find(app.window, "appsHome"));
+        QTRY_VERIFY(find(app.window, "appViewSwitch"));
+        QVERIFY(chosen());
+        QVERIFY(app.commands.entry("view.toggle-app").value("checked").toBool());
+        tap(app.window, "appViewSwitchApp");
+        QVERIFY(rig.shelf.atHome());
+        tap(app.window, "appViewSwitchGraph");
+        QTRY_VERIFY(!find(app.window, "appsHome"));
+        QTRY_VERIFY(find(app.window, "canvas"));
+
+        // 4. The empty graph Start blank gave: Graph chosen; Graph does nothing; App brings the shelf back, for this tab.
+        QVERIFY(!chosen());
+        QVERIFY(!app.commands.entry("view.toggle-app").value("checked").toBool());
+        tap(app.window, "appViewSwitchGraph");
+        QVERIFY(find(app.window, "canvas"));
+        tap(app.window, "appViewSwitchApp");
+        QTRY_VERIFY(find(app.window, "appsHome"));
+        QTRY_VERIFY(chosen());
+        QVERIFY(app.commands.trigger("view.toggle-app")); // the key does what the other segment does: Start blank
+        QTRY_VERIFY(!find(app.window, "appsHome"));
+        QVERIFY(app.commands.trigger("view.toggle-app"));
+        QTRY_VERIFY(find(app.window, "appsHome"));
+
+        // 3. A plain graph with a node: Graph chosen; App opens the builder; cancelling leaves Graph chosen.
+        tap(app.window, "appViewSwitchGraph");
+        QTRY_VERIFY(find(app.window, "canvas"));
+        app.workflows.newWorkflow();
+        QVERIFY(!app.model.addNode("fugue/text-encode", 0, 0).isEmpty());
+        QTRY_VERIFY(!rig.shelf.landing());
+        QVERIFY(!chosen());
+        tap(app.window, "appViewSwitchGraph");
+        QVERIFY(!app.model.appBuilder()->isOpen());
+        tap(app.window, "appViewSwitchApp");
+        QTRY_VERIFY(app.model.appBuilder()->isOpen());
+        app.model.appBuilder()->cancel();
+        QTRY_VERIFY(!app.model.appBuilder()->isOpen());
+        QVERIFY(!chosen());
+        QVERIFY(app.commands.trigger("view.toggle-app")); // Ctrl+Alt+A: the builder too
+        QTRY_VERIFY(app.model.appBuilder()->isOpen());
+        app.model.appBuilder()->cancel();
+
+        // 2. An app workflow: as before; App is chosen in the App view.
+        QVERIFY(rig.shelf.choose("ready-app"));
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QTRY_VERIFY(chosen());
+        tap(app.window, "appViewSwitchGraph");
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QVERIFY(!chosen());
+        QVERIFY(app.commands.trigger("view.toggle-app"));
+        QTRY_VERIFY(find(app.window, "appPage"));
         qDeleteAll(app.engine.rootObjects());
     }
 

@@ -200,6 +200,7 @@ int main(int argc, char *argv[]) {
     appShelf.setBookmarksFile(fugue::stateDir() + "/app-bookmarks.json"); // pinned apps, per user (#470)
     appShelf.setActions([&workflows](const QString &id, const QString &title) { return workflows.duplicateTemplate(id, title); },
                         [&workflows](const QString &id, const QString &title) { return workflows.renameTemplate(id, title); });
+    fugue::bindViewSwitch(appShelf, appView, commands);
     QObject::connect(&workflows, &fugue::Workflows::tabsChanged, &appShelf,
                      [&appShelf, &workflows] { appShelf.setLanding(workflows.currentIsPristine()); });
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.

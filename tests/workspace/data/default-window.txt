@@ -10,9 +10,13 @@
 # #465: rounded spaces (docs/canvas-look.md 20.21): the Graph's card outline (AreaFrame, a Shape) above the canvas, and a raised button's KitRaise in a Loader (ViewButton): nine items more.
 # #478: the workflow notice is a Banner (an item, its Loader and its content holder), two items more than the rectangle it was; the keymap notice is one too: four items more.
 # #393: the app builder (AppBuilderDialog) is one item over the window; its picking banner and the canvas pick layer are made only while picking: one item more.
-items 257
+# App | Graph switch always shown in the window bar (owner, 2026-11-25; it was made only for an app workflow): the KitSegmented, its track, thumb, two options and their labels, the tooltip: 13 items more.
+items 270
 ApplicationWindow 1
 ApplicationWindowContentControl 1
+appViewSwitch 1
+appViewSwitchApp 1
+appViewSwitchGraph 1
 areaClose-1 1
 areaHeader-1 1
 areaMenus-1 1

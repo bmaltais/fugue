@@ -118,10 +118,17 @@ private slots:
         shelf.dismiss();
         QVERIFY(!shelf.atHome());
         QCOMPARE(home.size(), 4);
-        shelf.setLanding(false);
+        shelf.setLanding(false); // landing and atHome share the signal: each change of either
+
         shelf.setLanding(true);
         QVERIFY(!shelf.atHome());
-        QCOMPARE(home.size(), 4);
+        QCOMPARE(home.size(), 6);
+        // Show again (the bar's App segment on the empty graph Start blank gave) undoes the dismissal; without one it does nothing.
+        shelf.showAgain();
+        QVERIFY(shelf.atHome());
+        QCOMPARE(home.size(), 7);
+        shelf.showAgain();
+        QCOMPARE(home.size(), 7);
     }
 
     // The search (#470): every word must be in the title, the summary or the kind, any case; `shown` follows live and says so only
