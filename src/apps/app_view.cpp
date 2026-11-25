@@ -2,6 +2,7 @@
 
 #include <QClipboard>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImageReader>
@@ -232,8 +233,24 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
     if (kind == QLatin1String("seed"))
         field.insert("mode", state.seedModes.value(input.key(), isRandom(m_document, input) ? QStringLiteral("random")
                                                                                               : QStringLiteral("fixed")));
-    if (kind == QLatin1String("image"))
-        field.insert("samples", samplesOf());
+    if (kind == QLatin1String("image")) {
+        // The template's own sample first: the block's default, else what the workflow holds, when it is a file there.
+        QVariantList samples = samplesOf();
+        const QJsonValue own = !input.defaultValue.isUndefined() ? input.defaultValue : current;
+        const QString sample = own.isString() ? QFileInfo(resolvedPath(own.toString())).canonicalFilePath() : QString();
+        if (!sample.isEmpty()) {
+            // The template's own sample leads the list, once.
+            for (int i = 0; i < samples.size(); ++i)
+                if (QFileInfo(samples.at(i).toMap().value("path").toString()).canonicalFilePath() == sample) {
+                    samples.removeAt(i);
+                    break;
+                }
+            samples.prepend(QVariantMap{{"path", sample}, {"url", QUrl::fromLocalFile(sample)},
+                                        {"name", QFileInfo(sample).completeBaseName()}});
+        }
+        field.insert("samples", samples);
+        field.insert("sample", sample);
+    }
     if (kind == QLatin1String("model"))
         field.insert("resource", modelTargetOf(m_document, input, m_registry).type);
     QJsonValue value = state.values.contains(input.key()) ? state.values.value(input.key())
@@ -365,6 +382,16 @@ QString AppView::resolvedPath(const QString &path) const {
     if (!info.isRelative())
         return expanded;
     return m_file.isEmpty() ? QString() : QFileInfo(m_file).absoluteDir().filePath(expanded);
+}
+
+QUrl AppView::preview() const {
+    if (m_file.isEmpty())
+        return {};
+    const QDir folder = QFileInfo(m_file).absoluteDir();
+    for (const char *name : {"preview.webp", "preview.png", "preview.jpg"})
+        if (folder.exists(QLatin1String(name)))
+            return QUrl::fromLocalFile(folder.filePath(QLatin1String(name)));
+    return {};
 }
 
 QUrl AppView::fileUrl(const QString &path) const {
@@ -643,6 +670,8 @@ QString AppView::run() {
         emit runChanged();
         return {};
     }
+    const QMap<QString, QJsonValue> shownValues = state.values;
+    const QMap<QString, QString> shownModes = state.seedModes;
     RunRequest request;
     request.document = bound.value();
     request.workflow = m_file;
@@ -665,6 +694,12 @@ QString AppView::run() {
     state.error.clear();
     state.details.clear();
     state.results.clear();
+    state.liveFrame.clear();
+    state.pinned.clear(); // a new run is the one to look at
+    state.cleared = false;
+    state.takes.prepend({id, state.status, {}, shownValues, shownModes, inputsLine(shownValues)});
+    while (state.takes.size() > maxTakes)
+        state.takes.removeLast();
     emit runChanged();
     emit progressChanged();
     return id;
@@ -684,6 +719,8 @@ void AppView::clearResults() {
     state.error.clear();
     state.details.clear();
     state.results.clear();
+    state.cleared = true;
+    state.pinned.clear();
     emit runChanged();
     emit progressChanged();
 }
@@ -787,14 +824,24 @@ void AppView::addResult(TabState &state, const QJsonObject &event) {
 
 void AppView::end(const QString &tab, const QString &status) {
     TabState &state = m_state[tab];
+    const QString finished = state.run;
     state.run.clear();
     state.progress = -1;
+    state.liveFrame.clear();
     state.status = status == QLatin1String("ok") ? QStringLiteral("done")
                    : status == QLatin1String("cancelled") ? QStringLiteral("cancelled")
                                                           : QStringLiteral("failed");
     if (state.status == QLatin1String("failed"))
         state.error = state.details.isEmpty() ? QObject::tr("The run did not finish.")
                                               : state.details.first().toMap().value("message").toString();
+    syncTake(state);
+    // A run cancelled before it made anything leaves no take: nothing of it to look at or reuse.
+    if (state.status == QLatin1String("cancelled") && !state.takes.isEmpty() && state.takes.first().run == finished
+        && state.takes.first().results.isEmpty()) {
+        state.takes.removeFirst();
+        if (state.pinned == finished)
+            state.pinned.clear();
+    }
     if (tab == m_tab) {
         emit runChanged();
         emit progressChanged();
@@ -810,6 +857,7 @@ void AppView::onEvent(const QString &run, const QJsonObject &event) {
     const bool current = tab == m_tab;
     if (kind == QLatin1String("run.started")) {
         state.status = QStringLiteral("running");
+        syncTake(state);
         if (current)
             emit runChanged();
     } else if (kind == QLatin1String("node.running")) {
@@ -823,8 +871,17 @@ void AppView::onEvent(const QString &run, const QJsonObject &event) {
     } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
         // The app's own outputs are the app's results; the other nodes' pictures are the graph's.
         addResult(state, event);
+        syncTake(state);
         if (current)
             emit runChanged();
+    } else if (kind == QLatin1String("node.preview")) {
+        // A step picture of a node at work (a Sampler's): the stage shows the newest while the run goes.
+        const QString url = event.value("thumbnails").toObject().value("preview").toObject().value("url").toString();
+        if (!url.isEmpty()) {
+            state.liveFrame = url;
+            if (current)
+                emit progressChanged();
+        }
     } else if (kind == QLatin1String("node.error")) {
         const Error error = Error::fromJson(event.value("error").toObject());
         addDetail(state, error.message, error.hint);
@@ -837,6 +894,185 @@ void AppView::onEvent(const QString &run, const QJsonObject &event) {
                 addDetail(state, error.message, error.hint);
         }
         end(tab, event.value("status").toString());
+    }
+}
+
+} // namespace fugue
+
+namespace fugue {
+
+// --- takes (#389) ---------------------------------------------------------------
+
+namespace {
+QString fileNameOf(const QString &path) { return QFileInfo(path).fileName(); }
+} // namespace
+
+QString AppView::inputsLine(const QMap<QString, QJsonValue> &values) const {
+    QStringList parts;
+    for (const QVariant &entry : m_fields) {
+        const QVariantMap field = entry.toMap();
+        const QString key = field.value("key").toString(), kind = field.value("kind").toString(), label = field.value("label").toString();
+        if (kind == QLatin1String("mask") || kind == QLatin1String("model"))
+            continue;
+        if (kind == QLatin1String("seed")) {
+            // The number the run used: the form's (a take's own), else the one the workflow holds; a seed left to chance has none.
+            const QVariant number = values.contains(key) ? values.value(key).toVariant() : field.value("value");
+            parts << (seedMode(key) == QLatin1String("random") || !number.isValid() || number.isNull()
+                          ? tr("seed new each run")
+                          : tr("seed %1").arg(qint64(number.toDouble())));
+            continue;
+        }
+        if (!values.contains(key))
+            continue;
+        const QJsonValue value = values.value(key);
+        if (kind == QLatin1String("image")) {
+            parts << fileNameOf(value.toString());
+        } else if (kind == QLatin1String("toggle")) {
+            parts << (value.toBool() ? label : tr("no %1").arg(label.toLower()));
+        } else if (value.isDouble()) {
+            parts << QStringLiteral("%1 %2").arg(label).arg(value.toDouble());
+        } else {
+            QString text = value.toString().simplified();
+            if (text.size() > 40)
+                text = text.left(39) + QStringLiteral("…");
+            if (!text.isEmpty())
+                parts << (kind == QLatin1String("text") ? QStringLiteral("“%1”").arg(text) : text);
+        }
+    }
+    QString line = parts.join(QStringLiteral(" · "));
+    if (line.size() > 160)
+        line = line.left(159) + QStringLiteral("…");
+    return line;
+}
+
+void AppView::syncTake(TabState &state) {
+    if (state.takes.isEmpty())
+        return;
+    Take &take = state.takes.first();
+    take.results = state.results;
+    take.status = state.status;
+}
+
+int AppView::takeIndex() const {
+    const QList<Take> &takes = m_state.value(m_tab).takes;
+    const QString pinned = m_state.value(m_tab).pinned;
+    if (m_state.value(m_tab).cleared)
+        return -1;
+    for (int i = 0; i < takes.size(); ++i)
+        if (!pinned.isEmpty() && takes.at(i).run == pinned)
+            return i;
+    for (int i = 0; i < takes.size(); ++i)
+        if (!takes.at(i).results.isEmpty())
+            return i;
+    return takes.isEmpty() ? -1 : 0;
+}
+
+QVariantList AppView::takes() const {
+    QVariantList list;
+    const TabState state = m_state.value(m_tab);
+    const int shown = takeIndex();
+    for (int i = 0; i < state.takes.size(); ++i) {
+        const Take &take = state.takes.at(i);
+        QString url;
+        for (const QVariant &result : take.results)
+            if (result.toMap().value("kind").toString() == QLatin1String("image")) {
+                url = result.toMap().value("url").toString();
+                break;
+            }
+        list << QVariantMap{{"run", take.run}, {"status", take.status},
+                            {"pending", take.status == QLatin1String("waiting") || take.status == QLatin1String("running")},
+                            {"url", url}, {"count", take.results.size()}, {"line", take.line}, {"shown", i == shown}};
+    }
+    return list;
+}
+
+QVariantList AppView::shownResults() const {
+    const TabState state = m_state.value(m_tab);
+    const int index = takeIndex();
+    return index < 0 ? QVariantList() : state.takes.at(index).results;
+}
+
+QString AppView::shownInputs() const {
+    const TabState state = m_state.value(m_tab);
+    const int index = takeIndex();
+    return index < 0 ? QString() : state.takes.at(index).line;
+}
+
+void AppView::selectTake(int index) {
+    TabState &state = m_state[m_tab];
+    if (index < 0 || index >= state.takes.size())
+        return;
+    state.pinned = index == 0 ? QString() : state.takes.at(index).run;
+    state.cleared = false;
+    emit runChanged();
+}
+
+void AppView::reuseInputs(int index) {
+    TabState &state = m_state[m_tab];
+    if (!m_app || index < 0 || index >= state.takes.size())
+        return;
+    const Take &take = state.takes.at(index);
+    state.values = take.values;
+    state.seedModes = take.seedModes;
+    for (const QVariant &field : std::as_const(m_fields))
+        emit valueChanged(field.toMap().value("key").toString());
+}
+
+QString AppView::runAgain(int index) {
+    reuseInputs(index);
+    return run();
+}
+
+QString AppView::saveResult(const QString &fileUrl, const QUrl &destination) {
+    const QString from = QUrl(fileUrl).toLocalFile();
+    if (from.isEmpty() || !QFileInfo(from).isFile() || !destination.isLocalFile())
+        return tr("There is no file to save.");
+    const QString to = destination.toLocalFile();
+    if (QFileInfo(to) == QFileInfo(from))
+        return {};
+    if (QFile::exists(to) && !QFile::remove(to))
+        return tr("Could not replace %1.").arg(fileNameOf(to));
+    return QFile::copy(from, to) ? QString() : tr("Could not save %1.").arg(fileNameOf(to));
+}
+
+QString AppView::imageKey() const {
+    for (const QVariant &field : m_fields)
+        if (field.toMap().value("kind").toString() == QLatin1String("image"))
+            return field.toMap().value("key").toString();
+    return {};
+}
+
+QString AppView::useResultAsInput(const QString &key, const QString &fileUrl) {
+    const QString path = QUrl(fileUrl).toLocalFile();
+    return path.isEmpty() ? tr("Only a picture can be used as an input.") : storeImages({path}, key);
+}
+
+QVariantList AppView::resultPictures() const {
+    QVariantList list;
+    const QList<Take> &takes = m_state.value(m_tab).takes;
+    for (int i = 0; i < takes.size(); ++i)
+        for (const QVariant &entry : takes.at(i).results) {
+            const QVariantMap result = entry.toMap();
+            const QString path = QUrl(result.value("full").toString()).toLocalFile();
+            if (result.value("kind").toString() != QLatin1String("image") || path.isEmpty() || !QFileInfo::exists(path))
+                continue;
+            list << QVariantMap{{"path", path}, {"url", result.value("url")},
+                                {"name", tr("%1 · %2").arg(fileNameOf(path)).arg(takes.size() - i)}};
+        }
+    return list;
+}
+
+void AppView::useSample(const QString &key) {
+    for (const QVariant &entry : std::as_const(m_fields)) {
+        const QVariantMap field = entry.toMap();
+        if (field.value("key").toString() != key || field.value("kind").toString() != QLatin1String("image"))
+            continue;
+        const QString sample = field.value("sample").toString();
+        if (sample.isEmpty())
+            return;
+        m_state[m_tab].values.insert(key, sample);
+        emit valueChanged(key);
+        return;
     }
 }
 

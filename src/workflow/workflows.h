@@ -120,6 +120,8 @@ public:
     ReadinessSheet *readiness() const { return m_readiness; }
     // Nothing is open: the one tab is empty, untitled and unsaved. What a window shows apps for (#388, AppShelf).
     bool nothingOpen() const { return count() == 1 && isPristine(0); }
+    // The shown tab is empty, untitled and unsaved: a new tab with nothing in it, among others or alone (the shelf shows there too).
+    bool currentIsPristine() const { return m_current >= 0 && m_current < count() && isPristine(m_current); }
     // The banner names a pack to install or models to download for the shown workflow: Get ready… is offered.
     bool getReadyOffer() const { return !packOffers().isEmpty() || !downloadOffer().isEmpty(); }
     QString downloadOffer() const;

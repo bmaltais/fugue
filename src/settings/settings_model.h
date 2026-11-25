@@ -59,6 +59,8 @@ class SettingsModel : public QObject {
     // The canvas corners (#63): px from 0 to maxCornerRadius, or -1 to follow Omarchy.
     Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY changed)
     Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
+    // How frosted the kit's controls over a picture are, 0 (off) to 1 (docs/canvas-look.md "Drift kit"); the theme's look follows it live.
+    Q_PROPERTY(double frost READ frost NOTIFY changed)
     // The hover magnifier (#74, #123): off unless turned on; the canvas binds it.
     Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
     // Reopen the last session's saved tabs at start (#212): on unless turned off; the window follows it live.
@@ -128,6 +130,7 @@ public:
     QString pictureMode() const { return m_effective.settings.pictureMode; } // smart, sinks or all (#263)
     QString stepPreview() const { return m_effective.settings.stepPreview; } // off, fast, tae or vae (#297)
     int cornerRadius() const { return m_effective.settings.cornerRadius; }
+    double frost() const { return m_effective.settings.frost; }
     bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
     bool restoreTabs() const { return m_effective.settings.restoreTabs; }
     QVariantMap origins() const;

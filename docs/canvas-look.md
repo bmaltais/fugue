@@ -770,9 +770,17 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`).
 | `KitRow` | `label`, optional dim `hint` (`label` color, 11px), and trailing controls as children; at least 10u tall; draws the hairline above itself unless it is the first visible row. `target` (a control with `toggle()`) makes the whole row its hit area; a click on a trailing control stays that control's |
 | `KitSeparator` | the hairline, inset 3.5u, for a row that is not a KitRow |
 | `KitToggle` | the pill switch: `checked`, `toggled(value)`, Space, Tab, 10u by 7u to press, accent track when on |
-| `KitChip` | the small rounded button: `text`, Lucide `glyph`, `pill` (fully round; a glyph-only pill is 2:1), `current`, `tip`, `tapped()`; 7u |
+| `KitChip` | the small rounded button: `text`, Lucide `glyph`, `pill` (fully round; a glyph-only pill is 2:1), `round` (as wide as tall, for a corner button), `bordered` (a hairline, for Cancel), `frosted` + `backdrop` (glass over a picture, below), `current`, `tip`, `tapped()`; 7u |
 | `KitSlider` | `from`, `to`, `value`, `stepSize`, `ticks`, `startGlyph`, `endGlyph`, `showValue`, `valueText`, `moved(value)`; arrows, PageUp/Down, Home/End; the end slot has a fixed width so rails in a group align; right to left mirrors |
+| `KitWell` | the recessed field: the `kit-well` fill a shade darker than its group, a border nearly its own color, a 1px shadow along the top edge (22% black dark, 8% light) and a faint light line along the bottom (4.5% white dark, 60% light); `focused` is the 2px accent ring; `dashed` leaves the border to a picture well's own dashed edge. Put it first in a field, filling it |
+| `KitWell` over a picture | give it the `backdrop` item it sits over and it is smoked glass (`KitFrost` with `smoked`): a dark translucent tint (black 35 to 55% over a dark patch, 55 to 75% over a pale one, raised until white text reads at 4.5:1, by the same `PictureLuma` measure as the frosted chips), the blur, a 1px shadow along the top, a faint light line along the bottom, white text (`ink`); `labelInk` is dark for a label beside it over a pale picture. Frost 0, or no backdrop: the opaque recessed well. A field on a plain panel is never glass. Used in the kit gallery; no App panel field sits over a picture yet |
+| `KitRaise` | the raised look of a clickable thing: a 1px light edge along the top (7% white dark, 60% light) and a soft 1px shadow under it; used by `KitChip`, the rail items and the Run pill |
+| `KitFrost` | the glass behind a control over a picture (a frosted `KitChip`, the hero's pill and close button): the `backdrop` item blurred (a `ShaderEffectSource` of the rectangle behind the control through a `MultiEffect` blur, cut to the control's rounded shape), a black base at 22% that keeps white text at 4.5:1 over any picture, the `kit-frost` tint and a 1px `kit-frost-edge` line. The software renderer has no blur: the base (40%) and the tint remain. A hero's picture is `backdropItem`; the picture well's remove button blurs the picture it sits on |
 | `KitHero` | the header: a picture or the "dusk" gradient, `title`, `subtitle`, `status` pill (`statusTapped()`), `showClose` (`closed()`), `minHeight`, `cornerRadius` |
+
+**One rule for the whole kit (owner, 2026-11-24): clickable things are raised and fillable things are recessed.** A chip, a button, a rail item and Run are raised (`KitRaise`, or frosted glass over a picture), never recessed; a field or a well is recessed (`KitWell`), never raised. The contrast is the point: a person sees at once what to press and what to fill. The look's `frost` (settings.json `frost`, Settings > Theme, 0 to 1, default 0.6) scales the glass; 0 makes every frosted control the plain raised chip. A frosted control measures the picture under it (`PictureLuma`, a downscaled grab, once per picture and position) and picks dark ink on a whiter tint over a pale patch or white ink over a dark base, raising the tint or base until the pair reads at 4.5:1.
+
+`KitHero` takes small buttons as children (`actions`: a row at its top end corner, the title elides before them); the app panel puts the launcher pin and Open in Fugue there as frosted round chips.
 
 `KitHero` is compact: its height is the title, the subtitle and padding (about 84px for a 32px title at text size 12, the
 app panel's header) and `minHeight` asks for more picture (the Fugue header, 45u). The title is Fraunces (SIL OFL, bundled:
@@ -803,6 +811,8 @@ New tokens (`CanvasLook`, `look.cpp` and `derive.py` together; `fg` is the theme
 | `kit-knob` | white | white | the round thumb and the switch knob, on and off (Drift: always white) |
 | `kit-chip`, `kit-chip-hover` | `mix(kit-group, fg, .10 / .17)` | same | a chip or pill |
 | `kit-hero-shade` | black at 55% | same | the foot of the hero's darkening gradient |
-| `kit-hero-pill`, `kit-hero-pill-hover` | black at 44% / 60% | same | the status pill and the close button over a picture |
+| `kit-hero-pill`, `kit-hero-pill-hover` | black at 44% / 60% | same | the old black pills over a picture (the hero's own pill and close are frosted now; kept for a flat control over a picture) |
+| `kit-well` | `mix(kit-group, black, .12)` | `mix(kit-group, black, .03)` | a field set into its group (a text field, the seed number, a prompt, the picture well) |
+| `kit-frost`, `kit-frost-hover`, `kit-frost-edge` | white at 20% / 30% / 28% | same | frosted glass: the tint, its hovered tint and the hairline (a picture is the same on every theme) |
 
 Credit: the layout, proportions and the idea of every component are omarchy-drift's.

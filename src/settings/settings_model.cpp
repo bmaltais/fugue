@@ -213,6 +213,8 @@ void SettingsModel::pushLive() {
         m_canvas->setPictureMode(pictureModeFromName(m_effective.settings.pictureMode));
     if (m_theme)
         m_theme->setCornerRadius(m_effective.settings.cornerRadius);
+    if (m_theme)
+        m_theme->setFrost(m_effective.settings.frost);
 }
 
 void SettingsModel::reload() {

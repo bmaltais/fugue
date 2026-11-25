@@ -460,6 +460,101 @@ private slots:
         QCOMPARE(inputOf(m_started.first().document, "load", "file"), QJsonValue(m_view->valueOf("image").toString()));
     }
 
+    // An app opens ready: the picture the workflow holds is the form's first value and the first sample, and Use sample brings it
+    // back after another was chosen.
+    void anAppOpensOnItsSampleAndUseSampleBringsItBack() {
+        QTemporaryDir folder;
+        QVERIFY(QDir(folder.path()).mkpath("inputs"));
+        QVERIFY(QImage(8, 6, QImage::Format_RGB32).save(folder.filePath("inputs/sample.png")));
+        QVERIFY(QImage(8, 6, QImage::Format_RGB32).save(folder.filePath("inputs/other.png")));
+        m_view->show("a", load(mediaWorkflow()), folder.filePath("app.fugue"));
+        const QString sample = QFileInfo(folder.filePath("inputs/sample.png")).canonicalFilePath();
+        QCOMPARE(field("image").value("sample").toString(), sample);
+        QCOMPARE(m_view->fileUrl(m_view->valueOf("image").toString()), QUrl::fromLocalFile(sample)); // the well shows it
+        QCOMPARE(field("image").value("samples").toList().first().toMap().value("path").toString(), sample); // listed first
+        m_view->useImage("image", folder.filePath("inputs/other.png"));
+        QVERIFY(m_view->valueOf("image").toString() != sample);
+        m_view->useSample("image");
+        QCOMPARE(m_view->valueOf("image").toString(), sample);
+        m_view->run();
+        QCOMPARE(inputOf(m_started.first().document, "load", "file"), QJsonValue(sample));
+    }
+
+    // Takes (#389): each run is one, newest first, with the inputs it had; the stage shows the newest that made something or the one
+    // picked; Reuse inputs puts a take's form back; a run cancelled with nothing made leaves none.
+    void everyRunIsATakeWithItsInputsAndCanBeShownAndReused() {
+        m_view->show("a", load(workflow()), {});
+        QCOMPARE(m_view->takeIndex(), -1);
+        QVERIFY(m_view->takes().isEmpty());
+        m_view->setValue("prompt", "a red fox");
+        m_view->setValue("steps", 3);
+        m_view->run();
+        QCOMPARE(m_view->takes().size(), 1);
+        QVERIFY(m_view->takes().first().toMap().value("pending").toBool());
+        m_view->onEvent("run1", evt("run.started"));
+        m_view->onEvent("run1", saved("save", "one.png"));
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        QVERIFY(!m_view->takes().first().toMap().value("pending").toBool());
+        QCOMPARE(m_view->takes().first().toMap().value("url").toString(), QStringLiteral("file:///t/one.png"));
+        QVERIFY(m_view->shownInputs().contains("a red fox"));
+        QVERIFY(m_view->shownInputs().contains("Steps 3") || m_view->shownInputs().contains("steps 3", Qt::CaseInsensitive));
+
+        m_view->setValue("prompt", "a blue fox");
+        m_view->run();
+        // The new run has made nothing: the stage keeps the earlier take, the strip has the pending one first.
+        QCOMPARE(m_view->takes().size(), 2);
+        QVERIFY(m_view->takes().first().toMap().value("pending").toBool());
+        QCOMPARE(m_view->takeIndex(), 1);
+        QCOMPARE(m_view->shownResults().size(), 1);
+        m_view->onEvent("run2", saved("save", "two.png"));
+        QCOMPARE(m_view->takeIndex(), 0);
+        m_view->onEvent("run2", evt("run.done", {{"status", "ok"}}));
+        QCOMPARE(m_view->shownResults().first().toMap().value("full").toString(), QStringLiteral("file:///t/two.png"));
+
+        // Pick the older one: its picture and its words; the newest picked follows new runs again.
+        m_view->selectTake(1);
+        QCOMPARE(m_view->takeIndex(), 1);
+        QCOMPARE(m_view->shownResults().first().toMap().value("full").toString(), QStringLiteral("file:///t/one.png"));
+        QVERIFY(m_view->shownInputs().contains("red fox"));
+        m_view->reuseInputs(1);
+        QCOMPARE(m_view->valueOf("prompt").toString(), QStringLiteral("a red fox"));
+        const QString again = m_view->runAgain(1);
+        QVERIFY(!again.isEmpty());
+        QCOMPARE(inputOf(m_started.last().document, "encode", "prompt"), QJsonValue("a red fox"));
+        QCOMPARE(m_view->takes().size(), 3);
+        QCOMPARE(m_view->takeIndex(), 1); // a new run is the one to look at, once it makes something; until then the last made
+        m_view->cancel();
+        m_view->onEvent(again, evt("run.done", {{"status", "cancelled"}}));
+        QCOMPARE(m_view->takes().size(), 2); // nothing made, no take
+    }
+
+    void aStepPictureShowsWhileTheRunGoesAndAResultCanBeSavedAndUsedAsAnInput() {
+        QTemporaryDir folder;
+        QVERIFY(QDir(folder.path()).mkpath("inputs"));
+        const QString file = folder.filePath("made.png");
+        QVERIFY(QImage(8, 6, QImage::Format_RGB32).save(file));
+        m_view->show("a", load(mediaWorkflow()), folder.filePath("app.fugue"));
+        m_view->run();
+        m_view->onEvent("run1", evt("node.preview", {{"thumbnails", QJsonObject{{"preview", QJsonObject{{"url", "file:///t/step.png"}}}}}}));
+        QCOMPARE(m_view->liveFrame(), QStringLiteral("file:///t/step.png"));
+        QJsonObject done = saved("save", "made.png");
+        QJsonObject image = done.value("thumbnails").toObject().value("image").toObject();
+        image.insert("source", file);
+        done.insert("thumbnails", QJsonObject{{"image", image}});
+        m_view->onEvent("run1", done);
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        QVERIFY(m_view->liveFrame().isEmpty());
+
+        const QString full = m_view->shownResults().first().toMap().value("full").toString();
+        QVERIFY(m_view->saveResult(full, QUrl::fromLocalFile(folder.filePath("copy.png"))).isEmpty());
+        QVERIFY(QFileInfo(folder.filePath("copy.png")).isFile());
+        QVERIFY(!m_view->saveResult("file:///nowhere.png", QUrl::fromLocalFile(folder.filePath("x.png"))).isEmpty());
+        QCOMPARE(m_view->resultPictures().size(), 1);
+        QCOMPARE(m_view->imageKey(), QStringLiteral("image"));
+        QVERIFY(m_view->useResultAsInput("image", full).isEmpty());
+        QVERIFY(m_view->valueOf("image").toString().startsWith(inputsDir() + "/"));
+    }
+
     void aMaskIsPaintedOverTheChosenPictureAndItsFileIsWhatTheRunBinds() {
         QTemporaryDir folder;
         QVERIFY(QDir(folder.path()).mkpath("inputs"));

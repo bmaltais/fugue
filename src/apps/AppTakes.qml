@@ -1,0 +1,90 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import QtQuick.Controls
+import Fugue
+import "../canvas"
+
+// The run history strip of an app ("takes", #389): the thumbnails of this app's runs this session, newest first, the shown one
+// outlined, a badge on one that waits or goes, a mark on one that failed. A press shows that take in the stage (AppView.selectTake);
+// Left and Right move and Enter shows. It scrolls sideways when there are more than fit. It knows nothing of runs: it draws
+// `appView.takes`.
+ListView {
+    id: strip
+    objectName: "appTakes"
+    required property AppView appView
+    required property CanvasLook look
+    readonly property real size: 14 * look.unit
+
+    implicitHeight: size + look.unit
+    orientation: ListView.Horizontal
+    spacing: look.unit
+    clip: true
+    model: appView.takes
+    activeFocusOnTab: true
+    keyNavigationEnabled: true
+    highlightFollowsCurrentItem: true
+    boundsBehavior: Flickable.StopAtBounds
+    Accessible.role: Accessible.List
+    Accessible.name: qsTr("Takes")
+    Keys.onReturnPressed: appView.selectTake(currentIndex)
+    Keys.onEnterPressed: appView.selectTake(currentIndex)
+    Keys.onSpacePressed: appView.selectTake(currentIndex)
+    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+
+    delegate: Rectangle {
+        id: take
+        required property var modelData
+        required property int index
+        readonly property bool failed: modelData.status === "failed"
+        width: strip.size
+        height: strip.size
+        radius: strip.look.smallCorner + 2
+        color: strip.look.kitChip
+        border.width: modelData.shown || (strip.activeFocus && ListView.isCurrentItem) ? 2 : 0
+        border.color: strip.look.accent
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Take %1").arg(strip.appView.takes.length - index)
+        Accessible.description: modelData.line
+        ToolTip.visible: hover.hovered && modelData.line !== ""
+        ToolTip.delay: strip.look.tooltipDelay
+        ToolTip.text: modelData.line
+        Image {
+            anchors { fill: parent; margins: 2 }
+            visible: take.modelData.url !== ""
+            source: take.modelData.url
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            sourceSize.height: 128
+            opacity: take.modelData.pending ? 0.5 : 1
+        }
+        Glyph {
+            anchors.centerIn: parent
+            visible: take.modelData.url === "" && !take.modelData.pending
+            look: strip.look
+            name: take.failed ? "triangle-alert" : "image"
+            color: take.failed ? strip.look.error : strip.look.label
+            font.pixelSize: 16
+        }
+        // The pending badge: a turning mark in a dot at the corner.
+        Rectangle {
+            visible: take.modelData.pending
+            objectName: "appTakePending"
+            anchors { top: parent.top; right: parent.right; margins: strip.look.unit / 2 }
+            width: 5 * strip.look.unit
+            height: width
+            radius: width / 2
+            color: strip.look.accent
+            Glyph {
+                id: spinner
+                anchors.centerIn: parent
+                look: strip.look
+                name: "loader-circle"
+                color: strip.look.accentForeground
+                font.pixelSize: 11
+                RotationAnimator on rotation { running: take.modelData.pending && take.visible; from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
+            }
+        }
+        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: { strip.currentIndex = take.index; strip.appView.selectTake(take.index) } }
+    }
+}

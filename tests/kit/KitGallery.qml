@@ -110,6 +110,55 @@ Item {
                             onMoved: v => gallery.blobs = v
                         }
                     }
+                    Item { // a picture with a field over it: smoked glass
+                        width: parent.width
+                        height: 11 * App.theme.look.unit
+                        Rectangle {
+                            id: pictureBehind
+                            anchors { fill: parent; topMargin: 2 * App.theme.look.unit; bottomMargin: 2 * App.theme.look.unit }
+                            radius: App.theme.look.popupCorner
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0; color: "#2a2f4a" }
+                                GradientStop { position: 0.5; color: "#c46b8a" }
+                                GradientStop { position: 1; color: "#f2eadb" }
+                            }
+                        }
+                        Rectangle {
+                            x: 3 * App.theme.look.unit
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 18 * App.theme.look.unit
+                            height: 7 * App.theme.look.unit
+                            color: "transparent"
+                            KitWell { id: smoked; backdrop: pictureBehind }
+                            Text { x: 2 * App.theme.look.unit; anchors.verticalCenter: parent.verticalCenter; text: "Gatineau"; color: smoked.ink; font.pixelSize: App.theme.look.textSize }
+                        }
+                        Rectangle {
+                            anchors { right: parent.right; rightMargin: 3 * App.theme.look.unit; verticalCenter: parent.verticalCenter }
+                            width: 18 * App.theme.look.unit
+                            height: 7 * App.theme.look.unit
+                            color: "transparent"
+                            KitWell { id: smokedPale; backdrop: pictureBehind }
+                            Text { x: 2 * App.theme.look.unit; anchors.verticalCenter: parent.verticalCenter; text: "Over pale"; color: smokedPale.ink; font.pixelSize: App.theme.look.textSize }
+                        }
+                    }
+                    KitRow {
+                        label: "Name"
+                        hint: "A field is set in; a chip is raised"
+                        Rectangle {
+                            width: 30 * App.theme.look.unit
+                            height: 7 * App.theme.look.unit
+                            color: "transparent"
+                            KitWell { }
+                            Text {
+                                x: 2 * App.theme.look.unit
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "Gatineau"
+                                color: App.theme.look.text
+                                font.pixelSize: App.theme.look.textSize
+                            }
+                        }
+                    }
                 }
             }
             KitSeparator { }

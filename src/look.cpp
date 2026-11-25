@@ -261,6 +261,10 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     t.kitHeroShade = QColor(0, 0, 0, 140);
     t.kitHeroPill = QColor(0, 0, 0, 112);
     t.kitHeroPillHover = QColor(0, 0, 0, 153);
+    t.kitWell = mix(t.kitGroup, QColor(Qt::black), light ? .03 : .12); // a field set in a group: a shade darker, not a step
+    t.kitFrost = QColor(255, 255, 255, 51);      // frosted glass over a picture: white tint at 20%, hover 30%, edge 28%
+    t.kitFrostHover = QColor(255, 255, 255, 77);
+    t.kitFrostEdge = QColor(255, 255, 255, 71);
     return t;
 }
 
@@ -564,6 +568,10 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     m_kitHeroShade = t.kitHeroShade;
     m_kitHeroPill = t.kitHeroPill;
     m_kitHeroPillHover = t.kitHeroPillHover;
+    m_kitFrost = t.kitFrost;
+    m_kitWell = t.kitWell;
+    m_kitFrostHover = t.kitFrostHover;
+    m_kitFrostEdge = t.kitFrostEdge;
     m_bypassBody = t.bypassBody;
     m_bypassHeader = t.bypassHeader;
     m_bypassEdge = t.bypassEdge;

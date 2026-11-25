@@ -16,7 +16,19 @@ Item {
     readonly property var apps: App.appShelf ? App.appShelf.apps : []
     signal chosen(string id)
 
-    function focusCards() { cards.forceActiveFocus() }
+    // Focus on the cards, on the card of the app now open when the shelf lists it (a template's folder is its id), else the first.
+    function focusCards() {
+        const file = App.appView ? App.appView.file : ""
+        let at = 0
+        for (let i = 0; file !== "" && i < apps.length; ++i)
+            if (file.endsWith("/" + apps[i].id + "/workflow.fugue")) {
+                at = i
+                break
+            }
+        cards.currentIndex = at
+        cards.positionViewAtIndex(at, GridView.Contain)
+        cards.forceActiveFocus()
+    }
 
     GridView {
         id: cards

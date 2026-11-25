@@ -2,10 +2,11 @@ import QtQuick
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
 // A seed as a node has it, in one row of the height of the other fields (7u): the number in a plain well (no Material outline,
-// no floating label: the mode is said by the mode control alone), a small dice for a new number, and the mode as a small
-// drop-down: Fixed (the run uses the number), Random (a new one every run, the field then shows "New each run") or Increment
+// no floating label: the mode is said by the mode control alone), a dice KitChip pill for a new number, and the mode as a chip
+// menu (AppChoice): Fixed (the run uses the number), Random (a new one every run, the field then shows "New each run") or Increment
 // (the number, then the next after each run). The mode and the number live in AppView (setSeedMode, rollSeed, setValue);
 // this only shows them.
 RowLayout {
@@ -33,9 +34,8 @@ RowLayout {
         Layout.minimumWidth: 16 * row.look.unit
         implicitHeight: 7 * row.look.unit
         radius: row.look.smallCorner
-        color: row.look.well
-        border.width: input.activeFocus ? 1 : 0
-        border.color: row.look.accent
+        color: "transparent"
+        KitWell { look: row.look; focused: input.activeFocus } // recessed, as every field
         opacity: row.random ? 0.6 : 1
         TextInput {
             id: input
@@ -71,17 +71,19 @@ RowLayout {
             elide: Text.ElideRight
         }
     }
-    ViewButton {
+    KitChip {
         objectName: "appSeedRoll-" + row.field.key
         look: row.look
+        pill: true
         glyph: "dices"
         tip: qsTr("A new random number")
         enabled: !row.random
         onTapped: row.appView.rollSeed(row.field.key)
     }
-    ThemedDropDown {
+    AppChoice {
         objectName: "appSeedMode-" + row.field.key
-        Layout.preferredWidth: 22 * row.look.unit
+        look: row.look
+        Layout.preferredWidth: 20 * row.look.unit
         options: [{ value: "fixed", text: qsTr("Fixed") },
                   { value: "random", text: qsTr("Random") },
                   { value: "increment", text: qsTr("Increment") }]

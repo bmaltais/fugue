@@ -3,11 +3,14 @@
 // Open in Fugue asks for the full window, and the Get ready sheet of #379 opens inside it. The entry's file is
 // test_launcher_entries; the store's logic is test_app_view.
 
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QQuickStyle>
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
 #include "apps/app_launcher.h"
+#include "apps/app_shelf.h"
 #include "apps/app_window.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
@@ -37,6 +40,25 @@ void tap(QQuickWindow *window, QQuickItem *item) {
 
 const QString templates = QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates");
 
+// A template folder that is an app: a prompt in, a picture out.
+void makeApp(const QString &root, const QString &id, const QString &title) {
+    QDir().mkpath(root + "/" + id);
+    QJsonObject nodes{{"encode", QJsonObject{{"type", "fugue/text-encode"}, {"version", "1.0.0"}, {"inputs", QJsonObject{{"prompt", "a lake"}}}}},
+                      {"save", QJsonObject{{"type", "fugue/save-image"}, {"version", "1.1.0"}, {"inputs", QJsonObject{{"name", "out"}}}}}};
+    const QJsonObject flow{{"fugue", 1},
+                           {"app", QJsonObject{{"format", 1}, {"title", title}, {"defaultView", "app"},
+                                               {"inputs", QJsonArray{QJsonObject{{"role", "prompt"}, {"targets", QJsonArray{"encode.prompt"}}, {"label", "Prompt"}}}},
+                                               {"outputs", QJsonArray{QJsonObject{{"node", "save"}}}}}},
+                           {"graph", QJsonObject{{"nodes", nodes}}}};
+    const auto write = [&root, &id](const char *name, const QJsonObject &json) {
+        QFile file(root + "/" + id + "/" + name);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(json).toJson());
+    };
+    write("workflow.fugue", flow);
+    write("template.json", QJsonObject{{"title", title}, {"description", "Makes " + title}, {"app", QJsonObject{{"title", title}, {"summary", "Does " + title}}}});
+}
+
 // What main() ties for an app's window: the runs (never started), the view and the launcher over a scratch data folder.
 struct Rig {
     RunSetup setup;
@@ -46,6 +68,8 @@ struct Rig {
     QTemporaryDir data;
     QList<QStringList> spawned;
     AppLauncher launcher;
+    AppShelf shelf;
+    QStringList icons; // the previews the window was given
 
     static RunSetup setupIn(const QString &root) {
         RunSetup out;
@@ -58,12 +82,17 @@ struct Rig {
         out.collectGarbage = false;
         return out;
     }
-    explicit Rig(App &app)
+    explicit Rig(App &app, const QString &root = templates)
         : setup(setupIn(app.dir.path())), service(setup), runs(&app.model, &app.workflows, &service, &app.registry),
           view([](const RunRequest &) { return QStringLiteral("r1"); }, [](const QString &) {}, &app.registry),
-          launcher(&view, &app.workflows, {{templates, false}}, &app.registry, LauncherEntries(data.path(), "fugue"),
-                   [this](const QStringList &arguments) { spawned << arguments; return true; }) {
-        app.workflows.setTemplateRoots({{templates, false}});
+          launcher(&view, &app.workflows, {{root, false}}, &app.registry, LauncherEntries(data.path(), "fugue"),
+                   [this](const QStringList &arguments) { spawned << arguments; return true; }),
+          shelf([&app] { return app.workflows.templates(); }, [&app](const QString &id) { return app.workflows.openTemplateById(id); }) {
+        app.workflows.setTemplateRoots({{root, false}});
+        app.appShelf = &shelf;
+        bindOwnAppWindow(shelf, view, launcher,
+                         [root, &app](const QString &id) { return resolveApp(id, {{root, false}}, &app.registry); },
+                         [this](const AppRef &chosen) { icons << chosen.ref; });
         runs.registerCommands(app.commands);
         app.runs = &runs;
         bindAppView(view, app.workflows, app.model, service, app.commands, runs);
@@ -101,7 +130,7 @@ private slots:
         // Add to launcher: an entry that starts this app, in the scratch folder only.
         QTRY_VERIFY(find(app.window, "appLauncherToggle"));
         QQuickItem *toggle = find(app.window, "appLauncherToggle");
-        QCOMPARE(toggle->property("text").toString(), QStringLiteral("Add to launcher"));
+        QVERIFY(toggle->property("tip").toString().startsWith("Add to launcher"));
         tap(app.window, toggle);
         const QString entry = rig.data.filePath("applications/fugue-app-test-app.desktop");
         QTRY_VERIFY(QFileInfo::exists(entry));
@@ -110,12 +139,12 @@ private slots:
         const QString text = QString::fromUtf8(file.readAll());
         QVERIFY(text.contains("Name=Block title\n"));
         QVERIFY(text.contains("Exec=fugue --app test-app\n"));
-        QTRY_COMPARE(find(app.window, "appLauncherToggle")->property("text").toString(), QStringLiteral("Remove from launcher"));
+        QTRY_VERIFY(find(app.window, "appLauncherToggle")->property("tip").toString().startsWith("Remove from launcher"));
         QVERIFY(app.workflows.notice().contains("launcher"));
 
         tap(app.window, find(app.window, "appLauncherToggle"));
         QTRY_VERIFY(!QFileInfo::exists(entry));
-        QTRY_COMPARE(find(app.window, "appLauncherToggle")->property("text").toString(), QStringLiteral("Add to launcher"));
+        QTRY_VERIFY(find(app.window, "appLauncherToggle")->property("tip").toString().startsWith("Add to launcher"));
 
         // Open in Fugue: the full window, in a process of its own.
         tap(app.window, find(app.window, "appOpenInFugue"));
@@ -126,6 +155,46 @@ private slots:
         app.workflows.readiness()->show();
         QTRY_VERIFY(app.window->findChild<QObject *>("getReadySheet"));
         QCOMPARE(app.window->findChild<QObject *>("getReadySheet")->property("visible").toBool(), true);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The rail's Apps: the shelf over the page; choosing another app switches this window to it in place (its tab, its title, its
+    // launcher entry and icon), and there is no Graph item in this window.
+    void theRailsAppsSwitchesTheWindowToAnotherAppInPlace() {
+        QTemporaryDir root;
+        makeApp(root.path(), "first", "First app");
+        makeApp(root.path(), "second", "Second app");
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app, root.path());
+        QVERIFY(app.workflows.openTemplateById("first"));
+        rig.view.showApp();
+        QVERIFY(app.open());
+        QTRY_COMPARE(find(app.window, "appTitle")->property("title").toString(), QStringLiteral("First app"));
+        QVERIFY(find(app.window, "appRail"));
+        QVERIFY(!find(app.window, "appOpenInGraph")); // the app's own window has no graph to open
+        QVERIFY(find(app.window, "appRailResults"));
+
+        tap(app.window, find(app.window, "appRailApps"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("appsDialog"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
+        QTRY_COMPARE(rig.shelf.apps().size(), 2);
+        QVERIFY(rig.shelf.choose("second"));
+        QTRY_COMPARE(find(app.window, "appTitle")->property("title").toString(), QStringLiteral("Second app"));
+        QCOMPARE(app.window->title(), QStringLiteral("Second app"));
+        QVERIFY(find(app.window, "appPage")); // still the App view, not a graph
+        QVERIFY(!find(app.window, "canvas"));
+        QCOMPARE(rig.icons, QStringList{"second"}); // the window's icon follows
+        // The launcher entry and Open in Fugue are the new app's (the dialog the card would have closed is closed first).
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) { // FUGUE_SHOT_DIR=<dir>: a picture of the app's window
+            QTest::qWait(500);
+            test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/app-own-window.png");
+        }
+        QTRY_VERIFY(find(app.window, "appOpenInFugue"));
+        tap(app.window, find(app.window, "appOpenInFugue"));
+        QTRY_VERIFY(!rig.spawned.isEmpty());
+        QCOMPARE(rig.spawned.last(), (QStringList{"--edit", "second"}));
         qDeleteAll(app.engine.rootObjects());
     }
 

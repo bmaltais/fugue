@@ -270,6 +270,8 @@ void Theme::refreshLook() {
     m_look->update(colors, m_light, fugue::look::corners(m_cornerSetting, m_radius), m_textSize);
 }
 
+void Theme::setFrost(double frost) { m_look->setFrost(frost); }
+
 void Theme::setCornerRadius(int setting) {
     if (setting == m_cornerSetting)
         return;

@@ -44,8 +44,16 @@ Window {
     property bool on: false
     property int chips: 0
     property int steps: 0
+    property int frosts: 0
     Column {
         width: parent.width
+        Rectangle {
+            id: sky
+            width: 200
+            height: 50
+            color: "#c9a4c8"
+            KitChip { objectName: "frostChip"; x: 10; y: 8; frosted: true; backdrop: sky; text: "Frost"; onTapped: window.frosts++ }
+        }
         KitGroup {
             id: group
             objectName: "group"
@@ -202,6 +210,22 @@ private slots:
         QTRY_COMPARE(window->property("chips").toInt(), 1);
         QCOMPARE(window->property("steps").toInt(), 3);
         QVERIFY(window->property("on").toBool());
+        // A frosted chip, over a picture, presses by click and by Space as any chip does.
+        auto *frost = window->findChild<QQuickItem *>("frostChip");
+        QVERIFY(frost);
+        QTest::mouseClick(window, Qt::LeftButton, {}, centerOf(frost).toPoint());
+        QTRY_COMPARE(window->property("frosts").toInt(), 1);
+        frost->forceActiveFocus();
+        QTRY_VERIFY(frost->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_COMPARE(window->property("frosts").toInt(), 2);
+        // The frost setting at 0 makes it the plain chip: no glass, still pressed the same.
+        QVERIFY(frost->property("glass").toBool());
+        shell.theme.look()->setFrost(0);
+        QTRY_VERIFY(!frost->property("glass").toBool());
+        QTest::mouseClick(window, Qt::LeftButton, {}, centerOf(frost).toPoint());
+        QTRY_COMPARE(window->property("frosts").toInt(), 3);
+        shell.theme.look()->setFrost(0.6);
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
         delete window;
     }

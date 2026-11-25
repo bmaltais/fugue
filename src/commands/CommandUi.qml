@@ -40,7 +40,10 @@ Item {
         delegate: Shortcut {
             required property string modelData
             sequence: modelData
-            enabled: keys.awake && !(App.commands.textFieldFocus && App.commands.belongsToTextField(modelData))
+            // Bare and Shift-only keys (Tab, letters) are the page's own while the App view is shown, as in a text field: Tab walks the
+            // panel instead of opening node search over a graph that is not there.
+            enabled: keys.awake && !((App.commands.textFieldFocus || (App.appView !== null && App.appView.shown))
+                                     && App.commands.belongsToTextField(modelData))
             onActivated: App.commands.triggerKey(modelData)
         }
     }

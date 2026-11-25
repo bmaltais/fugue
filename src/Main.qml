@@ -402,7 +402,7 @@ ApplicationWindow {
                 win.templatesDialog.open()
                 return
             }
-            if (id === "file.apps") {
+            if (id === "app.show-all") {
                 if (!win.appsDialog)
                     win.appsDialog = appsComponent.createObject(win.contentItem)
                 win.appsDialog.open()
@@ -444,7 +444,7 @@ ApplicationWindow {
             win.appSettingsModel.packs.add(source, ref)
         }
     }
-    // The Apps dialog (#388), made the first time file.apps asks for it.
+    // The Apps dialog (#388), made the first time app.show-all asks for it.
     property var appsDialog: null
     Component {
         id: appsComponent
@@ -581,7 +581,10 @@ ApplicationWindow {
     }
     // The tab strip (#159) on the left edge under the bars: made while the registry shows it
     // (focus mode hides it), and not at all in a window without side panels.
-    readonly property bool stripWanted: sidePanelsWanted && win.chromeIsShown("side-tabs")
+    // The App view has its own rail, so the strip and its panels are not shown there (they come back in the graph).
+    readonly property bool sidePanelsVisible: sidePanelsWanted && !appShown
+    onSidePanelsVisibleChanged: syncSidePanel()
+    readonly property bool stripWanted: sidePanelsVisible && win.chromeIsShown("side-tabs")
     readonly property real stripWidth: stripWanted && stripLoader.item ? (stripLoader.item as Item).width : 0
     // The most of the window the panel may take: the canvas keeps at least 160px.
     readonly property real sidePanelWidth: Math.max(0, Math.min(App.sidePanels ? App.sidePanels.width : 0, windowRoot.width - stripWidth - 160))
@@ -596,7 +599,7 @@ ApplicationWindow {
         return sidePanelWidth
     }
     function syncSidePanel() {
-        const tab = sidePanelsWanted ? App.sidePanels.tab : ""
+        const tab = sidePanelsVisible ? App.sidePanels.tab : ""
         if (tab === "") {
             if (sidePanelItem)
                 sidePanelItem.destroy()

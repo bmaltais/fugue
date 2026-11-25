@@ -6,7 +6,8 @@
 # #262: the Graph's area header sits above the canvas while the window has one area (view-type menu, split and close, and the Graph's own menus View, Select, Add and Node): 50 items more. The window bar has five menus (File, Edit, Run, Window, Help): one title fewer. With more areas the host's headers do this and the one above the canvas goes (test_area_split_window).
 # #262 slice 3: the workflow tabs sit in the window bar's row, as a strip with the New button and no layout item: two items fewer.
 # #379: the banner's Install pack, Download and Into controls (three items) became one Get ready… Loader, and the Get ready sheet is made when first opened: two items fewer.
-items 241
+# Drift-kit slice 2: Fugue's mark (the Dusk icon, `fugueMark` and its picture) sits at the window bar's start and runs app.show-all: two items more.
+items 243
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 areaClose-1 1
@@ -30,6 +31,7 @@ crumb0 1
 cutHandle 1
 draggedLink 1
 dropChooser 1
+fugueMark 1
 graphHeaderHost 1
 graphMenuBar 1
 graphMenuButton 1

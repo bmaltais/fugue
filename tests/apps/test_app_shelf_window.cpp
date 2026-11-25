@@ -181,7 +181,7 @@ private slots:
         tap(app.window, "appCard-ready-app");
         QTRY_VERIFY(find(app.window, "appPage"));
         QTRY_VERIFY(!find(app.window, "appsHome"));
-        QCOMPARE(find(app.window, "appTitle")->property("text").toString(), QStringLiteral("Ready app"));
+        QCOMPARE(find(app.window, "appTitle")->property("title").toString(), QStringLiteral("Ready app"));
         QVERIFY(!app.workflows.readiness()->isOpen());
         qDeleteAll(app.engine.rootObjects());
     }
@@ -200,7 +200,14 @@ private slots:
         QTRY_VERIFY(!find(app.window, "appsHome"));
         QTRY_VERIFY(find(app.window, "canvas"));
 
-        QVERIFY(app.commands.run("file.apps"));
+        // Fugue's mark at the start of the window bar is the same command, in the graph too: it opens the shelf, Escape closes it.
+        QVERIFY(find(app.window, "canvas"));
+        tap(app.window, "fugueMark");
+        QTRY_VERIFY(find(app.window, "appCard-ready-app"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
+
+        QVERIFY(app.commands.run("app.show-all"));
         QTRY_VERIFY(find(app.window, "appCard-ready-app"));
         QVERIFY(app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
         tap(app.window, "appCard-ready-app");

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 import "../menu"
 import "../canvas"
 
@@ -472,6 +473,35 @@ Popup {
                         }
                     }
 
+                    // Frost: the glass of the controls over a picture, live
+                    SettingsParts.Setting {
+                        id: frostSetting
+                        readonly property real amount: panel.model.frost
+                        visible: panel.page === "theme"
+                        title: qsTr("Frost")
+                        key: "frost"
+                        origin: panel.model.origins["frost"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("frost"))
+                        note: amount <= 0 ? qsTr("Off: the buttons over a picture are plain.")
+                            : amount < 0.4 ? qsTr("Light: the buttons over a picture are faintly frosted.")
+                            : amount < 0.75 ? qsTr("Medium: the buttons over a picture are frosted glass, the picture blurred behind them.")
+                            : qsTr("Strong: the buttons over a picture are thick frosted glass.")
+                        KitSlider {
+                            objectName: "frost"
+                            look: panel.look
+                            Layout.fillWidth: true
+                            railWidth: 40 * panel.u
+                            from: 0
+                            to: 1
+                            stepSize: 0.1
+                            value: frostSetting.amount
+                            text: qsTr("Frost")
+                            showValue: true
+                            valueText: frostSetting.amount <= 0 ? qsTr("Off") : frostSetting.amount < 0.4 ? qsTr("Light")
+                                     : frostSetting.amount < 0.75 ? qsTr("Medium") : qsTr("Strong")
+                            onMoved: v => panel.apply(panel.model.set("frost", Math.round(v * 10) / 10))
+                        }
+                    }
                     // Theme
                     SettingsParts.Setting {
                         visible: panel.page === "theme"
