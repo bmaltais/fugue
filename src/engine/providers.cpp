@@ -1,7 +1,10 @@
 #include "providers.h"
 
 #include "engine/helper_provider.h"
+#include "engine/cloudflare_provider.h"
 #include "engine/fal_provider.h"
+#include "engine/gemini_provider.h"
+#include "engine/replicate_provider.h"
 #include "engine/http_provider.h"
 #include "engine/json.h"
 #include "engine/paths.h"
@@ -218,7 +221,9 @@ Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &docume
         instance.name = object.value("name").toString();
         instance.type = object.value("type").toString();
         instance.address = object.value("address").toString();
-        instance.key = object.value("key").toString();
+        // Trimmed: a key pasted with a stray space or newline is sent as the service sees it, so it is also what every provider's
+        // error scrubbing looks for (review of the cloud providers, 2026-11-25).
+        instance.key = object.value("key").toString().trimmed();
         instance.enabled = object.value("enabled").toBool(true);
         for (auto it = object.begin(); it != object.end(); ++it)
             if (!QStringList{"name", "type", "address", "key", "enabled"}.contains(it.key()))
@@ -384,6 +389,12 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
         return Result<std::shared_ptr<Provider>>(std::make_shared<HttpProvider>(instance));
     if (instance.type == QLatin1String("fal"))
         return Result<std::shared_ptr<Provider>>(std::make_shared<FalProvider>(instance));
+    if (instance.type == QLatin1String("gemini"))
+        return Result<std::shared_ptr<Provider>>(std::make_shared<GeminiProvider>(instance));
+    if (instance.type == QLatin1String("replicate"))
+        return Result<std::shared_ptr<Provider>>(std::make_shared<ReplicateProvider>(instance));
+    if (instance.type == QLatin1String("cloudflare"))
+        return Result<std::shared_ptr<Provider>>(std::make_shared<CloudflareProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty())
         return Result<std::shared_ptr<Provider>>(std::make_shared<RemoteHelperProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper")) {

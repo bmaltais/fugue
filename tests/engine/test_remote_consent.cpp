@@ -105,6 +105,27 @@ private slots:
         ProviderInstance ownStorage = instance("fal.ai", "fal", "http://127.0.0.1:9");
         ownStorage.settings.insert("rest_address", "http://127.0.0.1:10");
         QCOMPARE(placementOf(ownStorage), Placement::ThisMachine);
+        // A gemini instance with only a key goes to Google's API by default: off-machine, so the question is asked (#407).
+        const ProviderInstance gemini = instance("Google Gemini", "gemini");
+        QCOMPARE(placementOf(gemini), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(gemini), QStringLiteral("https://generativelanguage.googleapis.com"));
+        QCOMPARE(consentFingerprint(gemini), QStringLiteral("gemini|https://generativelanguage.googleapis.com"));
+        QCOMPARE(placementOf(instance("Google Gemini", "gemini", "http://127.0.0.1:9")), Placement::ThisMachine);
+        // A replicate instance with only a key goes to Replicate's API by default: off-machine, so the question is asked (#407).
+        const ProviderInstance replicate = instance("Replicate", "replicate");
+        QCOMPARE(placementOf(replicate), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(replicate), QStringLiteral("https://api.replicate.com"));
+        QCOMPARE(consentFingerprint(replicate), QStringLiteral("replicate|https://api.replicate.com"));
+        QCOMPARE(consentFingerprint(instance("Replicate", "replicate", "https://api.replicate.com/")), consentFingerprint(replicate));
+        QCOMPARE(placementOf(instance("Replicate", "replicate", "http://127.0.0.1:9")), Placement::ThisMachine);
+        // A cloudflare instance goes to Cloudflare's API by default: off-machine, so the question is asked (#407).
+        const ProviderInstance cloudflare = instance("Cloudflare Workers AI", "cloudflare");
+        QCOMPARE(placementOf(cloudflare), Placement::OffMachine);
+        QCOMPARE(effectiveAddress(cloudflare), QStringLiteral("https://api.cloudflare.com"));
+        QCOMPARE(hostOf(cloudflare), QStringLiteral("api.cloudflare.com"));
+        QCOMPARE(consentFingerprint(cloudflare), QStringLiteral("cloudflare|https://api.cloudflare.com"));
+        QVERIFY(anyOffMachine({cloudflare}));
+        QCOMPARE(placementOf(instance("Cloudflare Workers AI", "cloudflare", "http://127.0.0.1:9")), Placement::ThisMachine);
         // A public name or address is off this machine, whatever the scheme.
         QCOMPARE(placementOf(instance("Cloud", "http", "https://api.example.com/v1")), Placement::OffMachine);
         QCOMPARE(placementOf(instance("Cloud", "http", "8.8.8.8:80")), Placement::OffMachine);

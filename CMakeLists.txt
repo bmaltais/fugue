@@ -119,7 +119,14 @@ qt_add_resources(fugue_core fugue_looks PREFIX /fugue/looks FILES ${fugue_look_s
 
 # The `fal` provider's model table (spec 8.7): share/providers/fal-models.json compiled in under :/fugue/providers.
 set_source_files_properties(share/providers/fal-models.json PROPERTIES QT_RESOURCE_ALIAS fal-models.json)
-qt_add_resources(fugue_engine fugue_provider_tables PREFIX /fugue/providers FILES share/providers/fal-models.json)
+set_source_files_properties(share/providers/gemini-models.json PROPERTIES QT_RESOURCE_ALIAS gemini-models.json)
+qt_add_resources(fugue_engine fugue_provider_tables PREFIX /fugue/providers FILES share/providers/fal-models.json share/providers/gemini-models.json)
+# The `replicate` provider's model table (spec 8.7): share/providers/replicate-models.json, under :/fugue/providers too.
+set_source_files_properties(share/providers/replicate-models.json PROPERTIES QT_RESOURCE_ALIAS replicate-models.json)
+qt_add_resources(fugue_engine fugue_replicate_table PREFIX /fugue/providers FILES share/providers/replicate-models.json)
+# The `cloudflare` provider's model table (spec 8.7), the same way.
+set_source_files_properties(share/providers/cloudflare-models.json PROPERTIES QT_RESOURCE_ALIAS cloudflare-models.json)
+qt_add_resources(fugue_engine fugue_provider_tables_cloudflare PREFIX /fugue/providers FILES share/providers/cloudflare-models.json)
 
 # A folder of the window's QML: its .qml files compiled in under qrc:<prefix>, where the
 # others import them by folder. A new .qml file there needs no line here. The same files are

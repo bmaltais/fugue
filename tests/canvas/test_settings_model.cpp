@@ -534,7 +534,7 @@ private slots:
             QVERIFY2(!ids.contains(p.id), qPrintable(p.id));
             ids.insert(p.id);
             QVERIFY(!p.name.isEmpty() && !p.description.isEmpty());
-            QVERIFY(QStringList({"omarchy", "http", "fugue-helper", "fal"}).contains(p.type));
+            QVERIFY(QStringList({"omarchy", "http", "fugue-helper", "fal", "gemini", "replicate", "cloudflare"}).contains(p.type));
             QVERIFY(QStringList({"cloud", "own"}).contains(p.group));
             if (p.group == QLatin1String("cloud")) {
                 QVERIFY2(p.address.isEmpty() || p.address.startsWith("https://"), qPrintable(p.id));
@@ -542,11 +542,36 @@ private slots:
             } else {
                 QVERIFY(p.privacy.isEmpty() && p.keyUrl.isEmpty());
             }
-            QVERIFY(p.needsAddress == p.address.isEmpty() || p.type == "fal");
+            QVERIFY(p.needsAddress == p.address.isEmpty() || p.type == "fal" || p.type == "gemini" || p.type == "replicate" || p.type == "cloudflare");
         }
         QVERIFY(ids.contains("fal"));
+        QVERIFY(ids.contains("gemini"));
+        QCOMPARE(providerPresetById("gemini").address, QString()); // the gemini type's own default
+        QCOMPARE(providerPresetById("gemini").keyUrl, QStringLiteral("https://aistudio.google.com/apikey"));
+        QVERIFY(ids.contains("replicate"));
+        QCOMPARE(providerPresetById("replicate").type, QStringLiteral("replicate"));
+        QCOMPARE(providerPresetById("replicate").address, QString()); // the replicate type's own default
+        QCOMPARE(providerPresetById("replicate").keyUrl, QStringLiteral("https://replicate.com/account/api-tokens"));
         QCOMPARE(providerPresetById("fal").address, QString()); // the fal type's own default
+        QVERIFY(ids.contains("cloudflare"));
+        QCOMPARE(providerPresetById("cloudflare").address, QString()); // the cloudflare type's own default
         QVERIFY(providerPresetById("nope").id.isEmpty());
+    }
+
+    // The Cloudflare card asks for the account id beside the token; the rare settings are advanced.
+    void theCloudflareCardAsksForTheAccountIdBesideTheToken() {
+        SettingsModel model;
+        QCOMPARE(model.addPreset("cloudflare"), QString());
+        const QVariantMap card = model.providers().last().toMap();
+        QCOMPARE(card.value("name").toString(), QStringLiteral("Cloudflare Workers AI"));
+        QVERIFY(card.value("keyUrl").toString().startsWith("https://dash.cloudflare.com/"));
+        QVariantMap seen;
+        for (const QVariant &f : card.value("fields").toList())
+            seen.insert(f.toMap().value("name").toString(), f);
+        QVERIFY(seen.contains("account_id") && !seen.value("account_id").toMap().value("advanced").toBool());
+        QVERIFY(seen.value("image_models").toMap().value("advanced").toBool() && seen.value("timeout_s").toMap().value("advanced").toBool());
+        QCOMPARE(model.setProviderField(model.providers().size() - 1, "account_id", "abc123"), QString());
+        QCOMPARE(loadProviderInstances(providersFile()).value().last().settings.value("account_id"), QJsonValue("abc123"));
     }
 
     void addingAPresetWritesTheInstanceAndNamesAreUnique() {

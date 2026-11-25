@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "note": "The Google Gemini image models the `gemini` provider offers (spec 8.7). Each takes a text prompt and up to `max_images` pictures in one generateContent request, so each is both generate and edit. `aspects` are the aspect ratios the model accepts (the node's width and height pick the nearest); `sizes` are its `imageSize` values (the larger side picks the nearest); a model with no `sizes` makes 1024 px. Prices are Google's published ones (2026-11-25), shown in the model's title. No model has a free-tier quota on the API.",
+  "models": [
+    {
+      "id": "gemini-nano-banana-2.1", "title": "Nano Banana 2.1", "price": "$0.034/1K image", "max_images": 14,
+      "aspects": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+      "sizes": ["1K", "2K", "4K"]
+    },
+    {
+      "id": "gemini-3.1-flash-image", "title": "Nano Banana 2", "price": "$0.067/1K image", "max_images": 14,
+      "aspects": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+      "sizes": ["512", "1K", "2K", "4K"]
+    },
+    {
+      "id": "gemini-3.1-flash-lite-image", "title": "Nano Banana 2 Lite", "price": "$0.034/1K image", "max_images": 14,
+      "aspects": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+    },
+    {
+      "id": "gemini-3-pro-image", "title": "Nano Banana Pro", "price": "$0.134/1K or 2K image", "max_images": 14,
+      "aspects": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+      "sizes": ["1K", "2K", "4K"]
+    },
+    {
+      "id": "gemini-2.5-flash-image", "title": "Nano Banana (ends 2027-03-15)", "price": "$0.039/image", "max_images": 14,
+      "aspects": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+    }
+  ]
+}

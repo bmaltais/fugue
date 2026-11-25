@@ -118,7 +118,28 @@ QList<ProviderModule> builtinProviderModules() {
     fal.transport = QStringLiteral("builtin");
     fal.when = QStringLiteral("never");
     fal.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
-    return {omarchy, http, helper, fal};
+    ProviderModule gemini;
+    gemini.id = QStringLiteral("gemini");
+    gemini.version = QStringLiteral("1");
+    gemini.name = QStringLiteral("Google Gemini");
+    gemini.transport = QStringLiteral("builtin");
+    gemini.when = QStringLiteral("never");
+    gemini.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    ProviderModule replicate;
+    replicate.id = QStringLiteral("replicate");
+    replicate.version = QStringLiteral("1");
+    replicate.name = QStringLiteral("Replicate");
+    replicate.transport = QStringLiteral("builtin");
+    replicate.when = QStringLiteral("never");
+    replicate.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    ProviderModule cloudflare;
+    cloudflare.id = QStringLiteral("cloudflare");
+    cloudflare.version = QStringLiteral("1");
+    cloudflare.name = QStringLiteral("Cloudflare Workers AI");
+    cloudflare.transport = QStringLiteral("builtin");
+    cloudflare.when = QStringLiteral("never");
+    cloudflare.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    return {omarchy, http, helper, fal, gemini, replicate, cloudflare};
 }
 
 Result<QList<ProviderModule>> loadProviderModules(const QString &root) {

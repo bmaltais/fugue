@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "note": "The official Replicate models the `replicate` provider offers (spec 8.7). Per model: how Fugue's standard parameters (8.1) map to the model's own input fields, read from each model's published input schema. A field left out is not sent. `aspect` takes the nearest of `aspects` to the node's size; `megapixels` the nearest of `megapixel_values`; `aspect_follow` is sent as the aspect when a picture goes in. `fixed` is sent as it is. Prices are Replicate's published ones (2026-11-25), shown in the model's title.",
+  "models": [
+    {
+      "id": "black-forest-labs/flux-schnell", "title": "FLUX.1 [schnell]", "price": "$0.003/image", "capability": "generate",
+      "aspect": "aspect_ratio", "aspects": ["1:1", "16:9", "21:9", "3:2", "2:3", "4:5", "5:4", "3:4", "4:3", "9:16", "9:21"],
+      "megapixels": "megapixels", "megapixel_values": ["0.25", "1"],
+      "steps": "num_inference_steps", "steps_max": 4, "seed": "seed",
+      "defaults": {"steps": 4},
+      "fixed": {"num_outputs": 1, "output_format": "png"}
+    },
+    {
+      "id": "black-forest-labs/flux-2-klein-4b", "title": "FLUX.2 [klein] 4B", "price": "$0.001/MP", "capability": "generate",
+      "aspect": "aspect_ratio", "aspects": ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "21:9", "9:21"], "aspect_follow": "match_input_image",
+      "megapixels": "output_megapixels", "megapixel_values": ["0.25", "0.5", "1", "2", "4"],
+      "seed": "seed", "image": "images", "image_list": true, "images_max": 5,
+      "fixed": {"output_format": "png"}
+    },
+    {
+      "id": "qwen/qwen-image", "title": "Qwen-Image", "price": "$0.025/image", "capability": "generate",
+      "aspect": "aspect_ratio", "aspects": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+      "steps": "num_inference_steps", "steps_max": 50, "guidance": "guidance", "negative_prompt": "negative_prompt", "seed": "seed",
+      "defaults": {"steps": 30, "guidance": 3},
+      "fixed": {"output_format": "png"}
+    },
+    {
+      "id": "black-forest-labs/flux-kontext-dev", "title": "FLUX.1 Kontext [dev]", "price": "$0.025/image", "capability": "edit",
+      "guidance": "guidance", "seed": "seed", "image": "input_image",
+      "defaults": {"guidance": 2.5},
+      "fixed": {"output_format": "png"}
+    },
+    {
+      "id": "qwen/qwen-image-edit", "title": "Qwen-Image Edit", "price": "$0.03/image", "capability": "edit",
+      "seed": "seed", "image": "image",
+      "fixed": {"output_format": "png"}
+    },
+    {
+      "id": "black-forest-labs/flux-fill-dev", "title": "FLUX.1 Fill [dev]", "price": "$0.04/image", "capability": "inpaint",
+      "steps": "num_inference_steps", "steps_max": 50, "guidance": "guidance", "seed": "seed", "image": "image", "mask": "mask",
+      "defaults": {"steps": 28, "guidance": 30},
+      "fixed": {"num_outputs": 1, "output_format": "png", "megapixels": "match_input"}
+    }
+  ]
+}
