@@ -43,7 +43,9 @@ Rectangle {
     readonly property real panelWidth: Math.min(0.4 * width, Math.max(80 * u, 0.25 * width))
 
     // The gap between the cards: the window's background shows through it.
-    readonly property real gap: 2 * u
+    readonly property real gap: look.params.areaLayout === "panes" ? 0 : look.params.areaGap * u
+    // The tone of the app's header (Dusk by default; an app may later pick one).
+    readonly property string tone: "dusk"
     color: "transparent"
 
     // The app being another one: Advanced starts closed again.
@@ -96,13 +98,12 @@ Rectangle {
         }
 
         // The stage card: the result well and its controls inside.
-        Rectangle {
+        KitPanel {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: page.look.popupCorner
-            color: page.look.popup
-            border.width: 1
-            border.color: page.look.hairline
+            look: page.look
+            tone: page.tone
+            calm: true
             AppStage {
                 anchors { fill: parent; margins: 3 * page.u }
                 appView: page.appView
@@ -111,15 +112,13 @@ Rectangle {
         }
 
         // The input panel card.
-        Rectangle {
+        KitPanel {
             id: panel
             objectName: "appPanel"
             Layout.fillHeight: true
             Layout.preferredWidth: page.panelWidth
-            radius: page.look.popupCorner
-            color: page.look.popup
-            border.width: 1
-            border.color: page.look.hairline
+            look: page.look
+            tone: page.tone
             ColumnLayout {
                 anchors { fill: parent; margins: 1 }
                 spacing: 0
@@ -132,7 +131,7 @@ Rectangle {
                     source: page.appView.preview
                     title: page.appView.title
                     subtitle: page.appView.description
-                    cornerRadius: page.look.popupCorner
+                    tone: page.tone
                     ToolTip.visible: heroHover.hovered && page.appView.description !== ""
                     ToolTip.delay: page.look.tooltipDelay
                     ToolTip.text: page.appView.description
@@ -159,7 +158,7 @@ Rectangle {
                     objectName: "appForm"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.margins: 3 * page.u
+                    Layout.margins: page.look.params.panelPad * page.u
                     Layout.topMargin: 0
                     contentWidth: availableWidth
                     clip: true
@@ -213,8 +212,8 @@ Rectangle {
                 Text {
                     objectName: "appProblem"
                     Layout.fillWidth: true
-                    Layout.leftMargin: 3 * page.u
-                    Layout.rightMargin: 3 * page.u
+                    Layout.leftMargin: page.look.params.panelPad * page.u
+                    Layout.rightMargin: page.look.params.panelPad * page.u
                     visible: text !== ""
                     text: page.appView.problem
                     color: page.look.error
@@ -226,7 +225,7 @@ Rectangle {
                     id: run
                     objectName: "appRun"
                     Layout.fillWidth: true
-                    Layout.margins: 3 * page.u
+                    Layout.margins: page.look.params.panelPad * page.u
                     Layout.preferredHeight: 9 * page.u
                     radius: height / 2
                     color: !enabled ? Qt.alpha(page.look.accent, 0.35) : runTap.pressed ? Qt.darker(page.look.accent, 1.15)

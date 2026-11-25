@@ -21,6 +21,7 @@
 #include "engine/paths.h"
 #include "engine/project.h"
 #include "engine/providers_file.h"
+#include "look_params.h"
 #include "theme.h"
 #include "translator.h"
 #include "workflow/readiness_sheet.h"
@@ -215,6 +216,13 @@ void SettingsModel::pushLive() {
         m_theme->setCornerRadius(m_effective.settings.cornerRadius);
     if (m_theme)
         m_theme->setFrost(m_effective.settings.frost);
+    if (m_theme)
+        m_theme->setLookSliders({m_effective.settings.lookColour, m_effective.settings.lookGlow, m_effective.settings.lookCorners,
+                                 m_effective.settings.lookSpacing, m_effective.settings.lookDepth});
+    if (m_theme)
+        m_theme->setLookPreset(look::loadPreset(m_effective.settings.lookPreset).params);
+    if (m_theme)
+        m_theme->setLookFile(configDir() + QStringLiteral("/look.json"));
 }
 
 void SettingsModel::reload() {
@@ -521,6 +529,62 @@ void SettingsModel::openKeymap() {
 void SettingsModel::reloadKeymap() {
     if (m_registry)
         m_registry->loadKeymap(effectiveKeymapPath());
+}
+
+QString SettingsModel::lookPreset() const {
+    const Settings &s = m_effective.settings;
+    const look::Preset preset = look::loadPreset(s.lookPreset);
+    const auto at = [&](const char *name, double fallback) { return preset.sliders.value(QLatin1String(name), fallback).toDouble(); };
+    const bool same = qFuzzyCompare(1 + s.lookColour, 1 + at("colour", look::Sliders::defaultColour))
+                      && qFuzzyCompare(1 + s.lookGlow, 1 + at("glow", look::Sliders::defaultGlow))
+                      && qFuzzyCompare(1 + s.frost, 1 + at("frost", 0.6))
+                      && qFuzzyCompare(1 + s.lookDepth, 1 + at("depth", look::Sliders::defaultDepth))
+                      && qFuzzyCompare(1 + s.lookCorners, 1 + at("corners", look::Sliders::defaultCorners))
+                      && qFuzzyCompare(1 + s.lookSpacing, 1 + at("spacing", look::Sliders::defaultSpacing));
+    return same ? preset.id : QStringLiteral("custom");
+}
+
+QVariantList SettingsModel::lookPresets() const {
+    QVariantList list;
+    for (const QString &id : look::presetIds())
+        list.append(QVariantMap{{"value", id}, {"text", look::loadPreset(id).title}});
+    return list;
+}
+
+QString SettingsModel::applyLookPreset(const QString &id) {
+    if (!look::presetIds().contains(id))
+        return tr("No look preset %1.").arg(id);
+    const look::Preset preset = look::loadPreset(id);
+    const auto at = [&](const char *name, double fallback) { return preset.sliders.value(QLatin1String(name), fallback).toDouble(); };
+    QString error = set(QStringLiteral("look_preset"), id);
+    const auto put = [&](const char *key, double value) {
+        if (error.isEmpty())
+            error = set(QLatin1String(key), value);
+    };
+    put("look_colour", at("colour", look::Sliders::defaultColour));
+    put("look_glow", at("glow", look::Sliders::defaultGlow));
+    put("frost", at("frost", 0.6));
+    put("look_depth", at("depth", look::Sliders::defaultDepth));
+    put("look_corners", at("corners", look::Sliders::defaultCorners));
+    put("look_spacing", at("spacing", look::Sliders::defaultSpacing));
+    return error;
+}
+
+QString SettingsModel::createLookFile() const {
+    const QString path = configDir() + QStringLiteral("/look.json");
+    if (!QFileInfo::exists(path)) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly))
+            file.write(look::defaultLookFile());
+    }
+    return path;
+}
+
+void SettingsModel::openLookFile() {
+    const QString path = createLookFile();
+    if (m_openUrl)
+        m_openUrl(QUrl::fromLocalFile(path));
 }
 
 } // namespace fugue

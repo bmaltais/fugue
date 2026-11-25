@@ -502,6 +502,69 @@ Popup {
                             onMoved: v => panel.apply(panel.model.set("frost", Math.round(v * 10) / 10))
                         }
                     }
+                    // The kit's look: a preset and six sliders (colour, glow, frost, depth, corners, spacing), live; Reset puts them back
+                    SettingsParts.Setting {
+                        id: lookSetting
+                        visible: panel.page === "theme"
+                        title: qsTr("Look")
+                        note: qsTr("A preset sets the sliders; moving one makes it Custom. A look.json file in the settings folder can set any look parameter by name.")
+                        component LookSlider: KitSlider {
+                            required property string settingKey
+                            required property string caption
+                            required property real amount
+                            look: panel.look
+                            Layout.fillWidth: true
+                            railWidth: 40 * panel.u
+                            from: 0
+                            to: 1
+                            stepSize: 0.05
+                            value: amount
+                            text: caption
+                            onMoved: v => panel.apply(panel.model.set(settingKey, Math.round(v * 20) / 20))
+                        }
+                        KitSegmented {
+                            id: presets
+                            objectName: "lookPreset"
+                            look: panel.look
+                            tone: "slate"
+                            text: qsTr("Look")
+                            readonly property var shown: panel.model.lookPresets.concat([{value: "custom", text: qsTr("Custom")}])
+                            options: shown.map(o => o.text)
+                            currentIndex: Math.max(0, shown.findIndex(o => o.value === panel.model.lookPreset))
+                            onMoved: index => { if (shown[index].value !== "custom") panel.apply(panel.model.applyLookPreset(shown[index].value)) }
+                        }
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 4 * panel.u
+                            rowSpacing: panel.u
+                            Text { text: qsTr("Colour"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
+                            LookSlider { objectName: "lookColour"; settingKey: "look_colour"; caption: qsTr("Colour"); amount: panel.model.lookColour }
+                            Text { text: qsTr("Glow"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
+                            LookSlider { objectName: "lookGlow"; settingKey: "look_glow"; caption: qsTr("Glow"); amount: panel.model.lookGlow }
+                            Text { text: qsTr("Depth"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
+                            LookSlider { objectName: "lookDepth"; settingKey: "look_depth"; caption: qsTr("Depth"); amount: panel.model.lookDepth }
+                            Text { text: qsTr("Corners"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
+                            LookSlider { objectName: "lookCorners"; settingKey: "look_corners"; caption: qsTr("Corners"); amount: panel.model.lookCorners }
+                            Text { text: qsTr("Spacing"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
+                            LookSlider { objectName: "lookSpacing"; settingKey: "look_spacing"; caption: qsTr("Spacing"); amount: panel.model.lookSpacing }
+                        }
+                        Row {
+                            spacing: 2 * panel.u
+                            SettingsParts.SmallButton {
+                                objectName: "lookReset"
+                                text: qsTr("Reset to defaults")
+                                onClicked: {
+                                    panel.apply(panel.model.applyLookPreset("calm"))
+                                }
+                            }
+                            SettingsParts.SmallButton {
+                                objectName: "lookFile"
+                                text: qsTr("Open look file…")
+                                onClicked: panel.model.openLookFile()
+                            }
+                        }
+                    }
                     // Theme
                     SettingsParts.Setting {
                         visible: panel.page === "theme"

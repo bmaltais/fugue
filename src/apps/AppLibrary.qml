@@ -141,7 +141,7 @@ Popup {
         signal tapped
         width: 26 * pop.u
         height: 26 * pop.u
-        radius: pop.look.smallCorner
+        radius: pop.look.params.cornerWell * pop.look.unit
         color: pop.look.well
         border.width: chosen || activeFocus ? 2 : 1
         border.color: chosen || activeFocus ? pop.look.accent : pop.look.hairline

@@ -12,8 +12,12 @@ Rectangle {
     width: parent ? parent.width : implicitWidth
     implicitHeight: column.implicitHeight
     height: implicitHeight
-    radius: look.popupCorner
-    color: look.kitGroup
+    // Over a tinted panel (Colour above 0) the fill is translucent, so the tint shows through; plain, it is the opaque `kitGroup`.
+    readonly property bool glass: look.params.panelTint > 0.001
+    radius: Math.min(look.params.cornerGroup * look.unit, 0.3 * height)
+    color: glass ? (look.light ? Qt.rgba(0, 0, 0, look.params.groupFillAlphaLight) : Qt.rgba(1, 1, 1, look.params.groupFillAlpha)) : look.kitGroup
+    border.width: look.params.borders === "hairline" && glass ? 1 : 0
+    border.color: look.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.06)
     Column {
         id: column
         width: parent.width

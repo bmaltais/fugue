@@ -42,6 +42,7 @@ Window {
     visible: true
     property real level: 5
     property bool on: false
+    property int mode: 0
     property int chips: 0
     property int steps: 0
     property int frosts: 0
@@ -64,6 +65,15 @@ Window {
                 target: toggle
                 KitChip { objectName: "chip"; text: "Here"; onTapped: window.chips++ }
                 KitToggle { id: toggle; objectName: "toggle"; checked: window.on; onToggled: v => { window.on = v; window.steps++ } }
+            }
+            KitRow {
+                label: "Seed"
+                KitSegmented {
+                    objectName: "seg"
+                    options: ["Fixed", "Random", "Increment"]
+                    currentIndex: window.mode
+                    onMoved: i => window.mode = i
+                }
             }
             KitRow {
                 label: "Blobs"
@@ -192,6 +202,30 @@ private slots:
         const QPointF mid = slider->mapToScene(QPointF(slider->property("railWidth").toDouble() / 2, slider->height() / 2));
         QTest::mouseClick(window, Qt::LeftButton, {}, mid.toPoint());
         QTRY_COMPARE(window->property("level").toDouble(), 5.0);
+
+        // The chooser: one tab stop, the arrows move and choose (never past the ends), Home and End jump, a press on an option chooses it,
+        // Space and Enter keep the choice, and it asks (`moved`) rather than sets.
+        auto *seg = window->findChild<QQuickItem *>("seg");
+        QVERIFY(seg);
+        seg->forceActiveFocus();
+        QTRY_VERIFY(seg->hasActiveFocus());
+        QCOMPARE(window->property("mode").toInt(), 0);
+        QTest::keyClick(window, Qt::Key_Left);
+        QCOMPARE(window->property("mode").toInt(), 0);
+        QTest::keyClick(window, Qt::Key_Right);
+        QTRY_COMPARE(window->property("mode").toInt(), 1);
+        QTest::keyClick(window, Qt::Key_Space);
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(window->property("mode").toInt(), 1);
+        QTest::keyClick(window, Qt::Key_End);
+        QTRY_COMPARE(window->property("mode").toInt(), 2);
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(window->property("mode").toInt(), 2);
+        QTest::keyClick(window, Qt::Key_Home);
+        QTRY_COMPARE(window->property("mode").toInt(), 0);
+        QTest::mouseClick(window, Qt::LeftButton, {}, seg->mapToScene(QPointF(seg->width() - 10, seg->height() / 2)).toPoint());
+        QTRY_COMPARE(window->property("mode").toInt(), 2);
+        QCOMPARE(seg->property("currentIndex").toInt(), 2);
 
         // The switch: Space asks for the opposite, and the window's answer is what shows.
         toggle->forceActiveFocus();

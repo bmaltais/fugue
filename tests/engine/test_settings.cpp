@@ -142,6 +142,41 @@ private slots:
         QCOMPARE(settingClass("picture_mode"), SettingClass::Preferences);
     }
 
+    // The look factors: 0.4, 0.5 and 0.5 unless set; a number from 0 to 1, nothing else.
+    void theLookFactorsDefaultAndAreRanged() {
+        QTemporaryDir dir;
+        const QStringList keys{"look_colour", "look_glow", "look_depth", "look_corners", "look_spacing"};
+        QCOMPARE(settingDefault("look_preset"), QJsonValue("calm"));
+        QCOMPARE(checkSetting("look_preset", "flat"), QString());
+        QVERIFY(!checkSetting("look_preset", "Not A Preset").isEmpty());
+        QCOMPARE(settingDefault("look_colour"), QJsonValue(0.4));
+        QCOMPARE(settingDefault("look_corners"), QJsonValue(0.5));
+        QCOMPARE(settingDefault("look_spacing"), QJsonValue(0.5));
+        QCOMPARE(settingDefault("look_glow"), QJsonValue(0.5));
+        QCOMPARE(settingDefault("look_depth"), QJsonValue(0.5));
+        const Settings defaults = readSettings(dir.filePath("settings.json")).settings;
+        QCOMPARE(defaults.lookColour, 0.4);
+        QCOMPARE(defaults.lookCorners, 0.5);
+        QCOMPARE(defaults.lookSpacing, 0.5);
+        for (const QString &key : keys) {
+            QCOMPARE(checkSetting(key, 0.0), QString());
+            QCOMPARE(checkSetting(key, 1), QString());
+            QVERIFY(!checkSetting(key, -0.1).isEmpty());
+            QVERIFY(!checkSetting(key, 1.1).isEmpty());
+            QVERIFY(!checkSetting(key, "high").isEmpty());
+            QCOMPARE(settingClass(key), SettingClass::Preferences);
+        }
+        write(dir.filePath("settings.json"), R"({"look_colour": 0, "look_corners": 1, "look_spacing": 0.25})");
+        const Settings set = readSettings(dir.filePath("settings.json")).settings;
+        QCOMPARE(set.lookColour, 0.0);
+        QCOMPARE(set.lookCorners, 1.0);
+        QCOMPARE(set.lookSpacing, 0.25);
+        write(dir.filePath("settings.json"), R"({"look_colour": 7})");
+        const SettingsFile bad = readSettings(dir.filePath("settings.json"));
+        QCOMPARE(bad.problems.size(), 1);
+        QCOMPARE(bad.settings.lookColour, 0.4);
+    }
+
     // The hover magnifier (#123): off unless the file says true; a bad value is a problem.
     void theHoverMagnifierIsOffUnlessSet() {
         QTemporaryDir dir;

@@ -11,21 +11,16 @@ import "../kit"
 // window, Graph (the workflow behind the app). Each is an icon over a short word (ComfyUI's rail is icons only and the owner did
 // not find the way back to the list), reached with Tab, worked with Enter or Space, a tooltip with the key where there is one,
 // and mirrored at the end edge in right-to-left like any row. `standalone` is the app's own window, which has no graph to open.
-Rectangle {
+KitPanel {
     id: rail
     objectName: "appRail"
-    required property CanvasLook look
+    calm: true
     property bool standalone: false
     signal appsRequested
     signal resultsRequested
     signal graphRequested
 
     implicitWidth: 14 * look.unit
-    // A rounded card like the stage and the panel, with their hairline edge.
-    radius: look.popupCorner
-    color: look.popup
-    border.width: 1
-    border.color: look.hairline
     component RailItem: Item {
         id: item
         required property string glyph
@@ -45,7 +40,7 @@ Rectangle {
         Keys.onSpacePressed: item.tapped()
         Rectangle {
             anchors.fill: parent
-            radius: rail.look.smallCorner + 2
+            radius: Math.min(rail.look.params.cornerChip * rail.look.unit, 0.45 * height)
             color: tap.pressed ? rail.look.menuRow : hover.hovered ? rail.look.kitChipHover : rail.look.kitChip
             border.width: item.activeFocus ? 2 : 0
             border.color: rail.look.accent

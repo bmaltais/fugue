@@ -84,6 +84,11 @@ public:
     void setCornerRadius(int setting);
     // settings.json's frost, 0 to 1: the look's `frost` (the kit's frosted controls read it).
     void setFrost(double frost);
+    // settings.json's five look sliders (look_params.h) and the power user's look.json, which the look reads.
+    void setLookSliders(const fugue::look::Sliders &sliders);
+    void setLookFile(const QString &path);
+    // The base parameters of a look preset (look_params.h loadPreset): under look.json and the sliders.
+    void setLookPreset(const QVariantMap &params);
     // A straight sRGB blend, `toB` of the way from a to b.
     static QColor mix(const QColor &a, const QColor &b, double toB);
 

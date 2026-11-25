@@ -35,7 +35,7 @@ Rectangle {
     implicitWidth: round ? implicitHeight : pill && text === "" ? 2 * implicitHeight : Math.max(content.implicitWidth + 5 * look.unit, implicitHeight)
     width: implicitWidth
     height: implicitHeight
-    radius: pill || round ? height / 2 : look.smallCorner + 2
+    radius: round || (pill && look.params.chipShape === "pill") ? height / 2 : Math.min(look.params.cornerChip * look.unit, 0.45 * height)
     readonly property bool glass: frosted && look.frost > 0.001 // the frost setting at 0 makes it the plain chip
     readonly property color ink: glass && glassLoader.item ? (glassLoader.item as KitFrost).ink : glass ? "white" : look.text
     readonly property bool darkInk: glass && glassLoader.item ? (glassLoader.item as KitFrost).pale : false
@@ -47,7 +47,7 @@ Rectangle {
     Accessible.role: Accessible.Button
     Accessible.name: text !== "" ? text : tip
     Accessible.onPressAction: chip.tapped()
-    Behavior on color { ColorAnimation { duration: 100; easing.type: Easing.OutCubic } }
+    Behavior on color { ColorAnimation { duration: chip.look.params.durColor; easing.type: Easing.OutCubic } }
 
     KitRaise { look: chip.look; radius: chip.radius; visible: !chip.glass }
     Loader {

@@ -23,7 +23,7 @@ const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "pack_paths",    "new_seed",
                         "embed_workflow", "corner_radius",  "hover_magnifier",
-                        "restore_tabs",   "picture_mode", "step_preview", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost"};
+                        "restore_tabs",   "picture_mode", "step_preview", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -96,6 +96,18 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.pictureMode = value.toString();
     else if (key == QLatin1String("step_preview"))
         settings.stepPreview = value.toString();
+    else if (key == QLatin1String("look_preset"))
+        settings.lookPreset = value.toString();
+    else if (key == QLatin1String("look_colour"))
+        settings.lookColour = std::clamp(value.toDouble(0.4), 0.0, 1.0);
+    else if (key == QLatin1String("look_glow"))
+        settings.lookGlow = std::clamp(value.toDouble(0.5), 0.0, 1.0);
+    else if (key == QLatin1String("look_depth"))
+        settings.lookDepth = std::clamp(value.toDouble(0.5), 0.0, 1.0);
+    else if (key == QLatin1String("look_corners"))
+        settings.lookCorners = std::clamp(value.toDouble(0.5), 0.0, 1.0);
+    else if (key == QLatin1String("look_spacing"))
+        settings.lookSpacing = std::clamp(value.toDouble(0.5), 0.0, 1.0);
     else if (key == QLatin1String("hover_magnifier"))
         settings.hoverMagnifier = value.toBool();
     else if (key == QLatin1String("frost"))
@@ -145,7 +157,7 @@ QString settingOriginName(SettingOrigin origin) {
 }
 
 SettingClass settingClass(const QString &key) {
-    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "frost", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview"};
+    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview"};
     if (preferences.contains(key))
         return SettingClass::Preferences;
     if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
@@ -186,6 +198,13 @@ QJsonValue settingDefault(const QString &key) {
         return false;
     if (key == QLatin1String("frost"))
         return 0.6;
+    if (key == QLatin1String("look_preset"))
+        return QStringLiteral("calm");
+    if (key == QLatin1String("look_colour"))
+        return 0.4;
+    if (key == QLatin1String("look_glow") || key == QLatin1String("look_depth") || key == QLatin1String("look_corners")
+        || key == QLatin1String("look_spacing"))
+        return 0.5;
     if (key == QLatin1String("restore_tabs"))
         return true;
     if (key == QLatin1String("cache_results_gb"))
@@ -228,6 +247,12 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
     }
     if (key == QLatin1String("frost"))
         return value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= 1 ? QString() : QStringLiteral("frost must be a number from 0 to 1.");
+    if (key == QLatin1String("look_preset"))
+        return value.isString() && QRegularExpression(QStringLiteral("^[a-z0-9_-]{1,32}$")).match(value.toString()).hasMatch()
+                   ? QString() : QStringLiteral("look_preset must be a preset's id: lower-case letters, digits, - and _.");
+    if (key == QLatin1String("look_colour") || key == QLatin1String("look_glow") || key == QLatin1String("look_depth")
+        || key == QLatin1String("look_corners") || key == QLatin1String("look_spacing"))
+        return value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= 1 ? QString() : QStringLiteral("%1 must be a number from 0 to 1.").arg(key);
     if (key == QLatin1String("hover_magnifier"))
         return value.isBool() ? QString() : QStringLiteral("hover_magnifier must be true or false.");
     if (key == QLatin1String("restore_tabs"))
@@ -420,6 +445,18 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
         return settings.hoverMagnifier;
     if (key == QLatin1String("frost"))
         return settings.frost;
+    if (key == QLatin1String("look_preset"))
+        return settings.lookPreset;
+    if (key == QLatin1String("look_colour"))
+        return settings.lookColour;
+    if (key == QLatin1String("look_glow"))
+        return settings.lookGlow;
+    if (key == QLatin1String("look_depth"))
+        return settings.lookDepth;
+    if (key == QLatin1String("look_corners"))
+        return settings.lookCorners;
+    if (key == QLatin1String("look_spacing"))
+        return settings.lookSpacing;
     if (key == QLatin1String("restore_tabs"))
         return settings.restoreTabs;
     if (key == QLatin1String("cache_results_gb"))

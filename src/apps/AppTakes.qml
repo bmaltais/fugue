@@ -38,7 +38,7 @@ ListView {
         readonly property bool failed: modelData.status === "failed"
         width: strip.size
         height: strip.size
-        radius: strip.look.smallCorner + 2
+        radius: strip.look.params.cornerWell * strip.look.unit
         color: strip.look.kitChip
         border.width: modelData.shown || (strip.activeFocus && ListView.isCurrentItem) ? 2 : 0
         border.color: strip.look.accent

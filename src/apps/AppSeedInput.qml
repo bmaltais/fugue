@@ -1,15 +1,13 @@
 import QtQuick
 import QtQuick.Layouts
 import Fugue
-import "../canvas"
 import "../kit"
 
-// A seed as a node has it, in one row of the height of the other fields (7u): the number in a plain well (no Material outline,
-// no floating label: the mode is said by the mode control alone), a dice KitChip pill for a new number, and the mode as a chip
-// menu (AppChoice): Fixed (the run uses the number), Random (a new one every run, the field then shows "New each run") or Increment
+// A seed as a node has it: the number in a recessed well (no Material outline, no floating label: the mode is said by the mode
+// control alone) with a dice KitChip for a new number, and under them the mode as a KitSegmented: Fixed (the run uses the number), Random (a new one every run, the field then shows "New each run") or Increment
 // (the number, then the next after each run). The mode and the number live in AppView (setSeedMode, rollSeed, setValue);
 // this only shows them.
-RowLayout {
+ColumnLayout {
     id: row
     required property var field
     required property AppView appView
@@ -18,6 +16,7 @@ RowLayout {
     property var current: field.value
     readonly property bool random: mode === "random"
     spacing: look.unit
+    readonly property var modes: ["fixed", "random", "increment"]
 
     Connections {
         target: row.appView
@@ -28,12 +27,15 @@ RowLayout {
             row.current = row.appView.valueOf(key)
         }
     }
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: row.look.unit
     Rectangle {
         id: well
         Layout.fillWidth: true
         Layout.minimumWidth: 16 * row.look.unit
         implicitHeight: 7 * row.look.unit
-        radius: row.look.smallCorner
+        radius: row.look.params.cornerWell * row.look.unit
         color: "transparent"
         KitWell { look: row.look; focused: input.activeFocus } // recessed, as every field
         opacity: row.random ? 0.6 : 1
@@ -80,15 +82,14 @@ RowLayout {
         enabled: !row.random
         onTapped: row.appView.rollSeed(row.field.key)
     }
-    AppChoice {
+    }
+    KitSegmented {
         objectName: "appSeedMode-" + row.field.key
         look: row.look
-        Layout.preferredWidth: 20 * row.look.unit
-        options: [{ value: "fixed", text: qsTr("Fixed") },
-                  { value: "random", text: qsTr("Random") },
-                  { value: "increment", text: qsTr("Increment") }]
-        value: row.mode
-        label: qsTr("%1 mode").arg(row.field.label)
-        onPicked: v => row.appView.setSeedMode(row.field.key, v)
+        Layout.fillWidth: true
+        options: [qsTr("Fixed"), qsTr("Random"), qsTr("Increment")]
+        currentIndex: Math.max(0, row.modes.indexOf(row.mode))
+        text: qsTr("%1 mode").arg(row.field.label)
+        onMoved: index => row.appView.setSeedMode(row.field.key, row.modes[index])
     }
 }

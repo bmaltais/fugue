@@ -1924,5 +1924,15 @@
   "Use sample": "Use sample",
   "no %1": "no %1",
   "seed %1": "seed %1",
-  "seed new each run": "seed new each run"
+  "seed new each run": "seed new each run",
+  "A preset sets the sliders; moving one makes it Custom. A look.json file in the settings folder can set any look parameter by name.": "A preset sets the sliders; moving one makes it Custom. A look.json file in the settings folder can set any look parameter by name.",
+  "Colour": "Colour",
+  "Corners": "Corners",
+  "Depth": "Depth",
+  "Glow": "Glow",
+  "Look": "Look",
+  "No look preset %1.": "No look preset %1.",
+  "Open look file…": "Open look file…",
+  "Reset to defaults": "Reset to defaults",
+  "Spacing": "Spacing"
 }

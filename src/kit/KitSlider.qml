@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
 import "../canvas"
+import "KitTone.js" as KitTone
 
 // A round-thumb slider of the Drift kit (docs/canvas-look.md "Drift kit"): a 1u rail on `kitTrack`, filled to the
 // thumb in the accent, a 4.5u `kitKnob` thumb, optional tick dots under the rail, optional Lucide glyphs at the
@@ -28,8 +29,11 @@ Item {
     property string text // the name assistive tools say; a KitRow with a label names its own slider
     property real railWidth: 40 * look.unit
     property real endWidth: 6.5 * look.unit
+    property string tone: KitTone.nearest(slider) // the panel's tone; "" is the accent
     signal moved(real value)
 
+    readonly property color toneColor: tone === "" || look.params.controlColour === "accent" ? look.accent : look.tone(tone).glass
+    readonly property bool glass: look.frost > 0.001
     readonly property bool mirrored: LayoutMirroring.enabled
     readonly property real fraction: to > from ? Math.max(0, Math.min(1, (value - from) / (to - from))) : 0
     readonly property real thumbSize: 4.5 * look.unit
@@ -77,20 +81,33 @@ Item {
         id: rail
         width: slider.railWidth
         height: parent.height
-        Rectangle {
+        Rectangle { // the recessed rail
             id: groove
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
-            height: slider.look.unit
+            height: 1.5 * slider.look.unit
             radius: height / 2
-            color: slider.look.kitTrack
-            Rectangle {
-                x: slider.mirrored ? parent.width - width : 0
-                width: slider.thumbSize / 2 + (parent.width - slider.thumbSize) * slider.fraction
-                height: parent.height
+            color: slider.glass ? Qt.rgba(0, 0, 0, slider.look.light ? slider.look.params.glassTrackAlphaLight : slider.look.params.glassTrackAlpha) : slider.look.kitTrack
+            border.width: slider.glass ? 1 : 0
+            border.color: Qt.rgba(0, 0, 0, slider.look.params.trackEdge * (slider.look.light ? 0.64 : 1))
+            Rectangle { // the fill, the tone, inside the rail
+                id: fill
+                x: slider.mirrored ? parent.width - width - 0.25 * slider.look.unit : 0.25 * slider.look.unit
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.max(0, slider.thumbSize / 2 + (parent.width - slider.thumbSize) * slider.fraction - 0.25 * slider.look.unit)
+                height: slider.look.unit
                 radius: height / 2
-                color: slider.look.accent
+                color: slider.glass ? Qt.alpha(slider.toneColor, slider.look.params.sliderFill) : Qt.tint(slider.look.kitTrack, Qt.alpha(slider.toneColor, 0.75))
             }
+        }
+        KitHalo { // a hint of the tone along the filled part
+            look: slider.look
+            tone: slider.toneColor
+            lit: slider.fraction > 0.02 && slider.glass
+            boxWidth: Math.max(fill.width + 20 * slider.look.unit, 20 * slider.look.unit)
+            boxHeight: 14 * slider.look.unit
+            centerX: slider.mirrored ? groove.width - fill.width / 2 : fill.width / 2
+            centerY: groove.y + groove.height / 2
         }
         Repeater {
             model: slider.ticks && slider.tickCount > 1 && slider.tickCount <= 24 ? slider.tickCount : 0
@@ -116,6 +133,13 @@ Item {
             color: slider.look.kitKnob
             border.width: slider.activeFocus ? 2 : slider.look.light ? 1 : 0
             border.color: slider.activeFocus ? slider.look.accent : slider.look.hairlineStrong
+            Rectangle { // the thumb's drop shadow
+                anchors { fill: parent; topMargin: slider.look.params.raiseShadowOffset; bottomMargin: -slider.look.params.raiseShadowOffset }
+                z: -1
+                radius: width / 2
+                color: Qt.rgba(0, 0, 0, slider.look.light ? 0.25 : 0.45)
+                visible: slider.look.params.raiseShadowOffset > 0.01
+            }
         }
         // A press or a drag anywhere on the rail's row asks for the value under the pointer.
         DragHandler {

@@ -288,6 +288,40 @@ private slots:
         QVERIFY(!readSettings(settingsFile()).document.contains("corner_radius"));
     }
 
+    // The six sliders reach the Theme's look live; the presets set all six, a slider move after one reads Custom, and the defaults are Calm.
+    void theLookSlidersApplyLiveAndPresetsAreDerived() {
+        QTemporaryDir omarchy;
+        Theme theme(omarchy.path());
+        SettingsModel model;
+        model.attach(nullptr, nullptr, nullptr, &theme);
+        CanvasLook *look = theme.look();
+        QCOMPARE(model.lookPreset(), QString("calm"));
+        QCOMPARE(look->params().value("haloOpacity").toDouble(), 0.18);
+        QCOMPARE(look->params().value("titleFont").toString(), QString("serif"));
+        QCOMPARE(model.lookPresets().size(), 2);
+        QCOMPARE(model.applyLookPreset("flat"), QString());
+        QCOMPARE(look->params().value("titleFont").toString(), QString("ui")); // a preset is parameter values, enumerated ones too
+        QCOMPARE(look->params().value("areaLayout").toString(), QString("panes"));
+        QCOMPARE(model.lookPreset(), QString("flat"));
+        QCOMPARE(model.lookColour(), 0.0);
+        QCOMPARE(model.lookGlow(), 0.0);
+        QCOMPARE(model.frost(), 0.0);
+        QCOMPARE(model.lookDepth(), 0.0);
+        QCOMPARE(model.lookCorners(), 0.1);
+        QCOMPARE(model.lookSpacing(), 0.5);
+        QCOMPARE(look->params().value("haloOpacity").toDouble(), 0.0);
+        QCOMPARE(look->params().value("panelTint").toDouble(), 0.0);
+        QCOMPARE(look->property("frost").toDouble(), 0.0);
+        QCOMPARE(model.set("look_glow", 0.3), QString());
+        QCOMPARE(model.lookPreset(), QString("custom"));
+        QVERIFY(!model.set("look_spacing", 2).isEmpty());
+        QCOMPARE(model.applyLookPreset("calm"), QString());
+        QCOMPARE(model.lookPreset(), QString("calm"));
+        QVERIFY(!readSettings(settingsFile()).document.contains("look_glow")); // Calm is the defaults: nothing stays in the file
+        QCOMPARE(look->params().value("titleFont").toString(), QString("serif"));
+        QVERIFY(!model.applyLookPreset("loud").isEmpty());
+    }
+
     // Frost: the glass of the kit's controls over a picture. 0.6 by default; the Theme's look follows it live; 0 is off (the look
     // reads 0, which the kit takes as plain chips); a value outside 0 to 1 is refused; the default leaves the file.
     void theFrostAppliesLiveAndZeroIsOff() {

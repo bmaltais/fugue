@@ -4,6 +4,7 @@ import QtQuick.Controls
 import Fugue
 import "../canvas"
 import "../canvas/widgets"
+import "../kit"
 
 // A model input: a well with the model's name that opens the model menu (WidgetMenu, searched by word start), the same menu
 // rows as a node's model picker: the models the providers offer, the files in the model folders with their size and the
@@ -24,10 +25,14 @@ Rectangle {
 
     objectName: "appInput-" + field.key
     implicitHeight: 7 * look.unit
-    radius: look.smallCorner
-    color: hover.hovered ? look.menuRow : look.well
-    border.width: 1
-    border.color: activeFocus ? look.accent : look.hairlineStrong
+    radius: look.params.cornerWell * look.unit
+    color: "transparent"
+    KitWell { look: root.look; focused: root.activeFocus } // recessed, as every field
+    Rectangle {
+        anchors.fill: parent
+        radius: parent.radius
+        color: hover.hovered ? Qt.alpha(root.look.text, 0.06) : "transparent"
+    }
     activeFocusOnTab: true
     Accessible.role: Accessible.ComboBox
     Accessible.name: field.label

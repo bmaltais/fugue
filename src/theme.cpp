@@ -272,6 +272,12 @@ void Theme::refreshLook() {
 
 void Theme::setFrost(double frost) { m_look->setFrost(frost); }
 
+void Theme::setLookSliders(const fugue::look::Sliders &sliders) { m_look->setSliders(sliders); }
+
+void Theme::setLookFile(const QString &path) { m_look->setLookFile(path); }
+
+void Theme::setLookPreset(const QVariantMap &params) { m_look->setPreset(params); }
+
 void Theme::setCornerRadius(int setting) {
     if (setting == m_cornerSetting)
         return;
