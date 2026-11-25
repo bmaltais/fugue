@@ -639,6 +639,27 @@ QVariantMap AppView::maskPicture() const {
     return {};
 }
 
+QVariantMap AppView::takeInputPicture() const {
+    if (!m_app)
+        return {};
+    const int index = takeIndex();
+    if (index < 0)
+        return {};
+    const Take &take = m_state.value(m_tab).takes.at(index);
+    const QString key = m_app->compare ? m_app->compare->input : imageKey();
+    if (key.isEmpty() || !take.values.contains(key))
+        return {};
+    const QUrl url = fileUrl(take.values.value(key).toString());
+    if (!url.isValid())
+        return {};
+    QImageReader reader(url.toLocalFile());
+    reader.setAutoTransform(true);
+    const QSize size = reader.size();
+    if (!size.isValid())
+        return {};
+    return {{"url", url}, {"width", size.width()}, {"height", size.height()}};
+}
+
 QRectF AppView::inputPlacement(int resultWidth, int resultHeight) const {
     if (!m_app || !m_app->compare)
         return {};

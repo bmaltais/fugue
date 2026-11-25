@@ -660,7 +660,13 @@ private slots:
         // The width unknown: the height says the scale.
         QCOMPARE(m_view->inputPlacement(0, 150), QRectF(0, 50, 50, 50));
         QCOMPARE(m_view->inputPlacement(0, 0), QRectF());
-        // The take is what was run: the form changing after it moves nothing.
+        // The take is what was run: the form changing after it moves nothing, B included (the picture it ran with).
+        QCOMPARE(m_view->takeInputPicture().value("width").toInt(), 100);
+        QVERIFY(QImage(40, 30, QImage::Format_RGB32).save(folder.filePath("other.png")));
+        m_view->setValue("image", folder.filePath("other.png"));
+        QCOMPARE(m_view->takeInputPicture().value("url").toUrl(), QUrl::fromLocalFile(picture));
+        QCOMPARE(m_view->takeInputPicture().value("height").toInt(), 100);
+        m_view->setValue("image", picture);
         m_view->setValue("top", 0);
         m_view->setValue("left", 100);
         QCOMPARE(m_view->inputPlacement(100, 300), QRectF(0, 100, 100, 100));

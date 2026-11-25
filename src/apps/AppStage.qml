@@ -39,13 +39,17 @@ Item {
     property bool detailsOpen: false
     readonly property alias viewer: view
 
-    function refreshInput() { inputPicture = appView.maskPicture() }
+    // B of the Compare: the picture the shown take ran with, else (an older take, a file gone) the form's own.
+    function refreshInput() {
+        const taken = appView.takeInputPicture()
+        inputPicture = taken.url !== undefined ? taken : appView.maskPicture()
+    }
     Component.onCompleted: refreshInput()
     Connections {
         target: stage.appView
         function onValueChanged() { stage.refreshInput() }
         function onAppChanged() { stage.refreshInput(); stage.comparing = false; stage.detailsOpen = false; stage.notice = "" }
-        function onRunChanged() { if (stage.appView.busy) stage.notice = ""; if (stage.resultIndex >= stage.results.length) stage.resultIndex = 0 }
+        function onRunChanged() { stage.refreshInput(); if (stage.appView.busy) stage.notice = ""; if (stage.resultIndex >= stage.results.length) stage.resultIndex = 0 }
     }
     onCurrentChanged: view.fit()
     function toggleCompare() {
