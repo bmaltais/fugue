@@ -796,6 +796,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Section title, group, row, separator | `KitSection`, `KitGroup`, `KitRow`, `KitSeparator` | Built (group fill and border adapt to the tint, 20.5) |
 | Recessed field, smoked mode | `KitWell` | Built (numbers to align, 20.6) |
 | Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7); `KitChip.toned` tints a chip that is on with the panel's tone |
+| Copy button for an error message | `KitCopyButton` | Built: a 6u round `KitChip` with the `copy` glyph, a check for `durCopied` after a press; `copyText` is the whole message with details and ids |
 | Toggle | `KitToggle` | Built (20.8, 20.11) |
 | Segmented chooser | `KitSegmented` | Built (20.9) |
 | Slider | `KitSlider` | Built (20.10, 20.11) |
@@ -900,6 +901,7 @@ numbers win (20.15). A field on a plain panel is never glass. Frost 0 or no back
 | Dropdown (`KitDropdown`) | a raised chip (it is clicked; a value picked from a menu is not typed, so it is not a well): the chosen text at the start in `text` (`label` for a prompt such as "Choose a picture"), elided, a 14px `chevron-down` in `label` at the end, 1u between them, both 2.5u from the ends; `menuRow` fill while its menu is open; the App view's picture, choice and model inputs (owner, 2026-11-25) |
 | Frosted chip (over a picture, Frost above 0) | blur `4 + 16 f` px, saturate `100 + 50 f` %; tint white `0.06 + 0.20 f`; edge 1px white `0.12 + 0.30 f`; inset top shine white `0.10 + 0.30 f`; white ink with a 0 1px 2px black 45% text shadow (`f` is the Frost setting, 0.6 by default) |
 | Frosted chip over a pale patch (luma above 0.55) | tint white `0.30 + 0.30 f`, raised in 5% steps until the dark ink `#17171b` reads 4.5:1; edge black `0.08 + 0.10 f`; inset top shine white 60%; drop 0 1px 2px black 10% |
+| Frosted chip, on (`current`) | lit glass, no accent, no ring (`KitFrost.on`): over a dark patch white tint 0.78 (0.86 hovered), edge white 0.9, ink `#17171b`; over a pale patch the inverse, black from 0.62 raised in 5% steps until white ink reads 4.5:1, white ink; faded in over `durColor`; Frost 0 is the plain chip's `selectedRow` fill |
 | Mixed pictures | each control measures its own patch (a 64px grab, once per picture and position); the ink is chosen per control |
 | Frost 0 | opaque `#3a3a40` equivalent (`kit-chip`), no edge, no blur, no measuring, ink `text` |
 | Focus | 2px accent ring; Enter or Space presses |
@@ -1067,6 +1069,7 @@ range is said once in the log and ignored or clamped; the sliders apply on top.
 | `durColor` | 100 | 0 to 1000 | - | a colour change in ms |
 | `durToggle` | 160 | 0 to 1000 | - | a toggle's knob and track in ms |
 | `durThumb` | 180 | 0 to 1000 | - | a chooser's thumb in ms |
+| `durCopied` | 1500 | 0 to 10000 | - | how long a copy button shows Copied, in ms |
 | `thumbAlpha` | 0.35 | 0 to 1 | - | a scroll bar thumb's alpha at rest (16.1) |
 | `thumbAlphaLight` | 0.45 | 0 to 1 | - | the same on a light theme |
 | `thumbHover` | 0.7 | 0 to 1 | - | the thumb's alpha while hovered |

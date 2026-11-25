@@ -4,7 +4,9 @@
 //
 //   FUGUE_KIT_SHOTS=~/.cache/fugue-ui-kit QT_QUICK_BACKEND=rhi build/test_kit shots
 
+#include <QClipboard>
 #include <QDir>
+#include <QGuiApplication>
 #include <QFile>
 #include <QImage>
 #include <QPainter>
@@ -46,6 +48,7 @@ Window {
     property int chips: 0
     property int steps: 0
     property int frosts: 0
+    property bool frostOn: false
     Column {
         width: parent.width
         Rectangle {
@@ -53,7 +56,8 @@ Window {
             width: 200
             height: 50
             color: "#c9a4c8"
-            KitChip { objectName: "frostChip"; x: 10; y: 8; frosted: true; backdrop: sky; text: "Frost"; onTapped: window.frosts++ }
+            KitCopyButton { objectName: "copyButton"; x: 150; y: 8; copyText: "It broke (request r-42)\nSecond line" }
+            KitChip { objectName: "frostChip"; x: 10; y: 8; frosted: true; backdrop: sky; text: "Frost"; current: window.frostOn; onTapped: window.frosts++ }
         }
         KitGroup {
             id: group
@@ -307,6 +311,31 @@ private slots:
         QTRY_VERIFY(frost->hasActiveFocus());
         QTest::keyClick(window, Qt::Key_Space);
         QTRY_COMPARE(window->property("frosts").toInt(), 2);
+        // A frosted chip that is on shows it (lit glass, KitFrost.on) and is off again with `current`.
+        auto *glass = frost->findChild<QQuickItem *>("frostOn");
+        QVERIFY(glass);
+        QVERIFY(!frost->findChild<QQuickItem *>("frostOn")->isVisible());
+        window->setProperty("frostOn", true);
+        QTRY_VERIFY(glass->isVisible());
+        QTRY_COMPARE(glass->opacity(), 1.0);
+        window->setProperty("frostOn", false);
+        QTRY_VERIFY(!glass->isVisible());
+        // The copy button: a press and Enter put the whole text on the clipboard, then it says Copied and goes back.
+        auto *copy = window->findChild<QQuickItem *>("copyButton");
+        QVERIFY(copy);
+        QCOMPARE(copy->property("glyph").toString(), QStringLiteral("copy"));
+        QGuiApplication::clipboard()->clear();
+        QTest::mouseClick(window, Qt::LeftButton, {}, centerOf(copy).toPoint());
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("It broke (request r-42)\nSecond line"));
+        QVERIFY(copy->property("copied").toBool());
+        QCOMPARE(copy->property("glyph").toString(), QStringLiteral("check"));
+        QTRY_VERIFY(!copy->property("copied").toBool()); // durCopied, 1.5 s
+        QGuiApplication::clipboard()->clear();
+        copy->forceActiveFocus();
+        QTRY_VERIFY(copy->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("It broke (request r-42)\nSecond line"));
+        QGuiApplication::clipboard()->clear();
         // The frost setting at 0 makes it the plain chip: no glass, still pressed the same.
         QVERIFY(frost->property("glass").toBool());
         shell.theme.look()->setFrost(0);

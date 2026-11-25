@@ -132,7 +132,9 @@ private slots:
         // Add to launcher: an entry that starts this app, in the scratch folder only.
         QTRY_VERIFY(find(app.window, "appLauncherToggle"));
         QQuickItem *toggle = find(app.window, "appLauncherToggle");
-        QVERIFY(toggle->property("tip").toString().startsWith("Add to launcher"));
+        QCOMPARE(toggle->property("glyph").toString(), QStringLiteral("app-window"));
+        QVERIFY(!toggle->property("current").toBool());
+        QVERIFY(toggle->property("tip").toString().startsWith("Add to the app launcher"));
         tap(app.window, toggle);
         const QString entry = rig.data.filePath("applications/fugue-app-test-app.desktop");
         QTRY_VERIFY(QFileInfo::exists(entry));
@@ -141,12 +143,14 @@ private slots:
         const QString text = QString::fromUtf8(file.readAll());
         QVERIFY(text.contains("Name=Block title\n"));
         QVERIFY(text.contains("Exec=fugue --app test-app\n"));
-        QTRY_VERIFY(find(app.window, "appLauncherToggle")->property("tip").toString().startsWith("Remove from launcher"));
-        QVERIFY(app.workflows.notice().contains("launcher"));
+        QTRY_VERIFY(find(app.window, "appLauncherToggle")->property("current").toBool());
+        QVERIFY(find(app.window, "appLauncherToggle")->property("tip").toString().startsWith("In the app launcher"));
+        QCOMPARE(app.workflows.notice(), QStringLiteral("Added to the app launcher"));
 
         tap(app.window, find(app.window, "appLauncherToggle"));
         QTRY_VERIFY(!QFileInfo::exists(entry));
-        QTRY_VERIFY(find(app.window, "appLauncherToggle")->property("tip").toString().startsWith("Add to launcher"));
+        QTRY_VERIFY(!find(app.window, "appLauncherToggle")->property("current").toBool());
+        QVERIFY(find(app.window, "appLauncherToggle")->property("tip").toString().startsWith("Add to the app launcher"));
 
         // Open in Fugue: the full window, in a process of its own.
         tap(app.window, find(app.window, "appOpenInFugue"));

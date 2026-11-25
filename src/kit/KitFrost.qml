@@ -27,6 +27,10 @@ Item {
     property real radius: height / 2
     property bool hovered: false
     property bool pressed: false
+    // A toggle that is on (KitChip.current): lit glass, no accent. Over a dark picture a near-white tint with dark ink and a bright edge; over a pale
+    // one the inverse, a dark base (raised until white ink reads at 4.5:1) with white ink. Frost 0 is the plain control, which the chip fills itself.
+    property bool on: false
+    readonly property bool lit: on && !frozen && !smoked
     property color plainColor: look.kitHeroPill // what the control is with the frost off
     readonly property bool frozen: look.frost <= 0.001
     readonly property real strength: look.frost / 0.6 // 1 at the default
@@ -36,8 +40,16 @@ Item {
     property real patch: -1
     readonly property bool pale: !frozen && patch > PictureLuma.paleThreshold()
     readonly property color darkInk: look.light ? look.text : "#17171b"
-    readonly property color ink: frozen || smoked ? "white" : pale ? darkInk : "white"
+    readonly property color ink: frozen || smoked ? "white" : (pale !== lit) ? darkInk : "white"
     readonly property color labelInk: frozen ? look.text : pale ? darkInk : "white"
+    // The dark base alpha under the white ink of a lit chip over a pale picture.
+    readonly property real litBase: {
+        const lum = patch < 0 ? 0.2 : patch
+        let b = 0.62
+        while (b < 0.95 && 1.05 / (lum * (1 - b) + 0.05) < 4.5)
+            b += 0.05
+        return b
+    }
     // The tint alpha and the dark base alpha that make the ink read at 4.5:1 over the measured patch.
     readonly property var plan: {
         const lum = patch < 0 ? 0.2 : patch
@@ -190,5 +202,16 @@ Item {
         height: 1
         y: parent.height - 2
         color: Qt.rgba(1, 1, 1, 0.12)
+    }
+    Rectangle { // on: lit glass over the tint, faded in over durColor
+        objectName: "frostOn"
+        anchors.fill: parent
+        radius: frost.radius
+        opacity: frost.lit ? 1 : 0
+        visible: opacity > 0
+        color: frost.pale ? Qt.rgba(0, 0, 0, frost.litBase) : Qt.rgba(1, 1, 1, Math.min(0.95, 0.78 + (frost.hovered || frost.pressed ? 0.08 : 0)))
+        border.width: frost.pale ? 0 : 1
+        border.color: Qt.rgba(1, 1, 1, 0.9)
+        Behavior on opacity { NumberAnimation { duration: frost.look.params.durColor } }
     }
 }

@@ -226,16 +226,20 @@ Rectangle {
                     HeroButton {
                         objectName: "appLauncherToggle"
                         visible: page.launchable
-                        glyph: "pin"
-                        tip: page.launcher && page.launcher.listed ? qsTr("Remove from launcher: take this app out of the desktop launcher")
-                                                                   : qsTr("Add to launcher: start this app from the desktop launcher, in a window of its own")
+                        glyph: "app-window"
+                        current: page.launcher !== null && page.launcher.listed
+                        Accessible.name: qsTr("Add to the app launcher")
+                        Accessible.checkable: true
+                        Accessible.checked: current
+                        tip: current ? qsTr("In the app launcher. Click to take it out")
+                                     : qsTr("Add to the app launcher: start this app by name, in a window of its own")
                         onTapped: page.launcher.listed ? page.launcher.remove() : page.launcher.add()
                     }
                     HeroButton {
                         objectName: "appKeep"
                         visible: page.launcher !== null && page.launcher.keepable
                         glyph: "plus"
-                        tip: qsTr("Keep this app: add it to your apps and your launcher")
+                        tip: qsTr("Keep this app: add it to your apps and your app launcher")
                         onTapped: page.launcher.keep()
                     }
                     HeroButton {
@@ -330,16 +334,26 @@ Rectangle {
                     }
                 }
 
-                Text {
-                    objectName: "appProblem"
+                RowLayout {
                     Layout.fillWidth: true
                     Layout.leftMargin: page.look.params.panelPad * page.u
                     Layout.rightMargin: page.look.params.panelPad * page.u
-                    visible: text !== ""
-                    text: page.appView.problem
-                    color: page.look.error
-                    font.pixelSize: page.look.labelSize
-                    wrapMode: Text.Wrap
+                    visible: page.appView.problem !== ""
+                    spacing: page.u
+                    Text {
+                        objectName: "appProblem"
+                        Layout.fillWidth: true
+                        text: page.appView.problem
+                        color: page.look.error
+                        font.pixelSize: page.look.labelSize
+                        wrapMode: Text.Wrap
+                    }
+                    KitCopyButton {
+                        objectName: "appProblemCopy"
+                        look: page.look
+                        Layout.alignment: Qt.AlignTop
+                        copyText: page.appView.problem
+                    }
                 }
                 // Live (#471): off at first, per tab, for the session. Live re-runs once an input has been still for a moment (the
                 // canvas Live toggle's wording, #315); Repeat starts the next run as soon as one ends (with a Random seed: new

@@ -11,7 +11,8 @@
 # #478: the workflow notice is a Banner (an item, its Loader and its content holder), two items more than the rectangle it was; the keymap notice is one too: four items more.
 # #393: the app builder (AppBuilderDialog) is one item over the window; its picking banner and the canvas pick layer are made only while picking: one item more.
 # App | Graph switch always shown in the window bar (owner, 2026-11-25; it was made only for an app workflow): the KitSegmented, its track, thumb, two options and their labels, the tooltip: 13 items more.
-items 270
+# Copy buttons for error messages (owner, 2026-11-25): the workflow notice holds a Loader for its KitCopyButton (made only while a notice shows): one item more.
+items 271
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 appViewSwitch 1
