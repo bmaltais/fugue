@@ -117,6 +117,10 @@ foreach(look ${fugue_look_files})
 endforeach()
 qt_add_resources(fugue_core fugue_looks PREFIX /fugue/looks FILES ${fugue_look_sources})
 
+# The `fal` provider's model table (spec 8.7): share/providers/fal-models.json compiled in under :/fugue/providers.
+set_source_files_properties(share/providers/fal-models.json PROPERTIES QT_RESOURCE_ALIAS fal-models.json)
+qt_add_resources(fugue_engine fugue_provider_tables PREFIX /fugue/providers FILES share/providers/fal-models.json)
+
 # A folder of the window's QML: its .qml files compiled in under qrc:<prefix>, where the
 # others import them by folder. A new .qml file there needs no line here. The same files are
 # written as build/qmllint/<name>.qrc too, so the qmllint test reads them where the app does.

@@ -9,6 +9,7 @@
 #include <QByteArray>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSize>
 #include <QString>
 
 #include "engine/provider.h"
@@ -52,6 +53,12 @@ QJsonObject imgGenBody(const JobRequest &request, Errors *errors);
 QJsonValue seedOf(const QJsonValue &seed);
 // The chat request for text.generate (8.1) for the served model `model`.
 QJsonObject chatBody(const QString &model, const JobRequest &request, Errors *errors);
+
+// The picture's size from a PNG's header (8-byte signature, then IHDR: width and height as
+// big-endian 32-bit numbers); 0 x 0 for any other file.
+QSize pngSize(const QByteArray &bytes);
+// The format of picture bytes ("png", "jpeg", "webp"), from their first bytes; empty when unknown.
+QString formatOf(const QByteArray &bytes);
 
 // The first object of an array, an empty one for an empty array.
 QJsonObject firstObject(const QJsonArray &array);
