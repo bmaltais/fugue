@@ -1,0 +1,64 @@
+#!/bin/bash
+set -euo pipefail
+
+# bin/look-shot <out.png> [--size WxH] [--wait SECONDS] [-- <fugue arguments...>]
+#
+# A picture of the real window, drawn on the real GPU, without touching the desktop: a hidden (headless) sway session
+# gets its own Wayland display, Fugue runs in it, grim takes the picture, and both are stopped. Offscreen grabs
+# (QT_QPA_PLATFORM=offscreen) have no GPU, so the frost blur and other effects only show their software fallback there;
+# this shows them as a person sees them. Nothing appears on the owner's screen and the pointer is never touched.
+#
+# FUGUE_HOME is used when set (a scratch home: never the owner's store); otherwise a temporary home is made and removed.
+# The build is build/fugue of this checkout.
+#
+#   bin/look-shot ~/.cache/shots/restore.png -- --app flux2-klein-9b-da-restore
+#   FUGUE_HOME=~/.cache/look-home bin/look-shot shot.png --size 900x700 --wait 15 -- examples/text-to-image.fugue
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out=${1:?usage: bin/look-shot <out.png> [--size WxH] [--wait S] [-- fugue args]}
+shift
+size=1888x971
+wait=10
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --size) size=$2; shift 2 ;;
+    --wait) wait=$2; shift 2 ;;
+    --) shift; break ;;
+    *) echo "bin/look-shot: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+command -v sway >/dev/null || { echo "bin/look-shot: needs sway (headless Wayland compositor)" >&2; exit 1; }
+command -v grim >/dev/null || { echo "bin/look-shot: needs grim" >&2; exit 1; }
+[[ -x $root/build/fugue ]] || { echo "bin/look-shot: build it first (bin/build fugue)" >&2; exit 1; }
+
+work="$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/fugue-look-shot.XXXXXX")"
+run="$work/run"
+mkdir -m 700 "$run"
+home=${FUGUE_HOME:-$work/home}
+mkdir -p "$home"
+printf 'output HEADLESS-1 resolution %s\ndefault_border none\nseat * hide_cursor 1\n' "$size" > "$work/sway.conf"
+
+sway_pid=""
+fugue_pid=""
+cleanup() {
+  [[ -n $fugue_pid ]] && kill "$fugue_pid" 2>/dev/null || true
+  [[ -n $sway_pid ]] && kill "$sway_pid" 2>/dev/null || true
+  wait 2>/dev/null || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
+env -u WAYLAND_DISPLAY -u DISPLAY XDG_RUNTIME_DIR="$run" WLR_BACKENDS=headless WLR_RENDERER=gles2 \
+  WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c "$work/sway.conf" >"$work/sway.log" 2>&1 &
+sway_pid=$!
+for _ in $(seq 50); do [[ -S $run/wayland-1 ]] && break; sleep 0.1; done
+[[ -S $run/wayland-1 ]] || { echo "bin/look-shot: the headless session did not start:" >&2; tail -5 "$work/sway.log" >&2; exit 1; }
+
+env -u DISPLAY XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 QT_QPA_PLATFORM=wayland FUGUE_HOME="$home" \
+  "$root/build/fugue" "$@" >"$work/fugue.log" 2>&1 &
+fugue_pid=$!
+sleep "$wait"
+kill -0 "$fugue_pid" 2>/dev/null || { echo "bin/look-shot: fugue exited early:" >&2; tail -5 "$work/fugue.log" >&2; exit 1; }
+mkdir -p "$(dirname "$out")"
+XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 grim "$out"
+echo "$out"
