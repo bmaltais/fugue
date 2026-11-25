@@ -2982,7 +2982,8 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   on a card, or Enter on it, opens it; a small "i" at the picture's bottom right corner (I or Space on the
   focused card) shows its details first (Open and Cancel at the foot, Escape closes them, then the dialog).
   Opening one makes a new unsaved tab named after it, its samples taken into the inputs folder as a
-  pasted image is, so it runs as it opens and a save keeps it portable. The CLI writes the
+  pasted image is, so it runs as it opens and a save keeps it portable. Every file it ships is taken in, a song, a clip or a
+  LUT as well as a picture: one left in the template's folder would be named by a path an AppImage mounts elsewhere at each start. The CLI writes the
   workflow with its samples copied into `inputs/` beside it, never replacing a file: a sample
   whose name is taken by another file takes `-2`, `-3`..., and the workflow names that. A sample
   must be a file inside its template's folder; one that leads out, by `..` or a link, is not read.

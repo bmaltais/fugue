@@ -699,8 +699,11 @@ private slots:
     void theWindowOpensATemplateAsANewWorkflowWithItsInputs() {
         Fixture f;
         makeTemplate(f.bundled.filePath("edit"), {{"title", "Klein edit"}},
-                     workflow({{"load", node("fugue/load-image", {{"file", "inputs/cat.png"}})}}));
+                     workflow({{"load", node("fugue/load-image", {{"file", "inputs/cat.png"}})},
+                               {"grade", node("fugue/apply-lut", {{"file", "inputs/look.cube"}})}}));
         writeFile(f.bundled.filePath("edit/inputs/cat.png"), png());
+        const QByteArray cube("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n");
+        writeFile(f.bundled.filePath("edit/inputs/look.cube"), cube);
         CanvasModel canvas(&f.registry);
         CommandRegistry commands;
         QTemporaryDir state;
@@ -739,6 +742,10 @@ private slots:
         const QString file = canvas.document().graph.nodes.value("load").inputs.value("file").literal().toString();
         QVERIFY2(file.startsWith(inputsDir() + "/"), qPrintable(file));
         QCOMPARE(readFile(file), png());
+        // A file that is not a picture (a LUT, a song, a clip) is taken in too: the template's folder may move (an AppImage's mount).
+        const QString lut = canvas.document().graph.nodes.value("grade").inputs.value("file").literal().toString();
+        QVERIFY2(lut.startsWith(inputsDir() + "/") && lut.endsWith(".cube"), qPrintable(lut));
+        QCOMPARE(readFile(lut), cube);
     }
 
     // File > Browse templates opens the dialog; a card shows what the template lacks, a category

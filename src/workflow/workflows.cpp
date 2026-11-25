@@ -711,7 +711,10 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     Errors errors = document ? Errors() : document.errors();
     if (document) {
         makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
-        errors = takeInputsFrom(document.value(), *m_registry, chosen.folder, fromPackage); // a package's samples are all taken in (#394)
+        // Every file a template ships is taken in, not only its pictures: a song, a clip or a LUT left in the template's
+        // folder is named by a full path that an AppImage mounts somewhere else at each start, so a saved copy would lose it.
+        // Template inputs are small (fugue-workflows' bin/check caps them) and stored once by hash.
+        errors = takeInputsFrom(document.value(), *m_registry, chosen.folder, true);
     }
     if (document && fromPackage && errors.isEmpty()) {
         const QString folder = canonicalPath(chosen.folder);
