@@ -9,6 +9,7 @@ Item {
     property url heroSource
     property int cardWidth: 380
     property real heroMin: 28 // in u; 0 is the compact header of an app panel
+    property string heroTone: "dusk" // KitHero.tone: the blend that says which part of Fugue this is
     property bool following: true
     property bool wander: false
     property bool followDay: true
@@ -40,6 +41,7 @@ Item {
             KitHero {
                 objectName: "hero"
                 source: gallery.heroSource
+                tone: gallery.heroTone
                 title: "Drift"
                 subtitle: "A quiet world, always becoming."
                 status: gallery.paused ? "Paused" : "Evolving"

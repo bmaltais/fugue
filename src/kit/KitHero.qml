@@ -28,8 +28,20 @@ Item {
     property bool showClose: false
     property real cornerRadius: look.popupCorner + 4
     property real minHeight: 0
-    property color duskBase: "#2a2533"
-    property var duskBlobs: ["#b98bd6", "#e3828f", "#6f86d6"] // lilac, rose, blue
+    // The blend says which part of Fugue a header belongs to (docs/canvas-look.md "Drift kit", Tones): dusk is the
+    // brand (Fugue, Apps), sea Templates, ember Results and media, moss Get ready and downloads, slate Settings. An
+    // unknown name is dusk. A picture (`source`) covers the blend; duskBase and duskBlobs take a blend of a host's own.
+    property string tone: "dusk"
+    readonly property var tones: ({
+        dusk: { base: "#2a2533", blobs: ["#b98bd6", "#e3828f", "#6f86d6"] },  // lilac, rose, blue
+        sea: { base: "#1d2a31", blobs: ["#6fc3c9", "#6f9fd6", "#8fd6c0"] },   // teal, blue, mint
+        ember: { base: "#32251f", blobs: ["#e8a87c", "#e3828f", "#d6b46f"] }, // amber, rose, gold
+        moss: { base: "#1f2e28", blobs: ["#8fcf9a", "#6fc3a8", "#b7d67a"] },  // green, teal, lime
+        slate: { base: "#242933", blobs: ["#8fa6c9", "#a9b4c9", "#6f86d6"] }  // blue-grey, mist, blue
+    })
+    readonly property var toneBlend: tones[tone] !== undefined ? tones[tone] : tones.dusk
+    property color duskBase: toneBlend.base
+    property var duskBlobs: toneBlend.blobs
     signal statusTapped
     signal closed
 

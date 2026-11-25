@@ -782,6 +782,17 @@ app panel's header) and `minHeight` asks for more picture (the Fugue header, 45u
 The dusk colors are the brand's, the same on every theme, because the hero is a picture, not a surface; the same is true of
 its white title and its black pills. A picture's top corners are cut by the thumbnail shader (square on the software renderer).
 
+Tones (owner, 2026-11-24: a header's colours give a cue of what the window is for). `tone` picks the blend; an app's own
+header shows its preview picture instead, so each app stays distinct:
+
+| `tone` | Blobs on base | Where |
+|---|---|---|
+| `dusk` (default) | lilac, rose, blue on `#2a2533` | Fugue itself, the Apps shelf: the brand |
+| `sea` | teal, blue, mint on `#1d2a31` | Templates |
+| `ember` | amber, rose, gold on `#32251f` | Results and media |
+| `moss` | green, teal, lime on `#1f2e28` | Get ready, downloads |
+| `slate` | blue-grey, mist, blue on `#242933` | Settings |
+
 New tokens (`CanvasLook`, `look.cpp` and `derive.py` together; `fg` is the theme's text, `popup` is the card):
 
 | Token | Dark theme | Light theme | Use |

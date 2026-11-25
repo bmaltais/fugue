@@ -204,12 +204,15 @@ private slots:
         QTest::addColumn<int>("cardWidth");
         QTest::addColumn<bool>("picture");
         QTest::addColumn<int>("heroMin");
-        QTest::newRow("dark narrow") << "tokyo-night" << "dark-380" << 380 << true << 28;
-        QTest::newRow("light narrow") << "catppuccin-latte" << "light-380" << 380 << true << 28;
-        QTest::newRow("dusk dark") << "tokyo-night" << "dusk-dark-380" << 380 << false << 0;
-        QTest::newRow("dusk light") << "catppuccin-latte" << "dusk-light-380" << 380 << false << 45;
-        QTest::newRow("dark wide") << "tokyo-night" << "dark-720" << 720 << true << 28;
-        QTest::newRow("light wide") << "catppuccin-latte" << "light-720" << 720 << true << 28;
+        QTest::addColumn<QString>("tone");
+        QTest::newRow("dark narrow") << "tokyo-night" << "dark-380" << 380 << true << 28 << "dusk";
+        QTest::newRow("light narrow") << "catppuccin-latte" << "light-380" << 380 << true << 28 << "dusk";
+        QTest::newRow("dusk dark") << "tokyo-night" << "dusk-dark-380" << 380 << false << 0 << "dusk";
+        QTest::newRow("dusk light") << "catppuccin-latte" << "dusk-light-380" << 380 << false << 45 << "dusk";
+        QTest::newRow("dark wide") << "tokyo-night" << "dark-720" << 720 << true << 28 << "dusk";
+        for (const char *tone : {"sea", "ember", "moss", "slate"})
+            QTest::newRow(tone) << "tokyo-night" << QString("tone-%1").arg(tone) << 380 << false << 0 << QString(tone);
+        QTest::newRow("light wide") << "catppuccin-latte" << "light-720" << 720 << true << 28 << "dusk";
     }
 
     // Pictures of the gallery, only when asked for: the folder is the caller's, nothing else is written.
@@ -222,6 +225,7 @@ private slots:
         QFETCH(int, cardWidth);
         QFETCH(bool, picture);
         QFETCH(int, heroMin);
+        QFETCH(QString, tone);
         QDir().mkpath(folder);
         const QString scene = dir.filePath("scene.png");
         writeScene(scene);
@@ -231,7 +235,7 @@ private slots:
         Shell shell(dir.filePath("shot-" + tag), theme);
         QQmlComponent component(&shell.engine);
         component.setData(body, QUrl::fromLocalFile(gallery.fileName()));
-        QObject *made = component.createWithInitialProperties({{"heroSource", picture ? QUrl::fromLocalFile(scene) : QUrl()}, {"cardWidth", cardWidth}, {"heroMin", heroMin}});
+        QObject *made = component.createWithInitialProperties({{"heroSource", picture ? QUrl::fromLocalFile(scene) : QUrl()}, {"cardWidth", cardWidth}, {"heroMin", heroMin}, {"heroTone", tone}});
         QVERIFY2(made, qPrintable(component.errorString()));
         auto *item = qobject_cast<QQuickItem *>(made);
         QVERIFY(item);
