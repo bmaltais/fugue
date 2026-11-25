@@ -12,6 +12,7 @@ stdout. The pages, in the order to read them:
 7. [Types and handles](types.md): media, resource and data values.
 8. [Testing a node](testing.md): `fugue node test`.
 9. [Publishing a pack](publishing.md).
+10. [HTTP Request](http-request.md): the first-party node for web APIs (webhooks, lookups, uploads) and its `network` permission.
 
 A working pack to read and copy is [examples/packs/io.github.bmaltais.fugue-example](../../examples/packs/io.github.bmaltais.fugue-example):
 `shout` is one-shot, `counter` is persistent. The tests run both.
