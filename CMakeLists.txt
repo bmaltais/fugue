@@ -443,7 +443,7 @@ include(GNUInstallDirs)
 install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES share/fugue-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages RENAME fugue.xml)
-# The icon, light-art as `fugue` and dark-art as `fugue-dark`, in the sizes a launcher asks for.
+# The icon (one art, installed as `fugue` and `fugue-dark`), scalable and in the sizes a launcher asks for.
 install(DIRECTORY share/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
 install(FILES examples/demo.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
 # The bundled templates (spec 11.10): the `templates` submodule, bmaltais/fugue-workflows at the
