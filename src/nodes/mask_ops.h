@@ -26,6 +26,11 @@ Pixels compositeMasked(const Pixels &destination, const Pixels &source, const Pi
 // ComfyUI's ThresholdMask: 1 where the mask is above `value`, else 0.
 Pixels thresholdMask(const Pixels &mask, float value);
 
+// Mask from Color (#550): 1 where a pixel of `image` is within `tolerance` of `rgb` (red, green, blue, 0..1), else 0. The
+// distance is the Euclidean distance in RGB divided by sqrt(3), so 0 is the exact color and 1 takes every pixel; alpha is
+// ignored. One channel, the picture's size.
+Pixels maskFromColor(const Pixels &image, const std::array<float, 3> &rgb, float tolerance);
+
 enum class CombineOperation { Multiply, Add, Subtract, And, Or, Xor };
 
 // ComfyUI's MaskComposite: `source` combined into `destination` at x, y over the part that

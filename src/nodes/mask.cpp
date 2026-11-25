@@ -80,6 +80,29 @@ public:
     }
 };
 
+// Mask from Color (#550): the pixels near a color, softened by Soften pixels with the Feather Mask blur (centered).
+class MaskFromColorKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> image = pixelsOf(context.input("image"), "image");
+        if (!image.ok())
+            return Result<Values>(image.errors());
+        const Result<std::array<float, 4>> color = colorOf(QStringLiteral("color"), context.input("color").text());
+        if (!color)
+            return color.errors();
+        const double tolerance = context.input("tolerance").number();
+        if (!(tolerance >= 0.0 && tolerance <= 1.0))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("tolerance"),
+                                  QStringLiteral("A tolerance of %1 is outside 0 to 1.").arg(tolerance));
+        const int soften = toInt(context.input("soften"));
+        if (soften < 0 || soften > kMaxFeather)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("soften"),
+                                  QStringLiteral("A soften of %1 is outside 0 to %2.").arg(soften).arg(kMaxFeather));
+        Pixels mask = maskFromColor(image.value(), {color.value()[0], color.value()[1], color.value()[2]}, float(tolerance));
+        return namedOutput(featherMask(mask, soften, FeatherDirection::Centered), "mask");
+    }
+};
+
 class ThresholdMaskKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
@@ -186,6 +209,7 @@ public:
 
 void addMaskKernels(Kernels &kernels) {
     kernels.add("fugue/composite-masked", std::make_shared<CompositeMaskedKernel>());
+    kernels.add("fugue/mask-from-color", std::make_shared<MaskFromColorKernel>());
     kernels.add("fugue/feather-mask", std::make_shared<FeatherMaskKernel>());
     kernels.add("fugue/threshold-mask", std::make_shared<ThresholdMaskKernel>());
     kernels.add("fugue/combine-masks", std::make_shared<CombineMasksKernel>());

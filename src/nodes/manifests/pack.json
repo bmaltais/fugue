@@ -48,6 +48,7 @@
     "load-models",
     "load-upscale-model",
     "load-video",
+    "mask-from-color",
     "mask-to-alpha",
     "number",
     "number-math",
