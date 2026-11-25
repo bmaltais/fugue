@@ -3062,18 +3062,24 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   **Advanced**; under the form **Run** (`appRun`, the one primary control), and while a run is waiting or going **Cancel**
   (`appCancel`, danger, a chunk of its own) and one line of progress ("Waiting for its turn…", "Working… 40%") over a 2 px bar.
   At the end the output: the results of the block's `outputs[]` (a picture fits and a double click opens it in the large
-  viewer (`LargeViewDialog` over the Compare viewer in its single mode); a video or sound plays; each is named by its `label`, else "Result"), or "The result appears here." A failed
+  viewer (`LargeViewDialog` over the Compare viewer in its single mode); a video or sound plays; each is named by its `label`, else "Result"), or "The result appears here." A quiet **Clear** (`appClear`) above the output empties the screen back to that state
+  (results, error and Details; the files stay on disk and in the results store; disabled while a run goes). A failed
   run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the rest and
   the hints; a cancelled run says nothing.
 - **Controls per kind** (#386, `AppInput.qml` picks, no control for an input the block does not bind): *text*, a well of
   several lines for the prompt roles (Enter is a new line, Tab leaves it) and a line for the rest; *number*, a drag field with
   its range (`min` and `max`), else a typed field (empty means the workflow's own); *toggle*, a switch (Space or Enter);
-  *choice*, a drop-down; *seed*, the number, a dice for a new one and its mode as a node's seed has it: Fixed, Randomize each
-  run (the engine's own `{"auto": "random"}`), Increment after each run (the run uses the number shown, the next the next
-  one, wrapping at `max`); a number typed makes it Fixed. *image*: a well that shows the picture and takes one dropped on
-  it, Browse, Paste (and Ctrl+V on the well) and a strip of pictures to try, the template's `inputs/` samples first, then
+  *choice*, a drop-down; *seed*, one row of the height of the other fields: the number, a small dice for a new
+  one and its mode as a small drop-down as a node's seed has it: Fixed, Random (the engine's own `{"auto": "random"}`; the
+  field then reads "New each run"), Increment (the run uses the number shown, the next the next one, wrapping at `max`); a
+  number typed makes it Fixed. Fixed and Increment always show a number (the workflow's, else a new one) and every run uses
+  it; going from Random to Fixed keeps the number the field had, or picks a new one (a run's own random seed is not known
+  to the form). *image*: a well that shows the picture and takes one dropped on
+  it, Browse, Paste and a strip of pictures to try, the template's `inputs/` samples first, then
   the inputs folder's newest; a picture from elsewhere is copied into the inputs folder as Load Image takes one (the same
-  bytes are one file). *mask*: Paint mask opens the mask editor (14.4) over the form's first picture input, "Painted" or
+  bytes are one file). Ctrl+V (and Edit > Paste) with a picture on the clipboard puts it into the focused picture input,
+  else the form's first, in the full window's App view and in an app's own window (a focused text field keeps Ctrl+V for
+  text); a picture dropped anywhere on the page goes to the same input. *mask*: Paint mask opens the mask editor (14.4) over the form's first picture input, "Painted" or
   "None", Clear; with no picture chosen it says so. *model*: the model menu of a node's picker (the providers' models, the
   files in the model folders with the Recommended one marked, #370, the catalog's models under Download, which asks first
   with the license, size, source and folder and fetches through the window's one download line); a file whose hash is not

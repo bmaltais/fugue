@@ -1882,5 +1882,8 @@
   "Remove from launcher": "Remove from launcher",
   "Start this app from the desktop launcher, in a window of its own": "Start this app from the desktop launcher, in a window of its own",
   "Take this app out of the desktop launcher": "Take this app out of the desktop launcher",
-  "This is not an app.": "This is not an app."
+  "This is not an app.": "This is not an app.",
+  "Clear the result from this screen; the files stay saved": "Clear the result from this screen; the files stay saved",
+  "Increment": "Increment",
+  "Random": "Random"
 }

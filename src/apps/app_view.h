@@ -85,6 +85,8 @@ class AppView : public QObject {
     // [{label, kind ("image", "video", "audio" or "text"), url (the picture to draw), full (its file as a URL), width, height,
     //   text}] of the last run, in the block's order.
     Q_PROPERTY(QVariantList results READ results NOTIFY runChanged)
+    // Something is shown of a finished run (results, an error) and no run of this tab goes: Clear can act.
+    Q_PROPERTY(bool canClear READ canClear NOTIFY runChanged)
 
 public:
     using Start = std::function<QString(const RunRequest &)>;
@@ -113,6 +115,7 @@ public:
     QString error() const { return m_state.value(m_tab).error; }
     QVariantList details() const { return m_state.value(m_tab).details; }
     QVariantList results() const { return m_state.value(m_tab).results; }
+    bool canClear() const;
 
     // A form's value, by the field's key. Empty text or NaN for a number takes the value away (the workflow's own stays).
     Q_INVOKABLE void setValue(const QString &key, const QVariant &value);
@@ -132,6 +135,14 @@ public:
     QString setImageFromMime(const QString &key, const QMimeData &data); // what a paste or a drop offers
     Q_INVOKABLE QString pasteImage(const QString &key); // from the clipboard
     Q_INVOKABLE bool canPasteImage() const;
+    // Ctrl+V and Edit > Paste while the App view is shown: the clipboard's picture goes into the focused picture input (the
+    // last one that took focus, setFocusedImage), else the form's first. False, doing nothing, when the clipboard has no
+    // picture or the form has no picture input (the caller then lets the key mean what it means elsewhere). The outcome (a
+    // refusal, or none) comes as imageNotice.
+    bool pasteToApp();
+    // A picture dropped anywhere on the page: the same target; returns why not, or empty.
+    Q_INVOKABLE QString dropImageFiles(const QList<QUrl> &files);
+    Q_INVOKABLE void setFocusedImage(const QString &key, bool focused);
     // A file already in the inputs folder, or one of the template's samples.
     Q_INVOKABLE void useImage(const QString &key, const QString &path);
     // The images last used: {path, url, name}, newest first.
@@ -166,6 +177,9 @@ public:
     // (`error` says why).
     Q_INVOKABLE QString run();
     Q_INVOKABLE void cancel();
+    // Empties the output area (results, error, Details) back to the empty state; the files stay on disk and in the results
+    // store. Does nothing while a run of this tab waits or goes.
+    Q_INVOKABLE void clearResults();
     // This tab shows the graph (the same workflow, as an ordinary tab); showApp() brings the form back.
     Q_INVOKABLE void openInGraph();
     Q_INVOKABLE void showApp();
@@ -182,6 +196,8 @@ signals:
     void appChanged();
     // The store changed a value itself (see the fields' doc): the control shows `valueOf(key)`.
     void valueChanged(const QString &key);
+    // A picture taken by the page's paste or drop was refused (`text`) or taken (empty): the picture input `key` shows it.
+    void imageNotice(const QString &key, const QString &text);
     void modelsChanged();
     void runChanged();
     void progressChanged();
@@ -205,6 +221,7 @@ private:
     // The key's input, in this form; null when none.
     const InputBinding *inputOf(const QString &key) const;
     QString kindOfField(const QString &key) const;
+    QString imageTarget() const; // the focused picture input, else the form's first; empty for none
     QString storeImages(const QStringList &paths, const QString &key);
     QVariantList samplesOf() const;
     void modelHashed(int ticket, const QVariantMap &handle);
@@ -218,6 +235,7 @@ private:
     Cancel m_cancel;
     const Registry *m_registry;
     QString m_tab;
+    QString m_focusedImage;
     QString m_file;
     Document m_document;
     std::optional<app::App> m_app;

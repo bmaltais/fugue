@@ -44,6 +44,14 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     };
     commands.setHandler(QStringLiteral("run.start"), [run] { run(false); });
     commands.setHandler(QStringLiteral("run.start-first"), [run] { run(true); });
+    // Ctrl+V and Edit > Paste: a picture on the clipboard goes into the app's picture input while the App view is shown; any
+    // other paste (and the graph's) is the canvas's. A focused text field keeps Ctrl+V for text (the registry's own rule).
+    commands.setHandler(QStringLiteral("edit.paste"), [&view, graph = commands.handlerOf(QStringLiteral("edit.paste"))] {
+        if (view.shown())
+            view.pasteToApp();
+        else if (graph)
+            graph();
+    });
     commands.setHandler(QStringLiteral("run.cancel"), [&view, &runs] {
         if (view.shown())
             view.cancel();

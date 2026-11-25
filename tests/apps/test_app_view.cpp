@@ -360,6 +360,66 @@ private slots:
         QVERIFY(m_view->valueOf("seed").toInt() >= 0 && m_view->valueOf("seed").toInt() <= 10);
     }
 
+    void fixedKeepsAConcreteNumberAndEveryRunUsesIt() {
+        // A workflow whose seed is left to chance has no number: Fixed picks one, shows it and keeps it for every run.
+        m_view->show("a", load(workflow()), {});
+        QCOMPARE(m_view->seedMode("seed"), QStringLiteral("random"));
+        QVERIFY(!m_view->valueOf("seed").isValid());
+        m_view->setSeedMode("seed", "fixed");
+        QCOMPARE(m_view->seedMode("seed"), QStringLiteral("fixed"));
+        const QVariant shown = m_view->valueOf("seed");
+        QVERIFY(shown.isValid() && shown.typeId() != QMetaType::QVariantMap);
+        m_view->setSeedMode("seed", "fixed"); // pressing it again keeps the number
+        QCOMPARE(m_view->valueOf("seed"), shown);
+        m_view->run();
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        m_view->run();
+        QCOMPARE(inputOf(m_started.at(0).document, "sample", "seed"), QJsonValue::fromVariant(shown));
+        QCOMPARE(inputOf(m_started.at(1).document, "sample", "seed"), QJsonValue::fromVariant(shown));
+        // Back to Random and again to Fixed: the number is still there, not the engine's {"auto": "random"}.
+        m_view->setSeedMode("seed", "random");
+        m_view->setSeedMode("seed", "fixed");
+        QCOMPARE(m_view->valueOf("seed"), shown);
+    }
+
+    void aFixedSeedTheWorkflowHoldsNoNumberForGetsOneAtOnce() {
+        // The block's default may be the engine's own: Fixed must still show a number, never an object.
+        QJsonObject json = workflow();
+        QJsonObject app = json.value("app").toObject();
+        QJsonArray inputs = app.value("inputs").toArray();
+        QJsonObject seed = inputs.at(1).toObject();
+        seed.insert("default", QJsonObject{{"auto", "random"}});
+        inputs.replace(1, seed);
+        app.insert("inputs", inputs);
+        json.insert("app", app);
+        m_view->show("a", load(json), {});
+        m_view->setSeedMode("seed", "fixed");
+        QVERIFY(m_view->valueOf("seed").isValid());
+        QVERIFY(m_view->valueOf("seed").canConvert<double>() && m_view->valueOf("seed").typeId() != QMetaType::QVariantMap);
+    }
+
+    void clearingTheResultEmptiesTheScreenOnlyWhenNoRunGoes() {
+        m_view->show("a", load(workflow()), {});
+        QVERIFY(!m_view->canClear());
+        m_view->run();
+        m_view->clearResults(); // a run goes
+        QCOMPARE(m_view->status(), QStringLiteral("waiting"));
+        m_view->onEvent("run1", evt("run.started"));
+        m_view->onEvent("run1", saved("save", "a.png"));
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        QCOMPARE(m_view->results().size(), 1);
+        QVERIFY(m_view->canClear());
+        QSignalSpy changed(m_view.get(), &AppView::runChanged);
+        m_view->clearResults();
+        QCOMPARE(changed.count(), 1);
+        QVERIFY(m_view->results().isEmpty());
+        QVERIFY(m_view->details().isEmpty());
+        QVERIFY(m_view->error().isEmpty());
+        QCOMPARE(m_view->status(), QStringLiteral("idle"));
+        QVERIFY(!m_view->canClear());
+        QVERIFY(m_view->canRun()); // the form is as it was
+    }
+
     void aPictureTakenIntoTheInputsFolderIsWhatTheRunBindsAndSamplesAreOffered() {
         QTemporaryDir folder;
         QVERIFY(QDir(folder.path()).mkpath("inputs"));

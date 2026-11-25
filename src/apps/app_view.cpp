@@ -102,6 +102,13 @@ double newSeed(const InputBinding &input) {
     return high <= low ? low : low + double(QRandomGenerator::global()->bounded(quint64(high - low) + 1));
 }
 
+// A seed's value is a number; a missing one, or the engine's own ({"auto": "random"}, which a block's default may be), is none.
+bool hasSeedNumber(const QVariant &value) {
+    bool ok = false;
+    return value.isValid() && value.typeId() != QMetaType::QVariantMap && !value.toString().isEmpty()
+           && (value.toDouble(&ok), ok);
+}
+
 QString kindOf(const InputBinding &input, const QJsonValue &current, const InputSpec *spec) {
     if (input.role == QLatin1String("image") || input.role == QLatin1String("mask") || input.role == QLatin1String("model")
         || input.role == QLatin1String("seed"))
@@ -255,6 +262,16 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
     } else if (kind == QLatin1String("toggle")) {
         value = QJsonValue(value.toBool());
     }
+    if (kind == QLatin1String("seed")) {
+        // A seed shows a number, or none while it is Random. Fixed and Increment always have one (the workflow's, else a new
+        // one kept in the form), so what is shown is what every run uses.
+        if (!hasSeedNumber(value.toVariant()))
+            value = QJsonValue::Undefined;
+        if (value.isUndefined() && field.value("mode").toString() != QLatin1String("random")) {
+            value = newSeed(input);
+            state.values.insert(input.key(), value);
+        }
+    }
     field.insert("value", value.isUndefined() ? QVariant() : value.toVariant());
     return field;
 }
@@ -326,7 +343,7 @@ void AppView::setSeedMode(const QString &key, const QString &mode) {
     TabState &state = m_state[m_tab];
     state.seedModes.insert(key, mode);
     // A number that stays has to be one: the field shows it, the run binds it.
-    if (mode != QLatin1String("random") && !valueOf(key).isValid())
+    if (mode != QLatin1String("random") && !hasSeedNumber(valueOf(key)))
         state.values.insert(key, newSeed(*inputOf(key)));
     emit valueChanged(key);
 }
@@ -418,6 +435,44 @@ QString AppView::pasteImage(const QString &key) {
     if (!clipboard || !clipboard->mimeData() || !clipboardHasImage(*clipboard->mimeData()))
         return QObject::tr("The clipboard has no picture.");
     return setImageFromMime(key, *clipboard->mimeData());
+}
+
+QString AppView::imageTarget() const {
+    QString first;
+    for (const QVariant &field : m_fields) {
+        const QVariantMap map = field.toMap();
+        if (map.value("kind").toString() != QLatin1String("image"))
+            continue;
+        if (map.value("key").toString() == m_focusedImage)
+            return m_focusedImage;
+        if (first.isEmpty())
+            first = map.value("key").toString();
+    }
+    return first;
+}
+
+void AppView::setFocusedImage(const QString &key, bool focused) {
+    if (focused)
+        m_focusedImage = key;
+    else if (m_focusedImage == key)
+        m_focusedImage.clear();
+}
+
+bool AppView::pasteToApp() {
+    const QString key = imageTarget();
+    if (!shown() || key.isEmpty() || !canPasteImage())
+        return false;
+    emit imageNotice(key, pasteImage(key));
+    return true;
+}
+
+QString AppView::dropImageFiles(const QList<QUrl> &files) {
+    const QString key = imageTarget();
+    if (key.isEmpty())
+        return {};
+    const QString why = setImageFiles(key, files);
+    emit imageNotice(key, why);
+    return why;
 }
 
 void AppView::useImage(const QString &key, const QString &path) {
@@ -613,6 +668,24 @@ QString AppView::run() {
     emit runChanged();
     emit progressChanged();
     return id;
+}
+
+bool AppView::canClear() const {
+    const TabState state = m_state.value(m_tab);
+    return m_app && state.run.isEmpty() && state.status != QLatin1String("idle");
+}
+
+void AppView::clearResults() {
+    if (!canClear())
+        return;
+    TabState &state = m_state[m_tab];
+    state.status = QStringLiteral("idle");
+    state.progress = -1;
+    state.error.clear();
+    state.details.clear();
+    state.results.clear();
+    emit runChanged();
+    emit progressChanged();
 }
 
 void AppView::cancel() {

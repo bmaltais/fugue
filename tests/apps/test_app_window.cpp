@@ -2,7 +2,11 @@
 // form with the canvas hidden, Run queues the bound copy, a result shows, Open in Graph and Show as app switch the tab, and a
 // workflow with no block is the window it was. The store's logic is test_app_view; this is only what QML wiring shows.
 
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QImage>
 #include <QJsonDocument>
+#include <QMimeData>
 #include <QQuickStyle>
 #include <QtTest>
 
@@ -284,6 +288,67 @@ private slots:
         QCOMPARE(toggle->property("checked").toBool(), false);
         QVERIFY(app.commands.run("run.start"));
         QCOMPARE(started.first().document.graph.nodes.value("grow").inputs.value("tapered_corners").toJson(), QJsonValue(false));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // Ctrl+V with a picture on the clipboard (the offscreen platform's own) fills the picture input; a focused text field keeps it.
+    void ctrlVPastesAPictureIntoTheAppUnlessATextFieldHasTheFocus() {
+        App app(load(mediaApp));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QTRY_VERIFY(find(app.window, "appInput-image"));
+        QVERIFY(rig.view.valueOf("image").toString().isEmpty());
+        QImage picture(6, 4, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        auto *data = new QMimeData;
+        data->setImageData(picture);
+        QGuiApplication::clipboard()->setMimeData(data);
+        QQuickItem *seed = find(app.window, "appInput-seed");
+        QVERIFY(seed);
+        seed->forceActiveFocus(); // a text field: the key is its own
+        QTRY_VERIFY(seed->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_V, Qt::ControlModifier);
+        QTest::qWait(50);
+        QVERIFY(rig.view.valueOf("image").toString().isEmpty());
+        find(app.window, "appInput-image")->forceActiveFocus(); // the picture well: the page's paste
+        QTest::keyClick(app.window, Qt::Key_V, Qt::ControlModifier);
+        QTRY_VERIFY(!rig.view.valueOf("image").toString().isEmpty());
+        QVERIFY(QFileInfo(rig.view.valueOf("image").toString()).isFile());
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // The seed row: Random and back to Fixed through the control keeps a number in the field; Clear empties a result.
+    void theSeedModeControlReachesTheStoreAndClearEmptiesTheResult() {
+        App app(load(mediaApp));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QQuickItem *mode = nullptr;
+        QTRY_VERIFY((mode = find(app.window, "appSeedMode-seed")));
+        QQuickItem *field = find(app.window, "appInput-seed");
+        QCOMPARE(field->property("text").toString(), QStringLiteral("3"));
+        QMetaObject::invokeMethod(mode, "picked", Q_ARG(QVariant, QStringLiteral("random")));
+        QTRY_COMPARE(rig.view.seedMode("seed"), QStringLiteral("random"));
+        QTRY_COMPARE(field->property("text").toString(), QString());
+        QMetaObject::invokeMethod(mode, "picked", Q_ARG(QVariant, QStringLiteral("fixed")));
+        QTRY_COMPARE(rig.view.seedMode("seed"), QStringLiteral("fixed"));
+        QTRY_COMPARE(field->property("text").toString(), QStringLiteral("3"));
+        QCOMPARE(mode->property("value").toString(), QStringLiteral("fixed"));
+
+        QVERIFY(!find(app.window, "appClear"));
+        rig.view.run();
+        rig.view.onEvent("r1", QJsonObject{{"event", "run.started"}});
+        rig.view.onEvent("r1", QJsonObject{{"event", "node.done"}, {"node", "save"},
+                                           {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", "file:///t/a.png"}, {"source", "/t/a.png"},
+                                                                                            {"width", 4}, {"height", 4}}}}}});
+        QQuickItem *clear = find(app.window, "appClear");
+        QVERIFY(clear);
+        QVERIFY(!clear->isEnabled()); // the run still goes
+        rig.view.onEvent("r1", QJsonObject{{"event", "run.done"}, {"status", "ok"}});
+        QTRY_VERIFY(clear->isEnabled());
+        QCOMPARE(rig.view.results().size(), 1);
+        tap(app.window, clear);
+        QTRY_VERIFY(rig.view.results().isEmpty());
+        QTRY_VERIFY(!find(app.window, "appClear"));
         qDeleteAll(app.engine.rootObjects());
     }
 };
