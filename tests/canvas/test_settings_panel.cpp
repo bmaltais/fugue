@@ -624,6 +624,40 @@ private slots:
             }
         }
     }
+
+    // FUGUE_SETTINGS_SHOTS=<dir> (as screenshots()): the Providers page as a person meets it: as it starts, the Add a service menu, a fresh fal.ai card.
+    void providerShots() {
+        const QString out = qEnvironmentVariable("FUGUE_SETTINGS_SHOTS");
+        if (out.isEmpty())
+            QSKIP("Set FUGUE_SETTINGS_SHOTS to a folder to write the pages there.");
+        QDir().mkpath(out);
+        App app(load(emptyDoc), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night")), 12});
+        QVERIFY(app.open());
+        for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
+            const QStringList kv = part.split('=');
+            QVERIFY(kv.size() == 2);
+            QCOMPARE(kv[0] == "preset" ? app.settings.applyLookPreset(kv[1]) : app.settings.set(kv[0], kv[1].toDouble()), QString());
+        }
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG", QStringLiteral("dark"));
+        app.window->resize(1300, 850);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-providers"));
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-1-start-%2.png").arg(out, tag)));
+        QQuickItem *add = NEED("providerAddService");
+        add->forceActiveFocus(Qt::TabFocusReason);
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-2-menu-%2.png").arg(out, tag)));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTest::qWait(500);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-3-fal-%2.png").arg(out, tag)));
+        // Advanced open, with a key typed and shown.
+        click(app, NEED(QStringLiteral("providerAdvanced-%1").arg(app.settings.providers().size() - 1)));
+        QTest::qWait(300);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/providers-4-advanced-%2.png").arg(out, tag)));
+    }
 };
 
 FUGUE_TEST_MAIN(TestSettingsPanel, QGuiApplication)
