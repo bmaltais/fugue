@@ -3293,7 +3293,7 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   another area and Canvas off in the Graph's area with "the Graph keeps an area"), and at the end **split side by
   side** (`areaSplitRow-<id>`, the `columns-2` glyph), **split top and bottom** (`areaSplitColumn-<id>`, `rows-2`), a 2u gap, then **close**
   (`areaClose-<id>`, the `x` glyph, a danger tint and a red glyph on hover or keyboard focus), each 6u = 24 px square, with its key in the tooltip. A
-  press in the header makes its area active; the active area's header has a 2 px accent foot and its name and glyph in
+  press in the header makes its area active; the active area's header is tinted a little more (no accent foot: it read as a drag line, owner 2026-11-25) and has its name and glyph in
   the text and accent colors. The ends keep 3u clear of the border handles, and the header at the body's top start
   keeps its menu clear of the auto-hide menu bar's handle. **Focus mode (H) hides the headers** with the other bars
   (12.15); the views take their place and the borders stay.
