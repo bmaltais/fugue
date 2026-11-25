@@ -253,10 +253,11 @@ Question {
             Layout.preferredHeight: Math.min(contentHeight, 24 * root.look.unit)
             clip: true
             model: backend.files
+            ScrollBar.vertical: FugueScrollBar { look: root.look }
             delegate: RowLayout {
                 id: fileRow
                 required property var modelData
-                width: ListView.view.width
+                width: fileList.width - (fileList.ScrollBar.vertical as FugueScrollBar).inset
                 spacing: 2 * root.look.unit
                 Label { text: fileRow.modelData.fileName; elide: Text.ElideMiddle; Layout.fillWidth: true }
                 Label { text: fileRow.modelData.size; color: root.look.label }

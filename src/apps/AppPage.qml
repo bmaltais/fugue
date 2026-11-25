@@ -274,10 +274,17 @@ Rectangle {
                     Layout.fillHeight: true
                     Layout.margins: page.look.params.panelPad * page.u
                     Layout.topMargin: 0
+                    // The panel's margin on the bar's side is the bar's room (>= 2.5u): the ScrollView
+                    // pads by it instead, so the bar lies in the padding and the form keeps its width.
+                    Layout.rightMargin: scroll.mirrored ? page.look.params.panelPad * page.u : 0
+                    Layout.leftMargin: scroll.mirrored ? 0 : page.look.params.panelPad * page.u
+                    rightPadding: scroll.mirrored ? 0 : page.look.params.panelPad * page.u
+                    leftPadding: scroll.mirrored ? page.look.params.panelPad * page.u : 0
                     contentWidth: availableWidth
                     clip: true
+                    ScrollBar.vertical: FugueScrollBar { look: page.look }
                     Column {
-                        width: scroll.availableWidth
+                        width: scroll.availableWidth - (scroll.ScrollBar.vertical as FugueScrollBar).inset
                         KitSection {
                             look: page.look
                             text: qsTr("Inputs")
