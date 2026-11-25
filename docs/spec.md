@@ -2814,6 +2814,10 @@ start it offers to recover.
     template the app came from), less what an install leaves around: dot files and folders (git, a `.venv`, the source record),
     `venv`, `__pycache__`, `node_modules` and links; a file over 256 MB or more than 5000 files cannot be carried. The
     workflow's `requires.packs` records its version, source and ref as before (4.3) and, new, its `commit`, so the receiver's copy can be updated (6.7);
+  - the executable bit of a pack's files (its `run.sh`) is stored in the zip (0755 against 0644) and restored on unpacking, from the archive only
+    (never setuid, no other mode); a bundle made without it still installs: the install makes the file each command node's `runtime.entry` names
+    executable. A pack unpacked from a bundle records the bundle file as its source (`.fugue-source.json` kind `bundle`, #520), not the scratch
+    folder it was unpacked into; `fugue pack update` says plainly that it has no source to update from (open a newer bundle instead);
   - **its media**: `inputs/` holds, besides images and paint files, any file (a video, a song, a document) that a node an app input is bound to
     names, at most 256 MB each (3 GB in all); a file another node names is left out as before, the input keeping the bare name;
   - **models stay references** (hash, source, size, licence by the catalog), never in the file.
@@ -4134,6 +4138,7 @@ validate and run.
   and symbolic links are resolved. A run started without roots is not limited; the canvas
   starts its runs without them (Appendix A). `fugue model get` writes only into the model
   folders (8.9): Fugue's own and the ones the settings name, which the person chose.
+  `fugue app run --out <dir>` is judged by the same roots before the folder is made, so an `--out` outside them is refused with nothing left behind.
 - This is a guard against mistakes and prompt injection, not a security boundary: anything with
   a shell as the user can edit Fugue's files. The docs say so.
 
