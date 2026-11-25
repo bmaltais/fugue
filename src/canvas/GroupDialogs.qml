@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 
 // What groups and Frames ask (spec 5): whether Make group leaves the selected sinks outside
 // (5.5), a Frame's new title (5.1), and the interface editor of the group shown (5.4): its
@@ -77,6 +78,15 @@ Item {
                 wrapMode: Text.Wrap
                 color: root.look.text
                 text: root.model.groups.problem !== "" ? root.model.groups.problem : root.model.groups.notice
+            }
+            Loader { // made only while a problem shows
+                Layout.alignment: Qt.AlignTop
+                active: root.model.groups.problem !== ""
+                sourceComponent: KitCopyButton {
+                    objectName: "groupBannerCopy"
+                    look: root.look
+                    copyText: root.model.groups.problem
+                }
             }
             GlyphButton {
                 glyph: "x"
@@ -313,12 +323,22 @@ Item {
                     text: (editor.face.id || "") + " " + (editor.face.version || "")
                 }
             }
-            Label {
-                visible: root.model.groups.problem !== ""
+            RowLayout {
                 Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                color: root.look.error
-                text: root.model.groups.problem
+                visible: root.model.groups.problem !== ""
+                spacing: 2 * root.look.unit
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: root.look.error
+                    text: root.model.groups.problem
+                }
+                KitCopyButton {
+                    objectName: "groupProblemCopy"
+                    look: root.look
+                    Layout.alignment: Qt.AlignTop
+                    copyText: root.model.groups.problem
+                }
             }
 
             ScrollView {

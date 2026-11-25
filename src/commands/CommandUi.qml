@@ -321,13 +321,24 @@ Item {
             }
             Repeater {
                 model: App.commands.problems
-                delegate: Text {
+                delegate: RowLayout {
+                    id: problemRow
                     required property string modelData
                     Layout.fillWidth: true
                     Layout.topMargin: root.u
-                    wrapMode: Text.Wrap
-                    color: root.look.error
-                    text: modelData
+                    spacing: root.u
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: root.look.error
+                        text: problemRow.modelData
+                    }
+                    KitCopyButton {
+                        objectName: "commandProblemCopy"
+                        look: root.look
+                        Layout.alignment: Qt.AlignTop
+                        copyText: problemRow.modelData
+                    }
                 }
             }
 

@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
+#include "../window_grab.h"
 #include "apps/app_launcher.h"
 #include "apps/app_shelf.h"
 #include "apps/app_window.h"
@@ -162,6 +163,56 @@ private slots:
         QTRY_VERIFY(app.window->findChild<QObject *>("getReadySheet"));
         QCOMPARE(app.window->findChild<QObject *>("getReadySheet")->property("visible").toBool(), true);
         qDeleteAll(app.engine.rootObjects());
+    }
+
+    // FUGUE_SHOT_DIR=<folder>: the failed run's error line with its copy button, and the hero's launcher toggle off and on, over the
+    // Dusk gradient (no preview) and over a pale preview picture. Pictures only; nothing is asserted.
+    void theErrorCopyButtonAndTheLauncherToggleLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        for (const bool pale : {false, true}) {
+            QTemporaryDir root;
+            makeApp(root.path(), "shot-app", "Shot app");
+            if (pale) {
+                QImage picture(640, 400, QImage::Format_RGB32);
+                for (int y = 0; y < picture.height(); ++y)
+                    for (int x = 0; x < picture.width(); ++x)
+                        picture.setPixelColor(x, y, QColor::fromHsv(40 + x * 40 / picture.width(), 25, 235 + 20 * y / picture.height()));
+                QVERIFY(picture.save(root.path() + "/shot-app/preview.png"));
+            }
+            App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+            Rig rig(app, root.path());
+            QVERIFY(app.workflows.openPath(root.path() + "/shot-app/workflow.fugue"));
+            rig.view.showApp();
+            QVERIFY(app.open());
+            app.window->resize(1100, 700);
+            QTRY_VERIFY(find(app.window, "appLauncherToggle"));
+            const QString tag = pale ? "pale" : "dusk";
+            const auto hero = [&](const char *state) {
+                QTest::qWait(500); // the chip's fade and the measuring of the picture under it
+                QImage whole = test_support::grab(app.window);
+                QQuickItem *toggle = find(app.window, "appLauncherToggle");
+                const QPoint at = toggle->mapToScene(QPointF(0, 0)).toPoint();
+                whole.copy(QRect(at - QPoint(160, 40), QSize(260, 100))).scaled(780, 300, Qt::KeepAspectRatio, Qt::FastTransformation)
+                    .save(QString("%1/launcher-%2-%3.png").arg(out, tag, state));
+            };
+            hero("off");
+            tap(app.window, find(app.window, "appLauncherToggle"));
+            QTRY_VERIFY(find(app.window, "appLauncherToggle")->property("current").toBool());
+            tap(app.window, find(app.window, "appPage")); // off the toggle, so the on-state is not hover
+            hero("on");
+            if (pale)
+                continue;
+            rig.view.run();
+            rig.view.onEvent("r1", QJsonObject{{"event", "run.done"}, {"status", "failed"},
+                                               {"errors", QJsonArray{QJsonObject{{"code", "oom"}, {"message", "Not enough GPU memory (request abc123)."}, {"hint", "Close other programs using the GPU, or lower the size."}}}}});
+            QTRY_VERIFY(find(app.window, "appErrorCopy"));
+            QTest::qWait(300);
+            test_support::grab(app.window).save(out + "/app-error-copy.png");
+            qDeleteAll(app.engine.rootObjects());
+        }
     }
 
     // `fugue --app x.fugueapp` (#394): the bundle opens as the app, and once it is ready "Keep this app" puts it in the person's

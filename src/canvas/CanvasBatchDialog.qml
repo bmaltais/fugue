@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 import "../menu"
 
 // Batch… (#250), Canvas > Automate: Photoshop's Automate > Batch on a Question (epic #206). Pick an action, the folder of
@@ -196,24 +197,48 @@ Question {
                         color: resultRow.modelData.status === "failed" ? root.look.error : root.look.label
                     }
                 }
-                Label {
+                RowLayout {
                     Layout.fillWidth: true
-                    visible: text !== ""
-                    text: resultRow.modelData.error
-                    color: root.look.error
-                    font.pixelSize: root.look.captionSize
-                    wrapMode: Text.Wrap
+                    visible: errLabel.text !== ""
+                    spacing: 2 * root.look.unit
+                    Label {
+                        id: errLabel
+                        Layout.fillWidth: true
+                        visible: text !== ""
+                        text: resultRow.modelData.error
+                        color: root.look.error
+                        font.pixelSize: root.look.captionSize
+                        wrapMode: Text.Wrap
+                    }
+                    KitCopyButton {
+                        objectName: "batchRowErrorCopy"
+                        look: root.look
+                        Layout.alignment: Qt.AlignTop
+                        copyText: resultRow.modelData.error
+                    }
                 }
             }
         }
 
-        Label {
-            objectName: "canvasBatchError"
+        RowLayout {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: root.problem
-            color: root.look.error
-            wrapMode: Text.Wrap
+            visible: errLabelAll.text !== ""
+            spacing: 2 * root.look.unit
+            Label {
+                id: errLabelAll
+                objectName: "canvasBatchError"
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: root.problem
+                color: root.look.error
+                wrapMode: Text.Wrap
+            }
+            KitCopyButton {
+                objectName: "canvasBatchErrorCopy"
+                look: root.look
+                Layout.alignment: Qt.AlignTop
+                copyText: root.problem
+            }
         }
 
         RowLayout {

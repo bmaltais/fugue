@@ -134,14 +134,25 @@ Popup {
                 visible: dialog.view === "list"
                 Layout.fillWidth: true
                 spacing: 3 * dialog.u
-                Text {
-                    objectName: "projectsRegistryProblem"
-                    visible: text !== ""
+                RowLayout {
                     Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: dialog.model.registryProblem
-                    color: dialog.look.error
-                    font.pixelSize: dialog.look.labelSize
+                    visible: registryProblem.text !== ""
+                    spacing: dialog.u
+                    Text {
+                        id: registryProblem
+                        objectName: "projectsRegistryProblem"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: dialog.model.registryProblem
+                        color: dialog.look.error
+                        font.pixelSize: dialog.look.labelSize
+                    }
+                    KitCopyButton {
+                        objectName: "projectsRegistryProblemCopy"
+                        look: dialog.look
+                        Layout.alignment: Qt.AlignTop
+                        copyText: dialog.model.registryProblem
+                    }
                 }
                 Repeater {
                     model: dialog.model.projects
@@ -520,14 +531,24 @@ Popup {
                 }
             }
 
-            Text {
-                objectName: "projectsError"
-                visible: dialog.error !== ""
+            RowLayout {
                 Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: dialog.error
-                color: dialog.look.error
-                font.pixelSize: dialog.look.labelSize
+                visible: dialog.error !== ""
+                spacing: dialog.u
+                Text {
+                    objectName: "projectsError"
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: dialog.error
+                    color: dialog.look.error
+                    font.pixelSize: dialog.look.labelSize
+                }
+                KitCopyButton {
+                    objectName: "projectsErrorCopy"
+                    look: dialog.look
+                    Layout.alignment: Qt.AlignTop
+                    copyText: dialog.error
+                }
             }
             Text {
                 Layout.alignment: Qt.AlignRight
