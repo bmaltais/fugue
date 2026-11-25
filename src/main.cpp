@@ -1,5 +1,6 @@
 // fugue — one line on what it does.
 
+#include <memory>
 #include <QCommandLineParser>
 #include <QDesktopServices>
 #include <QCommandLineOption>
@@ -35,6 +36,7 @@
 #include "node_type_reloads.h"
 #include "engine/fugue_home.h"
 #include "engine/project.h"
+#include "engine/node_kernel.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
@@ -177,7 +179,15 @@ int main(int argc, char *argv[]) {
     // The App view (#385): a workflow with an app block as one simple screen, its runs queued with the rest.
     fugue::AppView appView([&runService](const fugue::RunRequest &request) { return runService.start(request); },
                            [&runService](const QString &run) { runService.cancel(run); }, &registry);
-    fugue::bindAppView(appView, workflows, canvasModel, runService, commands, runs);
+    // Which capability a node asks a provider for, so the Needs panel can name a node the paired helper cannot take (#491).
+    const auto capabilityKernels = std::make_shared<fugue::Kernels>();
+    fugue::nodes::addBuiltinKernels(*capabilityKernels);
+    fugue::bindAppView(appView, workflows, canvasModel, runService, commands, runs,
+                       [capabilityKernels, &registry](const QString &typeId) {
+                           const fugue::NodeType *type = registry.nodeType(typeId);
+                           const std::shared_ptr<fugue::ProviderKernel> kernel = type ? capabilityKernels->provider(*type) : nullptr;
+                           return kernel ? kernel->requirement(*type, {}).capability : QString();
+                       });
     // Add to launcher and Open in Fugue, in both windows' App view (#398).
     fugue::AppLauncher appLauncher(&appView, &workflows, fugue::TemplateLibrary::standardRoots(), &registry);
     QObject::connect(&appLauncher, &fugue::AppLauncher::notice, &workflows, &fugue::Workflows::notify);

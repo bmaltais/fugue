@@ -28,8 +28,10 @@ class RunService;
 class Workflows;
 
 // Call after CanvasRuns::registerCommands (the handlers of run.* are replaced). Everything must outlive the window.
+// `capabilityOf` says which capability a node type asks a provider for (empty for a type that is none): with it the Needs panel names the
+// node a paired helper cannot take (#491); without it the host is taken to serve every node.
 void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunService &service, CommandRegistry &commands,
-                 CanvasRuns &runs);
+                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf = {});
 
 // An app's own window (`fugue --app`): the page's Apps choose another app, which opens in a tab of this window (the shelf's
 // choose) and is shown as the App view whatever its block's defaultView says; the launcher entry and Open in Fugue become that

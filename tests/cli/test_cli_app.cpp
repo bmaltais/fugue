@@ -12,6 +12,8 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QtTest>
 
 #include "engine/share_package.h"
@@ -323,6 +325,83 @@ private slots:
         QVERIFY2(ran.code() != QString("app_not_ready"), ran.out + ran.err);
         QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
         QCOMPARE(fugue({"app", "run", "unsourced.fugue", "--json"}).code(), QString("app_not_ready")); // no helper: refused as before
+    }
+
+    // #491: the run is refused up front, naming the node, when the paired helper cannot take it: a node pinned to a provider on this
+    // machine, or a node whose capability the host did not offer when it last answered.
+    void aRunTheHostCannotTakeIsRefusedNamingTheNode() {
+        QByteArray staged = kSampled;
+        staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"save\":");
+        write(path("work/staged.fugue"), staged);
+        QByteArray pinned = staged;
+        pinned.replace("\"version\": \"1.0.0\", \"inputs\": {\"model\"", "\"version\": \"1.0.0\", \"provider\": \"desk\", \"inputs\": {\"model\"");
+        write(path("work/pinned.fugue"), pinned);
+        write(path("root/config/fugue/providers.json"),
+              "{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"},"
+              " {\"name\": \"gx10\", \"type\": \"fugue-helper\", \"address\": \"http://gx10.invalid:8787\", \"key\": \"k\"}]}");
+
+        // Nothing is known of what the host offers: it answers for itself, as before.
+        QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+        // Pinned to a provider on this machine: refused, naming the node, with the prepare hint.
+        const Outcome info = fugue({"app", "info", "pinned.fugue", "--json"});
+        QVERIFY(!info.data().contains("runs_on"));
+        QCOMPARE(info.data().value("host_problems").toArray().first().toObject().value("node").toString(), QString("enc"));
+        const Outcome refused = fugue({"app", "run", "pinned.fugue", "--json"});
+        QCOMPARE(refused.code(), QString("model_missing"));
+        QVERIFY2(refused.error().value("message").toString().contains("Node enc is pinned to desk"), refused.out);
+        QCOMPARE(refused.error().value("node").toString(), QString("enc"));
+        QVERIFY(refused.error().value("hint").toString().contains("prepare"));
+
+        // The host last offered images only: it could never serve a text.encode node.
+        write(path("root/state/fugue/paired_helpers.json"),
+              "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}");
+        QVERIFY(!fugue({"app", "info", "staged.fugue", "--json"}).data().contains("runs_on"));
+        const Outcome noCapability = fugue({"app", "run", "staged.fugue", "--json"});
+        QCOMPARE(noCapability.code(), QString("model_missing"));
+        QVERIFY2(noCapability.error().value("message").toString().contains("does not offer text.encode"), noCapability.out);
+        write(path("root/state/fugue/paired_helpers.json"),
+              "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"text.encode\"]}}");
+        QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+
+        // (A loopback address is no paired host, so 0.0.0.0, which reaches it.) The host now offers it (what was kept is stale): the run is not refused, and what the host said is kept again.
+        QProcess host;
+        const QString script = path("host.py");
+        write(script, "import http.server, json, sys\n"
+                      "class H(http.server.BaseHTTPRequestHandler):\n"
+                      "    def do_POST(self):\n"
+                      "        n = int(self.headers.get('Content-Length', 0)); self.rfile.read(n)\n"
+                      "        body = json.dumps({'protocol': 1, 'engine': 'sdcpp', 'shares_filesystem': False, 'host': 'gx10', 'capabilities': ['text.encode']}).encode()\n"
+                      "        self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)\n"
+                      "    def log_message(self, *a): pass\n"
+                      "http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n");
+        QTcpServer probe;
+        QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
+        const quint16 port = probe.serverPort();
+        probe.close();
+        host.start("python3", {script, QString::number(port)});
+        QVERIFY(host.waitForStarted());
+        const auto up = [port] {
+            QTcpSocket socket;
+            socket.connectToHost(QHostAddress::LocalHost, port);
+            return socket.waitForConnected(200);
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(up(), 5000);
+        write(path("root/config/fugue/providers.json"),
+              QStringLiteral("{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"}, {\"name\": \"gx10\", \"type\": \"fugue-helper\", "
+                             "\"address\": \"http://0.0.0.0:%1\", \"key\": \"k\"}]}").arg(port).toUtf8());
+        write(path("root/state/fugue/paired_helpers.json"),
+              QStringLiteral("{\"gx10\": {\"address\": \"http://0.0.0.0:%1\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}").arg(port).toUtf8());
+        const Outcome freshInfo = fugue({"app", "info", "staged.fugue", "--json"});
+        QCOMPARE(freshInfo.data().value("runs_on").toString(), QString("gx10"));
+        QVERIFY(fugue({"app", "run", "staged.fugue", "--json"}).code() != QString("model_missing"));
+        host.kill();
+        host.waitForFinished(2000);
+
+        // No paired helper configured: nothing changes (not ready, as before).
+        write(path("root/config/fugue/providers.json"), "{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"}]}");
+        QCOMPARE(fugue({"app", "run", "pinned.fugue", "--json"}).code(), QString("app_not_ready"));
+        QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
+        QVERIFY(QFile::remove(path("root/state/fugue/paired_helpers.json")));
     }
 
     // `app export` (#394, spec 11.5): the bundle is the package's zip, read back with the package reader.

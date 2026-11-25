@@ -8,6 +8,7 @@
 #include "engine/fake_provider.h"
 #include "engine/helper_provider.h"
 #include "engine/omarchy_provider.h"
+#include "engine/paths.h"
 #include "engine/providers.h"
 #include "omarchy_fixture.h"
 
@@ -552,6 +553,74 @@ private slots:
         Requirement requirement = wants("image.generate");
         requirement.modelsElsewhere = true;
         QCOMPARE(selectProvider(candidates, requirement)->instance, QStringLiteral("This machine"));
+    }
+
+    // #491: with the host down, one that could never offer the node's capability is not why it fails: the node's own model_missing is,
+    // said at selection (no local job is started to fail late).
+    void aGoneHelperThatCouldNeverServeTheNodeIsNotTheReason() {
+        QList<Candidate> candidates = localAndHost(false);
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        candidates[1].remembered = candidates[0].description.value(); // it last offered image.generate
+        QCOMPARE(selectProvider(candidates, requirement).errors().first().code, QStringLiteral("provider_unreachable"));
+        candidates[1].remembered->capabilities = {CapabilityOffer{QStringLiteral("text.generate"), {model("any")}}};
+        const auto refused = selectProvider(candidates, requirement);
+        QVERIFY(!refused);
+        QCOMPARE(refused.errors().first().code, QStringLiteral("model_missing"));
+        QVERIFY(refused.errors().first().message.contains("gx10"));
+        candidates[1].remembered.reset(); // never heard from it: the host is named
+        QCOMPARE(selectProvider(candidates, requirement).errors().first().code, QStringLiteral("provider_unreachable"));
+    }
+
+    // Every paired helper that answers is described, and what each said is remembered.
+    void everyPairedHelperIsProbedAndRemembered() {
+        QFile::remove(stateDir() + QStringLiteral("/paired_helpers.json"));
+        ProviderInstance one = localAndHost(true)[1].instance;
+        ProviderInstance two = one;
+        two.name = QStringLiteral("gx11");
+        two.address = QStringLiteral("http://gx11.example:8787");
+        bool finished = false;
+        QMap<QString, Description> got;
+        const auto make = [&](const ProviderInstance &instance) {
+            Description said = localAndHost(true)[1].description.value();
+            said.engine = QStringLiteral("sdcpp@") + instance.name;
+            auto fake = std::make_shared<FakeProvider>(said);
+            if (instance.name == QLatin1String("gx11"))
+                fake->setDescribeErrors({makeError("provider_unreachable", "timed out.")});
+            return Result<std::shared_ptr<Provider>>(std::static_pointer_cast<Provider>(fake));
+        };
+        probePairedHelpers({localAndHost(true)[0].instance, one, two}, [&](const QMap<QString, Description> &answered) { got = answered; finished = true; }, make);
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 2000);
+        QCOMPARE(got.keys(), QStringList{"gx10"});
+        QCOMPARE(got.value("gx10").engine, QStringLiteral("sdcpp@gx10"));
+        QVERIFY(rememberedPairedHelper(one));
+        QVERIFY(!rememberedPairedHelper(two));
+        QFile::remove(stateDir() + QStringLiteral("/paired_helpers.json"));
+    }
+
+    // #492: what the host last said is kept by name and address, and only for a paired helper.
+    void whatAPairedHelperLastSaidIsKeptByNameAndAddress() {
+        QFile::remove(stateDir() + QStringLiteral("/paired_helpers.json"));
+        ProviderInstance host = localAndHost(true)[1].instance;
+        const Description said = localAndHost(true)[1].description.value();
+        QVERIFY(!rememberedPairedHelper(host));
+        rememberPairedHelper(host, said);
+        const std::optional<Description> back = rememberedPairedHelper(host);
+        QVERIFY(back);
+        QCOMPARE(back->engine, said.engine);
+        QVERIFY(back->offer("image.generate"));
+        QVERIFY(!back->sharesFilesystem);
+        // A handle with nested parts comes back whole: it is in the cache key.
+        Description nested = said;
+        nested.capabilities[0].models[0].handle = QJsonObject{{"name", "any"}, {"hash", "sha256:aa"}, {"parts", QJsonObject{{"loras", QJsonArray{"x"}}}}};
+        rememberPairedHelper(host, nested);
+        QCOMPARE(rememberedPairedHelper(host)->offer("image.generate")->models.first().handle, nested.capabilities[0].models[0].handle);
+        host.address = QStringLiteral("http://other.example:8787"); // another host under the name
+        QVERIFY(!rememberedPairedHelper(host));
+        ProviderInstance local = localAndHost(true)[0].instance;
+        rememberPairedHelper(local, said);
+        QVERIFY(!rememberedPairedHelper(local));
+        QFile::remove(stateDir() + QStringLiteral("/paired_helpers.json"));
     }
 
     void modelFilesElsewhereWithNoPairedHelperKeepTheOldAnswer() {

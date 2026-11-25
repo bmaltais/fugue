@@ -92,6 +92,9 @@ struct ReadinessModel {
     // Its resource type is declared by a pack this plan installs, so it cannot be planned before that pack is in (#418):
     // it is listed like any other model and the same yes covers it. The run plans it after the pack rows.
     bool deferred = false;
+    // A paired host that may have the file: it cannot be asked (describe lists no model of a helper that takes its files in the job), so the
+    // row stays and says so (#493). Empty: this machine is where it runs.
+    QString onHost;
     QString typeFrom;   // deferred: the pack that gives its type (its name), or empty when the list cannot tell
 };
 
@@ -113,6 +116,9 @@ struct ReadinessPlan {
     // What cannot be made ready from here: a pack with no known source, a model with no source, a
     // pack that did not preview. Warnings, not part of the one yes.
     Errors problems;
+    // The handles of the missing models that cannot be got here, with no source or one that cannot be used (each is also a `model_missing` or
+    // `download_failed` problem): what a paired host may still have (#491).
+    QList<QJsonObject> unobtainable;
 
     // The environment totals again (the builder calls it).
     void recount();
