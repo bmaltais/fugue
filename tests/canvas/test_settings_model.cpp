@@ -356,6 +356,21 @@ private slots:
         QVERIFY(!QFile::exists(providersFile())); // only a change writes it
     }
 
+    void anHttpProviderCanBeAddedWithItsSettings() {
+        SettingsModel model;
+        QVERIFY(model.providerTypes().contains("http"));
+        QCOMPARE(model.addProvider("http"), QString());
+        const int added = model.providers().size() - 1;
+        QStringList names;
+        for (const QVariant &field : model.providers().at(added).toMap().value("fields").toList())
+            names << field.toMap().value("name").toString();
+        QCOMPARE(names, (QStringList{"api", "image_models", "text_models", "timeout_s"}));
+        QCOMPARE(model.setProviderField(added, "image_models", "gpt-image-1, dall-e-3"), QString());
+        const ProviderInstance saved = loadProviderInstances(providersFile()).value().last();
+        QCOMPARE(saved.type, QStringLiteral("http"));
+        QCOMPARE(saved.settings.value("image_models").toString(), QStringLiteral("gpt-image-1, dall-e-3"));
+    }
+
     void aHelperProviderCanBeAddedWithItsIdleTimeout() {
         SettingsModel model;
         QVERIFY(model.providerTypes().contains("fugue-helper"));

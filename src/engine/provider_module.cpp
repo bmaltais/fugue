@@ -96,6 +96,13 @@ QList<ProviderModule> builtinProviderModules() {
     omarchy.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit"),
                             QStringLiteral("video.generate"), QStringLiteral("audio.generate"), QStringLiteral("audio.adapter"),
                             QStringLiteral("text.generate")};
+    ProviderModule http;
+    http.id = QStringLiteral("http");
+    http.version = QStringLiteral("1");
+    http.name = QStringLiteral("HTTP endpoint");
+    http.transport = QStringLiteral("builtin");
+    http.when = QStringLiteral("never");
+    http.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit"), QStringLiteral("text.generate")};
     ProviderModule helper;
     helper.id = QStringLiteral("fugue-helper");
     helper.version = QStringLiteral("1");
@@ -104,7 +111,7 @@ QList<ProviderModule> builtinProviderModules() {
     helper.capabilities = {QStringLiteral("text.encode"), QStringLiteral("latent.sample"),
                            QStringLiteral("latent.decode"), QStringLiteral("latent.encode"),
                            QStringLiteral("image.upscale"), QStringLiteral("image.restore")};
-    return {omarchy, helper};
+    return {omarchy, http, helper};
 }
 
 Result<QList<ProviderModule>> loadProviderModules(const QString &root) {

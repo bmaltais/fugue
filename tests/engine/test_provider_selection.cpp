@@ -261,7 +261,7 @@ private slots:
         const auto unknown = createProvider(instance);
         QVERIFY(!unknown.ok());
         QCOMPARE(unknown.errors().first().code, QStringLiteral("unknown_provider"));
-        QCOMPARE(strings(unknown.errors().first().valid), (QStringList{"fugue-helper", "omarchy"}));
+        QCOMPARE(strings(unknown.errors().first().valid), (QStringList{"fugue-helper", "http", "omarchy"}));
 
         instance.type = QStringLiteral("fugue-helper");
         const auto helper = createProvider(instance);

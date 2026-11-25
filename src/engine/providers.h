@@ -76,7 +76,7 @@ QString pairedHelperName(const QList<ProviderInstance> &instances);
 void probePairedHelper(const QList<ProviderInstance> &instances, std::function<void(const QString &host)> done,
                        std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make = {});
 
-// Makes the provider an instance is a use of: omarchy and fugue-helper are compiled in (8.7);
+// Makes the provider an instance is a use of: omarchy, http and fugue-helper are compiled in (8.7);
 // any other type is a provider module (8.8) installed in `modulesRoot` (providerModulesDir() when
 // not given) whose id it is: a stdio one is a HelperProvider that describes itself, an http one a
 // RemoteHelperProvider. No other type is unknown_provider, with every module id as `valid`.
