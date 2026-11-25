@@ -34,6 +34,7 @@
 
 namespace fugue {
 
+// Ordered nearest to farthest: placementOf takes the max of a fal instance's two hosts, so keep this order.
 enum class Placement { ThisMachine, OwnHost, OffMachine };
 
 Placement placementOf(const ProviderInstance &instance);
