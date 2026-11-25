@@ -492,9 +492,10 @@ Item {
                         Layout.fillHeight: true
                         contentWidth: availableWidth
                         clip: true
+                        ScrollBar.vertical: FugueScrollBar { look: root.look }
                         readonly property var fields: root.builder.preview.fields
                         Column {
-                            width: previewScroll.availableWidth
+                            width: previewScroll.availableWidth - (previewScroll.ScrollBar.vertical as FugueScrollBar).inset
                             Text {
                                 width: parent.width
                                 leftPadding: 2 * root.look.unit

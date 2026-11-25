@@ -17,7 +17,7 @@ ListView {
     required property CanvasLook look
     readonly property real size: 14 * look.unit
 
-    implicitHeight: size + look.unit
+    implicitHeight: size + look.unit + (ScrollBar.horizontal as FugueScrollBar).inset
     orientation: ListView.Horizontal
     spacing: look.unit
     clip: true
@@ -38,7 +38,7 @@ ListView {
             event.accepted = true
         }
     }
-    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+    ScrollBar.horizontal: FugueScrollBar { look: strip.look }
 
     delegate: Rectangle {
         id: take

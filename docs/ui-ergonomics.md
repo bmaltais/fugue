@@ -105,6 +105,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - 100% while comparing is of the larger picture (owner, same day): by area as before; with a placement, by density (the input's file pixels per result pixel over its place), so an input as dense as the result or denser is at 100% of its own pixels, a sparser one leaves A's. Z, 1 and the 100% chip already take the larger first; a second press toggles A and B as in the Compare node.
 - Why: the owner's ask (the square fully visible, the extension above and below, as a sliding A/B); the Compare Images node's fit is right for two pictures of one subject, wrong for a picture and its extension. Placement comes from the take's values, so it stays right after the form changes. Not asked of the graph's Compare node: it has no padding to read.
 
+### 2026-11-25 Scroll bar: a calm pill in a 2.5u gutter, kept out of the content (owner's feedback)
+
+- Control: `src/canvas/FugueScrollBar.qml`; hosts `src/apps/AppPage.qml` (`appForm`), `AppLibrary.qml`, `AppBuilderDialog.qml` (`builderPreview`), `AppTakes.qml`.
+- Old: a 10px gutter with a full-height `well` track at 60% always on; in the App view the bar was Qt's default, a wide flat grey bar over the rows' right-aligned values.
+- New: a 2.5u gutter, all of it the hit area; no track at rest, `kitTrack` while hovered or pressed; a round `label` pill at least 8u long, 1u wide (1.5u hovered or pressed), alpha 0.35 (0.45 light) at rest, 0.7 hovered, 0.9 pressed (`thumbAlpha`, `thumbAlphaLight`, `thumbHover`, `thumbPress`), animated over `durColor`. A host padded by at least 2.5u on that side holds the bar in the padding (the App form does not shrink); others pad by `inset`. Mirrors in right-to-left; takes no focus.
+- Why: the bar rests quietly like the rest of the Drift kit, grows when reached, and never sits over a value.
+
 ### 2026-11-25 App view: Clear empties the takes; Repeat needs a seed that varies; one raised dropdown; a slider's value is typed (owner's second look)
 
 - Control: `src/apps/AppStage.qml` `appClear` (now also when only the strip has takes); `src/apps/AppPage.qml` `appLiveMode` (Repeat only when `AppView.canRepeat`), `appRepeatWaits`; `src/kit/KitDropdown.qml` (new) for `appImageChoose-<key>`, `AppChoice.qml` and `AppModelInput.qml` (`appInput-<key>`); `src/kit/KitSlider.qml` the value field `<objectName>-value` (App view ranges, Settings > Look sliders).

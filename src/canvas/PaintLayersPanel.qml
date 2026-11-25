@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 import Fugue
 
 // The layers of the paint window (#181, spec 14.4): a list of a PaintLayer's layers, top first, each with
@@ -55,6 +56,7 @@ Rectangle {
             spacing: root.look.unit / 2
             boundsBehavior: Flickable.StopAtBounds
             activeFocusOnTab: true
+            ScrollBar.vertical: FugueScrollBar { look: root.look }
             Keys.onPressed: event => {
                 const at = root.activeIndex
                 if (event.key === Qt.Key_Up && at > 0) root.painting.selectLayer(root.entries[at - 1].id)
@@ -68,7 +70,7 @@ Rectangle {
                 required property int index
                 readonly property bool isPicture: modelData.kind === "picture"
                 objectName: "paintLayer-" + index
-                width: list.width
+                width: list.width - (list.ScrollBar.vertical as FugueScrollBar).inset
                 height: 8 * root.look.unit
                 radius: Math.min(root.look.params.cornerChip * root.look.unit, 0.45 * height)
                 color: modelData.active ? (root.look.params.controlColour === "accent" ? root.look.selectedRow : Qt.alpha(root.look.tone("sea").glass, 0.34)) : "transparent"

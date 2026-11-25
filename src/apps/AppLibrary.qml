@@ -69,13 +69,20 @@ Popup {
             }
         }
         ScrollView {
+            id: libScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 3 * pop.u
+            // The 3u margin on the bar's side is the bar's room: the ScrollView pads by it instead.
+            Layout.rightMargin: libScroll.mirrored ? 3 * pop.u : 0
+            Layout.leftMargin: libScroll.mirrored ? 0 : 3 * pop.u
+            rightPadding: libScroll.mirrored ? 0 : 3 * pop.u
+            leftPadding: libScroll.mirrored ? 3 * pop.u : 0
             contentWidth: availableWidth
             clip: true
+            ScrollBar.vertical: FugueScrollBar { look: pop.look }
             ColumnLayout {
-                width: parent.width
+                width: parent.width - (libScroll.ScrollBar.vertical as FugueScrollBar).inset
                 spacing: 2 * pop.u
                 Text {
                     visible: pop.takeTiles.length > 0
