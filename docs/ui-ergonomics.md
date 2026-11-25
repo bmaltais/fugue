@@ -1027,3 +1027,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rule: Floor (no new button; the chip is a label), Primary (Recommended is the one accent mark on a row), Learned place (the tooltip is the app's, delay as the layers panel's).
 - 2026-11-24 later (owner): the Models page is removed, with SizedList's `badge` and `bar`. Why: there was nothing to do on it, the Recommended mark already shows in the pickers and on the cards, and a list of files is not a setting. A Model library panel beside the canvas is filed instead.
 - Not checked by a person: the tooltip over a widget well of a tall (multiline) input, and at the narrowest settings width.
+
+### 2026-11-24 Apps chip in the Templates window (#387)
+
+- Control: `src/workflow/FilterChip.qml` (the Ready to run chip's markup, now shared) and the **Apps** chip `templatesApps` beside Ready to run (`templatesReadyOnly`); both 7u tall toggles, a check and the accent edge when on, Space or Return toggles.
+- Old: one inline chip, Ready to run.
+- New: Apps keeps only the templates with an `app` block; an app's card says the app's name and one line (`template.json`'s `app.title` and `app.summary`, else the block's). The chip is hidden while no template is an app, so a window without apps is unchanged, and it resets when the dialog opens.
+- Why: apps ride on templates (epic #397), so they are found where templates are, by one more filter, not a second window. Two chips share one component so they cannot drift.
+- Rules met: Floor (28px chip as before), Primary (no accent fill; a filter is not an action), Gaps (2u, the filter row's), Learned place (right of Ready to run).
+- Not checked by a person: the chip's wrap in the narrowest dialog.

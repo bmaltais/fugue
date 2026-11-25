@@ -30,6 +30,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -114,6 +115,9 @@ public:
     void onEvent(const QString &run, const QJsonObject &event);
 
 signals:
+    // One quiet line, once per tab, when the workflow's `app` block cannot be used (not well formed, or of a later format): the
+    // tab is then an ordinary graph and this says why. The window shows it as it shows any load problem (Workflows' notice).
+    void notice(const QString &text);
     // showApp() wants the workflow as it is now (edits made in the graph): the window answers with show().
     void documentWanted();
     void appChanged();
@@ -150,6 +154,7 @@ private:
     QString m_problem;
     QVariantList m_fields;
     QHash<QString, TabState> m_state;
+    QSet<QString> m_told; // the tabs whose unusable block was said
 };
 
 } // namespace fugue

@@ -1834,5 +1834,9 @@
   "Environments": "Environments",
   "Get ready": "Get ready",
   "Install and trust": "Install and trust",
-  "Trust": "Trust"
+  "Trust": "Trust",
+  "Apps": "Apps",
+  "Only apps: templates that open as one simple screen": "Only apps: templates that open as one simple screen",
+  "This workflow's app was made by a newer Fugue, so it opens as a graph.": "This workflow's app was made by a newer Fugue, so it opens as a graph.",
+  "This workflow's app block cannot be used, so it opens as a graph: %1": "This workflow's app block cannot be used, so it opens as a graph: %1"
 }

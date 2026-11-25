@@ -6,6 +6,11 @@
 //   <id>/template.json   {"title", "description", "category", "tags": [...], "source": {...}}; title required.
 //                        `source` is optional, where the workflow comes from (#369): {"name", "author",
 //                        "url", "note"}, each a string, all optional; a `url` must be http or https.
+//                        `app` is optional, `true` or {"title", "summary", "kind"} (each text, all optional):
+//                        the template is an App (#387, 4.9): its workflow has the `app` block, which is the
+//                        binding; this is only the catalog's flag and the card's words (title and summary
+//                        fall back to the block's (its title is required; the description, then the template's own); `kind` is a short word, as
+//                        "image"). `false` keeps a workflow with a block out of the Apps.
 //   <id>/workflow.fugue  the workflow; its `requires.models` give each model's `source`
 //   <id>/preview.webp    (or .png, .jpg) what it makes; optional
 //   <id>/inputs/         sample images its Load Image nodes name as `inputs/<name>`; optional
@@ -58,6 +63,13 @@ struct CarriedPack {
     QString name;   // its pack.json's display name, empty when it has none
 };
 
+// What the catalog shows of an app template (#387): its card's words. Never empty except `kind`.
+struct TemplateApp {
+    QString title;
+    QString summary;
+    QString kind;
+};
+
 struct Template {
     QString id;       // the folder's name (or a .fugue file's stem); a person's own wins a clash
     QString folder;   // absolute
@@ -69,6 +81,7 @@ struct Template {
     QString categoryTitle; // as the root's categories.json names it, else the id
     QStringList tags;
     QJsonObject source;        // template.json's `source`: name, author, url, note (only the valid ones); empty when none
+    std::optional<TemplateApp> app; // set when the workflow has a readable `app` block and template.json does not say `false`
     QStringList families;      // the model families of its models (engine/model_family.h), read, never written
     bool own = false;
     bool inherited = false;    // the Default project's own template, read-only here (1.4.2); `own` is set too
@@ -106,7 +119,8 @@ public:
     QList<Template> list() const;
     // What kept a template out of list(), or is wrong with one in it, for the bundled
     // templates' check: an unreadable template.json or workflow, a missing title, a Load Image
-    // file that is not in the folder. A template made by a newer Fugue is not a problem.
+    // file that is not in the folder, an `app` flag with no block in the workflow (or a block with no
+    // flag in its template.json, or one that does not read). A template made by a newer Fugue is not a problem.
     Errors problems() const;
 
     // The template with this id, or nullptr.

@@ -45,6 +45,36 @@ void tap(QQuickWindow *window, QQuickItem *item) {
     QTest::mouseClick(window, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
 }
 
+// The runs and the view tied to a window as main.cpp ties them; the run is a fake that only records the request (never started).
+struct Rig {
+    RunSetup setup;
+    QList<RunRequest> started;
+    RunService service;
+    CanvasRuns runs;
+    AppView view;
+
+    static RunSetup setupIn(const QString &root) {
+        RunSetup out;
+        out.runsRoot = root + "/runs";
+        out.queueDir = root + "/queue";
+        out.lockPath = root + "/engine.lock";
+        out.cacheRoot = root + "/results";
+        out.hashesPath = root + "/hashes.json";
+        out.thumbnailDir = root + "/thumbnails";
+        out.collectGarbage = false;
+        return out;
+    }
+    explicit Rig(App &app)
+        : setup(setupIn(app.dir.path())), service(setup), runs(&app.model, &app.workflows, &service, &app.registry),
+          view([this](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
+               [](const QString &) {}, &app.registry) {
+        runs.registerCommands(app.commands);
+        app.runs = &runs;
+        bindAppView(view, app.workflows, app.model, service, app.commands, runs);
+        app.appView = &view;
+    }
+};
+
 } // namespace
 
 class TestAppWindow : public QObject {
@@ -53,26 +83,55 @@ class TestAppWindow : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
+    // A template of the catalog (#387, tests/apps/templates/): opening it by id is the App view; Open in Graph is its workflow as a tab.
+    void anAppTemplateOpensAsTheAppAndOpenInGraphIsItsWorkflow() {
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        QVERIFY(app.open());
+        QVariantMap card;
+        for (const QVariant &entry : app.workflows.templates())
+            if (entry.toMap().value("id") == "test-app")
+                card = entry.toMap();
+        QVERIFY(card.value("app").toBool());
+        QCOMPARE(card.value("title").toString(), QStringLiteral("Test app"));
+
+        QVERIFY(app.workflows.openTemplateById("test-app"));
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QVERIFY(!find(app.window, "canvas"));
+        QCOMPARE(find(app.window, "appTitle")->property("text").toString(), QStringLiteral("Block title")); // the view is the binding's; the card's words are the catalog's
+        QVERIFY(find(app.window, "appInput-prompt"));
+
+        rig.view.openInGraph(); // the button is the first test's
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QCOMPARE(app.model.document().graph.nodes.value("encode").inputs.value("prompt").toJson(), QJsonValue("a quiet lake"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // A block that is not well formed, or of a later format, opens as the graph and says why, once, as other load problems are said.
+    void anUnusableBlockOpensTheGraphAndSaysWhy() {
+        for (const char *block : {"{\"format\": 1, \"inputs\": \"nope\"}", "{\"format\": 99}"}) {
+            const QByteArray json = QByteArray(R"({"fugue": 1, "app": @@, "graph": {"nodes": {
+                "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "old words"}}}}})")
+                                        .replace("@@", block);
+            const Result<Document> loaded = Document::load(json);
+            QVERIFY2(loaded.ok(), block);
+            App app(loaded.value());
+            Rig rig(app);
+            QVERIFY(app.open());
+            QTRY_VERIFY(find(app.window, "canvas"));
+            QVERIFY(!find(app.window, "appPage"));
+            QVERIFY2(!app.workflows.notice().isEmpty(), block);
+            QVERIFY2(app.workflows.notice().contains("opens as a graph"), qPrintable(app.workflows.notice()));
+            qDeleteAll(app.engine.rootObjects());
+        }
+    }
+
     void anAppOpensAsTheFormRunsAndGoesToTheGraphAndBack() {
         App app(load(appWorkflow));
-        RunSetup setup; // never started: the run is the fake below
-        const QString root = app.dir.path();
-        setup.runsRoot = root + "/runs";
-        setup.queueDir = root + "/queue";
-        setup.lockPath = root + "/engine.lock";
-        setup.cacheRoot = root + "/results";
-        setup.hashesPath = root + "/hashes.json";
-        setup.thumbnailDir = root + "/thumbnails";
-        setup.collectGarbage = false;
-        RunService service(setup);
-        CanvasRuns runs(&app.model, &app.workflows, &service, &app.registry);
-        runs.registerCommands(app.commands);
-        app.runs = &runs;
-        QList<RunRequest> started;
-        AppView view([&started](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
-                     [](const QString &) {}, &app.registry);
-        bindAppView(view, app.workflows, app.model, service, app.commands, runs);
-        app.appView = &view;
+        Rig rig(app);
+        QList<RunRequest> &started = rig.started;
+        RunService &service = rig.service;
         QVERIFY(app.open());
 
         // The form, no canvas.
@@ -94,7 +153,7 @@ private slots:
         QCOMPARE(started.first().document.graph.nodes.value("encode").inputs.value("prompt").toJson(), QJsonValue("a red fox"));
         QTRY_VERIFY(find(app.window, "appCancel"));
         QVERIFY(!find(app.window, "appRun")->property("enabled").toBool());
-        const QString picture = root + "/result.png";
+        const QString picture = app.dir.path() + "/result.png";
         QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(picture));
         emit service.event("r1", {{"event", "node.done"}, {"node", "save"},
                                   {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", QUrl::fromLocalFile(picture).toString()}, {"width", 8}, {"height", 8}}}}}});

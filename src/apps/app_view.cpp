@@ -73,6 +73,13 @@ void AppView::show(const QString &tab, const Document &document, const QString &
             state.graph = m_app->defaultView == QLatin1String("graph");
         }
     }
+    else if (!parsed && !m_told.contains(tab)) {
+        m_told.insert(tab);
+        const Error &why = parsed.error();
+        emit notice(why.code == QLatin1String("unsupported_format_version")
+                        ? tr("This workflow's app was made by a newer Fugue, so it opens as a graph.")
+                        : tr("This workflow's app block cannot be used, so it opens as a graph: %1").arg(why.message));
+    }
     buildFields();
     emit appChanged();
     emit runChanged();
@@ -81,6 +88,7 @@ void AppView::show(const QString &tab, const Document &document, const QString &
 
 void AppView::forget(const QString &tab) {
     const auto it = m_state.constFind(tab);
+    m_told.remove(tab);
     if (it == m_state.constEnd())
         return;
     if (!it->run.isEmpty() && m_cancel)

@@ -88,8 +88,10 @@ class TestCliApp : public QObject {
         out.write(bytes);
     }
 
-    void template_(const QString &id, const QString &title, const QByteArray &workflow) const {
-        write(path("templates/" + id + "/template.json"), "{\"title\": \"" + title.toUtf8() + "\"}");
+    // `app` is what template.json says of it: "true", "false" or nothing.
+    void template_(const QString &id, const QString &title, const QByteArray &workflow, const QByteArray &app = {}) const {
+        write(path("templates/" + id + "/template.json"),
+              "{\"title\": \"" + title.toUtf8() + "\"" + (app.isEmpty() ? QByteArray() : ", \"app\": " + app) + "}");
         write(path("templates/" + id + "/workflow.fugue"), workflow);
     }
 
@@ -103,7 +105,8 @@ private slots:
         QVERIFY(QDir().mkpath(path("work")));
         // A 1x1 PNG: a real picture through the real loader.
         write(picture(), QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="));
-        template_("invert", "Invert template", kInvert);
+        template_("invert", "Invert template", kInvert, R"({"summary": "Flip the colors.", "kind": "image"})");
+        template_("hidden", "Hidden", kInvert, "false");
         template_("plain", "Plain", kPlain);
         write(path("work/needs-pack.fugue"), kNeedsPack);
         write(path("work/invert.fugue"), kInvert);
@@ -118,6 +121,24 @@ private slots:
         ids.sort();
         QCOMPARE(ids, (QStringList{"invert"}));
         QCOMPARE(listed.data().value("apps").toArray().at(0).toObject().value("title").toString(), QString("Invert"));
+    }
+
+    // The catalog's flag (#387, 11.10) is what `app list` lists by; `template list` carries it with the card's words.
+    void templateListCarriesTheAppFlagAndAppListFollowsIt() {
+        const Outcome listed = fugue({"template", "list", "--json"});
+        QCOMPARE(listed.exitCode, 0);
+        QMap<QString, QJsonValue> app;
+        for (const QJsonValue entry : listed.data().value("templates").toArray())
+            app.insert(entry.toObject().value("id").toString(), entry.toObject().value("app"));
+        QCOMPARE(app.value("invert").toObject(),
+                 (QJsonObject{{"title", "Invert"}, {"summary", "Flip the colors."}, {"kind", "image"}}));
+        QCOMPARE(app.value("hidden"), QJsonValue(false)); // app: false keeps a workflow with a block out of the Apps
+        QCOMPARE(app.value("plain"), QJsonValue(false));
+        QStringList ids;
+        for (const QJsonValue entry : fugue({"app", "list", "--json"}).data().value("apps").toArray())
+            ids << entry.toObject().value("id").toString();
+        QCOMPARE(ids, (QStringList{"invert"}));
+        QCOMPARE(fugue({"app", "info", "hidden", "--json"}).exitCode, 0); // still an app by its block, by name
     }
 
     void infoGivesTheInputsAndOutputsOfATemplateOrAFile() {

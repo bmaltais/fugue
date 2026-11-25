@@ -1,0 +1,6 @@
+{
+  "title": "Test app fixture",
+  "description": "A tiny app for the tests: one prompt, one result.",
+  "category": "image",
+  "app": {"title": "Test app", "summary": "One prompt in, one picture out.", "kind": "image"}
+}
