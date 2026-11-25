@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/sampler",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "name": "Sampler",
   "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent or an Empty Video Latent (a clip), else from the latent given (a picture from VAE Encode, a clip from VAE Encode Video, or a sampled one), by the amount Denoise sets. A latent from VAE Encode with a mask is redrawn only where the mask is white; with Soft mask, gray in the mask is a strength.",
   "category": "Diffusion",
@@ -35,7 +35,13 @@
      "choices": ["noise_level", "schedule_cut"],
      "description": "How Denoise below 1 is read for a start latent. Unset or noise_level: the start picture is mixed with noise to that level and the steps run from there. schedule_cut: ComfyUI's reading: the schedule is made int(Steps / Denoise) long and its last Steps steps run, so Steps are always run and the sigmas match ComfyUI's. Not for video; Denoise 0 is refused."},
     {"name": "soft_mask", "shown_when": {"carries": {"latent": "mask"}}, "type": "boolean", "label": "Soft mask", "default": false, "advanced": true,
-     "description": "For a latent from VAE Encode with a mask: read the mask's gray as how much to change (differential diffusion): white is redrawn from the start, gray is held until later in the run, black is kept. Off: the mask is white or not. Not for an inpaint model, which has its own mask input. Needs this build's helper."}
+     "description": "For a latent from VAE Encode with a mask: read the mask's gray as how much to change (differential diffusion): white is redrawn from the start, gray is held until later in the run, black is kept. Off: the mask is white or not. Not for an inpaint model, which has its own mask input. Needs this build's helper."},
+    {"name": "variation_strength", "type": "number", "label": "Variation strength", "default": 0, "min": 0, "max": 1, "step": 0.01,
+     "widget": "slider", "advanced": true,
+     "description": "A small change on the same picture: the start noise of Seed is blended toward the noise of Variation seed by this much (spherical blend), 0 is the plain Seed, 1 is the Variation seed's own picture. Not for video. Needs this build's helper."},
+    {"name": "variation_seed", "shown_when": {"variation_strength": {"gt": 0}}, "type": "number", "label": "Variation seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed", "advanced": true,
+     "description": "The seed whose noise the start noise is blended toward. The same as Seed counts as Seed plus 1. Needs this build's helper."}
   ],
   "outputs": [
     {"name": "latent", "type": "fugue/latent", "label": "Latent"}

@@ -916,6 +916,15 @@ public:
             params.insert(QStringLiteral("video_frames"), from.frames);
             params.insert(QStringLiteral("fps"), from.fps);
         }
+        // Variation seeds (#553): sent only when it changes the picture, so a workflow without it keeps its request.
+        if (const double variation = context.input(QStringLiteral("variation_strength")).number(); variation > 0.0) {
+            if (from.isVideo())
+                return makeInputError(QStringLiteral("node_failed"), QStringLiteral("variation_strength"),
+                                      QStringLiteral("A video Sampler has no variation seed: the engine varies the start noise of pictures only."),
+                                      QStringLiteral("Set Variation strength to 0 for a clip."));
+            params.insert(QStringLiteral("fugue.variation_strength"), variation);
+            params.insert(QStringLiteral("fugue.variation_seed"), context.input(QStringLiteral("variation_seed")).json().toInteger());
+        }
         if (const Value method = context.input(QStringLiteral("sampler")); !method.isEmpty())
             params.insert(QStringLiteral("sample.method"), method.text());
         if (const Value scheduler = context.input(QStringLiteral("scheduler")); !scheduler.isEmpty())
