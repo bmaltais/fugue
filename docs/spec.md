@@ -3093,6 +3093,36 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   `status`, `progress`, `error`, `details`, `results`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
   it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.
 
+### 12.18 An app as its own application (#398, epic #397)
+
+`fugue --app <id|file|folder>` opens one app in a window of its own: the App view (12.17) and nothing else. No menu bar, tabs,
+graph, node library or panels; the title is the app's (the block's `title`) and the icon its template's `preview.*`, when
+there is one. `<id|file|folder>` is a template's id, a workflow file, a template folder or a `.fuguepack` (the words of
+`fugue app info`; a path that exists wins over an id). It is the same `fugue` binary, the same registry, run queue and helper;
+a second `--app` is a second process (no single-instance plumbing yet), which starts with the helper and the model cache the
+first one warmed. A name that is no app is a message on stderr and exit code 2; a file that has no usable app block opens the
+window with "This is not an app." and an Open in Fugue button.
+
+- **The window** (`apps/AppWindow.qml`, `appWindow`): the page (`appPage`, with `standalone`: no Open in Graph) and a notice line
+  at the foot that is the full window's (`workflows.notice`) with **Get ready…**, which opens the Get ready sheet (6.6, #379)
+  inside this window: a not-ready app (packs, trust, environments, models) goes through it at the first start, once. Ctrl+Enter
+  runs the app, `?` shows the keys. The window keeps no tab session and no recovery copies of its own (they go to a scratch
+  folder), does not record its project as the last one, and closing it, or Ctrl+Q, quits at once and never asks about unsaved
+  work. Closing it touches no other window's, no CLI run and not the shared helper.
+- **Add to launcher / Remove from launcher** (`appLauncherToggle`, in the App view of the full window and of the app's window;
+  `apps/app_launcher.h` for the shown app, `apps/launcher_entries.h` for the files): writes
+  `$XDG_DATA_HOME/applications/fugue-app-<key>.desktop` (`Type=Application`, `Name` the app's title, `Comment` its description,
+  `Exec=fugue --app <ref>` quoted as the Desktop Entry spec asks, the AppImage's own path in place of `fugue` when run from one,
+  `Icon` the copy of the preview in `$XDG_DATA_HOME/fugue/app-icons/` or `fugue`, `StartupWMClass=fugue-app-<key>`,
+  `X-Fugue-App=true`). `<ref>` is the template's id when the catalog has that folder, else an absolute path; `<key>` is the id, or
+  a path's file stem with a short hash of the path. The app's window sets its application id (Wayland app_id, desktop file name) to
+  `fugue-app-<key>`, which ties the window to its entry in the launcher and the task bar. Remove deletes the entry and its icon
+  copy and touches nothing else. The buttons are absent for a tab that has no file and no template folder (a new workflow: nothing
+  a launcher could start).
+- **Open in Fugue** (`appOpenInFugue`, the app's own window): starts `fugue --edit <ref>`, the full window with that app's
+  workflow as a tab, shown as the graph. A template is opened as a new unsaved workflow (as the Templates window does), a file
+  as that file. `--edit` also works from a terminal.
+
 ---
 
 ## 13. CLI and agent interface
@@ -3142,6 +3172,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue app list` | The apps of this machine (#392, epic #397): the templates the catalog flags as apps (`app` in `fugue template list`, 11.10: a readable `app` block, 4.9), the person's own first, by the template's id. Per app `id`, `title`, `description`, `file`, `inputs` and `outputs` (counts); a template that cannot be read is a warning and left out. |
 | `fugue app info <id\|file>` | What an app takes and gives: `id`, `file`, `title`, `description`, `default_view`, `inputs` [{`key` (the name, else the role), `role`, `label`, `type` (`image`, `mask`, `text`, `number`, `bool`, `model`, `choice`, ...), `required` (a picture or mask with none in the workflow, a prompt that is not optional and has no fallback), `advanced`, `default` (the block's, else the workflow's own value, a seed left to the engine as `{"auto": "random"}`, else the input's default), `min`, `max`, `choices` (the block's, else the target's, through a group instance to its inner input)}], `outputs` [{`node`, `label`}], `ready` and, when not ready, `needs` (the `prepare` plan, 6.6); what the workflow no longer has (a target, an input, an output) is dropped and reported as `app_stale` warnings. `<id\|file>` is a template id, or a workflow file (a path that exists wins over an id). Errors: `file_not_found` (no such app: `valid` lists the ids), `no_app` (the workflow or template has no `app` block), `app_invalid` (the block does not fit its graph; checked only when the app is ready, as a missing pack leaves its nodes unknown), `unsupported_format_version`. |
 | `fugue app run <id\|file> [--input <key>=<value>\|<key>=@<file>]... [--out <dir>]` | Run an app without the window (#392): `app::bindApp` puts the values in a copy of the workflow (an input left out keeps its block default, else the workflow's own value; a seed is never made random), the copy runs through the queue like `fugue run --wait` (`startBoundRun`, `waitForRun`; progress on stderr, Ctrl+C cancels), and the files the app's output nodes made are printed, one per line (`--json`: `{app, run, status: "ok", outputs: [{node, label, files}], files}`); results are the run's own (`fugue runs result <run>`, History), the app owns no store. `--input image=<file>` is a picture or mask path (it must exist, and a run may read it only under the home folder, 13.6); `<key>=@<file>` is that file's text, for a prompt; a number input takes a number, a choice input one of its words, a model input a model file's name (as `canvas act --set model=`) or a whole handle as JSON. `--out <dir>` (made when missing) sets the `folder` of every output node that writes files (Save Image, Save Video, Save Audio); a Preview has none. Refused before anything runs, in this order: `file_not_found`, `no_app`, `unknown_input` (`valid` lists the keys), `missing_input` (one error per input a run cannot do without), `usage` (a value of the wrong kind), `app_not_ready` (a pack to install or trust, a model to get; the hint says `fugue template prepare <id>` or `fugue workflow prepare <file>`), `app_invalid`; then `cancelled`, or the run's own code (`node_failed`, `out_of_memory`, ...), exit 1. |
+| `fugue --app <id\|file\|folder>` | The window, with one app only (#398, 12.18): the App view and nothing around it, titled and iconed as the app, for a desktop launcher entry. Not a command: it is the window's option, so it needs a display and may stand with `--home` and `--project`. `fugue --edit <id\|file\|folder>` opens that app's workflow in the full window. `fugue app open <id>`, the same as `--app`, is not there yet (it belongs in `src/cli/app.cpp`). |
 | `fugue canvas log <id>[@<revision>] [--limit <n>]` | The revisions from the head (or the one named) back along their parents, newest first, 20 by default: revision, time, producer. |
 | `fugue canvas show <id>[@<revision>]` | One revision: its tree hash, parent, producer, time and layers (position, name, kind, visibility, opacity, blend, layer mask, origin, tile count). |
 | `fugue canvas list` | The canvases of the store, newest first: id, creation time, name, head. |

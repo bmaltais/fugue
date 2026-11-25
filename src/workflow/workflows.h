@@ -332,6 +332,7 @@ private:
         int color = 0; // index into the look's tabColors
         std::unique_ptr<QUndoStack> undo; // while the tab is not shown
         QList<CarriedPack> carried; // the packs the template it was opened from carries (#118), else none
+        QString templateFolder;     // the folder of the template it was opened from (not a package's, which is gone), else empty (#398)
     };
 
     // Adds a tab and shows it. A current tab that is still an empty "Untitled" is replaced

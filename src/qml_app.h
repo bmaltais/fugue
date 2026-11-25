@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include "apps/app_launcher.h" // a QML type (AppLauncher, Add to launcher and Open in Fugue, #398): the module registers it from here
 #include "apps/app_view.h" // a QML type (AppView, the App view's store, #385): the module registers it from here
 #include "canvas/active_canvas.h"
 #include "canvas/canvas_actions.h"
@@ -78,6 +79,7 @@ struct AppObjects {
     ActiveCanvas *activeCanvas = nullptr;   // optional: the canvas last used in a Canvas view (#246); QML reads null
     CanvasBatch *canvasBatch = nullptr;     // optional: Canvas > Automate > Batch… (#250); QML reads null
     AppView *appView = nullptr;             // optional: the App view of a workflow with an app block (#385); QML reads null
+    AppLauncher *appLauncher = nullptr;     // optional, with appView: the launcher entry and Open in Fugue of the shown app (#398)
 };
 
 class QmlApp : public QObject {
@@ -108,6 +110,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::ActiveCanvas *activeCanvas READ activeCanvas CONSTANT)
     Q_PROPERTY(fugue::CanvasBatch *canvasBatch READ canvasBatch CONSTANT)
     Q_PROPERTY(fugue::AppView *appView READ appView CONSTANT)
+    Q_PROPERTY(fugue::AppLauncher *appLauncher READ appLauncher CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -135,6 +138,7 @@ public:
     ActiveCanvas *activeCanvas() const { return m_objects.activeCanvas; }
     CanvasBatch *canvasBatch() const { return m_objects.canvasBatch; }
     AppView *appView() const { return m_objects.appView; }
+    AppLauncher *appLauncher() const { return m_objects.appLauncher; }
 
 private:
     AppObjects m_objects;

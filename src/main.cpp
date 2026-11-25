@@ -2,6 +2,7 @@
 
 #include <QCommandLineParser>
 #include <QDesktopServices>
+#include <QCommandLineOption>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QKeySequence>
@@ -9,9 +10,12 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
 
+#include "apps/app_launcher.h"
+#include "apps/app_ref.h"
 #include "apps/app_window.h"
 #include "canvas/canvas_batch.h"
 #include "canvas/canvas_commands.h"
@@ -70,7 +74,11 @@ int main(int argc, char *argv[]) {
     // scripts get the same session every time), and remembers where it is running.
     if (QString lastError; !fugue::applyLastUsedProject(&lastError))
         std::fprintf(stderr, "fugue: %s\n", qPrintable(lastError));
-    fugue::recordLastUsedProject();
+    // `fugue --app <ref>` is one app in a window of its own (#398); `--edit <ref>` is that app's workflow in the full window.
+    const std::optional<QString> appArgument = fugue::appRefFromArgs(argc, argv);
+    const std::optional<QString> editArgument = fugue::appRefFromArgs(argc, argv, "--edit");
+    if (!appArgument)
+        fugue::recordLastUsedProject(); // an app's window is not where the person last worked
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("fugue");
@@ -121,7 +129,15 @@ int main(int argc, char *argv[]) {
     CanvasModel canvasModel(&registry);
     // The open workflows: tabs, open, save, recovery, import (spec 11). It starts with one
     // empty workflow and has the previous session's recovery copies ready to offer.
-    fugue::Workflows workflows(&canvasModel, &registry, &commands);
+    // An app's window keeps nothing of its own to recover or restore: its tab is the app, which a start brings back. Its
+    // recovery copies and tab list go into a scratch folder, so they never mix with the full window's.
+    QTemporaryDir appScratch;
+    fugue::WorkflowLocations locations;
+    if (appArgument) {
+        locations.recoveryDir = appScratch.filePath("recovery");
+        locations.sessionPath = appScratch.filePath("tabs.json");
+    }
+    fugue::Workflows workflows(&canvasModel, &registry, &commands, locations);
     fugue::registerFileCommands(commands, workflows);
     canvasModel.search()->registerCommands(commands);
     // The canvas is always there for now; Tab and Shift+A reach node.search through it.
@@ -162,6 +178,11 @@ int main(int argc, char *argv[]) {
     fugue::AppView appView([&runService](const fugue::RunRequest &request) { return runService.start(request); },
                            [&runService](const QString &run) { runService.cancel(run); }, &registry);
     fugue::bindAppView(appView, workflows, canvasModel, runService, commands, runs);
+    // Add to launcher and Open in Fugue, in both windows' App view (#398).
+    fugue::AppLauncher appLauncher(&appView, &workflows, fugue::TemplateLibrary::standardRoots(), &registry);
+    QObject::connect(&appLauncher, &fugue::AppLauncher::notice, &workflows, &fugue::Workflows::notify);
+    if (appArgument) // closing an app's window never asks about unsaved work: it has none of its own
+        commands.setHandler(QStringLiteral("app.quit"), [] { QCoreApplication::quit(); });
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
@@ -196,17 +217,31 @@ int main(int argc, char *argv[]) {
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas, &canvasBatch, &appView};
+                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas, &canvasBatch, &appView, &appLauncher};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);
     reloader.setTrustFile(fugue::TrustStore::defaultPath());
     fugue::followNodeTypeReloads(reloader, objects);
 
+    // The app a window is for, found before the window is made: its name is the window's identity in the launcher.
+    std::optional<fugue::AppRef> appRef;
+    if (const std::optional<QString> &named = appArgument ? appArgument : editArgument) {
+        QString why;
+        appRef = fugue::resolveApp(*named, fugue::TemplateLibrary::standardRoots(), &registry, &why);
+        if (!appRef) {
+            std::fprintf(stderr, "fugue: %s\n", qPrintable(why.isEmpty() ? QStringLiteral("name an app to open.") : why));
+            if (appArgument)
+                return 2; // a launcher entry whose app is gone: nothing to show but this
+        }
+    }
+    if (appArgument)
+        app.setDesktopFileName(fugue::LauncherEntries::desktopName(appRef->ref)); // ties the window to its launcher entry
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     fugue::exposeToQml(engine, objects);
-    engine.load(QUrl("qrc:/Main.qml"));
+    engine.load(QUrl(appArgument ? "qrc:/apps/AppWindow.qml" : "qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
 
@@ -214,18 +249,34 @@ int main(int argc, char *argv[]) {
     // already taken its own options (-platform, ...) off the arguments.
     QCommandLineParser parser;
     parser.addPositionalArgument("file", "A workflow to open.", "[file...]");
+    parser.addOption({"app", "Open an app (a template id, a workflow, a template folder or a package) in a window of its own.", "app"});
+    parser.addOption({"edit", "Open an app's workflow in the full window.", "app"});
     parser.parse(app.arguments());
     // A file named opens just that file and leaves the kept session alone; with none, the tabs the
     // last session had open come back (settings.json's restore_tabs, live), and are kept from here on.
-    workflows.setSessionEnabled(appSettings.restoreTabs());
-    QObject::connect(&appSettings, &fugue::SettingsModel::changed, &workflows,
-                     [&workflows, &appSettings] { workflows.setSessionEnabled(appSettings.restoreTabs()); });
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::flushSession);
+    if (!appArgument) {
+        workflows.setSessionEnabled(appSettings.restoreTabs());
+        QObject::connect(&appSettings, &fugue::SettingsModel::changed, &workflows,
+                         [&workflows, &appSettings] { workflows.setSessionEnabled(appSettings.restoreTabs()); });
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::flushSession);
+    }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &workspace, &fugue::Workspace::flush);
-    if (parser.positionalArguments().isEmpty())
+    if (appArgument) {
+        // The app's workflow is its one tab, shown as the App view whatever its block's defaultView says; a file that is
+        // not an app says so in the window. The launcher entry and Open in Fugue are about this app, a package included.
+        fugue::openApp(workflows, *appRef);
+        appView.showApp();
+        appLauncher.setApp(*appRef);
+        if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()); window && !appRef->preview.isEmpty())
+            window->setIcon(QIcon(appRef->preview));
+    } else if (appRef) {
+        if (fugue::openApp(workflows, *appRef))
+            appView.openInGraph();
+    } else if (parser.positionalArguments().isEmpty()) {
         workflows.restoreSession();
-    else
+    } else {
         workflows.openStartup(parser.positionalArguments());
+    }
 
     // `omarchy agent look app` runs the app offscreen with these set, to see
     // the window without a display: size it to OMARCHY_LOOK_SIZE when given,

@@ -32,7 +32,9 @@ Rectangle {
         TextEdit {
             id: edit
             objectName: area.objectName + "-edit"
-            width: flick.width - (flick.ScrollBar.vertical as FugueScrollBar).inset
+            // The bar's breadth always, not its `inset` (zero while it hides): the text wrapping to its lines showed the bar, whose inset narrowed
+            // the text, which wrapped to more lines: a binding loop.
+            width: flick.width - (flick.ScrollBar.vertical as FugueScrollBar).width
             wrapMode: TextEdit.Wrap
             selectByMouse: true
             textFormat: TextEdit.PlainText

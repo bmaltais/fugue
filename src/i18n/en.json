@@ -1851,5 +1851,17 @@
   "Paint mask…": "Paint mask…",
   "Pick a picture first: there is nothing to paint on yet.": "Pick a picture first: there is nothing to paint on yet.",
   "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif)": "Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif)",
-  "Pictures to try": "Pictures to try"
+  "Pictures to try": "Pictures to try",
+  "%1 is in your launcher.": "%1 is in your launcher.",
+  "%1 is out of your launcher.": "%1 is out of your launcher.",
+  "Add to launcher": "Add to launcher",
+  "Could not start Fugue.": "Could not start Fugue.",
+  "Fugue": "Fugue",
+  "It has no simple screen to show. Open it in Fugue to work on it.": "It has no simple screen to show. Open it in Fugue to work on it.",
+  "Open in Fugue": "Open in Fugue",
+  "Open the workflow behind this app in the full Fugue window": "Open the workflow behind this app in the full Fugue window",
+  "Remove from launcher": "Remove from launcher",
+  "Start this app from the desktop launcher, in a window of its own": "Start this app from the desktop launcher, in a window of its own",
+  "Take this app out of the desktop launcher": "Take this app out of the desktop launcher",
+  "This is not an app.": "This is not an app."
 }
