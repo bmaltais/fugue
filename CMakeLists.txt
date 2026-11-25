@@ -152,6 +152,8 @@ fugue_add_qml(fugue_apps_qml src/apps /apps)
 fugue_add_qml(fugue_panels_qml src/panels /panels)
 # The media browser (#133): a standalone viewer of a list of images, videos and sounds.
 fugue_add_qml(fugue_media_qml src/media /media)
+# The Drift kit (docs/canvas-look.md): grouped rows, switches, chips, sliders and the hero header, on the canvas look's tokens.
+fugue_add_qml(fugue_kit_qml src/kit /kit)
 # The window's areas and their views (#217): the area tree drawn (AreaNode.qml).
 fugue_add_qml(fugue_workspace_qml src/workspace /workspace)
 
@@ -356,6 +358,16 @@ foreach(test_source ${fugue_media_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} fugue_nodes Qt6::Test)
+  fugue_add_test(${test_name} OFFSCREEN)
+endforeach()
+
+# Kit tests: the Drift kit's controls alone, in a window of their own (tests/kit/KitGallery.qml is also its picture).
+file(GLOB fugue_kit_tests CONFIGURE_DEPENDS tests/kit/*.cpp)
+foreach(test_source ${fugue_kit_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
+  target_link_libraries(${test_name} PRIVATE fugue_core ${fugue_test_resources_link} Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   fugue_add_test(${test_name} OFFSCREEN)
 endforeach()
 

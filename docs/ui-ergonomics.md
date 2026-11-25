@@ -100,6 +100,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Open choices (owner, to confirm): the key; whether the switch should also be in the Graph's area header when the window bar is hidden (it is not: View > App view and the key reach it); Open in Graph on the App page stays as the page's own button.
 - Not checked by a person: the switch in a real window next to the project chip and with many tabs at the narrowest width; the right-to-left mirror.
 
+### 2026-11-24 Grouped rows as the convention for settings-like surfaces: the Drift kit (epic #456, slice 1)
+
+- Control: `src/kit/Kit*.qml` (`KitSection`, `KitGroup`, `KitRow`, `KitSeparator`, `KitToggle`, `KitChip`, `KitSlider`, `KitHero`); the section "Drift kit" of canvas-look.md is the spec. Nothing in the window uses them yet; slices 2 to 5 move the App view, the shelf, Settings and the sheets onto them.
+- Old: each surface made its own rows (`SettingsParts`, per-panel layouts).
+- New: a surface that is a list of settings or inputs is groups of rows, as iOS settings and omarchy-drift are: a bold small section title, a rounded group, rows with a label and a dim one-line hint at the start, the control at the end, a hairline between rows, the whole row a hit area for a switch.
+- Convention named: iOS Settings (grouped table cells, a switch at the end of a row that also takes the row's tap) and omarchy-drift (the owner's own app, the look reference). Deviation: the controls are controlled (the model owns the value), the colors follow the Omarchy theme and not fixed greys.
+- Rules met: Floor (switch 10u by 7u to press, chip 7u, slider 7u, rows 10u or more; the hero's pill and close button are 6u = 24px), Primary (the kit fills nothing with the accent but a switch that is on and a slider's filled rail; a surface's one primary stays a `ViewButton`), Destructive (none in the kit), Gaps (rows 3u inside, 1.5u between a section title and its group, 5u before a title), Learned place (nothing moves), Posture (these are transient and form surfaces: few decisions per row). Keys: Tab reaches each control; Space flips a switch and presses a chip; arrows, PageUp/Down, Home and End move a slider.
+
 ### 2026-11-24 Apps shelf: the door for the hobbyist (#388, epic #397)
 
 - Control: `src/apps/AppsHome.qml` (`appsHome`; `appsStartBlank`, `appsBrowseTemplates`), the dialog `src/apps/AppsDialog.qml` (`appsDialog`; `appsDialogBrowse`) for File > Apps… (`file.apps`, after Browse templates, before Projects…), both over `src/apps/AppShelfGrid.qml` (`appShelfGrid`, `appShelfEmpty`) of `src/apps/AppCard.qml` (`appCard-<id>`, `appTitle-<id>`, `appSummary-<id>`, `appReady-<id>`, `appPlaces-<id>`). Store: `apps/app_shelf.h`.

@@ -69,3 +69,8 @@ lock e10f
 lock-open e110
 paintbrush e2e7
 info e0fe
+turtle e4fe
+rabbit e4fb
+navigation e127
+shuffle e162
+chevrons-up-down e211

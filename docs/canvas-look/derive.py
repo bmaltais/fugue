@@ -239,6 +239,14 @@ def tokens(colors, light):
         t["_label-share"] = k
         if min(contrast(t["label"], t[s]) for s in LABEL_SURFACES + sheened) >= 4.5:
             break
+    # The Drift kit (docs/canvas-look.md "Drift kit"), as look.cpp.
+    t["kit-group"] = mix(t["popup"], fg, 0.045 if light else 0.07)
+    t["kit-separator"] = mix(t["kit-group"], fg, 0.10)
+    t["kit-track"] = mix(t["kit-group"], fg, 0.30 if light else 0.28)
+    t["kit-knob"] = WHITE  # Drift: a white knob and thumb on every theme, on and off
+    t["kit-chip"] = mix(t["kit-group"], fg, 0.10)
+    t["kit-chip-hover"] = mix(t["kit-group"], fg, 0.17)
+    t["kit-hero-shade"], t["kit-hero-pill"], t["kit-hero-pill-hover"] = (0, 0, 0, 0.55), (0, 0, 0, 0.44), (0, 0, 0, 0.60)
     # Frame fills and node-color header tints per theme role (layout colors are roles, spec 4.5).
     # A tint steps down until the title on it still reads at 4.5:1.
     for role in ("muted", "blue", "green", "magenta", "orange"):
