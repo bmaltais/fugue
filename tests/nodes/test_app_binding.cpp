@@ -29,7 +29,8 @@ QJsonObject workflow() {
                          {"name": "quality", "targets": ["sample.denoise"], "choices": ["Light", "Strong"],
                           "choice_values": [0.4, 0.9], "default": "Light"},
                          {"name": "type", "targets": ["save.format"], "choices": ["png"], "default": "png"}],
-              "outputs": [{"node": "save", "label": "Result"}]},
+              "outputs": [{"node": "save", "label": "Result"}],
+              "compare": {"input": "subject", "top": "steps"}},
       "graph": {"nodes": {
         "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "a.png"}},
         "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "old words"}},
@@ -118,6 +119,7 @@ private slots:
         QCOMPARE(app.inputs.at(0).key(), QStringLiteral("subject"));
         QCOMPARE(app.input("seed")->targets.size(), 2);
         QCOMPARE(app.outputNodes(), QStringList{"save"});
+        QVERIFY(app.compare && app.compare->input == "subject" && app.compare->top == "steps" && app.compare->left.isEmpty());
         QCOMPARE(toJson(app), workflow().value("app").toObject());
     }
 
@@ -156,6 +158,13 @@ private slots:
         };
         row("no title", [](QJsonObject &b) { b.remove("title"); }, "no title");
         row("view", [](QJsonObject &b) { b.insert("defaultView", "wall"); }, "app or graph");
+        row("compare unknown picture", [](QJsonObject &b) { b.insert("compare", QJsonObject{{"input", "nope"}}); },
+            "names the input nope, which the app does not have");
+        row("compare no picture", [](QJsonObject &b) { b.insert("compare", QJsonObject{{"left", "steps"}}); }, "names no `input`");
+        row("compare unknown side", [](QJsonObject &b) {
+            b.insert("compare", QJsonObject{{"input", "subject"}, {"top", "nope"}});
+        }, "names the input nope");
+        row("compare not a picture", [](QJsonObject &b) { b.insert("compare", QJsonObject{{"input", "prompt"}}); }, "not a picture");
         row("action role", [](QJsonObject &b) { b.insert("inputs", QJsonArray{QJsonObject{{"role", "colour"}, {"targets", QJsonArray{"a.b"}}}}); },
             "does not know");
         row("no targets", [](QJsonObject &b) { b.insert("inputs", QJsonArray{QJsonObject{{"role", "seed"}}}); }, "names no targets");
@@ -291,7 +300,7 @@ private slots:
         QTest::addColumn<QJsonObject>("json");
         QTest::addColumn<QString>("words");
         const auto input = [&](const QJsonObject &fields) {
-            return withBlock([&](QJsonObject &b) { b.insert("inputs", QJsonArray{fields}); });
+            return withBlock([&](QJsonObject &b) { b.remove("compare"); b.insert("inputs", QJsonArray{fields}); });
         };
         QTest::newRow("wrong type for the role") << input({{"role", "seed"}, {"targets", QJsonArray{"encode.prompt"}}}) << "not number";
         QTest::newRow("two types") << input({{"name", "x"}, {"targets", QJsonArray{"sample.seed", "encode.prompt"}}}) << "different types";

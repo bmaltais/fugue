@@ -1,6 +1,7 @@
 #include "engine/app_binding.h"
 
 #include <QJsonArray>
+#include <QPair>
 #include <QSet>
 
 #include "engine/node_type.h"
@@ -85,6 +86,31 @@ Result<App> parseApp(const QJsonValue &block) {
         seen.insert(output.node);
         app.outputs << output;
     }
+    if (const QJsonValue compare = object.value(QLatin1String("compare")); !compare.isUndefined()) {
+        if (!compare.isObject()) {
+            errors << reader().invalid(QStringLiteral("The app's `compare` is not an object."));
+        } else {
+            const QJsonObject block = compare.toObject();
+            const QString at = QStringLiteral("The app's `compare`");
+            AppCompare place;
+            place.input = reader().text(block, "input", errors, at);
+            place.left = reader().text(block, "left", errors, at);
+            place.top = reader().text(block, "top", errors, at);
+            place.right = reader().text(block, "right", errors, at);
+            place.bottom = reader().text(block, "bottom", errors, at);
+            const InputBinding *picture = app.input(place.input);
+            if (place.input.isEmpty())
+                errors << reader().invalid(at + QStringLiteral(" names no `input`."));
+            else if (!picture)
+                errors << reader().invalid(QStringLiteral("The app's `compare` names the input %1, which the app does not have.").arg(place.input));
+            else if (picture->role != QLatin1String("image"))
+                errors << reader().invalid(QStringLiteral("The app's `compare` input %1 is not a picture (role image).").arg(place.input));
+            for (const QString &side : {place.left, place.top, place.right, place.bottom})
+                if (!side.isEmpty() && !app.input(side))
+                    errors << reader().invalid(QStringLiteral("The app's `compare` names the input %1, which the app does not have.").arg(side));
+            app.compare = place;
+        }
+    }
     if (hasErrors(errors))
         return errors;
     return app;
@@ -114,6 +140,15 @@ QJsonObject toJson(const App &app) {
         outputs.append(out);
     }
     o.insert(QStringLiteral("outputs"), outputs);
+    if (app.compare) {
+        QJsonObject place{{QStringLiteral("input"), app.compare->input}};
+        const QPair<const char *, QString> sides[] = {{"left", app.compare->left}, {"top", app.compare->top},
+                                                      {"right", app.compare->right}, {"bottom", app.compare->bottom}};
+        for (const auto &side : sides)
+            if (!side.second.isEmpty())
+                place.insert(QLatin1String(side.first), side.second);
+        o.insert(QStringLiteral("compare"), place);
+    }
     return o;
 }
 
@@ -132,6 +167,17 @@ Errors pruneApp(App &app, const Document &document, const Registry &registry) {
         }
         warnings << stale(QStringLiteral("The app's output %1 is gone: the workflow has no node %1.").arg(output->node));
         output = app.outputs.erase(output);
+    }
+    if (app.compare) {
+        // Compare names inputs by key: one that is gone leaves the picture unplaced, so the whole `compare` goes with it.
+        QStringList names{app.compare->input, app.compare->left, app.compare->top, app.compare->right, app.compare->bottom};
+        names.removeAll(QString());
+        for (const QString &name : std::as_const(names))
+            if (!app.input(name)) {
+                warnings << stale(QStringLiteral("The app's compare is dropped: the app has no input %1.").arg(name));
+                app.compare.reset();
+                break;
+            }
     }
     return warnings;
 }

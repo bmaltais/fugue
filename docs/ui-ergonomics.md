@@ -97,6 +97,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Rules met: Floor (an exception, as the side panel's grip: the border is an edge hit along its whole length, 4u across, and Tab plus the arrows move it; a 24px target would reach over the cards' scroll gutters), Gaps (the stacked row 1.5u between label and control), Keys (unchanged: Tab, arrows, Enter on the border).
 - Decisions taken without the owner (each to confirm): a grip at rest, not only on hover (medium: the owner asked for a cue); no hover delay (medium); snap 64/16 by range, not set per app (medium: the app block has no step); the grip's alphas are the new scroll thumb's (one family).
 
+### 2026-11-25 App view: Compare lines the input up where it sits in the result (owner; decided by the coordinator, medium-high)
+
+- Control: `src/apps/AppStage.qml` `appResultViewer` (`placeB`), `src/canvas/CompareView.qml` `placeB`, `AppView::inputPlacement`; the app block's `compare` (spec 4.9).
+- Old: Compare fitted the input to the result's frame, so a 1024 x 1024 input stretched over a taller expanded result.
+- New: an app that grows a picture names the picture and the padding inputs in `compare`; Compare shows the result whole and the input at its own place in it (a square stays square, the added area shows around it), for slider and flip; side by side and difference keep the old fit.
+- 100% while comparing is of the larger picture (owner, same day): by area as before; with a placement, by density (the input's file pixels per result pixel over its place), so an input as dense as the result or denser is at 100% of its own pixels, a sparser one leaves A's. Z, 1 and the 100% chip already take the larger first; a second press toggles A and B as in the Compare node.
+- Why: the owner's ask (the square fully visible, the extension above and below, as a sliding A/B); the Compare Images node's fit is right for two pictures of one subject, wrong for a picture and its extension. Placement comes from the take's values, so it stays right after the form changes. Not asked of the graph's Compare node: it has no padding to read.
+
 ### 2026-11-25 App view: Clear empties the takes; Repeat needs a seed that varies; one raised dropdown; a slider's value is typed (owner's second look)
 
 - Control: `src/apps/AppStage.qml` `appClear` (now also when only the strip has takes); `src/apps/AppPage.qml` `appLiveMode` (Repeat only when `AppView.canRepeat`), `appRepeatWaits`; `src/kit/KitDropdown.qml` (new) for `appImageChoose-<key>`, `AppChoice.qml` and `AppModelInput.qml` (`appInput-<key>`); `src/kit/KitSlider.qml` the value field `<objectName>-value` (App view ranges, Settings > Look sliders).

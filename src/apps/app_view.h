@@ -45,6 +45,7 @@
 #include <QMap>
 #include <QMimeData>
 #include <QObject>
+#include <QRectF>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -220,6 +221,13 @@ public:
     Q_INVOKABLE QString resolvedPath(const QString &path) const;
     // The picture a mask is painted over: the first image input's now: {url, width, height}; empty when none is chosen.
     Q_INVOKABLE QVariantMap maskPicture() const;
+    // The picture the shown take ran with ({url, width, height}, the block's `compare.input`, else the form's first picture), or
+    // empty when the take has none on disk.
+    Q_INVOKABLE QVariantMap takeInputPicture() const;
+    // Where the input picture sits in a result of the shown take (Compare, the block's `compare`): a rect in the result's
+    // pixels, from the take's own values (what was run, not the form now). Empty when the block has no `compare`, the take has no
+    // picture on disk, or a size is unknown.
+    Q_INVOKABLE QRectF inputPlacement(int resultWidth, int resultHeight) const;
 
     // Models (#386): what a model field can be given. request starts the lists (disk and catalog at once, providers and the
     // Recommended mark when they answer: modelsChanged), models gives them (AppModels::entries), pickModelFile takes a file on
