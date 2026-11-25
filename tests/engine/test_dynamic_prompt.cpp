@@ -65,6 +65,7 @@ private slots:
         write(w + "/people/europe/french.txt", "French\n");
         write(w + "/people/europe/danish.txt", "Danish\n");
         write(w + "/people/asia.txt", "Korean\n");
+        write(w + "/weird.txt", "{p|q}\nr\n");
         write(w + "/weighted.txt", "3::heavy\n0::never\n");
         write(w + "/season_clothes.txt", "In ${season}, I wear ${season} shirts and ${season} trousers\n");
         write(w + "/clothes_default.txt", "In ${season:summer}, I wear ${season:summer} shirts\n");
@@ -89,10 +90,17 @@ private slots:
               "  winter:\n    - \"${weather=snow} ${drink=hot chocolate} __examples/prompt__\"\n");
         write(w + "/data.json", "{\"clothing\": [\"hat\", \"coat\"], \"artists\": {\"dutch\": [\"Vermeer\"]}, \"count\": 3}");
         write(w + "/bad.yaml", "good:\n  - x\nbad: [a, b]\n");
+        write(w + "/lex-ok.txt", "ok\n");
+        write(w + "/setter.txt", "${v=red}\n");
+        QString deep;
+        for (int k = 0; k < 40; ++k)
+            deep += QString(k * 2, QChar(' ')) + "k" + QString::number(k) + ":\n";
+        write(w + "/deep.yaml", deep + QString(80, QChar(' ')) + "- x\n");
         write(m_outside.path() + "/secret.txt", "top secret\n");
         write(m_outside.path() + "/dir/secret2.txt", "top secret too\n");
         QVERIFY(QFile::link(m_outside.path() + "/secret.txt", w + "/leak.txt"));
         QVERIFY(QFile::link(m_outside.path() + "/dir", w + "/leakdir"));
+        QVERIFY(QFile::link(m_outside.path() + "/secret.txt", w + "/lex-bad.txt"));
     }
 
     // ---- SYNTAX.md: variants
@@ -242,7 +250,9 @@ private slots:
         QVERIFY2(failure("a {b|c").contains("template_invalid: The { is never closed (line 1, column 3 of the template)"), qPrintable(failure("a {b|c")));
         QVERIFY(failure("line one\n  ${v=").contains("line 2, column 3"));
         QVERIFY(failure("x } y").contains("A } closes nothing (line 1, column 3"));
-        QVERIFY(failure("__season").contains("never closed with __"));
+        QCOMPARE(one("cute ^__^ face"), QString("cute ^__^ face")); // underscores that close nothing are text
+        QCOMPARE(one("a__b c and __season"), QString("a__b c and __season"));
+        QVERIFY(failure("__x(a=1,a=2)__").contains("parameter a of __x(...)__ is given twice"));
         QVERIFY(failure("${a b}").contains("expected }"));
         QVERIFY(failure("${}").contains("needs a name"));
         QVERIFY(failure("%{a$$b").contains("never closed"));
@@ -330,6 +340,72 @@ private slots:
         QCOMPARE(exact->prompts.size(), 2);
         QVERIFY(!exact->capped); // exactly the cap is not capped
         QVERIFY(!dynprompt::expandAll("{a", m_options, 5).ok());
+    }
+
+    // ---- limits and lookups found by review
+    void aHugePickCountHitsTheStepLimitInsteadOfHanging() {
+        QString templ = "{100000$$"; // 100000 picks over 100000 options: 1e10 steps, over the 200000 limit
+        for (int k = 0; k < 100000; ++k)
+            templ += "a|";
+        templ += "}";
+        QVERIFY(failure(templ).contains("steps"));
+    }
+    void expandAllWithRandomAndCyclicPartsAroundChoicesStaysCorrect() {
+        for (const QString templ : {"{@{a|b}|c} {x|y|z}", "{@{a|b}|c} {x|y}", "{~{a|b}|c} {x|y}", "__~weird__ {x|y}", "{@{a|b}|c}{@{p|q}|r} {x|y}"}) {
+            const Result<dynprompt::Expansion> r = dynprompt::expandAll(templ, m_options, 100);
+            QVERIFY2(r.ok(), qPrintable(templ + ": " + r.error().message));
+            QVERIFY2(!r->prompts.isEmpty(), qPrintable(templ));
+            QCOMPARE(set(r->prompts).size(), int(r->prompts.size())); // no duplicates
+            QVERIFY(r->prompts.size() % 2 == 0 || r->prompts.size() % 3 == 0);
+        }
+        QCOMPARE(dynprompt::expandAll("{@{a|b}|c} {x|y}", m_options, 100)->prompts, QStringList({"a x", "a y", "b x", "b y"}));
+    }
+    void aGlobOverManyFilesIsNotCountedPerGlob() {
+        QTemporaryDir dir;
+        for (int k = 0; k < 2000; ++k)
+            write(dir.path() + QString("/%1%2.txt").arg(QChar('a' + k % 3)).arg(k), "v\n");
+        dynprompt::Options options;
+        options.folders = {dir.path()};
+        QCOMPARE(dynprompt::generate("__a*__ __b*__ __c*__", 1, options).value(), QString("v v v"));
+        const QString before = dynprompt::wildcardSignature(options.folders);
+        QCOMPARE(dynprompt::wildcardSignature(options.folders), before);
+        write(dir.path() + "/zz-last.txt", "w\n"); // the last file in order is part of the key too
+        QVERIFY(dynprompt::wildcardSignature(options.folders) != before);
+        options.limits.maxFiles = 100;
+        QVERIFY(dynprompt::generate("__a*__", 1, options).error().message.contains("more than 100 wildcard files"));
+    }
+    void aLinkOutsideSkipsOneFileOfAGlobButNotAnExactName() {
+        QCOMPARE(outcomes("__lex-*__"), set({"ok"}));
+        QVERIFY(failure("__lex-bad__").contains("link to outside"));
+    }
+    void theFirstFolderWithTheNameWinsInAnyFormat() {
+        QTemporaryDir user;
+        QTemporaryDir pack;
+        write(user.path() + "/colours.yaml", "colours:\n  - red\n");
+        write(pack.path() + "/colours.txt", "blue\n");
+        write(pack.path() + "/only-pack.txt", "p\n");
+        dynprompt::Options options;
+        options.folders = {user.path(), pack.path()};
+        QSet<QString> got;
+        for (quint64 s = 0; s < 40; ++s)
+            got.insert(dynprompt::generate("__colours__ __only-pack__", s, options).value());
+        QCOMPARE(got, set({"red p"}));
+        options.folders = {pack.path(), user.path()};
+        QCOMPARE(dynprompt::generate("__colours__", 1, options).value(), QString("blue"));
+        write(pack.path() + "/colours.yaml", "colours:\n  - green\n");
+        options.folders = {user.path(), pack.path()};
+        QSet<QString> same;
+        for (quint64 s = 0; s < 40; ++s)
+            same.insert(dynprompt::generate("__colours__", s, options).value());
+        QCOMPARE(same, set({"red"})); // lists of the same name in two folders are not merged
+    }
+    void deepYamlIsRefusedWithItsFile() {
+        const QString r = failure("__deep__");
+        QVERIFY2(r.contains("deep.yaml, line") && r.contains("nested more than 32"), qPrintable(r));
+    }
+    void checkLeavesVariablesOfWildcardLinesAlone() {
+        QVERIFY(dynprompt::check("__setter__ ${v}", m_options).isEmpty());
+        QCOMPARE(one("__setter__ ${v}"), QString("red")); // the line sets it when it is picked
     }
 };
 

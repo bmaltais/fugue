@@ -311,12 +311,21 @@ private:
             }
         }
         for (;;) {
-            static const QRegularExpression weight(QStringLiteral("\\G\\s*(\\d+(?:\\.\\d+)?|\\.\\d+)::"));
             Option option;
-            const QRegularExpressionMatch w = weight.match(m_t, m_i);
-            if (w.hasMatch()) {
-                option.weight = w.captured(1).toDouble();
-                m_i += w.capturedLength(0);
+            // A weight "0.5::" (by hand: a regex match at an offset of a long template is slow).
+            int k = m_i;
+            while (k < m_t.size() && m_t.at(k).isSpace())
+                ++k;
+            const int digits = k;
+            while (k < m_t.size() && (m_t.at(k).isDigit() || m_t.at(k) == QLatin1Char('.')))
+                ++k;
+            if (k > digits && at(k) == QLatin1Char(':') && at(k + 1) == QLatin1Char(':')) {
+                bool ok = false;
+                const double weight = m_t.mid(digits, k - digits).toDouble(&ok);
+                if (ok) {
+                    option.weight = weight;
+                    m_i = k + 2;
+                }
             }
             option.seq = parseSeq(StopBar | StopClose);
             node.options.push_back(std::move(option));
@@ -434,8 +443,7 @@ private:
             return std::nullopt; // "____" or "__ ": plain underscores
         node.text = m_t.mid(nameStart, j - nameStart);
         if (!closed)
-            fail(start, QStringLiteral("The wildcard __%1 is never closed with __").arg(node.text),
-                 QStringLiteral("Write __%1__, or \\_\\_ for literal underscores.").arg(node.text));
+            return std::nullopt; // "cute ^__^ face", "a__b c": underscores that close nothing are text
         if (at(j) == QLatin1Char('(')) {
             const qsizetype close = m_t.indexOf(QLatin1Char(')'), j);
             if (close < 0)
@@ -449,6 +457,9 @@ private:
                 QString value = item.mid(eq + 1).trimmed();
                 if (value.size() >= 2 && (value.front() == QLatin1Char('"') || value.front() == QLatin1Char('\'')) && value.back() == value.front())
                     value = value.mid(1, value.size() - 2);
+                for (const auto &given : node.params)
+                    if (given.first == key)
+                        fail(start, QStringLiteral("The parameter %1 of __%2(...)__ is given twice").arg(key, node.text));
                 node.params.emplace_back(key, value);
             }
             j = int(close) + 1;
@@ -499,7 +510,7 @@ class YamlReader {
 public:
     using Leaves = QMap<QString, QList<Entry>>;
 
-    YamlReader(const QString &text, QString rel, Leaves &out) : m_rel(std::move(rel)), m_out(out) {
+    YamlReader(const QString &text, QString rel, Leaves &out, int maxDepth) : m_rel(std::move(rel)), m_out(out), m_maxDepth(maxDepth) {
         const QStringList raw = text.split(QLatin1Char('\n'));
         for (int k = 0; k < raw.size(); ++k) {
             QString line = raw.at(k);
@@ -543,6 +554,8 @@ private:
     };
     QString m_rel;
     Leaves &m_out;
+    int m_maxDepth;
+    int m_depth = 0;
     std::vector<Line> m_lines;
 
     [[noreturn]] void fail(int line, const QString &why) const {
@@ -569,10 +582,13 @@ private:
             return;
         if (m_lines[idx].indent > indent)
             fail(m_lines[idx].no, QStringLiteral("unexpected indentation"));
+        if (++m_depth > m_maxDepth)
+            fail(m_lines[idx].no, QStringLiteral("names nested more than %1 deep").arg(m_maxDepth));
         if (isDash(m_lines[idx].body))
             parseList(idx, indent, path);
         else
             parseMap(idx, indent, path);
+        --m_depth;
     }
 
     // The text of a block scalar whose header is at `idx - 1`, indented past `parent`.
@@ -763,6 +779,26 @@ QString globPattern(const QString &name) {
     return re + QLatin1Char('$');
 }
 
+// The lines of a wildcard with their weights, summed once so a pick of a big file is a search.
+struct Collection {
+    QList<Entry> entries;
+    std::vector<double> weights;
+    std::vector<double> cumulative;
+};
+using CollectionP = std::shared_ptr<const Collection>;
+
+// The wildcard files under `root` (txt, yaml, yml, json) as paths relative to it, sorted: the one
+// listing every lookup and the cache signature use.
+QStringList listWildcardFiles(const QString &root) {
+    QStringList out;
+    QDirIterator it(root, {QStringLiteral("*.txt"), QStringLiteral("*.yaml"), QStringLiteral("*.yml"), QStringLiteral("*.json")}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext())
+        out << it.next().mid(root.size() + 1);
+    out.sort();
+    return out;
+}
+
 class Wildcards {
 public:
     Wildcards(const Options &options) : m_options(options) {
@@ -773,7 +809,9 @@ public:
         }
     }
 
-    QList<Entry> lookup(const QString &name) {
+    // The first folder that has the name in any format wins (its .txt, else its lists in .yaml and
+    // .json; with a glob, all of those in that folder).
+    CollectionP lookup(const QString &name) {
         const auto cached = m_cache.constFind(name);
         if (cached != m_cache.constEnd())
             return *cached;
@@ -781,37 +819,78 @@ public:
             raise(QStringLiteral("The wildcard name \"%1\" is not allowed: %2.").arg(name, why));
         const bool glob = name.contains(QLatin1Char('*'));
         QList<Entry> out;
-        QSet<QString> seen;
+        bool emptyFile = false;
         for (const QString &root : std::as_const(m_roots)) {
-            if (!glob) {
-                const QString path = root + QLatin1Char('/') + name + QStringLiteral(".txt");
-                if (QFileInfo::exists(path) && !seen.contains(name)) {
-                    seen.insert(name);
-                    m_existing = true;
-                    out += readText(root, path, name);
-                }
-                continue;
+            out = lookupIn(root, name, glob, emptyFile);
+            if (!out.isEmpty() || emptyFile)
+                break;
+        }
+        if (out.isEmpty() && emptyFile)
+            raise(QStringLiteral("The wildcard \"%1\" has no values: %1.txt only has comments or blank lines.").arg(name));
+        if (out.isEmpty())
+            raise(notFound(name), QStringLiteral("Put %1.txt (one value per line) in %2.")
+                                      .arg(glob ? QStringLiteral("a file") : name,
+                                           m_options.folders.isEmpty() ? QStringLiteral("a wildcards folder") : m_options.folders.first()));
+        auto collection = std::make_shared<Collection>();
+        double sum = 0;
+        for (const Entry &e : out) {
+            collection->weights.push_back(e.weight);
+            sum += e.weight;
+            collection->cumulative.push_back(sum);
+        }
+        collection->entries = std::move(out);
+        m_cache.insert(name, collection);
+        return collection;
+    }
+
+private:
+    const Options &m_options;
+    QStringList m_roots;
+    QHash<QString, CollectionP> m_cache;
+    QHash<QString, QStringList> m_listing;
+    QHash<QString, YamlReader::Leaves> m_index;
+    QStringList m_badFiles;
+    int m_listed = 0;
+
+    // The files of a root, listed once per run; the limit counts these distinct files only.
+    const QStringList &files(const QString &root) {
+        const auto found = m_listing.constFind(root);
+        if (found != m_listing.constEnd())
+            return *found;
+        QStringList listed = listWildcardFiles(root);
+        m_listed += int(listed.size());
+        if (m_listed > m_options.limits.maxFiles)
+            raise(QStringLiteral("There are more than %1 wildcard files.").arg(m_options.limits.maxFiles));
+        return *m_listing.insert(root, std::move(listed));
+    }
+
+    QList<Entry> lookupIn(const QString &root, const QString &name, bool glob, bool &emptyFile) {
+        QList<Entry> out;
+        QSet<QString> seen;
+        if (!glob) {
+            const QString path = root + QLatin1Char('/') + name + QStringLiteral(".txt");
+            if (QFileInfo::exists(path)) {
+                seen.insert(name);
+                out += readText(root, path, name); // a name that is asked for exactly must be readable
             }
+        } else {
             const QRegularExpression pattern(globPattern(name));
-            QStringList matches;
-            QDirIterator it(root, {QStringLiteral("*.txt")}, QDir::Files, QDirIterator::Subdirectories);
-            while (it.hasNext()) {
-                const QString path = it.next();
-                if (++m_files > m_options.limits.maxFiles)
-                    raise(QStringLiteral("More than %1 wildcard files were looked at.").arg(m_options.limits.maxFiles));
-                const QString rel = path.mid(root.size() + 1).chopped(4);
-                if (pattern.match(rel).hasMatch())
-                    matches << rel;
-            }
-            matches.sort();
-            for (const QString &rel : std::as_const(matches))
-                if (!seen.contains(rel)) {
-                    seen.insert(rel);
-                    out += readText(root, root + QLatin1Char('/') + rel + QStringLiteral(".txt"), rel);
+            for (const QString &file : files(root)) {
+                if (!file.endsWith(QLatin1String(".txt")))
+                    continue;
+                const QString rel = file.chopped(4);
+                if (!pattern.match(rel).hasMatch())
+                    continue;
+                seen.insert(rel);
+                try {
+                    out += readText(root, root + QLatin1Char('/') + file, rel);
+                } catch (const Problem &problem) {
+                    m_badFiles << problem.message; // one unreadable file among a glob's matches is skipped
                 }
+            }
         }
         if (out.isEmpty() || glob) {
-            const YamlReader::Leaves &index = this->index();
+            const YamlReader::Leaves &index = this->index(root);
             const QRegularExpression pattern(glob ? globPattern(name) : QString());
             for (auto it = index.begin(); it != index.end(); ++it) {
                 const bool hit = glob ? pattern.match(it.key()).hasMatch() : (it.key() == name || it.key().startsWith(name + QLatin1Char('/')));
@@ -819,24 +898,9 @@ public:
                     out += it.value();
             }
         }
-        if (out.isEmpty() && !glob && seen.contains(name) && m_existing)
-            raise(QStringLiteral("The wildcard \"%1\" has no values: %1.txt only has comments or blank lines.").arg(name));
-        if (out.isEmpty())
-            raise(notFound(name), QStringLiteral("Put %1.txt (one value per line) in %2.")
-                                      .arg(name.contains(QLatin1Char('*')) ? QStringLiteral("a file") : name,
-                                           m_options.folders.isEmpty() ? QStringLiteral("a wildcards folder") : m_options.folders.first()));
-        m_cache.insert(name, out);
+        emptyFile = out.isEmpty() && seen.contains(name);
         return out;
     }
-
-private:
-    const Options &m_options;
-    QStringList m_roots;
-    QHash<QString, QList<Entry>> m_cache;
-    std::optional<YamlReader::Leaves> m_index;
-    QStringList m_badFiles;
-    int m_files = 0;
-    bool m_existing = false;
 
     QString notFound(const QString &name) const {
         QString message = QStringLiteral("The wildcard \"%1\" was not found. Looked for %1.txt, and for a %1 list in .yaml and .json files, in: %2.")
@@ -846,6 +910,8 @@ private:
         return message;
     }
 
+    // (A file swapped for a link between this check and the read needs write access to the wildcard
+    // folder, which already lets its owner change the wildcards; not defended.)
     QByteArray readChecked(const QString &root, const QString &path, const QString &what) {
         const QFileInfo info(path);
         const QString canonical = info.canonicalFilePath();
@@ -877,41 +943,29 @@ private:
         return out;
     }
 
-    const YamlReader::Leaves &index() {
-        if (m_index)
-            return *m_index;
+    // The lists of one root's .yaml, .yml and .json files, by key path.
+    const YamlReader::Leaves &index(const QString &root) {
+        const auto found = m_index.constFind(root);
+        if (found != m_index.constEnd())
+            return *found;
         YamlReader::Leaves all;
-        QSet<QString> seen;
-        for (const QString &root : std::as_const(m_roots)) {
-            QStringList files;
-            QDirIterator it(root, {QStringLiteral("*.yaml"), QStringLiteral("*.yml"), QStringLiteral("*.json")}, QDir::Files,
-                            QDirIterator::Subdirectories);
-            while (it.hasNext()) {
-                files << it.next().mid(root.size() + 1);
-                if (++m_files > m_options.limits.maxFiles)
-                    raise(QStringLiteral("More than %1 wildcard files were looked at.").arg(m_options.limits.maxFiles));
-            }
-            files.sort();
-            for (const QString &rel : std::as_const(files)) {
-                if (seen.contains(rel))
-                    continue;
-                seen.insert(rel);
-                try {
-                    const QByteArray bytes = readChecked(root, root + QLatin1Char('/') + rel, rel);
-                    YamlReader::Leaves leaves;
-                    if (rel.endsWith(QLatin1String(".json")))
-                        readJson(bytes, rel, leaves);
-                    else
-                        YamlReader(QString::fromUtf8(bytes), rel, leaves).read();
-                    for (auto leaf = leaves.begin(); leaf != leaves.end(); ++leaf)
-                        all[leaf.key()] += leaf.value();
-                } catch (const Problem &problem) {
-                    m_badFiles << problem.message;
-                }
+        for (const QString &rel : files(root)) {
+            if (rel.endsWith(QLatin1String(".txt")))
+                continue;
+            try {
+                const QByteArray bytes = readChecked(root, root + QLatin1Char('/') + rel, rel);
+                YamlReader::Leaves leaves;
+                if (rel.endsWith(QLatin1String(".json")))
+                    readJson(bytes, rel, leaves);
+                else
+                    YamlReader(QString::fromUtf8(bytes), rel, leaves, m_options.limits.maxDepth).read();
+                for (auto leaf = leaves.begin(); leaf != leaves.end(); ++leaf)
+                    all[leaf.key()] += leaf.value();
+            } catch (const Problem &problem) {
+                m_badFiles << problem.message;
             }
         }
-        m_index = std::move(all);
-        return *m_index;
+        return *m_index.insert(root, std::move(all));
     }
 };
 
@@ -923,6 +977,8 @@ public:
     virtual ~Chooser() = default;
     // An index below `arity`, by weights when given.
     virtual int pick(int arity, const std::vector<double> *weights, Sampler sampler) = 0;
+    // An index by cumulative weights (a wildcard's lines, summed once), `cum.size()` long.
+    virtual int pickCumulative(const std::vector<double> &cum, Sampler sampler) = 0;
     // `k` different indexes below `n`, in the order they are used.
     virtual std::vector<int> many(int n, int k, const std::vector<double> &weights) = 0;
     // A number from lo to hi.
@@ -959,17 +1015,39 @@ public:
         return last;
     }
 
+    int cumulative(const std::vector<double> &cum) {
+        const double total = cum.empty() ? 0 : cum.back();
+        if (!(total > 0))
+            raise(QStringLiteral("Every option has weight 0, so none can be picked."));
+        const double u = unit() * total;
+        const auto at = std::upper_bound(cum.begin(), cum.end(), u);
+        return at == cum.end() ? int(cum.size()) - 1 : int(at - cum.begin());
+    }
+
+    // `k` picks without replacement; the total is kept as the picks go (each pick is one pass over
+    // the weights, which the caller has charged to the step limit).
     std::vector<int> without(int n, int k, std::vector<double> weights) {
         std::vector<int> out;
-        for (int j = 0; j < k; ++j) {
-            double total = 0;
-            for (double w : weights)
-                total += w;
-            if (!(total > 0))
+        double total = 0;
+        for (double w : weights)
+            total += w;
+        for (int j = 0; j < k && total > 0; ++j) {
+            double u = unit() * total;
+            int chosen = -1;
+            for (int i = 0; i < n; ++i) {
+                const double w = weights[size_t(i)];
+                if (w <= 0)
+                    continue;
+                chosen = i;
+                if (u < w)
+                    break;
+                u -= w;
+            }
+            if (chosen < 0)
                 break;
-            const int c = weighted(n, &weights);
-            out.push_back(c);
-            weights[size_t(c)] = 0;
+            out.push_back(chosen);
+            total -= weights[size_t(chosen)];
+            weights[size_t(chosen)] = 0;
         }
         return out;
     }
@@ -985,6 +1063,11 @@ public:
         if (sampler == Sampler::Cyclic)
             return int(m_cycle % quint64(arity));
         return m_random.weighted(arity, weights);
+    }
+    int pickCumulative(const std::vector<double> &cum, Sampler sampler) override {
+        if (sampler == Sampler::Cyclic)
+            return int(m_cycle % quint64(cum.size()));
+        return m_random.cumulative(cum);
     }
     std::vector<int> many(int n, int k, const std::vector<double> &weights) override { return m_random.without(n, k, weights); }
     int range(int lo, int hi) override { return lo + m_random.below(hi - lo + 1); }
@@ -1017,12 +1100,21 @@ public:
         return false;
     }
 
+    // A ~ or @ part is not enumerated, but it is part of the path: its value is recorded the first
+    // time the path is walked and repeated after, so a replay always meets the same parts.
     int pick(int arity, const std::vector<double> *weights, Sampler sampler) override {
         if (sampler == Sampler::Cyclic)
-            return int(m_ordinal % quint64(arity));
+            return fixedChoice([&] { return int(m_ordinal % quint64(arity)); });
         if (sampler == Sampler::Random)
-            return m_random.weighted(arity, weights);
+            return fixedChoice([&] { return m_random.weighted(arity, weights); });
         return take(arity);
+    }
+    int pickCumulative(const std::vector<double> &cum, Sampler sampler) override {
+        if (sampler == Sampler::Cyclic)
+            return fixedChoice([&] { return int(m_ordinal % quint64(cum.size())); });
+        if (sampler == Sampler::Random)
+            return fixedChoice([&] { return m_random.cumulative(cum); });
+        return take(int(cum.size()));
     }
     std::vector<int> many(int n, int k, const std::vector<double> &) override {
         std::vector<int> out;
@@ -1041,16 +1133,29 @@ private:
     struct Step {
         int chosen = 0;
         int arity = 1;
+        bool fixed = false;
     };
     int take(int arity) {
         if (m_pos < m_tape.size()) {
-            if (m_tape[m_pos].arity != arity)
+            if (m_tape[m_pos].arity != arity || m_tape[m_pos].fixed)
                 raise(QStringLiteral("The template does not expand the same way twice."));
             return m_tape[m_pos++].chosen;
         }
-        m_tape.push_back({0, arity});
+        m_tape.push_back({0, arity, false});
         ++m_pos;
         return 0;
+    }
+    template <typename F>
+    int fixedChoice(F make) {
+        if (m_pos < m_tape.size()) {
+            if (!m_tape[m_pos].fixed)
+                raise(QStringLiteral("The template does not expand the same way twice."));
+            return m_tape[m_pos++].chosen;
+        }
+        const int value = make();
+        m_tape.push_back({value, 1, true});
+        ++m_pos;
+        return value;
     }
     quint64 m_seed;
     quint64 m_ordinal = 0;
@@ -1117,7 +1222,7 @@ private:
                 out += node.text;
                 break;
             case Node::Kind::Variant:
-                out += evalVariant(node, depth);
+                out += evalVariant(seq, node, depth);
                 break;
             case Node::Kind::Wildcard:
                 out += evalWildcardPick(seq, node, depth);
@@ -1208,7 +1313,7 @@ private:
         return text;
     }
 
-    QList<Entry> entriesOf(const Seq &seq, const Node &wildcard) {
+    CollectionP collectionOf(const Seq &seq, const Node &wildcard) {
         try {
             return m_wildcards.lookup(wildcard.text);
         } catch (const Problem &problem) {
@@ -1218,43 +1323,38 @@ private:
         }
     }
 
-    static std::vector<double> weightsOf(const QList<Entry> &entries) {
-        std::vector<double> w;
-        w.reserve(size_t(entries.size()));
-        for (const Entry &e : entries)
-            w.push_back(e.weight);
-        return w;
+    void charge(const Seq &seq, int pos, qint64 steps) {
+        m_steps += steps;
+        if (m_steps > m_options.limits.maxSteps)
+            fail(seq, pos, QStringLiteral("The template needs more than %1 steps to expand").arg(m_options.limits.maxSteps),
+                 QStringLiteral("A pick of very many values, or a variable or wildcard that expands to itself many times over, is the usual cause."));
     }
 
     QString evalWildcardPick(const Seq &seq, const Node &node, int depth) {
-        const QList<Entry> entries = entriesOf(seq, node);
-        if (entries.isEmpty())
-            fail(seq, node.pos, QStringLiteral("The wildcard \"%1\" has no values").arg(node.text));
-        const std::vector<double> weights = weightsOf(entries);
-        const int at = m_chooser.pick(int(entries.size()), &weights, node.sampler);
-        return evalEntry(seq, node, entries.at(at), depth);
+        const CollectionP collection = collectionOf(seq, node);
+        const int at = m_chooser.pickCumulative(collection->cumulative, node.sampler);
+        return evalEntry(seq, node, collection->entries.at(at), depth);
     }
 
-    QString evalVariant(const Node &node, int depth) {
+    QString evalVariant(const Seq &seq, const Node &node, int depth) {
         // {2$$__colours__}: the values of the wildcard are the options.
         const Node *only = nullptr;
         if (node.options.size() == 1 && node.options[0].seq->nodes.size() == 1 && node.options[0].seq->nodes[0].kind == Node::Kind::Wildcard)
             only = &node.options[0].seq->nodes[0];
-        QList<Entry> entries;
-        std::vector<double> weights;
-        if (only) {
-            entries = entriesOf(*node.options[0].seq, *only);
-            weights = weightsOf(entries);
-        } else {
+        CollectionP collection;
+        std::vector<double> own;
+        if (only)
+            collection = collectionOf(*node.options[0].seq, *only);
+        else
             for (const Option &option : node.options)
-                weights.push_back(option.weight);
-        }
-        const int n = only ? int(entries.size()) : int(node.options.size());
+                own.push_back(option.weight);
+        const std::vector<double> &weights = only ? collection->weights : own;
+        const int n = int(weights.size());
         if (n == 0)
             return {};
         const auto text = [&](int k) {
             if (only)
-                return evalEntry(*node.options[0].seq, *only, entries.at(k), depth);
+                return evalEntry(*node.options[0].seq, *only, collection->entries.at(k), depth);
             return evalSeq(*node.options[size_t(k)].seq, depth).trimmed();
         };
         const int lo = std::min(node.lo, n);
@@ -1263,7 +1363,8 @@ private:
         if (count == 0)
             return {};
         if (count == 1)
-            return text(m_chooser.pick(n, &weights, node.sampler));
+            return text(only ? m_chooser.pickCumulative(collection->cumulative, node.sampler) : m_chooser.pick(n, &weights, node.sampler));
+        charge(seq, node.pos, qint64(count) * n); // each pick without repeats is a pass over the options
         QStringList parts;
         for (const int k : m_chooser.many(n, count, weights))
             parts << text(k);
@@ -1307,16 +1408,11 @@ QStringList wildcardFolders() {
 
 QString wildcardSignature(const QStringList &folders) {
     QStringList lines;
-    int count = 0;
-    for (const QString &folder : folders) {
-        QDirIterator it(folder, {QStringLiteral("*.txt"), QStringLiteral("*.yaml"), QStringLiteral("*.yml"), QStringLiteral("*.json")},
-                        QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext() && ++count <= Limits().maxFiles) {
-            const QFileInfo info(it.next());
-            lines << QStringLiteral("%1|%2|%3").arg(info.filePath()).arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
+    for (const QString &folder : folders)
+        for (const QString &rel : listWildcardFiles(folder)) { // every file a lookup can reach, sorted
+            const QFileInfo info(folder + QLatin1Char('/') + rel);
+            lines << QStringLiteral("%1|%2|%3|%4").arg(folder, rel).arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
         }
-    }
-    lines.sort();
     return QString::fromLatin1(QCryptographicHash::hash(lines.join(QLatin1Char('\n')).toUtf8(), QCryptographicHash::Sha256).toHex());
 }
 
@@ -1363,14 +1459,17 @@ Errors check(const QString &templ, const Options &options) {
         const SeqP top = parseText(templ, QString(), options.limits);
         Errors errors;
         QSet<QString> assigned;
+        bool wildcardsUsed = false; // a wildcard line may set a variable: not told without running
         walk(*top, [&](const Node &node) {
             if (node.kind == Node::Kind::VarSet)
                 assigned.insert(node.text);
+            if (node.kind == Node::Kind::Wildcard)
+                wildcardsUsed = true;
         });
         Wildcards wildcards(options);
         QSet<QString> checked;
         walk(*top, [&](const Node &node) {
-            if (node.kind == Node::Kind::VarUse && !node.a && !assigned.contains(node.text))
+            if (node.kind == Node::Kind::VarUse && !node.a && !wildcardsUsed && !assigned.contains(node.text))
                 errors << toError({QStringLiteral("The variable ${%1} is never set in the template (%2).").arg(node.text, top->src->where(node.pos)),
                                    QStringLiteral("Set it with ${%1=value} or give a default with ${%1:default}.").arg(node.text)});
             if (node.kind == Node::Kind::Wildcard && !checked.contains(node.text)) {
