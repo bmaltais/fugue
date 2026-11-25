@@ -33,7 +33,7 @@ Question {
         // The accent border marks it as a question that needs an answer, not a notice.
         Rectangle {
             anchors.fill: parent
-            radius: root.look.popupCorner
+            radius: Math.min(root.look.params.cornerCard * root.look.unit, 0.2 * Math.min(width, height))
             color: "transparent"
             border.width: 2
             border.color: root.look.accent

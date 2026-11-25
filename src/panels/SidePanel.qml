@@ -2,13 +2,17 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
 import "../canvas"
+import "../kit"
 
 // A dockable side panel (#56, ComfyUI's sidebar): a title bar with a button that moves it to the
 // other side and one that closes it, the content below it, and a grip on the edge that faces the
 // canvas to change its width. It knows nothing of what it holds or of the canvas: put the content
 // inside it (it fills the area under the title bar), and the caller sets its place and size.
 //
-//   look, title, dock ("left" or "right": the window's side, not mirrored), minWidth, maxWidth
+// It is a card of the Drift kit (KitPanel, docs/canvas-look.md 20.21): rounded, a faint tint of its `tone`, `gap` px of window
+// background on each side, and a compact title bar that fades into the panel; the caller gives it the room of the card plus the gap.
+//
+//   look, title, tone, gap, dock ("left" or "right": the window's side, not mirrored), minWidth, maxWidth
 //   closeRequested, dockRequested(dock), widthRequested(width): what a person asked for; the caller
 //     decides (and keeps) the answer, so the panel never changes its own width or side
 //   focusFirst(): the focus goes to the content's `focusTarget`, else the panel
@@ -20,6 +24,8 @@ Item {
     objectName: "sidePanel"
     required property CanvasLook look
     property string title
+    property string tone: "dusk"
+    property real gap: 0 // window background kept on each side of the card, px
     property string dock: "left"
     property int minWidth: 200
     property int maxWidth: 640
@@ -49,9 +55,11 @@ Item {
 
     Keys.onEscapePressed: panel.closeRequested()
 
-    Rectangle {
-        anchors.fill: parent
-        color: panel.look.popup
+    KitPanel {
+        id: card
+        look: panel.look
+        tone: panel.tone
+        anchors { fill: parent; leftMargin: panel.gap; rightMargin: panel.gap }
         // Nothing under the panel hears a press or the wheel that lands on it.
         MouseArea {
             anchors.fill: parent
@@ -59,19 +67,24 @@ Item {
             onWheel: wheel => wheel.accepted = true
         }
     }
-    // The edge that faces the canvas. Placed by x: the window mirrors, the panel's side does not.
-    Rectangle {
-        x: panel.onLeft ? panel.width - 1 : 0
-        width: 1
-        height: parent.height
-        color: panel.look.hairline
-    }
 
     Item {
         id: bar
-        // Under the grip's edge nothing is drawn; the bar spans the panel.
-        width: parent.width
+        // Under the grip's edge nothing is drawn; the bar spans the card.
+        x: panel.gap
+        width: parent.width - 2 * panel.gap
         height: 9 * panel.u
+        // The title bar takes the tone and fades into the panel (no hairline).
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            visible: panel.look.params.panelTint > 0.001
+            radius: Math.max(0, card.radius - 1)
+            gradient: Gradient {
+                GradientStop { position: 0; color: Qt.alpha(panel.look.tone(panel.tone).blobs[0], 2.2 * panel.look.params.panelTint) }
+                GradientStop { position: 1; color: Qt.alpha(panel.look.tone(panel.tone).blobs[0], 0) }
+            }
+        }
         Text {
             anchors { left: parent.left; leftMargin: 3 * panel.u; right: buttons.left; rightMargin: panel.u; verticalCenter: parent.verticalCenter }
             text: panel.title
@@ -101,19 +114,15 @@ Item {
             }
         }
     }
-    Rectangle {
-        anchors { left: parent.left; right: parent.right; top: bar.bottom }
-        height: 1
-        color: panel.look.hairline
-    }
     Item {
         id: body
         // The grip lies on the panel's outer edge and takes the presses there, so the content stops
         // short of it: a scroll bar or a row button under the grip could not be pressed.
         anchors {
-            left: parent.left; right: parent.right; top: bar.bottom; bottom: parent.bottom; topMargin: 1
-            leftMargin: panel.onLeft ? 0 : panel.gripWidth
-            rightMargin: panel.onLeft ? panel.gripWidth : 0
+            left: parent.left; right: parent.right; top: bar.bottom; bottom: parent.bottom
+            leftMargin: panel.gap + (panel.onLeft ? 0 : panel.gripWidth)
+            rightMargin: panel.gap + (panel.onLeft ? panel.gripWidth : 0)
+            bottomMargin: card.radius / 3
         }
     }
 
@@ -122,7 +131,7 @@ Item {
     Item {
         id: grip
         objectName: "sidePanelGrip"
-        x: panel.onLeft ? panel.width - width : 0
+        x: panel.onLeft ? panel.width - panel.gap - width : panel.gap
         width: panel.gripWidth
         height: parent.height
         activeFocusOnTab: true

@@ -32,6 +32,13 @@ ApplicationWindow {
     Material.foreground: App.theme.foreground
 
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
+    // Rounded spaces with gaps (docs/canvas-look.md 20.1, 20.21): the canvas or the areas, and a side panel, are cards a gap of window
+    // background apart, half of it on each side of a border and half between a card and the window's edge; the Panes layout has none.
+    readonly property real cardGap: App.theme.look.params.areaLayout === "panes" ? 0 : App.theme.look.params.areaGap * App.theme.look.unit
+    readonly property real cardHalf: cardGap / 2
+    // The cards' top and bottom in the main column: the Graph's header above the canvas is part of its card.
+    readonly property real cardTop: graphHeader.active ? graphHeader.y : body.y
+    readonly property real cardBottom: body.y + body.height
     // The settings (settings/settings_model.h); a test window may run without them.
     readonly property SettingsModel appSettingsModel: App.settings
     // The shown workflow has an app block (#385), and the window shows it as the App view.
@@ -78,7 +85,7 @@ ApplicationWindow {
             anchors.bottomMargin: 4 * App.theme.look.unit
             width: hintLabel.implicitWidth + 6 * App.theme.look.unit
             height: 7 * App.theme.look.unit
-            radius: Math.min(App.theme.look.popupCorner, 14)
+            radius: Math.min(App.theme.look.params.cornerCard * App.theme.look.unit, height / 2)
             color: App.theme.look.popup
             border.color: App.theme.look.hairline
             Accessible.role: Accessible.AlertMessage
@@ -187,8 +194,9 @@ ApplicationWindow {
                 objectName: "graphHeaderHost"
                 Layout.fillWidth: true
                 Layout.preferredHeight: item ? 7 * App.theme.look.unit : 0
-                Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
-                Layout.rightMargin: win.sidePanelMargin("right")
+                Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left") + win.cardHalf
+                Layout.rightMargin: win.sidePanelMargin("right") + win.cardHalf
+                Layout.topMargin: active ? win.cardHalf : 0
                 active: !win.areaHost && !win.focusMode && !win.appShown && !win.homeShown && App.workspace !== null
                 sourceComponent: AreaHeader {
                     areaId: App.workspace.graphArea
@@ -203,8 +211,10 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // The side panel (#56) takes its width from the canvas, on the side it docks.
-                Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
-                Layout.rightMargin: win.sidePanelMargin("right")
+                Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left") + win.cardHalf
+                Layout.rightMargin: win.sidePanelMargin("right") + win.cardHalf
+                Layout.topMargin: graphHeader.active ? 0 : win.cardHalf
+                Layout.bottomMargin: win.cardHalf
                 model: App.canvasModel
                 floatingBar: (win.runToolbarItem as RunToolbar)?.surface ?? null
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
@@ -240,6 +250,16 @@ ApplicationWindow {
             }
         }
 
+        // The Graph's card while the window has one area: the corners and the hairline round the header and the canvas.
+        AreaFrame {
+            objectName: "graphFrame"
+            x: fugueCanvas.x
+            y: mainLayout.y + win.cardTop
+            width: fugueCanvas.width
+            height: win.cardBottom - win.cardTop
+            shown: !win.areaHost && !win.appShown && !win.homeShown
+        }
+
         // The file pickers, the save and trust and recovery questions, the drop area.
         WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas }
         GroupDialogs { anchors.fill: parent }
@@ -267,6 +287,8 @@ ApplicationWindow {
         rightToLeft: win.rightToLeft
         header: areaHeaderComponent
         handle: areaHandleComponent
+        frame: areaFrameComponent
+        gap: win.cardGap
         // Focus mode hides the headers with the other bars (12.15); the borders stay.
         headerHeight: win.focusMode ? 0 : 7 * App.theme.look.unit
         leadingClear: Math.max(0, menuBarHost.handleEnd - win.body.x)
@@ -378,14 +400,20 @@ ApplicationWindow {
             objectName: "areaHost"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
-            Layout.rightMargin: win.sidePanelMargin("right")
+            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left") + win.cardHalf
+            Layout.rightMargin: win.sidePanelMargin("right") + win.cardHalf
+            Layout.topMargin: win.cardHalf
+            Layout.bottomMargin: win.cardHalf
             onPressed: point => win.activateAreaAt(point)
         }
     }
     Component {
         id: areaHeaderComponent
         AreaHeader {}
+    }
+    Component {
+        id: areaFrameComponent
+        AreaFrame {}
     }
     Component {
         id: areaHandleComponent
@@ -601,8 +629,14 @@ ApplicationWindow {
     function syncSidePanel() {
         const tab = sidePanelsVisible ? App.sidePanels.tab : ""
         if (tab === "") {
+            // Closing the panel from inside it (Escape) gives the keys back to the canvas, which opened it.
+            let hadFocus = false
+            for (let at = win.activeFocusItem; sidePanelItem && at && !hadFocus; at = at.parent)
+                hadFocus = at === sidePanelItem
             if (sidePanelItem)
                 sidePanelItem.destroy()
+            if (hadFocus && fugueCanvas.visible)
+                fugueCanvas.forceActiveFocus()
             sidePanelItem = null
             sidePanelContent = null
             sidePanelShown = ""
@@ -626,8 +660,8 @@ ApplicationWindow {
         id: stripLoader
         parent: windowRoot
         active: win.stripWanted
-        y: mainLayout.y + win.body.y
-        height: win.body.height
+        y: mainLayout.y + win.cardTop
+        height: win.cardBottom - win.cardTop
         sourceComponent: SideTabStrip {
             look: App.theme.look
             panels: App.sidePanels.panels
@@ -649,13 +683,16 @@ ApplicationWindow {
         SidePanel {
                 look: App.theme.look
             title: App.sidePanels.tab === "nodes" ? qsTr("Node library") : qsTr("Workflows")
+            // The window's tone; the results browser is ember (docs/canvas-look.md 20.1, 4).
+            tone: App.sidePanels.tab === "workflows" && (win.sidePanelContent as WorkflowsPanel)?.view === "results" ? "ember" : "dusk"
             dock: App.sidePanels.dock
             width: win.sidePanelWidth
             minWidth: App.sidePanels.minWidth
             maxWidth: App.sidePanels.maxWidth
             x: dock === "right" ? windowRoot.width - width : win.stripWidth
-            y: mainLayout.y + win.body.y
-            height: win.body.height
+            y: mainLayout.y + win.cardTop
+            height: win.cardBottom - win.cardTop
+            gap: win.cardHalf
             onCloseRequested: App.sidePanels.tab = ""
             onDockRequested: dock => App.sidePanels.dock = dock
             onWidthRequested: width => App.sidePanels.width = width

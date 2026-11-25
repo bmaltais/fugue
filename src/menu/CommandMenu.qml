@@ -150,7 +150,7 @@ Menu {
             bottomPadding: menu.u
             contentItem: Rectangle {
                 implicitHeight: 1
-                color: menu.look.hairline
+                color: menu.look.params.rowSeparators === "hairline" ? menu.look.hairline : "transparent"
             }
         }
     }

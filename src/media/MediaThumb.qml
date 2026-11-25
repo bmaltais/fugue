@@ -22,7 +22,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: cell.look.thumbCorner
+        radius: Math.min(cell.look.params.cornerGroup * cell.look.unit, 0.2 * Math.min(width, height))
         color: cell.look.well
     }
     Image {
@@ -89,7 +89,7 @@ Item {
     }
     Rectangle {
         anchors.fill: parent
-        radius: cell.look.thumbCorner
+        radius: Math.min(cell.look.params.cornerGroup * cell.look.unit, 0.2 * Math.min(width, height))
         color: "transparent"
         border.width: cell.current ? 2 : 1
         border.color: cell.current ? (cell.focused ? cell.look.accent : cell.look.label)

@@ -29,7 +29,11 @@ Rectangle {
     readonly property real endClear: Math.max(12, 3 * u)
     // How far the window's furniture reaches into this bar's start (the auto-hide menu bar's handle, AreaNode.qml).
     property real leadingClear: 0
-    color: look.popup
+    // The bar takes a faint tone of what the area shows (the Graph dusk, a Canvas sea, any other slate): the card's header, calm
+    // (docs/canvas-look.md 20.21); with the Colour slider at 0 it is the plain popup fill.
+    readonly property string tone: viewType === "graph" ? "dusk" : viewType === "canvas" ? "sea" : "slate"
+    readonly property color toneColor: look.tone(tone).blobs[0]
+    color: Qt.tint(look.popup, Qt.alpha(toneColor, look.params.panelTint * (active ? 1.5 : 1.0)))
     Accessible.role: Accessible.ToolBar
     Accessible.name: qsTr("%1 area").arg(App.workspace ? App.workspace.views.name(viewType) : viewType)
 

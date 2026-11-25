@@ -38,7 +38,10 @@ Item {
             moveRequested(row && rightToLeft ? -delta : delta)
     }
 
+    // Panes: a 1px divider always. Cards: the gap of window background is the divider, and the line shows only while the border is
+    // in use (pointer, press or keys).
     Rectangle {
+        visible: handle.look.params.areaLayout === "panes" || handle.lit
         x: handle.row ? Math.round(handle.width / 2) - (handle.lit ? 1 : 0) : 0
         y: handle.row ? 0 : Math.round(handle.height / 2) - (handle.lit ? 1 : 0)
         width: handle.row ? (handle.lit ? 2 : 1) : handle.width

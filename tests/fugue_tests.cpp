@@ -519,7 +519,7 @@ private slots:
         const QRectF titles = file->mapRectToScene(file->boundingRect()).united(last->mapRectToScene(last->boundingRect()));
         QVERIFY2(!titles.contains(inBar), qPrintable(QStringLiteral("%1 %2").arg(inBar.x()).arg(titles.right())));
         QCOMPARE(QColor(shot.pixel(inBar)).name(), theme.look()->tokens().well.name());
-        const QPoint inCanvas = canvas->mapToScene(QPointF(canvas->width() - 4, canvas->height() - 4)).toPoint();
+        const QPoint inCanvas = canvas->mapToScene(QPointF(canvas->width() - 30, canvas->height() - 30)).toPoint();
         QCOMPARE(QColor(shot.pixel(inCanvas)).name(), theme.look()->tokens().canvas.name());
         // Mirrored, the menu titles start at the right.
         const qreal fileX = file->mapToScene(QPointF(file->width() / 2, 0)).x();

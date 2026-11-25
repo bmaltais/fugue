@@ -65,6 +65,8 @@ Popup {
         NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
     }
     onAboutToShow: reset()
+    // The first useful control of the list takes the keys; Tab walks New, Open folder and Project settings, Escape closes.
+    onOpened: if (dialog.view === "list") newButton.forceActiveFocus()
 
     Connections {
         target: dialog.model
@@ -148,7 +150,7 @@ Popup {
                         objectName: "project-" + index
                         Layout.fillWidth: true
                         implicitHeight: rowColumn.implicitHeight + 6 * dialog.u
-                        radius: dialog.look.smallCorner
+                        radius: Math.min(dialog.look.params.cornerGroup * dialog.u, 0.3 * height)
                         color: modelData.current ? dialog.look.selectedRow : "transparent"
                         border.width: 1
                         border.color: dialog.look.hairline
@@ -274,6 +276,7 @@ Popup {
                     Layout.fillWidth: true
                     spacing: dialog.u
                     SettingsParts.SmallButton {
+                        id: newButton
                         objectName: "projectNew"
                         text: qsTr("New…")
                         onClicked: {
