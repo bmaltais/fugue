@@ -138,6 +138,7 @@ AppView::AppView(Start start, Cancel cancel, const Registry *registry, QObject *
     // A new app, or a run that ended, may have found something missing: the panel looks again (the source says "ready" at once
     // when nothing is).
     connect(this, &AppView::appChanged, m_needs, &NeedsModel::refreshSoon);
+    connect(this, &AppView::appChanged, this, &AppView::shownChanged); // what the tab shows follows the app and its mode
     connect(this, &AppView::runChanged, m_needs, [this] { if (status() == QLatin1String("failed")) m_needs->refreshSoon(); });
     if (registry) {
         m_models = new AppModels(registry, this);
@@ -795,7 +796,21 @@ void AppView::cancel() {
         m_cancel(run);
 }
 
+void AppView::setAreas(bool split, bool appActive) {
+    if (m_split == split && m_areaApp == appActive)
+        return;
+    const bool was = shown();
+    m_split = split;
+    m_areaApp = appActive;
+    if (was != shown())
+        emit shownChanged();
+}
+
 void AppView::openInGraph() {
+    if (m_app && m_split) { // the graph is on screen already: bring it to the area that shows the App view
+        emit areaViewRequested(false);
+        return;
+    }
     if (!m_app || m_state[m_tab].graph)
         return;
     m_state[m_tab].graph = true;
@@ -803,13 +818,19 @@ void AppView::openInGraph() {
 }
 
 void AppView::toggle() {
-    if (shown())
+    if (m_app && m_split)
+        emit areaToggleRequested();
+    else if (shown())
         openInGraph();
     else
         showApp();
 }
 
 void AppView::showApp() {
+    if (m_app && m_split) { // an area shows it, in the active one or the next
+        emit areaViewRequested(true);
+        return;
+    }
     if (!m_app || !m_state[m_tab].graph)
         return;
     emit documentWanted(); // edits made in the graph, and a block changed there, are in the form

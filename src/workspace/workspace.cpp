@@ -252,6 +252,37 @@ QString Workspace::viewOf(int id) const {
     return area ? area->view : QString();
 }
 
+int Workspace::areaOf(const QString &view) const {
+    for (const int id : m_tree.areaIds())
+        if (m_tree.area(id)->view == view)
+            return id;
+    return 0;
+}
+
+bool Workspace::toggleApp() {
+    const int id = m_tree.area(m_active) ? m_active : graphArea();
+    const QString view = viewOf(id);
+    if (view == ViewRegistry::kApp)
+        return showView(id, ViewRegistry::kGraph);
+    if (view != ViewRegistry::kGraph)
+        return showView(id, ViewRegistry::kApp);
+    if (const int app = areaOf(ViewRegistry::kApp))
+        return showView(app, ViewRegistry::kGraph);
+    for (const int other : m_tree.areaIds())
+        if (other != id)
+            return showView(other, ViewRegistry::kApp);
+    return false;
+}
+
+bool Workspace::requestApp(bool app) {
+    const int id = m_tree.area(m_active) ? m_active : graphArea();
+    if (!app)
+        return viewOf(id) == ViewRegistry::kApp && showView(id, ViewRegistry::kGraph);
+    if (areaOf(ViewRegistry::kApp))
+        return false;
+    return toggleApp();
+}
+
 bool Workspace::resizeBorder(const QVariantList &path, int border, double delta, double length) {
     AreaTree next = m_tree;
     if (!next.resize(toPath(path), border, delta, length, minimum()))

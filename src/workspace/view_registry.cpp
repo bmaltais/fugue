@@ -6,6 +6,7 @@ namespace fugue {
 
 const QString ViewRegistry::kGraph = QStringLiteral("graph");
 const QString ViewRegistry::kCanvas = QStringLiteral("canvas");
+const QString ViewRegistry::kApp = QStringLiteral("app");
 
 ViewRegistry::ViewRegistry(QObject *parent) : QObject(parent) {
     // The node graph: today's whole window body. The window declares it itself (Main.qml), so its area
@@ -16,6 +17,10 @@ ViewRegistry::ViewRegistry(QObject *parent) : QObject(parent) {
     // Canvas Region, its canvas kept in the area's state. Wide enough for its bar's first chips and a picture.
     add({kCanvas, QT_TRANSLATE_NOOP("View", "Canvas"), QStringLiteral("image"), QUrl(QStringLiteral("qrc:/workspace/CanvasArea.qml")),
          QSizeF(240, 180), Multiplicity::Many});
+    // The App view of the shown workflow (#450, spec 12.17): AppArea.qml, AppPage.qml over the one AppView store, so one area in the
+    // window. Wide enough for the rail, a stage and the input panel at its least width (80u, 40% of 800).
+    add({kApp, QT_TRANSLATE_NOOP("View", "App"), QStringLiteral("layout-template"), QUrl(QStringLiteral("qrc:/apps/AppArea.qml")),
+         QSizeF(800, 360), Multiplicity::OnePerWindow});
 }
 
 void ViewRegistry::add(const ViewType &type) {
