@@ -47,6 +47,7 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QString outputFolder READ outputFolder NOTIFY changed)
     Q_PROPERTY(bool outputFolderIsDefault READ outputFolderIsDefault NOTIFY changed)
     Q_PROPERTY(QString inputsFolder READ inputsFolder NOTIFY changed)
+    Q_PROPERTY(QString wildcardsFolder READ wildcardsFolder NOTIFY changed)
     Q_PROPERTY(bool inputsFolderIsDefault READ inputsFolderIsDefault NOTIFY changed)
     Q_PROPERTY(QStringList modelPaths READ modelPaths NOTIFY changed)
     Q_PROPERTY(QStringList packPaths READ packPaths NOTIFY changed)
@@ -131,6 +132,8 @@ public:
     QString outputFolder() const;
     bool outputFolderIsDefault() const { return m_file.settings.outputFolder.isEmpty(); }
     QString inputsFolder() const;
+    // Where Dynamic Prompt reads __wildcard__ files (spec 14.1): the data folder's wildcards/, ~ for home.
+    QString wildcardsFolder() const;
     bool inputsFolderIsDefault() const { return m_file.settings.inputsFolder.isEmpty(); }
     QStringList modelPaths() const { return m_file.settings.modelPaths; }
     QStringList packPaths() const { return m_file.settings.packPaths; }

@@ -2141,8 +2141,10 @@
   "Type it and press Enter": "Type it and press Enter",
   "Type its path and press Enter": "Type its path and press Enter",
   "Update %1": "Update %1",
-  "Where Fugue saves pictures, downloads models, and looks for models and packs.": "Where Fugue saves pictures, downloads models, and looks for models and packs.",
+  "Where Dynamic Prompt looks for __name__ files: .txt (one value per line), .yaml and .json, in folders as they come from a collection. A pack's own wildcards folder is searched too, and a project that inherits prompts also reads the Default's.": "Where Dynamic Prompt looks for __name__ files: .txt (one value per line), .yaml and .json, in folders as they come from a collection. A pack's own wildcards folder is searched too, and a project that inherits prompts also reads the Default's.",
+  "Where Fugue saves pictures, downloads models, and looks for models, packs and wildcards.": "Where Fugue saves pictures, downloads models, and looks for models, packs and wildcards.",
   "Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders.": "Where models are saved when Fugue downloads them for a template or a workflow, in the folder of their type. Choose from Fugue's own folder and the extra model folders.",
+  "Wildcards": "Wildcards",
   "You are asked before anything is installed": "You are asked before anything is installed",
   "https://api.example.com": "https://api.example.com",
   "%n folders": {

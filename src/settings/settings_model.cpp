@@ -293,6 +293,8 @@ QString SettingsModel::outputFolder() const {
     return tilde(chosen.isEmpty() ? defaultOutputDir() : QDir::cleanPath(expandHome(chosen)));
 }
 
+QString SettingsModel::wildcardsFolder() const { return tilde(dataDir() + QStringLiteral("/wildcards")); }
+
 QString SettingsModel::inputsFolder() const {
     const QString chosen = m_file.settings.inputsFolder;
     return chosen.isEmpty() ? outputFolder() + QStringLiteral("/inputs") : tilde(QDir::cleanPath(expandHome(chosen)));
