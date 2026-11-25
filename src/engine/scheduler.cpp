@@ -377,7 +377,8 @@ private:
             if (n.selection)
                 providers.insert(path, QJsonObject{{"instance", n.selection->instance},
                                                    {"engine", n.selection->engine},
-                                                   {"model", n.selection->model.handle}});
+                                                   {"model", n.selection->model.handle},
+                                                   {"remote", !n.selection->sharesFilesystem}});
             QJsonObject node;
             const NodeState shown = n.phase == Phase::Running ? NodeState::Running : n.state;
             node.insert("state", nodeStateName(shown));
@@ -539,6 +540,9 @@ private:
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
             requirement.workflowPin.clear();
+            // A node that takes its model files in the job and whose files are not here can only run on a paired host (#395).
+            if (requirement.model.isEmpty() && modelFilesElsewhere(n))
+                requirement.modelsElsewhere = true;
             const Result<Selection> selection = selectProvider(m_candidates, requirement);
             if (!selection) {
                 if (!m_dry)
@@ -617,6 +621,23 @@ private:
             warning.node = n.path;
             m_outcome.errors.append(warning);
         }
+    }
+
+    // Some model file the node is given is known and not on this machine (a check reads no file, as warnMissingModels).
+    bool modelFilesElsewhere(const NodeRun &n) const {
+        if (!m_env.registry || !m_env.hashes)
+            return false;
+        std::optional<ModelLibrary> library;
+        for (auto it = n.inputs.begin(); it != n.inputs.end(); ++it) {
+            const InputSpec *spec = n.type->input(it.key());
+            if (!spec || it.value().isEmpty() || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
+                continue;
+            if (!library)
+                library.emplace(ModelLibrary::current(m_env.registry));
+            if (!library->withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly))
+                return true;
+        }
+        return false;
     }
 
     void warnMissingModels(const NodeRun &n) {

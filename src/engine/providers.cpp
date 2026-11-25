@@ -413,6 +413,18 @@ bool sameModel(const QJsonObject &requested, const QJsonObject &offered) {
     return !name.isEmpty() && offered.value("name").toString() == name;
 }
 
+QString pairedHelperName(const QList<ProviderInstance> &instances) {
+    for (const ProviderInstance &instance : instances) {
+        if (!instance.enabled || instance.address.isEmpty() || instance.type == QLatin1String("omarchy"))
+            continue;
+        const QString host = QUrl(instance.address).host();
+        if (host == QLatin1String("localhost") || host == QLatin1String("::1") || host.startsWith(QLatin1String("127.")))
+            continue;
+        return instance.name;
+    }
+    return {};
+}
+
 Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {
     const QString pin = requirement.nodePin.isEmpty() ? requirement.workflowPin : requirement.nodePin;
     if (!pin.isEmpty()) {
@@ -454,6 +466,30 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
             unreachable.append(QStringLiteral("%1 is unavailable: %2").arg(candidate.instance.name, why));
         } else {
             usable.append(&candidate);
+        }
+    }
+    if (requirement.modelsElsewhere) {
+        QList<const Candidate *> remote;
+        for (const Candidate *candidate : std::as_const(usable))
+            if (!candidate->description->sharesFilesystem)
+                remote.append(candidate);
+        if (!remote.isEmpty()) {
+            usable = remote;
+        } else {
+            // A paired helper that does not answer: say so, not the model_missing of a machine that never had the files.
+            for (const Candidate &candidate : candidates) {
+                if (!candidate.instance.enabled || candidate.description.ok() || candidate.instance.address.isEmpty()
+                    || candidate.instance.type == QLatin1String("omarchy"))
+                    continue;
+                const QString why = candidate.description.errors().isEmpty() ? QString()
+                                                                             : candidate.description.errors().first().message;
+                return failed(makeError(
+                    QStringLiteral("provider_unreachable"),
+                    QStringLiteral("The model files are not on this machine, and the paired host %1 is not answering. %2")
+                        .arg(candidate.instance.name, why).trimmed(),
+                    QStringLiteral("Start the helper on %1, or get the model files onto this machine (Get ready).")
+                        .arg(candidate.instance.name)));
+            }
         }
     }
     return choose(usable, requirement, {}, disabled, unreachable);

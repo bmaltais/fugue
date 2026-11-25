@@ -13,12 +13,14 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include <algorithm>
 #include <optional>
 
 #include "cli/canvas_run.h"
 #include "cli/commands.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
+#include "engine/providers.h"
 #include "engine/readiness.h"
 #include "engine/registry.h"
 #include "engine/share_package.h"
@@ -203,6 +205,36 @@ ReadinessPlan planFor(const Loaded &loaded, const Document &document, Context &c
 }
 
 bool isReady(const ReadinessPlan &plan) { return plan.empty() && plan.problems.isEmpty(); }
+
+// Only model files are missing here, and a helper on a paired host is configured: the run goes there and the host checks the
+// files (#395; a host that does not have them, or is gone, answers with an error of its own).
+// A model with no source to download from is a `download_failed` problem of the plan: the host may have it all the same.
+bool onlyModelsMissing(const ReadinessPlan &plan) {
+    if (!plan.packs.isEmpty() || (plan.models.isEmpty() && plan.problems.isEmpty()))
+        return false;
+    return std::all_of(plan.problems.cbegin(), plan.problems.cend(), [](const Error &problem) {
+        return problem.code == QLatin1String("download_failed");
+    });
+}
+bool mayRunOnHost(const ReadinessPlan &plan) {
+    if (!onlyModelsMissing(plan))
+        return false;
+    const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
+    return instances && !pairedHelperName(instances.value()).isEmpty();
+}
+
+// The paired hosts that ran a node of the run (run.json: the nodes a provider that does not share this machine's files served), once each.
+QStringList hostsOfRun(const RunFolder &folder) {
+    QStringList hosts;
+    const QJsonObject providers = folder.state().value("providers").toObject();
+    for (auto it = providers.begin(); it != providers.end(); ++it) {
+        const QJsonObject served = it.value().toObject();
+        const QString instance = served.value("instance").toString();
+        if (served.value("remote").toBool() && !instance.isEmpty() && !hosts.contains(instance))
+            hosts << instance;
+    }
+    return hosts;
+}
 
 Error notReady(const Loaded &loaded, const ReadinessPlan &plan) {
     const bool template_ = !QFileInfo(loaded.id).isFile();
@@ -449,6 +481,12 @@ Reply appInfo(const Command &command, Context &context) {
                      {"inputs", inputs},
                      {"outputs", outputsJson(*loaded)},
                      {"ready", ready}};
+    if (!ready && mayRunOnHost(plan)) {
+        // Not here, but the paired helper is configured: Run goes there and the host checks the files (#395).
+        const QString host = pairedHelperName(loadProviderInstances(providersPath()).value());
+        data.insert("runs_on", host);
+        lines << QStringLiteral("Runs on %1: its models are not on this machine.").arg(host);
+    }
     if (!ready) {
         data.insert("needs", plan.toJson());
         lines << QStringLiteral("Not ready: %1").arg(notReady(*loaded, plan).message);
@@ -507,7 +545,7 @@ Reply appRun(const Command &command, Context &context) {
 
     // Ready before the block is checked: a missing pack leaves nodes the block names unknown.
     const ReadinessPlan plan = planFor(*loaded, loaded->document, context);
-    if (!isReady(plan))
+    if (!isReady(plan) && !mayRunOnHost(plan))
         return Reply::failure(notReady(*loaded, plan));
     if (const Errors invalid = app::checkApp(loaded->app, loaded->document, context.registry); hasErrors(invalid))
         return Reply::failure(invalid);
@@ -517,7 +555,7 @@ Reply appRun(const Command &command, Context &context) {
         return Reply::failure(bound.errors());
     // A model picked with --input has to be here too.
     if (!values->isEmpty())
-        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen))
+        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen) && !mayRunOnHost(chosen))
             return Reply::failure(notReady(*loaded, chosen));
     if (command.has("out")) {
         const QString dir = QDir(command.value("out")).absolutePath();
@@ -546,7 +584,10 @@ Reply appRun(const Command &command, Context &context) {
 
     QStringList files;
     const QJsonArray results = resultsOf(*loaded, *folder, files);
-    Reply reply = Reply::success(QJsonObject{{"app", loaded->id}, {"run", folder->id()}, {"status", "ok"}, {"outputs", results}, {"files", QJsonArray::fromStringList(files)}},
+    const QStringList hosts = hostsOfRun(*folder);
+    if (!hosts.isEmpty())
+        context.log(QStringLiteral("Ran on %1.").arg(hosts.join(QStringLiteral(", "))));
+    Reply reply = Reply::success(QJsonObject{{"app", loaded->id}, {"run", folder->id()}, {"status", "ok"}, {"ran_on", QJsonArray::fromStringList(hosts)}, {"outputs", results}, {"files", QJsonArray::fromStringList(files)}},
                                  files.join(QLatin1Char('\n')));
     reply.errors = loaded->stale;
     return reply;

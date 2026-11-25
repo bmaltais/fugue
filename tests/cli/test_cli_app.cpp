@@ -300,6 +300,22 @@ private slots:
         QCOMPARE(fugue({"app", "run", "needs-pack.fugue", "--json"}).code(), QString("app_not_ready"));
     }
 
+    // #395: an app whose model is not on this machine says it runs on the paired helper, when one is configured; with none it is not
+    // ready, as before. The run itself is the scheduler's (tests/engine/test_scheduler_providers.cpp).
+    void appInfoSaysWhereAnAppRunsWhenItsModelIsOnlyOnThePairedHelper() {
+        write(path("work/sampled.fugue"), kSampled);
+        const Outcome alone = fugue({"app", "info", "sampled.fugue", "--json"});
+        QVERIFY(!alone.data().value("ready").toBool());
+        QVERIFY(!alone.data().contains("runs_on"));
+        QCOMPARE(fugue({"app", "run", "sampled.fugue", "--json"}).code(), QString("app_not_ready"));
+
+        write(path("root/config/fugue/providers.json"),
+              "{\"providers\": [{\"name\": \"gx10\", \"type\": \"fugue-helper\", \"address\": \"http://gx10.invalid:8787\", \"key\": \"k\"}]}");
+        const Outcome paired = fugue({"app", "info", "sampled.fugue", "--json"});
+        QCOMPARE(paired.data().value("runs_on").toString(), QString("gx10"));
+        QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
+    }
+
     // `app export` (#394, spec 11.5): the bundle is the package's zip, read back with the package reader.
     void exportWritesABundleWithItsSampleFilesAndRefusesWhatItCannotCarry() {
         const QByteArray sampled = kSampled;

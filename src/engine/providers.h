@@ -63,6 +63,10 @@ QString pairedHostsProblem(const OmarchyPaths &omarchy);
 // http: {"name": "gx10", "type": "fugue-helper", "address": "http://host:port", "key": "..."}.
 // Without an address it is the helper on this machine.
 //
+// The first enabled instance that is a helper on a paired host (#395): not an omarchy instance (those serve models by
+// name, 8.7) and with an address that is not this machine's. Empty when there is none.
+QString pairedHelperName(const QList<ProviderInstance> &instances);
+
 // Makes the provider an instance is a use of: omarchy and fugue-helper are compiled in (8.7);
 // any other type is a provider module (8.8) installed in `modulesRoot` (providerModulesDir() when
 // not given) whose id it is: a stdio one is a HelperProvider that describes itself, an http one a
@@ -91,6 +95,12 @@ struct Requirement {
     // `fugue run --provider` replaces the workflow's pin for that run.
     QString nodePin;
     QString workflowPin;
+    // The node's model files are not on this machine (set by the scheduler for a node that takes
+    // its model files in the job, #395): only a provider that does not share this machine's files
+    // (a paired helper) can run it, and when none answers the error names the paired host that is
+    // gone. A pin still wins. With no paired helper configured at all nothing changes: the node
+    // reports its own model_missing.
+    bool modelsElsewhere = false;
 };
 
 struct Selection {

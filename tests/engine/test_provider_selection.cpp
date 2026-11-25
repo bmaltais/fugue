@@ -51,6 +51,18 @@ Requirement wants(const QString &capability) {
     return requirement;
 }
 
+// A local instance first, then the paired helper, as the default order has them.
+QList<Candidate> localAndHost(bool hostAnswers) {
+    Candidate local = candidate("This machine", {generate({model("any")})});
+    Candidate host = candidate("gx10", {generate({model("any")})});
+    host.instance.type = QStringLiteral("fugue-helper");
+    host.instance.address = QStringLiteral("http://gx10.example:8787");
+    host.description.value().sharesFilesystem = false;
+    if (!hostAnswers)
+        host.description = Result<Description>(makeError("provider_unreachable", "cannot reach it: timed out."));
+    return {local, host};
+}
+
 QStringList strings(const QJsonArray &array) {
     QStringList list;
     for (const QJsonValue &value : array)
@@ -442,6 +454,41 @@ private slots:
         QCOMPARE(chosen.errors().first().code, QStringLiteral("model_missing"));
         QCOMPARE(chosen.errors().first().severity, Error::Severity::Error);
         QCOMPARE(strings(chosen.errors().first().valid), QStringList{"z-image"});
+    }
+    // --- model files that are not on this machine (#395) ---
+
+    void modelFilesElsewhereGoToThePairedHelper() {
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider(localAndHost(true), requirement);
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("gx10"));
+        QVERIFY(!chosen->sharesFilesystem);
+    }
+
+    void modelFilesHereKeepTheOrderEvenWithAPairedHelper() {
+        const auto chosen = selectProvider(localAndHost(true), wants("image.generate"));
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("This machine"));
+    }
+
+    void modelFilesElsewhereAndTheHelperGoneIsAClearError() {
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider(localAndHost(false), requirement);
+        QVERIFY(!chosen);
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("provider_unreachable"));
+        QVERIFY(chosen.errors().first().message.contains("gx10"));
+        QVERIFY(chosen.errors().first().message.contains("timed out"));
+    }
+
+    void modelFilesElsewhereWithNoPairedHelperKeepTheOldAnswer() {
+        const QList<Candidate> candidates{candidate("This machine", {generate({model("any")})})};
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(chosen);
+        QCOMPARE(chosen->instance, QStringLiteral("This machine"));
     }
 };
 
