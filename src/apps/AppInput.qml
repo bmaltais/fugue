@@ -1,48 +1,111 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
-// One input of an app's form (#385, #386): its label over its control, the control chosen by the field's kind, in this one
-// place: text (a well of several lines for a prompt), number (a drag field with a range, else typed), toggle, choice, seed
-// (number, dice and mode), image (drop, paste, pick, samples, last used), mask (the mask editor over the picture), model
-// (the model menu with Download). It knows nothing of the run or the workflow: give it a `field` (AppView's: {key, label,
-// kind, value, min, max, choices, ...}) and listen to `edited(key, value)`; a number cleared says "". The kinds that take
-// files, seeds and models act on the store (`appView`) themselves. Every control is reached with Tab and worked with
-// Enter or Space; Ctrl+Enter, Run, is the window's and no field takes it.
-ColumnLayout {
+// One input of an app's form (#385, #386) as a row of the panel's KitGroup (docs/canvas-look.md "Drift kit"): a switch is a
+// KitRow with the KitToggle at its end (a click anywhere on the row flips it), a choice a KitRow with a chip menu at its end,
+// and everything wider (text and prompt, number, a range as KitSlider with its value, seed, picture, mask, model) an AppRow, the
+// label and a dim hint over the control at full width. The control is chosen by the field's kind in this one place. It knows
+// nothing of the run or the workflow: give it a `field` (AppView's: {key, label, kind, value, min, max, choices, hint?, ...})
+// and listen to `edited(key, value)`; a number cleared says "". The kinds that take files, seeds and models act on the store
+// (`appView`) themselves. Every control is reached with Tab and worked with Enter or Space; Ctrl+Enter, Run, is the window's
+// and no field takes it. It draws the group's hairline above itself unless it is the first row.
+Item {
     id: root
     required property var field
     readonly property CanvasLook look: App.theme.look
     property AppView appView: App.appView
     // What the control shows now: starts as the field's value, follows what the person does.
     property var current: field.value
+    readonly property string hint: field.hint ?? ""
     signal edited(string key, var value)
 
-    spacing: look.unit
+    width: parent ? parent.width : implicitWidth
+    implicitHeight: rows.item ? (rows.item as Item).height : 0
+    height: implicitHeight
     Accessible.role: Accessible.Grouping
     Accessible.name: field.label
 
-    Text {
-        Layout.fillWidth: true
-        text: root.field.label
-        color: root.look.label
-        font.pixelSize: root.look.labelSize
-        elide: Text.ElideRight
+    // A value the store changes by itself (Reuse inputs, a sample) is what the control shows.
+    Connections {
+        target: root.appView
+        function onValueChanged(key) {
+            if (key === root.field.key && root.field.kind !== "seed" && root.field.kind !== "image")
+                root.current = root.appView.valueOf(key)
+        }
+    }
+    KitSeparator {
+        look: root.look
+        visible: root.y > 0
+        z: 1
     }
     Loader {
-        Layout.fillWidth: true
-        sourceComponent: root.field.kind === "choice" ? choiceInput
-                       : root.field.kind === "number" && root.field.min !== undefined && root.field.max !== undefined ? rangedInput
-                       : root.field.kind === "number" ? numberInput
-                       : root.field.kind === "toggle" ? toggleInput
-                       : root.field.kind === "seed" ? seedInput
-                       : root.field.kind === "image" ? imageInput
-                       : root.field.kind === "mask" ? maskInput
-                       : root.field.kind === "model" ? modelInput
-                       : root.field.multiline === true ? areaInput : textInput
+        id: rows
+        width: parent.width
+        sourceComponent: root.field.kind === "toggle" ? toggleRow : root.field.kind === "choice" ? choiceRow : wideRow
     }
+    Component {
+        id: toggleRow
+        KitRow {
+            look: root.look
+            label: root.field.label
+            hint: root.hint
+            target: sw
+            KitToggle {
+                id: sw
+                objectName: "appInput-" + root.field.key
+                look: root.look
+                text: root.field.label
+                checked: root.current === true
+                onToggled: on => {
+                    root.current = on
+                    root.edited(root.field.key, on)
+                }
+            }
+        }
+    }
+    Component {
+        id: choiceRow
+        KitRow {
+            look: root.look
+            label: root.field.label
+            hint: root.hint
+            AppChoice {
+                objectName: "appInput-" + root.field.key
+                look: root.look
+                options: root.field.choices
+                value: root.current
+                label: root.field.label
+                onPicked: v => {
+                    root.current = v
+                    root.edited(root.field.key, v)
+                }
+            }
+        }
+    }
+    Component {
+        id: wideRow
+        AppRow {
+            look: root.look
+            label: root.field.label
+            hint: root.hint
+            value: root.field.kind === "number" && root.field.min !== undefined && root.field.max !== undefined
+                   ? String(Number(root.current ?? root.field.min)) : ""
+            Loader {
+                width: parent.width
+                sourceComponent: root.field.kind === "number" && root.field.min !== undefined && root.field.max !== undefined ? rangedInput
+                               : root.field.kind === "number" ? numberInput
+                               : root.field.kind === "seed" ? seedInput
+                               : root.field.kind === "image" ? imageInput
+                               : root.field.kind === "mask" ? maskInput
+                               : root.field.kind === "model" ? modelInput
+                               : root.field.multiline === true ? areaInput : textInput
+            }
+        }
+    }
+
     Component {
         id: areaInput
         AppTextArea {
@@ -54,19 +117,6 @@ ColumnLayout {
             onEdited: t => {
                 root.current = t
                 root.edited(root.field.key, t)
-            }
-        }
-    }
-    Component {
-        id: toggleInput
-        AppToggle {
-            objectName: "appInput-" + root.field.key
-            look: root.look
-            label: root.field.label
-            checked: root.current === true
-            onToggled: on => {
-                root.current = on
-                root.edited(root.field.key, on)
             }
         }
     }
@@ -108,12 +158,12 @@ ColumnLayout {
     }
     Component {
         id: textInput
-        ThemedTextField {
+        AppField {
             objectName: "appInput-" + root.field.key
+            look: root.look
+            width: parent?.width ?? 0
             text: root.current === undefined || root.current === null ? "" : String(root.current)
-            font.pixelSize: root.look.textSize
-            selectByMouse: true
-            Accessible.name: root.field.label
+            label: root.field.label
             onTextEdited: {
                 root.current = text
                 root.edited(root.field.key, text)
@@ -122,15 +172,15 @@ ColumnLayout {
     }
     Component {
         id: numberInput
-        ThemedTextField {
+        AppField {
             objectName: "appInput-" + root.field.key
+            look: root.look
+            width: parent?.width ?? 0
             text: root.current === undefined || root.current === null ? "" : String(root.current)
-            placeholderText: qsTr("Automatic")
-            font.pixelSize: root.look.textSize
+            placeholder: qsTr("Automatic")
             inputMethodHints: Qt.ImhFormattedNumbersOnly
             validator: DoubleValidator { notation: DoubleValidator.StandardNotation }
-            selectByMouse: true
-            Accessible.name: root.field.label
+            label: root.field.label
             // Each edit is a value (not the end of editing): a Run pressed with the cursor still here uses what is shown.
             onTextEdited: {
                 root.current = text
@@ -140,30 +190,17 @@ ColumnLayout {
     }
     Component {
         id: rangedInput
-        DragNumberField {
+        KitSlider {
             objectName: "appInput-" + root.field.key
             look: root.look
             width: parent?.width ?? 0
+            railWidth: width
+            text: root.field.label
             from: root.field.min
             to: root.field.max
-            step: Number.isInteger(root.field.min) && Number.isInteger(root.field.max) ? 1 : 0.01
+            stepSize: Number.isInteger(root.field.min) && Number.isInteger(root.field.max) ? 1 : 0.01
             value: Number(root.current ?? root.field.min)
-            defaultValue: Number(root.field.value ?? root.field.min)
-            onCommitted: v => {
-                root.current = v
-                root.edited(root.field.key, v)
-            }
-        }
-    }
-    Component {
-        id: choiceInput
-        ThemedDropDown {
-            objectName: "appInput-" + root.field.key
-            options: root.field.choices
-            value: root.current
-            label: root.field.label
-            maxWidth: 1000 * root.look.unit
-            onPicked: v => {
+            onMoved: v => {
                 root.current = v
                 root.edited(root.field.key, v)
             }

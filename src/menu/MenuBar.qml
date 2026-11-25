@@ -163,12 +163,49 @@ Rectangle {
         }
     }
 
+    // Fugue's mark at the bar's start (the Dusk app icon): the way back to the shelf of apps from any view, `app.show-all`. The
+    // first Tab stop of the bar; Enter or Space presses it.
+    Rectangle {
+        id: mark
+        objectName: "fugueMark"
+        color: "transparent"
+        radius: bar.look.smallCorner + 2
+        border.width: activeFocus ? 2 : 0
+        border.color: bar.look.accent
+        anchors.left: parent.left
+        anchors.leftMargin: 1.5 * bar.u
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: -0.5
+        width: 6 * bar.u
+        height: 6 * bar.u
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("All apps")
+        Accessible.onPressAction: App.commands.trigger("app.show-all")
+        Keys.onReturnPressed: App.commands.trigger("app.show-all")
+        Keys.onEnterPressed: App.commands.trigger("app.show-all")
+        Keys.onSpacePressed: App.commands.trigger("app.show-all")
+        Image {
+            anchors.fill: parent
+            source: App.theme.light ? "qrc:/fugue-light.png" : "qrc:/fugue-dark.png"
+            sourceSize: Qt.size(64, 64)
+            fillMode: Image.PreserveAspectFit
+            mipmap: true
+            opacity: markHover.hovered ? 1 : 0.9
+        }
+        HoverHandler { id: markHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: App.commands.trigger("app.show-all") }
+        ToolTip.visible: markHover.hovered
+        ToolTip.delay: bar.look.tooltipDelay
+        ToolTip.text: qsTr("All apps (%1)").arg((App.commands.entry("app.show-all").keys ?? [])[0] ?? "")
+    }
+
     Row {
         id: titles
         visible: !bar.narrow
         height: parent.height - 1
-        anchors.left: parent.left
-        anchors.leftMargin: 1.5 * bar.u
+        anchors.left: mark.right
+        anchors.leftMargin: 1 * bar.u
         Repeater {
             id: titleRepeater
             model: bar.tree
@@ -206,8 +243,8 @@ Rectangle {
         id: hamburger
         objectName: "menuButton"
         visible: bar.narrow
-        anchors.left: parent.left
-        anchors.leftMargin: 1.5 * bar.u
+        anchors.left: mark.right
+        anchors.leftMargin: 1 * bar.u
         width: 8 * bar.u
         height: parent.height - 1
         focusPolicy: Qt.NoFocus

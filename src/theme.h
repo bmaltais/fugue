@@ -82,6 +82,8 @@ public:
     // settings.json's corner_radius: px, or Settings::followOmarchy (look::corners). Only
     // the look changes (and says so); Theme's own properties stay.
     void setCornerRadius(int setting);
+    // settings.json's frost, 0 to 1: the look's `frost` (the kit's frosted controls read it).
+    void setFrost(double frost);
     // A straight sRGB blend, `toB` of the way from a to b.
     static QColor mix(const QColor &a, const QColor &b, double toB);
 

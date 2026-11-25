@@ -247,6 +247,8 @@ def tokens(colors, light):
     t["kit-chip"] = mix(t["kit-group"], fg, 0.10)
     t["kit-chip-hover"] = mix(t["kit-group"], fg, 0.17)
     t["kit-hero-shade"], t["kit-hero-pill"], t["kit-hero-pill-hover"] = (0, 0, 0, 0.55), (0, 0, 0, 0.44), (0, 0, 0, 0.60)
+    t["kit-well"] = mix(t["kit-group"], (0, 0, 0), 0.03 if light else 0.12)
+    t["kit-frost"], t["kit-frost-hover"], t["kit-frost-edge"] = (1, 1, 1, 0.20), (1, 1, 1, 0.30), (1, 1, 1, 0.28)
     # Frame fills and node-color header tints per theme role (layout colors are roles, spec 4.5).
     # A tint steps down until the title on it still reads at 4.5:1.
     for role in ("muted", "blue", "green", "magenta", "orange"):

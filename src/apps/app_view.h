@@ -70,6 +70,10 @@ class AppView : public QObject {
     // The window shows the App view: isApp and not opened in the graph.
     Q_PROPERTY(bool shown READ shown NOTIFY appChanged)
     Q_PROPERTY(QString title READ title NOTIFY appChanged)
+    // The workflow file the form was made from (a template's own workflow.fugue, else the saved file), empty for an unsaved one.
+    Q_PROPERTY(QString file READ file NOTIFY appChanged)
+    // The picture of the app (preview.webp|png|jpg beside its workflow: a template's), empty when there is none.
+    Q_PROPERTY(QUrl preview READ preview NOTIFY appChanged)
     Q_PROPERTY(QString description READ description NOTIFY appChanged)
     Q_PROPERTY(QVariantList fields READ fields NOTIFY appChanged)
     // Why Run cannot (the block does not fit the workflow), in one line; empty when it can.
@@ -85,6 +89,17 @@ class AppView : public QObject {
     // [{label, kind ("image", "video", "audio" or "text"), url (the picture to draw), full (its file as a URL), width, height,
     //   text}] of the last run, in the block's order.
     Q_PROPERTY(QVariantList results READ results NOTIFY runChanged)
+    // The takes of this tab's runs this session, newest first (#389): [{run, status, pending, url (the first picture, or empty),
+    // count (results), line (what the form had, in a quiet line), shown}].
+    Q_PROPERTY(QVariantList takes READ takes NOTIFY runChanged)
+    // The take the stage shows, as an index into `takes`, or -1. The newest take that made something, unless the person picked
+    // an older one (selectTake); a run that is still waiting has made nothing yet, so the stage keeps the one before it.
+    Q_PROPERTY(int takeIndex READ takeIndex NOTIFY runChanged)
+    // The shown take's results (the same shape as `results`) and its quiet line of inputs.
+    Q_PROPERTY(QVariantList shownResults READ shownResults NOTIFY runChanged)
+    Q_PROPERTY(QString shownInputs READ shownInputs NOTIFY runChanged)
+    // The newest step picture of the run going ("" when none): what a Sampler's preview gives while it works.
+    Q_PROPERTY(QString liveFrame READ liveFrame NOTIFY progressChanged)
     // Something is shown of a finished run (results, an error) and no run of this tab goes: Clear can act.
     Q_PROPERTY(bool canClear READ canClear NOTIFY runChanged)
 
@@ -105,6 +120,8 @@ public:
     bool isApp() const { return m_app.has_value(); }
     bool shown() const { return m_app && !m_state[m_tab].graph; }
     QString title() const { return m_app ? m_app->title : QString(); }
+    QString file() const { return m_file; }
+    QUrl preview() const;
     QString description() const { return m_app ? m_app->description : QString(); }
     QVariantList fields() const { return m_fields; }
     QString problem() const { return m_problem; }
@@ -115,6 +132,11 @@ public:
     QString error() const { return m_state.value(m_tab).error; }
     QVariantList details() const { return m_state.value(m_tab).details; }
     QVariantList results() const { return m_state.value(m_tab).results; }
+    QVariantList takes() const;
+    int takeIndex() const;
+    QVariantList shownResults() const;
+    QString shownInputs() const;
+    QString liveFrame() const { return m_state.value(m_tab).liveFrame; }
     bool canClear() const;
 
     // A form's value, by the field's key. Empty text or NaN for a number takes the value away (the workflow's own stays).
@@ -177,7 +199,25 @@ public:
     // (`error` says why).
     Q_INVOKABLE QString run();
     Q_INVOKABLE void cancel();
-    // Empties the output area (results, error, Details) back to the empty state; the files stay on disk and in the results
+    // Takes (#389). The stage shows take `index` (0 is the newest; the newest again follows new runs).
+    Q_INVOKABLE void selectTake(int index);
+    // Puts take `index`'s inputs back in the form (a seed left to chance stays so: its number was the engine's).
+    Q_INVOKABLE void reuseInputs(int index);
+    // Reuses take `index`'s inputs and runs: "Run again" of a take.
+    Q_INVOKABLE QString runAgain(int index);
+    // Copies a result's file (a file URL: `full` of a result) to `destination`; why not, or empty. An existing file is replaced
+    // (the picker asked first).
+    Q_INVOKABLE QString saveResult(const QString &fileUrl, const QUrl &destination);
+    // The form's first picture input's key, or empty: where "Use as input" puts a result.
+    Q_INVOKABLE QString imageKey() const;
+    // The picture input's own sample (the block's default, else the workflow's value, when it is a file that exists): "Use sample".
+    // It is also the form's value until the person chooses another, so an app opens ready to Run.
+    Q_INVOKABLE void useSample(const QString &key);
+    // Takes a result's file into the inputs folder as the value of a picture input (as a dropped file is).
+    Q_INVOKABLE QString useResultAsInput(const QString &key, const QString &fileUrl);
+    // This tab's picture results, newest first, as {path, url, name} (the recent pictures' shape), for an input to take again.
+    Q_INVOKABLE QVariantList resultPictures() const;
+    // Empties the output area (results, error, Details) back to the empty state (the takes stay in the strip); the files stay on disk and in the results
     // store. Does nothing while a run of this tab waits or goes.
     Q_INVOKABLE void clearResults();
     // This tab shows the graph (the same workflow, as an ordinary tab); showApp() brings the form back.
@@ -205,6 +245,15 @@ signals:
     void progressChanged();
 
 private:
+    // One run of the tab: what it was given and what it made (the shown results are the newest take's, kept as they come).
+    struct Take {
+        QString run;
+        QString status;
+        QVariantList results;
+        QMap<QString, QJsonValue> values;
+        QMap<QString, QString> seedModes;
+        QString line;
+    };
     struct TabState {
         bool seen = false;
         bool graph = false;
@@ -217,7 +266,14 @@ private:
         QString error;
         QVariantList details;
         QVariantList results;
+        QList<Take> takes; // newest first, at most maxTakes
+        QString pinned;    // the run the person picked, or empty to follow the newest
+        QString liveFrame;
+        bool cleared = false; // Clear emptied the stage; the takes stay in the strip, and picking one shows it again
     };
+    static constexpr int maxTakes = 30;
+    QString inputsLine(const QMap<QString, QJsonValue> &values) const;
+    void syncTake(TabState &state);
     void buildFields();
     QVariantMap fieldFor(const InputBinding &input) const;
     // The key's input, in this form; null when none.

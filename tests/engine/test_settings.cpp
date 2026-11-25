@@ -95,6 +95,10 @@ private slots:
         QVERIFY(!checkSetting("no_such_setting", 1).isEmpty());
         QCOMPARE(checkSetting("hover_magnifier", true), QString());
         QVERIFY(!checkSetting("hover_magnifier", "yes").isEmpty());
+        QCOMPARE(checkSetting("frost", 0.0), QString());
+        QCOMPARE(checkSetting("frost", 1), QString());
+        QVERIFY(!checkSetting("frost", -0.1).isEmpty());
+        QVERIFY(!checkSetting("frost", "on").isEmpty());
     }
 
     // The canvas corners (#63): 8 px unless set, any whole number of px from 0 to 16, or

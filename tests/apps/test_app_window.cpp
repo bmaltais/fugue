@@ -6,11 +6,14 @@
 #include <QGuiApplication>
 #include <QImage>
 #include <QJsonDocument>
+#include <QImage>
+#include <QTemporaryDir>
 #include <QMimeData>
 #include <QQuickStyle>
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
+#include "apps/app_shelf.h"
 #include "apps/app_window.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
@@ -50,6 +53,27 @@ const char *mediaApp = R"({
   }}
 })";
 
+
+// An app that looks like a real one: a picture, a prompt, a ranged number, a seed and an Advanced toggle.
+const char *lookApp = R"({
+  "fugue": 1,
+  "app": {"format": 1, "title": "Restore a photo", "defaultView": "app",
+          "description": "Cleans up a worn photograph, makes it bigger and brings the colors back, keeping the faces as they are.",
+          "inputs": [{"role": "image", "targets": ["load.file"], "label": "Picture"},
+                     {"role": "prompt", "targets": ["encode.prompt"], "label": "What is in the picture"},
+                     {"name": "steps", "targets": ["sample.steps"], "label": "Make it this many times bigger", "min": 1, "max": 4},
+                     {"role": "seed", "targets": ["sample.seed"], "label": "Seed"},
+                     {"name": "tapered", "targets": ["grow.tapered_corners"], "label": "Soft corners", "section": "Advanced"}],
+          "outputs": [{"node": "save", "label": "Picture"}]},
+  "graph": {"nodes": {
+    "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "inputs/sample.png"}},
+    "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "an old family portrait"}},
+    "grow": {"type": "fugue/grow-mask", "version": "1.0.1", "inputs": {"tapered_corners": true}},
+    "sample": {"type": "fugue/sampler", "version": "1.2.0", "inputs": {"seed": 3, "steps": 3}},
+    "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
+  }}
+})";
+
 QQuickItem *shown(QQuickItem *from, const QString &name) {
     for (QQuickItem *child : from->childItems()) {
         if (!child->isVisible())
@@ -75,6 +99,7 @@ struct Rig {
     RunService service;
     CanvasRuns runs;
     AppView view;
+    AppShelf shelf;
 
     static RunSetup setupIn(const QString &root) {
         RunSetup out;
@@ -90,7 +115,9 @@ struct Rig {
     explicit Rig(App &app)
         : setup(setupIn(app.dir.path())), service(setup), runs(&app.model, &app.workflows, &service, &app.registry),
           view([this](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
-               [](const QString &) {}, &app.registry) {
+               [](const QString &) {}, &app.registry),
+          shelf([&app] { return app.workflows.templates(); }, [&app](const QString &id) { return app.workflows.openTemplateById(id); }) {
+        app.appShelf = &shelf;
         runs.registerCommands(app.commands);
         app.runs = &runs;
         bindAppView(view, app.workflows, app.model, service, app.commands, runs);
@@ -122,12 +149,56 @@ private slots:
         QVERIFY(app.workflows.openTemplateById("test-app"));
         QTRY_VERIFY(find(app.window, "appPage"));
         QVERIFY(!find(app.window, "canvas"));
-        QCOMPARE(find(app.window, "appTitle")->property("text").toString(), QStringLiteral("Block title")); // the view is the binding's; the card's words are the catalog's
+        QCOMPARE(find(app.window, "appTitle")->property("title").toString(), QStringLiteral("Block title")); // the view is the binding's; the card's words are the catalog's
         QVERIFY(find(app.window, "appInput-prompt"));
 
         rig.view.openInGraph(); // the button is the first test's
         QTRY_VERIFY(find(app.window, "canvas"));
         QCOMPARE(app.model.document().graph.nodes.value("encode").inputs.value("prompt").toJson(), QJsonValue("a quiet lake"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // A shipped template's own sample shows in the picture well (the dropdown names it, the well draws it). Opening a template takes
+    // the sample into the inputs folder (#376), so the well's file is that copy; it must load.
+    void aShippedTemplateShowsItsSampleInThePictureWell() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        if (!QFileInfo::exists(root + "/image-upscale/workflow.fugue"))
+            QSKIP("the templates submodule is not checked out");
+        for (const auto &[id, stem] : {std::pair{"image-upscale", "ramen"}, std::pair{"flux2-klein-9b-da-restore", "reading-nook"}}) {
+            App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+            Rig rig(app);
+            app.workflows.setTemplateRoots({{root, false}});
+            QVERIFY(app.open());
+            QVERIFY(app.workflows.openTemplateById(id));
+            QTRY_VERIFY(find(app.window, "appPage"));
+            QQuickItem *picture = nullptr;
+            QTRY_VERIFY((picture = find(app.window, "appImageShown-image")) != nullptr);
+            QTRY_COMPARE(picture->property("status").toInt(), 1 /* Image.Ready */);
+            QVERIFY2(picture->property("source").toUrl().toLocalFile().contains(QString("/%1-").arg(stem)),
+                     qPrintable(picture->property("source").toString()));
+            qDeleteAll(app.engine.rootObjects());
+        }
+    }
+
+    // A click on the picture well only focuses it (Ctrl+V then pastes there); only the Browse button opens the file picker.
+    void clickingThePictureWellNeverOpensTheFilePickerButBrowseDoes() {
+        App app(load(mediaApp));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QQuickItem *input = find(app.window, "appImageInput-image");
+        QVERIFY(input);
+        input->setProperty("usePortal", false); // Qt's own dialog, in the window, never the desktop's
+        QQuickItem *well = find(app.window, "appInput-image");
+        QVERIFY(well);
+        tap(app.window, well);
+        QTRY_VERIFY(well->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTest::keyClick(app.window, Qt::Key_Space);
+        QTest::qWait(100);
+        QCOMPARE(input->property("pickerRoute").toString(), QString()); // nothing opened
+        tap(app.window, find(app.window, "appImageBrowse-image"));
+        QTRY_COMPARE(input->property("pickerRoute").toString(), QStringLiteral("qt"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
         qDeleteAll(app.engine.rootObjects());
     }
 
@@ -150,6 +221,34 @@ private slots:
         }
     }
 
+    // The rail: Apps opens the shelf over the page and choosing an app opens it as a new tab; Results opens the library; Graph is
+    // Open in Graph. A new tab with nothing in it, made over an app, is "landing" (the shelf shows there, #388).
+    void theRailOpensTheShelfAndTheLibraryAndANewTabOverAnAppLandsOnTheShelf() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        QVERIFY(app.open());
+        QTRY_VERIFY(find(app.window, "appRail"));
+        QCOMPARE(app.workflows.count(), 1);
+
+        tap(app.window, find(app.window, "appRailResults"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("appLibrary")->property("visible").toBool());
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!app.window->findChild<QObject *>("appLibrary")->property("visible").toBool());
+
+        tap(app.window, find(app.window, "appRailApps"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("appsDialog") && app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
+        QTRY_VERIFY(!rig.shelf.apps().isEmpty());
+        QVERIFY(rig.shelf.choose("test-app"));
+        QTRY_COMPARE(app.workflows.count(), 2); // a new tab, the first one kept
+        QTRY_COMPARE(find(app.window, "appTitle")->property("title").toString(), QStringLiteral("Block title"));
+
+        app.workflows.newWorkflow();
+        QCOMPARE(app.workflows.count(), 3);
+        QVERIFY(app.workflows.currentIsPristine()); // the shelf's "landing", though other tabs are open
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     void anAppOpensAsTheFormRunsAndGoesToTheGraphAndBack() {
         App app(load(appWorkflow));
         Rig rig(app);
@@ -161,9 +260,10 @@ private slots:
         QVERIFY(find(app.window, "appPage"));
         QVERIFY(!find(app.window, "canvas"));
         QVERIFY(!find(app.window, "areaHeader-1")); // no graph menus over the form
-        QCOMPARE(find(app.window, "appTitle")->property("text").toString(), QStringLiteral("Restyle"));
+        QCOMPARE(find(app.window, "appTitle")->property("title").toString(), QStringLiteral("Restyle"));
         QVERIFY(!find(app.window, "appCancel"));
         QVERIFY(find(app.window, "appViewSwitch")); // the way to the graph, in the window bar
+        QVERIFY(!find(app.window, "sideTabStrip")); // the page's rail is the only rail: no side strip beside it
 
         // Typing in the form is the value a run binds; Run, the key and the button, reaches the app, not the graph.
         QQuickItem *prompt = find(app.window, "appInput-prompt-edit"); // a prompt is several lines
@@ -181,7 +281,9 @@ private slots:
                                   {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", QUrl::fromLocalFile(picture).toString()}, {"width", 8}, {"height", 8}}}}}});
         emit service.event("r1", {{"event", "run.done"}, {"status", "ok"}});
         QTRY_VERIFY(!find(app.window, "appCancel"));
-        QTRY_COMPARE(find(app.window, "appResults")->property("count").toInt(), 1);
+        QTRY_VERIFY(find(app.window, "appResultViewer")); // the picture in the stage
+        QTRY_COMPARE(find(app.window, "appTakes")->property("count").toInt(), 1); // and its take in the strip
+        QTRY_VERIFY(find(app.window, "appSizeLine")->property("text").toString().startsWith(QStringLiteral("8 × 8 · "))); // fitted (the percentage is the stage's size)
         if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) { // FUGUE_SHOT_DIR=<dir>: a picture of the view
             QTest::qWait(300);
             test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/app-view.png");
@@ -190,6 +292,13 @@ private slots:
         QCOMPARE(started.size(), 2);
         emit service.event("r2", {{"event", "run.done"}, {"status", "cancelled"}});
 
+        // The rail's Graph item is view.toggle-app: the graph (and the side strip with it), and the switch back.
+        tap(app.window, find(app.window, "appOpenInGraph"));
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QTRY_VERIFY(find(app.window, "sideTabStrip"));
+        tap(app.window, find(app.window, "appViewSwitchApp"));
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QVERIFY(!find(app.window, "sideTabStrip"));
         // Open in Graph: this tab shows the graph; the window bar's App | Graph switch (also view.toggle-app) goes back and forth.
         tap(app.window, find(app.window, "appOpenInGraph"));
         QTRY_VERIFY(find(app.window, "canvas"));
@@ -257,6 +366,197 @@ private slots:
         QTRY_VERIFY(title->hasActiveFocus());
         QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(started.size(), 2);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // FUGUE_SHOT_DIR=<dir>: the page as the owner sees it at two window sizes, with a result, takes, a running run and the Apps
+    // dialog. Nothing is checked beyond the pieces being there; it is for looking at the pictures.
+    void theLookInTwoSizes() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        // FUGUE_SHOT_THEME=<omarchy theme> (default tokyo-night): one theme per process, a second window in one process is not safe.
+        for (const QString &themeName : {qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night"))}) {
+        const QString out = QString::fromLocal8Bit(dir) + "/" + themeName;
+        QDir().mkpath(out);
+        App app(load(lookApp), {}, Look{themeName, 12});
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        QVERIFY(app.open());
+        // The app as a file with a real template's preview and a sample picture beside it, as an app of the catalog is.
+        QTemporaryDir appFolder;
+        QDir(appFolder.path()).mkpath("inputs");
+        if (qEnvironmentVariableIsSet("FUGUE_SHOT_PALE")) { // FUGUE_SHOT_PALE=1: a pale preview, for the frosted buttons' dark ink
+            QImage pale(640, 400, QImage::Format_RGB32);
+            for (int y = 0; y < pale.height(); ++y)
+                for (int x = 0; x < pale.width(); ++x)
+                    pale.setPixelColor(x, y, QColor::fromHsv(40 + x * 40 / pale.width(), 25, 235 + 20 * y / pale.height()));
+            QVERIFY(pale.save(appFolder.filePath("preview.png")));
+        } else {
+            QVERIFY(QFile::copy(QStringLiteral(FUGUE_SOURCE_DIR "/templates/flux2-klein-9b-da-restore/preview.webp"), appFolder.filePath("preview.webp")));
+        }
+        QVERIFY(QImage(QStringLiteral(FUGUE_SOURCE_DIR "/templates/flux2-klein-9b-da-restore/inputs/reading-nook.jpg")).save(appFolder.filePath("inputs/sample.png")));
+        QFile workflow(appFolder.filePath("workflow.fugue"));
+        QVERIFY(workflow.open(QIODevice::WriteOnly));
+        workflow.write(lookApp);
+        workflow.close();
+        QVERIFY(app.workflows.openPath(appFolder.filePath("workflow.fugue")));
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QTemporaryDir files;
+        const auto made = [&files](const QString &name, int w, int h, int hue) {
+            QImage image(w, h, QImage::Format_RGB32);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    image.setPixelColor(x, y, QColor::fromHsv((hue + x * 120 / w + y * 60 / h) % 360, 120, 90 + 120 * y / h));
+            image.save(files.filePath(name));
+            return files.filePath(name);
+        };
+        const QString result = made("restored.png", 1392, 752, 20);
+        const QString first = made("first.png", 1392, 752, 200);
+        const auto finish = [&](const QString &run, const QString &file) {
+            emit rig.service.event(run, {{"event", "run.started"}});
+            emit rig.service.event(run, {{"event", "node.done"}, {"node", "save"},
+                                         {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", QUrl::fromLocalFile(file).toString()}, {"source", file},
+                                                                                          {"width", 1392}, {"height", 752}}}}}});
+            emit rig.service.event(run, {{"event", "run.done"}, {"status", "ok"}});
+        };
+        rig.view.run();
+        finish("r1", first);
+        rig.view.setValue("steps", 2);
+        rig.view.run();
+        finish("r2", result);
+        rig.view.setValue("steps", 4);
+        rig.view.run(); // running: r3
+        emit rig.service.event("r3", {{"event", "run.started"}});
+        emit rig.service.event("r3", {{"event", "node.progress"}, {"value", 0.4}});
+        for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
+            app.window->resize(size);
+            QTest::qWait(400);
+            test_support::grab(app.window).save(QString("%1/app-running-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+        }
+        finish("r3", made("third.png", 1392, 752, 120));
+        QTRY_COMPARE(find(app.window, "appTakes")->property("count").toInt(), 3);
+        for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
+            app.window->resize(size);
+            QTest::qWait(400);
+            test_support::grab(app.window).save(QString("%1/app-result-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+        }
+        // Zoomed into the picture, the stage's own controls shown.
+        QQuickItem *viewer = find(app.window, "appResultViewer");
+        QVERIFY(viewer);
+        QMetaObject::invokeMethod(viewer, "zoomAt", Q_ARG(QVariant, viewer->width() / 2), Q_ARG(QVariant, viewer->height() / 2), Q_ARG(QVariant, 3.0));
+        QTest::qWait(300);
+        test_support::grab(app.window).save(QString("%1/app-zoomed.png").arg(out));
+        // The Apps dialog from the rail.
+        app.window->resize(1888, 971);
+        tap(app.window, find(app.window, "appRailApps"));
+        QTRY_VERIFY(find(app.window, "appsDialog") || app.window->findChild<QObject *>("appsDialog"));
+        QTest::qWait(500);
+        test_support::grab(app.window).save(QString("%1/app-apps-dialog.png").arg(out));
+        // Right to left: the rows mirror (rail and stage to the end side, the panel to the start); the picture does not.
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QGuiApplication::setLayoutDirection(Qt::RightToLeft);
+        app.window->resize(1200, 760);
+        QTest::qWait(500);
+        test_support::grab(app.window).save(QString("%1/app-rtl.png").arg(out));
+        QGuiApplication::setLayoutDirection(Qt::LeftToRight);
+        // The graph, with Fugue's mark at the window bar's start.
+        app.window->resize(1888, 971);
+        QVERIFY(app.commands.run("view.toggle-app"));
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QTest::qWait(400);
+        test_support::grab(app.window).save(QString("%1/app-graph-corner.png").arg(out));
+        qDeleteAll(app.engine.rootObjects());
+        }
+    }
+
+
+    // The panel by keys alone (owner rule): focus the first input, Down opens the picture menu and Escape closes it, Tab goes through
+    // the panel in reading order to Run, Ctrl+Enter runs from the first input, Enter on the focused Run runs, the takes strip takes
+    // the arrows, and the Apps shelf (Ctrl+Shift+A, app.show-all) opens on a card, Enter opens it and Escape closes the dialog.
+    void thePanelWorksByKeysAlone() {
+        App app(load(lookApp));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        QVERIFY(app.open());
+        QQuickItem *first = find(app.window, "appImageChoose-image");
+        QVERIFY(first);
+        const QString picture = app.dir.path() + "/result.png";
+        QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(picture));
+        const auto finish = [&](const char *run) {
+            emit rig.service.event(run, {{"event", "run.started"}});
+            emit rig.service.event(run, {{"event", "node.done"}, {"node", "save"},
+                                         {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", QUrl::fromLocalFile(picture).toString()}, {"source", picture}, {"width", 8}, {"height", 8}}}}}});
+            emit rig.service.event(run, {{"event", "run.done"}, {"status", "ok"}});
+        };
+        first->forceActiveFocus();
+        QTRY_VERIFY(first->hasActiveFocus());
+        QQuickItem *menu = find(app.window, "appImageInput-image");
+        QVERIFY(menu);
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_VERIFY(menu->property("menuOpen").toBool());
+        QTest::keyClick(app.window, Qt::Key_Down); // arrows move in the menu
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menu->property("menuOpen").toBool());
+        QTRY_VERIFY(first->hasActiveFocus());
+
+        // Ctrl+Enter from the first input runs.
+        QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(rig.started.size(), 1);
+        finish("r1");
+        QTRY_VERIFY(rig.view.canRun());
+
+        // Tab: reading order, the focus ring on a control of the panel each time, ending on Run.
+        const auto named = [&](QQuickItem *item) {
+            for (; item; item = item->parentItem())
+                if (item->objectName().startsWith("app"))
+                    return item->objectName();
+            return QString();
+        };
+        QStringList order;
+        for (int i = 0; i < 24 && (order.isEmpty() || !order.last().startsWith("appRun")); ++i) {
+            QTest::keyClick(app.window, Qt::Key_Tab);
+            QQuickItem *focused = app.window->activeFocusItem();
+            order << (named(focused) + "/" + (focused ? focused->metaObject()->className() : "null"));
+        }
+        QVERIFY2(order.last().startsWith(QStringLiteral("appRun")), qPrintable(order.join(",")));
+        const auto at = [&](const char *name) {
+            for (int i = 0; i < order.size(); ++i)
+                if (order.at(i).startsWith(QString::fromLatin1(name) + "/"))
+                    return i;
+            return -1;
+        };
+        QVERIFY2(at("appImageBrowse-image") >= 0 && at("appInput-steps") > at("appImageBrowse-image")
+                 && at("appSeedRoll-seed") > at("appInput-steps") && at("appAdvanced") > at("appSeedRoll-seed")
+                 && at("appRun") > at("appAdvanced"), qPrintable(order.join(',')));
+        QTest::keyClick(app.window, Qt::Key_Return); // Enter on the focused Run
+        QCOMPARE(rig.started.size(), 2);
+        finish("r2");
+
+        // The takes strip: the arrows move, a take shows.
+        QQuickItem *takes = nullptr;
+        QTRY_VERIFY((takes = find(app.window, "appTakes")));
+        takes->forceActiveFocus();
+        QTRY_VERIFY(takes->hasActiveFocus());
+        QCOMPARE(takes->property("currentIndex").toInt(), 0);
+        QTest::keyClick(app.window, Qt::Key_Right);
+        QTRY_COMPARE(takes->property("currentIndex").toInt(), 1);
+        QTest::keyClick(app.window, Qt::Key_Left);
+        QTRY_COMPARE(takes->property("currentIndex").toInt(), 0);
+
+        // All apps: the key opens the shelf with the focus on the cards; Escape closes it; Enter opens the focused card.
+        QVERIFY(app.commands.run("app.show-all"));
+        QObject *dialog = nullptr;
+        QTRY_VERIFY((dialog = app.window->findChild<QObject *>("appsDialog")) && dialog->property("visible").toBool());
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = find(app.window, "appShelfGrid")) && grid->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(app.commands.run("app.show-all"));
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QTRY_VERIFY((grid = find(app.window, "appShelfGrid")) && grid->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_COMPARE(app.workflows.count(), 2);
         qDeleteAll(app.engine.rootObjects());
     }
 
@@ -345,15 +645,23 @@ private slots:
         rig.view.onEvent("r1", QJsonObject{{"event", "node.done"}, {"node", "save"},
                                            {"thumbnails", QJsonObject{{"image", QJsonObject{{"url", "file:///t/a.png"}, {"source", "/t/a.png"},
                                                                                             {"width", 4}, {"height", 4}}}}}});
-        QQuickItem *clear = find(app.window, "appClear");
-        QVERIFY(clear);
-        QVERIFY(!clear->isEnabled()); // the run still goes
+        QVERIFY(!find(app.window, "appClear")); // the run still goes: Cancel is in the toolbar's place
+        QVERIFY(find(app.window, "appCancel"));
         rig.view.onEvent("r1", QJsonObject{{"event", "run.done"}, {"status", "ok"}});
-        QTRY_VERIFY(clear->isEnabled());
+        QQuickItem *clear = nullptr;
+        QTRY_VERIFY((clear = find(app.window, "appClear")));
+        QVERIFY(clear->isEnabled());
+        QTRY_VERIFY(find(app.window, "appReuseInputs")); // the toolbar has all its buttons: the layout is settled before the press
+        QPointF where;
+        QTRY_VERIFY((where == clear->mapToScene(QPointF())) || ((where = clear->mapToScene(QPointF())) != QPointF() && false)); // stopped moving
         QCOMPARE(rig.view.results().size(), 1);
         tap(app.window, clear);
         QTRY_VERIFY(rig.view.results().isEmpty());
         QTRY_VERIFY(!find(app.window, "appClear"));
+        QCOMPARE(rig.view.takes().size(), 1); // Clear empties the stage; the take stays in the strip
+        QCOMPARE(rig.view.takeIndex(), -1);
+        rig.view.selectTake(0);
+        QCOMPARE(rig.view.shownResults().size(), 1);
         qDeleteAll(app.engine.rootObjects());
     }
 };

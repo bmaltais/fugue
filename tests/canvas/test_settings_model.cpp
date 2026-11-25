@@ -288,6 +288,27 @@ private slots:
         QVERIFY(!readSettings(settingsFile()).document.contains("corner_radius"));
     }
 
+    // Frost: the glass of the kit's controls over a picture. 0.6 by default; the Theme's look follows it live; 0 is off (the look
+    // reads 0, which the kit takes as plain chips); a value outside 0 to 1 is refused; the default leaves the file.
+    void theFrostAppliesLiveAndZeroIsOff() {
+        QTemporaryDir omarchy;
+        Theme theme(omarchy.path());
+        SettingsModel model;
+        model.attach(nullptr, nullptr, nullptr, &theme);
+        QCOMPARE(model.frost(), 0.6);
+        QCOMPARE(theme.look()->property("frost").toDouble(), 0.6);
+        QCOMPARE(model.set("frost", 0.3), QString());
+        QCOMPARE(theme.look()->property("frost").toDouble(), 0.3);
+        QCOMPARE(SettingsModel().frost(), 0.3);
+        QVERIFY(!model.set("frost", 1.5).isEmpty());
+        QVERIFY(!model.set("frost", "strong").isEmpty());
+        QCOMPARE(theme.look()->property("frost").toDouble(), 0.3);
+        QCOMPARE(model.set("frost", 0), QString());
+        QCOMPARE(theme.look()->property("frost").toDouble(), 0.0);
+        QCOMPARE(model.set("frost", 0.6), QString());
+        QVERIFY(!readSettings(settingsFile()).document.contains("frost"));
+    }
+
     // --- providers ---
 
     void withoutAProvidersFileTheDefaultsShowAsNotSaved() {

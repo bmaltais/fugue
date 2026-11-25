@@ -42,14 +42,25 @@ Item {
     readonly property var toneBlend: tones[tone] !== undefined ? tones[tone] : tones.dusk
     property color duskBase: toneBlend.base
     property var duskBlobs: toneBlend.blobs
+    // Small round buttons in the top corner (the app panel's pin and Open in Fugue): children of the hero, laid in a row at the
+    // end edge; the title elides before them.
+    default property alias actions: actionRow.data
     signal statusTapped
     signal closed
 
     readonly property bool rounded: cornerRadius > 0 && GraphicsInfo.api !== GraphicsInfo.Software
     readonly property color ink: "white"
+    // The white title keeps 4.5:1 on a pale picture: the mean luminance of the picture (PictureLuma, read once from a small
+    // copy) sets a uniform shade just strong enough that the darkened picture is at most 0.18 (white on 0.18 is 4.5:1).
+    // The dusk blend and dark pictures need none.
+    readonly property real pictureLuma: source.toString() !== "" ? PictureLuma.meanOfFile(source, 0, 0, 1, 1) : -1
+    readonly property real legibleShade: pictureLuma > 0.18 ? Math.min(0.85, 1 - 0.18 / pictureLuma) : 0
+    // The picture and its shade: what the frosted pills and buttons over it blur (KitFrost).
+    readonly property Item backdropItem: art
     readonly property real edge: 3.5 * look.unit
     // How much of the top right the pill and the button take, so a long title elides before them.
     readonly property real cluster: (status !== "" ? pill.width + 2 * look.unit : 0) + (showClose ? close.width + look.unit : 0)
+                                    + (actionRow.visibleChildren.length > 0 ? actionRow.width + look.unit : 0)
 
     implicitWidth: 93 * look.unit
     implicitHeight: Math.max(minHeight, titleBlock.height + 7 * look.unit)
@@ -115,6 +126,12 @@ Item {
                 GradientStop { position: 1; color: hero.look.kitHeroShade }
             }
         }
+        Rectangle {
+            objectName: "heroLegibleShade"
+            anchors.fill: parent
+            visible: hero.legibleShade > 0
+            color: Qt.rgba(0, 0, 0, hero.legibleShade)
+        }
     }
     Loader {
         active: hero.rounded
@@ -136,13 +153,21 @@ Item {
         height: 6 * hero.look.unit
         width: pillRow.implicitWidth + 4 * hero.look.unit
         radius: height / 2
-        color: pillTap.pressed || pillHover.hovered && hero.statusTappable ? hero.look.kitHeroPillHover : hero.look.kitHeroPill
+        color: "transparent"
         activeFocusOnTab: hero.statusTappable
         border.width: activeFocus ? 2 : 0
         border.color: hero.look.accent
         Accessible.role: hero.statusTappable ? Accessible.Button : Accessible.StaticText
         Accessible.name: hero.status
         Accessible.onPressAction: hero.statusTapped()
+        KitFrost {
+            look: hero.look
+            backdrop: hero.backdropItem
+            backdropSource: hero.source
+            z: -1
+            hovered: pillHover.hovered && hero.statusTappable
+            pressed: pillTap.pressed
+        }
         Row {
             id: pillRow
             anchors.centerIn: parent
@@ -184,13 +209,21 @@ Item {
         width: 6 * hero.look.unit
         height: width
         radius: width / 2
-        color: closeTap.pressed || closeHover.hovered ? hero.look.kitHeroPillHover : hero.look.kitHeroPill
+        color: "transparent"
         activeFocusOnTab: true
         border.width: activeFocus ? 2 : 0
         border.color: hero.look.accent
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Close")
         Accessible.onPressAction: hero.closed()
+        KitFrost {
+            look: hero.look
+            backdrop: hero.backdropItem
+            backdropSource: hero.source
+            z: -1
+            hovered: closeHover.hovered
+            pressed: closeTap.pressed
+        }
         Glyph {
             anchors.centerIn: parent
             look: hero.look
@@ -209,6 +242,12 @@ Item {
         Keys.onSpacePressed: hero.closed()
         Keys.onReturnPressed: hero.closed()
     }
+    Row {
+        id: actionRow
+        x: hero.width - width - hero.edge
+        y: 3 * hero.look.unit
+        spacing: hero.look.unit
+    }
     Column {
         id: titleBlock
         x: 5 * hero.look.unit
@@ -223,6 +262,10 @@ Item {
             color: hero.ink
             font.family: hero.look.serifFont !== "" ? hero.look.serifFont : "Noto Serif"
             font.pixelSize: Math.round(hero.look.textSize * 8 / 3)
+            // The bundled Fraunces is variable with its default instance at weight 900: the calm regular cut is asked for on
+            // its weight axis (font.weight alone does not move a variable font's default instance).
+            font.weight: Font.Normal
+            font.variableAxes: ({ "wght": 420 })
         }
         Text {
             width: parent.width

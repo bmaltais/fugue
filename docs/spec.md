@@ -2518,6 +2518,7 @@ and the `?` overlay marks each one.
 | `view.focus-mode` | Hide all bars and panels; the same key brings them back as they were | H | added |
 | `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
 | `view.toggle-app` | Switch this workflow between its App view and the graph; off for a workflow with no app block (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
+| `app.show-all` | The shelf of apps over the window, on the current app's card, to open another (12.17, #397) | Ctrl+Shift+A (File > All apps…, the rail's Apps item, Fugue's mark in the window bar) | added |
 | `app.menu-bar` | Open the menu bar | F10 | added |
 | `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
 | `area.split-row`, `area.split-column` | Split the active area side by side, top and bottom (12.16) | `Ctrl+\`, `Ctrl+Alt+\` | added |
@@ -3057,27 +3058,60 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   (`app_invalid`, a later `format`) or a document with none opens as an ordinary workflow; for a block that does not read the
   window says so once per tab, in the notice line other load problems use: "This workflow's app block cannot be used, so it
   opens as a graph: <why>", or "...was made by a newer Fugue..." for a later format (#387).
-- **The screen** (`apps/AppPage.qml`, `appPage`): at the top the app's title and description, and at the end **Open in
-  Graph** (`appOpenInGraph`). Below, at the start the form: each input of `inputs[]` in the block's order (`AppInput.qml`,
-  `appInput-<key>`: its label over the control of its kind, see below), the `Advanced` ones folded under
-  **Advanced**; under the form **Run** (`appRun`, the one primary control), and while a run is waiting or going **Cancel**
-  (`appCancel`, danger, a chunk of its own) and one line of progress ("Waiting for its turn…", "Working… 40%") over a 2 px bar.
-  At the end the output: the results of the block's `outputs[]` (a picture fits and a double click opens it in the large
-  viewer (`LargeViewDialog` over the Compare viewer in its single mode); a video or sound plays; each is named by its `label`, else "Result"), or "The result appears here." A quiet **Clear** (`appClear`) above the output empties the screen back to that state
-  (results, error and Details; the files stay on disk and in the results store; disabled while a run goes). A failed
-  run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the rest and
-  the hints; a cancelled run says nothing.
+- **The screen** (`apps/AppPage.qml`, `appPage`), in the layout of ComfyUI App Mode (its docs and screenshots only: layout and
+  behaviour, no code, CSS, icons or branding; GPL-3.0 and AGPL-3.0). Three parts side by side, mirrored in right-to-left (a
+  picture never is):
+  - the three parts are rounded cards (the kit group's corner, a hairline edge) 2u apart on the window's background, in the look of the Drift kit (docs/canvas-look.md section 20, epic #456); the window's own side strip and panels are not shown in the App view;
+  - the **rail** (`AppRail.qml`, `appRail`, 14u wide, at the start edge): each item an icon over a short word, with tooltips and Tab: **Apps**
+    (`appRailApps`, first, "All apps (Ctrl+Shift+A)": `app.show-all`, the apps shelf's grid in `AppsDialog` over the page, opened on the current app's card; choosing a card opens that app as a new tab, and in an
+    app's own window switches that window to it in place, 12.18), **Results and pictures** (`appRailResults`, `AppLibrary.qml`:
+    a popover with search and a grid of this app's takes, which show in the stage, and of the recent pictures, which become the
+    picture input) and **Graph** (`appOpenInGraph`, Open in Graph; not in an app's own window);
+  - the **stage** (`AppStage.qml`, `appStage`, the wide middle): a thin progress line at its top; a toolbar; the result; under it
+    "1392 × 752 · 100%" (the size and the zoom, quiet) with **Fit** and **100%**; the takes strip and the shown take's inputs
+    in one quiet line (below);
+  - the **panel** (`appPanel`, at the end, a quarter of the window, at least 80u and at most 40%): a `KitHero` (`appTitle`) with the app's preview picture (the Dusk gradient without one), its serif title and one-line description (whole in a tooltip), and in its corner **Add to launcher** (`appLauncherToggle`, a frosted round pin) and, in the app's own window, **Open in Fugue** (`appOpenInFugue`); the form scrolling (`appForm`: each input
+    of `inputs[]` in the block's order, `AppInput.qml`, `appInput-<key>`: a small dim label over a compact control; the
+    `Advanced` ones folded under a quiet **Advanced** row, `appAdvanced`); and **Run** (`appRun`, the one primary control, full
+    width, 9u tall, pinned at the panel's foot, "Run (Ctrl+Enter)" in its tooltip). A "Number of runs" stepper is not offered:
+    a tab holds one run at a time, and queuing several of one bound workflow is the run service's.
+  The **toolbar** (`appToolbar`) is, while a run waits or goes, **Cancel this run** (`appCancel`, a normal button: danger red
+  is for deletion) and where the run is ("Waiting for its turn…", "Working… 40%"); otherwise **Run again** (`appRunAgain`: this
+  take's inputs, run), **Reuse inputs** (`appReuseInputs`: this take's inputs back in the form), **Save as…** (`appSaveAs`: a copy
+  of the file, `AppView::saveResult`), **Clear** (`appClear`, shown once there is something to clear: the stage back to its
+  empty state, the takes stay in the strip and picking one shows it again; the files stay on disk and in the results store) and
+  **…** (`appMore`: Open large, Show in folder, Use as input, Compare with the input). The **result** is a picture in
+  `CompareView` (single mode, the large view's viewer): the wheel zooms about the pointer, a drag pans once zoomed, a double
+  click fits (at Fit it opens `LargeViewDialog`), **Z** toggles 100%, **C** compares with the input picture (slider mode over
+  the form's first picture), Home or 0 fits, 1 is 100%, + and - zoom. A video or sound plays, a text is text; with more than
+  one output a small row names them by `label`, else "Result". While a run goes the Sampler's step picture (`node.preview`,
+  `AppView::liveFrame`) shows over the result, else the previous result stays; the empty stage says in one line what to do.
+  A failed run shows one line in the error color (the engine's own sentence) and a quiet **Details** (`appDetails`) with the
+  rest and the hints; a cancelled run says nothing.
+- **Takes** (#389, `AppView::takes`, `AppTakes.qml`, `appTakes`): every run of this tab in this session is a take, newest first,
+  at most 30 per tab: a thumbnail (a 14u square) with the shown one outlined, a turning badge while it waits or goes and a mark
+  when it failed; a run cancelled before it made anything leaves none. A take keeps the form it was run with (a quiet line:
+  "a red fox · Steps 3 · seed 12"). The stage shows the newest take that made something, or the one the person picked
+  (`selectTake`; picking the newest follows new runs again); a new run is shown once it has made a result, the earlier one stays
+  until then. `reuseInputs` and `runAgain` put a take's values and seed modes back (a seed left to Random stays Random: its
+  number was the engine's, so a Random take does not reproduce). Takes live in the session only; reading earlier runs back
+  from the run history (so they survive a restart) needs the history to be filtered by workflow and to give each run's inputs
+  and results, which it does not yet.
 - **Controls per kind** (#386, `AppInput.qml` picks, no control for an input the block does not bind): *text*, a well of
   several lines for the prompt roles (Enter is a new line, Tab leaves it) and a line for the rest; *number*, a drag field with
-  its range (`min` and `max`), else a typed field (empty means the workflow's own); *toggle*, a switch (Space or Enter);
+  its range (`min` and `max`) as a slider with the value in a small editable field at its end (`AppSlider.qml`: a press or drag sets
+  it, arrows step, a double click puts back the default), else a typed field (empty means the workflow's own); *toggle*, a switch (Space or Enter);
   *choice*, a drop-down; *seed*, one row of the height of the other fields: the number, a small dice for a new
   one and its mode as a small drop-down as a node's seed has it: Fixed, Random (the engine's own `{"auto": "random"}`; the
   field then reads "New each run"), Increment (the run uses the number shown, the next the next one, wrapping at `max`); a
   number typed makes it Fixed. Fixed and Increment always show a number (the workflow's, else a new one) and every run uses
   it; going from Random to Fixed keeps the number the field had, or picks a new one (a run's own random seed is not known
-  to the form). *image*: a well that shows the picture and takes one dropped on
-  it, Browse, Paste and a strip of pictures to try, the template's `inputs/` samples first, then
-  the inputs folder's newest; a picture from elsewhere is copied into the inputs folder as Load Image takes one (the same
+  to the form). *image* (`AppImageInput.qml`): a row of a dropdown and a folder button (the file picker) over a dashed well that shows the
+  picture fitted, says "Drop, paste or browse" while empty, takes a drop, and has a remove (x) button while the pointer is over
+  it. The dropdown lists, in groups with a thumbnail each and a search field, **Samples** (the template's `inputs/` pictures,
+  its own sample first: the block's default, else the picture the workflow holds), **Recent** (the inputs folder's newest) and
+  **This app's results** (so a result can be fed back in: it is copied into the inputs folder), and **Use sample** whenever
+  the template has one. An app opens on its sample, so Run works at once; a picture from elsewhere is copied into the inputs folder as Load Image takes one (the same
   bytes are one file). Ctrl+V (and Edit > Paste) with a picture on the clipboard puts it into the focused picture input,
   else the form's first, in the full window's App view and in an app's own window (a focused text field keeps Ctrl+V for
   text); a picture dropped anywhere on the page goes to the same input. *mask*: Paint mask opens the mask editor (14.4) over the form's first picture input, "Painted" or
@@ -3090,9 +3124,8 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
 - **Run** binds the form's values into a copy of the workflow (`bindApp`, 4.9) and queues it through RunService like any run:
   one queue, one GPU, the queue panel lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
   (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
-  outputs: a run's results are the existing run history's; the screen shows the last run of this session (past takes are a
-  later issue).
-- **Open in Graph** switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
+  outputs: a run's results are the existing run history's; the screen shows this session's takes (above).
+- **Open in Graph** (the rail's Graph item, which runs `view.toggle-app`) switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
   workflow (window bar, tabs, the graph's header and its menus, the side panels), with the nodes fitted in the canvas as it is
   now, also when the window was resized or tiled while the shelf or the App view hid the canvas. **App | Graph** is the way back
   and forth: two segments at the window bar's far end (`appViewSwitch`, before the project chip), shown for a tab whose workflow
@@ -3101,7 +3134,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   left it (values kept for inputs that still exist). A workflow with no app block has no switch and the command is off. The choice is per tab and kept for the session; a tab opens in the view its
   `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
 - **The apps shelf** (#388, `apps/app_shelf.h`, `AppsHome.qml`, `AppsDialog.qml`). Fugue has no start screen; a window with nothing
-  open (one empty, untitled, unsaved workflow) shows the shelf in the canvas's place, and File > Apps… (`file.apps`) shows it
+  open (the shown tab is empty, untitled and unsaved: also a new tab made over an app) shows the shelf in the canvas's place, and File > All apps… (`app.show-all`, Ctrl+Shift+A, also Fugue's mark at the window bar's start) shows it
   as a dialog over open tabs. It lists the templates that are apps, the same list the Templates window reads
   (`Workflows::templates()`, 11.10), never a second catalog: a card has the app's name, its one line (`summary`), its
   preview, the models-where badges (#164) and one line of readiness, a check and "Ready" when its models are on this machine
@@ -3114,7 +3147,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   catalog is read only when the shelf is shown (`AppShelf::refresh`). With no apps it says so and offers **Browse
   templates…**.
 - **Code** (`apps/app_view.h`): `AppView` holds the logic and no QML (`isApp`, `shown`, `fields`, `setValue`, `setSeedMode`, `setImageFiles`, `pasteImage`, `useImage`, `maskPicture`, `models`, `pickModel`, `run`, `cancel`,
-  `status`, `progress`, `error`, `details`, `results`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
+  `status`, `progress`, `error`, `details`, `results`, `takes`, `takeIndex`, `shownResults`, `selectTake`, `reuseInputs`, `runAgain`, `saveResult`, `useResultAsInput`, `useSample`, `liveFrame`, `openInGraph`, `showApp`); it takes the run as a function, so a test feeds
   it the events a RunService sends. `apps/app_window.*` ties it to the open tabs, the runs and the run commands.
 
 ### 12.18 An app as its own application (#398, epic #397)
@@ -3143,6 +3176,7 @@ window with "This is not an app." and an Open in Fugue button.
   `fugue-app-<key>`, which ties the window to its entry in the launcher and the task bar. Remove deletes the entry and its icon
   copy and touches nothing else. The buttons are absent for a tab that has no file and no template folder (a new workflow: nothing
   a launcher could start).
+- **Apps** (the rail's, 12.17) in an app's own window: choosing another app opens its tab in this window and shows it as the App view (`bindOwnAppWindow`), so the title (the view's), the window icon (that app's preview), the launcher entry and Open in Fugue become that app's, in the same process; the first tab stays open behind it.
 - **Open in Fugue** (`appOpenInFugue`, the app's own window): starts `fugue --edit <ref>`, the full window with that app's
   workflow as a tab, shown as the graph. A template is opened as a new unsaved workflow (as the Templates window does), a file
   as that file. `--edit` also works from a terminal.

@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "apps/app_launcher.h"
+#include "apps/app_shelf.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "run/canvas_runs.h"
@@ -63,6 +65,19 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             runs.cancel();
     });
     give(true);
+}
+
+void bindOwnAppWindow(AppShelf &shelf, AppView &view, AppLauncher &launcher,
+                      std::function<std::optional<AppRef>(const QString &id)> resolve, std::function<void(const AppRef &)> retitled) {
+    QObject::connect(&shelf, &AppShelf::chosen, &view,
+                     [&view, &launcher, resolve = std::move(resolve), retitled = std::move(retitled)](const QString &id) {
+                         view.showApp(); // the chosen tab is shown now: a block that opens as the graph is the App view here
+                         if (const std::optional<AppRef> app = resolve(id)) {
+                             launcher.setApp(*app);
+                             if (retitled)
+                                 retitled(*app);
+                         }
+                     });
 }
 
 } // namespace fugue

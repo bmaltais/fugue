@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Fugue
@@ -18,19 +19,29 @@ Rectangle {
     property string tip
     property bool pill: false
     property bool current: false
+    // Frosted glass for a chip over a picture (KitFrost): the `backdrop` item behind it blurred, a light tint and hairline, white
+    // text; without a backdrop, or on the software renderer, the tint alone.
+    property bool frosted: false
+    property Item backdrop: null
+    property url backdropSource // the picture the backdrop shows, when it is one: a new one is measured again
+    property bool round: false // as wide as tall, fully round (a glyph button in a corner)
+    property bool bordered: false // a hairline edge, for a chip that stands on its own (Cancel)
     signal tapped
 
     readonly property bool hovered: hover.hovered
     readonly property bool pressed: tap.pressed
 
     implicitHeight: 7 * look.unit
-    implicitWidth: pill && text === "" ? 2 * implicitHeight : Math.max(content.implicitWidth + 5 * look.unit, implicitHeight)
+    implicitWidth: round ? implicitHeight : pill && text === "" ? 2 * implicitHeight : Math.max(content.implicitWidth + 5 * look.unit, implicitHeight)
     width: implicitWidth
     height: implicitHeight
-    radius: pill ? height / 2 : look.smallCorner + 2
-    color: pressed ? look.menuRow : current ? look.selectedRow : hovered ? look.kitChipHover : look.kitChip
-    border.width: activeFocus ? 2 : 0
-    border.color: look.accent
+    radius: pill || round ? height / 2 : look.smallCorner + 2
+    readonly property bool glass: frosted && look.frost > 0.001 // the frost setting at 0 makes it the plain chip
+    readonly property color ink: glass && glassLoader.item ? (glassLoader.item as KitFrost).ink : glass ? "white" : look.text
+    readonly property bool darkInk: glass && glassLoader.item ? (glassLoader.item as KitFrost).pale : false
+    color: glass ? "transparent" : pressed ? look.menuRow : current ? look.selectedRow : hovered ? look.kitChipHover : look.kitChip
+    border.width: activeFocus ? 2 : bordered ? 1 : 0
+    border.color: activeFocus ? look.accent : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button
@@ -38,6 +49,21 @@ Rectangle {
     Accessible.onPressAction: chip.tapped()
     Behavior on color { ColorAnimation { duration: 100; easing.type: Easing.OutCubic } }
 
+    KitRaise { look: chip.look; radius: chip.radius; visible: !chip.glass }
+    Loader {
+        id: glassLoader
+        anchors.fill: parent
+        active: chip.glass
+        z: -1
+        sourceComponent: KitFrost {
+            look: chip.look
+            backdrop: chip.backdrop
+            backdropSource: chip.backdropSource
+            hovered: chip.hovered
+            pressed: chip.pressed
+            radius: chip.radius
+        }
+    }
     Row {
         id: content
         anchors.centerIn: parent
@@ -47,14 +73,16 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             look: chip.look
             name: chip.glyph
-            color: chip.look.text
+            color: chip.ink
         }
         Text {
             visible: chip.text !== ""
             anchors.verticalCenter: parent.verticalCenter
             text: chip.text
             textFormat: Text.PlainText
-            color: chip.look.text
+            color: chip.ink
+            style: chip.glass && !chip.darkInk ? Text.Raised : Text.Normal // white ink gets a soft 1px shadow
+            styleColor: Qt.rgba(0, 0, 0, 0.35)
             font.pixelSize: Math.round(chip.look.textSize * 13 / 12)
             font.weight: Font.Medium
         }

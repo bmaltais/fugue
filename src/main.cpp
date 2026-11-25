@@ -188,7 +188,7 @@ int main(int argc, char *argv[]) {
     fugue::AppShelf appShelf([&workflows] { return workflows.templates(); },
                              [&workflows](const QString &id) { return workflows.openTemplateById(id); });
     QObject::connect(&workflows, &fugue::Workflows::tabsChanged, &appShelf,
-                     [&appShelf, &workflows] { appShelf.setLanding(workflows.nothingOpen()); });
+                     [&appShelf, &workflows] { appShelf.setLanding(workflows.currentIsPristine()); });
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
@@ -273,8 +273,18 @@ int main(int argc, char *argv[]) {
         fugue::openApp(workflows, *appRef);
         appView.showApp();
         appLauncher.setApp(*appRef);
-        if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()); window && !appRef->preview.isEmpty())
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+        if (window && !appRef->preview.isEmpty())
             window->setIcon(QIcon(appRef->preview));
+        // Another app chosen from the page's Apps is this window's from then on, in place: its tab, its title (the view's), its
+        // icon and its launcher entry.
+        fugue::bindOwnAppWindow(
+            appShelf, appView, appLauncher,
+            [&registry](const QString &id) { return fugue::resolveApp(id, fugue::TemplateLibrary::standardRoots(), &registry); },
+            [window](const fugue::AppRef &chosen) {
+                if (window && !chosen.preview.isEmpty())
+                    window->setIcon(QIcon(chosen.preview));
+            });
     } else if (appRef) {
         if (fugue::openApp(workflows, *appRef))
             appView.openInGraph();
@@ -283,7 +293,7 @@ int main(int argc, char *argv[]) {
     } else {
         workflows.openStartup(parser.positionalArguments());
     }
-    appShelf.setLanding(workflows.nothingOpen()); // after the files and tabs are in: a window with something open never shows it
+    appShelf.setLanding(workflows.currentIsPristine()); // after the files and tabs are in: a window with something open never shows it
 
     // `omarchy agent look app` runs the app offscreen with these set, to see
     // the window without a display: size it to OMARCHY_LOOK_SIZE when given,

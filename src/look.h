@@ -62,7 +62,7 @@ struct Tokens {
     // off track, `kitKnob` the round thumb, `kitChip` and `kitChipHover` a chip or pill button. The hero header's
     // three sit over a picture, so they are black at fixed alphas on every theme: `kitHeroShade` is the bottom of
     // its darkening gradient, `kitHeroPill` the status pill and close button, `kitHeroPillHover` the hovered one.
-    QColor kitGroup, kitSeparator, kitTrack, kitKnob, kitChip, kitChipHover, kitHeroShade, kitHeroPill, kitHeroPillHover;
+    QColor kitGroup, kitSeparator, kitTrack, kitKnob, kitChip, kitChipHover, kitHeroShade, kitHeroPill, kitHeroPillHover, kitFrost, kitFrostHover, kitFrostEdge, kitWell;
     double labelShare = 0; // the share of text in `label` the 4.5:1 rule settled on
 };
 
@@ -146,6 +146,10 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor kitChipHover MEMBER m_kitChipHover NOTIFY changed)
     Q_PROPERTY(QColor kitHeroShade MEMBER m_kitHeroShade NOTIFY changed)
     Q_PROPERTY(QColor kitHeroPill MEMBER m_kitHeroPill NOTIFY changed)
+    Q_PROPERTY(QColor kitWell MEMBER m_kitWell NOTIFY changed)
+    Q_PROPERTY(QColor kitFrost MEMBER m_kitFrost NOTIFY changed)
+    Q_PROPERTY(QColor kitFrostHover MEMBER m_kitFrostHover NOTIFY changed)
+    Q_PROPERTY(QColor kitFrostEdge MEMBER m_kitFrostEdge NOTIFY changed)
     Q_PROPERTY(QColor kitHeroPillHover MEMBER m_kitHeroPillHover NOTIFY changed)
     Q_PROPERTY(QColor bypassBody MEMBER m_bypassBody NOTIFY changed)
     Q_PROPERTY(QColor bypassHeader MEMBER m_bypassHeader NOTIFY changed)
@@ -155,6 +159,8 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor accent MEMBER m_accent NOTIFY changed)
     Q_PROPERTY(QColor accentForeground MEMBER m_accentForeground NOTIFY changed)
     Q_PROPERTY(QColor error MEMBER m_error NOTIFY changed)
+    // How frosted the controls over a picture are, 0 (off: plain opaque chips) to 1; settings.json's `frost` (default 0.6).
+    Q_PROPERTY(qreal frost READ frost WRITE setFrost NOTIFY changed)
     Q_PROPERTY(bool light MEMBER m_light NOTIFY changed)
     // A port color key from the canvas model (text, number, ..., declared) to its color.
     Q_PROPERTY(QVariantMap ports MEMBER m_ports NOTIFY changed)
@@ -203,6 +209,14 @@ public:
     // "unknown" (a placeholder's port: the label color too).
     Q_INVOKABLE QColor port(const QString &key) const;
     // The character of a Lucide glyph by its name ("check", "triangle-alert", ...), or empty.
+    qreal frost() const { return m_frost; }
+    void setFrost(qreal frost) {
+        frost = qBound(0.0, frost, 1.0);
+        if (qFuzzyCompare(1 + frost, 1 + m_frost))
+            return;
+        m_frost = frost;
+        emit changed();
+    }
     Q_INVOKABLE QString glyph(const QString &name) const;
     QString iconFont() const;
     QString serifFont() const;
@@ -224,9 +238,10 @@ private:
         m_bypassEdge;
     QColor m_sheenTop, m_sheenBottom, m_litTop, m_litBottom;
     QColor m_kitGroup, m_kitSeparator, m_kitTrack, m_kitKnob, m_kitChip, m_kitChipHover, m_kitHeroShade, m_kitHeroPill,
-        m_kitHeroPillHover;
+        m_kitHeroPillHover, m_kitFrost, m_kitFrostHover, m_kitFrostEdge, m_kitWell;
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
+    qreal m_frost = 0.6;
     QVariantMap m_ports;
     QVariantList m_tabColors;
     int m_textSize = 12;

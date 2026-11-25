@@ -7,7 +7,7 @@ import "../canvas"
 
 // File > Apps… (#388): the same shelf as the home page, as a dialog over whatever is open, for the person who has tabs and wants
 // an app. Styled as the Templates dialog (scrim, popup card, level 3 shadow); Escape closes. Made by Main.qml the first time
-// file.apps asks for it.
+// app.show-all asks for it.
 Popup {
     id: dialog
     objectName: "appsDialog"

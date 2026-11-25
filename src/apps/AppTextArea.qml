@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../kit"
 
 // A several-line text in a well, for a prompt: it grows with its lines (3 to 8 shown, then it scrolls). Enter is a new line;
 // Tab and Shift+Tab move on (a prompt is never a place to get stuck in), and Ctrl+Enter is not taken, so the window's Run
@@ -16,9 +17,8 @@ Rectangle {
     readonly property real lineHeight: Math.round(look.textSize * 4 / 3)
     implicitHeight: Math.max(3, Math.min(8, edit.lineCount)) * lineHeight + 2 * look.unit + 8
     radius: look.smallCorner
-    color: look.well
-    border.width: edit.activeFocus ? 2 : 1
-    border.color: edit.activeFocus ? look.accent : look.hairline
+    color: "transparent"
+    KitWell { look: area.look; focused: edit.activeFocus }
 
     Flickable {
         id: flick

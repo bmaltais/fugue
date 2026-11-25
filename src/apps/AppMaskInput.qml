@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
 // A mask input: the mask editor (spec 14.4) over the form's picture. A button opens it; "Painted" or "None" says what is
 // there, Clear takes it away. The picture is AppView's maskPicture() (the first picture input's now): with none chosen a
@@ -36,12 +37,12 @@ RowLayout {
         editor.open()
     }
 
-    ViewButton {
+    KitChip {
         objectName: "appInput-" + row.field.key
         look: row.look
+        pill: true
         text: qsTr("Paint mask…")
         glyph: "paintbrush"
-        bordered: true
         onTapped: row.paint()
     }
     Text {
@@ -52,11 +53,11 @@ RowLayout {
         font.pixelSize: row.look.labelSize
         wrapMode: Text.Wrap
     }
-    ViewButton {
+    KitChip {
         objectName: "appMaskClear-" + row.field.key
         look: row.look
+        pill: true
         text: qsTr("Clear")
-        flat: true
         visible: row.current !== ""
         onTapped: row.setMask("")
     }

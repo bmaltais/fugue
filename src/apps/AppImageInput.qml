@@ -1,28 +1,58 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 import Fugue
 import "../canvas"
+import "../canvas/widgets"
+import "../kit"
 import "../menu"
 
-// A picture input: a well that shows the picture and takes one dropped on it (Enter or a click opens the file picker, Ctrl+V
-// pastes), Browse and Paste buttons, and a strip of pictures to try: the template's samples first, then the last used
-// (the inputs folder's newest). AppView takes the file into the inputs folder (setImageFiles, pasteImage, useImage); this
-// shows `valueOf(key)`. A refusal is one line under the strip, in the error color.
+// A picture input in ComfyUI App Mode's layout: one row with a dropdown of pictures (this template's Samples, the Recent ones
+// from the inputs folder, then This app's results, so a result can go back in) and a folder button (the file picker), over a
+// dashed well that shows the picture fitted. The well says "Drop, paste or browse" while empty, takes a drop, and has a small
+// remove (x) button while the pointer is over it; a click focuses it (Ctrl+V pastes) and only the Browse button opens the picker. "Use sample" is in the
+// dropdown whenever the template has one. AppView takes the file into the inputs folder (setImageFiles, pasteImage, useImage,
+// useResultAsInput); this shows `valueOf(key)`. A refusal is one line under the well, in the error color.
 ColumnLayout {
     id: root
+    objectName: "appImageInput-" + field.key
     required property var field
     required property AppView appView
     required property CanvasLook look
     property string current: field.value === undefined || field.value === null ? "" : String(field.value)
     property string notice
+    // Which dialog the file picker opened ("" while it has not been opened): what a test reads.
+    readonly property string pickerRoute: picker.route
+    property alias usePortal: picker.usePortal
+    readonly property bool menuOpen: menu.opened
     property var recents: appView.recentImages()
-    // Samples, then the recent ones the samples do not already show, at most ten.
-    readonly property var strip: {
-        const paths = field.samples.map(s => s.path)
-        return field.samples.concat(recents.filter(r => !paths.includes(r.path))).slice(0, 10)
+    property var results: appView.resultPictures()
+    readonly property string sample: field.sample ?? ""
+    readonly property string currentName: current === "" ? "" : current.split("/").pop()
+    // The dropdown's entries, in groups: the template's samples, the recent pictures they do not repeat, this app's results.
+    readonly property var entries: {
+        const out = []
+        const seen = {}
+        const add = (heading, list, prefix) => {
+            const fresh = list.filter(p => seen[p.path] !== true)
+            if (fresh.length === 0)
+                return
+            out.push({heading: true, text: heading})
+            for (const p of fresh) {
+                seen[p.path] = true
+                out.push({text: p.name, value: prefix + p.path, thumbnail: p.url, checked: p.path === root.current})
+            }
+        }
+        add(qsTr("Samples"), field.samples, "")
+        add(qsTr("Recent"), recents.slice(0, 24), "")
+        add(qsTr("This app's results"), results.slice(0, 12), "result:")
+        if (root.sample !== "")
+            out.push({text: qsTr("Use sample"), value: "sample:"})
+        return out
     }
-    spacing: look.unit
+    spacing: look.unit / 2
 
     Connections {
         target: root.appView
@@ -32,6 +62,7 @@ ColumnLayout {
             root.current = String(root.appView.valueOf(key) ?? "")
             root.recents = root.appView.recentImages()
         }
+        function onRunChanged() { root.results = root.appView.resultPictures() }
         // A picture the page took by Ctrl+V or a drop anywhere on it: its refusal shows here.
         function onImageNotice(key, text) {
             if (key === root.field.key)
@@ -39,25 +70,103 @@ ColumnLayout {
         }
     }
     function paste() { root.notice = root.appView.pasteImage(root.field.key) }
+    function remove() {
+        root.appView.setValue(root.field.key, "")
+        root.current = ""
+    }
+    function pick(value) {
+        if (value === "sample:")
+            root.appView.useSample(root.field.key)
+        else if (value.startsWith("result:"))
+            root.notice = root.appView.useResultAsInput(root.field.key, "file://" + value.substring(7))
+        else
+            root.appView.useImage(root.field.key, value)
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: root.look.unit
+        Rectangle {
+            id: drop
+            objectName: "appImageChoose-" + root.field.key
+            Layout.fillWidth: true
+            implicitHeight: 7 * root.look.unit
+            radius: height / 2
+            color: dropHover.hovered ? root.look.kitChipHover : root.look.kitChip
+            border.width: activeFocus || menu.opened ? 2 : 0
+            border.color: root.look.accent
+            activeFocusOnTab: true
+            Accessible.role: Accessible.ComboBox
+            Accessible.name: root.field.label
+            Accessible.description: root.currentName
+            Keys.onSpacePressed: drop.show()
+            Keys.onReturnPressed: drop.show()
+            Keys.onDownPressed: drop.show()
+            function show() {
+                root.recents = root.appView.recentImages()
+                root.results = root.appView.resultPictures()
+                const at = drop.mapToItem(Overlay.overlay, 0, drop.height)
+                menu.wantX = at.x
+                menu.wantY = at.y
+                menu.anchorHeight = drop.height
+                menu.open()
+            }
+            HoverHandler { id: dropHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: { drop.forceActiveFocus(); drop.show() } }
+            Text {
+                anchors { left: parent.left; leftMargin: 2 * root.look.unit; right: chevron.left; rightMargin: root.look.unit
+                          verticalCenter: parent.verticalCenter }
+                text: root.currentName !== "" ? root.currentName : qsTr("Choose a picture")
+                elide: Text.ElideMiddle
+                textFormat: Text.PlainText
+                color: root.currentName !== "" ? root.look.text : root.look.label
+                font.pixelSize: root.look.textSize
+            }
+            Glyph {
+                id: chevron
+                anchors { right: parent.right; rightMargin: root.look.unit; verticalCenter: parent.verticalCenter }
+                look: root.look
+                name: "chevron-down"
+                color: root.look.label
+                font.pixelSize: 12
+            }
+            WidgetMenu {
+                id: menu
+                objectName: "appImageMenu-" + root.field.key
+                look: root.look
+                parent: Overlay.overlay
+                searchable: true
+                wordStart: true
+                width: Math.min(Math.max(drop.width, 36 * root.look.unit), Overlay.overlay ? Overlay.overlay.width - 4 * root.look.unit : 400)
+                entries: root.entries
+                onPicked: v => { root.pick(v); drop.forceActiveFocus() }
+            }
+        }
+        KitChip {
+            objectName: "appImageBrowse-" + root.field.key
+            look: root.look
+            pill: true
+            glyph: "folder"
+            tip: qsTr("Browse for a picture")
+            onTapped: picker.open()
+        }
+    }
 
     Rectangle {
         id: well
         objectName: "appInput-" + root.field.key
         Layout.fillWidth: true
-        implicitHeight: 36 * root.look.unit
-        radius: root.look.smallCorner
-        color: root.look.well
-        border.width: activeFocus || drop.containsDrag ? 2 : 1
-        border.color: activeFocus || drop.containsDrag ? root.look.accent : root.look.hairline
+        implicitHeight: 40 * root.look.unit
+        radius: root.look.smallCorner + 2
+        color: "transparent"
+        KitWell { look: root.look; dashed: true } // recessed; the dashed edge stays
         activeFocusOnTab: true
         // The page's Ctrl+V and drop go to the picture input last focused.
         onActiveFocusChanged: root.appView.setFocusedImage(root.field.key, activeFocus)
         Accessible.role: Accessible.Button
         Accessible.name: root.field.label
-        Accessible.description: root.current === "" ? qsTr("No picture") : root.current.split("/").pop()
-        Keys.onReturnPressed: picker.open()
-        Keys.onEnterPressed: picker.open()
-        Keys.onSpacePressed: picker.open()
+        Accessible.description: root.current === "" ? qsTr("No picture") : root.currentName
+        Keys.onDeletePressed: root.remove()
         Keys.onPressed: event => {
             if (event.matches(StandardKey.Paste)) {
                 root.paste()
@@ -65,91 +174,66 @@ ColumnLayout {
             }
         }
         Image {
-            anchors { fill: parent; margins: 2 }
+            id: shown
+            objectName: "appImageShown-" + root.field.key
+            anchors { fill: parent; margins: 2 * root.look.unit }
             source: root.appView.fileUrl(root.current)
             fillMode: Image.PreserveAspectFit
             asynchronous: true
             mipmap: true
-            sourceSize.height: 256
+            sourceSize.height: 512
+        }
+        Shape {
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeWidth: well.activeFocus || dropArea.containsDrag ? 2 : 1
+                strokeColor: well.activeFocus || dropArea.containsDrag ? root.look.accent : root.look.hairlineStrong
+                strokeStyle: ShapePath.DashLine
+                dashPattern: [4, 3]
+                fillColor: "transparent"
+                PathRectangle {
+                    x: 0.5; y: 0.5
+                    width: well.width - 1
+                    height: well.height - 1
+                    radius: root.look.smallCorner
+                }
+            }
         }
         Text {
-            anchors.centerIn: parent
-            visible: root.current === ""
-            text: qsTr("Drop a picture here, paste one or browse")
+            anchors { centerIn: parent }
+            width: parent.width - 4 * root.look.unit
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            visible: root.current === "" || shown.status === Image.Error
+            text: qsTr("Drop, paste or browse")
             color: root.look.label
             font.pixelSize: root.look.textSize
         }
         DropArea {
-            id: drop
+            id: dropArea
             anchors.fill: parent
             onDropped: event => {
                 if (event.hasUrls)
                     root.notice = root.appView.setImageFiles(root.field.key, event.urls)
             }
         }
-        TapHandler { onTapped: { well.forceActiveFocus(); picker.open() } }
-    }
-    RowLayout {
-        spacing: root.look.unit
-        ViewButton {
-            objectName: "appImageBrowse-" + root.field.key
+        HoverHandler { id: wellHover }
+        // A click only focuses the well (Ctrl+V pastes there); the Browse button is the one way to the file picker.
+        TapHandler { onTapped: well.forceActiveFocus() }
+        // Takes the picture away; the well is empty, and Run says what it needs.
+        KitChip {
+            objectName: "appImageRemove-" + root.field.key
+            anchors { top: parent.top; right: parent.right; margins: root.look.unit }
+            visible: root.current !== "" && (wellHover.hovered || activeFocus)
             look: root.look
-            text: qsTr("Browse…")
-            glyph: "folder"
-            bordered: true
-            onTapped: picker.open()
-        }
-        ViewButton {
-            objectName: "appImagePaste-" + root.field.key
-            look: root.look
-            text: qsTr("Paste")
-            bordered: true
-            onTapped: root.paste()
-        }
-    }
-    ListView {
-        id: thumbs
-        objectName: "appImageStrip-" + root.field.key
-        Layout.fillWidth: true
-        implicitHeight: 14 * root.look.unit
-        visible: root.strip.length > 0
-        orientation: ListView.Horizontal
-        spacing: root.look.unit
-        clip: true
-        model: root.strip
-        activeFocusOnTab: true
-        keyNavigationEnabled: true
-        highlightFollowsCurrentItem: true
-        Accessible.role: Accessible.List
-        Accessible.name: qsTr("Pictures to try")
-        Keys.onReturnPressed: pick(currentIndex)
-        Keys.onEnterPressed: pick(currentIndex)
-        Keys.onSpacePressed: pick(currentIndex)
-        function pick(index) {
-            if (index >= 0 && index < root.strip.length)
-                root.appView.useImage(root.field.key, root.strip[index].path)
-        }
-        delegate: Rectangle {
-            id: thumb
-            required property var modelData
-            required property int index
-            readonly property bool chosen: root.current !== "" && root.current === modelData.path
-            width: 14 * root.look.unit
-            height: 14 * root.look.unit
-            radius: root.look.smallCorner
-            color: root.look.well
-            border.width: chosen || (thumbs.activeFocus && ListView.isCurrentItem) ? 2 : 1
-            border.color: chosen || (thumbs.activeFocus && ListView.isCurrentItem) ? root.look.accent : root.look.hairline
-            Accessible.role: Accessible.Button
-            Accessible.name: modelData.name
-            Image {
-                anchors { fill: parent; margins: 2 }
-                source: thumb.modelData.url
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                sourceSize.height: 96
-            }
-            TapHandler { onTapped: { thumbs.currentIndex = thumb.index; thumbs.pick(thumb.index) } }
+            round: true
+            frosted: true
+            backdrop: shown
+            backdropSource: shown.source
+            glyph: "x"
+            tip: qsTr("Remove the picture")
+            onTapped: root.remove()
         }
     }
     Text {

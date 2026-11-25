@@ -23,6 +23,8 @@
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
 // | corner_radius    | 0 to 16 px, or "omarchy" (#63)           | 8                        |
+// | frost            | 0 to 1: how frosted the controls over a  | 0.6                      |
+// |                  | picture are; 0 is off (docs/canvas-look.md)|                          |
 // | hover_magnifier  | true or false: far out, a short hover    | false                    |
 // |                  | shows a node at zoom 1 (12.6, #74, #123)  |                          |
 // | picture_mode    | "smart", "sinks" or "all": which nodes    | "smart"                  |
@@ -67,6 +69,7 @@ struct Settings {
     int cornerRadius = 8;
     QString pictureMode = QStringLiteral("smart"); // which nodes show a picture (#263)
     QString stepPreview = QStringLiteral("fast"); // the Sampler's picture while it runs (#297)
+    double frost = 0.6;          // the frosted glass of the kit's controls over a picture, 0 (off) to 1
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
     bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)
     // The cache limits (#141); the cache manager turns them into bytes. 0 is no limit.
