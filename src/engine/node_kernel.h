@@ -126,6 +126,11 @@ public:
     // reports as warnings on the node (8.5). Only `node`, `type`, `inputs`, `hashes` and
     // `registry` are set, and an input not known yet is absent. Called on the scheduler's thread.
     virtual Errors check(const NodeContext &context) const;
+
+    // What else decides the answer that is not an input: files the kernel reads itself (the wildcard
+    // files of Dynamic Prompt), as text that changes when they do. It goes into the cache key (10.1);
+    // empty (the default) leaves the key as it was. Called on the scheduler's thread.
+    virtual QString keyExtra(const Values &inputs) const { Q_UNUSED(inputs); return {}; }
 };
 
 class ProviderKernel {

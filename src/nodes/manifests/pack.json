@@ -27,6 +27,7 @@
     "detail-regions",
     "draw-text",
     "edit-image",
+    "dynamic-prompt",
     "empty-latent",
     "empty-video-latent",
     "enhance-prompt",

@@ -596,6 +596,7 @@ private:
             parts.extra = n.providerKernel->keyExtra(n.inputs);
             n.models = {n.selection->instance + QLatin1Char('\n') + parts.model};
         } else if (n.kernel) {
+            parts.extra = n.kernel->keyExtra(n.inputs);
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
             // Its own persistent program, which holds memory between runs (7.3).
@@ -1081,6 +1082,10 @@ private:
                 entry.insert("engine", node.selection->engine);
                 entry.insert("model", node.selection->model.handle);
             }
+            // The prompt a Dynamic Prompt picked: the template is in the workflow, but a wildcard file
+            // may change later, so the picture says which text it was made with.
+            if (node.type && node.type->id == QLatin1String("fugue/dynamic-prompt") && node.outputs.contains(QStringLiteral("text")))
+                entry.insert("prompt", node.outputs.value(QStringLiteral("text")).text());
             if (!entry.isEmpty())
                 used.insert(path, entry);
             pending.append(node.dependencies);

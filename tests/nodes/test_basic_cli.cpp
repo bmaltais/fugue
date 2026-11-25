@@ -12,6 +12,7 @@
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QtEndian>
+#include <QScopeGuard>
 #include <QtTest>
 
 #include <vips/vips8>
@@ -144,6 +145,42 @@ private slots:
         const Outcome secondResult = fugue({"runs", "result", second, "--json"});
         QCOMPARE(secondResult.data().value("outputs").toObject().value("look").toObject().value("value").toString(), QString("a red fox"));
         QVERIFY(!QFileInfo::exists(out + "/fox-2.png"));
+    }
+
+    // A Dynamic Prompt upstream of a Save Image: its picked text is in the embedded run section, with the template and
+    // the concrete seed in the workflow, and left out when the Save node embeds without prompts (#556).
+    void thePickedPromptIsEmbeddedWithTheImage() {
+        FileHashes hashes(path("hashes3.json"));
+        const vips::VImage pixels = (vips::VImage::black(40, 30, vips::VImage::option()->set("bands", 3)) + 90).cast(VIPS_FORMAT_UCHAR);
+        const MediaHandle fixture = MediaHandle::fromImage(pixels).value().saved(path("in3"), "base", hashes).value();
+        // The binary shares this process's scratch data folder (tests/test_environment.cpp).
+        const QString wildcard = qEnvironmentVariable("XDG_DATA_HOME") + "/fugue/wildcards/animal.txt";
+        write(wildcard, "# animals\nfox\n");
+        const auto removeWildcard = qScopeGuard([&] { QFile::remove(wildcard); });
+        const QString out = path("out3");
+        const auto save = [&](const QString &id, const QString &embed) {
+            return QByteArray("\"") + id.toUtf8() + "\": {\"type\": \"fugue/save-image\", \"version\": \"1.0.0\", \"inputs\": {"
+                   "\"image\": {\"from\": \"label.image\"}, \"name\": \"" + id.toUtf8() + "\", \"embed\": \"" + embed.toUtf8() +
+                   "\", \"folder\": \"" + out.toUtf8() + "\"}}";
+        };
+        write(path("dyn.fugue"),
+              QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                         "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"") + fixture.path().toUtf8() + "\"}},"
+                  "\"dyn\": {\"type\": \"fugue/dynamic-prompt\", \"version\": \"1.0.0\", \"inputs\": {\"template\": \"a __animal__ {big|big}\", \"seed\": {\"auto\": \"random\"}}},"
+                  "\"label\": {\"type\": \"fugue/draw-text\", \"version\": \"1.0.0\", \"inputs\": {\"image\": {\"from\": \"load.image\"}, \"text\": {\"from\": \"dyn.text\"}}},"
+                  + save("full", "full") + "," + save("blank", "no-prompts") + "}}}");
+        const Outcome ran = fugue({"run", path("dyn.fugue"), "--wait", "--json"});
+        QVERIFY2(ran.exitCode == 0, qPrintable(ran.out + ran.err));
+        const Result<QJsonObject> full = readEmbeddedWorkflow(out + "/full.png");
+        QVERIFY2(full.ok(), qPrintable(full.error().message));
+        const QJsonObject entry = full->value("run").toObject().value("nodes").toObject().value("dyn").toObject();
+        QCOMPARE(entry.value("prompt").toString(), QString("a fox big"));
+        QVERIFY(entry.value("auto").toObject().value("seed").isDouble()); // the seed that was used
+        QCOMPARE(full->value("graph").toObject().value("nodes").toObject().value("dyn").toObject().value("inputs").toObject().value("template").toString(),
+                 QString("a __animal__ {big|big}"));
+        const Result<QJsonObject> blank = readEmbeddedWorkflow(out + "/blank.png");
+        QVERIFY2(blank.ok(), qPrintable(blank.error().message));
+        QVERIFY(!blank->value("run").toObject().value("nodes").toObject().value("dyn").toObject().contains("prompt"));
     }
 
     // The pixel nodes hand Save Image float images (#15); they are saved at 16 bits in PNG and as
