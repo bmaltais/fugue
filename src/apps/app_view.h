@@ -15,7 +15,11 @@
 // every run waits in. The window's events come back through onEvent(run, event); a run belongs to its tab, so a tab switched
 // away from keeps its progress and results and shows them again. The app owns no outputs: the results of the app's output
 // nodes (their thumbnails and files, the ones the Graph's cards show) are what the last run of the tab made, in the order the
-// block lists them; run history and the results store are the existing ones (a later issue shows past takes).
+// block lists them; run history and the results store are the existing ones: the takes of an app with a file are read back from the
+// run folders (apps/app_takes.h, #389), so they survive a restart; an app with no file keeps the session's only.
+//
+// Live (#471): per tab and for the session, "off" at first, "live" (an input change queues a run once it has been still for
+// liveDelay, ~600 ms) or "repeat" (a run ends, the next starts, until Cancel or a failure). Nothing is armed while it is off.
 //
 // Words: nothing here names a node or a graph port. An output is called by its label, else "Result". Errors are shown as
 // the engine words them; `error` is the first line, `details` all of them (with their hint).
@@ -44,6 +48,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -92,9 +97,12 @@ class AppView : public QObject {
     // [{label, kind ("image", "video", "audio" or "text"), url (the picture to draw), full (its file as a URL), width, height,
     //   text}] of the last run, in the block's order.
     Q_PROPERTY(QVariantList results READ results NOTIFY runChanged)
-    // The takes of this tab's runs this session, newest first (#389): [{run, status, pending, url (the first picture, or empty),
-    // count (results), line (what the form had, in a quiet line), shown}].
+    // The takes of this app, newest first (#389): this tab's runs of the session, then the runs History has for the app (apps/app_takes.h):
+    // [{run, status, pending, url (the first picture, or empty), count (results), line (what the form had, in a quiet line), shown,
+    //   persisted}].
     Q_PROPERTY(QVariantList takes READ takes NOTIFY runChanged)
+    // "off", "live" or "repeat" (#471): this tab's Live mode.
+    Q_PROPERTY(QString liveMode READ liveMode NOTIFY liveChanged)
     // The take the stage shows, as an index into `takes`, or -1. The newest take that made something, unless the person picked
     // an older one (selectTake); a run that is still waiting has made nothing yet, so the stage keeps the one before it.
     Q_PROPERTY(int takeIndex READ takeIndex NOTIFY runChanged)
@@ -111,6 +119,8 @@ class AppView : public QObject {
 public:
     using Start = std::function<QString(const RunRequest &)>;
     using Cancel = std::function<void(const QString &run)>;
+    // Asks for a finished run's results again; they come back through onEvent (RunService::replay).
+    using Replay = std::function<void(const QString &run)>;
 
     // `registry` prunes the block of what the workflow no longer has and checks it; none: the block is used as it is.
     AppView(Start start, Cancel cancel, const Registry *registry = nullptr, QObject *parent = nullptr);
@@ -118,9 +128,21 @@ public:
     // The tab the window shows and its workflow (`file`: where it came from, or empty). Called when the tab changes and
     // when the person comes back to the view, so edits made in the graph are seen. A tab seen for the first time opens in
     // its block's defaultView.
-    void show(const QString &tab, const Document &document, const QString &file);
+    // `templateFolder`: where a tab of a template with no file of its own came from; its workflow.fugue is then the app's key for
+    // its takes (a saved file is its own key).
+    void show(const QString &tab, const Document &document, const QString &file, const QString &templateFolder = {});
     // The tab was closed: what it kept goes (its run is cancelled).
     void forget(const QString &tab);
+    // Where the run folders are and how to read a run's results again: the takes of an app with a file are read from there
+    // (#389). Without it the takes are the session's.
+    void setHistory(const QString &runsRoot, Replay replay);
+    // Live's debounce in ms (600 at first; tests shorten it).
+    void setLiveDelay(int milliseconds) { m_liveTimer.setInterval(milliseconds); }
+    QString liveMode() const { return m_state.value(m_tab).live; }
+    // "off", "live" or "repeat". Repeat starts a run at once when none goes. Cancel turns it off.
+    Q_INVOKABLE void setLiveMode(const QString &mode);
+    // Whether anything is armed for Live (a debounce waiting): false at idle and when it is off.
+    bool liveArmed() const { return m_liveTimer.isActive(); }
 
     bool isApp() const { return m_app.has_value(); }
     bool shown() const { return m_app && !m_state[m_tab].graph; }
@@ -208,6 +230,9 @@ public:
     Q_INVOKABLE void cancel();
     // Takes (#389). The stage shows take `index` (0 is the newest; the newest again follows new runs).
     Q_INVOKABLE void selectTake(int index);
+    // A take read back from History has no results until they are asked for: the strip asks for the ones it draws, so a long
+    // history costs nothing until it is looked at (#389).
+    Q_INVOKABLE void ensureTake(int index);
     // Puts take `index`'s inputs back in the form (a seed left to chance stays so: its number was the engine's).
     Q_INVOKABLE void reuseInputs(int index);
     // Reuses take `index`'s inputs and runs: "Run again" of a take.
@@ -250,6 +275,7 @@ signals:
     void modelsChanged();
     void runChanged();
     void progressChanged();
+    void liveChanged();
 
 private:
     // One run of the tab: what it was given and what it made (the shown results are the newest take's, kept as they come).
@@ -260,6 +286,8 @@ private:
         QMap<QString, QJsonValue> values;
         QMap<QString, QString> seedModes;
         QString line;
+        bool persisted = false; // read back from the run folders: its results come by replay
+        bool requested = false; // that replay was asked for
     };
     struct TabState {
         bool seen = false;
@@ -276,10 +304,20 @@ private:
         QList<Take> takes; // newest first, at most maxTakes
         QString pinned;    // the run the person picked, or empty to follow the newest
         QString liveFrame;
+        QString live = QStringLiteral("off"); // Live (#471): "off", "live" or "repeat"
+        bool liveDirty = false;               // an input changed (or the last run ended in Repeat) and a run is owed
+        QString storedFor;                    // the file the takes of History were read for
         bool cleared = false; // Clear emptied the stage; the takes stay in the strip, and picking one shows it again
     };
     static constexpr int maxTakes = 30;
-    QString inputsLine(const QMap<QString, QJsonValue> &values) const;
+    QString inputsLine(const QMap<QString, QJsonValue> &values, const QMap<QString, QString> &modes) const;
+    void loadStored(TabState &state);
+    void requestTake(Take &take);
+    void replayEvent(const QString &tab, const QString &run, const QJsonObject &event);
+    // The person changed an input (not the store by itself): Live arms its debounce.
+    void inputEdited();
+    void liveFire();
+    void scheduleLive(const QString &tab);
     void syncTake(TabState &state);
     void buildFields();
     QVariantMap fieldFor(const InputBinding &input) const;
@@ -292,16 +330,21 @@ private:
     void modelHashed(int ticket, const QVariantMap &handle);
     int waitFor(const QString &key); // a ticket for this tab's field
     QString tabOfRun(const QString &run) const;
-    void addResult(TabState &state, const QJsonObject &event);
+    static void addResult(const QList<app::AppOutput> &outputs, QVariantList &list, const QJsonObject &event);
     static void addDetail(TabState &state, const QString &message, const QString &hint);
     void end(const QString &tab, const QString &status);
 
     Start m_start;
     Cancel m_cancel;
+    Replay m_replay;
+    QString m_runsRoot;
+    QHash<QString, QString> m_replaying; // run -> tab: a take's results being read again
+    QTimer m_liveTimer;
     const Registry *m_registry;
     QString m_tab;
     QString m_focusedImage;
     QString m_file;
+    QString m_takesKey; // the app of the shown tab, as its takes know it (apps/app_takes.h); empty: session takes only
     Document m_document;
     std::optional<app::App> m_app;
     QString m_problem;

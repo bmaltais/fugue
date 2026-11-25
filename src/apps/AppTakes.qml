@@ -6,7 +6,9 @@ import "../canvas"
 
 // The run history strip of an app ("takes", #389): the thumbnails of this app's runs this session, newest first, the shown one
 // outlined, a badge on one that waits or goes, a mark on one that failed. A press shows that take in the stage (AppView.selectTake);
-// Left and Right move and Enter shows. It scrolls sideways when there are more than fit. It knows nothing of runs: it draws
+// Left and Right move, Enter shows and R runs again with the inputs of the one with the place. The takes of an app with a file come
+// from History (they survive a restart); one read back asks for its results only when it is drawn (AppView.ensureTake), so a long
+// history loads nothing it does not show. It scrolls sideways when there are more than fit. It knows nothing of runs: it draws
 // `appView.takes`.
 ListView {
     id: strip
@@ -29,6 +31,13 @@ ListView {
     Keys.onReturnPressed: appView.selectTake(currentIndex)
     Keys.onEnterPressed: appView.selectTake(currentIndex)
     Keys.onSpacePressed: appView.selectTake(currentIndex)
+    // R: run again with the inputs of the take that has the place (the toolbar's Run again acts on the shown one).
+    Keys.onPressed: event => {
+        if (event.key === Qt.Key_R && event.modifiers === Qt.NoModifier && currentIndex >= 0) {
+            appView.runAgain(currentIndex)
+            event.accepted = true
+        }
+    }
     ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
 
     delegate: Rectangle {
@@ -45,6 +54,7 @@ ListView {
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Take %1").arg(strip.appView.takes.length - index)
         Accessible.description: modelData.line
+        Component.onCompleted: strip.appView.ensureTake(index)
         ToolTip.visible: hover.hovered && modelData.line !== ""
         ToolTip.delay: strip.look.tooltipDelay
         ToolTip.text: modelData.line

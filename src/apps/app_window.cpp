@@ -23,20 +23,23 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
             return;
         const QVariantMap tab = tabs.at(index).toMap();
         const QString id = tab.value("id").toString();
-        if (!force && id == *shown)
+        // A template's folder is set a moment after its tab is made: that is a change too (the app's takes are found by it).
+        const QString token = id + QLatin1Char('|') + tab.value("template").toString();
+        if (!force && token == *shown)
             return;
-        *shown = id;
-        view.show(id, canvas.document(), tab.value("path").toString());
+        *shown = token;
+        view.show(id, canvas.document(), tab.value("path").toString(), tab.value("template").toString());
     };
     QObject::connect(&workflows, &Workflows::tabsChanged, &view, [give] { give(false); });
     QObject::connect(&view, &AppView::documentWanted, &view, [give] { give(true); });
     QObject::connect(&workflows, &Workflows::tabClosed, &view, [&view, shown](const QString &id) {
-        if (id == *shown)
+        if (shown->startsWith(id + QLatin1Char('|')))
             shown->clear();
         view.forget(id);
     });
     QObject::connect(&view, &AppView::notice, &workflows, &Workflows::notify);
     QObject::connect(&service, &RunService::event, &view, &AppView::onEvent);
+    view.setHistory(service.runsRoot(), [&service](const QString &run) { service.replay(run); });
     view.setDownloads(workflows.downloads()); // a model field's Download shares the window's one download line
 
     // The Needs panel (#469): the shown app's missing models and packs, from the Get ready sheet's own plan, looked at only while the

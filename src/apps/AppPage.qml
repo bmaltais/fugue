@@ -19,7 +19,7 @@ import "../kit"
 //           buttons in its corner; the inputs as KitGroup rows (AppInput) scrolling; Advanced a quiet disclosure row at the foot
 //           of the group; and Run, the screen's one primary control, a full-width accent pill pinned at the panel's foot
 //
-// Keys: Tab goes through the panel in reading order (hero buttons, inputs, Advanced, Run) with the kit's focus ring on each;
+// Keys: Tab goes through the panel in reading order (hero buttons, inputs, Advanced, Run again (arrows choose), Run; Space flips a switch) with the kit's focus ring on each;
 // Enter or Space press the focused button, Ctrl+Enter runs from anywhere (also a prompt), Escape closes a menu or popover.
 // Right to left the rows mirror: the rail and stage go to the end side and the panel to the start; a picture is never mirrored.
 // "Number of runs" (ComfyUI's stepper) is not here: a tab holds one run at a time, and queuing several of the same bound
@@ -234,6 +234,34 @@ Rectangle {
                     color: page.look.error
                     font.pixelSize: page.look.labelSize
                     wrapMode: Text.Wrap
+                }
+                // Live (#471): off at first, per tab, for the session. Live re-runs once an input has been still for a moment (the
+                // canvas Live toggle's wording, #315); Repeat starts the next run as soon as one ends (with a Random seed: new
+                // pictures one after another). One at a time; Cancel ends either. Nothing runs, and nothing is armed, while both are off.
+                KitGroup {
+                    id: liveGroup
+                    objectName: "appLive"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: page.look.params.panelPad * page.u
+                    Layout.rightMargin: page.look.params.panelPad * page.u
+                    look: page.look
+                    visible: page.appView.problem === ""
+                    // One mode, one row (coordinator, overnight: two switches for one three-way mode read as two settings
+                    // and cost a row of the form): Off, On change (Live), Repeat.
+                    KitRow {
+                        look: page.look
+                        label: qsTr("Run again")
+                        KitSegmented {
+                            id: liveChooser
+                            objectName: "appLiveMode"
+                            look: page.look
+                            text: qsTr("Run again")
+                            readonly property var modes: ["off", "live", "repeat"]
+                            options: [qsTr("Off"), qsTr("On change"), qsTr("Repeat")]
+                            currentIndex: Math.max(0, modes.indexOf(page.appView.liveMode))
+                            onMoved: index => page.appView.setLiveMode(modes[index])
+                        }
+                    }
                 }
                 // Run: the screen's one primary control, a full-width pill in the accent.
                 Rectangle {
