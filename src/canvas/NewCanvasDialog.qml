@@ -13,6 +13,8 @@ import "../menu"
 Question {
     id: root
     objectName: "newCanvasDialog"
+    heading: qsTr("New canvas")
+    subheading: qsTr("A blank picture, the clipboard or a file.")
     // The canvas store's folder; empty is the session's.
     property string storeRoot: ""
     readonly property alias model: backend
@@ -47,7 +49,6 @@ Question {
     ColumnLayout {
         anchors.fill: parent
         spacing: 3 * root.look.unit
-        Label { text: qsTr("New canvas"); font.bold: true; Layout.fillWidth: true }
         GridLayout {
             Layout.fillWidth: true
             columns: 2

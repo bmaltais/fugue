@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Fugue
 import "../menu"
 import "../canvas"
+import "../kit"
 
 // The Projects dialog (spec 1.4.2, #204 step 2), opened by file.projects (File > Projects…) or the project
 // chip: the projects you know with the current one marked, and New…, Open folder… and Project settings….
@@ -54,7 +55,7 @@ Popup {
     focus: true
     padding: 0
     width: Math.min(680, (parent ? parent.width : 680) - 12 * u)
-    height: Math.min(content.implicitHeight, (parent ? parent.height : 640) - 12 * u)
+    height: Math.min(hero.height + content.implicitHeight, (parent ? parent.height : 640) - 12 * u)
     Overlay.modal: Rectangle { color: dialog.look.scrim }
     background: PopupSurface { look: dialog.look }
     enter: Transition {
@@ -93,8 +94,25 @@ Popup {
         picker.open()
     }
 
-    contentItem: Flickable {
+    contentItem: Item {
+      KitHero {
+        id: hero
+        objectName: "projectsHero"
+        look: dialog.look
+        tone: "dusk"
+        title: dialog.view === "new" ? qsTr("New project") : dialog.view === "settings" ? qsTr("Project settings")
+               : dialog.view === "blocked" ? qsTr("Unsaved work") : qsTr("Projects")
+        subtitle: dialog.view === "list" ? qsTr("A project keeps its own settings, packs and keys. Switching opens a new window.") : ""
+        showClose: true
+        LayoutMirroring.enabled: dialog.rightToLeft
+        LayoutMirroring.childrenInherit: true
+        onClosed: dialog.close()
+      }
+      Flickable {
         id: scroller
+        y: hero.height
+        width: parent.width
+        height: parent.height - hero.height
         clip: true
         contentWidth: width
         contentHeight: content.implicitHeight
@@ -117,19 +135,6 @@ Popup {
                 Layout.fillWidth: true
                 spacing: 3 * dialog.u
                 Text {
-                    text: qsTr("Projects")
-                    color: dialog.look.text
-                    font.pixelSize: dialog.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                }
-                Text {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: qsTr("A project keeps its own settings, packs, models, outputs and keys apart from the others. Switching opens a new Fugue window in the project you pick.")
-                    color: dialog.look.label
-                    font.pixelSize: dialog.look.labelSize
-                }
-                Text {
                     objectName: "projectsRegistryProblem"
                     visible: text !== ""
                     Layout.fillWidth: true
@@ -151,7 +156,7 @@ Popup {
                         Layout.fillWidth: true
                         implicitHeight: rowColumn.implicitHeight + 6 * dialog.u
                         radius: Math.min(dialog.look.params.cornerGroup * dialog.u, 0.3 * height)
-                        color: modelData.current ? dialog.look.selectedRow : "transparent"
+                        color: modelData.current ? (dialog.look.params.controlColour === "accent" ? dialog.look.selectedRow : Qt.alpha(dialog.look.tone("dusk").glass, 0.34)) : "transparent" // the current project takes the dialog's tone
                         border.width: 1
                         border.color: dialog.look.hairline
                         ColumnLayout {
@@ -311,12 +316,6 @@ Popup {
                 visible: dialog.view === "new"
                 Layout.fillWidth: true
                 spacing: 3 * dialog.u
-                Text {
-                    text: qsTr("New project")
-                    color: dialog.look.text
-                    font.pixelSize: dialog.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                }
                 SettingsParts.Setting {
                     title: qsTr("Name")
                     note: qsTr("What the window title and the project chip show. No slash or dot.")
@@ -408,12 +407,6 @@ Popup {
                 Layout.fillWidth: true
                 spacing: 3 * dialog.u
                 Text {
-                    text: qsTr("Project settings")
-                    color: dialog.look.text
-                    font.pixelSize: dialog.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                }
-                Text {
                     objectName: "defaultProjectNote"
                     visible: dialog.model.currentIsDefault
                     Layout.fillWidth: true
@@ -499,12 +492,6 @@ Popup {
                 Layout.fillWidth: true
                 spacing: 3 * dialog.u
                 Text {
-                    text: qsTr("Unsaved work")
-                    color: dialog.look.text
-                    font.pixelSize: dialog.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                }
-                Text {
                     objectName: "projectBlockedText"
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
@@ -550,5 +537,6 @@ Popup {
             }
             Item { implicitHeight: 2 * dialog.u }
         }
+      }
     }
 }

@@ -64,11 +64,11 @@ Item {
     Question {
         id: modifyAsk
         objectName: "canvasModifyAsk"
+        heading: root.info.title
         onOpened: { amountField.forceActiveFocus(); amountField.selectAll() }
         ColumnLayout {
             anchors.fill: parent
             spacing: 3 * root.u
-            Label { text: root.info.title; font.bold: true }
             RowLayout {
                 spacing: 2 * root.u
                 Label { text: root.info.field }
@@ -106,11 +106,11 @@ Item {
     Question {
         id: transformAsk
         objectName: "canvasTransformAsk"
+        heading: qsTr("Transform selection")
         onOpened: { scaleField.forceActiveFocus(); scaleField.selectAll() }
         ColumnLayout {
             anchors.fill: parent
             spacing: 3 * root.u
-            Label { text: qsTr("Transform selection"); font.bold: true }
             GridLayout {
                 columns: 3
                 columnSpacing: 2 * root.u

@@ -17,6 +17,8 @@ import "../menu"
 Question {
     id: root
     objectName: "canvasExportDialog"
+    heading: layers ? qsTr("Export layers as files") : qsTr("Export with quality and scale")
+    tone: "slate" // export is the quiet slate (docs/canvas-look.md 20.21)
     // The canvas store's folder; empty is the session's.
     property string storeRoot: ""
     readonly property alias model: backend
@@ -53,12 +55,6 @@ Question {
     ColumnLayout {
         anchors.fill: parent
         spacing: 3 * root.look.unit
-        Label {
-            objectName: "canvasExportTitle"
-            text: root.layers ? qsTr("Export layers as files") : qsTr("Export with quality and scale")
-            font.bold: true
-            Layout.fillWidth: true
-        }
         RowLayout {
             Layout.fillWidth: true
             spacing: 3 * root.look.unit

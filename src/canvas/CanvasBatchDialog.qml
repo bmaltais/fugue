@@ -15,6 +15,8 @@ import "../menu"
 Question {
     id: root
     objectName: "canvasBatchDialog"
+    heading: qsTr("Batch")
+    subheading: qsTr("One action on every picture of a folder.")
     readonly property var batch: App.canvasBatch
     property string action: ""
     property string inFolder: ""
@@ -59,13 +61,6 @@ Question {
     ColumnLayout {
         anchors.fill: parent
         spacing: 3 * root.look.unit
-        Label {
-            objectName: "canvasBatchTitle"
-            text: qsTr("Batch")
-            font.bold: true
-            Layout.fillWidth: true
-        }
-
         GridLayout {
             visible: !root.showsResults
             Layout.fillWidth: true

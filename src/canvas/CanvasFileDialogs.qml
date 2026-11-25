@@ -64,11 +64,11 @@ Item {
     Question {
         id: propsAsk
         objectName: "canvasPropertiesAsk"
+        heading: qsTr("Layer properties")
         onOpened: { propsName.forceActiveFocus(); propsName.selectAll() }
         ColumnLayout {
             anchors.fill: parent
             spacing: 3 * root.u
-            Label { text: qsTr("Layer properties"); font.bold: true; Layout.fillWidth: true }
             Label { text: qsTr("Name"); color: root.look.label }
             ThemedTextField {
                 id: propsName

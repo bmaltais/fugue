@@ -232,7 +232,7 @@ private slots:
         };
         openRow("canvas-view.export-options");
         QTRY_VERIFY(exportOpen());
-        QCOMPARE(find(app.window, "canvasExportTitle")->property("text").toString(), QString("Export with quality and scale"));
+        QCOMPARE(app.window->findChild<QObject *>("canvasExportDialog")->property("heading").toString(), QString("Export with quality and scale"));
         QTRY_VERIFY(find(app.window, "canvasExportEstimate")->property("text").toString().contains("px"));
         QVERIFY(!find(app.window, "canvasExportQuality")); // a PNG has none
         click(app, "canvasExportFormat-jpg");
@@ -246,7 +246,7 @@ private slots:
 
         openRow("canvas-view.export-layers");
         QTRY_VERIFY(exportOpen());
-        QCOMPARE(find(app.window, "canvasExportTitle")->property("text").toString(), QString("Export layers as files"));
+        QCOMPARE(app.window->findChild<QObject *>("canvasExportDialog")->property("heading").toString(), QString("Export layers as files"));
         QTRY_VERIFY(find(app.window, "canvasExportFiles"));
         QVERIFY(find(app.window, "canvasExportVisibleOnly"));
         QVERIFY(!find(app.window, "canvasExportFormat-jpg")); // layers keep their transparency

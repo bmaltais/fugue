@@ -8,7 +8,8 @@
 # #379: the banner's Install pack, Download and Into controls (three items) became one Get ready… Loader, and the Get ready sheet is made when first opened: two items fewer.
 # Drift-kit slice 2: Fugue's mark (the Dusk icon, `fugueMark` and its picture) sits at the window bar's start and runs app.show-all: two items more.
 # #465: rounded spaces (docs/canvas-look.md 20.21): the Graph's card outline (AreaFrame, a Shape) above the canvas, and a raised button's KitRaise in a Loader (ViewButton): nine items more.
-items 252
+# #478: the workflow notice is a Banner (an item, its Loader and its content holder), two items more than the rectangle it was; the keymap notice is one too: four items more.
+items 256
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 areaClose-1 1

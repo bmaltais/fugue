@@ -18,6 +18,7 @@ Item {
     readonly property CanvasLook look: App.theme.look
     // The canvas, to turn a drop point into world coordinates.
     property FugueCanvas canvasView
+    property real noticeInset: 0 // the rail at the window's left edge, which the notice keeps clear of
     property alias closeQuestion: closeAsk
     property alias trustQuestion: trustAsk
     property alias recoveryQuestion: recoverAsk
@@ -107,18 +108,17 @@ Item {
 
     // What went wrong, or what the opened workflow lacks; its missing models' Download button
     // (#89), and the models downloading.
-    Rectangle {
+    Banner {
         id: notice
         objectName: "workflowNotice"
         readonly property var downloads: App.workflows.downloads
         visible: App.workflows.notice.length > 0 || downloads.busy
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: visible ? noticeColumn.implicitHeight + 16 : 0
-        color: root.look.popup
-        border.color: root.look.hairline
+        look: root.look
+        tone: App.workflows.getReadyOffer || downloads.busy ? "moss" : "slate" // what a workflow lacks and its downloads are Get ready's area
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 * root.look.unit; leftMargin: root.noticeInset + 2 * root.look.unit }
         ColumnLayout {
             id: noticeColumn
-            anchors { fill: parent; margins: 8 }
+            width: parent.width
             spacing: 16 // two chunks: the line and its button, then the download under way
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true

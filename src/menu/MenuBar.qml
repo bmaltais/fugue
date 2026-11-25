@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../kit"
 import "../apps"
 import "../workflow"
 
@@ -399,28 +400,45 @@ Rectangle {
     Component {
         id: aboutComponent
         Popup {
+            id: aboutPopup
             objectName: "about"
             parent: Overlay.overlay
             anchors.centerIn: parent
             modal: true
             focus: true
-            padding: 6 * bar.u
+            padding: 0
+            width: 80 * bar.u
             Overlay.modal: Rectangle { color: bar.look.scrim }
-            background: PopupSurface { look: bar.look }
-            contentItem: Column {
-                spacing: 2 * bar.u
-                Text {
-                    text: qsTr("Fugue %1").arg(Qt.application.version)
-                    font.pixelSize: bar.look.overlayTitleSize
-                    font.weight: Font.DemiBold
-                    color: bar.look.text
+            topPadding: aboutHero.height
+            background: Item {
+                PopupSurface { anchors.fill: parent; look: bar.look; tone: "dusk" }
+                KitHero {
+                    id: aboutHero
+                    objectName: "aboutHero"
+                    look: bar.look
+                    tone: "dusk"
+                    title: qsTr("Fugue %1").arg(Qt.application.version)
+                    subtitle: qsTr("Node-based workflows for local AI on Omarchy.")
+                    LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
+                    LayoutMirroring.childrenInherit: true
+                }
+            }
+            onOpened: aboutClose.forceActiveFocus(Qt.OtherFocusReason)
+            contentItem: Item {
+                implicitHeight: 4 * bar.u + 7 * bar.u
+                LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
+                LayoutMirroring.childrenInherit: true
+                KitChip {
+                    id: aboutClose
+                    objectName: "aboutClose"
+                    anchors { right: parent.right; rightMargin: 5 * bar.u; bottom: parent.bottom; bottomMargin: 4 * bar.u }
+                    look: bar.look
+                    text: qsTr("Close")
+                    bordered: true
+                    onTapped: aboutPopup.close()
                 }
                 Text {
-                    text: qsTr("Node-based workflows for local AI on Omarchy.")
-                    color: bar.look.label
-                    font.pixelSize: bar.look.textSize
-                }
-                Text {
+                    anchors { left: parent.left; leftMargin: 5 * bar.u; verticalCenter: aboutClose.verticalCenter }
                     text: qsTr("MIT license.")
                     color: bar.look.label
                     font.pixelSize: bar.look.labelSize
