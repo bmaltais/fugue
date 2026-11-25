@@ -52,7 +52,9 @@ struct Expansion {
 Result<Expansion> expandAll(const QString &templ, const Options &options, int cap, quint64 seed = 0);
 
 // What can be told without running: the syntax, wildcard names that cannot be allowed, wildcards
-// that no file has, variables that are never set. Errors, or warnings for a missing wildcard file.
+// that no file has, variables that are never set. Each finding is a template_invalid Error; the
+// scheduler shows every NodeKernel::check finding under validate as a warning on the node (as for
+// Text Template), and the run itself fails with the same error.
 Errors check(const QString &templ, const Options &options);
 
 } // namespace fugue::dynprompt

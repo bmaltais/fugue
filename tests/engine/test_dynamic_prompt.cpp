@@ -302,7 +302,7 @@ private slots:
         small = m_options;
         small.limits.maxFiles = 2;
         QVERIFY(dynprompt::generate("__colours*__", 1, small).error().message.contains("wildcard files"));
-        QCOMPARE(one("{99999999999999999999$$a|b}"), QString("a, b")); // clamped to the options
+        QCOMPARE(set(one("{99999999999999999999$$a|b}").split(", ")), set({"a", "b"})); // clamped to the options
     }
     void checkFindsWhatNeedsNoRun() {
         QVERIFY(dynprompt::check("{a|b} __season__ ${x=1}${x}", m_options).isEmpty());
@@ -406,6 +406,50 @@ private slots:
     void checkLeavesVariablesOfWildcardLinesAlone() {
         QVERIFY(dynprompt::check("__setter__ ${v}", m_options).isEmpty());
         QCOMPARE(one("__setter__ ${v}"), QString("red")); // the line sets it when it is picked
+    }
+
+    // ---- second review
+    void aLongChainOfBigVariantsPicksInLogTime() {
+        QString big = "{";
+        for (int k = 0; k < 20000; ++k)
+            big += "x|";
+        big += "y}";
+        QString templ = "${a=" + big + "}${b=${a}${a}}";
+        for (int k = 0; k < 14; ++k)
+            templ += QString("${c%1=${%2}${%2}}").arg(k).arg(k == 0 ? QString("b") : QString("c%1").arg(k - 1));
+        templ += "${c13}";
+        const Result<QString> r = dynprompt::generate(templ, 1, m_options);
+        QVERIFY2(r.ok(), qPrintable(r.error().message)); // 2^15 picks of a 20000-option variant, each a search
+        QCOMPARE(r.value().size(), 1 << 15);
+    }
+    void fewPicksOfABigWildcardAreCheapAndLargeSharesWork() {
+        QTemporaryDir dir;
+        QString lines;
+        for (int k = 0; k < 100000; ++k)
+            lines += QString("tag%1\n").arg(k);
+        write(dir.path() + "/tags.txt", lines);
+        dynprompt::Options options;
+        options.folders = {dir.path()};
+        for (const QString templ : {"{2$$__tags__}", "{3$$__tags__}"}) {
+            const Result<QString> r = dynprompt::generate(templ, 3, options);
+            QVERIFY2(r.ok(), qPrintable(templ + r.error().message));
+            const QStringList parts = r.value().split(", ");
+            QCOMPARE(set(parts).size(), int(parts.size()));
+        }
+        QVERIFY(dynprompt::expandAll("{3$$__tags__}", options, 5)->capped);
+        // a share of the options that is not small, with a zero weight that is never taken
+        QCOMPARE(set(one("{3$$1::a|1::b|1::c|0::d}").split(", ")), set({"a", "b", "c"}));
+        QVERIFY(failure("{40000$$" + QString("a|").repeated(40000) + "}").contains("steps"));
+    }
+    void cyclicAndRandomPartsBeforeChoicesAreDrawnAtEveryPrompt() {
+        QCOMPARE(dynprompt::expandAll("{@x|y} {a|b|c}", m_options, 100)->prompts, QStringList({"x a", "y b", "x c"}));
+        const QStringList shapes = dynprompt::expandAll("{~square|circle|star|ring|dot} {red|green|blue|pink|tan|grey|teal|lime}", m_options, 100)->prompts;
+        QCOMPARE(shapes.size(), 8);
+        QVERIFY(set(shapes).size() > 3); // not one shape repeated
+        QCOMPARE(dynprompt::expandAll("{red|green|blue} {~square|circle}", m_options, 100)->prompts.size(), 3);
+        QCOMPARE(dynprompt::expandAll("{a|b|c} {@x|y}", m_options, 100)->prompts, QStringList({"a x", "b y", "c x"}));
+        // a pick that holds choices keeps its first pick, so those choices are enumerated
+        QCOMPARE(dynprompt::expandAll("{@{a|b}|c} {x|y}", m_options, 100)->prompts, QStringList({"a x", "a y", "b x", "b y"}));
     }
 };
 

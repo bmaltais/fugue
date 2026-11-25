@@ -19,7 +19,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <cmath>
 #include <random>
+#include <unordered_set>
 #include <vector>
 
 #include "engine/pack_loader.h"
@@ -87,6 +89,9 @@ struct Node {
     bool hiOpen = false;
     QString sep = QStringLiteral(", ");
     std::vector<Option> options;
+    std::vector<double> weights;    // of the options, and their running sums: summed once, here
+    std::vector<double> cumulative;
+    bool plain = false;             // no option holds anything that makes a choice
     std::vector<std::pair<QString, QString>> params; // wildcard parameters
     bool immediate = false;
     bool keep = false;
@@ -339,6 +344,16 @@ private:
             break;
         }
         --m_depth;
+        double sum = 0;
+        node.plain = true;
+        for (const Option &option : node.options) {
+            node.weights.push_back(option.weight);
+            sum += option.weight;
+            node.cumulative.push_back(sum);
+            for (const Node &part : option.seq->nodes)
+                if (part.kind != Node::Kind::Literal)
+                    node.plain = false;
+        }
         return node;
     }
 
@@ -784,6 +799,7 @@ struct Collection {
     QList<Entry> entries;
     std::vector<double> weights;
     std::vector<double> cumulative;
+    bool plain = true; // no line holds a variant, wildcard, variable or wrap
 };
 using CollectionP = std::shared_ptr<const Collection>;
 
@@ -837,6 +853,9 @@ public:
             collection->weights.push_back(e.weight);
             sum += e.weight;
             collection->cumulative.push_back(sum);
+            if (e.text.contains(QLatin1Char('{')) || e.text.contains(QStringLiteral("__")) || e.text.contains(QLatin1Char('$')) ||
+                e.text.contains(QLatin1Char('%')))
+                collection->plain = false;
         }
         collection->entries = std::move(out);
         m_cache.insert(name, collection);
@@ -975,12 +994,14 @@ private:
 class Chooser {
 public:
     virtual ~Chooser() = default;
-    // An index below `arity`, by weights when given.
-    virtual int pick(int arity, const std::vector<double> *weights, Sampler sampler) = 0;
-    // An index by cumulative weights (a wildcard's lines, summed once), `cum.size()` long.
-    virtual int pickCumulative(const std::vector<double> &cum, Sampler sampler) = 0;
+    // Called with the number of steps a pick costs beyond the one the caller charged.
+    std::function<void(qint64)> work;
+    // An index by cumulative weights (a variant's or wildcard's options, summed once), `cum.size()`
+    // long. `plain`: no option opens further choices, so a ~ or @ pick may be drawn again at every
+    // prompt of an enumeration.
+    virtual int pickCumulative(const std::vector<double> &cum, Sampler sampler, bool plain) = 0;
     // `k` different indexes below `n`, in the order they are used.
-    virtual std::vector<int> many(int n, int k, const std::vector<double> &weights) = 0;
+    virtual std::vector<int> many(int n, int k, const std::vector<double> &weights, const std::vector<double> &cum) = 0;
     // A number from lo to hi.
     virtual int range(int lo, int hi) = 0;
 };
@@ -989,31 +1010,8 @@ class Random {
 public:
     explicit Random(quint64 seed) : m_gen(seed) {}
     void reseed(quint64 seed) { m_gen.seed(seed); }
-    quint64 next() { return m_gen(); }
     double unit() { return double(m_gen() >> 11) * (1.0 / 9007199254740992.0); }
     int below(int n) { return int(m_gen() % quint64(n)); }
-
-    int weighted(int arity, const std::vector<double> *weights) {
-        if (!weights)
-            return below(arity);
-        double total = 0;
-        for (double w : *weights)
-            total += w;
-        if (!(total > 0))
-            raise(QStringLiteral("Every option has weight 0, so none can be picked."));
-        double u = unit() * total;
-        int last = 0;
-        for (int k = 0; k < arity; ++k) {
-            const double w = (*weights)[size_t(k)];
-            if (w <= 0)
-                continue;
-            last = k;
-            if (u < w)
-                return k;
-            u -= w;
-        }
-        return last;
-    }
 
     int cumulative(const std::vector<double> &cum) {
         const double total = cum.empty() ? 0 : cum.back();
@@ -1024,31 +1022,33 @@ public:
         return at == cum.end() ? int(cum.size()) - 1 : int(at - cum.begin());
     }
 
-    // `k` picks without replacement; the total is kept as the picks go (each pick is one pass over
-    // the weights, which the caller has charged to the step limit).
-    std::vector<int> without(int n, int k, std::vector<double> weights) {
+    // `k` different indexes by weight, as the order of picks one after another without putting back.
+    // A few of many: draw and skip repeats (each draw a binary search). Else every option gets the
+    // key log(u)/w and the k largest are taken (Efraimidis and Spirakis), one pass over the options.
+    std::vector<int> without(int n, int k, const std::vector<double> &weights, const std::vector<double> &cum,
+                             const std::function<void(qint64)> &work) {
         std::vector<int> out;
-        double total = 0;
-        for (double w : weights)
-            total += w;
-        for (int j = 0; j < k && total > 0; ++j) {
-            double u = unit() * total;
-            int chosen = -1;
-            for (int i = 0; i < n; ++i) {
-                const double w = weights[size_t(i)];
-                if (w <= 0)
-                    continue;
-                chosen = i;
-                if (u < w)
-                    break;
-                u -= w;
+        if (qint64(k) * 4 <= n) {
+            std::unordered_set<int> got;
+            for (qint64 tries = 0; int(out.size()) < k && tries < 20LL * k + 100; ++tries) {
+                const int c = cumulative(cum);
+                if (got.insert(c).second)
+                    out.push_back(c);
             }
-            if (chosen < 0)
-                break;
-            out.push_back(chosen);
-            total -= weights[size_t(chosen)];
-            weights[size_t(chosen)] = 0;
+            if (int(out.size()) == k)
+                return out;
+            out.clear();
         }
+        if (work)
+            work(n);
+        std::vector<std::pair<double, int>> keyed;
+        for (int i = 0; i < n; ++i)
+            if (weights[size_t(i)] > 0)
+                keyed.emplace_back(std::log(std::max(unit(), 1e-300)) / weights[size_t(i)], i);
+        const size_t take = std::min(size_t(k), keyed.size());
+        std::partial_sort(keyed.begin(), keyed.begin() + take, keyed.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+        for (size_t i = 0; i < take; ++i)
+            out.push_back(keyed[i].second);
         return out;
     }
 
@@ -1059,17 +1059,14 @@ private:
 class RandomChooser : public Chooser {
 public:
     RandomChooser(quint64 seed) : m_random(seed), m_cycle(seed) {}
-    int pick(int arity, const std::vector<double> *weights, Sampler sampler) override {
-        if (sampler == Sampler::Cyclic)
-            return int(m_cycle % quint64(arity));
-        return m_random.weighted(arity, weights);
-    }
-    int pickCumulative(const std::vector<double> &cum, Sampler sampler) override {
+    int pickCumulative(const std::vector<double> &cum, Sampler sampler, bool) override {
         if (sampler == Sampler::Cyclic)
             return int(m_cycle % quint64(cum.size()));
         return m_random.cumulative(cum);
     }
-    std::vector<int> many(int n, int k, const std::vector<double> &weights) override { return m_random.without(n, k, weights); }
+    std::vector<int> many(int n, int k, const std::vector<double> &weights, const std::vector<double> &cum) override {
+        return m_random.without(n, k, weights, cum, work);
+    }
     int range(int lo, int hi) override { return lo + m_random.below(hi - lo + 1); }
 
 private:
@@ -1100,23 +1097,18 @@ public:
         return false;
     }
 
-    // A ~ or @ part is not enumerated, but it is part of the path: its value is recorded the first
-    // time the path is walked and repeated after, so a replay always meets the same parts.
-    int pick(int arity, const std::vector<double> *weights, Sampler sampler) override {
+    // A ~ or @ part is not enumerated, but it is part of the path of the choices after it. When no
+    // option of it opens choices (`plain`) it is drawn again at every prompt (@ from the prompt's
+    // place, ~ from the prompt's own random); else its first pick is kept for the whole walk, so the
+    // choices inside it are enumerated.
+    int pickCumulative(const std::vector<double> &cum, Sampler sampler, bool plain) override {
         if (sampler == Sampler::Cyclic)
-            return fixedChoice([&] { return int(m_ordinal % quint64(arity)); });
+            return fixedChoice(plain, [&] { return int(m_ordinal % quint64(cum.size())); });
         if (sampler == Sampler::Random)
-            return fixedChoice([&] { return m_random.weighted(arity, weights); });
-        return take(arity);
-    }
-    int pickCumulative(const std::vector<double> &cum, Sampler sampler) override {
-        if (sampler == Sampler::Cyclic)
-            return fixedChoice([&] { return int(m_ordinal % quint64(cum.size())); });
-        if (sampler == Sampler::Random)
-            return fixedChoice([&] { return m_random.cumulative(cum); });
+            return fixedChoice(plain, [&] { return m_random.cumulative(cum); });
         return take(int(cum.size()));
     }
-    std::vector<int> many(int n, int k, const std::vector<double> &) override {
+    std::vector<int> many(int n, int k, const std::vector<double> &, const std::vector<double> &) override {
         std::vector<int> out;
         int last = -1;
         for (int j = 0; j < k; ++j) {
@@ -1146,11 +1138,15 @@ private:
         return 0;
     }
     template <typename F>
-    int fixedChoice(F make) {
+    int fixedChoice(bool plain, F make) {
         if (m_pos < m_tape.size()) {
-            if (!m_tape[m_pos].fixed)
+            Step &step = m_tape[m_pos];
+            if (!step.fixed)
                 raise(QStringLiteral("The template does not expand the same way twice."));
-            return m_tape[m_pos++].chosen;
+            if (plain)
+                step.chosen = make();
+            ++m_pos;
+            return step.chosen;
         }
         const int value = make();
         m_tape.push_back({value, 1, true});
@@ -1176,7 +1172,12 @@ struct Var {
 class Evaluator {
 public:
     Evaluator(const Options &options, Wildcards &wildcards, Chooser &chooser, QHash<QString, SeqP> &parsed)
-        : m_options(options), m_wildcards(wildcards), m_chooser(chooser), m_parsed(parsed) {}
+        : m_options(options), m_wildcards(wildcards), m_chooser(chooser), m_parsed(parsed) {
+        m_chooser.work = [this](qint64 steps) {
+            if (m_workSeq)
+                charge(*m_workSeq, m_workPos, steps);
+        };
+    }
 
     QString run(const Seq &top) {
         m_vars.clear();
@@ -1193,6 +1194,8 @@ private:
     QHash<QString, Var> m_vars;
     QStringList m_chain;
     qint64 m_steps = 0;
+    const Seq *m_workSeq = nullptr;
+    int m_workPos = 0;
 
     [[noreturn]] void fail(const Seq &seq, int pos, const QString &message, const QString &hint = {}) const {
         raise(QStringLiteral("%1 (%2).").arg(message, seq.src->where(pos)), hint);
@@ -1332,7 +1335,7 @@ private:
 
     QString evalWildcardPick(const Seq &seq, const Node &node, int depth) {
         const CollectionP collection = collectionOf(seq, node);
-        const int at = m_chooser.pickCumulative(collection->cumulative, node.sampler);
+        const int at = m_chooser.pickCumulative(collection->cumulative, node.sampler, collection->plain);
         return evalEntry(seq, node, collection->entries.at(at), depth);
     }
 
@@ -1342,13 +1345,10 @@ private:
         if (node.options.size() == 1 && node.options[0].seq->nodes.size() == 1 && node.options[0].seq->nodes[0].kind == Node::Kind::Wildcard)
             only = &node.options[0].seq->nodes[0];
         CollectionP collection;
-        std::vector<double> own;
         if (only)
             collection = collectionOf(*node.options[0].seq, *only);
-        else
-            for (const Option &option : node.options)
-                own.push_back(option.weight);
-        const std::vector<double> &weights = only ? collection->weights : own;
+        const std::vector<double> &weights = only ? collection->weights : node.weights;
+        const std::vector<double> &cumulative = only ? collection->cumulative : node.cumulative;
         const int n = int(weights.size());
         if (n == 0)
             return {};
@@ -1363,10 +1363,12 @@ private:
         if (count == 0)
             return {};
         if (count == 1)
-            return text(only ? m_chooser.pickCumulative(collection->cumulative, node.sampler) : m_chooser.pick(n, &weights, node.sampler));
-        charge(seq, node.pos, qint64(count) * n); // each pick without repeats is a pass over the options
+            return text(m_chooser.pickCumulative(cumulative, node.sampler, only ? collection->plain : node.plain));
+        charge(seq, node.pos, qint64(count) * 3); // a pick is a search; a pass over all the options is charged when it is needed
+        m_workSeq = &seq;
+        m_workPos = node.pos;
         QStringList parts;
-        for (const int k : m_chooser.many(n, count, weights))
+        for (const int k : m_chooser.many(n, count, weights, cumulative))
             parts << text(k);
         return parts.join(node.sep);
     }
