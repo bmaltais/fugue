@@ -163,10 +163,12 @@ private slots:
         QTRY_VERIFY(find(app.window, "aboutClose")->hasActiveFocus());
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app, "about"));
-        // The keys are the window's again: the next dialog hears its Escape.
+        // Wait for About's exit to end: when it does, the popup gives the focus back, and a dialog opened during the fade would lose
+        // it (#503). Then the keys are the window's again: the next dialog hears its Escape.
+        QTRY_VERIFY(!named(app, "about")->property("visible").toBool());
         QVERIFY(app.commands.trigger("app.shortcuts"));
         QTRY_VERIFY(isOpen(app, "help"));
-        QTRY_VERIFY(focusOnPopup(app, "help")); // under load the focus moves in after `opened`: the Escape must reach the popup
+        QTRY_VERIFY(focusOnPopup(app, "help"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app, "help"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

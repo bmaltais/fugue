@@ -14,8 +14,10 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QPointer>
 
 #include <algorithm>
+#include <memory>
 #include <optional>
 
 #include "cli/canvas_run.h"
@@ -245,19 +247,31 @@ bool mayRunOnHost(const ReadinessPlan &plan, const Document &document, Context &
         return false;
     QMap<QString, Description> answered;
     {
+        // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared
+        // state, never in this frame, and quits no loop.
+        struct Wait {
+            QMap<QString, Description> answered;
+            bool finished = false;
+            QPointer<QEventLoop> loop;
+        };
+        const auto wait = std::make_shared<Wait>();
         QEventLoop loop;
+        wait->loop = &loop;
         QTimer limit;
         limit.setSingleShot(true);
         QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
-        bool finished = false;
-        probePairedHelpers(instances.value(), [&](const QMap<QString, Description> &got) {
-            answered = got;
-            finished = true;
-            loop.quit();
+        probePairedHelpers(instances.value(), [wait](const QMap<QString, Description> &got) {
+            wait->answered = got;
+            wait->finished = true;
+            if (wait->loop)
+                wait->loop->quit();
         });
-        limit.start(12000); // a describe on a paired host gives up after 10 s
-        if (!finished)
+        limit.start(12000); // a describe on a paired host gives up after 10 s of silence
+        if (!wait->finished)
             loop.exec();
+        wait->loop = nullptr;
+        if (wait->finished)
+            answered = wait->answered;
     }
     for (const ProviderInstance &instance : instances.value()) {
         if (!instance.enabled || !isPairedHelper(instance))
