@@ -150,8 +150,8 @@ Popup {
         height: 26 * pop.u
         radius: pop.look.params.cornerWell * pop.look.unit
         color: pop.look.well
-        border.width: chosen || activeFocus ? 2 : 1
-        border.color: chosen || activeFocus ? pop.look.accent : pop.look.hairline
+        border.width: chosen || (activeFocus && FocusInput.keyboard) ? 2 : 1
+        border.color: chosen || (activeFocus && FocusInput.keyboard) ? pop.look.accent : pop.look.hairline
         opacity: enabled ? 1 : 0.5
         activeFocusOnTab: true
         Accessible.role: Accessible.Button

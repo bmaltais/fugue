@@ -24,10 +24,8 @@ Item {
     property real step: 2 * look.unit
     readonly property bool row: axis === "row"
     readonly property bool lit: mouse.pressed || mouse.containsMouse || keyFocus
-    // The focus a press gives draws nothing; only Tab's does (KitSegmented).
-    property bool pressFocus: false
-    onActiveFocusChanged: if (!activeFocus) pressFocus = false
-    readonly property bool keyFocus: activeFocus && !pressFocus
+    // The focus a press gives draws nothing; only the keyboard's does (FocusInput, the app's :focus-visible).
+    readonly property bool keyFocus: activeFocus && FocusInput.keyboard
     readonly property bool pressed: mouse.pressed
     // The words, for a border that is not between two areas (the App view's inputs panel, AppPage.qml).
     property string name: row ? qsTr("Border between the areas side by side") : qsTr("Border between the areas one over the other")
@@ -79,11 +77,7 @@ Item {
         hoverEnabled: true
         preventStealing: true
         cursorShape: handle.row ? Qt.SplitHCursor : Qt.SplitVCursor
-        onPressed: {
-            if (!handle.activeFocus)
-                handle.pressFocus = true
-            handle.forceActiveFocus(Qt.MouseFocusReason)
-        }
+        onPressed: handle.forceActiveFocus(Qt.MouseFocusReason)
         onPositionChanged: mouseEvent => {
             if (!pressed)
                 return

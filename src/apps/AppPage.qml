@@ -407,7 +407,7 @@ Rectangle {
                     radius: height / 2
                     color: !enabled ? Qt.alpha(page.look.accent, 0.35) : runTap.pressed ? Qt.darker(page.look.accent, 1.15)
                          : runHover.hovered ? Qt.lighter(page.look.accent, 1.08) : page.look.accent
-                    border.width: activeFocus ? 2 : 0
+                    border.width: activeFocus && FocusInput.keyboard ? 2 : 0
                     border.color: page.look.accentForeground
                     enabled: page.appView.canRun
                     activeFocusOnTab: enabled

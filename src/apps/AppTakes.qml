@@ -52,7 +52,7 @@ ListView {
         height: strip.size
         radius: strip.look.params.cornerWell * strip.look.unit
         color: strip.look.kitChip
-        border.width: modelData.shown || (strip.activeFocus && ListView.isCurrentItem) ? 2 : 0
+        border.width: modelData.shown || (strip.activeFocus && FocusInput.keyboard && ListView.isCurrentItem) ? 2 : 0
         border.color: strip.look.accent
         Accessible.role: Accessible.Button
         Accessible.name: qsTr("Take %1").arg(strip.appView.takes.length - index)
