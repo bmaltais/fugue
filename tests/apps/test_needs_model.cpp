@@ -86,6 +86,18 @@ private slots:
         QCOMPARE(changed.size(), 2);
     }
 
+    // #493: the paired host cannot be asked whether it has a model, so a row stays, and says whose copy the run would use.
+    void aModelThatMayBeOnThePairedHostStaysAndSaysSo() {
+        NeedsModel needs;
+        ReadinessPlan plan = modelsPlan();
+        plan.models[0].onHost = QStringLiteral("gx10");
+        needs.setPlan(plan);
+        QCOMPARE(needs.items().size(), 2);
+        QVERIFY(needs.items().at(0).toMap().value("detail").toString().contains("on gx10 if it has it"));
+        QVERIFY(!needs.items().at(1).toMap().value("detail").toString().contains("gx10"));
+        QVERIFY(needs.items().at(0).toMap().value("canDownload").toBool()); // still downloadable here
+    }
+
     void aPackRowComesFirstAndDownloadAllOpensTheSheetForTheYes() {
         NeedsModel needs;
         needs.setPlan(withPack(modelsPlan()));

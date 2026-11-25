@@ -1625,6 +1625,24 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   models are missing here and a paired helper is configured (the app is then runnable: `app run` does not stop at the missing models,
   and the host answers `model_missing` itself when it does not have them either). Not the same as the omarchy hosts' models
   (8.7), which are chosen by the model's name.
+- **Refused up front, and served from the cache (#491, #492).**
+  - *A run that cannot succeed on the host is refused before any node runs* (`fugue app run`; the App view's Needs panel shows the same
+    lines). `remoteRunProblems` (`engine/remote_placement.*`) reads the document: the nodes that hold a missing model's handle, and every
+    node that reads from them, are the nodes that need it; each provider node among them is refused with `model_missing`, naming the
+    node, when it is pinned (its own pin, else the workflow's) to an instance that runs on this machine ("Node enc is pinned to desk, which
+    runs on this machine, and the model m.safetensors it needs is not here"), or when what the host offers is known and lacks the node's
+    capability ("... the paired host gx10 does not offer text.encode"). The hint says to get the model here (`prepare`, Get ready) or to
+    unpin the node. What the host offers is what it said the last time it answered `describe`, kept in `<state>/paired_helpers.json` by
+    instance name and address (the scheduler's describe and the App view's probe write it); with nothing kept the host answers for itself
+    at the run, as before. `fugue app info` has the lines as `host_problems` and does not say "Runs on". With no paired helper, nothing
+    changes.
+  - *The host down, and the node could never go there:* when the host does not answer but it never offered the node's capability (what it
+    last said), the node is chosen the ordinary way and its own provider reports the `model_missing`, not `provider_unreachable`; a host
+    never heard from is still named.
+  - *The host down, and the result already made there:* a result made on the host is in the cache under its engine id (`sdcpp@gx10`) and
+    model, which only its `describe` tells. With the host not answering, the scheduler asks for a stand-in selection from what it last said
+    (engine id, model handles) and looks the key up in the cache: a hit is served (`node.cached`, nothing runs, `run.json` records no
+    "remote"); a miss is the `provider_unreachable` of the host being gone. Nothing ever runs from the remembered description.
 - Memory: a job on a paired host is not on this machine's GPU lane and Fugue does not measure this machine's
   memory for it (9.2). The host reports its free memory in `describe` (`free_memory_bytes`), which is shown,
   not compared with a node's estimate; the host frees its own least recently used contexts before a load and
@@ -3375,12 +3393,16 @@ a plan with a pack opens the sheet for the one yes, as does a pack row's button.
 panel clears by itself when a refresh finds the app ready. Keys: Tab reaches Download all first, then each row's buttons.
 
 **Runs on a host (#395, epic #397).** When the app's models are not on this machine and the paired helper (8.7) answers, the form
-shows a quiet line above Run, "Runs on gx10" (`appRunsOn`; nothing for a local run), and the Needs panel stops asking to download the
-models the host has (its plan keeps the pack rows). The helper is asked once for the shown tab (`probePairedHelper`, `describe`,
+shows a quiet line above Run, "Runs on gx10" (`appRunsOn`; nothing for a local run), and the Needs panel marks the model rows as the host's to have (below). The helper is asked once for the shown tab (`probePairedHelper`, `describe`,
 10 s at most), again when another tab is shown; one that does not answer leaves the form as it was, with its Needs rows. The run goes
 where the scheduler puts it (8.7, "Where a node runs when its model is not here"): a host that has gone, with no copy of the models
 here, ends the run with the error "The model files are not on this machine, and the paired host gx10 is not answering." in the form's
 error line and Details, like any run error; with a copy here the run is local. Choosing a host or a mesh peer is #203's, not this.
+The helper cannot say which models it has (`describe` lists no model of a helper that takes its files in the job, and the protocol has no
+other question for it), so the Needs panel keeps every model row and marks each "on gx10 if it has it" (the Download still works here); a
+host that does not have the model answers `model_missing` at the run (#493). When the host cannot take a node of the app (pinned to a
+provider on this machine, or it does not offer the node's capability, 8.7), the form does not say "Runs on", and the panel names the
+node and why as a line without an action (#491); the host is asked again when another tab is shown.
 
 ### 12.18 An app as its own application (#398, epic #397)
 

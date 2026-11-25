@@ -323,6 +323,8 @@ public:
             candidate.instance = entry.instance;
             if (!entry.provider)
                 candidate.instance.enabled = false;
+            if (candidate.instance.enabled)
+                candidate.remembered = rememberedPairedHelper(candidate.instance);
             m_candidates.append(candidate);
         }
         if (needsProviders)
@@ -428,6 +430,8 @@ private:
                 if (!self)
                     return;
                 self->m_candidates[i].description = description;
+                if (description.ok() && isPairedHelper(self->m_candidates[i].instance))
+                    rememberPairedHelper(self->m_candidates[i].instance, description.value());
                 if (--self->m_describing == 0)
                     self->advance();
             });
@@ -549,6 +553,7 @@ private:
         // The provider checks come before anything that depends on every input being
         // known, so that validate reports them (8.5) for a node with a randomized seed
         // or an input linked to a node that has not run.
+        std::optional<Errors> hostGone; // set when only the cache may serve this node, with the error of the host being gone
         if (n.providerKernel) {
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
@@ -556,7 +561,15 @@ private:
             // A node that takes its model files in the job and whose files are not here can only run on a paired host (#395).
             if (requirement.model.isEmpty() && modelFilesElsewhere(n))
                 requirement.modelsElsewhere = true;
-            const Result<Selection> selection = selectProvider(m_candidates, requirement);
+            Result<Selection> selection = selectProvider(m_candidates, requirement);
+            // A paired host that is not answering may still have made this node's result already (#492): the cache is asked with the
+            // engine id it had when it last answered, and only a hit is served. Anything else is the error of the host being gone.
+            if (!selection && selection.errors().first().code == QLatin1String("provider_unreachable")) {
+                if (Result<Selection> remembered = selectFromMemory(requirement); remembered) {
+                    hostGone = selection.errors();
+                    selection = remembered;
+                }
+            }
             if (!selection) {
                 if (!m_dry)
                     return fail(n, selection.error());
@@ -595,7 +608,7 @@ private:
             }
         }
         if (unknown)
-            return stale(n);
+            return hostGone ? giveUp(n, *hostGone) : stale(n);
         if (!n.providerKernel && !n.kernel && !m_dry) {
             return fail(n, nodeError(QStringLiteral("internal"),
                                      QStringLiteral("No kernel is registered for node type %1.").arg(n.type->id)));
@@ -607,7 +620,7 @@ private:
         parts.packVersion = n.type->packVersion;
         if (!n.type->deterministic) {
             if (m_dry)
-                return stale(n);
+                return hostGone ? giveUp(n, *hostGone) : stale(n);
             parts.run = runId();
         }
         n.key = cacheKey(parts);
@@ -616,9 +629,42 @@ private:
             m_dry ? m_env.cache->peek(n.key, *m_env.hashes) : m_env.cache->lookup(n.key, usedBy(n), *m_env.hashes);
         if (cached)
             return hit(n, *cached, NodeState::Cached);
+        if (hostGone)
+            return giveUp(n, *hostGone);
         if (m_dry)
             return stale(n);
         n.phase = Phase::Ready;
+    }
+
+    // The paired host is gone and the cache has nothing for the node: its error, as a run reports it, or as a warning under validate.
+    void giveUp(NodeRun &n, const Errors &errors) {
+        if (!m_dry)
+            return fail(n, errors.first());
+        for (Error warning : errors) {
+            warning.severity = Error::Severity::Warning;
+            warning.node = n.path;
+            m_outcome.errors.append(warning);
+        }
+        stale(n);
+    }
+
+    // Selection again with a paired helper that does not answer taken for what it last said (rememberedPairedHelper), accepted only
+    // when that picks a paired helper: the engine id and the model it would have used, to ask the cache for a result it made.
+    Result<Selection> selectFromMemory(const Requirement &requirement) const {
+        QList<Candidate> candidates = m_candidates;
+        bool any = false;
+        for (Candidate &candidate : candidates) {
+            if (candidate.instance.enabled && !candidate.description.ok() && candidate.remembered) {
+                candidate.description = Result<Description>(*candidate.remembered);
+                any = true;
+            }
+        }
+        if (!any)
+            return Result<Selection>(makeError(QStringLiteral("provider_unreachable"), QString()));
+        Result<Selection> selection = selectProvider(candidates, requirement);
+        if (selection && selection->sharesFilesystem)
+            return Result<Selection>(makeError(QStringLiteral("provider_unreachable"), QString()));
+        return selection;
     }
 
     // What the node's kernel can tell before a run (NodeKernel::check), as warnings.

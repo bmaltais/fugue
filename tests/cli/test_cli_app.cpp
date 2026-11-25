@@ -325,6 +325,49 @@ private slots:
         QCOMPARE(fugue({"app", "run", "unsourced.fugue", "--json"}).code(), QString("app_not_ready")); // no helper: refused as before
     }
 
+    // #491: the run is refused up front, naming the node, when the paired helper cannot take it: a node pinned to a provider on this
+    // machine, or a node whose capability the host did not offer when it last answered.
+    void aRunTheHostCannotTakeIsRefusedNamingTheNode() {
+        QByteArray staged = kSampled;
+        staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"save\":");
+        write(path("work/staged.fugue"), staged);
+        QByteArray pinned = staged;
+        pinned.replace("\"version\": \"1.0.0\", \"inputs\": {\"model\"", "\"version\": \"1.0.0\", \"provider\": \"desk\", \"inputs\": {\"model\"");
+        write(path("work/pinned.fugue"), pinned);
+        write(path("root/config/fugue/providers.json"),
+              "{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"},"
+              " {\"name\": \"gx10\", \"type\": \"fugue-helper\", \"address\": \"http://gx10.invalid:8787\", \"key\": \"k\"}]}");
+
+        // Nothing is known of what the host offers: it answers for itself, as before.
+        QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+        // Pinned to a provider on this machine: refused, naming the node, with the prepare hint.
+        const Outcome info = fugue({"app", "info", "pinned.fugue", "--json"});
+        QVERIFY(!info.data().contains("runs_on"));
+        QCOMPARE(info.data().value("host_problems").toArray().first().toObject().value("node").toString(), QString("enc"));
+        const Outcome refused = fugue({"app", "run", "pinned.fugue", "--json"});
+        QCOMPARE(refused.code(), QString("model_missing"));
+        QVERIFY2(refused.error().value("message").toString().contains("Node enc is pinned to desk"), refused.out);
+        QCOMPARE(refused.error().value("node").toString(), QString("enc"));
+        QVERIFY(refused.error().value("hint").toString().contains("prepare"));
+
+        // The host last offered images only: it could never serve a text.encode node.
+        write(path("root/state/fugue/paired_helpers.json"),
+              "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}");
+        QVERIFY(!fugue({"app", "info", "staged.fugue", "--json"}).data().contains("runs_on"));
+        const Outcome noCapability = fugue({"app", "run", "staged.fugue", "--json"});
+        QCOMPARE(noCapability.code(), QString("model_missing"));
+        QVERIFY2(noCapability.error().value("message").toString().contains("does not offer text.encode"), noCapability.out);
+        write(path("root/state/fugue/paired_helpers.json"),
+              "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"text.encode\"]}}");
+        QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+
+        // No paired helper configured: nothing changes (not ready, as before).
+        write(path("root/config/fugue/providers.json"), "{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"}]}");
+        QCOMPARE(fugue({"app", "run", "pinned.fugue", "--json"}).code(), QString("app_not_ready"));
+        QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
+        QVERIFY(QFile::remove(path("root/state/fugue/paired_helpers.json")));
+    }
+
     // `app export` (#394, spec 11.5): the bundle is the package's zip, read back with the package reader.
     void exportWritesABundleWithItsSampleFilesAndRefusesWhatItCannotCarry() {
         const QByteArray sampled = kSampled;

@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include "engine/provider.h"
 
@@ -70,6 +71,13 @@ bool isPairedHelper(const ProviderInstance &instance);
 // The first enabled paired helper's name. Empty when there is none.
 QString pairedHelperName(const QList<ProviderInstance> &instances);
 
+// What a paired helper last said in `describe`, kept in <stateDir>/paired_helpers.json by the instance's name and address: its engine id
+// (which is in every cache key made on it) and the capabilities it offered. A host that is down cannot be asked either, and a result
+// that was made on it stays in the cache under that engine id (#492); the capabilities say that it could never serve some node (#491).
+// Nothing is written when it is the same as before. Only a paired helper is remembered.
+void rememberPairedHelper(const ProviderInstance &instance, const Description &description);
+std::optional<Description> rememberedPairedHelper(const ProviderInstance &instance);
+
 // Asks the paired helper (pairedHelperName of the configured instances) to describe itself: `done` gets its name when it answers,
 // empty when none is configured or it does not answer (a describe on a paired host gives up after 10 s). Called once, from the event
 // loop. `make` makes the provider (createProvider; a test gives a fake).
@@ -87,6 +95,9 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
 struct Candidate {
     ProviderInstance instance;
     Result<Description> description{Description{}};
+    // A paired helper that does not answer now: what it said the last time it did (rememberedPairedHelper), so selection can
+    // tell whether it could ever serve a node (#491) and the cache can be asked for its results (#492). Never used to run a job.
+    std::optional<Description> remembered;
 };
 
 // What a provider node needs.

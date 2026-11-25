@@ -12,10 +12,12 @@
 #include <algorithm>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
+#include <QSaveFile>
 #include <QSet>
 #include <QTimer>
 #include <QUrl>
@@ -434,6 +436,53 @@ QString pairedHelperName(const QList<ProviderInstance> &instances) {
     return {};
 }
 
+namespace {
+
+QString pairedMemoPath() { return stateDir() + QStringLiteral("/paired_helpers.json"); }
+
+} // namespace
+
+void rememberPairedHelper(const ProviderInstance &instance, const Description &description) {
+    if (!isPairedHelper(instance) || description.engine.isEmpty())
+        return;
+    // By capability, with each model's handle (empty for a helper that takes its files in the job): the handle is in the cache key.
+    QJsonObject capabilities;
+    for (const CapabilityOffer &offer : description.capabilities) {
+        QJsonArray models;
+        for (const OfferedModel &model : offer.models)
+            models.append(model.handle);
+        capabilities.insert(offer.capability, QJsonObject{{"models", models}});
+    }
+    const QJsonObject entry{{"address", instance.address}, {"engine", description.engine}, {"capabilities", capabilities}};
+    QFile file(pairedMemoPath());
+    QJsonObject all;
+    if (file.open(QIODevice::ReadOnly))
+        all = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    if (all.value(instance.name).toObject() == entry)
+        return;
+    all.insert(instance.name, entry);
+    QDir().mkpath(QFileInfo(file).path());
+    QSaveFile out(pairedMemoPath());
+    if (out.open(QIODevice::WriteOnly)) {
+        out.write(QJsonDocument(all).toJson(QJsonDocument::Compact));
+        out.commit();
+    }
+}
+
+std::optional<Description> rememberedPairedHelper(const ProviderInstance &instance) {
+    if (!isPairedHelper(instance))
+        return std::nullopt;
+    QFile file(pairedMemoPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return std::nullopt;
+    const QJsonObject entry = QJsonDocument::fromJson(file.readAll()).object().value(instance.name).toObject();
+    if (entry.value("address").toString() != instance.address || entry.value("engine").toString().isEmpty())
+        return std::nullopt; // another host now
+    // The describe reply's shape, with the engine id as it was made (no host is added to it again).
+    return parseDescription(QJsonObject{{"engine", entry.value("engine")}, {"capabilities", entry.value("capabilities")}}, {}, {});
+}
+
 void probePairedHelper(const QList<ProviderInstance> &instances, std::function<void(const QString &host)> done,
                        std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make) {
     const QString name = pairedHelperName(instances);
@@ -448,7 +497,9 @@ void probePairedHelper(const QList<ProviderInstance> &instances, std::function<v
         return;
     }
     const std::shared_ptr<Provider> held = provider.value(); // alive until it has answered
-    held->describe([held, name, done = std::move(done)](const Result<Description> &described) {
+    held->describe([held, name, remember = *instance, done = std::move(done)](const Result<Description> &described) {
+        if (described.ok())
+            rememberPairedHelper(remember, described.value()); // what the host offers, for the check before a run (#491)
         done(described.ok() ? name : QString());
         // Not the last owner from inside the provider's own reply (it would delete the reply it is in), as model_offers does.
         QTimer::singleShot(0, [held] {});
@@ -510,6 +561,9 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
             // A paired helper that does not answer: say so, not the model_missing of a machine that never had the files.
             for (const Candidate &candidate : candidates) {
                 if (!candidate.instance.enabled || candidate.description.ok() || !isPairedHelper(candidate.instance))
+                    continue;
+                // A host that could never serve this node is not why it fails (#491): the node's own model_missing is.
+                if (candidate.remembered && !candidate.remembered->offer(requirement.capability))
                     continue;
                 const QString why = candidate.description.errors().isEmpty() ? QString()
                                                                              : candidate.description.errors().first().message;

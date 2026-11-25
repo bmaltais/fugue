@@ -8,6 +8,7 @@
 #include "engine/fake_provider.h"
 #include "engine/helper_provider.h"
 #include "engine/omarchy_provider.h"
+#include "engine/paths.h"
 #include "engine/providers.h"
 #include "omarchy_fixture.h"
 
@@ -552,6 +553,41 @@ private slots:
         Requirement requirement = wants("image.generate");
         requirement.modelsElsewhere = true;
         QCOMPARE(selectProvider(candidates, requirement)->instance, QStringLiteral("This machine"));
+    }
+
+    // #491: with the host down, one that could never offer the node's capability is not why it fails: the node's own model_missing is.
+    void aGoneHelperThatCouldNeverServeTheNodeIsNotTheReason() {
+        QList<Candidate> candidates = localAndHost(false);
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        candidates[1].remembered = candidates[0].description.value(); // it last offered image.generate
+        QCOMPARE(selectProvider(candidates, requirement).errors().first().code, QStringLiteral("provider_unreachable"));
+        candidates[1].remembered->capabilities = {CapabilityOffer{QStringLiteral("text.generate"), {model("any")}}};
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(chosen); // the ordinary choice, whose own provider answers model_missing when the files are not there
+        QCOMPARE(chosen->instance, QStringLiteral("This machine"));
+        candidates[1].remembered.reset(); // never heard from it: the host is named
+        QCOMPARE(selectProvider(candidates, requirement).errors().first().code, QStringLiteral("provider_unreachable"));
+    }
+
+    // #492: what the host last said is kept by name and address, and only for a paired helper.
+    void whatAPairedHelperLastSaidIsKeptByNameAndAddress() {
+        QFile::remove(stateDir() + QStringLiteral("/paired_helpers.json"));
+        ProviderInstance host = localAndHost(true)[1].instance;
+        const Description said = localAndHost(true)[1].description.value();
+        QVERIFY(!rememberedPairedHelper(host));
+        rememberPairedHelper(host, said);
+        const std::optional<Description> back = rememberedPairedHelper(host);
+        QVERIFY(back);
+        QCOMPARE(back->engine, said.engine);
+        QVERIFY(back->offer("image.generate"));
+        QVERIFY(!back->sharesFilesystem);
+        host.address = QStringLiteral("http://other.example:8787"); // another host under the name
+        QVERIFY(!rememberedPairedHelper(host));
+        ProviderInstance local = localAndHost(true)[0].instance;
+        rememberPairedHelper(local, said);
+        QVERIFY(!rememberedPairedHelper(local));
+        QFile::remove(stateDir() + QStringLiteral("/paired_helpers.json"));
     }
 
     void modelFilesElsewhereWithNoPairedHelperKeepTheOldAnswer() {
