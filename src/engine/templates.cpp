@@ -420,6 +420,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             t.source = sourceOf(t.id, about, problems);
             t.app = appOf(t, about, *document, entry.isDir(), problems);
             t.models = document->models();
+            t.providerModels = document->providerModels();
             t.families = modelFamilies(t.models);
             if (entry.isDir()) // not a loose .fugue file: its folder is the person's own
                 t.carriedPacks = carriedPacksOf(t.id, t.folder, document->requirements, problems);

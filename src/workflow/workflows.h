@@ -167,7 +167,7 @@ public:
     // missing models that have a source (as downloadOffer), else empty. A check: no model file is read.
     // Each also says where its models are (#164, engine/model_places.h): `ready` (every model
     // is on this machine or answering from a paired host; true with no models), `local`, `hosts`
-    // and `offlineHosts` (host names). A host's models are those the last loadHostModels() found.
+    // `offlineHosts` (host names) and `clouds` (names of the off-machine provider instances that offer a model, never a guess). A host's models are those the last loadHostModels() found.
     Q_INVOKABLE QVariantList templates() const;
     // Whether a template of templates() satisfies what was typed in the Templates window's search
     // (word starts over title, description, category, tags, id, source, families; `tag:`, `source:`, `family:`).

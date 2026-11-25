@@ -214,6 +214,9 @@ struct Document {
     // The `models` refreshRequirements() writes: every resource handle with a hash in a literal,
     // once per hash, sorted by hash, with the `source` and `size` `requires` records for that hash.
     QJsonArray models() const;
+    // The models a provider serves that the document names: every resource handle in a literal with a name and no hash (2.5: a
+    // handle without a hash names a provider's model, such as fal-ai/flux/schnell), once per resource and name, in order.
+    QJsonArray providerModels() const;
 };
 
 } // namespace fugue

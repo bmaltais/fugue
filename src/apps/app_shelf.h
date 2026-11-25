@@ -4,7 +4,7 @@
 // nothing open, and for File > Apps…. No window and no QML in it: value in (the templates, landing), change signal out.
 //
 //  - The catalog is Workflows::templates(): one list for the Templates window and the shelf, filtered to the apps (`app`),
-//    never a second catalog. Each app is a card: {id, title, summary, preview, ready, needs, detail, local, hosts, offlineHosts}.
+//    never a second catalog. Each app is a card: {id, title, summary, preview, ready, needs, detail, local, hosts, offlineHosts, clouds}.
 //    `ready` is the one word the card shows; `needs` says what is missing in few words ("Needs 2.1 GB and 1 pack"), empty when
 //    ready; `kind`, `video` (the moving preview), `own`, `inherited`, `canRename`, `bookmarked`; `detail` is the Templates window's own longer line, for a tooltip. Ready apps come first, the catalog's order kept.
 //  - Search, bookmarks, Duplicate and Rename (#470): `query` narrows `shown` live (every word must be in the title, the summary

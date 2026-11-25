@@ -230,7 +230,7 @@ Popup {
                 font.pixelSize: menu.look.captionSize
                 bottomPadding: 6
             }
-            // Where the model lives (#164): this machine or a paired host, left of the detail.
+            // Where the model lives (#164): this machine, a paired host or a cloud service, left of the detail.
             PlaceBadge {
                 id: placeBadge
                 objectName: "widgetMenuPlace"
@@ -239,7 +239,8 @@ Popup {
                 anchors.rightMargin: 4
                 y: (menu.rowHeight - height) / 2
                 look: menu.look
-                kind: entry.modelData.place === "host" ? "host" : "local"
+                kind: entry.modelData.place === "host" ? "host" : entry.modelData.place === "cloud" ? "cloud" : "local"
+                services: entry.modelData.placeHost !== undefined ? [entry.modelData.placeHost] : []
                 hosts: entry.modelData.placeHost !== undefined ? [entry.modelData.placeHost] : []
                 offline: entry.modelData.dim === true && entry.modelData.place === "host"
             }

@@ -55,7 +55,8 @@ QVariantMap AppShelf::cardFor(const QVariantMap &templ) {
             {"detail", templ.value("status")},
             {"local", templ.value("local")},
             {"hosts", templ.value("hosts")},
-            {"offlineHosts", templ.value("offlineHosts")}};
+            {"offlineHosts", templ.value("offlineHosts")},
+            {"clouds", templ.value("clouds")}};
 }
 
 QVariantList AppShelf::cardsFrom(const QVariantList &templates, const QStringList &bookmarks) {

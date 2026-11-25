@@ -265,9 +265,9 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     t.kitHeroPill = QColor(0, 0, 0, 112);
     t.kitHeroPillHover = QColor(0, 0, 0, 153);
     t.kitWell = mix(t.kitGroup, QColor(Qt::black), light ? .03 : .12); // a field set in a group: a shade darker, not a step
-    t.kitFrost = QColor(255, 255, 255, 51);      // frosted glass over a picture: white tint at 20%, hover 30%, edge 28%
+    t.kitFrost = QColor(255, 255, 255, 51);      // frosted glass over a picture: white tint at 20%, hover 30%, edge 12%
     t.kitFrostHover = QColor(255, 255, 255, 77);
-    t.kitFrostEdge = QColor(255, 255, 255, 71);
+    t.kitFrostEdge = QColor(255, 255, 255, 31); // 12%: at 28% the edge glowed like the accent surrounds the owner asked away (2026-11-25)
     return t;
 }
 

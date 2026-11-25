@@ -2,10 +2,15 @@
 //
 // Seam: placesOf, summarizePlaces and placeGlyphs over the models the providers listed.
 
+#include <QDir>
+#include <QFile>
 #include <QJsonObject>
 #include <QtTest>
 
+#include <optional>
+
 #include "engine/model_places.h"
+#include "engine/providers.h"
 
 using namespace fugue;
 
@@ -122,6 +127,65 @@ private slots:
     void glyphsAreOnePerPlace() {
         QCOMPARE(placeGlyphs(true, false), QStringList{"monitor"});
         QCOMPARE(placeGlyphs(false, true), QStringList{"server"});
+        QCOMPARE(placeGlyphs(false, false, true), QStringList{"cloud"});
+        QCOMPARE(placeGlyphs(true, true, true), (QStringList{"monitor", "server", "cloud"}));
+    }
+
+    // The placement is the engine's: a model the instances offer, listed with the instance that runs off this machine.
+    // Scratch providers.json (the test environment's config home), never the person's.
+    QList<ListedModel> offeredBy(const QByteArray &providers, const QJsonObject &model) {
+        QDir().mkpath(QFileInfo(providersPath()).absolutePath());
+        QFile file(providersPath());
+        if (providers.isEmpty()) {
+            QFile::remove(providersPath());
+        } else if (file.open(QIODevice::WriteOnly)) {
+            file.write(providers);
+            file.close();
+        }
+        std::optional<QList<ListedModel>> listed;
+        listOfferedModels({}, {}, [&](QList<ListedModel> models) { listed = models; });
+        [&] { QTRY_VERIFY(listed.has_value()); }();
+        QFile::remove(providersPath());
+        QList<ListedModel> same;
+        for (const ListedModel &m : listed.value_or(QList<ListedModel>()))
+            if (sameModel(model, m.handle))
+                same << m;
+        return same;
+    }
+    void aFalModelWithAFalInstanceIsCloudNeverLocal() {
+        const QJsonObject model{{"resource", "fugue/image-model"}, {"name", "fal-ai/flux/schnell"}};
+        const QList<ListedModel> offered = offeredBy(R"({"providers": [{"name": "fal.ai", "type": "fal", "key": "k"}]})", model);
+        QCOMPARE(offered.size(), 1);
+        QCOMPARE(offered.first().cloud, QStringLiteral("fal.ai"));
+        const ModelPlaces places = placesOf(offered.first().handle, false, offered);
+        QVERIFY(!places.local);
+        QVERIFY(places.hosts.isEmpty());
+        QCOMPARE(places.clouds, QStringList{"fal.ai"});
+        QVERIFY(places.available()); // it has its key
+        const TemplatePlaces t = summarizePlaces({places});
+        QCOMPARE(t.clouds, QStringList{"fal.ai"});
+        QVERIFY(t.ready);
+        QVERIFY(!t.local);
+    }
+    void aCloudInstanceWithoutItsKeyIsNamedButNotReady() {
+        const QJsonObject model{{"resource", "fugue/image-model"}, {"name", "fal-ai/flux/schnell"}};
+        const QList<ListedModel> offered = offeredBy(R"({"providers": [{"name": "fal.ai", "type": "fal"}]})", model);
+        const ModelPlaces places = placesOf(model, false, offered);
+        QCOMPARE(places.clouds, QStringList{"fal.ai"});
+        QVERIFY(!places.available());
+    }
+    void aLocalModelStaysLocalWithOrWithoutACloudInstance() {
+        const ModelPlaces places = placesOf(handle("a.gguf"), true, {});
+        QVERIFY(places.local);
+        QVERIFY(places.clouds.isEmpty());
+    }
+    void withNoInstanceThatOffersItThereIsNoBadge() {
+        const QJsonObject model{{"resource", "fugue/image-model"}, {"name", "fal-ai/flux/schnell"}};
+        QVERIFY(offeredBy({}, model).isEmpty()); // no providers.json: only this machine's omarchy, which has no such model
+        const ModelPlaces places = placesOf(model, false, {});
+        QVERIFY(places.clouds.isEmpty());
+        QVERIFY(!places.available());
+        QVERIFY(summarizePlaces({places}).clouds.isEmpty());
     }
 };
 
