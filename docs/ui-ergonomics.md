@@ -1333,3 +1333,10 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rules met: Primary (Yes the one accent fill, not the default: the question opens on No), Keys (Tab reaches Yes, Enter on it sends; Enter on No and Escape cancel the run wherever the focus is; the whole question works without a pointer), Destructive (nothing is removed; No only cancels the run), Gaps (3u between lines, 2u between answers, as every Question), Words ("Yes, send it" and "No, cancel the run" say what the answer does), Right-to-left (the content mirrors as every Question's), Floor (the mark uses `captionSize`, quiet, never over a chip: it sits above the card, the chips below).
 - Decision (changed after review, confirm): the focus opens on No, not on the primary Yes, because a stray Enter must never grant consent to send data off the machine; the primary stays visually Yes. Escape answers No instead of doing nothing, because the run is waiting on the answer and a closed question that left it waiting would hang the queue.
 - Not checked by a person: the question and the mark in a real window.
+
+### 2026-11-25 App view: the "…" menu opened as a 4px strip
+
+- Control: `src/canvas/widgets/WidgetMenu.qml` (`implicitWidth`), so the App view's `appMoreMenu` (`src/apps/AppStage.qml`).
+- Old: `WidgetMenu` had no width of its own; every caller set one except `appMoreMenu`, which opened as a 4px strip under `appMore` (owner, with a screenshot).
+- New: a caller that sets no width gets the widest entry's text and detail plus the row's insets, at least 32u. Callers that set a width keep it.
+- Rules met: Floor (the rows are the 28px WidgetMenu rows), Words (every entry reads whole, none elided), Learned place (it still opens under its chip and flips or shifts to stay in the window).

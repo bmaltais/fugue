@@ -34,6 +34,19 @@ Popup {
     readonly property var shown: filtered(entries, query)
     signal picked(var value)
 
+    // A caller that sets no `width` gets one that fits the widest entry (text, detail and the row's insets), never
+    // less than 32 units: without it the list has no width of its own and the menu opens as a 4px strip.
+    FontMetrics { id: rowFont; font.pixelSize: menu.look.labelSize }
+    implicitWidth: {
+        let widest = 0
+        for (const e of entries) {
+            if (e.separator === true)
+                continue
+            const detail = e.detail !== undefined && e.detail !== "" ? rowFont.advanceWidth(e.detail) + 12 : 0
+            widest = Math.max(widest, rowFont.advanceWidth(e.text ?? "") + detail)
+        }
+        return Math.ceil(Math.max(32 * look.unit, 8 + 12 + 6 + widest + 8 + 2 * padding + 8))
+    }
     readonly property real rowHeight: Math.round(look.textSize * 2)
     // An entry with a `thumbnail` (a file URL) shows it small at the left, in a taller row.
     readonly property real thumbHeight: Math.round(look.textSize * 3.2)
