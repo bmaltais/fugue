@@ -31,7 +31,7 @@ Item {
         title: qsTr("Open a workflow")
         fileMode: PortalFileDialog.OpenFiles
         currentFolder: App.workflows.suggestedFolder
-        nameFilters: [qsTr("Fugue workflows, packages and images with one (*.fugue *.fuguepack *.png *.webp)"), qsTr("All files (*)")]
+        nameFilters: [qsTr("Fugue workflows, packages, apps and images with one (*.fugue *.fuguepack *.fugueapp *.png *.webp)"), qsTr("All files (*)")]
         onAccepted: App.workflows.openUrls(selectedFiles)
     }
 
@@ -73,7 +73,13 @@ Item {
     Connections {
         target: App.workflows
         function onOpenDialogRequested() { openDialog.open() }
-        function onExportShareRequested() { exportDialog.open() }
+        function onExportShareRequested() {
+            // An app is shared as a bundle (#394), anything else as a package.
+            const app = App.workflows.shareSuffix() === "fugueapp"
+            exportDialog.defaultSuffix = app ? "fugueapp" : "fuguepack"
+            exportDialog.nameFilters = app ? [qsTr("Fugue apps (*.fugueapp)")] : [qsTr("Fugue packages (*.fuguepack)")]
+            exportDialog.open()
+        }
         function onExportCompiledRequested() { compiledDialog.open() }
         function onSaveAsRequested() { saveDialog.open() }
         function onCloseConfirmationRequested(index, title) {

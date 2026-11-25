@@ -10,6 +10,8 @@
 #include "engine/vips.h"
 
 #include <QBuffer>
+#include <QCryptographicHash>
+#include <QSaveFile>
 #include <cerrno>
 #include <QDateTime>
 #include <QDir>
@@ -406,7 +408,58 @@ bool startsLikeAnImage(const QString &path) {
 }
 } // namespace
 
-Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder) {
+Result<QString> storeMediaFile(const QString &path, const QString &folder, const FileRoots &roots) {
+    const QFileInfo info(path);
+    if (info.isSymLink() || !info.isFile())
+        return makeError(QStringLiteral("file_not_found"), QStringLiteral("%1 is not a file.").arg(path));
+    if (info.size() > maxImageBytes)
+        return makeError(QStringLiteral("value_out_of_range"),
+                         QStringLiteral("%1 is %2 MB; Fugue takes at most %3 MB.")
+                             .arg(info.fileName(), megabytes(info.size()), megabytes(maxImageBytes)));
+    QFile file(info.canonicalFilePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return makeError(QStringLiteral("permission_denied"),
+                         QStringLiteral("%1 cannot be read: %2.").arg(info.fileName(), file.errorString()));
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(&file);
+    const QString tail = QStringLiteral("-%1").arg(QString::fromLatin1(hash.result().toHex().left(10)))
+                         + (info.suffix().isEmpty() ? QString() : QLatin1Char('.') + info.suffix().toLower().left(12));
+    const QString name = safeStem(info.fileName()) + tail;
+    if (const Errors made = makeFolder(folder); hasErrors(made))
+        return made;
+    for (int n = 1;; ++n) {
+        const QString candidate = n == 1 ? name : QStringLiteral("%1-%2%3").arg(QFileInfo(name).completeBaseName()).arg(n).arg(info.suffix().isEmpty() ? QString() : QLatin1Char('.') + QFileInfo(name).suffix());
+        const QString there = QDir(folder).filePath(candidate);
+        if (QFileInfo(there).isSymLink())
+            continue;
+        const Result<QString> allowed = roots.checkWrite(there, QStringLiteral("file"));
+        if (!allowed)
+            return allowed.errors();
+        if (QFileInfo::exists(there)) {
+            // The same bytes again are the file already there (a regular file whose whole content is these).
+            QFile same(there);
+            if (QFileInfo(there).size() == info.size() && same.open(QIODevice::ReadOnly)) {
+                QCryptographicHash again(QCryptographicHash::Sha256);
+                again.addData(&same);
+                if (again.result() == hash.result())
+                    return allowed.value();
+            }
+            continue;
+        }
+        file.seek(0);
+        QSaveFile out(there);
+        if (!out.open(QIODevice::WriteOnly))
+            return makeError(QStringLiteral("permission_denied"), QStringLiteral("%1 cannot be written: %2.").arg(candidate, out.errorString()));
+        while (!file.atEnd())
+            if (out.write(file.read(1 << 20)) < 0)
+                return makeError(QStringLiteral("io_error"), QStringLiteral("%1 cannot be written: %2.").arg(candidate, out.errorString()));
+        if (!out.commit())
+            return makeError(QStringLiteral("io_error"), QStringLiteral("%1 cannot be written: %2.").arg(candidate, out.errorString()));
+        return allowed.value();
+    }
+}
+
+Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder, bool anyFile) {
     const QString root = canonicalPath(folder);
     if (root.isEmpty())
         return {};
@@ -417,10 +470,11 @@ Errors takeInputsFrom(Document &document, const Registry &registry, const QStrin
         const QString path = canonicalPath(value.literal().toString());
         if (path.isEmpty() || !isInside(path, root) || !QFileInfo(path).isFile())
             return;
-        // Only pictures are taken in; a video or a song a template ships stays where it is.
-        if (!startsLikeAnImage(path))
+        // Only pictures are taken in; a video or a song a template ships stays where it is, unless it is a bundle's (anyFile).
+        const bool image = startsLikeAnImage(path);
+        if (!image && !anyFile)
             return;
-        const Result<QString> stored = storeImageFile(path, inputsDir(), roots);
+        const Result<QString> stored = image ? storeImageFile(path, inputsDir(), roots) : storeMediaFile(path, inputsDir(), roots);
         if (stored)
             value = InputValue::literal(stored.value());
         else

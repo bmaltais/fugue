@@ -83,6 +83,7 @@ const char *helpText =
     "  canvas resize <id> --to <x>,<y>,<w>,<h> [--fill edge-blur|edge|gray|transparent] [--blur <px>]   (grow, shift or cut the canvas; the rectangle is in the old canvas's pixels)\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
     "  app list | app info <id|file> | app run <id|file> [--input <key>=<value>|<key>=@<file>]... [--out <dir>]   (an app: a workflow with an app block; prints the files it made)\n"
+    "  app export <id|file> <file.fugueapp>   (the app as a bundle: its packs and sample files in it, models as references)\n"
     "  cache status | cache clear [--kind results|thumbnails|runs|all] [--workflow <file>] [--node <id>]\n"
     "      [--older-than <age, 30d>] [--dry-run]\n"
     "  provider, command (later releases)\n"

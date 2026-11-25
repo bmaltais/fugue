@@ -31,6 +31,7 @@
 
 #include <QObject>
 #include <QSet>
+#include <QTemporaryDir>
 #include <QUndoStack>
 #include <QUrl>
 #include <QTimer>
@@ -156,6 +157,9 @@ public:
     // `fromPackage`: its folder goes away once it is open (openPackage), so an input still
     // naming a file in it (a file the sender lacked, or one not an image) keeps only the bare name.
     bool openTemplate(const Template &chosen, bool fromPackage = false);
+    // The suffix File > Export for sharing gives the shown workflow: `fugueapp` when it has an `app` block (an app bundle,
+    // #394), else `fuguepack`.
+    Q_INVOKABLE QString shareSuffix() const;
     // The templates for the Templates dialog, in TemplateLibrary::list()'s order, each a map:
     // id, title, description, category, categoryTitle, tags, preview (a file URL or empty),
     // own, missingModels (name, source, folder each), neededPacks (not installed, or at another version), and status, one line: what
@@ -333,6 +337,13 @@ signals:
     void tabColorRequested(int index);
 
 private:
+    // What openPackage hands openTemplate for the tab it makes (#394).
+    struct PendingPackage {
+        QString path;
+        std::shared_ptr<QTemporaryDir> unpacked;
+    };
+    PendingPackage m_pendingPackage;
+
     struct Tab {
         QString id;
         QString path;
@@ -345,6 +356,10 @@ private:
         std::unique_ptr<QUndoStack> undo; // while the tab is not shown
         QList<CarriedPack> carried; // the packs the template it was opened from carries (#118), else none
         QString templateFolder;     // the folder of the template it was opened from (not a package's, which is gone), else empty (#398)
+        // The package it was opened from (#394): its file, and while the tab lives the folder it was unpacked in when it carries
+        // packs, which the Get ready sheet reads them from (a package that carries none is unpacked only while it opens).
+        QString packagePath;
+        std::shared_ptr<QTemporaryDir> unpacked;
     };
 
     // Adds a tab and shows it. A current tab that is still an empty "Untitled" is replaced

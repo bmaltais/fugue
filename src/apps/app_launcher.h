@@ -32,6 +32,8 @@ class AppLauncher : public QObject {
     Q_PROPERTY(bool available READ available NOTIFY changed)
     // The app has an entry now.
     Q_PROPERTY(bool listed READ listed NOTIFY changed)
+    // The shown app is a package (a `.fugueapp` from a file) that is ready to run and not kept yet: Keep this app is offered (#394).
+    Q_PROPERTY(bool keepable READ keepable NOTIFY changed)
 
 public:
     using Spawn = std::function<bool(const QStringList &arguments)>;
@@ -42,11 +44,16 @@ public:
                 Spawn spawn = {}, QObject *parent = nullptr);
 
     bool available() const { return m_app.has_value(); }
-    bool listed() const { return m_app && m_entries.has(m_app->ref); }
+    bool listed() const { return m_app && m_entries.has(refOf()); }
+    bool keepable() const;
 
     // The window of an app opened by `--app`: that app, whatever the shown tab says.
     void setApp(const AppRef &app);
 
+    // "Keep this app" (#394): installs the package the shown app was opened from into the person's apps (the apps folder, as a
+    // template) and adds its launcher entry, so it starts by name from then on. Offered once the app is ready (the one Get ready
+    // sheet has run). The packs it carries were installed by that sheet; the folder keeps them too.
+    Q_INVOKABLE void keep();
     Q_INVOKABLE void add();
     Q_INVOKABLE void remove();
     // The full window, with the app's workflow in a tab (`fugue --edit <ref>`).
@@ -59,6 +66,8 @@ signals:
 
 private:
     void refresh();
+    // What the entry is for: the kept app's id once kept, else the app's own ref.
+    QString refOf() const { return m_kept.isEmpty() ? m_app->ref : m_kept; }
 
     AppView *m_view;
     Workflows *m_workflows;
@@ -69,6 +78,7 @@ private:
     std::optional<AppRef> m_app;
     std::optional<AppRef> m_fixed;
     QString m_candidate;
+    QString m_kept; // the template id of the shown package once kept
 };
 
 } // namespace fugue

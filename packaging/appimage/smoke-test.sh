@@ -28,7 +28,7 @@ echo "$version"
 say "the files inside: the example, the templates, the desktop entry, the MIME types"
 (cd "$work" && "$image" --appimage-extract 'usr/share/*' >/dev/null)
 share=$work/squashfs-root/usr/share
-for f in fugue/examples/demo.fugue fugue/templates/text-to-image/workflow.fugue applications/fugue.desktop mime/packages/fugue.xml icons/hicolor/256x256/apps/fugue.png; do
+for f in fugue/examples/demo.fugue fugue/templates/text-to-image/workflow.fugue applications/fugue.desktop applications/fugue-app.desktop mime/packages/fugue.xml icons/hicolor/256x256/apps/fugue.png; do
   [[ -f $share/$f ]] || fail "missing from the AppImage: usr/share/$f"
 done
 

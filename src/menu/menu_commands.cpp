@@ -54,7 +54,7 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Paste as new canvas"), {}, "app", "added"},
         // The Canvas view (#221): the picture of a canvas, its revisions and candidates; the window opens the dialog (CommandUi.qml).
         {"file.canvas-view", QT_TRANSLATE_NOOP("Command", "Canvas view: the picture, revisions, candidates, region"), QT_TRANSLATE_NOOP("Command", "Canvas…"), {}, "app", "added"},
-        {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .fuguepack with its images, local paths removed"),
+        {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .fuguepack (a .fugueapp for an app) with its images, local paths removed"),
          QT_TRANSLATE_NOOP("Command", "Export for sharing…"), {}, "app", "same"},
         {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),
          QT_TRANSLATE_NOOP("Command", "Export compiled graph…"), {}, "app", "same"},

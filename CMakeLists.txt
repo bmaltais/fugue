@@ -462,7 +462,7 @@ endforeach()
 # before it is packaged; a package installs the same files under /usr.
 include(GNUInstallDirs)
 install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES share/fugue.desktop share/fugue-app.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES share/fugue-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages RENAME fugue.xml)
 # The icon (one art, installed as `fugue` and `fugue-dark`), scalable and in the sizes a launcher asks for.
 install(DIRECTORY share/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
