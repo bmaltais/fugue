@@ -970,8 +970,8 @@ private slots:
         QCOMPARE(local->jobs().size(), 0);
     }
 
-    // #491: a host that could never serve the node (it did not offer its capability when it last answered) is not named; the
-    // node goes the ordinary way and its provider reports the model that is missing.
+    // #491: a host that could never serve the node (it did not offer its capability when it last answered) is not named: the node fails
+    // at selection with the model that is missing here, and no job is started on this machine to fail late.
     void aGoneHelperThatNeverOfferedTheCapabilityDoesNotHideTheMissingModel() {
         World world;
         addStagedType(world);
@@ -985,9 +985,35 @@ private slots:
         Run run(world.graph(stagedGraph(QJsonObject{{"resource", "fugue/lora"}, {"hash", sha256Of("not-anywhere")}, {"name", "not-anywhere.safetensors"}})),
                 world.folder(), world.environment());
         run.start();
-        QTRY_COMPARE(local->jobs().size(), 1); // it went to this machine, whose provider says model_missing
-        local->finish(local->jobs().first(), picture);
         QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().errors.first().code, QStringLiteral("model_missing"));
+        QCOMPARE(local->jobs().size(), 0);
+    }
+
+    // Memory stands in only for a choice the live host could not make differently: a host that offered several models would pick one now.
+    void aHelperThatOfferedSeveralModelsDoesNotAnswerFromTheCacheWhileDown() {
+        World world;
+        addStagedType(world);
+        world.provider("This machine", {"any"});
+        const auto helper = world.provider("gx10", {"a", "b"}, "http://gx10.example:8787");
+        world.providers.last().instance.type = QStringLiteral("fugue-helper");
+        Description description = imageDescription({"a", "b"}, "fake@gx10");
+        description.sharesFilesystem = false;
+        helper->setDescription(description);
+        const CompiledGraph graph = world.graph(stagedGraph(elsewhere()));
+        {
+            Run run(graph, world.folder(), world.environment());
+            run.start();
+            QTRY_COMPARE(helper->jobs().size(), 1);
+            helper->finish(helper->jobs().first(), picture);
+            QTRY_VERIFY(run.isFinished());
+        }
+        helper->setDescribeErrors({makeError("provider_unreachable", "cannot reach it: timed out.")});
+        Run again(graph, world.folder(), world.environment());
+        again.start();
+        QTRY_VERIFY(again.isFinished());
+        QCOMPARE(again.outcome().status, RunStatus::Failed);
+        QCOMPARE(again.outcome().errors.first().code, QStringLiteral("provider_unreachable"));
     }
 
     void aGoneHelperAndNoLocalCopyIsAClearErrorNotAHang() {

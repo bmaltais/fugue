@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFile>
 #include <QCoreApplication>
+#include <QEventLoop>
+#include <QTimer>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -234,14 +236,44 @@ bool mayRunOnHost(const ReadinessPlan &plan, const Document &document, Context &
         const std::shared_ptr<ProviderKernel> kernel = type ? context.kernels.provider(*type) : nullptr;
         return kernel ? kernel->requirement(*type, {}).capability : QString();
     };
-    for (const ProviderInstance &instance : instances.value())
-        if (instance.name == pairedHelperName(instances.value()))
-            if (const std::optional<Description> offered = rememberedPairedHelper(instance)) {
-                QStringList capabilities;
-                for (const CapabilityOffer &offer : offered->capabilities)
-                    capabilities << offer.capability;
-                placement.hostCapabilities = capabilities;
-            }
+    placement.registry = &context.registry;
+    // Pins decide without the host. Only when they pass is the host asked what it offers now (it may have gained a capability since it
+    // last answered: a refusal here never reaches the scheduler, which is what would update what is kept); what it last said stands
+    // in only for a host that does not answer.
+    problems = remoteRunProblems(document, plan, placement);
+    if (!problems.isEmpty())
+        return false;
+    QMap<QString, Description> answered;
+    {
+        QEventLoop loop;
+        QTimer limit;
+        limit.setSingleShot(true);
+        QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
+        bool finished = false;
+        probePairedHelpers(instances.value(), [&](const QMap<QString, Description> &got) {
+            answered = got;
+            finished = true;
+            loop.quit();
+        });
+        limit.start(12000); // a describe on a paired host gives up after 10 s
+        if (!finished)
+            loop.exec();
+    }
+    for (const ProviderInstance &instance : instances.value()) {
+        if (!instance.enabled || !isPairedHelper(instance))
+            continue;
+        std::optional<Description> offered;
+        if (answered.contains(instance.name))
+            offered = answered.value(instance.name);
+        else
+            offered = rememberedPairedHelper(instance);
+        if (!offered)
+            continue;
+        QStringList capabilities;
+        for (const CapabilityOffer &offer : offered->capabilities)
+            capabilities << offer.capability;
+        placement.hostCapabilities.insert(instance.name, capabilities);
+    }
     problems = remoteRunProblems(document, plan, placement);
     return problems.isEmpty();
 }

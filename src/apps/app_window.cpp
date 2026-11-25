@@ -54,24 +54,27 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // helper that takes its files in the job), so the rows of the models stay, marked as the host's if it has them (#493). A host
     // that cannot take a node leaves the rows and adds the node and why (`blocked`).
     const auto blocked = std::make_shared<Errors>();
-    view.setPlacementSource([&workflows, &canvas, needs, blocked, capabilityOf = std::move(capabilityOf)](std::function<void(const QString &)> done) {
+    view.setPlacementSource([&workflows, &canvas, registry = view.registry(), needs, blocked, capabilityOf = std::move(capabilityOf)](std::function<void(const QString &)> done) {
         const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-        probePairedHelper(instances ? instances.value() : QList<ProviderInstance>(),
-                          [&workflows, &canvas, needs, blocked, capabilityOf, instances = instances ? instances.value() : QList<ProviderInstance>(),
-                           done = std::move(done)](const QString &host) {
+        probePairedHelpers(instances ? instances.value() : QList<ProviderInstance>(),
+                           [&workflows, &canvas, registry, needs, blocked, capabilityOf, instances = instances ? instances.value() : QList<ProviderInstance>(),
+                            done = std::move(done)](const QMap<QString, Description> &answered) {
             blocked->clear();
+            QString host; // the first helper, in the user's order, that answered
+            for (const ProviderInstance &instance : instances)
+                if (host.isEmpty() && answered.contains(instance.name))
+                    host = instance.name;
             if (!host.isEmpty()) {
                 RemotePlacement placement;
                 placement.instances = instances;
                 placement.capabilityOf = capabilityOf;
-                for (const ProviderInstance &instance : instances)
-                    if (instance.name == host)
-                        if (const std::optional<Description> offered = rememberedPairedHelper(instance)) { // the probe has just written it
-                            QStringList capabilities;
-                            for (const CapabilityOffer &offer : offered->capabilities)
-                                capabilities << offer.capability;
-                            placement.hostCapabilities = capabilities;
-                        }
+                placement.registry = registry;
+                for (auto it = answered.cbegin(); it != answered.cend(); ++it) { // what each said just now, not a file read back
+                    QStringList capabilities;
+                    for (const CapabilityOffer &offer : it->capabilities)
+                        capabilities << offer.capability;
+                    placement.hostCapabilities.insert(it.key(), capabilities);
+                }
                 *blocked = remoteRunProblems(canvas.document(), workflows.readiness()->currentPlan(), placement);
             }
             if (!blocked->isEmpty())

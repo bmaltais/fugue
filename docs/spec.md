@@ -1665,21 +1665,24 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   (8.7), which are chosen by the model's name.
 - **Refused up front, and served from the cache (#491, #492).**
   - *A run that cannot succeed on the host is refused before any node runs* (`fugue app run`; the App view's Needs panel shows the same
-    lines). `remoteRunProblems` (`engine/remote_placement.*`) reads the document: the nodes that hold a missing model's handle, and every
-    node that reads from them, are the nodes that need it; each provider node among them is refused with `model_missing`, naming the
+    lines). `remoteRunProblems` (`engine/remote_placement.*`) reads the document the way the scheduler decides, per node: a node needs the
+    model when one of its own Resource inputs holds the missing handle, or is linked to a node that holds it through a Resource output (a
+    picture decoded from it does not carry it); each provider node among them is refused with `model_missing`, naming the
     node, when it is pinned (its own pin, else the workflow's) to an instance that runs on this machine ("Node enc is pinned to desk, which
-    runs on this machine, and the model m.safetensors it needs is not here"), or when what the host offers is known and lacks the node's
+    runs on this machine, and the model m.safetensors it needs is not here"), or when every paired helper that could take it (the one it is pinned to, else all) is known not to offer the node's
     capability ("... the paired host gx10 does not offer text.encode"). The hint says to get the model here (`prepare`, Get ready) or to
-    unpin the node. What the host offers is what it said the last time it answered `describe`, kept in `<state>/paired_helpers.json` by
-    instance name and address (the scheduler's describe and the App view's probe write it); with nothing kept the host answers for itself
+    unpin the node. What a host offers is what it says now: `fugue app run`/`info` and the App view describe every paired helper (10 s at
+    most) and never refuse from what was kept when it answers; what it said the last time it answered, kept in `<state>/paired_helpers.json` by
+    instance name and address (the scheduler's describe and the probes write it, one change at a time), stands in only for a host that does not answer; with nothing kept the host answers for itself
     at the run, as before. `fugue app info` has the lines as `host_problems` and does not say "Runs on". With no paired helper, nothing
     changes.
   - *The host down, and the node could never go there:* when the host does not answer but it never offered the node's capability (what it
-    last said), the node is chosen the ordinary way and its own provider reports the `model_missing`, not `provider_unreachable`; a host
-    never heard from is still named.
+    last said), selection fails at once with `model_missing` (the files are not here and the host did not offer it), not
+    `provider_unreachable` and no local job is started to fail late; a host never heard from is still named.
   - *The host down, and the result already made there:* a result made on the host is in the cache under its engine id (`sdcpp@gx10`) and
     model, which only its `describe` tells. With the host not answering, the scheduler asks for a stand-in selection from what it last said
-    (engine id, model handles) and looks the key up in the cache: a hit is served (`node.cached`, nothing runs, `run.json` records no
+    (engine id, whole model handles), only for a node that wants no property and one named model or a host that offered one model
+    (memory never picks a model the live host might not) and looks the key up in the cache: a hit is served (`node.cached`, nothing runs, `run.json` records no
     "remote"); a miss is the `provider_unreachable` of the host being gone. Nothing ever runs from the remembered description.
 - Memory: a job on a paired host is not on this machine's GPU lane and Fugue does not measure this machine's
   memory for it (9.2). The host reports its free memory in `describe` (`free_memory_bytes`), which is shown,

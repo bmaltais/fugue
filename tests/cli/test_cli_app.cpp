@@ -12,6 +12,8 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QtTest>
 
 #include "engine/share_package.h"
@@ -360,6 +362,40 @@ private slots:
         write(path("root/state/fugue/paired_helpers.json"),
               "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"text.encode\"]}}");
         QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+
+        // (A loopback address is no paired host, so 0.0.0.0, which reaches it.) The host now offers it (what was kept is stale): the run is not refused, and what the host said is kept again.
+        QProcess host;
+        const QString script = path("host.py");
+        write(script, "import http.server, json, sys\n"
+                      "class H(http.server.BaseHTTPRequestHandler):\n"
+                      "    def do_POST(self):\n"
+                      "        n = int(self.headers.get('Content-Length', 0)); self.rfile.read(n)\n"
+                      "        body = json.dumps({'protocol': 1, 'engine': 'sdcpp', 'shares_filesystem': False, 'host': 'gx10', 'capabilities': ['text.encode']}).encode()\n"
+                      "        self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)\n"
+                      "    def log_message(self, *a): pass\n"
+                      "http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n");
+        QTcpServer probe;
+        QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
+        const quint16 port = probe.serverPort();
+        probe.close();
+        host.start("python3", {script, QString::number(port)});
+        QVERIFY(host.waitForStarted());
+        const auto up = [port] {
+            QTcpSocket socket;
+            socket.connectToHost(QHostAddress::LocalHost, port);
+            return socket.waitForConnected(200);
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(up(), 5000);
+        write(path("root/config/fugue/providers.json"),
+              QStringLiteral("{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"}, {\"name\": \"gx10\", \"type\": \"fugue-helper\", "
+                             "\"address\": \"http://0.0.0.0:%1\", \"key\": \"k\"}]}").arg(port).toUtf8());
+        write(path("root/state/fugue/paired_helpers.json"),
+              QStringLiteral("{\"gx10\": {\"address\": \"http://0.0.0.0:%1\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}").arg(port).toUtf8());
+        const Outcome freshInfo = fugue({"app", "info", "staged.fugue", "--json"});
+        QCOMPARE(freshInfo.data().value("runs_on").toString(), QString("gx10"));
+        QVERIFY(fugue({"app", "run", "staged.fugue", "--json"}).code() != QString("model_missing"));
+        host.kill();
+        host.waitForFinished(2000);
 
         // No paired helper configured: nothing changes (not ready, as before).
         write(path("root/config/fugue/providers.json"), "{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"}]}");

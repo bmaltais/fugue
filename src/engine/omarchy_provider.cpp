@@ -611,7 +611,7 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
         requirement.capability = request.capability;
         requirement.model = request.model;
         requirement.nodePin = self->m_instance.name;
-        const auto chosen = selectProvider({Candidate{self->m_instance, Result<Description>(found->description)}}, requirement);
+        const auto chosen = selectProvider({Candidate{self->m_instance, Result<Description>(found->description), std::nullopt}}, requirement);
         if (!chosen.ok())
             return reply(Result<QString>(chosen.errors()));
         if (request.capability == kTextGenerate) {

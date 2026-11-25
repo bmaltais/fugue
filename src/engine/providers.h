@@ -8,6 +8,7 @@
 
 #include <QJsonObject>
 #include <QList>
+#include <QMap>
 #include <QString>
 
 #include <functional>
@@ -83,6 +84,12 @@ std::optional<Description> rememberedPairedHelper(const ProviderInstance &instan
 // loop. `make` makes the provider (createProvider; a test gives a fake).
 void probePairedHelper(const QList<ProviderInstance> &instances, std::function<void(const QString &host)> done,
                        std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make = {});
+
+// Asks every enabled paired helper to describe itself (10 s at most each, in parallel; a test gives `make`): `done` gets the descriptions
+// of those that answered, by instance name, once all have answered or given up. Each answer is remembered (rememberPairedHelper). Called
+// once, from the event loop.
+void probePairedHelpers(const QList<ProviderInstance> &instances, std::function<void(const QMap<QString, Description> &answered)> done,
+                        std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make = {});
 
 // Makes the provider an instance is a use of: omarchy, http and fugue-helper are compiled in (8.7);
 // any other type is a provider module (8.8) installed in `modulesRoot` (providerModulesDir() when

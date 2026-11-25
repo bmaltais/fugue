@@ -651,6 +651,13 @@ private:
     // Selection again with a paired helper that does not answer taken for what it last said (rememberedPairedHelper), accepted only
     // when that picks a paired helper: the engine id and the model it would have used, to ask the cache for a result it made.
     Result<Selection> selectFromMemory(const Requirement &requirement) const {
+        const Result<Selection> none(makeError(QStringLiteral("provider_unreachable"), QString()));
+        // Memory only stands in for a choice the live host could not make differently: a node that wants one named model, or any model
+        // of a capability the host offers one of, and no property that would pick among several.
+        if (!requirement.properties.isEmpty() || !requirement.preferred.isEmpty())
+            return none;
+        if (!requirement.model.isEmpty() && requirement.model.value("hash").toString().isEmpty())
+            return none;
         QList<Candidate> candidates = m_candidates;
         bool any = false;
         for (Candidate &candidate : candidates) {
@@ -660,10 +667,15 @@ private:
             }
         }
         if (!any)
-            return Result<Selection>(makeError(QStringLiteral("provider_unreachable"), QString()));
+            return none;
+        if (requirement.model.isEmpty())
+            for (const Candidate &candidate : std::as_const(candidates))
+                if (const CapabilityOffer *offer = candidate.remembered ? candidate.remembered->offer(requirement.capability) : nullptr;
+                    offer && offer->models.size() > 1)
+                    return none; // it said several: which one it would pick now is its own
         Result<Selection> selection = selectProvider(candidates, requirement);
         if (selection && selection->sharesFilesystem)
-            return Result<Selection>(makeError(QStringLiteral("provider_unreachable"), QString()));
+            return none;
         return selection;
     }
 
