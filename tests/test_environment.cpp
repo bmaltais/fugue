@@ -51,6 +51,15 @@ void isolateFromTheOwnersFiles() {
 }
 
 void isolateFromTheDesktop() {
+    // Never the owner's screen: a test binary run by hand (an agent taking grabs, someone trying one test) gets the
+    // offscreen platform as ctest does, and no display to reach (2026-11-24: grab runs from an agent's shell, whose
+    // QT_QPA_PLATFORM was the desktop's, put windows on the owner's screen). FUGUE_TEST_ON_SCREEN=1 asks for a real
+    // window on purpose.
+    if (qgetenv("FUGUE_TEST_ON_SCREEN") != "1") {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        qunsetenv("WAYLAND_DISPLAY");
+        qunsetenv("DISPLAY");
+    }
     qputenv("QT_QPA_PLATFORMTHEME", "generic");
     qputenv("QT_NO_XDG_DESKTOP_PORTAL", "1");
     // The FFmpeg backend of Qt Multimedia dumps every file it opens to stderr (main.cpp turns it off in the app).

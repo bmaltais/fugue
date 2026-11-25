@@ -28,6 +28,11 @@ minutes for `engine/registry.h`). For a static build, like the package's, run `F
 in a fresh `build/` (the choice is cached in the folder). A test that calls a library a library only links
 privately (libarchive, zlib, Vulkan) must link it itself, as `test_paint_file` does.
 
+A test never opens a window on the desktop: every test binary, run by ctest or by hand (`build/test_x`, a grab
+run with a shots folder), takes the offscreen platform and has no display to reach (`tests/test_environment.cpp`).
+Set `FUGUE_TEST_ON_SCREEN=1` only to watch a test on purpose. `build/fugue` itself has no such guard: start it
+offscreen (`QT_QPA_PLATFORM=offscreen`) unless a person asked to see it.
+
 `bin/build` and `bin/test` share one machine-wide lock, so only one big build or run happens at a time.
 A new build folder uses Ninja and lld when they are installed (a folder made with Make keeps Make; delete
 `build/` to move). The window's resources are built once for all tests, so a `Main.qml` edit rebuilds in
