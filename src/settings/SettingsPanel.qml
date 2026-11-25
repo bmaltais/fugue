@@ -23,6 +23,8 @@ Popup {
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     property string page: "general" // a page id (pages)
+    // Another page starts at its top, not where the last one was scrolled to (owner, 2026-11-25).
+    onPageChanged: scroller.contentY = 0
     // Why the last change was refused, until the next change.
     property string error: ""
 

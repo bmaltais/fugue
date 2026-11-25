@@ -556,6 +556,7 @@ private slots:
                 if (flick->property("contentHeight").isValid() && scroll_checks::barOf(flick) && flick->isVisible())
                     page = flick;
             QVERIFY(page);
+            QCOMPARE(page->property("contentY").toReal(), 0.0); // the page before was scrolled; this one starts at its top
             QQuickItem *bar = scroll_checks::barOf(page);
             if (!bar->isVisible())
                 continue;
@@ -564,6 +565,7 @@ private slots:
             QVERIFY2(under.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index, under)));
             const QString failed = scroll_checks::scrollsByWheelAndThumb(app.window, page);
             QVERIFY2(failed.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index, failed)));
+            page->setProperty("contentY", page->property("contentHeight").toReal() - page->height()); // left at its foot
         }
         QVERIFY(overflowing > 0);
     }
