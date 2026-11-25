@@ -346,6 +346,7 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
         if (model.source.isEmpty()) {
             plan.problems << problem(QStringLiteral("model_missing"), QStringLiteral("The model %1 has no source to download from.").arg(name),
                                      QStringLiteral("Put it in %1.").arg(model.folder));
+            plan.unobtainable << model.handle;
             continue;
         }
         ReadinessModel row;
@@ -365,6 +366,7 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
                     e.severity = Error::Severity::Warning;
                     plan.problems << e;
                 }
+                plan.unobtainable << model.handle;
                 continue;
             }
             row.host = target->source.host();

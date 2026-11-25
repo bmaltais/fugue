@@ -12,10 +12,13 @@
 #include <algorithm>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
+#include <QMutex>
+#include <QSaveFile>
 #include <QSet>
 #include <QTimer>
 #include <QUrl>
@@ -434,6 +437,61 @@ QString pairedHelperName(const QList<ProviderInstance> &instances) {
     return {};
 }
 
+namespace {
+
+QString pairedMemoPath() { return stateDir() + QStringLiteral("/paired_helpers.json"); }
+
+// paired_helpers.json is read, changed and written back: one change at a time in this process (the scheduler's thread, the window's probe).
+QMutex &memoLock() {
+    static QMutex mutex;
+    return mutex;
+}
+
+} // namespace
+
+void rememberPairedHelper(const ProviderInstance &instance, const Description &description) {
+    if (!isPairedHelper(instance) || description.engine.isEmpty())
+        return;
+    // By capability, with each model's handle (empty for a helper that takes its files in the job): the handle is in the cache key.
+    QJsonObject capabilities;
+    for (const CapabilityOffer &offer : description.capabilities) {
+        QJsonArray models;
+        for (const OfferedModel &model : offer.models)
+            models.append(QJsonObject{{"handle", model.handle}}); // the whole handle, nested parts included: it is in the cache key
+        capabilities.insert(offer.capability, QJsonObject{{"models", models}});
+    }
+    const QJsonObject entry{{"address", instance.address}, {"engine", description.engine}, {"capabilities", capabilities}};
+    QMutexLocker lock(&memoLock());
+    QFile file(pairedMemoPath());
+    QJsonObject all;
+    if (file.open(QIODevice::ReadOnly))
+        all = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    if (all.value(instance.name).toObject() == entry)
+        return;
+    all.insert(instance.name, entry);
+    QDir().mkpath(QFileInfo(file).path());
+    QSaveFile out(pairedMemoPath());
+    if (out.open(QIODevice::WriteOnly)) {
+        out.write(QJsonDocument(all).toJson(QJsonDocument::Compact));
+        out.commit();
+    }
+}
+
+std::optional<Description> rememberedPairedHelper(const ProviderInstance &instance) {
+    if (!isPairedHelper(instance))
+        return std::nullopt;
+    QMutexLocker lock(&memoLock());
+    QFile file(pairedMemoPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return std::nullopt;
+    const QJsonObject entry = QJsonDocument::fromJson(file.readAll()).object().value(instance.name).toObject();
+    if (entry.value("address").toString() != instance.address || entry.value("engine").toString().isEmpty())
+        return std::nullopt; // another host now
+    // The describe reply's shape, with the engine id as it was made (no host is added to it again).
+    return parseDescription(QJsonObject{{"engine", entry.value("engine")}, {"capabilities", entry.value("capabilities")}}, {}, {});
+}
+
 void probePairedHelper(const QList<ProviderInstance> &instances, std::function<void(const QString &host)> done,
                        std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make) {
     const QString name = pairedHelperName(instances);
@@ -448,11 +506,53 @@ void probePairedHelper(const QList<ProviderInstance> &instances, std::function<v
         return;
     }
     const std::shared_ptr<Provider> held = provider.value(); // alive until it has answered
-    held->describe([held, name, done = std::move(done)](const Result<Description> &described) {
+    held->describe([held, name, remember = *instance, done = std::move(done)](const Result<Description> &described) {
+        if (described.ok())
+            rememberPairedHelper(remember, described.value()); // what the host offers, for the check before a run (#491)
         done(described.ok() ? name : QString());
         // Not the last owner from inside the provider's own reply (it would delete the reply it is in), as model_offers does.
         QTimer::singleShot(0, [held] {});
     });
+}
+
+void probePairedHelpers(const QList<ProviderInstance> &instances, std::function<void(const QMap<QString, Description> &answered)> done,
+                        std::function<Result<std::shared_ptr<Provider>>(const ProviderInstance &)> make) {
+    struct Pending {
+        int left = 0;
+        QMap<QString, Description> answered;
+        std::function<void(const QMap<QString, Description> &)> done;
+    };
+    const auto pending = std::make_shared<Pending>();
+    pending->done = std::move(done);
+    QList<ProviderInstance> asked;
+    for (const ProviderInstance &instance : instances)
+        if (instance.enabled && isPairedHelper(instance))
+            asked.append(instance);
+    pending->left = int(asked.size());
+    if (asked.isEmpty()) {
+        QTimer::singleShot(0, [pending] { pending->done({}); });
+        return;
+    }
+    const auto answer = [pending] {
+        if (--pending->left == 0)
+            pending->done(pending->answered);
+    };
+    for (const ProviderInstance &instance : std::as_const(asked)) {
+        const Result<std::shared_ptr<Provider>> provider = make ? make(instance) : createProvider(instance);
+        if (!provider) {
+            QTimer::singleShot(0, [answer] { answer(); });
+            continue;
+        }
+        const std::shared_ptr<Provider> held = provider.value();
+        held->describe([held, instance, pending, answer](const Result<Description> &described) {
+            if (described.ok()) {
+                rememberPairedHelper(instance, described.value()); // what the host offers now, for the checks before a run (#491)
+                pending->answered.insert(instance.name, described.value());
+            }
+            answer();
+            QTimer::singleShot(0, [held] {});
+        });
+    }
 }
 
 Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {
@@ -508,9 +608,15 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
             usable = remote;
         } else {
             // A paired helper that does not answer: say so, not the model_missing of a machine that never had the files.
+            QStringList neverOffered; // hosts that did not offer the capability when they last answered
             for (const Candidate &candidate : candidates) {
                 if (!candidate.instance.enabled || candidate.description.ok() || !isPairedHelper(candidate.instance))
                     continue;
+                // A host that could never serve this node is not why it fails (#491).
+                if (candidate.remembered && !candidate.remembered->offer(requirement.capability)) {
+                    neverOffered.append(candidate.instance.name);
+                    continue;
+                }
                 const QString why = candidate.description.errors().isEmpty() ? QString()
                                                                              : candidate.description.errors().first().message;
                 return failed(makeError(
@@ -520,6 +626,12 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
                     QStringLiteral("Start the helper on %1, or get the model files onto this machine (Get ready).")
                         .arg(candidate.instance.name)));
             }
+            if (!neverOffered.isEmpty())
+                return failed(makeError(
+                    QStringLiteral("model_missing"),
+                    QStringLiteral("The model files are not on this machine, and the paired host %1 did not offer %2 when it last answered.")
+                        .arg(neverOffered.join(QStringLiteral(", ")), requirement.capability),
+                    QStringLiteral("Get the model files onto this machine (Get ready).")));
         }
     }
     return choose(usable, requirement, {}, disabled, unreachable);

@@ -91,6 +91,8 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
         QStringList parts;
         if (!m.host.isEmpty())
             parts << tr("from %1").arg(m.host);
+        if (!m.onHost.isEmpty())
+            parts << tr("on %1 if it has it").arg(m.onHost);
         if (m.deferred)
             parts << (m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom));
         add({{"kind", "model"}, {"key", "model:" + m.name}, {"name", m.name}, {"id", QString()}, {"hash", m.entry.value("hash").toString()},
