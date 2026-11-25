@@ -180,11 +180,11 @@ private slots:
         QCOMPARE(fixture.api.requests().size(), 1);
         QCOMPARE(posts.first().headers.value("authorization"), "Bearer " + kKey);
         QVERIFY(posts.first().headers.value("content-type").startsWith("application/json"));
-        // schnell takes a prompt, steps (at most 8) and a seed.
-        QCOMPARE(parse(posts.first().body), (QJsonObject{{"prompt", "a dot"}, {"steps", 8}, {"seed", 7}}));
+        // schnell takes a prompt and steps (at most 8), and no seed: the real service refuses one (owner's run, 2026-11-25).
+        QCOMPARE(parse(posts.first().body), (QJsonObject{{"prompt", "a dot"}, {"steps", 8}}));
         QCOMPARE(readAll(result.outputs.value("image").toObject().value("path").toString()), kPng);
         QCOMPARE(result.used.value("engine").toString(), QStringLiteral("cloudflare@") + kSchnell);
-        QCOMPARE(result.used.value("seed").toInt(), 7);
+        QVERIFY(!result.used.contains("seed")); // none was sent, so none is reported
         QCOMPARE(result.used.value("width").toInt(), 1); // the picture's own size
         QVERIFY(!json(result.used).contains(kKey));
         QVERIFY(fixture.other.requests().isEmpty());
@@ -255,9 +255,10 @@ private slots:
         auto provider = fixture.provider();
         JobResult result;
         const qint64 seed = (1LL << 40) + 5;
-        QCOMPARE(run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}, {"seed", double(seed)}}), &result).state, QStringLiteral("done"));
-        const qint64 sent = parse(fixture.api.requestsTo("POST", runPath(kSchnell).toLatin1()).last().body).value("seed").toDouble();
-        QCOMPARE(sent, seed % 2147483647);
+        // A FLUX.2 model takes a seed (schnell takes none): the multipart field carries the reduced one.
+        QCOMPARE(run(*provider, fixture.request("image.generate", kKlein, {{"prompt", "x"}, {"seed", double(seed)}}), &result).state, QStringLiteral("done"));
+        const qint64 sent = seed % 2147483647;
+        QVERIFY(fixture.api.requestsTo("POST", runPath(kKlein).toLatin1()).last().body.contains("name=\"seed\"\r\n\r\n" + QByteArray::number(sent) + "\r\n"));
         QVERIFY(sent < (1LL << 31));
         QCOMPARE(qint64(result.used.value("seed").toDouble()), sent);
     }

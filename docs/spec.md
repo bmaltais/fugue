@@ -1923,7 +1923,7 @@ pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `plac
 
 | Model id | Offers | Published price | One 1 MP picture |
 | --- | --- | --- | --- |
-| `@cf/black-forest-labs/flux-1-schnell` | `image.generate` (JSON: `prompt`, `steps` up to 8, default 4, `seed`; no size field is documented) | 4.80 neurons per 512x512 tile, 9.60 per step | 57.6 neurons, about $0.0006 |
+| `@cf/black-forest-labs/flux-1-schnell` | `image.generate` (JSON: `prompt`, `steps` up to 8, default 4; no seed: the service answers 400 "Additional or unevaluated properties '/seed'", seen on the owner's first real run 2026-11-25; no size field is documented) | 4.80 neurons per 512x512 tile, 9.60 per step | 57.6 neurons, about $0.0006 |
 | `@cf/black-forest-labs/flux-2-klein-4b` | `image.generate`, `image.edit` (up to 4 reference pictures) | 26.05 neurons per output tile, 5.37 per input tile | 104 neurons, about $0.0012 |
 | `@cf/black-forest-labs/flux-2-klein-9b` | `image.generate`, `image.edit` (up to 4) | 1363.64 neurons per first MP, 181.82 per further or input MP | 1364 neurons, $0.015 |
 | `@cf/black-forest-labs/flux-2-dev` | `image.generate`, `image.edit` (up to 4) | 37.50 neurons per output tile per step, 18.75 per input tile per step | 150 neurons a step, about $0.0016 a step |
@@ -1964,8 +1964,7 @@ pictures, `image.edit`. It is off-machine ([8.2](#82-provider-instances)): `plac
   (medium-high: their request fields were not read); reference pictures are scaled to fit 511x511 (medium-high: the limit is in the FLUX.2 [dev] changelog, not in every model page); a seed is reduced modulo 2^31-1 (medium: no range is documented) and the one sent is what the run record holds; no retry of a call (high: neurons are billed per run).
 - **Not checked against the real service**: no Cloudflare token was at hand. The tests use a fake API on the loopback whose answers
   follow Cloudflare's documentation; the exact REST envelope for the image models, the error codes (5007, the neuron-limit message),
-  whether the partner FLUX.2 models draw on the free allocation, and `seed` for schnell (used in Cloudflare's examples, not in its
-  parameter list) are unconfirmed; a real run with a token is pending.
+  and whether the partner FLUX.2 models draw on the free allocation are unconfirmed (schnell's `seed` is settled: refused); a real run with a token is pending.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:
