@@ -1479,12 +1479,14 @@ A provider instance is a configured use of a provider module, stored in
   description and, for an off-machine service, a privacy line. A preset is a starting point only: the instance written is the one
   typing it in would write, and adding the same preset again names the second "fal.ai 2". "Get a key" opens `keyUrl` in the browser,
   the only network action of the page. **Cloud services:** fal.ai (`fal`, no address: the type's own `https://queue.fal.run`,
-  keys at fal.ai/dashboard/keys), OpenAI (`http`, `https://api.openai.com/v1`), Together AI (`http`, `https://api.together.ai/v1`),
+  keys at fal.ai/dashboard/keys), Google Gemini (`gemini`, no address: the type's own `https://generativelanguage.googleapis.com`,
+  keys at aistudio.google.com/apikey), OpenAI (`http`, `https://api.openai.com/v1`), Together AI (`http`, `https://api.together.ai/v1`),
   OpenRouter (`http`, `https://openrouter.ai/api/v1`). Each says "Sends your pictures and prompts to <name>" under its title.
   **Your own machines:** a local OpenAI-compatible server (`http`, `http://localhost:1234/v1`, no key: LM Studio, llama.cpp, vLLM),
   an Omarchy host (`omarchy`, address to fill), a Fugue helper on another machine (`fugue-helper`, address and key to fill).
   A card of a `fal` instance shows its key, `image_models` and `store_io`; its address, `rest_address`, `timeout_s` and `poll_ms`
   sit under an Advanced disclosure.
+  A card of a `gemini` instance shows its key and `image_models`; its address and `timeout_s` sit under Advanced.
 - **Local or remote is only the address.** It is never a property of a graph.
 - Keys live only here. They are never written into a workflow, an export or an embedded graph.
 - **Where an instance runs, and consent (#404).** Fugue is local-first: pictures, masks, audio and prompts leave the machine only
@@ -1494,7 +1496,7 @@ A provider instance is a configured use of a provider module, stored in
   (Tailscale) address or a `.local`, `.internal` or `.ts.net` name: the test the `http` provider applies to the pictures a
   service may make Fugue fetch, 8.7, plus the tailnet's names, so there is one idea of "local"), or *off-machine* (any
   other type at any other address: a cloud service). The address is the one the provider really uses: an http provider
-  module's default `address` (8.8) when the instance has none, and `https://queue.fal.run` for a `fal` instance. Nothing is asked for the first two: the person typed the
+  module's default `address` (8.8) when the instance has none, `https://queue.fal.run` for a `fal` instance and `https://generativelanguage.googleapis.com` for a `gemini` instance. Nothing is asked for the first two: the person typed the
   address in and it is their own network. **The limit:** a stdio provider module is a program that runs here, so it counts as
   this machine even if its program calls a cloud API itself; Fugue cannot see that, and the module's description should say it.
   - **The question.** Before a run whose plan would run a node on an off-machine instance (the nodes that are not cached, found
@@ -1580,11 +1582,12 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | `omarchy` | The model servers omarchy-local-ai runs, on this machine or a paired host. | M0 |
 | `http` | A generic endpoint: OpenAI-compatible images and text, and the stable-diffusion.cpp native API. | M4 |
 | `fal` | fal.ai's image models, from a key alone: `image.generate`, `image.edit` and inpainting with a mask ([the `fal` provider](#87-shipped-providers), #407). | M6 |
+| `gemini` | Google's Gemini image models (Nano Banana), from a key alone: `image.generate` and `image.edit` with pictures ([the `gemini` provider](#87-shipped-providers), #407). | M6 |
 | `fugue-helper` | Fugue's own out-of-process generation helper and a Fugue-managed server, started on demand ([8.10](#810-gpu-memory-and-the-helper)). | M5 |
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal` and `fugue-helper` are
+third-party module ([8.11](#811-the-provider-interface)). `omarchy`, `http`, `fal`, `gemini` and `fugue-helper` are
 listed as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
 Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, the helper's
 program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)), and `http` needs what a module
@@ -1746,6 +1749,83 @@ with none, so the consent question of #404 is asked before anything is sent; a r
   multi-image Kontext, upscale, video, webhooks and the synchronous `fal.run` API.
 - **Not checked against the real service**: no fal key was at hand when this was built. The tests use a fake queue, storage and file
   server on the loopback, whose answers follow fal's documentation and client; a real run with a key is pending.
+
+**The `gemini` provider** (#407, approved by the owner 2026-11-25) gives a person who pastes only a Google Gemini API key the Nano
+Banana image models in the model pickers: `{"name": "Google Gemini", "type": "gemini", "key": "…"}` in `providers.json`. Compiled in,
+like `fal`. It serves `image.generate` and `image.edit`; every model takes the prompt and the node's pictures (up to 14) in one
+request, so a picture is an edit or a reference. A mask is `mask_unsupported`: the API has none. It is off-machine
+([8.2](#82-provider-instances)): `placementOf` takes the default address `https://generativelanguage.googleapis.com`, so the consent
+question of #404 is asked before anything is sent.
+
+| Setting | Meaning |
+| --- | --- |
+| `key` | Sent as the `x-goog-api-key` header to the origin of `address` and nowhere else; never in a URL (not `?key=`) and never to a redirect (none is followed). Without a key the models are `unavailable` and a job is refused before anything is sent. |
+| `address` | The API's root, default `https://generativelanguage.googleapis.com`. Tests point it at a local fake. |
+| `image_models` | More model ids (a list, or text separated by commas), with the generic mapping: `aspectRatio` from the node's size, no `imageSize`, up to 14 pictures. |
+| `timeout_s` | The job's one deadline (default 300): the call is cut and the job fails with `node_timeout` after it. |
+
+- **The flow.** One synchronous call: `POST <address>/v1beta/models/<model>:generateContent`, body `contents[0].parts` = the prompt
+  as `text`, then each picture as `inline_data` (`mime_type`, base64 `data`), and `generationConfig`: `responseModalities`
+  `["TEXT", "IMAGE"]`, `imageConfig.aspectRatio` (the nearest supported ratio to the node's width and height), `imageConfig.imageSize`
+  (`512`, `1K`, `2K`, `4K`: the nearest to the larger side, for the models that take one; the others make about 1 K) and `seed` when
+  the node sets one. The result is the first `inlineData` image part of the first candidate that is not a `thought` (Gemini 3 Pro
+  shows interim pictures as thoughts), written to the output folder. The values used are the picture's own size (PNG) or the size
+  asked for, the seed sent, the model and `gemini@<model id>`. A cancel drops the call (Google has no cancel; a started call is billed).
+  The whole request, inline pictures included, may be 20 MB (Google's limit, [image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)):
+  more is `input_invalid` before anything is sent; the Files API is not used.
+- **Models.** A table shipped with Fugue (`share/providers/gemini-models.json`, compiled in) lists each model id with its
+  `aspects`, `sizes` and price; the price is in the title. Checked 2026-11-25 against Google's pages
+  ([models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing),
+  [image generation](https://ai.google.dev/gemini-api/docs/image-generation)):
+
+| Model id | Name | Price |
+| --- | --- | --- |
+| `gemini-nano-banana-2.1` | Nano Banana 2.1 | $0.0336 per 1K image ($0.113 per 4K) |
+| `gemini-3.1-flash-image` | Nano Banana 2 | $0.067 per 1K image ($0.151 per 4K) |
+| `gemini-3.1-flash-lite-image` | Nano Banana 2 Lite | $0.0336 per 1K image |
+| `gemini-3-pro-image` | Nano Banana Pro | $0.134 per 1K or 2K image ($0.24 per 4K) |
+| `gemini-2.5-flash-image` | Nano Banana | $0.039 per image (up to 1024 px); Google shuts it down 2027-03-15 |
+
+  Imagen is not offered: Google lists `imagen-4.0-generate` as shut down.
+- **No free quota.** Google's pricing page lists "Free tier: Not available" for every image model above, and the free API tier
+  does not cover them: a key without billing is expected to be refused or answered 429 (not observed; no key was used). The preset's description cannot promise a free try. The 429 error
+  says so and its hint points to turning billing on for the key's project in Google AI Studio.
+- **What Google does with the inputs** ([terms](https://ai.google.dev/gemini-api/terms)). On the *unpaid* (free) services Google uses the
+  prompts, pictures and outputs to "provide, improve, and develop" its products, and human reviewers may read them. On the *paid*
+  services it does not use them to improve its products. The image models are paid-only today, so a key that works for them is on
+  the paid terms; a person who also uses the key for free-tier models (text) is on the unpaid terms for those. The preset's privacy
+  line says only that prompts and pictures go to Google; the consent question names what is sent.
+- **Errors**, in the codes of [13.3](#133-errors), each with a hint. Google's body is `{"error": {"code", "message", "status", "details"}}`:
+
+| The service | Code | Said |
+| --- | --- | --- |
+| no key | `provider_unreachable` | the provider has no key; the hint names Settings > Providers |
+| 401, 403, or 400 with `API_KEY_INVALID` | `provider_unreachable` | refused the key (Google answers 400, not 401, for an unknown key) |
+| 404 | `model_missing` | no such model |
+| 429 | `node_failed` | no quota for this key, with the `Retry-After` it sent; the hint says the image models have no free quota |
+| 400 `FAILED_PRECONDITION` | `node_failed` | the key cannot be served here (billing, region) |
+| other 400 | `node_failed` | the service's message |
+| 502, 503, 504 | `provider_unreachable` | not available right now |
+| other 5xx | `node_failed` | the service's message |
+| a prompt block (`promptFeedback.blockReason`), or a `finishReason` of `SAFETY`, `IMAGE_SAFETY`, `PROHIBITED_CONTENT`, `IMAGE_PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `RECITATION` and no picture | `node_failed` | held back under Google's safety rules; change the prompt or the pictures |
+| an answer with text and no picture (`NO_IMAGE` too) | `node_failed` | made no picture, with what the model said |
+| a mask | `mask_unsupported` | the API has none |
+| no answer in `timeout_s`, a refused connection | `provider_unreachable` / `node_timeout` | what happened; the hint names `timeout_s` |
+
+  A key is never sent over plain `http://` to a host that is not loopback. Every text from the service is scrubbed of the key. There
+  is no retry.
+- **Decisions** (the builder's, each with its confidence; overturn any): `generateContent` on `v1beta`, not the newer Interactions
+  API Google calls the default for new work (medium-high: `generateContent` is documented as supported, answers in one call and
+  has the one stable shape; the Interactions API would need a second request shape for no gain here); `responseModalities`
+  `["TEXT","IMAGE"]` as in Google's examples (medium-high); the key in the header only (high; the docs allow both); Imagen left out,
+  being shut down (high); `max_images` 14 for every model, as Google's page says "up to 14 reference images in total" (medium: the
+  older Nano Banana was advised up to 3, Google answers an error if it refuses); the negative prompt, steps and guidance are not sent,
+  the API has none (high); a thought picture is skipped (high).
+- **Not built**: `text.generate` (the same key could serve Gemini text models later, through `http_provider`'s `text.generate` and
+  Google's OpenAI-compatible endpoint; not built now), the Files API for large inputs, the Interactions API, search grounding, thinking
+  levels, multi-turn editing, a mask, a cost estimate before a run.
+- **Not checked against the real service**: no Gemini key was used and no call was made to Google (documentation only). The tests use
+  a fake API on the loopback whose answers follow Google's documentation.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:

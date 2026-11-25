@@ -26,6 +26,9 @@ QList<ProviderPreset> knownProviderPresets() {
     // `fal` provider type's own default, so it stays empty here.
     cloud(QStringLiteral("fal"), QStringLiteral("fal.ai"), QStringLiteral("fal"), {},
           QStringLiteral("https://fal.ai/dashboard/keys"), QCoreApplication::translate("fugue::ProviderPresets", "Many image and video models, run in the cloud"));
+    // Gemini's API address is the `gemini` provider type's own default too. Its image models have no free quota (spec 8.7).
+    cloud(QStringLiteral("gemini"), QStringLiteral("Google Gemini"), QStringLiteral("gemini"), {},
+          QStringLiteral("https://aistudio.google.com/apikey"), QCoreApplication::translate("fugue::ProviderPresets", "Nano Banana image models, run in the cloud"));
     cloud(QStringLiteral("openai"), QStringLiteral("OpenAI"), QStringLiteral("http"), QStringLiteral("https://api.openai.com/v1"),
           QStringLiteral("https://platform.openai.com/settings/organization/api-keys"), QCoreApplication::translate("fugue::ProviderPresets", "GPT image and text models"));
     cloud(QStringLiteral("together"), QStringLiteral("Together AI"), QStringLiteral("http"), QStringLiteral("https://api.together.ai/v1"),

@@ -118,7 +118,14 @@ QList<ProviderModule> builtinProviderModules() {
     fal.transport = QStringLiteral("builtin");
     fal.when = QStringLiteral("never");
     fal.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
-    return {omarchy, http, helper, fal};
+    ProviderModule gemini;
+    gemini.id = QStringLiteral("gemini");
+    gemini.version = QStringLiteral("1");
+    gemini.name = QStringLiteral("Google Gemini");
+    gemini.transport = QStringLiteral("builtin");
+    gemini.when = QStringLiteral("never");
+    gemini.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit")};
+    return {omarchy, http, helper, fal, gemini};
 }
 
 Result<QList<ProviderModule>> loadProviderModules(const QString &root) {
