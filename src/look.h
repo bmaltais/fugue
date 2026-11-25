@@ -57,6 +57,12 @@ struct Tokens {
     // (`litTop`, `litBottom`: twice the step). Labels read at every end.
     QColor sheenTop, sheenBottom, litTop, litBottom;
     QColor scrim; // behind the `?` overlay, with alpha
+    // The Drift kit (docs/canvas-look.md, "Drift kit"): grouped rows on a popup-colored card. `kitGroup` is the
+    // rounded group's fill, `kitSeparator` the hairline between its rows, `kitTrack` a slider's rail and a switch's
+    // off track, `kitKnob` the round thumb, `kitChip` and `kitChipHover` a chip or pill button. The hero header's
+    // three sit over a picture, so they are black at fixed alphas on every theme: `kitHeroShade` is the bottom of
+    // its darkening gradient, `kitHeroPill` the status pill and close button, `kitHeroPillHover` the hovered one.
+    QColor kitGroup, kitSeparator, kitTrack, kitKnob, kitChip, kitChipHover, kitHeroShade, kitHeroPill, kitHeroPillHover;
     double labelShare = 0; // the share of text in `label` the 4.5:1 rule settled on
 };
 
@@ -131,6 +137,16 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor litTop MEMBER m_litTop NOTIFY changed)
     Q_PROPERTY(QColor litBottom MEMBER m_litBottom NOTIFY changed)
     Q_PROPERTY(QColor scrim MEMBER m_scrim NOTIFY changed)
+    // The Drift kit's (src/kit/, docs/canvas-look.md "Drift kit").
+    Q_PROPERTY(QColor kitGroup MEMBER m_kitGroup NOTIFY changed)
+    Q_PROPERTY(QColor kitSeparator MEMBER m_kitSeparator NOTIFY changed)
+    Q_PROPERTY(QColor kitTrack MEMBER m_kitTrack NOTIFY changed)
+    Q_PROPERTY(QColor kitKnob MEMBER m_kitKnob NOTIFY changed)
+    Q_PROPERTY(QColor kitChip MEMBER m_kitChip NOTIFY changed)
+    Q_PROPERTY(QColor kitChipHover MEMBER m_kitChipHover NOTIFY changed)
+    Q_PROPERTY(QColor kitHeroShade MEMBER m_kitHeroShade NOTIFY changed)
+    Q_PROPERTY(QColor kitHeroPill MEMBER m_kitHeroPill NOTIFY changed)
+    Q_PROPERTY(QColor kitHeroPillHover MEMBER m_kitHeroPillHover NOTIFY changed)
     Q_PROPERTY(QColor bypassBody MEMBER m_bypassBody NOTIFY changed)
     Q_PROPERTY(QColor bypassHeader MEMBER m_bypassHeader NOTIFY changed)
     Q_PROPERTY(QColor bypassEdge MEMBER m_bypassEdge NOTIFY changed)
@@ -170,6 +186,8 @@ class CanvasLook : public QObject {
     // Glyphs (16): Lucide icons as a font, drawn with Text { font.family: theme.look.iconFont;
     // text: theme.look.glyph("check") }, so they recolor and batch with labels.
     Q_PROPERTY(QString iconFont READ iconFont CONSTANT)
+    // The serif face of the Drift kit's titles: Fraunces (SIL OFL, share/fonts/LICENSE.fraunces), bundled; empty without a GUI.
+    Q_PROPERTY(QString serifFont READ serifFont CONSTANT)
 
 public:
     explicit CanvasLook(QObject *parent = nullptr);
@@ -187,6 +205,7 @@ public:
     // The character of a Lucide glyph by its name ("check", "triangle-alert", ...), or empty.
     Q_INVOKABLE QString glyph(const QString &name) const;
     QString iconFont() const;
+    QString serifFont() const;
 
     const fugue::look::Tokens &tokens() const { return m_tokens; }
     QColor portColor(const QString &key) const { return m_portColors.value(key, m_portColors.value("declared")); }
@@ -204,6 +223,8 @@ private:
     QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_dangerFill, m_dangerHover, m_bevel, m_scrim, m_bypassBody, m_bypassHeader,
         m_bypassEdge;
     QColor m_sheenTop, m_sheenBottom, m_litTop, m_litBottom;
+    QColor m_kitGroup, m_kitSeparator, m_kitTrack, m_kitKnob, m_kitChip, m_kitChipHover, m_kitHeroShade, m_kitHeroPill,
+        m_kitHeroPillHover;
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     QVariantMap m_ports;
