@@ -1472,11 +1472,14 @@ A provider instance is a configured use of a provider module, stored in
   When a `fugue-helper` is installed, the default ends with `Fugue helper` (type
   `fugue-helper`): last, so "any ready model" stays the model servers', while only the helper
   runs models from disk.
-- **Well-known services (presets).** Settings > Providers > "Add a service…" lists them by group, each with a one-line description;
-  choosing one adds an instance with its name, type and address filled, and the focus goes to the key (or the address when that is what
-  is missing). The table is one place, `src/settings/provider_presets.{h,cpp}` (`knownProviderPresets()`; the model's `providerPresets()`
+- **Well-known services (presets).** Settings > Providers > "Add a service" is a closed row under the list; opened it lists the services
+  by group, each with a one-line description and an Add chip (a cloud service already on the list says Added, with a Show chip), and the
+  page's one search box filters both the list and these rows (names, descriptions, where it runs, "Free tier", and each service's
+  model families, `keywords` in the table). Choosing one adds an instance with its name, type and address filled, opens its row, and the
+  focus goes to the key (or the address when that is what is missing). The list is one 10u line per instance (glyph for where it runs,
+  name, where, status, switch), one row open at a time; docs/ui-ergonomics.md has the decision. The table is one place, `src/settings/provider_presets.{h,cpp}` (`knownProviderPresets()`; the model's `providerPresets()`
   and `addPreset(id)` expose it to QML), a row being id, name, group, type, address, `needsKey`, `needsAddress`, `keyUrl`, a
-  description and, for an off-machine service, a privacy line. A preset is a starting point only: the instance written is the one
+  description, `keywords`, `freeTier` and, for an off-machine service, a privacy line. A preset is a starting point only: the instance written is the one
   typing it in would write, and adding the same preset again names the second "fal.ai 2". "Get a key" opens `keyUrl` in the browser,
   the only network action of the page. **Cloud services:** fal.ai (`fal`, no address: the type's own `https://queue.fal.run`,
   keys at fal.ai/dashboard/keys), Google Gemini (`gemini`, no address: the type's own `https://generativelanguage.googleapis.com`,

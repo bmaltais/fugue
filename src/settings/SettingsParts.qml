@@ -127,9 +127,12 @@ QtObject {
         implicitWidth: 60 * App.theme.look.unit // the control column of a kit row
         implicitHeight: 8 * App.theme.look.unit
         function commit() {
-            if (textInput.text !== field.value)
-                field.committed(textInput.text)
+            // The text goes back to the stored value first: a change that builds the page again destroys this field, which loses the
+            // focus, which commits (a second time, with the same text) from inside the first.
+            const typed = textInput.text
             textInput.text = Qt.binding(() => field.secret ? "" : field.value)
+            if (typed !== (field.secret ? "" : field.value))
+                field.committed(typed)
         }
         KitWell {
             look: App.theme.look
