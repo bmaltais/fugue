@@ -701,6 +701,13 @@ void AppView::openInGraph() {
     emit appChanged();
 }
 
+void AppView::toggle() {
+    if (shown())
+        openInGraph();
+    else
+        showApp();
+}
+
 void AppView::showApp() {
     if (!m_app || !m_state[m_tab].graph)
         return;

@@ -2517,6 +2517,7 @@ and the `?` overlay marks each one.
 | `view.toggle-menu-bar`, `view.toggle-tabs`, `view.toggle-run-toolbar`, `view.toggle-selection-toolbar`, `view.toggle-breadcrumb`, `view.toggle-run-status`, `view.toggle-zoom-readout` | Show or hide each bar | none (View > Bars and panels) | added |
 | `view.focus-mode` | Hide all bars and panels; the same key brings them back as they were | H | added |
 | `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
+| `view.toggle-app` | Switch this workflow between its App view and the graph; off for a workflow with no app block (12.17, #397) | Ctrl+Alt+A (Window and Graph View menus, the window bar's App \| Graph switch) | added |
 | `app.menu-bar` | Open the menu bar | F10 | added |
 | `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
 | `area.split-row`, `area.split-column` | Split the active area side by side, top and bottom (12.16) | `Ctrl+\`, `Ctrl+Alt+\` | added |
@@ -3091,9 +3092,13 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
   outputs: a run's results are the existing run history's; the screen shows the last run of this session (past takes are a
   later issue).
-- **Open in Graph** switches this tab to the graph, the same workflow as an ordinary tab. While an app tab shows the graph a
-  strip under the canvas has **Show as app** (`appShowApp`); it brings the form back, rebuilt from the workflow as the graph
-  left it (values kept for inputs that still exist). The choice is per tab and kept for the session; a tab opens in the view its
+- **Open in Graph** switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
+  workflow (window bar, tabs, the graph's header and its menus, the side panels), with the nodes fitted in the canvas as it is
+  now, also when the window was resized or tiled while the shelf or the App view hid the canvas. **App | Graph** is the way back
+  and forth: two segments at the window bar's far end (`appViewSwitch`, before the project chip), shown for a tab whose workflow
+  has an app block, in the App view and the graph alike, the view in force marked; the same switch is `view.toggle-app`
+  (Ctrl+Alt+A, Window > App view, Graph > View > App view). It brings the form back rebuilt from the workflow as the graph
+  left it (values kept for inputs that still exist). A workflow with no app block has no switch and the command is off. The choice is per tab and kept for the session; a tab opens in the view its
   `defaultView` names. A run started from the App view does not paint its results on the graph's nodes.
 - **The apps shelf** (#388, `apps/app_shelf.h`, `AppsHome.qml`, `AppsDialog.qml`). Fugue has no start screen; a window with nothing
   open (one empty, untitled, unsaved workflow) shows the shelf in the canvas's place, and File > Apps… (`file.apps`) shows it

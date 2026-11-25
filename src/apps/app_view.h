@@ -182,6 +182,8 @@ public:
     Q_INVOKABLE void clearResults();
     // This tab shows the graph (the same workflow, as an ordinary tab); showApp() brings the form back.
     Q_INVOKABLE void openInGraph();
+    // The other view of this tab (view.toggle-app, the window bar's App | Graph): the graph from the App view, the App view from the graph.
+    Q_INVOKABLE void toggle();
     Q_INVOKABLE void showApp();
 
     // The window's events of every run (RunService::event); the ones of runs this did not start are ignored.

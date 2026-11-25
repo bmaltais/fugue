@@ -33,6 +33,15 @@ QQuickItem *shown(QQuickItem *from, const QString &name) {
     return nullptr;
 }
 
+
+void saveGrab(QQuickWindow *window, const QString &name) {
+    const QString out = qEnvironmentVariable("FUGUE_GRAB_DIR");
+    if (out.isEmpty())
+        return;
+    QDir().mkpath(out);
+    test_support::grab(window).save(out + "/" + name + ".png");
+}
+
 QQuickItem *find(QQuickWindow *window, const QString &name) { return shown(window->contentItem(), name); }
 
 // Taps the item of this name once it is where it will stay: a control made just now is placed over the next frames (the grid
@@ -140,6 +149,7 @@ private slots:
         rig.shelf.setLanding(app.workflows.nothingOpen()); // main.cpp does it once the files are in
         QTRY_VERIFY(find(app.window, "appsHome"));
         QVERIFY(!find(app.window, "canvas"));
+        QVERIFY(!find(app.window, "appViewSwitch")); // the shelf is no app: nothing to switch
         QTRY_VERIFY(find(app.window, "appCard-ready-app"));
         QTRY_VERIFY(find(app.window, "appCard-needs-app"));
         QVERIFY(!find(app.window, "appCard-plain"));
@@ -196,6 +206,54 @@ private slots:
         tap(app.window, "appCard-ready-app");
         QTRY_VERIFY(find(app.window, "appPage"));
         QTRY_VERIFY(!app.window->findChild<QObject *>("appsDialog")->property("visible").toBool());
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // Open in Graph from the shelf's app gives the whole window back (the owner's report on #397): the canvas fitted to the
+    // workflow's nodes, the window bar with its menus and tabs, no App page and no shelf.
+    void openInGraphFromTheShelfShowsTheWholeWindow() {
+        QTemporaryDir root;
+        makeApp(root.path(), "ready-app", "Ready app", false);
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QVERIFY(app.open());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QTRY_VERIFY(find(app.window, "appCard-ready-app"));
+        app.window->resize(1500, 900); // the window is tiled to its place while the shelf hides the canvas, as on Hyprland
+        QTRY_COMPARE(app.window->width(), 1500);
+        tap(app.window, "appCard-ready-app");
+        QTRY_VERIFY(find(app.window, "appPage"));
+        saveGrab(app.window, "app-from-shelf");
+        rig.view.openInGraph();
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QTRY_VERIFY(!find(app.window, "appPage"));
+        QVERIFY(!find(app.window, "appsHome"));
+        QTRY_VERIFY(find(app.window, "menuBar"));
+        QVERIFY(find(app.window, "appViewSwitch")); // the way back to the App view
+        QVERIFY(find(app.window, "areaHeader-1")); // the graph's own menus
+        QQuickItem *canvas = find(app.window, "canvas");
+        QTRY_VERIFY(canvas->width() > 1300); // laid out at the resized window's width
+        QTRY_VERIFY(app.model.view().contains("zoom"));
+        const double zoom = app.model.view().value("zoom").toDouble();
+        QVERIFY2(zoom > 0.05 && zoom <= 2.0, qPrintable(QString::number(zoom)));
+        // The nodes are in the middle of the canvas as it is now, not of the size it had before the window was resized: the point
+        // in the canvas's middle is the view's center.
+        const auto middleIsCenter = [&] {
+            QVariant middle;
+            if (!QMetaObject::invokeMethod(canvas, "toWorld", Q_RETURN_ARG(QVariant, middle), Q_ARG(QVariant, canvas->width() / 2),
+                                           Q_ARG(QVariant, canvas->height() / 2)))
+                return false;
+            const QVariantList center = app.model.view().value("center").toList();
+            return qAbs(middle.toPointF().x() - center.at(0).toDouble()) < 1.5 && qAbs(middle.toPointF().y() - center.at(1).toDouble()) < 1.5;
+        };
+        QTRY_VERIFY(middleIsCenter());
+        // Fitted to the canvas as it is now: fitting again here changes nothing.
+        const QVariantMap before = app.model.view();
+        QVERIFY(app.model.fitView(canvas->width(), canvas->height(), canvas->property("reservedTop").toReal(), canvas->property("reservedBottom").toReal()));
+        QCOMPARE(app.model.view().value("zoom").toDouble(), before.value("zoom").toDouble());
+        QCOMPARE(app.model.view().value("center").toList(), before.value("center").toList());
+        saveGrab(app.window, "graph-from-shelf");
         qDeleteAll(app.engine.rootObjects());
     }
 

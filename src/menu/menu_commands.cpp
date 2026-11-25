@@ -142,6 +142,9 @@ QList<Row> menuRows() {
         {"frame.rename", QT_TRANSLATE_NOOP("Command", "Rename the Frame"), QT_TRANSLATE_NOOP("Command", "Rename Frame…"), {}, "canvas", "same"},
         {"frame.delete", QT_TRANSLATE_NOOP("Command", "Delete the Frame (its nodes stay)"),
          QT_TRANSLATE_NOOP("Command", "Delete Frame"), {}, "canvas", "same"},
+        // The App | Graph switch of a tab whose workflow has an app block (#397); AppView handles it (apps/app_window.cpp).
+        {"view.toggle-app", QT_TRANSLATE_NOOP("Command", "Switch this workflow between its App view and the graph"),
+         QT_TRANSLATE_NOOP("Command", "App view"), {"Ctrl+Alt+A"}, "app", "added"},
         {"app.menu-bar", QT_TRANSLATE_NOOP("Command", "Open the menu bar"), nullptr, {"F10"}, "app", "added"},
         {"app.context-menu", QT_TRANSLATE_NOOP("Command", "Open the context menu"), nullptr, {"Shift+F10", "Menu"}, "canvas", "added"},
     };
