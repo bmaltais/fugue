@@ -111,10 +111,13 @@ JobStatus run(HttpProvider &provider, const JobRequest &request, JobResult *resu
     if (jobId)
         *jobId = submitted.value();
     JobStatus status;
-    QTest::qWaitFor([&] {
-        status = await<JobStatus>([&](auto reply) { provider.status(submitted.value(), reply); }).value();
-        return status.isTerminal();
-    }, 5000);
+    if (!QTest::qWaitFor([&] {
+            status = await<JobStatus>([&](auto reply) { provider.status(submitted.value(), reply); }).value();
+            return status.isTerminal();
+        }, 8000)) {
+        status.state = QStringLiteral("error");
+        status.error = makeError(QStringLiteral("internal"), QStringLiteral("The job did not end."));
+    }
     if (result && status.state == QLatin1String("done"))
         *result = await<JobResult>([&](auto reply) { provider.result(submitted.value(), reply); }).value();
     return status;
@@ -396,6 +399,140 @@ private slots:
         const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
         QCOMPARE(await<QString>([&](auto reply) { provider->cancel(id, reply); }).value(), QStringLiteral("cancelled"));
         QCOMPARE(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().state, QStringLiteral("cancelled"));
+    }
+
+    // --- picture links, size caps, retries (review of #401) ---
+
+    void aPictureLinkIsOnlyFetchedWhenItIsAPlaceAServiceMayName() {
+        QVERIFY(downloadUrlAllowed(QUrl("https://cdn.example.com/a.png"), "api.example.com"));
+        QVERIFY(!downloadUrlAllowed(QUrl("file:///mnt/windows/models/huge.safetensors"), "api.example.com"));
+        QVERIFY(!downloadUrlAllowed(QUrl("data:image/png;base64,AAAA"), "127.0.0.1"));
+        QVERIFY(!downloadUrlAllowed(QUrl("qrc:/x"), "127.0.0.1"));
+        QVERIFY(!downloadUrlAllowed(QUrl("http://127.0.0.1:8080/admin"), "api.example.com"));
+        QVERIFY(!downloadUrlAllowed(QUrl("http://localhost/x"), "api.example.com"));
+        QVERIFY(!downloadUrlAllowed(QUrl("http://169.254.169.254/latest"), "api.example.com"));
+        QVERIFY(!downloadUrlAllowed(QUrl("http://192.168.1.5/x"), "api.example.com"));
+        QVERIFY(!downloadUrlAllowed(QUrl("http://[::1]/x"), "api.example.com"));
+        QVERIFY(downloadUrlAllowed(QUrl("http://127.0.0.1:8080/x"), "127.0.0.1")); // the service is local itself
+        QVERIFY(downloadUrlAllowed(QUrl("http://192.168.1.5/x"), "192.168.1.9"));
+    }
+
+    void aFileOrDataLinkIsRefusedAndARelativeLinkWorks() {
+        Fixture fixture;
+        auto link = std::make_shared<QString>();
+        fixture.server.on("POST", "/v1/images/generations", [link](const HttpRequest &) {
+            return HttpResponse{200, json({{"data", QJsonArray{QJsonObject{{"url", *link}}}}})};
+        });
+        fixture.server.on("GET", "/v1/pic.png", [](const HttpRequest &) { return HttpResponse{200, kPng, "image/png"}; });
+        auto provider = fixture.provider({{"image_models", "dall-e-3"}});
+        JobRequest request = fixture.request("image.generate", {{"prompt", "a dot"}});
+        request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", "dall-e-3"}};
+        for (const QString &bad : {QStringLiteral("file:///etc/hostname"), QStringLiteral("data:image/png;base64,AAAA")}) {
+            *link = bad;
+            const JobStatus ended = run(*provider, request);
+            QCOMPARE(ended.error.code, QStringLiteral("node_failed"));
+            QVERIFY2(ended.error.message.contains("does not fetch"), qPrintable(ended.error.message));
+        }
+        *link = QStringLiteral("pic.png"); // relative to the address
+        JobResult result;
+        QCOMPARE(run(*provider, request, &result).state, QStringLiteral("done"));
+        QCOMPARE(readAll(result.outputs.value("image").toObject().value("path").toString()), kPng);
+    }
+
+    void aRedirectOfAPictureLinkToAFileIsRefusedAndAnExpiredLinkIsSaid() {
+        Fixture fixture;
+        auto target = std::make_shared<HttpResponse>();
+        fixture.server.on("POST", "/v1/images/generations", [&fixture](const HttpRequest &) {
+            return HttpResponse{200, json({{"data", QJsonArray{QJsonObject{{"url", QString::fromLatin1(fixture.server.origin()) + "/files/1.png"}}}}})};
+        });
+        fixture.server.on("GET", "/files/1.png", [target](const HttpRequest &) { return *target; });
+        auto provider = fixture.provider({{"image_models", "dall-e-3"}});
+        JobRequest request = fixture.request("image.generate", {{"prompt", "a dot"}});
+        request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", "dall-e-3"}};
+        *target = HttpResponse{302, "", "text/plain", false, -1, {"Location: file:///etc/hostname"}};
+        const JobStatus redirected = run(*provider, request);
+        QVERIFY2(redirected.error.message.contains("sent the picture link on"), qPrintable(redirected.error.message));
+        *target = HttpResponse{403, "<Error>Expired</Error>", "text/xml"};
+        const JobStatus expired = run(*provider, request);
+        QVERIFY2(expired.error.message.contains("picture link was refused"), qPrintable(expired.error.message));
+        QVERIFY(!expired.error.message.contains("key"));
+    }
+
+    void anAnswerPastTheSizeCapIsCutOff() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &) { return HttpResponse{200, QByteArray(70 << 20, 'x')}; });
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(!described.ok());
+        QVERIFY2(described.error().message.contains("more data"), qPrintable(described.error().message));
+        QVERIFY(!described.error().hint.isEmpty());
+    }
+
+    void aRedirectedAddressNamesTheNewOne() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &) {
+            return HttpResponse{301, "", "text/plain", false, -1, {"Location: https://api.example.com/v1/models"}};
+        });
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(!described.ok());
+        QVERIFY2(described.error().message.contains("https://api.example.com/v1/models"), qPrintable(described.error().message));
+        QVERIFY(described.error().hint.contains("Use that address"));
+    }
+
+    void anImageThatIsNotAPictureAndAnEmptyDataListFail() {
+        Fixture fixture;
+        auto body = std::make_shared<QByteArray>();
+        fixture.server.on("POST", "/v1/images/generations", [body](const HttpRequest &) { return HttpResponse{200, *body}; });
+        auto provider = fixture.provider({{"image_models", "gpt-image-1"}});
+        JobRequest request = fixture.request("image.generate", {{"prompt", "x"}});
+        request.model = kDraw;
+        *body = json({{"data", QJsonArray{QJsonObject{{"b64_json", QString::fromLatin1(QByteArray("just text").toBase64())}}}}});
+        QVERIFY(run(*provider, request).error.message.contains("not a picture"));
+        *body = json({{"data", QJsonArray{}}});
+        QVERIFY(run(*provider, request).error.message.contains("without an image"));
+    }
+
+    void aNativePollRetriesATransientAnswerAndScrubsTheServersText() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) { return HttpResponse{200, json({{"model", QJsonObject{{"name", "m"}}}})}; });
+        fixture.server.on("POST", "/sdcpp/v1/img_gen", [](const HttpRequest &) { return HttpResponse{202, json({{"id", "j"}, {"status", "queued"}})}; });
+        auto polls = std::make_shared<int>(0);
+        fixture.server.on("GET", "/sdcpp/v1/jobs/j", [polls](const HttpRequest &) {
+            if (++*polls <= 2)
+                return HttpResponse{(*polls == 1 ? 429 : 503), "{}"};
+            return HttpResponse{200, json({{"id", "j"}, {"status", "failed"}, {"error", QJsonObject{{"message", "bad key " + QString::fromLatin1(kKey)}}}})};
+        });
+        auto provider = fixture.provider();
+        JobRequest request = fixture.request("image.generate", {{"prompt", "x"}});
+        request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", "m"}};
+        const JobStatus ended = run(*provider, request);
+        QVERIFY(*polls >= 3); // it kept asking
+        QVERIFY2(ended.error.message.contains("bad key"), qPrintable(ended.error.message));
+        QVERIFY(!ended.error.message.contains(QString::fromLatin1(kKey)));
+    }
+
+    void aNativeJobThatNeverEndsGivesUp() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) { return HttpResponse{200, json({{"model", QJsonObject{{"name", "m"}}}})}; });
+        fixture.server.on("POST", "/sdcpp/v1/img_gen", [](const HttpRequest &) { return HttpResponse{202, json({{"id", "j"}, {"status", "queued"}})}; });
+        fixture.server.on("GET", "/sdcpp/v1/jobs/j", [](const HttpRequest &) { return HttpResponse{200, json({{"id", "j"}, {"status", "generating"}})}; });
+        auto provider = fixture.provider({{"timeout_s", 0.2}});
+        JobRequest request = fixture.request("image.generate", {{"prompt", "x"}});
+        request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", "m"}};
+        QCOMPARE(run(*provider, request).error.code, QStringLiteral("node_timeout"));
+    }
+
+    void aSubmitNeverRepliesInsideTheCall() {
+        Fixture fixture;
+        auto provider = fixture.provider({{"image_models", "gpt-image-1"}});
+        (void)await<Description>([&](auto reply) { provider->describe(reply); });
+        JobRequest request = fixture.request("image.generate", {{"prompt", "x"}}, {{"mask", QJsonObject{}}});
+        request.model = kDraw;
+        bool inside = true, replied = false;
+        provider->submit(request, [&](const Result<QString> &) { replied = true; QVERIFY(!inside); });
+        inside = false;
+        QVERIFY(QTest::qWaitFor([&] { return replied; }, 3000));
     }
 
     // --- the stable-diffusion.cpp native server ---

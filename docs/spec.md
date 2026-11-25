@@ -1516,6 +1516,12 @@ service speaks), and because it shares the omarchy provider's request and result
 
   There is no new code: a rate limit is `node_failed` ("a later run succeeds") and Fugue does not
   retry it (what a retry would cost on a paid service is the business of #403).
+- **Limits.** A picture link a service names is fetched only when it is `http(s)` (a relative one is
+  resolved against the address) and not a loopback, link-local or private address, unless the instance
+  itself is at one; a redirect of it is checked the same way (3 hops at most), and Fugue follows no redirect
+  of an API call: a 301 or 302 is said with the new address. No answer is read past 64 MB (512 MB for a
+  picture or a native job), and a native job is given up on (`node_timeout`) after 6 times `timeout_s`;
+  its poll is retried a few times, with growing waits, on a 429 or a 502, 503 or 504.
 - Not built, and said so here: video and music (`video.generate`, `audio.generate`), a model's
   parameters beyond those above, and any cost or privacy notice (#403, #404). The key goes in clear to
   a plain `http://` address that is not on this machine: use `https://`.

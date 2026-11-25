@@ -53,6 +53,9 @@ QJsonValue seedOf(const QJsonValue &seed);
 // The chat request for text.generate (8.1) for the served model `model`.
 QJsonObject chatBody(const QString &model, const JobRequest &request, Errors *errors);
 
+// The first object of an array, an empty one for an empty array.
+QJsonObject firstObject(const QJsonArray &array);
+
 // A multipart/form-data body. A part with a file name is a file; one without is a plain field.
 struct FormPart {
     QByteArray name;

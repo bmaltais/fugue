@@ -748,7 +748,7 @@ void OmarchyProvider::finishChat(const QString &id) {
     }
     // A server that ignored `stream` answers in one JSON object.
     if (!streamed)
-        job->reader.text = answer.value("choices").toArray().first().toObject().value("message").toObject().value("content").toString();
+        job->reader.text = firstObject(answer.value("choices").toArray()).value("message").toObject().value("content").toString();
 
     QJsonObject used{{"model", job->model}};
     if (!server.runtime.isEmpty())

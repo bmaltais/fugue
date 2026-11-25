@@ -29,6 +29,7 @@
 #include <QNetworkAccessManager>
 #include <QPointer>
 #include <QTimer>
+#include <QUrl>
 
 #include <functional>
 #include <memory>
@@ -42,6 +43,9 @@ namespace fugue {
 
 // Whether a model id from an OpenAI-style /models list is one that draws pictures (dall-e-3,
 // gpt-image-1, flux, ...): the guess used when the instance names no image_models.
+// Whether a picture link a service names may be fetched: http or https, and not a loopback, link-local
+// or private address unless the instance itself (`instanceHost`) is at one.
+bool downloadUrlAllowed(const QUrl &url, const QString &instanceHost);
 bool looksLikeImageModel(const QString &id);
 // Whether a model id is not a chat model at all (embeddings, speech): never offered as text.
 bool looksLikeOtherModel(const QString &id);
@@ -75,7 +79,8 @@ private:
     QUrl openaiUrl(const QString &path) const;
     QUrl nativeUrl(const QString &path) const;
     QNetworkReply *send(const QUrl &url, const QByteArray &method, const QByteArray &body = {},
-                        const QByteArray &contentType = QByteArrayLiteral("application/json"), bool withKey = true);
+                        const QByteArray &contentType = QByteArrayLiteral("application/json"), bool withKey = true,
+                        qint64 cap = 64LL << 20);
     // `text` with the key and its first lines' worth of noise removed: what a message may carry.
     QString clean(const QString &text) const;
     // The failure of an HTTP answer (code 0: no answer), in the spec's codes (8.8, 13.3).

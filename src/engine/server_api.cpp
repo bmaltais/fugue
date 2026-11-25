@@ -218,6 +218,8 @@ QJsonObject chatBody(const QString &recipe, const JobRequest &request, Errors *e
     return body;
 }
 
+QJsonObject firstObject(const QJsonArray &array) { return array.isEmpty() ? QJsonObject() : array.first().toObject(); }
+
 QByteArray multipartBody(const QList<FormPart> &parts, QByteArray *boundary) {
     *boundary = "----fugue" + QUuid::createUuid().toByteArray(QUuid::Id128);
     QByteArray body;
@@ -252,7 +254,7 @@ bool ChatStream::feed(const QByteArray &bytes, bool atEnd) {
             error = serverMessage(chunk);
             return false;
         }
-        const QJsonObject choice = chunk.value("choices").toArray().first().toObject();
+        const QJsonObject choice = firstObject(chunk.value("choices").toArray());
         if (choice.value("finish_reason").isString())
             finished = true;
         const QJsonObject delta = choice.value("delta").toObject();
@@ -275,7 +277,7 @@ Result<JobResult> imageJobResult(const QJsonObject &answer, const JobRequest &re
     const QJsonArray images = result.value("images").toArray();
     if (images.isEmpty())
         return Result<JobResult>(jobError(QStringLiteral("%1 finished without an image.").arg(who)));
-    const QJsonObject first = images.first().toObject();
+    const QJsonObject first = firstObject(images);
     const QString path = QDir(request.outputDir).absoluteFilePath(QStringLiteral("image.") + format);
     QFile file(path);
     const QByteArray bytes = QByteArray::fromBase64(first.value("b64_json").toString().toLatin1());
