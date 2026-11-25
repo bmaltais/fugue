@@ -471,7 +471,9 @@ Rectangle {
         look: page.look
         axis: "row"
         rightToLeft: LayoutMirroring.enabled
-        readonly property real border: rightToLeft ? panel.x + panel.width + page.gap / 2 : panel.x - page.gap / 2
+        // From the widths that place the panel, not from panel.x: the row layout moves the panel only at its next polish, so two
+        // pointer moves before it measured from the old border and applied the drag twice (the panel overshot and shook).
+        readonly property real border: rightToLeft ? page.gap + page.endWidth + page.gap / 2 : page.width - page.gap - page.endWidth - page.gap / 2
         x: border - width / 2
         y: panel.y
         width: thickness

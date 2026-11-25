@@ -76,8 +76,13 @@ Item {
         }
         Rectangle {
             id: thumb
+            objectName: "kitSegmentedThumb"
             readonly property int slot: seg.currentIndex
-            x: seg.pad + (seg.mirrored ? seg.count - 1 - slot : slot) * seg.optionWidth
+            // The slot it stands on, as a number that slides when the choice changes. Only the slot is animated, not x and width:
+            // those follow a resize (a dragged panel) at once instead of trailing it and stretching over the next option.
+            property real place: seg.mirrored ? seg.count - 1 - slot : slot
+            Behavior on place { NumberAnimation { duration: seg.pm.durThumb; easing.type: Easing.InOutQuad } }
+            x: seg.pad + place * seg.optionWidth
             y: (parent.height - height) / 2
             width: seg.optionWidth
             height: seg.optionHeight
@@ -89,8 +94,6 @@ Item {
             }
             border.width: seg.glass ? 1 : 0
             border.color: Qt.rgba(1, 1, 1, 0.28)
-            Behavior on x { NumberAnimation { duration: seg.pm.durThumb; easing.type: Easing.InOutQuad } }
-            Behavior on width { NumberAnimation { duration: seg.pm.durThumb; easing.type: Easing.InOutQuad } }
             Rectangle { // the light along its top edge
                 visible: seg.glass
                 x: parent.radius * 0.5
