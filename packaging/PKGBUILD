@@ -91,7 +91,8 @@ prepare() {
 
 # The helper for one backend, from the sources above rather than a download.
 _helper() {
-  "$srcdir/$pkgbase/bin/build-helper" "$1" \
+  # Portable: bin/build-helper otherwise builds CUDA for the GPU of the machine that runs makepkg.
+  FUGUE_HELPER_PORTABLE=1 "$srcdir/$pkgbase/bin/build-helper" "$1" \
     -DFETCHCONTENT_SOURCE_DIR_SDCPP="$srcdir/stable-diffusion.cpp-$_sdcpp" \
     -DFETCHCONTENT_SOURCE_DIR_SDCPP_GGML="$srcdir/ggml-$_ggml" \
     -DFETCHCONTENT_SOURCE_DIR_SDCPP_CUTLASS="$srcdir/cutlass-$_cutlass"

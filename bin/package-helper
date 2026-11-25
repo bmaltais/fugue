@@ -17,7 +17,7 @@ case $arch in
   *) echo "package-helper: only aarch64 is built this way; x86_64 has the fugue-helper-cuda package" >&2; exit 2 ;;
 esac
 
-"$root/bin/build-helper" cuda -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES="$archs"
+FUGUE_HELPER_PORTABLE=1 "$root/bin/build-helper" cuda -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES="$archs"
 
 name="fugue-helper-cuda-$arch-linux"
 stage="$(mktemp -d)"

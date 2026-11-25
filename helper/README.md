@@ -66,8 +66,13 @@ flow, and the cut drops the blank with the encode it would go through.
 
 ```sh
 bin/build-helper cuda      # or vulkan, cpu; into build-helper-<backend>/
-bin/build-helper cuda -DCMAKE_CUDA_ARCHITECTURES=native -DGGML_NATIVE=ON   # this machine only, faster
+FUGUE_HELPER_PORTABLE=1 bin/build-helper cuda   # the package's portable CUDA settings
 ```
+
+CUDA builds for this machine's GPUs by default (`nvidia-smi`'s compute capabilities, `GGML_NATIVE=ON`), so
+every worktree hashes the same flags and ccache shares their objects; a portable build compiles each kernel for
+five architectures and shares nothing with a local one (a worktree's engine build once took 40 minutes for that,
+2026-11-25). The package and `bin/package-helper` ask for portable.
 
 A cold CUDA build takes about 15 minutes; ccache makes later ones short, also in another worktree: `bin/build-helper` sets `CCACHE_BASEDIR` to the folder holding the worktrees, and configure with `NVCC_CCBIN` set (it changes the CUDA include dirs CMake records, so a hand-run `cmake` configure hashes differently). Check a miss with `CCACHE_DEBUG=1 CCACHE_DEBUGDIR=<dir>` on one `.cu` object (`make acc.cu.o` in its build subfolder). The package builds the
 Vulkan helper into `fugue` and the CUDA one into `fugue-helper-cuda` (`packaging/PKGBUILD`).
