@@ -106,8 +106,9 @@ QStringList sessionInherits();
 
 // The root the window last ran in, when it is still a usable project; else empty.
 QString lastUsedProjectRoot();
-// The window start's: remembers the current root (fugueHome()) as the last used if it is a project, or
-// forgets it when the session is Default. Only when there is a registry to update or a project to remember;
+// The window start's: remembers the current root (fugueHome()) as the last used if it is a project the person
+// chose (rootIsChosenProject(): --project, FUGUE_PROJECT, the last used), or forgets it when the session is
+// Default; a root from FUGUE_HOME or --home is left out (2026-11-25: an agent's scratch home was recorded). Only when there is a registry to update or a project to remember;
 // a failure to write is not worth stopping the window for.
 void recordLastUsedProject();
 
