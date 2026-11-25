@@ -235,15 +235,11 @@ ColumnLayout {
             }
         }
     }
-    // Where an instance runs, in plain words (a cloud service says what it is sent instead).
-    function placement(modelData) {
-        const address = modelData.address
-        const local = address === "" || /^https?:\/\/(localhost|127\.|\[::1\])/.test(address)
-        if (local)
-            return qsTr("On this machine")
-        if (modelData.type === "omarchy" || modelData.type === "fugue-helper")
-            return qsTr("On your network")
-        return qsTr("At %1").arg(address.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))
+    // The dim line of a body: what a cloud service is sent, else where it runs (the engine's placement, as the Where column).
+    function placementLine(modelData) {
+        if (modelData.privacy !== "")
+            return modelData.privacy
+        return modelData.placement === "cloud" && modelData.host !== "" ? qsTr("At %1").arg(modelData.host) : modelData.placementText
     }
 
     Shortcut { // checked against the command registry: Ctrl+F is unused there
@@ -340,7 +336,8 @@ ColumnLayout {
                 visible: !page.searching || page.shownNames.includes(modelData.name)
                 label: modelData.name
                 glyph: modelData.placement === "cloud" ? "cloud" : modelData.placement === "machine" ? "monitor" : "server"
-                detail: modelData.placementText
+                detail: modelData.placementText.toLowerCase() === modelData.name.toLowerCase() ? "" : modelData.placementText
+                where: modelData.placementText
                 detailWidth: page.detailWidth
                 status: modelData.statusText
                 statusStrong: modelData.statusStrong
@@ -446,7 +443,7 @@ ColumnLayout {
                             objectName: "providerPrivacy-" + row.index
                             width: Math.min(implicitWidth, line.width)
                             wrapMode: Text.Wrap
-                            text: row.modelData.privacy !== "" ? row.modelData.privacy : page.placement(row.modelData)
+                            text: row.modelData.privacy !== "" ? row.modelData.privacy : page.placementLine(row.modelData)
                             textFormat: Text.PlainText
                             color: page.look.label
                             font.pixelSize: page.look.labelSize
@@ -660,16 +657,17 @@ ColumnLayout {
                                     look: page.look
                                     label: modelData.name
                                     hint: modelData.description
+                                    hintLines: 2
                                     target: added ? showChip : addChip
                                     KitBadge {
                                         look: page.look
-                                        visible: preset.modelData.freeTier
+                                        visible: preset.modelData.freeTier && preset.width >= 90 * page.u
                                         text: qsTr("Free tier")
                                     }
                                     KitBadge {
                                         objectName: "providerPresetAdded-" + preset.modelData.id
                                         look: page.look
-                                        visible: preset.added
+                                        visible: preset.added && preset.width >= 90 * page.u
                                         text: qsTr("Added")
                                     }
                                     KitChip {

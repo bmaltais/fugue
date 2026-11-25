@@ -22,7 +22,8 @@ Item {
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
     property string label
     property string glyph
-    property string detail
+    property string detail // the dim "where" column; may be empty when the name already says it
+    property string where // the same, in full, for the glyph's tooltip and the accessible description
     property real detailWidth: 0
     property string status
     property bool statusStrong: false
@@ -78,7 +79,7 @@ Item {
         activeFocusOnTab: row.tabStop && row.enabled
         Accessible.role: Accessible.Button
         Accessible.name: row.label
-        Accessible.description: [row.detail, row.status].filter(t => t !== "").join(", ")
+        Accessible.description: [row.where !== "" ? row.where : row.detail, row.status].filter(t => t !== "").join(", ")
         Accessible.expandable: true
         Accessible.expanded: row.expanded
         Accessible.onPressAction: row.expandRequested(!row.expanded)
@@ -107,6 +108,10 @@ Item {
                 visible: row.glyph !== ""
                 color: row.look.label
                 Layout.alignment: Qt.AlignVCenter
+                HoverHandler { id: glyphHover }
+                ToolTip.visible: glyphHover.hovered && row.where !== ""
+                ToolTip.delay: row.look.tooltipDelay
+                ToolTip.text: row.where
             }
             ColumnLayout {
                 Layout.fillWidth: true

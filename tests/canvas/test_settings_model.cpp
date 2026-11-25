@@ -641,12 +641,34 @@ private slots:
         QCOMPARE(instance("Cloudflare Workers AI").value("status").toString(), QStringLiteral("needsAccount"));
         QCOMPARE(model.setProviderField(fal + 1, "account_id", "abc"), QString());
         QCOMPARE(instance("Cloudflare Workers AI").value("status").toString(), QStringLiteral("ready"));
-        // A helper on the network needs a key; its address makes it a network service, localhost a local one.
-        QCOMPARE(instance("Fugue helper").value("status").toString(), QStringLiteral("needsKey"));
+        // A helper with no address is the built-in one: ready. With an address it needs a key; the address makes it a network service,
+        // localhost a local one.
+        QCOMPARE(instance("Fugue helper").value("status").toString(), QStringLiteral("ready"));
         QCOMPARE(model.setProviderField(fal + 2, "address", "https://studio.example.ts.net"), QString());
+        QCOMPARE(instance("Fugue helper").value("status").toString(), QStringLiteral("needsKey"));
         QCOMPARE(instance("Fugue helper").value("placement").toString(), QStringLiteral("network"));
         QCOMPARE(model.setProviderField(fal + 2, "address", "http://localhost:9000"), QString());
         QCOMPARE(instance("Fugue helper").value("placement").toString(), QStringLiteral("machine"));
+    }
+
+    // The engine's placement and key rule: a helper without an address is the built-in one (no key); a plain http endpoint off the
+    // person's networks is a cloud service and needs a key.
+    void placementAndKeyFollowTheEngine() {
+        SettingsModel model;
+        QCOMPARE(model.addProvider("fugue-helper"), QString());
+        QCOMPARE(model.addProvider("http"), QString());
+        const int helper = model.providers().size() - 2;
+        QVariantMap built = model.providers().at(helper).toMap();
+        QCOMPARE(built.value("placement").toString(), QStringLiteral("machine"));
+        QCOMPARE(built.value("status").toString(), QStringLiteral("ready"));
+        QVERIFY(!built.value("keyRequired").toBool());
+        QCOMPARE(model.setProviderField(helper + 1, "address", "https://api.example.com"), QString());
+        const QVariantMap http = model.providers().at(helper + 1).toMap();
+        QCOMPARE(http.value("placement").toString(), QStringLiteral("cloud"));
+        QCOMPARE(http.value("status").toString(), QStringLiteral("needsKey"));
+        QCOMPARE(model.setProviderField(helper, "address", "https://studio.example.ts.net"), QString());
+        QVERIFY(model.providers().at(helper).toMap().value("keyRequired").toBool());
+        QCOMPARE(model.providers().at(helper).toMap().value("placement").toString(), QStringLiteral("network"));
     }
 
     void theSearchFindsServicesByWordStart() {

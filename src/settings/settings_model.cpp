@@ -113,15 +113,6 @@ QList<ModuleField> moduleFields(const ProviderInstance &instance) {
     return fields;
 }
 
-// Where an instance runs (Where column of the Providers page): "cloud" for a service that is sent your work, "machine" for
-// an address on this computer, else "network".
-QString placementOf(const ProviderInstance &instance, bool cloud) {
-    if (cloud)
-        return QStringLiteral("cloud");
-    static const QRegularExpression local(QStringLiteral("^https?://(localhost|127\\.|\\[::1\\])"));
-    return instance.address.isEmpty() || local.match(instance.address).hasMatch() ? QStringLiteral("machine") : QStringLiteral("network");
-}
-
 QString checkAddress(const QString &address) {
     if (address.isEmpty())
         return {};
@@ -468,9 +459,11 @@ QVariantList SettingsModel::providers() const {
             }
         const bool cloud = !privacy.isEmpty();
         groupTitle = cloud ? tr("Cloud services") : tr("Your own machines");
-        const QString placement = placementOf(instance, cloud);
-        // A key is needed by every cloud service and by a Fugue helper; for the others it is optional.
-        const bool keyRequired = cloud || instance.type == QLatin1String("fugue-helper");
+        const Placement where = fugue::placementOf(instance); // the engine's rule, the one the privacy question uses
+        const QString placement = where == Placement::ThisMachine ? QStringLiteral("machine")
+                                  : where == Placement::OwnHost ? QStringLiteral("network") : QStringLiteral("cloud");
+        // A key is needed by every off-machine service and by a Fugue helper on another machine (the built-in one has no address); else optional.
+        const bool keyRequired = placement == QLatin1String("cloud") || (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty());
         // What the row says: Off beats everything; else what blocks it (it is "strong"), else Ready.
         QString status = QStringLiteral("ready");
         if (!instance.enabled)
@@ -493,6 +486,7 @@ QVariantList SettingsModel::providers() const {
                                 {"freeTier", freeTier},
                                 {"placement", placement},
                                 {"placementText", providerPlacementText(placement)},
+                                {"host", QUrl(instance.address).host()},
                                 {"keyRequired", keyRequired},
                                 {"status", status},
                                 {"statusText", statusText},
