@@ -170,7 +170,7 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
       m_search(new NodeSearch(registry, this, this)), m_widgets(new WidgetEdit(registry, this, this)),
-      m_groups(new GroupEdit(registry, this, this)), m_gesture(new CanvasGesture(this, this)),
+      m_groups(new GroupEdit(registry, this, this)), m_appBuilder(new AppBuilder(registry, this, this)), m_gesture(new CanvasGesture(this, this)),
       m_undo(makeUndoStack()) {
     watchUndoStack();
     m_lensNodes = new QSortFilterProxyModel(this);
@@ -1417,6 +1417,29 @@ QVariantMap CanvasModel::portAt(qreal x, qreal y, qreal radius) const {
         best.insert("wired", isWired(best.value("node").toString(), best.value("port").toString(),
                                      best.value("output").toBool()));
     return best;
+}
+
+QVariantMap CanvasModel::inputRowAt(qreal x, qreal y) const {
+    const QString id = nodeAt(x, y);
+    for (const NodeRow &row : m_rows) {
+        if (row.id != id || row.collapsed)
+            continue;
+        for (const Port &port : row.inputs)
+            if (port.widget && !port.hidden && !port.notUsed && y >= row.pos.y() + port.rowTop && y < row.pos.y() + port.rowTop + port.rowHeight)
+                return {{"node", id}, {"input", port.name}, {"label", port.label}};
+    }
+    return {};
+}
+
+QRectF CanvasModel::inputRowRect(const QString &node, const QString &input) const {
+    for (const NodeRow &row : m_rows) {
+        if (row.id != node || row.collapsed)
+            continue;
+        for (const Port &port : row.inputs)
+            if (port.name == input && !port.hidden && !port.notUsed && port.rowHeight > 0)
+                return QRectF(row.pos.x(), row.pos.y() + port.rowTop, row.width, port.rowHeight);
+    }
+    return {};
 }
 
 QString CanvasModel::nodeAt(qreal x, qreal y) const {

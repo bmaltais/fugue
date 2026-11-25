@@ -101,6 +101,9 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
             model->groups()->enterGroup(ids.first());
         emit model->interfaceEditorRequested();
     });
+    // Make app (#393): the builder over the whole workflow; Edit app is the same dialog on the block there.
+    for (const char *id : {"app.make", "app.edit"})
+        commands.setHandler(id, [model] { model->appBuilder()->requestOpen(); });
     commands.setHandler("group.save-to-library", [model] { model->groups()->saveGroupToLibrary(); });
     commands.setHandler("group.update", [model] { model->groups()->requestGroupUpdate(); });
     commands.setHandler("node.move-version", [model] { model->requestMajorMove(); });

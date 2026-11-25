@@ -43,6 +43,11 @@ QList<Row> menuRows() {
         {"file.templates", QT_TRANSLATE_NOOP("Command", "Browse templates"), nullptr, {}, "app", "same"},
         // The apps shelf (#388): the installed apps as cards; the window opens it (Main.qml).
         {"app.show-all", QT_TRANSLATE_NOOP("Command", "All apps: the shelf of apps, to open another"), QT_TRANSLATE_NOOP("Command", "All apps…"), {"Ctrl+Shift+A"}, "app", "added"},
+        // Make app and Edit app (#393): the builder, opened by the window (AppBuilderDialog.qml); both run one handler.
+        {"app.make", QT_TRANSLATE_NOOP("Command", "Turn this workflow into an app: pick its inputs and outputs"),
+         QT_TRANSLATE_NOOP("Command", "Make app…"), {"Ctrl+Alt+M"}, "app", "added"},
+        {"app.edit", QT_TRANSLATE_NOOP("Command", "Change the inputs, outputs and look of this workflow's app"),
+         QT_TRANSLATE_NOOP("Command", "Edit app…"), {}, "app", "added"},
         // The projects dialog (spec 1.4.2): the window opens it; ProjectModel sets the handler.
         {"file.projects", QT_TRANSLATE_NOOP("Command", "Projects: switch, make or add one"), QT_TRANSLATE_NOOP("Command", "Projects…"), {}, "app", "added"},
         // The canvas revisions and candidates (#210); the window opens the dialog (Main.qml).
@@ -301,6 +306,7 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
         const QStringList ids = model->selectedIds();
         return ids.size() == 1 && model->groupInstances(ids.first()) > 1;
     });
+    registry.setEnabledWhen("app.edit", [model] { return model->appBuilder()->hasBlock(); });
     registry.setEnabledWhen("group.interface", [model] {
         const QStringList ids = model->selectedIds();
         return model->inGroup() || (ids.size() == 1 && model->isGroup(ids.first()));

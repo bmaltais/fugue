@@ -63,6 +63,7 @@
 
 #include "canvas/canvas_gesture.h"
 #include "canvas/group_edit.h"
+#include "apps/app_builder.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
 #include "engine/node_picture.h"
@@ -210,6 +211,8 @@ class CanvasModel : public QObject {
     // Group scope and interface editing (canvas/group_edit.h): enter and leave a group, Make
     // group, the exposed inputs and outputs, the library.
     Q_PROPERTY(GroupEdit *groups READ groups CONSTANT)
+    // Make an app (apps/app_builder.h, spec 12.19): the builder dialog's store and the canvas's click-to-expose mode.
+    Q_PROPERTY(AppBuilder *appBuilder READ appBuilder CONSTANT)
     // What a press, a drag and a release on the canvas do (canvas/canvas_gesture.h).
     Q_PROPERTY(CanvasGesture *gesture READ gesture CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
@@ -247,6 +250,7 @@ public:
     fugue::NodeSearch *search() const { return m_search; }
     WidgetEdit *widgets() const { return m_widgets; }
     GroupEdit *groups() const { return m_groups; }
+    AppBuilder *appBuilder() const { return m_appBuilder; }
     CanvasGesture *gesture() const { return m_gesture; }
     // Pasting and dropping images (workflow/image_inputs.h): set by Workflows; the paste command
     // and the Paste button of Load Image go through it. Null without one.
@@ -638,6 +642,11 @@ public:
     Q_INVOKABLE QPointF position(const QString &node) const;
     // The node's box in the world, as drawn (a collapsed one is its header); empty for none.
     Q_INVOKABLE QRectF nodeRect(const QString &node) const;
+    // The value input whose row the world point is on, as {node, input}, or empty: what the app builder's click-to-expose
+    // mode reads (a linked input, a folded Advanced one and a collapsed node have none).
+    Q_INVOKABLE QVariantMap inputRowAt(qreal x, qreal y) const;
+    // That input's row in the world, as drawn; empty when it has none.
+    Q_INVOKABLE QRectF inputRowRect(const QString &node, const QString &input) const;
 
     // --- selection ---
 
@@ -881,6 +890,7 @@ private:
     fugue::NodeSearch *m_search;
     WidgetEdit *m_widgets;
     GroupEdit *m_groups;
+    AppBuilder *m_appBuilder;
     CanvasGesture *m_gesture;
     fugue::ImageInputs *m_images = nullptr;
     std::vector<NodeRow> m_rows;
