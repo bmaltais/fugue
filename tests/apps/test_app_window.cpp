@@ -374,6 +374,7 @@ private slots:
         QCOMPARE(started.size(), 1);
         QCOMPARE(started.first().document.graph.nodes.value("encode").inputs.value("prompt").toJson(), QJsonValue("a red fox"));
         QTRY_VERIFY(find(app.window, "appCancel"));
+        QVERIFY(find(app.window, "appCancel")->property("alarmed").toBool()); // red while it can stop the run (owner, 2026-11-25)
         QVERIFY(!find(app.window, "appRun")->property("enabled").toBool());
         const QString picture = app.dir.path() + "/result.png";
         QVERIFY(QImage(8, 8, QImage::Format_RGB32).save(picture));

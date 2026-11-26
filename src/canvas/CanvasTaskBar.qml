@@ -473,6 +473,7 @@ Item {
                 }
                 ViewButton {
                     objectName: "canvasTaskCancel"
+                    danger: true
                     look: bar.look
                     visible: bar.busy
                     text: qsTr("Cancel")
