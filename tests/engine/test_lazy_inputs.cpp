@@ -22,8 +22,8 @@ void addTypes(World &world) {
                });
     const QByteArray pick =
         "'inputs': [{'name': 'condition', 'type': 'boolean'},"
-        " {'name': 'on_true', 'type': 'any', 'optional': true, 'lazy': true},"
-        " {'name': 'on_false', 'type': 'any', 'optional': true, 'lazy': true}],"
+        " {'name': 'on_true', 'type': 'any', 'optional': true, 'lazy': true, 'takes_list': true},"
+        " {'name': 'on_false', 'type': 'any', 'optional': true, 'lazy': true, 'takes_list': true}],"
         "'outputs': [{'name': 'value', 'type': 'any', 'follows': ['on_true', 'on_false']}]";
     world.type(
         "fugue/pick", pick,
@@ -58,6 +58,31 @@ QByteArray graphFor(const QString &answer, const QString &more = {}, const QStri
 
 QString textOf(const Ran &ran, const QString &node, const QString &output = QStringLiteral("text")) {
     return ran.outcome.outputs.value(node).value(output).text();
+}
+
+
+// What the compiler says about a graph written with single quotes; the nodes get version 1.0.0.
+Compilation compileOf(World &world, const QByteArray &graph) {
+    QJsonObject nodes = json(graph);
+    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+        QJsonObject node = it.value().toObject();
+        node.insert("version", "1.0.0");
+        it.value() = node;
+    }
+    const Result<Document> document = Document::fromJson(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}});
+    if (!document)
+        qFatal("test document is invalid");
+    return compile(*document, world.registry);
+}
+
+// A text list source, and sinks that take a list of text or a single text.
+void addListTypes(World &world) {
+    world.type("fugue/names", "'inputs': [], 'outputs': [{'name': 'items', 'type': 'text', 'list': true}]",
+               [](const NodeContext &) -> Result<Values> { return Values{{"items", Value::list({Value("a"), Value("b")})}}; });
+    world.type("fugue/takes-list", "'sink': true, 'inputs': [{'name': 'items', 'type': 'text', 'list': true}], 'outputs': []",
+               [](const NodeContext &) -> Result<Values> { return Values{}; });
+    world.type("fugue/takes-text", "'sink': true, 'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': []",
+               [](const NodeContext &) -> Result<Values> { return Values{}; });
 }
 
 } // namespace
@@ -240,6 +265,97 @@ private slots:
         const Ran ran = world.run(world.graph(graph));
         QCOMPARE(ran.outcome.states.value("sw"), NodeState::Error);
         QCOMPARE(ran.outcome.errors.first().input, QStringLiteral("on_true"));
+    }
+
+    // A mute is the person's choice (#590): a muted source empties the lazy input it feeds, and only a Switch that picks that
+    // side is skipped as upstream_muted. The other side runs as if nothing were muted.
+    void aMutedUnchosenSideLeavesTheNodeRunning() {
+        World world;
+        addTypes(world);
+        QByteArray graph = graphFor("yes");
+        graph.replace("'f3': {'type': 'fugue/join',", "'f3': {'type': 'fugue/join', 'mode': 'mute',");
+        const Ran ran = world.run(world.graph(graph));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(ran.outcome.states.value("sw"), NodeState::Cached);
+        QCOMPARE(textOf(ran, "sw", "value"), QStringLiteral("t1++"));
+    }
+
+    void aMutedChosenSideSkipsTheNodeAsUpstreamMuted() {
+        World world;
+        addTypes(world);
+        QByteArray graph = graphFor("no");
+        graph.replace("'f3': {'type': 'fugue/join',", "'f3': {'type': 'fugue/join', 'mode': 'mute',");
+        const Ran ran = world.run(world.graph(graph));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(traceOf(ran.events, {"sw"}), QStringList{QStringLiteral("node.skipped sw upstream_muted")});
+        QCOMPARE(world.calls.count("t1"), 0); // the other side is let go, not run
+        QCOMPARE(world.calls.count("out"), 0);
+    }
+
+    // With no hook every lazy input is asked for, so the muted one skips the node.
+    void aNodeWithoutAHookAsksForEveryLazyInputSoAMutedOneSkipsIt() {
+        World world;
+        addTypes(world);
+        QByteArray graph = graphFor("yes");
+        graph.replace("'f3': {'type': 'fugue/join',", "'f3': {'type': 'fugue/join', 'mode': 'mute',");
+        graph.replace("fugue/pick", "fugue/both"); // asks for every lazy input: the muted one included
+        const Ran ran = world.run(world.graph(graph));
+        QCOMPARE(traceOf(ran.events, {"sw"}), QStringList{QStringLiteral("node.skipped sw upstream_muted")});
+    }
+
+    // #592: a Switch switches lists. Its output is the list type, so a list input takes it and a single-value input does not.
+    void aSwitchPassesAListThroughAsAList() {
+        World world;
+        addTypes(world);
+        addListTypes(world);
+        const QByteArray graph =
+            "{'n': {'type': 'fugue/names'}, 'sw': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 'n.items'}}},"
+            " 'out': {'type': 'fugue/takes-list', 'inputs': {'items': {'from': 'sw.value'}}}}";
+        const Compilation compiled = compileOf(world, graph);
+        QVERIFY2(compiled.ok(), qPrintable(compiled.errors().isEmpty() ? QString() : compiled.errors().first().message));
+        const Ran ran = world.run(*compiled);
+        QVERIFY2(ran.outcome.status == RunStatus::Ok, qPrintable(ran.outcome.errors.isEmpty() ? QString() : ran.outcome.errors.first().message));
+        QCOMPARE(ran.outcome.outputs.value("sw").value("value").items().size(), 2);
+    }
+
+    void aSwitchOfListsIsNotASingleValue() {
+        World world;
+        addTypes(world);
+        addListTypes(world);
+        const Compilation compiled = compileOf(
+            world, "{'n': {'type': 'fugue/names'}, 'sw': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 'n.items'}}},"
+                   " 'out': {'type': 'fugue/takes-text', 'inputs': {'text': {'from': 'sw.value'}}}}");
+        QVERIFY(!compiled.ok());
+        QCOMPARE(compiled.errors().first().code, QStringLiteral("type_mismatch"));
+        QCOMPARE(compiled.errors().first().node, QStringLiteral("out"));
+    }
+
+    void aListOnOneSideAndASingleValueOnTheOtherIsATypeMismatch() {
+        World world;
+        addTypes(world);
+        addListTypes(world);
+        const Compilation compiled = compileOf(
+            world, "{'n': {'type': 'fugue/names'}, 't': {'type': 'fugue/text', 'inputs': {'text': 'x'}},"
+                   " 'sw': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 'n.items'}, 'on_false': {'from': 't.text'}}},"
+                   " 'out': {'type': 'fugue/takes-list', 'inputs': {'items': {'from': 'sw.value'}}}}");
+        QVERIFY(!compiled.ok());
+        QCOMPARE(compiled.errors().first().code, QStringLiteral("type_mismatch"));
+        QVERIFY(compiled.errors().first().message.contains("differ"));
+    }
+
+    // #592 (b): only the CLI or hand-edited JSON can write a literal on an any input (the canvas has no widget for one), and
+    // it types nothing, so it is a compile error on the node that holds it rather than an unchecked value.
+    void aLiteralOnASwitchSideIsACompileError() {
+        World world;
+        addTypes(world);
+        const Compilation compiled = compileOf(
+            world, "{'t': {'type': 'fugue/text', 'inputs': {'text': 'x'}},"
+                   " 'sw': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 't.text'}, 'on_false': 5}},"
+                   " 'out': {'type': 'fugue/save', 'inputs': {'value': {'from': 'sw.value'}}}}");
+        QVERIFY(!compiled.ok());
+        QCOMPARE(compiled.errors().first().code, QStringLiteral("type_mismatch"));
+        QCOMPARE(compiled.errors().first().node, QStringLiteral("sw"));
+        QCOMPARE(compiled.errors().first().input, QStringLiteral("on_false"));
     }
 
     // The output of a node that follows its inputs has their type: a text input accepts a text, and a wrong type is

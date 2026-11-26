@@ -212,6 +212,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.string(o, "description", input.description, where, n);
     r.boolean(o, "optional", input.optional, where, n);
     r.boolean(o, "lazy", input.lazy, where, n);
+    r.boolean(o, "takes_list", input.type.takesList, where, n);
     r.count(o, "min_items", input.minItems, where, n);
     r.count(o, "max_items", input.maxItems, where, n);
     r.number(o, "min", input.min, where, n);
@@ -233,7 +234,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     }
     input.defaultValue = o.value("default");
     r.unknownFields(o,
-                    {"name", "type", "label", "description", "default", "optional", "lazy", "list", "min_items",
+                    {"name", "type", "label", "description", "default", "optional", "lazy", "takes_list", "list", "min_items",
                      "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
                      "advanced", "role", "over", "shown_when"},
                     where, n);
@@ -254,6 +255,8 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
                    n);
         if (input.choices && id != "text")
             r.fail(where + QStringLiteral(" is %1, but \"choices\" only applies to text inputs.").arg(id), n);
+        if (input.type.takesList && (id != "any" || input.type.list))
+            r.fail(where + QStringLiteral(" has \"takes_list\" but is not a single-value \"any\" input."), n);
         if (!input.type.list && (input.minItems || input.maxItems))
             r.fail(where + QStringLiteral(" has \"min_items\" or \"max_items\" but is not a list."), n);
         if (input.min && input.max && *input.min > *input.max)
@@ -577,6 +580,7 @@ QJsonObject NodeType::toJson() const {
             i.insert("default", input.defaultValue);
         putIfTrue(i, "optional", input.optional);
         putIfTrue(i, "lazy", input.lazy);
+        putIfTrue(i, "takes_list", input.type.takesList);
         putIf(i, "min_items", input.minItems);
         putIf(i, "max_items", input.maxItems);
         putIf(i, "min", input.min);

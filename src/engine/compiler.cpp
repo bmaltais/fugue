@@ -135,6 +135,7 @@ struct Flat {
     QMap<QString, InputValue> inputs; // links by path id
     QMap<QString, InputSpec> checkedAs; // each input as its value was checked: narrowed by group faces
     bool emptied = false;             // a required input lost its value to a bypass
+    QMap<QString, QString> lazyDropped; // lazy inputs that lost their value to a bypass, a mute or an emptied source: the reason
 
     const NodeType &spec() const { return face ? *face : *type; }
 };
@@ -752,6 +753,21 @@ void Compiler::checkInstance(Scope *scope, const QString &id, Scope *child) {
 std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpec &spec, const Bound &bound,
                                                 const InputValue &item, int index) {
     if (item.kind() != InputValue::Kind::Link) {
+        // A literal on an input an "any" output follows would type nothing and pass unchecked: only a link says the type (#592).
+        if (spec.type.type.isAny() && !item.isEmpty()) {
+            const QList<OutputSpec> &outputs = flat.spec().outputs;
+            if (std::any_of(outputs.cbegin(), outputs.cend(),
+                            [&](const OutputSpec &out) { return out.follows.contains(spec.name); })) {
+                Error error = nodeError(QStringLiteral("type_mismatch"), flat.path,
+                                        QStringLiteral("Input %1 of %2 holds a typed value, but the output of %2 takes its type from what is "
+                                                       "linked to %1.")
+                                            .arg(spec.name, flat.path));
+                error.input = spec.name;
+                error.hint = QStringLiteral("Link an output to %1; a literal has no type to pass on.").arg(spec.name);
+                fail(error);
+                return std::nullopt;
+            }
+        }
         const Errors errors = checkLiteral(spec, item.toJson(), m_registry.portKind(spec.type.type));
         for (Error error : errors) {
             error.node = flat.path;
@@ -1074,7 +1090,9 @@ CompiledGraph Compiler::shape() {
                 continue;
             }
             const InputSpec *spec = flat.spec().input(it.key());
-            if (spec && spec->required())
+            if (spec && spec->lazy)
+                flat.lazyDropped[it.key()] = QStringLiteral("upstream_empty"); // only an error when the node asks for it
+            else if (spec && spec->required())
                 flat.emptied = true;
         }
         flat.inputs = rewired;
@@ -1096,9 +1114,28 @@ CompiledGraph Compiler::shape() {
         ordering.nodes[flat.path].inputs = flat.inputs;
     QMap<QString, QString> dropped;
     for (const QString &path : ordering.order()) {
-        const Flat &flat = live[path];
+        Flat &flat = live[path];
         QString reason;
         bool upstreamEmpty = flat.emptied;
+        // A muted or emptied source of a lazy input empties that input only: the node decides whether it needs it (9.9).
+        for (auto input = flat.inputs.begin(); input != flat.inputs.end();) {
+            const InputSpec *spec = flat.spec().input(input.key());
+            QString why;
+            if (spec && spec->lazy)
+                for (const QString &dep : sources({{input.key(), *input}})) {
+                    const QString depWhy = dropped.value(dep);
+                    if (depWhy == QLatin1String("upstream_empty") && why.isEmpty())
+                        why = depWhy;
+                    else if (!depWhy.isEmpty() && depWhy != QLatin1String("upstream_empty"))
+                        why = QStringLiteral("upstream_muted");
+                }
+            if (why.isEmpty()) {
+                ++input;
+            } else {
+                flat.lazyDropped[input.key()] = why;
+                input = flat.inputs.erase(input);
+            }
+        }
         for (const QString &dep : sources(flat.inputs)) {
             const QString why = dropped.value(dep);
             if (why == QLatin1String("muted") || why == QLatin1String("upstream_muted"))
@@ -1152,6 +1189,7 @@ CompiledGraph Compiler::shape() {
         node.sink = flat.spec().sink;
         node.provider = flat.provider;
         node.frozen = flat.frozen;
+        node.lazyDropped = flat.lazyDropped;
         graph.nodes[flat.path] = node;
     }
     return graph;
@@ -1293,6 +1331,12 @@ QJsonObject CompiledGraph::toJson() const {
             node["provider"] = it->provider;
         if (!it->frozen.isEmpty())
             node["frozen"] = it->frozen;
+        if (!it->lazyDropped.isEmpty()) {
+            QJsonObject dropped;
+            for (auto drop = it->lazyDropped.constBegin(); drop != it->lazyDropped.constEnd(); ++drop)
+                dropped[drop.key()] = *drop;
+            node["lazy_dropped"] = dropped;
+        }
         jsonNodes[it.key()] = node;
     }
     QJsonObject jsonSkipped;
@@ -1373,6 +1417,15 @@ std::optional<CompiledGraph> readCompiled(const QJsonObject &json, Errors &error
         node.sink = o.value("sink").toBool();
         node.provider = o.value("provider").toString();
         node.frozen = o.value("frozen").toString();
+        const QJsonObject lazyDropped = o.value("lazy_dropped").toObject();
+        for (auto drop = lazyDropped.constBegin(); drop != lazyDropped.constEnd(); ++drop) {
+            const QString why = drop->toString();
+            if (!isPortName(drop.key()) || (why != QLatin1String("upstream_muted") && why != QLatin1String("upstream_empty")))
+                fail(QStringLiteral("Node %1: lazy_dropped %2 must be upstream_muted or upstream_empty.").arg(path, drop.key()), path,
+                     drop.key());
+            else
+                node.lazyDropped[drop.key()] = why;
+        }
         graph.nodes[path] = node;
     }
 
