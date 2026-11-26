@@ -51,10 +51,12 @@ Rectangle {
             Accessible.name: area.label
             onTextChanged: {
                 // A paste into a one-line value: its line breaks are spaces.
+                // Sent out, not assigned: the value comes back through `text: area.text`, and assigning `text` here would cut
+                // that binding, so a value set later (another tab, a reset) would no longer show.
                 if (area.singleLine && /[\r\n]/.test(text)) {
                     const at = cursorPosition
-                    text = text.replace(/\r\n|\r|\n/g, " ")
-                    cursorPosition = at
+                    area.edited(text.replace(/\r\n|\r|\n/g, " "))
+                    cursorPosition = Math.min(at, length)
                     return
                 }
                 if (text !== area.text) area.edited(text)

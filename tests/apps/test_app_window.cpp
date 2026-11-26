@@ -523,6 +523,9 @@ private slots:
         QVERIFY(!title->property("text").toString().contains('\n'));
         QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(started.size(), 2);
+        // The paste did not cut the field from its value: a value set later still shows.
+        titleBox->setProperty("text", QStringLiteral("set later"));
+        QTRY_COMPARE(title->property("text").toString(), QStringLiteral("set later"));
         qDeleteAll(app.engine.rootObjects());
     }
 
