@@ -131,6 +131,7 @@ This is a test release and the packages and the AppImage are unsigned.
 - [docs/ui-ergonomics.md](docs/ui-ergonomics.md): rules window UI follows.
 - Research notes behind the big epics: [mesh](docs/mesh-research.md), [private mode](docs/private-mode-research.md), [canvas](docs/canvas-research.md), [workspaces](docs/workspaces-research.md); design notes: [canvas actions](docs/canvas-actions-design.md).
 - [docs/recording-screenshots.md](docs/recording-screenshots.md): how the pictures above are made again.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to help, build and send a pull request.
 - Work is tracked in the [issues](https://github.com/bmaltais/fugue/issues) by milestone.
 
 ## Build
