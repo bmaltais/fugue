@@ -40,9 +40,9 @@ namespace {
 
 constexpr int W = 320;
 constexpr int H = 240;
-// The redrawn region, and how far from it the mask must be 0 (margin 16 + feather 16 + blur 4, with room).
+// The redrawn region, and how far from it the mask must be 0.
 constexpr int RX = 120, RY = 80, RW = 80, RH = 80;
-constexpr int FAR = 70;
+constexpr int FAR = 40; // the reach is blur 4 + margin 16 + feather 16 = 36
 
 Pixels picture() {
     Pixels p(W, H, 3);
@@ -66,12 +66,15 @@ float bilinear(const Pixels &p, float x, float y, int c) {
 }
 
 // What an edit model returns: a region redrawn, a global shift, a slight blur.
-Pixels edit(const Pixels &original) {
+Pixels edit(const Pixels &original, bool blueOnly = false) {
     Pixels e = original;
     for (int y = RY; y < RY + RH; ++y)
         for (int x = RX; x < RX + RW; ++x)
             for (int c = 0; c < 3; ++c)
-                e.at(x, y, c) = (c == 0 ? 0.95f : c == 1 ? 0.8f : 0.1f) + 0.04f * std::sin((x + y) * 0.2f);
+                if (blueOnly) // a change in blue alone: Desaturate's luma weights make this the weakest to see
+                    e.at(x, y, c) = original.at(x, y, c) + (c == 2 ? 0.15f : 0.0f);
+                else
+                    e.at(x, y, c) = (c == 0 ? 0.95f : c == 1 ? 0.8f : 0.1f) + 0.04f * std::sin((x + y) * 0.2f);
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
             e.at(x, y, 0) += 0.03f; // brighter, a little warmer
@@ -122,8 +125,8 @@ Pixels read(const QJsonObject &output) {
     return p.value();
 }
 
-bool far(int x, int y) {
-    return x < RX - FAR || x >= RX + RW + FAR || y < RY - FAR || y >= RY + RH + FAR;
+bool far(int x, int y, int distance) {
+    return x < RX - distance || x >= RX + RW + distance || y < RY - distance || y >= RY + RH + distance;
 }
 
 class TestKeepUnchanged : public QObject {
@@ -205,7 +208,9 @@ class TestKeepUnchanged : public QObject {
     }
 
     // The promise, checked on one run.
-    static void check(const Run &r, const char *what) {
+    // `truth` is the edit before it was reshaped: inside the region the output must be it, so a fit that
+    // shifted or stretched the edit wrongly (paste and crop) fails here.
+    static void check(const Run &r, const Pixels &truth, int channel, const char *what) {
         const Pixels &original = r.original;
         QCOMPARE(r.image.width, W);
         QCOMPARE(r.image.height, H);
@@ -220,7 +225,9 @@ class TestKeepUnchanged : public QObject {
         int zero = 0, differing = 0;
         for (int y = 0; y < H; ++y)
             for (int x = 0; x < W; ++x) {
-                if (far(x, y))
+                if (far(x, y, FAR) && !far(x, y, FAR + 30)) // the feather's last tail is a few steps of 16 bits
+                    QVERIFY2(r.mask.at(x, y, 0) < 0.01f, qPrintable(QStringLiteral("%1: mask %2 at %3,%4").arg(what).arg(r.mask.at(x, y, 0)).arg(x).arg(y)));
+                if (far(x, y, FAR + 30))
                     QVERIFY2(r.mask.at(x, y, 0) == 0.0f, qPrintable(QStringLiteral("%1: mask %2 at %3,%4").arg(what).arg(r.mask.at(x, y, 0)).arg(x).arg(y)));
                 if (r.mask.at(x, y, 0) != 0.0f)
                     continue;
@@ -230,7 +237,15 @@ class TestKeepUnchanged : public QObject {
             }
         QVERIFY(zero > W * H / 2);
         QCOMPARE(differing, 0); // where the mask is 0, the output is the original
-        QVERIFY(std::fabs(r.image.at(RX + RW / 2, RY + RH / 2, 0) - original.at(RX + RW / 2, RY + RH / 2, 0)) > 0.05f); // the edit came through
+        QVERIFY(std::fabs(r.image.at(RX + RW / 2, RY + RH / 2, channel) - original.at(RX + RW / 2, RY + RH / 2, channel)) > 0.05f); // the edit came through
+        // Deep inside the region the output is the edit at that spot (the fit is a bilinear resample, so a small tolerance).
+        float worst = 0;
+        for (int y = RY + 10; y < RY + RH - 10; ++y)
+            for (int x = RX + 10; x < RX + RW - 10; ++x)
+                for (int c = 0; c < 3; ++c)
+                    worst = std::max(worst, std::fabs(r.image.at(x, y, c) - std::clamp(truth.at(x, y, c), 0.0f, 1.0f)));
+        QVERIFY2(worst < 0.03f, qPrintable(QStringLiteral("%1: the region is off the edit by %2").arg(what).arg(worst)));
+        qInfo("%s: worst error inside the region %.4f", what, worst);
         qInfo("%s: mean mask in the region %.3f, %d pixels with mask 0, %d of them differing", what, mean, zero, differing);
     }
 
@@ -244,10 +259,28 @@ private slots:
         QCOMPARE(group->name, QStringLiteral("Keep unchanged areas"));
         QCOMPARE(group->category, QStringLiteral("Image/Mask"));
         QVERIFY(group->input("original") && group->input("edited"));
-        const std::pair<const char *, double> knobs[] = {{"blur", 4}, {"threshold", 0.04}, {"speck", 12}, {"close", 24}, {"margin", 16}, {"feather", 16}};
+        const std::pair<const char *, double> knobs[] = {{"blur", 4}, {"threshold", 0.12}, {"speck", 12}, {"close", 24}, {"margin", 16}, {"feather", 16}};
         for (const auto &[name, value] : knobs) {
             QVERIFY2(group->input(QLatin1String(name)), name);
             QCOMPARE(group->input(QLatin1String(name))->defaultValue.toDouble(), value);
+        }
+        // Each knob's range fits inside the range of every inner input it sets (a Blur radius is 1 to 31).
+        const Result<Document> library = loadLibraryGroup(*group);
+        QVERIFY(library.ok());
+        const GroupDefinition *inner = library->group("fugue/keep-unchanged");
+        QVERIFY(inner);
+        for (const auto &exposed : inner->inputs) {
+            const InputSpec *knob = group->input(exposed.name);
+            QVERIFY2(knob, qPrintable(exposed.name));
+            for (const PortRef &target : exposed.targets) {
+                const NodeType *type = registry.nodeType(inner->nodes.value(target.node).type);
+                QVERIFY2(type && type->input(target.port), qPrintable(target.toString()));
+                const InputSpec *own = type->input(target.port);
+                if (knob->min && own->min)
+                    QVERIFY2(*knob->min >= *own->min, qPrintable(exposed.name + " min below " + target.toString()));
+                if (knob->max && own->max)
+                    QVERIFY2(*knob->max <= *own->max, qPrintable(exposed.name + " max above " + target.toString()));
+            }
         }
         QVERIFY(group->output("image"));
         QVERIFY(group->output("mask"));
@@ -275,13 +308,23 @@ private slots:
     void theMaskCoversTheChangeAndTheRestIsTheOriginal() {
         QTemporaryDir dir;
         const Pixels original = picture();
-        check(run(dir, original, edit(original)), "same size");
+        const Pixels edited = edit(original);
+        check(run(dir, original, edited), edited, 0, "same size");
     }
 
     void anEditOfAnotherSizeAndAspectLandsOnTheOriginal() {
         QTemporaryDir dir;
         const Pixels original = picture();
-        check(run(dir, original, reshaped(edit(original))), "another size");
+        const Pixels edited = edit(original);
+        check(run(dir, original, reshaped(edited)), edited, 0, "another size");
+    }
+
+    // Desaturate weighs blue 0.072, so a blue-only change had to be about 0.55 to pass 0.04.
+    void aChangeInBlueAloneIsCaught() {
+        QTemporaryDir dir;
+        const Pixels original = picture();
+        const Pixels edited = edit(original, true);
+        check(run(dir, original, edited), edited, 2, "blue only");
     }
 };
 

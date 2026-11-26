@@ -110,6 +110,62 @@
           "type": "fugue/blur",
           "version": "1.0.0"
         },
+        "change_blue": {
+          "inputs": {
+            "channel": "blue",
+            "image": {
+              "from": "difference.image"
+            }
+          },
+          "type": "fugue/image-to-mask",
+          "version": "1.0.1"
+        },
+        "change_green": {
+          "inputs": {
+            "channel": "green",
+            "image": {
+              "from": "difference.image"
+            }
+          },
+          "type": "fugue/image-to-mask",
+          "version": "1.0.1"
+        },
+        "change_red": {
+          "inputs": {
+            "channel": "red",
+            "image": {
+              "from": "difference.image"
+            }
+          },
+          "type": "fugue/image-to-mask",
+          "version": "1.0.1"
+        },
+        "change_rg": {
+          "inputs": {
+            "destination": {
+              "from": "change_red.mask"
+            },
+            "operation": "add",
+            "source": {
+              "from": "change_green.mask"
+            }
+          },
+          "type": "fugue/combine-masks",
+          "version": "1.0.0"
+        },
+        "change_sum": {
+          "inputs": {
+            "destination": {
+              "from": "change_rg.mask"
+            },
+            "operation": "add",
+            "source": {
+              "from": "change_blue.mask"
+            }
+          },
+          "type": "fugue/combine-masks",
+          "version": "1.0.0"
+        },
         "diff_rough": {
           "inputs": {
             "base": {
@@ -176,26 +232,6 @@
             "resize_source": true
           },
           "type": "fugue/composite-masked",
-          "version": "1.0.0"
-        },
-        "gray": {
-          "inputs": {
-            "amount": 1,
-            "image": {
-              "from": "difference.image"
-            }
-          },
-          "type": "fugue/desaturate",
-          "version": "1.0.0"
-        },
-        "gray_rough": {
-          "inputs": {
-            "amount": 1,
-            "image": {
-              "from": "diff_rough.image"
-            }
-          },
-          "type": "fugue/desaturate",
           "version": "1.0.0"
         },
         "grow_rough": {
@@ -284,12 +320,68 @@
           "type": "fugue/grow-mask",
           "version": "1.0.1"
         },
+        "rough_blue": {
+          "inputs": {
+            "channel": "blue",
+            "image": {
+              "from": "diff_rough.image"
+            }
+          },
+          "type": "fugue/image-to-mask",
+          "version": "1.0.1"
+        },
+        "rough_green": {
+          "inputs": {
+            "channel": "green",
+            "image": {
+              "from": "diff_rough.image"
+            }
+          },
+          "type": "fugue/image-to-mask",
+          "version": "1.0.1"
+        },
+        "rough_red": {
+          "inputs": {
+            "channel": "red",
+            "image": {
+              "from": "diff_rough.image"
+            }
+          },
+          "type": "fugue/image-to-mask",
+          "version": "1.0.1"
+        },
+        "rough_rg": {
+          "inputs": {
+            "destination": {
+              "from": "rough_red.mask"
+            },
+            "operation": "add",
+            "source": {
+              "from": "rough_green.mask"
+            }
+          },
+          "type": "fugue/combine-masks",
+          "version": "1.0.0"
+        },
+        "rough_sum": {
+          "inputs": {
+            "destination": {
+              "from": "rough_rg.mask"
+            },
+            "operation": "add",
+            "source": {
+              "from": "rough_blue.mask"
+            }
+          },
+          "type": "fugue/combine-masks",
+          "version": "1.0.0"
+        },
         "threshold": {
           "inputs": {
             "mask": {
-              "from": "to_mask.mask"
+              "from": "change_sum.mask"
             },
-            "value": 0.04
+            "value": 0.12
           },
           "type": "fugue/threshold-mask",
           "version": "1.0.0"
@@ -297,32 +389,12 @@
         "threshold_rough": {
           "inputs": {
             "mask": {
-              "from": "to_mask_rough.mask"
+              "from": "rough_sum.mask"
             },
-            "value": 0.1
+            "value": 0.3
           },
           "type": "fugue/threshold-mask",
           "version": "1.0.0"
-        },
-        "to_mask": {
-          "inputs": {
-            "channel": "red",
-            "image": {
-              "from": "gray.image"
-            }
-          },
-          "type": "fugue/image-to-mask",
-          "version": "1.0.1"
-        },
-        "to_mask_rough": {
-          "inputs": {
-            "channel": "red",
-            "image": {
-              "from": "gray_rough.image"
-            }
-          },
-          "type": "fugue/image-to-mask",
-          "version": "1.0.1"
         }
       },
       "outputs": [
@@ -346,7 +418,7 @@
         "nodes": {
           "blur_matched": {
             "pos": [
-              2720,
+              3060,
               0
             ]
           },
@@ -362,6 +434,36 @@
               0
             ]
           },
+          "change_blue": {
+            "pos": [
+              3740,
+              300
+            ]
+          },
+          "change_green": {
+            "pos": [
+              3740,
+              0
+            ]
+          },
+          "change_red": {
+            "pos": [
+              3740,
+              -300
+            ]
+          },
+          "change_rg": {
+            "pos": [
+              4080,
+              0
+            ]
+          },
+          "change_sum": {
+            "pos": [
+              4420,
+              0
+            ]
+          },
           "diff_rough": {
             "pos": [
               680,
@@ -370,25 +472,25 @@
           },
           "difference": {
             "pos": [
-              3060,
+              3400,
               0
             ]
           },
           "feather": {
             "pos": [
-              6120,
+              6800,
               0
             ]
           },
           "fill_grow": {
             "pos": [
-              5100,
+              5780,
               0
             ]
           },
           "fill_shrink": {
             "pos": [
-              5440,
+              6120,
               0
             ]
           },
@@ -398,87 +500,93 @@
               0
             ]
           },
-          "gray": {
-            "pos": [
-              3400,
-              0
-            ]
-          },
-          "gray_rough": {
-            "pos": [
-              1020,
-              0
-            ]
-          },
           "grow_rough": {
-            "pos": [
-              2040,
-              0
-            ]
-          },
-          "margin": {
-            "pos": [
-              5780,
-              0
-            ]
-          },
-          "match": {
             "pos": [
               2380,
               0
             ]
           },
-          "negate_fill": {
-            "pos": [
-              5100,
-              300
-            ]
-          },
-          "negate_speck": {
-            "pos": [
-              4080,
-              300
-            ]
-          },
-          "open_shrink": {
-            "pos": [
-              4420,
-              0
-            ]
-          },
-          "paste": {
+          "margin": {
             "pos": [
               6460,
               0
             ]
           },
-          "regrow": {
+          "match": {
+            "pos": [
+              2720,
+              0
+            ]
+          },
+          "negate_fill": {
+            "pos": [
+              5780,
+              300
+            ]
+          },
+          "negate_speck": {
             "pos": [
               4760,
-              0
+              300
             ]
           },
-          "threshold": {
+          "open_shrink": {
             "pos": [
-              4080,
+              5100,
               0
             ]
           },
-          "threshold_rough": {
+          "paste": {
+            "pos": [
+              7140,
+              0
+            ]
+          },
+          "regrow": {
+            "pos": [
+              5440,
+              0
+            ]
+          },
+          "rough_blue": {
+            "pos": [
+              1020,
+              300
+            ]
+          },
+          "rough_green": {
+            "pos": [
+              1020,
+              0
+            ]
+          },
+          "rough_red": {
+            "pos": [
+              1020,
+              -300
+            ]
+          },
+          "rough_rg": {
+            "pos": [
+              1360,
+              0
+            ]
+          },
+          "rough_sum": {
             "pos": [
               1700,
               0
             ]
           },
-          "to_mask": {
+          "threshold": {
             "pos": [
-              3740,
+              4760,
               0
             ]
           },
-          "to_mask_rough": {
+          "threshold_rough": {
             "pos": [
-              1360,
+              2040,
               0
             ]
           }
