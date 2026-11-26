@@ -239,7 +239,12 @@ void NodeSearch::refresh() {
         }
     }
     const bool ranked = !wordsOf(m_query).isEmpty();
-    std::sort(rows.begin(), rows.end(), [ranked](const SearchResults::Row &a, const SearchResults::Row &b) {
+    // A wire dragged out of an output with nothing typed: the nodes that carry the work on come first and the ends
+    // (Preview, the Save nodes) last, so Preview no longer leads the list only because "Basic" sorts first.
+    const bool sinksLast = !ranked && m_linkType && m_link.value("output").toBool();
+    std::sort(rows.begin(), rows.end(), [ranked, sinksLast](const SearchResults::Row &a, const SearchResults::Row &b) {
+        if (sinksLast && a.type->sink != b.type->sink)
+            return b.type->sink;
         if (ranked && a.score != b.score)
             return a.score > b.score;
         if (!ranked && a.type->category != b.type->category)

@@ -3266,7 +3266,10 @@ shown later than the run that made the results waits for the next run: a cached 
 ### 12.8 Node search
 
 Search-first node creation. Results show category, ports and version, and are filtered by port
-type when opened from a dragged link. Groups appear in search like any node type.
+type when opened from a dragged link. Groups appear in search like any node type. With nothing typed the
+list is by category, then name; opened from a link dragged out of an output, the sinks (Preview, the Save
+nodes) come after every other node, so the nodes that carry the work on lead the list (owner, 2026-11-25:
+Preview led it only because "Basic" sorts first). Typed words rank as before.
 
 ### 12.9 Furniture
 
