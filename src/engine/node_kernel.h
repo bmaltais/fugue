@@ -122,8 +122,9 @@ public:
     virtual Result<Values> run(const NodeContext &context) = 0;
 
     // Under validate (the canvas check, `fugue validate`): what a run of these inputs would fail
-    // on and can be told cheaply, with no model loaded and no file hashed, as errors the scheduler
-    // reports as warnings on the node (8.5). Only `node`, `type`, `inputs`, `hashes` and
+    // on and can be told cheaply, with no model loaded and no file hashed, as errors naming
+    // the node and, when it has one, the input. `fugue validate` lists them as warnings; the canvas shows them
+    // as the node's error after an edit, with no run (#600). Only `node`, `type`, `inputs`, `hashes` and
     // `registry` are set, and an input not known yet is absent. Called on the scheduler's thread.
     virtual Errors check(const NodeContext &context) const;
 

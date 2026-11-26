@@ -755,7 +755,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         if (!next.contains(top)) {
             NodeView view = runs.nodes.value(top);
             // An error stays until the workflow is edited, a group's inner one too.
-            const bool failed = aggregate(view) == QLatin1String("error");
+            const bool failed = aggregate(view) == QLatin1String("error") && !view.fromCheck;
             view.inner.clear();
             view.warnings.clear();
             view.notice.clear();
@@ -797,7 +797,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         if (next.contains(it.key()))
             continue;
         NodeView view = it.value();
-        const bool failed = aggregate(view) == QLatin1String("error");
+        const bool failed = aggregate(view) == QLatin1String("error") && !view.fromCheck;
         view.inner.clear();
         view.warnings.clear();
         view.notice.clear();
@@ -809,6 +809,28 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
             view.state = QStringLiteral("error");
         }
         next.insert(it.key(), view);
+    }
+    // What a node's kernel found wrong in its own values (check(), #600) shows as the node's error, as a run's does, and goes
+    // with the next check that does not find it. A node a run failed on keeps the run's words.
+    runs.checkErrors.clear();
+    if (!nodes.isEmpty()) {
+        for (const QJsonValue &value : problems) {
+            const Error error = Error::fromJson(value.toObject());
+            if (error.severity == Error::Severity::Warning || error.node.isEmpty())
+                continue;
+            runs.checkErrors << QVariantMap{{"node", error.node}, {"shown", topOf(error.node)}, {"message", error.message},
+                                            {"code", error.code}, {"hint", error.hint}, {"input", error.input}};
+            for (const QString &top : levelsOf(error.node)) {
+                NodeView &view = next[top];
+                if (view.state == QLatin1String("error") && !view.fromCheck)
+                    continue;
+                if (view.fromCheck && top == error.node)
+                    continue; // the first of its errors is the one shown
+                view.state = QStringLiteral("error");
+                setError(view, error, error.node, top != error.node);
+                view.fromCheck = true;
+            }
+        }
     }
     if (asked.edit)
         runs.errors.clear();
@@ -1074,7 +1096,20 @@ QString CanvasRuns::lastPicture() const {
     return newest;
 }
 
-QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }
+QVariantList CanvasRuns::errors() const {
+    const TabRuns runs = m_tabs.value(m_shownTab);
+    QVariantList list = runs.errors;
+    // A run that failed on the same node and code has said it already.
+    for (const QVariant &found : runs.checkErrors) {
+        const QVariantMap check = found.toMap();
+        const bool listed = std::any_of(list.cbegin(), list.cend(), [&](const QVariant &e) {
+            return e.toMap().value("node") == check.value("node") && e.toMap().value("code") == check.value("code");
+        });
+        if (!listed)
+            list << found;
+    }
+    return list;
+}
 
 QString CanvasRuns::lastStatus() const { return m_tabs.value(m_shownTab).lastStatus; }
 

@@ -876,7 +876,7 @@ private:
         return selection;
     }
 
-    // What the node's kernel can tell before a run (NodeKernel::check), as warnings.
+    // What the node's kernel can tell before a run (NodeKernel::check), kept as errors in `checkErrors`.
     void warnFromKernel(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -884,10 +884,10 @@ private:
         context.inputs = n.inputs;
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
-        for (Error warning : n.kernel->check(context)) {
-            warning.severity = Error::Severity::Warning;
-            warning.node = n.path;
-            m_outcome.errors.append(warning);
+        for (Error error : n.kernel->check(context)) {
+            error.severity = Error::Severity::Error;
+            error.node = n.path;
+            m_outcome.checkErrors.append(error);
         }
     }
 
@@ -1785,6 +1785,52 @@ void CheckAbort::abort() {
         m_quit();
 }
 
+namespace {
+
+// What the kernels of the nodes no output needs say of their own values (#600): a run never reaches them, but the person who
+// typed a bad formula into a node not yet wired should hear of it. Only the literals count; a link, an auto value or a list is
+// not known here, so an input holding one is left out, as under validate.
+Errors checkUnusedNodes(const CompiledGraph &graph, const RunEnvironment &environment) {
+    Errors errors;
+    if (!environment.registry || !environment.kernels)
+        return errors;
+    for (auto it = graph.unused.cbegin(); it != graph.unused.cend(); ++it) {
+        const NodeType *type = environment.registry->nodeTypeFor(it->type, it->version.major);
+        const std::shared_ptr<NodeKernel> kernel = type ? environment.kernels->node(*type) : nullptr;
+        if (!kernel)
+            continue;
+        NodeContext context;
+        context.node = it.key();
+        context.type = type;
+        context.hashes = environment.hashes;
+        context.registry = environment.registry;
+        for (const InputSpec &spec : type->inputs) {
+            if (spec.lazy)
+                continue;
+            const auto written = it->inputs.constFind(spec.name);
+            Value value;
+            if (written == it->inputs.constEnd() || written->isEmpty()) {
+                if (!spec.defaultValue.isUndefined())
+                    value = Value(spec.defaultValue);
+            } else if (written->kind() == InputValue::Kind::Literal) {
+                value = Value(written->literal());
+            } else if (written->kind() == InputValue::Kind::Resource) {
+                value = Value(written->handle());
+            }
+            if (!value.isEmpty())
+                context.inputs.insert(spec.name, value);
+        }
+        for (Error error : kernel->check(context)) {
+            error.severity = Error::Severity::Error;
+            error.node = it.key();
+            errors.append(error);
+        }
+    }
+    return errors;
+}
+
+} // namespace
+
 GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options,
                       CheckAbort *abort) {
     Scheduler scheduler(graph, std::nullopt, environment, options, true);
@@ -1806,6 +1852,9 @@ GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environm
     check.keys = scheduler.outcome().keys;
     check.routes = scheduler.outcome().routes;
     check.warnings = scheduler.outcome().errors;
+    check.checkErrors = scheduler.outcome().checkErrors;
+    if (!check.aborted)
+        check.checkErrors += checkUnusedNodes(graph, environment);
     return check;
 }
 

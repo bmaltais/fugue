@@ -1190,6 +1190,13 @@ CompiledGraph Compiler::shape() {
     for (const Flat &flat : live) {
         if (!needed.contains(flat.path)) {
             graph.skipped[flat.path] = QStringLiteral("not_part_of_output");
+            if (m_options.target.isEmpty()) {
+                CompiledNode unused;
+                unused.type = flat.spec().id;
+                unused.version = flat.spec().version;
+                unused.inputs = flat.inputs;
+                graph.unused[flat.path] = unused;
+            }
             if (m_options.target.isEmpty())
                 warn(nodeError(QStringLiteral("not_part_of_output"), flat.path,
                                QStringLiteral("Node %1 is not part of any output: no sink depends on it.")
