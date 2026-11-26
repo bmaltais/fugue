@@ -18,9 +18,18 @@ name: Package
 on:
   push:
     tags: ['v*']
+  # Weekly on main: a tag can only read caches made on the default branch, so this keeps them warm for the release.
+  schedule:
+    - cron: '37 6 * * 1'
   pull_request:
     paths: [packaging/PKGBUILD, .github/workflows/package.yml]
   workflow_dispatch:
+
+# A new push to a pull request cancels that pull request's older run. Tags, the weekly runs and manual runs each get
+# their own group (run_id), so a release is never cancelled. (llama.cpp's expression; docs/ci-research in the workbench.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -34,9 +43,13 @@ jobs:
       run:
         shell: bash
     env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 800M
     steps:
+      # In a container job `github.workspace` is the host's path (/home/runner/work/...), not where the checkout is
+      # mounted (/__w/...), so ccache would write outside the folder the cache steps restore and save (#335).
+      - name: Point ccache at the cached folder
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
 
