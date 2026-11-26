@@ -70,6 +70,7 @@ struct NodeRun {
     bool lazyAsked = false;
     int potential = 0; // nodes that read from it and may still demand it
     bool settled = false;     // its finish has been counted for its dependencies
+    QStringList gaveUp;       // the dependencies it declined: it no longer counts in their `readers`
     const NodeType *type = nullptr;
     std::shared_ptr<NodeKernel> kernel;
     std::shared_ptr<ProviderKernel> providerKernel;
@@ -502,6 +503,17 @@ private:
             letGo(m_nodes[up]);
     }
 
+    // `reader` declined `dep`: it stops counting in `dep`'s readers now, not when it finishes, so the images of `dep` go as soon as
+    // the readers left have finished (9.2). Once per pair: its finish skips what it gave up.
+    void stopReading(NodeRun &reader, NodeRun &dep) {
+        if (reader.gaveUp.contains(dep.path))
+            return;
+        reader.gaveUp << dep.path;
+        Q_ASSERT(dep.readers > 0);
+        if (--dep.readers == 0 && dep.settled)
+            dropImages(dep.outputs);
+    }
+
     // The values of the inputs that are not lazy, as the kernel will see them, for NodeKernel::lazyInputs. `unknown`: one is not
     // known yet (validate: a node that has not run, a random seed). `empty`: a required one came back with nothing, so the node
     // will not run (upstream_empty, or missing_input), and nothing is asked of its lazy inputs.
@@ -533,7 +545,7 @@ private:
     // its key when the answer is known (so the key is the one a run made), and what feeds every lazy input is still demanded.
     void askLazy(NodeRun &n) {
         n.lazyAsked = true;
-        if (n.lazyOf.isEmpty())
+        if (n.lazyOf.isEmpty() && n.node->lazyDropped.isEmpty())
             return;
         QStringList all;
         for (const InputSpec &spec : n.type->inputs)
@@ -550,7 +562,15 @@ private:
         for (const QString &name : all)
             if (!wanted.contains(name) && !(m_dry && (unknown || broken)))
                 n.declined << name;
-        const QStringList needed = m_dry ? all : wanted;
+        // A lazy input the compiler emptied (its source is muted, or came out empty) is only a problem when it is asked for.
+        QString dropReason;
+        if (!(m_dry && (unknown || broken)))
+            for (const QString &name : std::as_const(wanted))
+                if (n.node->lazyDropped.contains(name)) {
+                    dropReason = n.node->lazyDropped.value(name);
+                    break;
+                }
+        const QStringList needed = m_dry ? all : (dropReason.isEmpty() ? wanted : QStringList());
         // Nodes let go only because their reader could not ask (it failed upstream, or its condition is empty) were not chosen:
         // nothing upstream of them failed.
         for (auto it = n.lazyOf.constBegin(); it != n.lazyOf.constEnd(); ++it) {
@@ -560,9 +580,12 @@ private:
                 n.waitFor << it.key();
                 demand(m_nodes[it.key()]);
             } else {
+                stopReading(n, m_nodes[it.key()]);
                 letGo(m_nodes[it.key()]);
             }
         }
+        if (!dropReason.isEmpty())
+            skip(n, dropReason);
         m_again = true;
     }
 
@@ -629,11 +652,16 @@ private:
             if (n.phase != Phase::Finished || n.settled)
                 continue;
             n.settled = true;
+            dropImages(n.inputs); // the copies it read are the dependencies' pixels too; the files stay
             if (n.readers == 0)
                 dropImages(n.outputs);
-            for (const QString &dep : std::as_const(n.dependencies))
+            for (const QString &dep : std::as_const(n.dependencies)) {
+                if (n.gaveUp.contains(dep))
+                    continue; // counted out when it declined
+                Q_ASSERT(m_nodes[dep].readers > 0);
                 if (--m_nodes[dep].readers == 0 && m_nodes[dep].settled)
                     dropImages(m_nodes[dep].outputs);
+            }
         }
     }
 
@@ -660,7 +688,7 @@ private:
                 continue;
             if (!n.lazyAsked)
                 askLazy(n);
-            if (done(n.waitFor))
+            if (n.phase == Phase::Waiting && done(n.waitFor))
                 prepare(n);
         }
     }
@@ -685,6 +713,13 @@ private:
 
         if (const QString broken = brokenUpstream(n); !broken.isEmpty())
             return skip(n, broken);
+        // A Switch skipped because its chosen side is muted: what reads it is muted too, as a compile-time mute does (3.5), also
+        // through an optional input, which would otherwise run without it.
+        for (const QString &dep : std::as_const(n.strictDeps)) {
+            const NodeRun &d = *m_nodes.constFind(dep);
+            if (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_muted"))
+                return skip(n, QStringLiteral("upstream_muted"));
+        }
         if (!n.type) {
             Error error = nodeError(QStringLiteral("unknown_node_type"),
                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type));
@@ -1572,7 +1607,8 @@ private:
                 value = Value::list({value});
                 outputs.insert(spec.name, value);
             }
-            const QList<Value> items = spec.type.list ? value.items() : QList<Value>{value};
+            // An "any" output that follows a list (a Switch of lists) holds one: its items are checked, not the list.
+            const QList<Value> items = spec.type.list || (spec.type.type.isAny() && value.isList()) ? value.items() : QList<Value>{value};
             for (const Value &item : items)
                 if (!fits(item, spec.type.type))
                     return wrong(spec.name, QStringLiteral("Output %1 is not %2.").arg(spec.name, spec.type.toString()));

@@ -71,6 +71,7 @@ and in `fugue pack list`. It never stops Fugue.
 | `default` | For `text`, `number` and `boolean`. An input with no default and not `optional` must be given. |
 | `optional` | May be unset or unwired; then it is absent from the request. |
 | `lazy` | The engine starts what feeds this input only when the node asks for it (`NodeKernel::lazyInputs` for a built-in node; a pack program's lazy inputs are all asked for). Required or optional as declared. A lazy input the node did not ask for is absent from its inputs and its cache key. See spec 3.2 and 3.4. |
+| `takes_list` | Only on a single-value `any` input of a built-in node: a list output may be linked into it, and arrives as one value (a list) rather than a one-item list. A Switch side. |
 | `list`, `min_items`, `max_items` | A list input and its size limits. |
 | `min`, `max`, `step`, `integer` | Number limits. A value outside them is `value_out_of_range`. |
 | `choices` | Allowed values of a `text` input; it becomes a choice. |

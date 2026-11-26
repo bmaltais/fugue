@@ -50,7 +50,9 @@ struct PortMatch {
     bool output = false;
     explicit operator bool() const { return !name.isEmpty(); }
 };
-PortMatch compatiblePort(const NodeType &type, const PortSpec &dragged, bool draggedIsOutput);
+// `sameList`: the dragged port is a Switch side that took its type from the other side, so a node's output must also be a
+// list exactly when it is.
+PortMatch compatiblePort(const NodeType &type, const PortSpec &dragged, bool draggedIsOutput, bool sameList = false);
 
 // The ranked results as a list model for QML.
 class SearchResults : public QAbstractListModel {
@@ -170,6 +172,7 @@ private:
     std::optional<PortSpec> m_linkType;
     QString m_filterText;
     QString m_filterChip;
+    bool m_linkSameList = false; // the dragged input is a Switch side typed by the other side (compatiblePort sameList)
     QPointF m_point;
     std::vector<NodeType> m_groups; // what the group rows point at, until the next refresh
 };

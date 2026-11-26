@@ -7,6 +7,7 @@
 
 #include <QHash>
 #include <QJsonArray>
+#include <QScopeGuard>
 #include <QSet>
 
 #include <algorithm>
@@ -135,6 +136,7 @@ struct Flat {
     QMap<QString, InputValue> inputs; // links by path id
     QMap<QString, InputSpec> checkedAs; // each input as its value was checked: narrowed by group faces
     bool emptied = false;             // a required input lost its value to a bypass
+    QMap<QString, QString> lazyDropped; // lazy inputs that lost their value to a bypass, a mute or an emptied source: the reason
 
     const NodeType &spec() const { return face ? *face : *type; }
 };
@@ -196,6 +198,8 @@ private:
                                                          const QString &port) const;
     Source resolve(Scope *scope, const PortRef &ref) const;
     Source followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const;
+    mutable QStringList m_following;   // path.port of the outputs followed() is inside of, outermost first
+    mutable QSet<QString> m_followLoop; // paths of the nodes in a loop of followed outputs
     std::optional<InputSpec> exposedSpec(Scope *child, const GroupInput &input) const;
     NodeType faceOf(Scope *child, const Node &instance) const;
     QStringList knownTypes() const;
@@ -505,6 +509,16 @@ std::optional<std::pair<QString, QString>> Compiler::exposedAt(const Scope *scop
 Source Compiler::followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const {
     // What the inputs hold as the node is run: an exposed input of the group around it replaces what is written inside, and its link
     // resolves where it was written (as resolveItem does).
+    // Outputs that follow each other's inputs would be followed forever: the second entry is Broken (its link is left out, so
+    // findCycles cannot see the loop) and the loop is reported as a cycle by run().
+    const QString key = source.path + QLatin1Char('.') + ref.port;
+    if (const qsizetype at = m_following.indexOf(key); at >= 0) {
+        for (const QString &entry : m_following.mid(at))
+            m_followLoop.insert(entry.section(QLatin1Char('.'), 0, -2));
+        return Source{};
+    }
+    m_following << key;
+    const auto leave = qScopeGuard([&] { m_following.removeLast(); });
     const QMap<QString, Bound> held = effective(scope, ref.node);
     std::optional<PortSpec> found;
     QString foundFrom;
@@ -752,6 +766,22 @@ void Compiler::checkInstance(Scope *scope, const QString &id, Scope *child) {
 std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpec &spec, const Bound &bound,
                                                 const InputValue &item, int index) {
     if (item.kind() != InputValue::Kind::Link) {
+        // A literal on an input an "any" output follows would type nothing and pass unchecked: only a link says the type (#592).
+        if (spec.type.type.isAny() && !item.isEmpty()) {
+            const QList<OutputSpec> &outputs = flat.spec().outputs;
+            if (std::any_of(outputs.cbegin(), outputs.cend(),
+                            [&](const OutputSpec &out) { return out.follows.contains(spec.name); })) {
+                // Placed where it was written, as link errors are (an exposed input of a group is written on the group instance).
+                Error error = nodeError(QStringLiteral("type_mismatch"), bound.writtenAt,
+                                        QStringLiteral("Input %1 of %2 holds a typed value, but the output of %2 takes its type from what is "
+                                                       "linked to %1.")
+                                            .arg(bound.writtenInput, bound.writtenAt));
+                error.input = bound.writtenInput;
+                error.hint = QStringLiteral("Link an output to %1; a literal has no type to pass on.").arg(bound.writtenInput);
+                fail(error);
+                return std::nullopt;
+            }
+        }
         const Errors errors = checkLiteral(spec, item.toJson(), m_registry.portKind(spec.type.type));
         for (Error error : errors) {
             error.node = flat.path;
@@ -1074,7 +1104,9 @@ CompiledGraph Compiler::shape() {
                 continue;
             }
             const InputSpec *spec = flat.spec().input(it.key());
-            if (spec && spec->required())
+            if (spec && spec->lazy)
+                flat.lazyDropped[it.key()] = QStringLiteral("upstream_empty"); // only an error when the node asks for it
+            else if (spec && spec->required())
                 flat.emptied = true;
         }
         flat.inputs = rewired;
@@ -1096,9 +1128,28 @@ CompiledGraph Compiler::shape() {
         ordering.nodes[flat.path].inputs = flat.inputs;
     QMap<QString, QString> dropped;
     for (const QString &path : ordering.order()) {
-        const Flat &flat = live[path];
+        Flat &flat = live[path];
         QString reason;
         bool upstreamEmpty = flat.emptied;
+        // A muted or emptied source of a lazy input empties that input only: the node decides whether it needs it (9.9).
+        for (auto input = flat.inputs.begin(); input != flat.inputs.end();) {
+            const InputSpec *spec = flat.spec().input(input.key());
+            QString why;
+            if (spec && spec->lazy)
+                for (const QString &dep : sources({{input.key(), *input}})) {
+                    const QString depWhy = dropped.value(dep);
+                    if (depWhy == QLatin1String("upstream_empty") && why.isEmpty())
+                        why = depWhy;
+                    else if (!depWhy.isEmpty() && depWhy != QLatin1String("upstream_empty"))
+                        why = QStringLiteral("upstream_muted");
+                }
+            if (why.isEmpty()) {
+                ++input;
+            } else {
+                flat.lazyDropped[input.key()] = why;
+                input = flat.inputs.erase(input);
+            }
+        }
         for (const QString &dep : sources(flat.inputs)) {
             const QString why = dropped.value(dep);
             if (why == QLatin1String("muted") || why == QLatin1String("upstream_muted"))
@@ -1152,6 +1203,7 @@ CompiledGraph Compiler::shape() {
         node.sink = flat.spec().sink;
         node.provider = flat.provider;
         node.frozen = flat.frozen;
+        node.lazyDropped = flat.lazyDropped;
         graph.nodes[flat.path] = node;
     }
     return graph;
@@ -1170,7 +1222,17 @@ Compilation Compiler::run() {
 
     // Cycles are looked for even when there are other errors: links that did
     // not resolve are not in the flattened graph, so what is there is sound.
-    const bool cyclic = findCycles();
+    bool cyclic = findCycles();
+    if (!cyclic && !m_followLoop.isEmpty()) {
+        QStringList component = m_followLoop.values();
+        std::sort(component.begin(), component.end());
+        Error error = nodeError(QStringLiteral("cycle"), component.first(),
+                                QStringLiteral("Nodes %1 take their type from each other in a cycle.").arg(joined(component)));
+        error.valid = QJsonArray::fromStringList(component);
+        error.hint = QStringLiteral("Remove one of the links that close the loop.");
+        fail(error);
+        cyclic = true;
+    }
     if (!hasErrors(m_errors) && !cyclic) {
         CompiledGraph graph = shape();
         if (!hasErrors(m_errors))
@@ -1293,6 +1355,12 @@ QJsonObject CompiledGraph::toJson() const {
             node["provider"] = it->provider;
         if (!it->frozen.isEmpty())
             node["frozen"] = it->frozen;
+        if (!it->lazyDropped.isEmpty()) {
+            QJsonObject dropped;
+            for (auto drop = it->lazyDropped.constBegin(); drop != it->lazyDropped.constEnd(); ++drop)
+                dropped[drop.key()] = *drop;
+            node["lazy_dropped"] = dropped;
+        }
         jsonNodes[it.key()] = node;
     }
     QJsonObject jsonSkipped;
@@ -1373,6 +1441,17 @@ std::optional<CompiledGraph> readCompiled(const QJsonObject &json, Errors &error
         node.sink = o.value("sink").toBool();
         node.provider = o.value("provider").toString();
         node.frozen = o.value("frozen").toString();
+        if (!o.value("lazy_dropped").isUndefined() && !o.value("lazy_dropped").isObject())
+            fail(QStringLiteral("Node %1: \"lazy_dropped\" must be an object.").arg(path), path);
+        const QJsonObject lazyDropped = o.value("lazy_dropped").toObject();
+        for (auto drop = lazyDropped.constBegin(); drop != lazyDropped.constEnd(); ++drop) {
+            const QString why = drop->toString();
+            if (!isPortName(drop.key()) || (why != QLatin1String("upstream_muted") && why != QLatin1String("upstream_empty")))
+                fail(QStringLiteral("Node %1: lazy_dropped %2 must be upstream_muted or upstream_empty.").arg(path, drop.key()), path,
+                     drop.key());
+            else
+                node.lazyDropped[drop.key()] = why;
+        }
         graph.nodes[path] = node;
     }
 

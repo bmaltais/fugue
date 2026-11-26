@@ -21,7 +21,7 @@ A named, typed slot on a node that takes either a literal value or a link from a
 _Avoid_: parameter, socket, pin
 
 **Lazy input**:
-An input marked `lazy`: what feeds it is not started until the node asks for it, once its other inputs are in. The If/Else Switch asks only for the side its condition chooses; a node nothing asks for is skipped as `not_chosen`.
+An input marked `lazy`: what feeds it is not started until the node asks for it, once its other inputs are in. The If/Else Switch asks only for the side its condition chooses; a node nothing asks for is skipped as `not_chosen`. A source of a lazy input that is muted, or came out empty from a bypass, only empties that input: the node is skipped when it asks for it.
 _Avoid_: conditional input, deferred input
 
 **Output**:

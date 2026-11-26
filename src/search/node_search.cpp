@@ -94,14 +94,14 @@ int searchScore(const NodeType &type, const QString &query) {
     return total;
 }
 
-PortMatch compatiblePort(const NodeType &type, const PortSpec &dragged, bool draggedIsOutput) {
+PortMatch compatiblePort(const NodeType &type, const PortSpec &dragged, bool draggedIsOutput, bool sameList) {
     if (draggedIsOutput) {
         for (const InputSpec &in : type.inputs)
             if (compatibility(dragged, in.type) == Compatibility::Compatible)
                 return {in.name, false};
     } else {
         for (const OutputSpec &out : type.outputs)
-            if (compatibility(out.type, dragged) == Compatibility::Compatible)
+            if (compatibility(out.type, dragged) == Compatibility::Compatible && (!sameList || out.type.list == dragged.list))
                 return {out.name, true};
     }
     return {};
@@ -227,7 +227,7 @@ void NodeSearch::refresh() {
             SearchResults::Row row;
             row.type = type;
             if (m_linkType) {
-                const PortMatch match = compatiblePort(*type, *m_linkType, draggedIsOutput);
+                const PortMatch match = compatiblePort(*type, *m_linkType, draggedIsOutput, m_linkSameList);
                 if (!match)
                     continue;
                 row.match = match.name;
@@ -278,6 +278,7 @@ void NodeSearch::openFromLink(const QVariantMap &from, qreal x, qreal y) {
     const bool output = from.value("output").toBool();
     m_point = {x, y};
     m_linkType = m_canvas ? m_canvas->portType(node, port, output) : std::nullopt;
+    m_linkSameList = m_linkType && !output && m_canvas->takesLinkedType(node, port);
     const PortKind kind = m_registry && m_linkType ? m_registry->portKind(m_linkType->type) : PortKind::Unknown;
     m_link = {{"node", node}, {"port", port}, {"output", output},
               {"type", m_linkType ? m_linkType->toString() : QString()},
