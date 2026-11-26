@@ -112,7 +112,7 @@ _This section and 5 to 9 describe the Flat face. The Compact face (the default, 
 
 | Part | Value |
 | --- | --- |
-| Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (longer text values widen it) until a resize pins it; double-click on a corner returns to auto |
+| Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (a longer text value, model name or choice widens it) until a resize pins it; double-click on a corner returns to auto |
 | Resize | from any of the four corners (as ComfyUI): a square 4u wide (at least 12 screen px) inside each corner, with the matching diagonal resize cursor before the press; a top or left corner moves the node so the opposite corner stays put. The mark: a 1.5 px stroke 3 px inside the edge, concentric with the corner (an L at `r` = 0, an arc of `r` − 3 with short legs beyond), in all four corners while the node is hovered or selected (as ComfyUI's Vue nodes), in `label` (4.5:1 on the body and the header, 6.1), and in `text` in the corner under the pointer or being dragged; a port in a corner wins over it (a press there drags a link). Sizes in `u`: inset 0.75u, legs at least 0.75u, stroke 0.375u |
 | Edge | 1 px `hairline` inside the box; `hairline-strong` on hover |
 | Fill | `body`; `tint-body-<role>` when the node has a layout color (#72); with its sheen, a top-to-bottom gradient from `sheen-top` over the fill to `sheen-bottom` over it, `lit-top` to `lit-bottom` while hovered or selected (120 ms between them) |

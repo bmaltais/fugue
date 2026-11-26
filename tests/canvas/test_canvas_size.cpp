@@ -104,6 +104,23 @@ private slots:
         QCOMPARE(node(canvas, "save").value("nodeWidth").toDouble(), 480.0);
     }
 
+    void aLongModelNameWidensTheNodeUpToTheMaximum() {
+        // Load Models opened at 60u cut its file names short, so the person widened it every time (2026-11-26).
+        const auto models = [](const QString &name) {
+            return QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {"load": {"type": "fugue/load-models", "version": "1.2.0", "inputs": {
+                "diffusion_model": {"resource": "fugue/diffusion-model", "name": "%1"}}}}},
+                "layout": {"nodes": {"load": {"pos": [0, 0]}}}})").arg(name).toUtf8();
+        };
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(models("z.gguf")));
+        QCOMPARE(node(canvas, "load").value("nodeWidth").toDouble(), 240.0);
+        canvas.setDocument(document(models("flux-2-klein-4b.safetensors")));
+        const qreal wide = node(canvas, "load").value("nodeWidth").toDouble();
+        QVERIFY2(wide > 240.0 && wide < 480.0, qPrintable(QString::number(wide)));
+        canvas.setDocument(document(models(QString(200, 'x'))));
+        QCOMPARE(node(canvas, "load").value("nodeWidth").toDouble(), 480.0);
+    }
+
     void aMultilineValueGrowsItsRowWithItsLinesUpToTheMaximum() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(workflow(placed)));
