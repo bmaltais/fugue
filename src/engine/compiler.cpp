@@ -1113,14 +1113,30 @@ CompiledGraph Compiler::shape() {
     }
 
     // Sinks inside a group never run (5.5), unless the run stops at one, or the user has
-    // entered the instance that holds it.
-    for (auto it = live.begin(); it != live.end();) {
-        const bool entered = !m_options.entered.isEmpty() && it.key().section(QLatin1Char('/'), 0, -2) == m_options.entered;
-        if (it->inGroup && it->spec().sink && it.key() != m_options.target && !entered)
-            it = live.erase(it);
-        else
-            ++it;
+    // entered the instance that holds it. A sink with outputs (Compare Images) that a node
+    // that stays reads is still needed for that value: it stays as a plain node, not as a
+    // root, and does not count as a sink. Dropping it instead left its readers linked to a
+    // node that is not in the graph (#623).
+    auto quiet = [this](const Flat &flat) {
+        const bool entered = !m_options.entered.isEmpty() && flat.path.section(QLatin1Char('/'), 0, -2) == m_options.entered;
+        return flat.inGroup && flat.spec().sink && flat.path != m_options.target && !entered;
+    };
+    QSet<QString> kept;
+    QStringList pending;
+    for (const Flat &flat : live)
+        if (!quiet(flat))
+            pending << flat.path;
+    while (!pending.isEmpty()) {
+        const QString path = pending.takeLast();
+        if (kept.contains(path))
+            continue;
+        kept.insert(path);
+        for (const QString &dep : sources(live[path].inputs))
+            if (live.contains(dep) && quiet(live[dep]))
+                pending << dep;
     }
+    for (auto it = live.begin(); it != live.end();)
+        it = quiet(*it) && !kept.contains(it.key()) ? live.erase(it) : std::next(it);
 
     // Mute (3.5) and inputs a bypass left empty, in dependency order.
     CompiledGraph ordering;
@@ -1176,7 +1192,7 @@ CompiledGraph Compiler::shape() {
             roots << m_options.target;
     } else {
         for (const Flat &flat : live)
-            if (flat.spec().sink)
+            if (flat.spec().sink && !quiet(flat))
                 roots << flat.path;
     }
     QSet<QString> needed;
@@ -1207,7 +1223,7 @@ CompiledGraph Compiler::shape() {
         node.type = flat.spec().id;
         node.version = flat.spec().version;
         node.inputs = flat.inputs;
-        node.sink = flat.spec().sink;
+        node.sink = flat.spec().sink && !quiet(flat);
         node.provider = flat.provider;
         node.frozen = flat.frozen;
         node.lazyDropped = flat.lazyDropped;
