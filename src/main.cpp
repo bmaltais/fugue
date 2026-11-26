@@ -53,6 +53,7 @@
 #include "theme.h"
 #include "canvas/active_canvas.h"
 #include "workflow/workflows.h"
+#include "tour_probe.h"
 #include "translator.h"
 
 int main(int argc, char *argv[]) {
@@ -263,6 +264,8 @@ int main(int argc, char *argv[]) {
     engine.load(QUrl(appArgument ? "qrc:/apps/AppWindow.qml" : "qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
+    // Off unless FUGUE_TOUR_PROBE names a folder: lets a README tour ask where an item is by objectName (tour_probe.h).
+    fugue::startTourProbe(qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()), &app);
 
     // `fugue path.fugue` opens that file (an image with a workflow in it works too). Qt has
     // already taken its own options (-platform, ...) off the arguments.

@@ -95,13 +95,15 @@ from a checkout of the tag, with the same script (portable settings: no `-march=
 
 ```sh
 git clone --branch vX https://github.com/bmaltais/fugue && cd fugue
-bin/package-helper cuda                  # about 40 minutes cold, ccache after; writes dist/
-gh release upload vX dist/fugue-helper-cuda-aarch64-linux.tar.zst dist/SHA256SUMS --clobber
+bin/package-helper cuda dist             # about 40 minutes cold, ccache after; writes dist/ (the outdir argument)
+(cd dist && sha256sum fugue-helper-cuda-aarch64-linux.tar.zst > fugue-helper-cuda-aarch64-linux.tar.zst.sha256)
+gh release upload vX dist/fugue-helper-cuda-aarch64-linux.tar.zst dist/fugue-helper-cuda-aarch64-linux.tar.zst.sha256 --clobber
 ```
 
-Fetch SHA256SUMS first (`gh release download vX -p SHA256SUMS -D dist`) so the upload keeps the other
-lines. On the host: unpack, put the binary at `~/.local/lib/fugue/fugue-helper-cuda`, and follow
-the paired-host steps below.
+Do not upload a `SHA256SUMS`: `release-sums.yml` builds it from each asset's `.sha256` file ([docs/release.md](../docs/release.md);
+rerun it on the tag by hand after a manual upload). Without the `dist` argument the script writes to
+`~/.cache/fugue-package-helper/dist`, shared by every worktree; runs at once wait for each other (a lock in that folder). On the host:
+unpack, put the binary at `~/.local/lib/fugue/fugue-helper-cuda`, and follow the paired-host steps below.
 
 `FUGUE_SDCPP_SOURCE=<a clone of the fork>` builds that folder instead of the pinned tarball
 (`-DFETCHCONTENT_SOURCE_DIR_SDCPP`): see [Changing the engine](#changing-the-engine).

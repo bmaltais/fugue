@@ -12,6 +12,7 @@ cp "$here/AppRun" "$work/app/AppRun"
 cat >"$work/app/usr/bin/fugue" <<'FAKE'
 #!/bin/sh
 echo "helper=${FUGUE_HELPER-<unset>}"
+echo "fromapprun=${FUGUE_HELPER_FROM_APPRUN-<unset>}"
 for a in "$@"; do echo "arg=$a"; done
 FAKE
 chmod +x "$work/app/AppRun" "$work/app/usr/bin/fugue"
@@ -36,5 +37,9 @@ ARGS=(x "y z")
 grep -qxF 'arg=y z' <<<"$(run)" || fail "the helper search lost an argument"
 grep -qx 'helper=' <<<"$(run FUGUE_HELPER=)" || fail "an empty FUGUE_HELPER must stay empty (no helper)"
 grep -qx 'helper=/x' <<<"$(run FUGUE_HELPER=/x)" || fail "FUGUE_HELPER from the user must win"
+grep -qx 'fromapprun=1' <<<"$(run)" || fail "a helper AppRun found must be marked FUGUE_HELPER_FROM_APPRUN=1"
+grep -qx 'fromapprun=<unset>' <<<"$(run FUGUE_HELPER=/x)" || fail "a helper the user named must not be marked"
+grep -qx 'fromapprun=<unset>' <<<"$(run FUGUE_HELPER=/x FUGUE_HELPER_FROM_APPRUN=1)" || fail "a stale mark must go when the user names a helper"
+grep -qx 'fromapprun=<unset>' <<<"$(run FUGUE_HELPER=)" || fail "no helper means no mark"
 env -i HOME="$work/home" PATH="$PATH" "$work/app/AppRun" | grep -q LD_LIBRARY && fail "AppRun must not add LD_LIBRARY_PATH" || true
 echo "AppRun: ok"

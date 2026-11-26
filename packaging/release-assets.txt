@@ -1,0 +1,12 @@
+# What a v* tag's release must hold: one shell glob per asset. packaging/release-sums.sh refuses to write SHA256SUMS
+# until each glob matches an asset, so a failed job shows as a missing line instead of a release that installs partly.
+# package.yml
+fugue-[0-9]*-x86_64.pkg.tar.zst
+fugue-[0-9]*-aarch64.pkg.tar.zst
+fugue-helper-cuda-aarch64-linux.tar.zst
+# appimage.yml
+Fugue-*-x86_64.AppImage
+# helper-tarballs.yml
+fugue-helper-cuda-x86_64-linux.tar.zst
+fugue-helper-vulkan-x86_64-linux.tar.zst
+fugue-helper-cpu-x86_64-linux.tar.zst

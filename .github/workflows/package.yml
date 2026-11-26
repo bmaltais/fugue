@@ -9,16 +9,28 @@ name: Package
 # Two more jobs run on an arm runner: fugue-helper-cuda-aarch64-linux.tar.zst (the CUDA helper for a DGX
 # Spark) and the aarch64 package (`package-aarch64`, built in an Arch Linux ARM container like test.yml's
 # test-aarch64; its file name carries the arch, fugue-*-aarch64.pkg.tar.zst, so it cannot collide with the x86 one).
-# The release gets both packages, the helper tarball and one SHA256SUMS.
+# The release gets both packages, the helper tarball and a checksum file for each; release-sums.yml writes the one
+# SHA256SUMS from them (docs/release.md).
 #
 # Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
+# A tag (the release), a pull request that changes the package recipe or this file (tested before the merge, not
+# after it), or by hand.
 on:
   push:
-    branches: [main, master]
-    paths: [packaging/**, share/**, bin/build, bin/build-helper, bin/package-helper, helper/**, CMakeLists.txt, .github/workflows/package.yml]
     tags: ['v*']
+  # Weekly on main: a tag can only read caches made on the default branch, so this keeps them warm for the release.
+  schedule:
+    - cron: '37 6 * * 1'
+  pull_request:
+    paths: [packaging/PKGBUILD, .github/workflows/package.yml]
   workflow_dispatch:
+
+# A new push to a pull request cancels that pull request's older run. Tags, the weekly runs and manual runs each get
+# their own group (run_id), so a release is never cancelled. (llama.cpp's expression; docs/ci-research in the workbench.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,9 +44,13 @@ jobs:
       run:
         shell: bash
     env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 800M
     steps:
+      # In a container job `github.workspace` is the host's path (/home/runner/work/...), not where the checkout is
+      # mounted (/__w/...), so ccache would write outside the folder the cache steps restore and save (#335).
+      - name: Point ccache at the cached folder
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
 
@@ -73,9 +89,9 @@ jobs:
         run: |
           cd dist
           ls -l
-          sha256sum *.pkg.tar.zst | tee SHA256SUMS
+          sha256sum -- *.pkg.tar.zst | tee SHA256SUMS
           for pkg in *.pkg.tar.zst; do pacman -Qip "$pkg" | grep -E '^(Name|Version|Depends On)'; done
-          pacman -Qlp *.pkg.tar.zst | grep -E 'bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper' | head
+          pacman -Qlp -- *.pkg.tar.zst | grep -E 'bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper' | head
 
       - name: Compiler cache use
         if: always()
@@ -190,9 +206,9 @@ jobs:
             set -euo pipefail
             cd dist
             ls -l
-            sha256sum *.pkg.tar.zst | tee SHA256SUMS
+            sha256sum -- *.pkg.tar.zst | tee SHA256SUMS
             for pkg in *.pkg.tar.zst; do pacman -Qip "$pkg" | grep -E "^(Name|Version|Architecture|Depends On)"; done
-            pacman -Qlp *.pkg.tar.zst | grep -E "bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper" | head'
+            pacman -Qlp -- *.pkg.tar.zst | grep -E "bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper" | head'
 
       - name: Check the ELF segment alignment (Asahi Linux uses 16 KB pages)
         # A binary whose LOAD segments are aligned to less than 0x4000 does not start on a 16 KB-page kernel.
@@ -229,7 +245,8 @@ jobs:
           mkdir dist
           # The package file names carry the arch (-x86_64, -aarch64), so the two sets do not collide.
           cp parts/package/*.pkg.tar.zst parts/package-aarch64/*.pkg.tar.zst parts/helper-aarch64/*.tar.zst dist/
-          cat parts/package/SHA256SUMS parts/package-aarch64/SHA256SUMS parts/helper-aarch64/SHA256SUMS > dist/SHA256SUMS
+          # One <asset>.sha256 each; release-sums.yml writes the SHA256SUMS from them once every job's files are there.
+          (cd dist && for f in *.tar.zst; do [[ -e $f.sha256 ]] || sha256sum "$f" > "$f.sha256"; done)
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
