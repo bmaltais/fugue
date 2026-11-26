@@ -7,9 +7,9 @@
 #include <QJsonArray>
 #include <QPointer>
 #include <QStorageInfo>
-#include <QThread>
 
 #include <algorithm>
+#include <thread>
 
 #include "engine/fugue_home.h"
 #include "engine/model_download.h"
@@ -105,23 +105,21 @@ QVariantList kindChoices() {
 } // namespace
 
 ModelSetup::ModelSetup(SettingsModel *settings) : QObject(settings), m_settings(settings) {
-    m_finder = [this](const QList<FinderLocation> &locations, const QStringList &skip, const std::atomic<bool> &cancel,
-                      const std::function<void(const FoundFolder &)> &found) {
-        FinderEnv env = this->env();
-        env.cancel = &cancel;
-        const Registry *registry = types();
-        if (registry)
-            findModelFolders(*registry, locations, env, skip, found);
+    // The default finder reads nothing of the window: the job carries the types, the mounts and the cancel flag as values.
+    m_finder = [](const FinderJob &job, const std::function<void(const FoundFolder &)> &found) {
+        FinderEnv env = job.env;
+        env.cancel = job.cancel.get();
+        for (const QString &path : job.describe)
+            found(describeModelFolder(job.types, path, env));
+        if (job.locations.isEmpty())
+            return FindResult();
+        return findModelFolders(job.types, job.locations, env, job.skip, found, job.offered);
     };
 }
 
-ModelSetup::~ModelSetup() {
-    m_cancel = true;
-    if (m_thread) {
-        m_thread->wait();
-        delete m_thread;
-    }
-}
+// No wait: a worker stuck in a stat of a slow or hung drive must never hold the window or the quit. It holds the cancel flag
+// itself, answers to nobody when this is gone, and the process ends without it.
+ModelSetup::~ModelSetup() { *m_cancel = true; }
 
 void ModelSetup::setFinder(Finder finder, bool runInline) {
     m_finder = std::move(finder);
@@ -157,7 +155,8 @@ void ModelSetup::show(bool firstRun) {
     if (m_open)
         return;
     m_generation++;
-    m_cancel = true;
+    *m_cancel = true;
+    m_cancel = std::make_shared<std::atomic<bool>>(false);
     m_open = true;
     m_firstRun = firstRun;
     m_phase = QStringLiteral("consent");
@@ -166,9 +165,12 @@ void ModelSetup::show(bool firstRun) {
     m_rows.clear();
     m_unticked.clear();
     m_message.clear();
-    m_downloadChosen = false;
-    m_download = ownRoot();
-    m_locations = finderLocations(env()); // one stat each; nothing below them is listed
+    // A rerun starts from the download folder the person has: it is kept unless they choose another.
+    const Settings settings = currentSettings();
+    m_downloadChosen = !settings.downloadFolder.isEmpty();
+    m_download = m_settings->downloadFolder();
+    m_envNow = env();
+    m_locations = finderLocations(m_envNow); // an lstat each; nothing below them is listed, no link followed
     emit changed();
 }
 
@@ -199,11 +201,10 @@ QVariantList ModelSetup::locations() const {
     return list;
 }
 
+// The folders already in use, as rows still being counted: the worker counts them (a slow drive is its wait, not the window's).
 void ModelSetup::addInUse() {
     const Settings settings = currentSettings();
-    const ModelLibrary library(ModelLibrary::roots(settings), types(), ModelLibrary::rootKinds(settings));
-    const FinderEnv environment = env();
-    const QStringList own = settings.modelPaths;
+    const QHash<QString, QString> pinned = ModelLibrary::rootKinds(settings);
     for (const SearchPath &root : ModelLibrary::taggedRoots(settings)) {
         if (root.path == ownRoot())
             continue;
@@ -212,14 +213,22 @@ void ModelSetup::addInUse() {
         row.inUse = true;
         row.inherited = root.inherited;
         row.on = true;
-        row.kind = library.kindOf(root.path);
-        if (types())
-            row.found = describeModelFolder(*types(), root.path, environment);
+        row.busy = true;
+        row.kind = pinned.value(root.path);
         row.found.path = root.path;
-        row.found.tool = row.found.tool.isEmpty() ? QStringLiteral("Model folder") : row.found.tool;
-        row.writable = QFileInfo(root.path).isWritable();
+        row.found.tool = QStringLiteral("Model folder");
         m_rows.append(row);
     }
+}
+
+ModelSetup::FinderJob ModelSetup::makeJob() const {
+    FinderJob job;
+    job.env = env();
+    if (types())
+        job.types = FinderTypes::from(*types()); // a copy made here, on this thread: a registry reload cannot pull it from a walk
+    job.cancel = m_cancel;
+    job.offered = m_locations;
+    return job;
 }
 
 void ModelSetup::search() {
@@ -233,68 +242,119 @@ void ModelSetup::search() {
     addInUse();
     m_phase = QStringLiteral("looking");
     m_looking = true;
+    m_capped = false;
     begin(ticked);
     emit changed();
 }
 
+void ModelSetup::searchAgain() {
+    if (!m_open || m_phase == QLatin1String("consent"))
+        return;
+    m_generation++;
+    *m_cancel = true;
+    m_cancel = std::make_shared<std::atomic<bool>>(false);
+    m_looking = false;
+    m_capped = false;
+    m_phase = QStringLiteral("consent");
+    m_rows.clear();
+    m_message.clear();
+    emit changed();
+}
+
 void ModelSetup::begin(const QList<FinderLocation> &locations) {
-    const int generation = ++m_generation;
-    QStringList skip;
+    ++m_generation;
+    FinderJob job = makeJob();
+    job.locations = locations;
     for (const Row &row : std::as_const(m_rows)) {
-        skip << row.path;
-        skip << QFileInfo(row.path).canonicalFilePath();
+        job.skip << row.path;
+        if (row.inUse)
+            job.describe << row.path;
     }
-    if (m_thread) {
-        m_cancel = true;
-        m_thread->wait();
-        delete m_thread;
-        m_thread = nullptr;
-    }
-    m_cancel = false;
+    run(std::move(job), true);
+}
+
+// Runs a job on a thread of its own that is never waited for: it captures values only (never `this`), tells this object through a
+// weak pointer, and a stalled one is simply left behind.
+void ModelSetup::run(FinderJob job, bool search) {
+    const int generation = m_generation;
     const Finder finder = m_finder;
     if (m_inline) {
-        finder(locations, skip, m_cancel, [this, generation](const FoundFolder &folder) { found(generation, folder); });
-        finished(generation);
+        const FindResult result = finder(job, [this, generation](const FoundFolder &folder) { found(generation, folder); });
+        if (search)
+            finished(generation, result.capped);
         return;
     }
     QPointer<ModelSetup> self(this);
-    m_thread = QThread::create([self, finder, locations, skip, generation, cancel = &m_cancel] {
-        finder(locations, skip, *cancel, [self, generation](const FoundFolder &folder) {
+    std::thread([self, finder, job = std::move(job), generation, search] {
+        const FindResult result = finder(job, [self, generation](const FoundFolder &folder) {
             if (self)
                 QMetaObject::invokeMethod(self.data(), [self, generation, folder] { if (self) self->found(generation, folder); }, Qt::QueuedConnection);
         });
-        if (self)
-            QMetaObject::invokeMethod(self.data(), [self, generation] { if (self) self->finished(generation); }, Qt::QueuedConnection);
-    });
-    m_thread->start();
+        if (search && self)
+            QMetaObject::invokeMethod(self.data(), [self, generation, result] { if (self) self->finished(generation, result.capped); }, Qt::QueuedConnection);
+    }).detach();
 }
 
 ModelSetup::Row ModelSetup::makeRow(const FoundFolder &folder) const {
     Row row;
     row.path = folder.path;
     row.found = folder;
-    row.writable = QFileInfo(folder.path).isWritable();
+    row.writable = folder.writable;
     row.kind = folder.layout ? ModelLibrary::kLayout : QString();
-    // Ticked: found with models; InvokeAI sorts its own way (off); an install with no models yet is off.
-    row.on = folder.tool != QLatin1String("InvokeAI") && (folder.models > 0 || folder.network);
+    // Ticked: found with models; InvokeAI sorts its own way (off); an install with no models yet is off; a network drive is
+    // listed but never ticked for the person.
+    row.on = folder.tool != QLatin1String("InvokeAI") && folder.models > 0 && !folder.network;
     return row;
 }
 
 void ModelSetup::found(int generation, const FoundFolder &folder) {
     if (generation != m_generation || !m_open)
         return;
-    for (const Row &row : std::as_const(m_rows))
-        if (row.path == folder.path)
-            return;
+    for (Row &row : m_rows) {
+        if (row.path != folder.path)
+            continue;
+        if (row.busy) {
+            // The count of a row that was waiting (in use, or just picked).
+            row.busy = false;
+            row.found = folder;
+            row.writable = folder.writable;
+            if (row.inUse) {
+                if (row.kind.isEmpty() && folder.layout)
+                    row.kind = ModelLibrary::kLayout;
+            } else {
+                row.kind = folder.layout ? ModelLibrary::kLayout : QString();
+                if (!folder.layout && types()) {
+                    // A folder of one kind: told by a few of its files' headers (a pick, so one folder).
+                    const ModelLibrary library({ownRoot(), row.path}, types(), {});
+                    row.kind = library.kindOf(row.path);
+                    if (row.kind == ModelLibrary::kLayout)
+                        row.found.layout = true;
+                }
+                // The same folder by another path: the second is dropped.
+                for (const Row &other : std::as_const(m_rows))
+                    if (&other != &row && !other.busy && !folder.canonical.isEmpty() && other.found.canonical == folder.canonical) {
+                        m_message = tr("That folder is already in the list.");
+                        m_rows.removeIf([&row](const Row &r) { return &r == &row; });
+                        break;
+                    }
+            }
+            emit changed();
+        }
+        return;
+    }
     m_rows.append(makeRow(folder));
     emit changed();
 }
 
-void ModelSetup::finished(int generation) {
+void ModelSetup::finished(int generation, bool capped) {
     if (generation != m_generation || !m_open)
         return;
     m_looking = false;
+    m_capped = capped;
     m_phase = QStringLiteral("results");
+    // A folder in use that the finder did not count (a fake finder): shown as it is. A pick still being counted keeps waiting.
+    for (Row &row : m_rows)
+        row.busy = row.busy && !row.inUse;
     emit changed();
 }
 
@@ -303,29 +363,35 @@ QString ModelSetup::addFolder(const QVariant &value) {
     if (path.startsWith(QLatin1String("file:")))
         path = QUrl(path).toLocalFile();
     path = QDir::cleanPath(expandHome(path.trimmed()));
-    if (path.isEmpty() || !QFileInfo(path).isDir())
+    if (path.isEmpty() || !QFileInfo(path).isDir()) // the person's own pick, one stat
         return tr("%1 is not a folder.").arg(tilde(path));
-    const QString canonical = QFileInfo(path).canonicalFilePath();
     for (const Row &row : std::as_const(m_rows))
-        if (row.path == path || QFileInfo(row.path).canonicalFilePath() == canonical)
+        if (row.path == path)
             return tr("That folder is already in the list.");
+    m_message.clear();
     if (m_phase == QLatin1String("consent")) {
         // A pick with no search: the results, with what is in use and this folder.
         m_rows.clear();
         addInUse();
         m_phase = QStringLiteral("results");
+        m_capped = false;
+        FinderJob inUse = makeJob();
+        for (const Row &row : std::as_const(m_rows))
+            inUse.describe << row.path;
+        if (!inUse.describe.isEmpty())
+            run(std::move(inUse), false);
     }
-    FoundFolder folder = types() ? describeModelFolder(*types(), path, env()) : FoundFolder();
-    folder.path = path;
-    Row row = makeRow(folder);
+    // The count is the worker's; the row waits, busy, and the answer comes back to found().
+    Row row;
+    row.path = path;
+    row.found.path = path;
+    row.found.tool = QStringLiteral("Model folder");
     row.on = true;
-    if (!folder.layout) {
-        const ModelLibrary library({ownRoot(), path}, types(), {});
-        row.kind = library.kindOf(path);
-        if (row.kind == ModelLibrary::kLayout)
-            row.found.layout = true;
-    }
+    row.busy = true;
     m_rows.append(row);
+    FinderJob job = makeJob();
+    job.describe << path;
+    run(std::move(job), false);
     emit changed();
     return {};
 }
@@ -372,7 +438,9 @@ QVariantList ModelSetup::rows() const {
         // Line 2: the size, then what it holds (the three most, and "and more").
         QStringList parts;
         QString counted;
-        if (f.network) {
+        if (row.busy) {
+            counted = tr("Counting its models");
+        } else if (f.network) {
             counted = tr("On a network drive: not counted");
         } else if (f.models == 0 && !row.inUse) {
             counted = tr("No models yet");
@@ -418,9 +486,10 @@ QVariantList ModelSetup::rows() const {
                                 {"tooltip", tooltip},
                                 {"on", row.on},
                                 {"inUse", row.inUse},
+                                {"busy", row.busy},
                                 {"inherited", row.inherited},
                                 {"readOnly", !row.writable},
-                                {"needsKind", row.kind.isEmpty() && !row.inUse && f.tool != QLatin1String("InvokeAI")},
+                                {"needsKind", row.kind.isEmpty() && !row.inUse && !row.busy && f.tool != QLatin1String("InvokeAI")},
                                 {"kind", row.kind},
                                 {"models", f.models},
                                 {"capped", f.countCapped}});
@@ -434,14 +503,29 @@ QString ModelSetup::defaultDownload() const {
     QString best = ownRoot();
     qint64 biggest = -1;
     for (const Row &row : m_rows) {
-        if (row.inherited || !row.on || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
+        if (row.inherited || !row.on || row.busy || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
             continue;
+        if (slowToWriteTo(row))
+            continue; // a network or removable drive is a choice the person makes, never the default
         if (row.found.size > biggest) {
             biggest = row.found.size;
             best = row.path;
         }
     }
     return best;
+}
+
+// A network drive, an automount, or a removable drive (under /run/media or /media): never picked for the person.
+bool ModelSetup::slowToWriteTo(const Row &row) const {
+    if (row.found.network)
+        return true;
+    for (const QString &prefix : {QStringLiteral("/run/media/"), QStringLiteral("/media/")})
+        if (row.path.startsWith(prefix))
+            return true;
+    for (const QString &mount : m_envNow.networkMounts)
+        if (row.path == mount || row.path.startsWith(mount + QLatin1Char('/')))
+            return true;
+    return false;
 }
 
 QVariantList ModelSetup::choices() const {
@@ -529,6 +613,9 @@ bool ModelSetup::primaryEnabled() const {
     if (m_looking)
         return false;
     for (const Row &row : m_rows)
+        if (row.busy)
+            return false; // a folder still being counted
+    for (const Row &row : m_rows)
         if (row.on && !row.inherited && row.kind.isEmpty() && !row.inUse && row.found.tool != QLatin1String("InvokeAI"))
             return false; // a folder the person must say what it holds first
     return true;
@@ -571,7 +658,7 @@ QVariantList ModelSetup::foldersToWrite(int *left) const {
 void ModelSetup::skip() {
     if (!m_open)
         return;
-    m_cancel = true;
+    *m_cancel = true;
     m_generation++;
     if (m_firstRun)
         m_settings->markModelSetup(QStringLiteral("skipped"));
@@ -585,7 +672,7 @@ void ModelSetup::apply() {
         search();
         return;
     }
-    m_cancel = true;
+    *m_cancel = true;
     m_generation++;
     if (m_rows.isEmpty()) {
         // Nothing found: Done writes `done` and nothing else (a rerun, nothing at all).

@@ -258,12 +258,14 @@ private slots:
         const ModelLibrary library({QStringLiteral("/models")}, &bench.registry);
         const auto folders = [&](const char *type) { return library.folders(*PortType::parse(QString::fromLatin1(type))); };
         QCOMPARE(folders("fugue/diffusion-model"),
-                 (QStringList{"/models/diffusion-model", "/models/diffusion_models", "/models/unet"}));
+                 (QStringList{"/models/diffusion-model", "/models/diffusion_models", "/models/unet", "/models/DiffusionModels"}));
         QCOMPARE(folders("fugue/text-encoder"),
-                 (QStringList{"/models/text-encoder", "/models/text_encoders", "/models/clip"}));
-        QCOMPARE(folders("fugue/vae"), QStringList{"/models/vae"});
-        QCOMPARE(folders("fugue/lora"), (QStringList{"/models/lora", "/models/loras"}));
-        QCOMPARE(folders("fugue/model"), QStringList{"/models/checkpoints"});
+                 (QStringList{"/models/text-encoder", "/models/text_encoders", "/models/clip", "/models/TextEncoders"}));
+        // ComfyUI's names come first; the A1111, Forge, SwarmUI and Stability Matrix names follow them (#619: pack.json appends them).
+        QCOMPARE(folders("fugue/vae"), (QStringList{"/models/vae", "/models/VAE"}));
+        QCOMPARE(folders("fugue/lora"), (QStringList{"/models/lora", "/models/loras", "/models/Lora", "/models/LyCORIS"}));
+        QCOMPARE(folders("fugue/model"),
+                 (QStringList{"/models/checkpoints", "/models/Stable-diffusion", "/models/Stable-Diffusion", "/models/StableDiffusion"}));
         QCOMPARE(bench.registry.portKind(*PortType::parse("fugue/latent")), PortKind::Data);
         QCOMPARE(bench.registry.portKind(*PortType::parse("fugue/conditioning")), PortKind::Data);
     }

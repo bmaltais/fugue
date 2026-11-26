@@ -202,7 +202,7 @@ Reply modelFindFolders(const Command &command, Context &context) {
         skip << root;
     QElapsedTimer timer;
     timer.start();
-    const FindResult result = findModelFolders(context.registry, chosen, env, skip);
+    const FindResult result = findModelFolders(context.registry, chosen, env, skip, {}, places);
     QJsonArray found, searched;
     QStringList lines;
     for (const FinderLocation &place : std::as_const(chosen))

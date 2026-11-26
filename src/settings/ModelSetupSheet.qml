@@ -80,7 +80,7 @@ Popup {
     // A row of the results: it knows its switch, so Up and Down can find the next one.
     component SetupRow: KitRow {
         property Item toggle: null
-        readonly property bool hasToggle: toggle !== null && toggle.visible
+        readonly property bool hasToggle: toggle !== null
     }
 
     contentItem: KitPanel {
@@ -188,9 +188,30 @@ Popup {
                         text: qsTr("Found on this computer")
                         topPadding: 3 * sheet.u
                     }
+                    // A search that stopped at a cap (time) before it was done: what is below may be missing folders.
+                    Column {
+                        objectName: "modelSetupCapped"
+                        visible: sheet.setup.searchCapped
+                        width: parent.width
+                        spacing: sheet.u
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            color: sheet.look.text
+                            font.pixelSize: sheet.look.textSize
+                            text: qsTr("The search stopped early to stay quick, so some folders may be missing. Switch off big places and search again, or add a folder.")
+                        }
+                        KitChip {
+                            objectName: "modelSetupSearchAgain"
+                            look: sheet.look
+                            bordered: true
+                            text: qsTr("Search again")
+                            onTapped: sheet.setup.searchAgain()
+                        }
+                    }
                     Text {
                         objectName: "modelSetupNothing"
-                        visible: sheet.setup.nothing
+                        visible: sheet.setup.nothing && !sheet.setup.searchCapped
                         width: parent.width
                         wrapMode: Text.Wrap
                         color: sheet.look.text
@@ -277,7 +298,8 @@ Popup {
                                 KitToggle {
                                     id: rowToggle
                                     objectName: "modelSetupToggle-" + folderRow.index
-                                    visible: folderRow.hasToggle
+                                    enabled: !folderRow.modelData.busy
+                                    visible: !folderRow.modelData.inherited
                                     look: sheet.look
                                     text: folderRow.modelData.display
                                     checked: folderRow.modelData.on
@@ -412,6 +434,27 @@ Popup {
                 }
             }
         }
+    }
+
+    // The focused control scrolls into view (Tab and the arrows move the focus past what the list shows), in the consent list and in the
+    // results.
+    Connections {
+        target: card.Window.window
+        function onActiveFocusItemChanged() { sheet.reveal(card.Window.window.activeFocusItem) }
+    }
+    function reveal(item) {
+        let parentItem = item
+        while (parentItem && parentItem !== list.contentItem)
+            parentItem = parentItem.parent
+        if (!parentItem || item === list.contentItem)
+            return
+        const top = item.mapToItem(list.contentItem, 0, 0).y
+        const bottom = top + item.height
+        const margin = 2 * u
+        if (top - margin < list.contentY)
+            list.contentY = Math.max(0, top - margin)
+        else if (bottom + margin > list.contentY + list.height)
+            list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, bottom + margin - list.height))
     }
 
     function run() {

@@ -336,6 +336,57 @@ private slots:
         QCOMPARE(library.folders(type("fugue/vae")), QStringList{own.path() + "/vae"});
     }
 
+    // #619: pack.json now lists the A1111, Forge, SwarmUI and Stability Matrix folder names. A folder an existing user has that
+    // holds LoRAs (or checkpoints) and happens to have one such subfolder is still that one kind, not ComfyUI's layout.
+    void aFolderOfOneKindWithAnotherToolsSubfolderStaysThatKind() {
+        QTemporaryDir own, loras, checkpoints;
+        Registry registry;
+        const auto withFiles = [&](const char *id, const QString &files, const QStringList &folders) {
+            DeclaredPortType declared;
+            declared.type = type(QString::fromLatin1(id));
+            declared.kind = PortKind::Resource;
+            declared.name = QStringLiteral("A model");
+            declared.extensions = {".safetensors"};
+            declared.folders = folders;
+            declared.files = files;
+            QVERIFY(registry.add(declared).isEmpty());
+        };
+        withFiles("fugue/lora", "lora", {"lora", "loras", "Lora", "LyCORIS"});
+        withFiles("fugue/vae", "vae", {"vae", "VAE"});
+        withFiles("fugue/model", "checkpoint", {"checkpoints", "Stable-diffusion"});
+        writeFile(loras.filePath("top.safetensors"), safetensors(kLora));
+        QDir().mkpath(loras.filePath("LyCORIS"));
+        QDir().mkpath(loras.filePath("Lora"));
+        writeFile(checkpoints.filePath("top-model.safetensors"), safetensors({"model.diffusion_model.input_blocks.0.0.weight"}));
+        QDir().mkpath(checkpoints.filePath("VAE"));
+        const ModelLibrary library({own.path(), loras.path(), checkpoints.path()}, &registry);
+        QCOMPARE(library.kindOf(loras.path()), QStringLiteral("fugue/lora")); // not "layout": its top-level LoRAs stay listed
+        QCOMPARE(names(library.list(type("fugue/lora"))), QStringList{"top.safetensors"});
+        QVERIFY(library.kindOf(checkpoints.path()) != ModelLibrary::kLayout);
+    }
+
+    // The same names are a layout when they are the layout: two of them, or one in a folder with no model files of its own, and
+    // ComfyUI's own names as before.
+    void theOtherToolsNamesAreALayoutWhenTheyAre() {
+        QTemporaryDir own, a1111, onlyLora, comfy, comfyOne;
+        Registry registry;
+        declare(registry, "fugue/lora", {".safetensors"}, {"lora", "loras", "Lora", "LyCORIS"});
+        declare(registry, "fugue/vae", {".safetensors"}, {"vae", "VAE"});
+        QDir().mkpath(a1111.filePath("Lora"));
+        QDir().mkpath(a1111.filePath("VAE"));
+        writeFile(a1111.filePath("stray.safetensors"));
+        QDir().mkpath(onlyLora.filePath("Lora"));
+        QDir().mkpath(comfy.filePath("loras"));
+        QDir().mkpath(comfy.filePath("vae"));
+        QDir().mkpath(comfyOne.filePath("loras")); // one ComfyUI name is a layout, as it always was
+        writeFile(comfyOne.filePath("stray.safetensors"));
+        const ModelLibrary library({own.path(), a1111.path(), onlyLora.path(), comfy.path(), comfyOne.path()}, &registry);
+        QCOMPARE(library.kindOf(a1111.path()), ModelLibrary::kLayout);
+        QCOMPARE(library.kindOf(onlyLora.path()), ModelLibrary::kLayout);
+        QCOMPARE(library.kindOf(comfy.path()), ModelLibrary::kLayout);
+        QCOMPARE(library.kindOf(comfyOne.path()), ModelLibrary::kLayout);
+    }
+
     void aKindSetInTheSettingsWinsOverTheFiles() {
         QTemporaryDir own, folder;
         Registry registry;

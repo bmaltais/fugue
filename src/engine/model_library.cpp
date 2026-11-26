@@ -184,6 +184,25 @@ FoundKinds &foundKinds() {
 
 } // namespace
 
+const QStringList &ModelLibrary::defaultModelExtensions() { return defaultExtensions; }
+
+namespace {
+// The folder names other tools use for a kind (A1111, Forge, SwarmUI, Stability Matrix: pack.json lists them after ComfyUI's, #619).
+// A folder with just one of them inside is not taken for ComfyUI's layout when it also holds model files itself: an existing
+// folder of LoRAs with a `LyCORIS/` or `Lora/` subfolder, or of checkpoints with a `VAE/`, stays the folder of one kind it was.
+const QSet<QString> &otherToolsNames() {
+    static const QSet<QString> names{QStringLiteral("Stable-diffusion"), QStringLiteral("Stable-Diffusion"), QStringLiteral("StableDiffusion"),
+                                     QStringLiteral("Lora"),             QStringLiteral("LyCORIS"),          QStringLiteral("VAE"),
+                                     QStringLiteral("TextEncoders"),     QStringLiteral("DiffusionModels"),  QStringLiteral("RealESRGAN")};
+    return names;
+}
+
+bool holdsModelFiles(const QString &root) {
+    const QFileInfoList files = QDir(root).entryInfoList(QDir::Files);
+    return std::any_of(files.begin(), files.end(), [](const QFileInfo &file) { return hasExtension(file.fileName(), defaultExtensions); });
+}
+} // namespace
+
 QString ModelLibrary::kindOf(const QString &root) const {
     if (const QString set = m_kinds.value(root); !set.isEmpty())
         return set;
@@ -196,16 +215,26 @@ QString ModelLibrary::kindOf(const QString &root) const {
         return *found;
     const QList<const DeclaredPortType *> types = m_registry->portTypes();
     QString kind;
-    // ComfyUI's layout when any resource type's folder is there.
+    // ComfyUI's layout when any resource type's folder is there, as it always was. The other tools' names count when two are there,
+    // (counted by type), or one in a folder with no model files of its own (an A1111 `models/` with only `Lora/`).
+    int other = 0;
     for (const DeclaredPortType *declared : types) {
         if (declared->kind != PortKind::Resource)
             continue;
+        bool otherHere = false;
         for (const QString &name : folderNames(*declared))
-            if (QFileInfo(root + QLatin1Char('/') + name).isDir())
-                kind = kLayout;
+            if (QFileInfo(root + QLatin1Char('/') + name).isDir()) {
+                if (otherToolsNames().contains(name))
+                    otherHere = true;
+                else
+                    kind = kLayout;
+            }
         if (!kind.isEmpty())
             break;
+        other += otherHere ? 1 : 0; // once for each type: `Lora/` and `LyCORIS/` are one kind
     }
+    if (kind.isEmpty() && other > 0 && (other >= 2 || !holdsModelFiles(root)))
+        kind = kLayout;
     // Else the type whose files most of a few of its files are (pack.json "files").
     if (kind.isEmpty()) {
         QStringList files;

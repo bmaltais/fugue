@@ -82,6 +82,8 @@ public:
     // type id; a root not named is found by its files.
     ModelLibrary(QStringList roots, const Registry *registry, QHash<QString, QString> kinds = {});
     static inline const QString kLayout = QStringLiteral("layout");
+    // ComfyUI's list of model file extensions plus .gguf: what a type that names none takes.
+    static const QStringList &defaultModelExtensions();
 
     // The library of the settings in effect now (currentSettings()).
     static ModelLibrary current(const Registry *registry);

@@ -2295,7 +2295,10 @@ it as a module folder and run it with no code of its own in Fugue.
   (ComfyUI's `a1111:` section maps the same): `fugue/model` also `Stable-diffusion`, `Stable-Diffusion` and `StableDiffusion`;
   `fugue/lora` `Lora` and `LyCORIS`; `fugue/vae` `VAE`; `fugue/text-encoder` `TextEncoders`; `fugue/diffusion-model`
   `DiffusionModels`; `fugue/upscale-model` `RealESRGAN`. They come after the type's own names, so Fugue's own folders are
-  unchanged (#619). An Automatic1111, Forge, SwarmUI or Stability Matrix `models/` folder is therefore one layout root.
+  unchanged (#619). An Automatic1111, Forge, SwarmUI or Stability Matrix `models/` folder is therefore one layout root. These other
+  tools' names count for the layout (`ModelLibrary::kindOf`) when two kinds have one, or when the folder holds no model file of its
+  own, so an existing folder of LoRAs with a `Lora/` or `LyCORIS/` subfolder, or of checkpoints with a `VAE/`, stays a folder of
+  one kind; ComfyUI's names decide as they always did (one is enough).
 - **Finding the model folders a person already has** (#619; `engine/model_folder_finder.h`). Folder names and file sizes only: no
   model file is opened, read or hashed, and nothing is written. A folder is a candidate when at least two of the resource types'
   folder names are in it (the registry's, so a pack's count) and, for a tool that sorts models its own way, by what stands beside
@@ -2316,13 +2319,23 @@ it as a module folder and run it with no code of its own in Fugue.
   folder reached by two paths (a link) is one candidate with `alsoReached`; one whose every type folder resolves inside another
   (Stability Matrix linked into ComfyUI) is that one's alias, and its files are counted once. `fugue model find-folders [--json]`
   prints the candidates and writes nothing.
+  **Links, automounts and workers.** A link is resolved by reading its text (`readlink`), and every step is checked against the
+  places left off before anything is stat'd or listed, so a link from a ticked place into an unticked one, at the top or nested,
+  or from one install folder to another that was left off, is never followed; each type folder and each folder counted is
+  resolved the same way, and one that leads onto a network drive is not entered. An autofs mount point (and anything under it)
+  counts as a network drive and is not even listed as a place: looking inside it would mount the share. The registry's folder
+  names and extensions are copied on the GUI thread (`FinderTypes`) and the worker reads only that copy. The worker is never
+  waited for: it holds its own cancel flag, answers to the window through a weak pointer, and a stalled stat leaves it behind
+  without holding the window or the quit. Time and cancellation are checked at every entry (listing and stat), counting all
+  folders has a total cap, a count that stops early is `countCapped`, and a search a cap ended says so (`capped`; the sheet offers
+  Search again, with big places switched off, or Add a folder). A folder holding `model_index.json` (a diffusers repo) is skipped.
 - **The first-run setup** (#619; `settings/model_setup.h`, `ModelSetupSheet.qml`). It opens by itself, once, as the main window
   shows, when the session is the Default or a root with no `project.json`, the layered `model_paths` is empty, Fugue's own models
   folder holds no model file and `models_setup` is unset; never in a project. Two screens: the **consent screen** says why and
   that only folder names and file sizes are read, lists every place with a switch each (all on), and offers **Search**, **Add a
   folder…** (a manual pick that goes to the results with no search) and **Skip**; only Search searches. The **results** list what
   was found, a switch each (on for a folder with models, off for InvokeAI and for an install with none; "In use" folders first, on),
-  **New downloads** (the picked writable folder in ComfyUI's layout with the most model bytes, else Fugue's own; the choice
+  **New downloads** (the picked writable folder in ComfyUI's layout with the most model bytes, never a network or removable drive unless the person picks it, else Fugue's own; a rerun starts from the `download_folder` the person has; the choice
   lists Fugue's own and each such folder with its free space and keeps a short disk's choice, saying "Only %1 free there." under
   20 GB) and **Use N folders**. Nothing is written before the yes; the yes is one write of this session's own settings.json:
   `model_paths` and `model_folder_kinds` (`layout`, pinned so a guess never flips), `download_folder` and `models_setup: "done"`

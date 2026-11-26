@@ -63,7 +63,9 @@ class TestModelFolderFinder : public QObject {
     }
     QList<FinderLocation> all(const FinderEnv &e) { return finderLocations(e); }
     FindResult find(const FinderEnv &e, const QList<FinderLocation> &locations, const QStringList &skip = {}) {
-        return findModelFolders(m_registry, locations, e, skip);
+        FinderEnv quiet = e; // what was offered is told apart from what is searched: the probe sees only the search
+        quiet.touched = nullptr;
+        return findModelFolders(m_registry, locations, e, skip, {}, finderLocations(quiet));
     }
     QList<FinderLocation> only(const FinderEnv &e, const QStringList &ids) {
         QList<FinderLocation> list;
@@ -73,6 +75,11 @@ class TestModelFolderFinder : public QObject {
         return list;
     }
 
+    void a1111(const QString &root) {
+        touchFile(root + "/webui.py");
+        touchFile(root + "/models/Stable-diffusion/x.safetensors");
+        touchFile(root + "/models/Lora/l.safetensors");
+    }
     void comfy(const QString &root) {
         QDir().mkpath(root + "/custom_nodes");
         touchFile(root + "/models/checkpoints/a.safetensors", 2000000);
@@ -359,6 +366,142 @@ private slots:
         touchFile(m_home + "/photos/p3/ComfyUI/models/checkpoints/a.safetensors");
         touchFile(m_home + "/photos/p3/ComfyUI/models/loras/a.safetensors");
         QVERIFY(find(e, all(e)).folders.isEmpty());
+    }
+
+    // A link into a place that is not ticked is never followed: not at the top, not nested, not to an unticked install folder. The probe
+    // records resolved paths too, so a stat of the target would show.
+    void aLinkIntoAnUntickedPlaceIsNeverFollowed() {
+        comfy(m_mnt + "/ssd/ComfyUI");
+        QVERIFY(QFile::link(m_mnt + "/ssd/ComfyUI/models", m_home + "/models"));
+        QDir().mkpath(m_home + "/a/b");
+        QVERIFY(QFile::link(m_mnt + "/ssd", m_home + "/a/b/ssd"));
+        comfy(m_home + "/ComfyUI"); // an unticked install folder, reached by another link
+        QVERIFY(QFile::link(m_home + "/ComfyUI", m_home + "/shortcut"));
+        QVERIFY(QFile::link(m_home + "/ComfyUI/models", m_home + "/shortcut-models"));
+        const FinderEnv e = env();
+        QStringList ids;
+        for (const FinderLocation &location : finderLocations(e))
+            if (location.id != "drive:" + m_mnt && location.id != "probe:" + m_home + "/ComfyUI/models")
+                ids << location.id;
+        const QList<FinderLocation> ticked = only(e, ids);
+        m_touched.clear();
+        const FindResult result = find(e, ticked);
+        QVERIFY(result.folders.isEmpty());
+        for (const QString &path : std::as_const(m_touched)) {
+            QVERIFY2(!path.startsWith(m_mnt + "/"), qPrintable("touched " + path));
+            QVERIFY2(!path.startsWith(m_home + "/ComfyUI/"), qPrintable("touched " + path));
+        }
+        // With the places ticked the same links are found, each tree once.
+        m_touched.clear();
+        const FindResult all = find(e, finderLocations(e));
+        QCOMPARE(all.folders.size(), 2);
+    }
+
+    // An automount is not stat'd into: touching it would mount the share. It is in the network set, and is not even a listed place.
+    void anAutomountIsNeverTouched() {
+        const QByteArray info = "50 29 0:40 / " + m_mnt.toUtf8() + "/nas rw,relatime shared:1 - autofs systemd-1 rw,fd=30\n"
+                                "51 50 0:41 / " + m_mnt.toUtf8() + "/nas/share rw - nfs4 srv:/x rw\n";
+        FinderEnv e = env();
+        e.networkMounts = networkMountsFrom(info);
+        e.autofsMounts = autofsMountsFrom(info);
+        QCOMPARE(e.autofsMounts, QStringList{m_mnt + "/nas"});
+        QVERIFY(e.networkMounts.contains(m_mnt + "/nas"));
+        QVERIFY(e.networkMounts.contains(m_mnt + "/nas/share"));
+        touchFile(m_mnt + "/nas/ComfyUI/custom_nodes/x.py");
+        touchFile(m_mnt + "/nas/ComfyUI/models/checkpoints/a.safetensors");
+        touchFile(m_mnt + "/nas/ComfyUI/models/loras/a.safetensors");
+        touchFile(m_mnt + "/c/ComfyUI/custom_nodes/x.py");
+        touchFile(m_mnt + "/c/ComfyUI/models/checkpoints/a.safetensors");
+        touchFile(m_mnt + "/c/ComfyUI/models/loras/a.safetensors");
+        QVERIFY(QFile::link(m_mnt + "/nas/ComfyUI/models", m_home + "/linked-models"));
+        m_touched.clear();
+        const FindResult result = find(e, finderLocations(e));
+        QCOMPARE(result.folders.size(), 1); // the drive that is not an automount
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(m_mnt + "/nas/"), qPrintable("touched " + path));
+    }
+
+    // A type folder that is a link to a network drive is not counted (and nothing below it is listed).
+    void aLinkedNetworkFolderIsNotCounted() {
+        comfy(m_home + "/ComfyUI");
+        touchFile(m_mnt + "/nas/loras/far.safetensors", 100);
+        QVERIFY(QDir(m_home + "/ComfyUI/models/loras").removeRecursively());
+        QVERIFY(QFile::link(m_mnt + "/nas/loras", m_home + "/ComfyUI/models/loras"));
+        FinderEnv e = env();
+        e.networkMounts = {m_mnt + "/nas"};
+        m_touched.clear();
+        const FindResult result = find(e, all(e));
+        QCOMPARE(result.folders.size(), 1);
+        QCOMPARE(result.folders.first().counts.value("fugue/lora"), 0);
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(m_mnt + "/nas"), qPrintable("touched " + path));
+    }
+
+    // The 2 s cap is checked at every entry, in the one big folder as well, and says so.
+    void aSingleBigFolderStopsAtTheTimeCapInsideTheLoop() {
+        comfy(m_home + "/ComfyUI");
+        for (int i = 0; i < 200; ++i)
+            touchFile(m_home + QString("/ComfyUI/models/loras/more%1.safetensors").arg(i, 3, 10, QChar('0')), 10);
+        FinderEnv e = env();
+        qint64 clock = 0;
+        e.nowMs = [&clock] { return clock; };
+        e.findCapMs = 1000000;
+        e.totalCountCapMs = 1000000;
+        e.touched = [&clock](const QString &path) { if (path.contains("/loras/more")) clock += 100; }; // each file stat costs 100 ms
+        const FindResult result = find(e, all(e));
+        QCOMPARE(result.folders.size(), 1);
+        QVERIFY(result.folders.first().countCapped);
+        QVERIFY2(result.folders.first().counts.value("fugue/lora") < 40, qPrintable(QString::number(result.folders.first().counts.value("fugue/lora"))));
+    }
+
+    // Counting every folder has a total too: past it the rest are listed with a count that stopped, and the search says it ended early.
+    void theTotalForCountingIsCapped() {
+        comfy(m_home + "/ComfyUI");
+        a1111(m_home + "/stable-diffusion-webui");
+        FinderEnv e = env();
+        qint64 clock = 0;
+        e.nowMs = [&clock] { return clock; };
+        e.findCapMs = 1000000;
+        e.totalCountCapMs = 5;
+        e.touched = [&clock](const QString &) { clock += 1; };
+        const FindResult result = find(e, all(e));
+        QVERIFY(result.capped);
+        QVERIFY(std::any_of(result.folders.begin(), result.folders.end(), [](const FoundFolder &f) { return f.countCapped; }));
+    }
+
+    // A diffusers repo (model_index.json) is not a model library: not found, and its files are not counted.
+    void aDiffusersRepoIsSkipped() {
+        QDir().mkpath(m_home + "/repo/vae");
+        QDir().mkpath(m_home + "/repo/unet");
+        QDir().mkpath(m_home + "/repo/checkpoints");
+        touchFile(m_home + "/repo/model_index.json");
+        touchFile(m_home + "/repo/vae/a.safetensors");
+        touchFile(m_home + "/repo/checkpoints/a.safetensors");
+        comfy(m_home + "/ComfyUI");
+        QDir().mkpath(m_home + "/ComfyUI/models/loras/some-repo");
+        touchFile(m_home + "/ComfyUI/models/loras/some-repo/model_index.json");
+        touchFile(m_home + "/ComfyUI/models/loras/some-repo/w.safetensors");
+        const FinderEnv e = env();
+        const FindResult result = find(e, all(e));
+        QCOMPARE(result.folders.size(), 1);
+        QCOMPARE(result.folders.first().counts.value("fugue/lora"), 3);
+    }
+
+    // An install folder ticked with the home not: only places inside what is ticked are stat'd.
+    void aTickedProbeWithTheHomeUntickedTouchesNothingElseInTheHome() {
+        comfy(m_home + "/ComfyUI");
+        touchFile(m_home + "/secret/readme.txt");
+        const FinderEnv e = env();
+        const QList<FinderLocation> ticked = only(e, {"probe:" + m_home + "/ComfyUI/models"});
+        QCOMPARE(ticked.size(), 1);
+        m_touched.clear();
+        const FindResult result = find(e, ticked);
+        QCOMPARE(result.folders.size(), 1);
+        QCOMPARE(result.folders.first().tool, QStringLiteral("ComfyUI")); // named by its neighbour, inside the install folder
+        for (const QString &path : std::as_const(m_touched)) {
+            QVERIFY2(!path.startsWith(m_home + "/secret"), qPrintable(path));
+            QVERIFY2(path != m_home + "/python_embeded" && path != m_home + "/ComfyUI_windows_portable", qPrintable(path));
+        }
     }
 
     void aWindowsDrivesInstallIsFoundFiveLevelsDown() {

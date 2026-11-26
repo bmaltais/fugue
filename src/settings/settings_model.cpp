@@ -415,6 +415,7 @@ QString SettingsModel::markModelSetup(const QString &state) {
 
 QVariantMap SettingsModel::applyModelSetup(const QVariantList &folders, const QString &download, bool markDone) {
     auto failed = [](const QString &why) { return QVariantMap{{"error", why}, {"added", 0}, {"removed", 0}, {"vanished", 0}}; };
+    loadSettings(); // what the file holds now: a change made since the sheet opened (the CLI's, an editor's) is kept
     if (!m_file.writable)
         return failed(tr("Fix %1 first: it is not a JSON object.").arg(tilde(m_path)));
     const QString own = ModelLibrary::roots(m_effective.settings).value(0);

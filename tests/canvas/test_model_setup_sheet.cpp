@@ -94,12 +94,12 @@ class TestModelSetupSheet : public QObject {
     // The sheet, found once the window has made it.
     QObject *sheet(App &app) {
         QObject *found = nullptr;
-        [&] { QTRY_VERIFY((found = app.window->findChild<QObject *>("modelSetupSheet"))); }();
+        [&] { QTRY_VERIFY2((found = app.window->findChild<QObject *>("modelSetupSheet")), "no sheet"); }();
         return found;
     }
     QQuickItem *control(App &app, const QString &name) {
         QQuickItem *item = nullptr;
-        [&] { QTRY_VERIFY((item = find(app.window, name))); }();
+        [&] { QTRY_VERIFY2((item = find(app.window, name)), qPrintable(name)); }();
         return item;
     }
     QString shotDir() const { return qEnvironmentVariable("FUGUE_SHOT_DIR"); }
@@ -182,6 +182,62 @@ private slots:
         QFile after(app.settings.path());
         QVERIFY(after.open(QIODevice::ReadOnly));
         QCOMPARE(after.readAll(), before);
+    }
+
+    // The focus scrolls the list: arrow and Tab moves past what the list shows bring the focused switch into view, in the consent
+    // list and in a long list of results.
+    void theFocusedSwitchScrollsIntoView() {
+        // Every usual install folder exists: a long consent list.
+        for (const QString &name : {"ComfyUI/models", "ComfyUI-Shared", "ComfyUI-Installs", "StabilityMatrix/Data/Models", "StabilityMatrix/Models",
+                                    "stable-diffusion-webui/models", "stable-diffusion-webui-forge/models", "SwarmUI/Models", "invokeai/models"})
+            QDir().mkpath(QDir::homePath() + "/" + name);
+        App app(load(emptyDoc));
+        fugue::ModelSetup &setup = *app.settings.modelSetup();
+        setup.setEnv(env());
+        QVERIFY(app.open());
+        app.window->resize(900, 480);
+        setup.setFinder([](const fugue::ModelSetup::FinderJob &, const std::function<void(const fugue::FoundFolder &)> &found) {
+            for (int i = 0; i < 20; ++i) {
+                fugue::FoundFolder folder;
+                folder.tool = "ComfyUI";
+                folder.path = QString("/models-%1").arg(i, 2, 10, QChar('0'));
+                folder.models = 100 - i;
+                folder.size = 1000000 * (100 - i);
+                found(folder);
+            }
+            return fugue::FindResult();
+        }, true);
+        setup.show(true);
+        QObject *popup = sheet(app);
+        QTRY_VERIFY(popup->property("visible").toBool());
+        QQuickItem *list = control(app, "modelSetupList");
+        const auto visibleIn = [&](QQuickItem *item) {
+            const qreal top = item->mapToItem(list, QPointF(0, 0)).y();
+            return top >= 0 && top + item->height() <= list->height() + 1;
+        };
+        // The consent list: the last place's switch, focused, is in view.
+        QQuickItem *last = control(app, "modelSetupPlaceToggle-drive:" + m_mnt);
+        QVERIFY2(!visibleIn(last) || list->property("contentY").toReal() >= 0, "the list is long enough to need a scroll");
+        last->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(visibleIn(last));
+        QVERIFY(list->property("contentY").toReal() > 0);
+        // The results: Down along twenty rows keeps the focused switch in view.
+        setup.search();
+        QTRY_COMPARE(setup.phase(), QStringLiteral("results"));
+        QVERIFY(popup->setProperty("showAll", true));
+        QCOMPARE(popup->property("showAll").toBool(), true);
+        QCOMPARE(setup.rows().size(), 20);
+        QQuickItem *first = control(app, "modelSetupToggle-0");
+        first->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(first->hasActiveFocus());
+        for (int i = 1; i < 20; ++i) {
+            QTest::keyClick(app.window, Qt::Key_Down);
+            QQuickItem *row = control(app, QString("modelSetupToggle-%1").arg(i));
+            QTRY_VERIFY(row->hasActiveFocus());
+            QTRY_VERIFY2(visibleIn(row), qPrintable(QString("row %1").arg(i)));
+        }
+        QTest::keyClick(app.window, Qt::Key_Up);
+        QTRY_VERIFY(visibleIn(control(app, "modelSetupToggle-18")));
     }
 
     // The pictures of the documentation.

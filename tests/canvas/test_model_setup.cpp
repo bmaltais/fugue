@@ -25,6 +25,9 @@
 #include "nodes/builtin.h"
 #include "settings/settings_model.h"
 
+#include <atomic>
+#include <memory>
+
 using namespace fugue;
 
 namespace {
@@ -405,6 +408,8 @@ private slots:
         setup.show(true);
         QCOMPARE(setup.addFolder(mystery), QString()); // a manual pick: no search
         QCOMPARE(setup.phase(), QStringLiteral("results"));
+        QVERIFY(rowOf(setup.rows(), "mystery").value("busy").toBool()); // counted on the worker, not here
+        QTRY_VERIFY(!rowOf(setup.rows(), "mystery").value("busy").toBool());
         QVERIFY(rowOf(setup.rows(), "mystery").value("needsKind").toBool());
         QVERIFY(!setup.primaryEnabled());
         QCOMPARE(setup.addFolder(mystery), QStringLiteral("That folder is already in the list."));
@@ -413,6 +418,138 @@ private slots:
         QVERIFY(setup.primaryEnabled());
         setup.apply();
         QCOMPARE(readSettings(settingsPath()).settings.modelFolderKinds.value(mystery), QStringLiteral("fugue/lora"));
+    }
+
+    // A rerun starts from the download folder the person has, and keeps it unless they choose another.
+    void aRerunKeepsTheDownloadFolderThePersonHas() {
+        comfy(m_home + "/ComfyUI");
+        a1111(m_mnt + "/d/stable-diffusion-webui");
+        const QString mine = m_home + "/ComfyUI/models";
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{mine, m_mnt + "/d/stable-diffusion-webui/models"}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "model_folder_kinds",
+                              QJsonObject{{mine, "layout"}, {m_mnt + "/d/stable-diffusion-webui/models", "layout"}}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "download_folder", mine).isEmpty());
+        settings.reload();
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(false);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        QCOMPARE(setup.download(), mine); // the bigger A1111 folder does not take it over
+        setup.apply();
+        QCOMPARE(readSettings(settingsPath()).settings.downloadFolder, mine);
+    }
+
+    // The network and removable drives are never the default, and a network row's size 0 never beats a real folder.
+    void aNetworkOrRemovableFolderIsNeverTheDefaultDownload() {
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        FinderEnv e = env();
+        e.networkMounts = {m_mnt + "/nas"};
+        setup.setEnv(e);
+        QDir().mkpath(m_mnt + "/nas/models");
+        QDir().mkpath(m_mnt + "/loc/models");
+        QDir().mkpath(path("run/media/me/usb/models"));
+        setup.setFinder([this](const ModelSetup::FinderJob &, const std::function<void(const FoundFolder &)> &found) {
+            auto folder = [](const QString &p, qint64 size, bool network) {
+                FoundFolder f;
+                f.tool = "ComfyUI";
+                f.path = p;
+                f.canonical = p;
+                f.models = 3;
+                f.size = size;
+                f.network = network;
+                return f;
+            };
+            found(folder(m_mnt + "/nas/models", 0, true));
+            found(folder("/media/me/stick/models", 9000000000, false));
+            found(folder(m_mnt + "/loc/models", 100, false));
+            return FindResult();
+        }, true);
+        setup.show(true);
+        setup.search();
+        QCOMPARE(setup.download(), m_mnt + "/loc/models"); // the local one, though the others are bigger
+        QCOMPARE(setup.choices().size(), 3); // still offered: own, the local and the removable; the network row is off by default
+        setup.setRowOn(m_mnt + "/loc/models", false);
+        QCOMPARE(setup.download(), dataDir() + "/models"); // nothing qualifies: Fugue's own
+    }
+
+    // A search stopped at a cap says so, and Search again goes back to the places with the same ticks.
+    void aCappedSearchSaysSoAndCanBeRunAgain() {
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        QDir().mkpath(m_home + "/ComfyUI/models");
+        setup.setFinder([](const ModelSetup::FinderJob &, const std::function<void(const FoundFolder &)> &) {
+            FindResult result;
+            result.capped = true;
+            return result;
+        }, true);
+        setup.show(true);
+        setup.setLocationChecked("home", false);
+        setup.search();
+        QVERIFY(setup.searchCapped());
+        QVERIFY(setup.nothing()); // nothing found, but not because nothing is there
+        setup.searchAgain();
+        QCOMPARE(setup.phase(), QStringLiteral("consent"));
+        QVERIFY(!setup.searchCapped());
+        for (const QVariant &location : setup.locations())
+            QCOMPARE(location.toMap().value("checked").toBool(), location.toMap().value("id").toString() != "home");
+        // A search that finished is not capped.
+        setup.setFinder([](const ModelSetup::FinderJob &, const std::function<void(const FoundFolder &)> &) { return FindResult(); }, true);
+        setup.search();
+        QVERIFY(!setup.searchCapped());
+    }
+
+    // Quitting in the middle of a search whose worker is stuck (a hung stat) neither waits for it nor crashes when it wakes.
+    void quittingMidSearchWithAStalledWorkerReturnsAtOnce() {
+        auto release = std::make_shared<std::atomic<bool>>(false);
+        auto entered = std::make_shared<std::atomic<bool>>(false);
+        QElapsedTimer timer;
+        {
+            SettingsModel settings;
+            settings.attach(nullptr, nullptr, &m_registry);
+            ModelSetup &setup = *settings.modelSetup();
+            setup.setEnv(env());
+            setup.setFinder([release, entered](const ModelSetup::FinderJob &, const std::function<void(const FoundFolder &)> &found) {
+                *entered = true;
+                QElapsedTimer guard;
+                guard.start();
+                while (!*release && guard.elapsed() < 10000) // ignores the cancel flag, like a stat that does not come back
+                    QThread::msleep(5);
+                FoundFolder folder;
+                folder.path = "/gone";
+                found(folder); // delivered to an object that no longer exists
+                return FindResult();
+            });
+            setup.show(true);
+            setup.search();
+            QTRY_VERIFY(*entered);
+            timer.start();
+            QTest::qWait(1);
+        } // the settings model, and the setup with it, are gone while the worker is stuck
+        QVERIFY2(timer.elapsed() < 1000, qPrintable(QString::number(timer.elapsed())));
+        *release = true;
+        QTest::qWait(100); // the worker wakes and finds nobody
+    }
+
+    // The yes builds on the file as it is now: a setting changed since the sheet opened is kept.
+    void theYesKeepsAChangeMadeWhileTheSheetWasOpen() {
+        comfy(m_home + "/ComfyUI");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        searchAll(setup);
+        QVERIFY(changeSetting(settingsPath(), "new_seed", "fixed").isEmpty()); // the CLI, meanwhile
+        setup.apply();
+        const SettingsFile file = readSettings(settingsPath());
+        QCOMPARE(file.settings.newSeed, QStringLiteral("fixed"));
+        QCOMPARE(file.settings.modelPaths.size(), 1);
     }
 
     // InvokeAI is off by default; when ticked, the folders it can tell apart are added single-kind.

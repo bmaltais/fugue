@@ -21,8 +21,6 @@
 
 #include "engine/model_folder_finder.h"
 
-class QThread;
-
 namespace fugue {
 
 class Registry;
@@ -38,6 +36,8 @@ class ModelSetup : public QObject {
     Q_PROPERTY(QString phase READ phase NOTIFY changed)
     Q_PROPERTY(bool looking READ looking NOTIFY changed)
     Q_PROPERTY(bool nothing READ nothing NOTIFY changed) // looked, and found no folder to offer
+    // The search stopped at a cap (time) before it was done: what is listed may be missing folders. The sheet says so.
+    Q_PROPERTY(bool searchCapped READ searchCapped NOTIFY changed)
     Q_PROPERTY(bool inProject READ inProject NOTIFY changed)
     // [{id, display, hint, checked}], the places the search would look; only those that exist.
     Q_PROPERTY(QVariantList locations READ locations NOTIFY changed)
@@ -59,10 +59,19 @@ public:
     explicit ModelSetup(SettingsModel *settings);
     ~ModelSetup() override;
 
-    // The finder the search runs: called on a worker thread with the ticked locations, the folders to leave out, a cancel flag and
-    // the function to call with each folder found. The tests give a fake, and may run it inline.
-    using Finder = std::function<void(const QList<FinderLocation> &, const QStringList &, const std::atomic<bool> &,
-                                      const std::function<void(const FoundFolder &)> &)>;
+    // What a worker needs, as values (it never reads a Qt object of the window: no registry, no settings model, not `this`).
+    struct FinderJob {
+        QList<FinderLocation> locations;      // the ticked places
+        QList<FinderLocation> offered;        // every place shown: the ones not ticked are never touched
+        QStringList skip;                     // folders already listed
+        QStringList describe;                 // folders to count first (in use, or just picked)
+        FinderEnv env;
+        FinderTypes types;
+        std::shared_ptr<std::atomic<bool>> cancel;
+    };
+    // The finder a job runs: on a worker thread, calling `found` with each folder; the result says whether a cap ended the search
+    // early. The tests give a fake, and may run it inline.
+    using Finder = std::function<FindResult(const FinderJob &, const std::function<void(const FoundFolder &)> &)>;
     void setFinder(Finder finder, bool runInline = false);
     // The world the finder reads (the tests' scratch home); default FinderEnv::system().
     void setEnv(const FinderEnv &env) { m_env = env; m_envSet = true; }
@@ -74,6 +83,7 @@ public:
     QString phase() const { return m_phase; }
     bool looking() const { return m_looking; }
     bool nothing() const;
+    bool searchCapped() const { return m_capped && m_phase == QLatin1String("results"); }
     bool inProject() const;
     QVariantList locations() const;
     bool canSearch() const;
@@ -103,6 +113,8 @@ public:
     Q_INVOKABLE void setDownload(const QString &path);
     // The kinds a folder can be set to hold, {value, text}, without "found by its files".
     Q_INVOKABLE QVariantList kinds() const;
+    // Back to the consent screen with the same places ticked, to switch off the big ones and search again.
+    Q_INVOKABLE void searchAgain();
     // Skip, Escape or the close: a first run writes "skipped", a rerun writes nothing; the sheet closes.
     Q_INVOKABLE void skip();
     // The primary: Use N folders (one settings write), or Done when nothing was found.
@@ -122,20 +134,24 @@ private:
         bool inUse = false;
         bool inherited = false;
         bool writable = true;
+        bool busy = false;  // being counted on the worker
         QString kind;       // "layout", a type id, or "" (not told: the person chooses)
     };
 
     void close();
     void begin(const QList<FinderLocation> &locations);
+    void run(FinderJob job, bool search);
     void found(int generation, const FoundFolder &folder);
-    void finished(int generation);
+    void finished(int generation, bool capped);
     void addInUse();
     Row makeRow(const FoundFolder &folder) const;
     QList<int> order() const;
     QString ownRoot() const;
     QString defaultDownload() const;
+    bool slowToWriteTo(const Row &row) const;
     const Registry *types() const;
     FinderEnv env() const;
+    FinderJob makeJob() const;
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
@@ -156,8 +172,8 @@ private:
     bool m_downloadChosen = false;
     QString m_message;
     int m_generation = 0;
-    std::atomic<bool> m_cancel{false};
-    QThread *m_thread = nullptr;
+    std::shared_ptr<std::atomic<bool>> m_cancel = std::make_shared<std::atomic<bool>>(false); // each job holds it: no wait on a worker
+    FinderEnv m_envNow;   // the mounts as they were when the sheet opened, for what the window checks
 };
 
 } // namespace fugue
