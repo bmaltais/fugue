@@ -678,6 +678,7 @@ ColumnLayout {
             }
             KitChip {
                 objectName: "packsCancel"
+                danger: true
                 look: page.look
                 text: qsTr("Cancel")
                 onTapped: page.model.cancel()

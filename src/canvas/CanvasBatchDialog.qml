@@ -246,6 +246,7 @@ Question {
             spacing: 2 * root.look.unit
             ThemedButton {
                 objectName: "canvasBatchCancel"
+                danger: true
                 visible: root.batch !== null && root.batch.busy
                 text: qsTr("Cancel batch")
                 onClicked: root.batch.cancel()

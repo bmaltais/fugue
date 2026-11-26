@@ -104,6 +104,7 @@ Item {
             spacing: stage.u
             KitChip {
                 objectName: "appCancel"
+                danger: true // stops running work: the red tint (docs/canvas-look.md 11)
                 look: stage.look
                 pill: true
                 text: qsTr("Cancel this run")

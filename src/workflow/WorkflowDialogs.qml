@@ -187,6 +187,7 @@ Item {
                     }
                     ThemedButton {
                         objectName: "downloadCancel"
+                        danger: true
                         Layout.leftMargin: 8 // Destructive: twice the row's gap before it
                         text: qsTr("Cancel")
                         onClicked: notice.downloads.cancel()
