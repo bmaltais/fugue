@@ -60,6 +60,9 @@ Errors Registry::add(const NodeType &type) {
                      .arg(input.name, input.type.type.toString()),
                  input.name);
     }
+    for (const InputSpec &input : type.inputs)
+        if (input.type.takesList && !builtin)
+            fail(QStringLiteral("input %1 has \"takes_list\", which only built-in fugue/ nodes may use.").arg(input.name), input.name);
     for (const OutputSpec &output : type.outputs) {
         if (output.type.type.isAny()) {
             if (!builtin)

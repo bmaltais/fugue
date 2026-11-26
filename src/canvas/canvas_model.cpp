@@ -1018,27 +1018,49 @@ const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QStrin
 }
 
 std::optional<PortSpec> CanvasModel::portType(const QString &node, const QString &port, bool output) const {
-    return resolvedType(node, port, output, 0);
+    return resolvedType(node, port, output);
+}
+
+bool CanvasModel::takesLinkedType(const QString &node, const QString &port) const {
+    const Port *found = findPort(node, port, false);
+    if (!found || !found->type || !found->type->type.isAny())
+        return false;
+    const std::optional<PortSpec> type = resolvedType(node, port, false);
+    return type && !type->type.isAny();
 }
 
 QString CanvasModel::portColor(const QString &node, const Port &port) const {
-    const std::optional<PortSpec> type = resolvedType(node, port.name, port.output, 0);
+    const std::optional<PortSpec> type = resolvedType(node, port.name, port.output);
     return colorKey(type, type && type != port.type && m_registry ? m_registry->portKind(type->type) : port.kind);
 }
 
-std::optional<PortSpec> CanvasModel::resolvedType(const QString &node, const QString &port, bool output, int depth) const {
+std::optional<PortSpec> CanvasModel::resolvedType(const QString &node, const QString &port, bool output) const {
+    Resolving walk;
+    return resolvedType(node, port, output, walk);
+}
+
+std::optional<PortSpec> CanvasModel::resolvedType(const QString &node, const QString &port, bool output, Resolving &walk) const {
     const Port *found = findPort(node, port, output);
-    if (!found || !found->type || depth > 32) // a chain of Switches is short; the bound guards a document with a cycle
+    if (!found || !found->type)
         return found ? found->type : std::nullopt;
-    const Node &document = m_document.graph.nodes.value(node);
-    const NodeType *type = m_registry ? m_registry->nodeTypeFor(document.type, document.version.major) : nullptr;
+    const QString key = node + QLatin1Char(output ? '>' : '<') + port;
+    if (const auto done = walk.done.constFind(key); done != walk.done.constEnd())
+        return *done;
+    // A document with a cycle of Switches reads a port it is resolving: that read is the port's own type, an `any` that types nothing.
+    if (walk.active.contains(key))
+        return found->type;
+    const auto document = m_document.graph.nodes.constFind(node);
+    const NodeType *type =
+        m_registry && document != m_document.graph.nodes.constEnd() ? m_registry->nodeTypeFor(document->type, document->version.major) : nullptr;
     if (!type)
         return found->type;
+    walk.active.insert(key);
     // What the node's own links give an input: the type of the output it reads, as that resolves.
     const LinkedTypeOf linked = [&](const QString &input) -> std::optional<PortSpec> {
-        const InputValue value = document.inputs.value(input);
-        return value.kind() == InputValue::Kind::Link ? resolvedType(value.from().node, value.from().port, true, depth + 1)
-                                                      : std::nullopt;
+        const auto value = document->inputs.constFind(input);
+        return value != document->inputs.constEnd() && value->kind() == InputValue::Kind::Link
+                   ? resolvedType(value->from().node, value->from().port, true, walk)
+                   : std::nullopt;
     };
     std::optional<PortSpec> resolved;
     if (output) {
@@ -1047,7 +1069,10 @@ std::optional<PortSpec> CanvasModel::resolvedType(const QString &node, const QSt
     } else {
         resolved = followedInputType(type->outputs, port, linked);
     }
-    return resolved ? resolved : found->type;
+    walk.active.remove(key);
+    const std::optional<PortSpec> result = resolved ? resolved : found->type;
+    walk.done.insert(key, result);
+    return result;
 }
 
 // --- links -------------------------------------------------------------------
@@ -1173,8 +1198,8 @@ QString CanvasModel::problem(const QString &fromNode, const QString &output, con
     if (!out->type || !in->type)
         return tr("The type of this port is not known.");
     // A Switch's value and its sides are typed by what is linked to them (#591), not by their `any`.
-    const PortSpec outType = resolvedType(fromNode, output, true, 0).value_or(*out->type);
-    const PortSpec inType = resolvedType(toNode, input, false, 0).value_or(*in->type);
+    const PortSpec outType = resolvedType(fromNode, output, true).value_or(*out->type);
+    const PortSpec inType = resolvedType(toNode, input, false).value_or(*in->type);
     switch (compatibility(outType, inType)) {
     case Compatibility::Compatible: break;
     case Compatibility::DifferentType:
@@ -1183,6 +1208,10 @@ QString CanvasModel::problem(const QString &fromNode, const QString &output, con
     case Compatibility::ListIntoSingle:
         return tr("A list of %1 cannot feed an input that takes one.").arg(type(outType.type.toString()));
     }
+    // A Switch side that took its type from the other side takes its list-ness too: the compiler refuses a list and a single value.
+    if (outType.list != inType.list && takesLinkedType(toNode, input))
+        return outType.list ? tr("A list of %1 cannot feed this side: the other side is a single value.").arg(type(outType.type.toString()))
+                            : tr("A single %1 cannot feed this side: the other side is a list.").arg(type(outType.type.toString()));
     // A link into toNode from fromNode closes a cycle when fromNode already reads from toNode.
     const bool cycle = useDrag ? m_dragUnreachable.contains(m_drag.value("output").toBool() ? toNode : fromNode)
                                : upstreamOf(fromNode).contains(toNode);

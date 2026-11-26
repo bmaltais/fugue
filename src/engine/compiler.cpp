@@ -7,6 +7,7 @@
 
 #include <QHash>
 #include <QJsonArray>
+#include <QScopeGuard>
 #include <QSet>
 
 #include <algorithm>
@@ -197,6 +198,8 @@ private:
                                                          const QString &port) const;
     Source resolve(Scope *scope, const PortRef &ref) const;
     Source followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const;
+    mutable QStringList m_following;   // path.port of the outputs followed() is inside of, outermost first
+    mutable QSet<QString> m_followLoop; // paths of the nodes in a loop of followed outputs
     std::optional<InputSpec> exposedSpec(Scope *child, const GroupInput &input) const;
     NodeType faceOf(Scope *child, const Node &instance) const;
     QStringList knownTypes() const;
@@ -506,6 +509,16 @@ std::optional<std::pair<QString, QString>> Compiler::exposedAt(const Scope *scop
 Source Compiler::followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const {
     // What the inputs hold as the node is run: an exposed input of the group around it replaces what is written inside, and its link
     // resolves where it was written (as resolveItem does).
+    // Outputs that follow each other's inputs would be followed forever: the second entry is Broken (its link is left out, so
+    // findCycles cannot see the loop) and the loop is reported as a cycle by run().
+    const QString key = source.path + QLatin1Char('.') + ref.port;
+    if (const qsizetype at = m_following.indexOf(key); at >= 0) {
+        for (const QString &entry : m_following.mid(at))
+            m_followLoop.insert(entry.section(QLatin1Char('.'), 0, -2));
+        return Source{};
+    }
+    m_following << key;
+    const auto leave = qScopeGuard([&] { m_following.removeLast(); });
     const QMap<QString, Bound> held = effective(scope, ref.node);
     std::optional<PortSpec> found;
     QString foundFrom;
@@ -758,12 +771,13 @@ std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpe
             const QList<OutputSpec> &outputs = flat.spec().outputs;
             if (std::any_of(outputs.cbegin(), outputs.cend(),
                             [&](const OutputSpec &out) { return out.follows.contains(spec.name); })) {
-                Error error = nodeError(QStringLiteral("type_mismatch"), flat.path,
+                // Placed where it was written, as link errors are (an exposed input of a group is written on the group instance).
+                Error error = nodeError(QStringLiteral("type_mismatch"), bound.writtenAt,
                                         QStringLiteral("Input %1 of %2 holds a typed value, but the output of %2 takes its type from what is "
                                                        "linked to %1.")
-                                            .arg(spec.name, flat.path));
-                error.input = spec.name;
-                error.hint = QStringLiteral("Link an output to %1; a literal has no type to pass on.").arg(spec.name);
+                                            .arg(bound.writtenInput, bound.writtenAt));
+                error.input = bound.writtenInput;
+                error.hint = QStringLiteral("Link an output to %1; a literal has no type to pass on.").arg(bound.writtenInput);
                 fail(error);
                 return std::nullopt;
             }
@@ -1208,7 +1222,17 @@ Compilation Compiler::run() {
 
     // Cycles are looked for even when there are other errors: links that did
     // not resolve are not in the flattened graph, so what is there is sound.
-    const bool cyclic = findCycles();
+    bool cyclic = findCycles();
+    if (!cyclic && !m_followLoop.isEmpty()) {
+        QStringList component = m_followLoop.values();
+        std::sort(component.begin(), component.end());
+        Error error = nodeError(QStringLiteral("cycle"), component.first(),
+                                QStringLiteral("Nodes %1 take their type from each other in a cycle.").arg(joined(component)));
+        error.valid = QJsonArray::fromStringList(component);
+        error.hint = QStringLiteral("Remove one of the links that close the loop.");
+        fail(error);
+        cyclic = true;
+    }
     if (!hasErrors(m_errors) && !cyclic) {
         CompiledGraph graph = shape();
         if (!hasErrors(m_errors))
@@ -1417,6 +1441,8 @@ std::optional<CompiledGraph> readCompiled(const QJsonObject &json, Errors &error
         node.sink = o.value("sink").toBool();
         node.provider = o.value("provider").toString();
         node.frozen = o.value("frozen").toString();
+        if (!o.value("lazy_dropped").isUndefined() && !o.value("lazy_dropped").isObject())
+            fail(QStringLiteral("Node %1: \"lazy_dropped\" must be an object.").arg(path), path);
         const QJsonObject lazyDropped = o.value("lazy_dropped").toObject();
         for (auto drop = lazyDropped.constBegin(); drop != lazyDropped.constEnd(); ++drop) {
             const QString why = drop->toString();

@@ -317,6 +317,65 @@ private slots:
         QVERIFY(!canvas.linkProblem("sw", "value", "save", "name").isEmpty()); // a new link of it would be refused
     }
 
+    // A list of text on one side makes the other side take a list: a single text there is refused (the compiler would), and
+    // the other way round.
+    void aSwitchSideTakesTheOtherSidesListness() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        NodeType names;
+        names.id = "io.example.tools/names";
+        names.version = *Version::parse("1.0.0");
+        names.name = "Names";
+        names.runtime = QJsonObject{{"kind", "builtin"}};
+        OutputSpec items;
+        items.name = "items";
+        items.type = {*PortType::parse("text"), true};
+        names.outputs.append(items);
+        QVERIFY(registry.add(names).isEmpty());
+        CanvasModel canvas(&registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "a": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "x"}},
+            "n": {"type": "io.example.tools/names", "version": "1.0.0", "inputs": {}},
+            "sw": {"type": "fugue/switch", "version": "1.0.0", "inputs": {}}}},
+            "layout": {"nodes": {"a": {"pos": [0, 0]}, "n": {"pos": [0, 200]}, "sw": {"pos": [300, 100]}}}})"));
+        QVERIFY(canvas.connectPorts("n", "items", "sw", "on_true"));
+        QVERIFY(canvas.takesLinkedType("sw", "on_false"));
+        QVERIFY(!canvas.linkProblem("a", "text", "sw", "on_false").isEmpty());
+        QVERIFY(!canvas.connectPorts("a", "text", "sw", "on_false"));
+        QCOMPARE(canvas.linkProblem("n", "items", "sw", "on_false"), QString());
+        QVERIFY(!canvas.takesLinkedType("a", "text"));
+    }
+
+    // Switches that read each other, and a long chain with both sides linked, resolve at once (no walk of every path).
+    void switchTypesResolveQuicklyOverACycleAndAChain() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(switchDoc));
+        QJsonObject nodes = canvas.document().toJson().value("graph").toObject().value("nodes").toObject();
+        QJsonObject layout;
+        const auto sw = [](const QString &a, const QString &b) {
+            return QJsonObject{{"type", "fugue/switch"}, {"version", "1.0.0"},
+                               {"inputs", QJsonObject{{"on_true", QJsonObject{{"from", a}}}, {"on_false", QJsonObject{{"from", b}}}}}};
+        };
+        nodes.insert("c1", sw("c2.value", "a.text"));
+        nodes.insert("c2", sw("c1.value", "a.text"));
+        nodes.insert("s0", sw("a.text", "a.text"));
+        for (int i = 1; i <= 20; ++i)
+            nodes.insert(QString("s%1").arg(i), sw(QString("s%1.value").arg(i - 1), QString("s%1.value").arg(i - 1)));
+        for (auto it = nodes.begin(); it != nodes.end(); ++it)
+            layout.insert(it.key(), QJsonObject{{"pos", QJsonArray{0, 0}}});
+        canvas.setDocument(document(QJsonDocument(QJsonObject{{"fugue", 1},
+                                                              {"graph", QJsonObject{{"nodes", nodes}}},
+                                                              {"layout", QJsonObject{{"nodes", layout}}}})
+                                        .toJson()
+                                        .constData()));
+        QElapsedTimer timer;
+        timer.start();
+        QCOMPARE(canvas.portType("s20", "value", true)->toString(), QString("text"));
+        QCOMPARE(canvas.portType("c1", "value", true)->toString(), QString("text"));
+        QCOMPARE(canvas.portType("c2", "on_true", false)->toString(), QString("text"));
+        QVERIFY2(timer.elapsed() < 500, qPrintable(QString::number(timer.elapsed())));
+    }
+
     void linkProblemsSayWhy() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));

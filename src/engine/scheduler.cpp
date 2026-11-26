@@ -505,7 +505,7 @@ private:
 
     // `reader` declined `dep`: it stops counting in `dep`'s readers now, not when it finishes, so the images of `dep` go as soon as
     // the readers left have finished (9.2). Once per pair: its finish skips what it gave up.
-    void giveUp(NodeRun &reader, NodeRun &dep) {
+    void stopReading(NodeRun &reader, NodeRun &dep) {
         if (reader.gaveUp.contains(dep.path))
             return;
         reader.gaveUp << dep.path;
@@ -580,7 +580,7 @@ private:
                 n.waitFor << it.key();
                 demand(m_nodes[it.key()]);
             } else {
-                giveUp(n, m_nodes[it.key()]);
+                stopReading(n, m_nodes[it.key()]);
                 letGo(m_nodes[it.key()]);
             }
         }
@@ -713,6 +713,13 @@ private:
 
         if (const QString broken = brokenUpstream(n); !broken.isEmpty())
             return skip(n, broken);
+        // A Switch skipped because its chosen side is muted: what reads it is muted too, as a compile-time mute does (3.5), also
+        // through an optional input, which would otherwise run without it.
+        for (const QString &dep : std::as_const(n.strictDeps)) {
+            const NodeRun &d = *m_nodes.constFind(dep);
+            if (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_muted"))
+                return skip(n, QStringLiteral("upstream_muted"));
+        }
         if (!n.type) {
             Error error = nodeError(QStringLiteral("unknown_node_type"),
                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type));

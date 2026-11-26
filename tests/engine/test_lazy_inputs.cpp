@@ -298,6 +298,21 @@ private slots:
         QCOMPARE(world.calls.count("out"), 0);
     }
 
+    // Spec 3.5: what reads a Switch skipped for its muted chosen side is skipped upstream_muted too, as a compile-time mute does,
+    // through a required input (the Save) and through an optional one (a Join's b), which would otherwise run without it.
+    void aReaderOfASwitchSkippedForAMutedSideIsSkippedAsUpstreamMuted() {
+        World world;
+        addTypes(world);
+        QByteArray graph = graphFor("no", "'j': {'type': 'fugue/join', 'inputs': {'a': 'x', 'b': {'from': 'sw.value'}}},"
+                                       " 'out2': {'type': 'fugue/save', 'inputs': {'value': {'from': 'j.text'}}}");
+        graph.replace("'f3': {'type': 'fugue/join',", "'f3': {'type': 'fugue/join', 'mode': 'mute',");
+        const Ran ran = world.run(world.graph(graph));
+        QCOMPARE(traceOf(ran.events, {"sw"}), QStringList{QStringLiteral("node.skipped sw upstream_muted")});
+        QCOMPARE(traceOf(ran.events, {"out"}), QStringList{QStringLiteral("node.skipped out upstream_muted")});
+        QCOMPARE(traceOf(ran.events, {"j"}), QStringList{QStringLiteral("node.skipped j upstream_muted")});
+        QCOMPARE(world.calls.count("j"), 0);
+    }
+
     // With no hook every lazy input is asked for, so the muted one skips the node.
     void aNodeWithoutAHookAsksForEveryLazyInputSoAMutedOneSkipsIt() {
         World world;
@@ -349,6 +364,21 @@ private slots:
         QVERIFY(compiled.errors().first().message.contains("differ"));
     }
 
+    // Two Switches that take each other's value follow forever: the compiler reports a cycle instead of overflowing the stack.
+    void twoSwitchesThatFollowEachOtherAreACycle() {
+        World world;
+        addTypes(world);
+        const Compilation compiled = compileOf(
+            world, "{'a': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 'b.value'}}},"
+                   " 'b': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 'a.value'}}},"
+                   " 'out': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.value'}}}}");
+        QVERIFY(!compiled.ok());
+        bool cycle = false;
+        for (const Error &error : compiled.errors())
+            cycle = cycle || error.code == QLatin1String("cycle");
+        QVERIFY(cycle);
+    }
+
     // #592 (b): only the CLI or hand-edited JSON can write a literal on an any input (the canvas has no widget for one), and
     // it types nothing, so it is a compile error on the node that holds it rather than an unchecked value.
     void aLiteralOnASwitchSideIsACompileError() {
@@ -362,6 +392,28 @@ private slots:
         QCOMPARE(compiled.errors().first().code, QStringLiteral("type_mismatch"));
         QCOMPARE(compiled.errors().first().node, QStringLiteral("sw"));
         QCOMPARE(compiled.errors().first().input, QStringLiteral("on_false"));
+    }
+
+    // The same error for a side a group exposes is placed on the group instance and its exposed input, as link errors are.
+    void aLiteralOnAnExposedSwitchSideIsPlacedOnTheGroupInstance() {
+        World world;
+        addTypes(world);
+        const QJsonObject doc = json(
+            "{'fugue': 1, 'graph': {'nodes': {"
+            " 't': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'x'}},"
+            " 'g': {'type': 'local/sided', 'version': '1.0.0', 'inputs': {'side': 5, 'other': {'from': 't.text'}}},"
+            " 'out': {'type': 'fugue/save', 'version': '1.0.0', 'inputs': {'value': {'from': 'g.value'}}}}},"
+            " 'groups': {'local/sided': {'version': '1.0.0', 'name': 'Sided',"
+            "  'inputs': [{'name': 'side', 'targets': ['sw.on_false']}, {'name': 'other', 'targets': ['sw.on_true']}],"
+            "  'outputs': [{'name': 'value', 'from': 'sw.value'}],"
+            "  'nodes': {'sw': {'type': 'fugue/pick', 'version': '1.0.0', 'inputs': {'condition': true}}}}}}");
+        const Result<Document> document = Document::fromJson(doc);
+        QVERIFY(document.ok());
+        const Compilation compiled = compile(*document, world.registry);
+        QVERIFY(!compiled.ok());
+        QCOMPARE(compiled.errors().first().code, QStringLiteral("type_mismatch"));
+        QCOMPARE(compiled.errors().first().node, QStringLiteral("g"));
+        QCOMPARE(compiled.errors().first().input, QStringLiteral("side"));
     }
 
     // The output of a node that follows its inputs has their type: a text input accepts a text, and a wrong type is
