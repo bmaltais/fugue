@@ -281,8 +281,44 @@ public:
 // source with the job and skips the model that writes songs, so the description and the lyrics reach the
 // renderer as they are). Remix is ace-step's cover (re-played in another style; "stay close" keeps its
 // tune and timing), Repaint redraws one stretch of the song and keeps the rest.
+// What Extend Song's seconds cannot be: negative, both zero, or both set (one side at a time).
+std::optional<Error> extendProblem(double before, double after) {
+    if (before < 0 || after < 0)
+        return makeInputError(QStringLiteral("value_out_of_range"), before < 0 ? QStringLiteral("before") : QStringLiteral("after"),
+                              QStringLiteral("The seconds to add cannot be negative."));
+    if (before <= 0 && after <= 0)
+        return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
+                              QStringLiteral("Say how many seconds to add before or after the song."));
+    // The server redraws one region and keeps the rest of the song, so both sides at once would redraw the
+    // song too (the region would run from before the start to past the end).
+    if (before > 0 && after > 0)
+        return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
+                              QStringLiteral("The model adds to one side at a time."),
+                              QStringLiteral("Set one of Seconds before and Seconds after to 0, and chain a second Extend Song for the other side."));
+    return std::nullopt;
+}
+
+// A part of the song that ends before it starts (`stop` is the end, or the song's length for 0).
+std::optional<Error> repaintProblem(double start, double stop) {
+    if (stop > start)
+        return std::nullopt;
+    return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("end"),
+                          QStringLiteral("The part to redraw ends at %1 seconds, before it starts at %2.").arg(stop).arg(start));
+}
+
 class SongEditKernel : public ProviderKernel {
 public:
+    // Under validate: the seconds written agree. Repaint's end of 0 is the song's end, which is not known yet.
+    Errors check(const NodeContext &context) const override {
+        std::optional<Error> bad;
+        if (m_mode == Mode::Extend && context.inputs.contains(QStringLiteral("before")) && context.inputs.contains(QStringLiteral("after")))
+            bad = extendProblem(context.input(QStringLiteral("before")).number(), context.input(QStringLiteral("after")).number());
+        else if (m_mode == Mode::Repaint && context.inputs.contains(QStringLiteral("start")) && context.inputs.contains(QStringLiteral("end"))
+                 && context.input(QStringLiteral("end")).number() > 0)
+            bad = repaintProblem(context.input(QStringLiteral("start")).number(), context.input(QStringLiteral("end")).number());
+        return bad ? Errors{*bad} : Errors{};
+    }
+
     // Extend Song is Repaint's code path (ace-server's repaint with a start before the song, or an end beyond it),
     // a node of its own so that "seconds before and after" is what the person sees.
     enum class Mode { Remix, Repaint, Extend };
@@ -314,18 +350,8 @@ public:
         if (m_mode == Mode::Extend) {
             const double before = context.input(QStringLiteral("before")).number();
             const double after = context.input(QStringLiteral("after")).number();
-            if (before < 0 || after < 0)
-                return makeInputError(QStringLiteral("value_out_of_range"), before < 0 ? QStringLiteral("before") : QStringLiteral("after"),
-                                      QStringLiteral("The seconds to add cannot be negative."));
-            if (before <= 0 && after <= 0)
-                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
-                                      QStringLiteral("Say how many seconds to add before or after the song."));
-            // The server redraws one region and keeps the rest of the song, so both sides at once would redraw the
-            // song too (the region would run from before the start to past the end).
-            if (before > 0 && after > 0)
-                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
-                                      QStringLiteral("The model adds to one side at a time."),
-                                      QStringLiteral("Set one of Seconds before and Seconds after to 0, and chain a second Extend Song for the other side."));
+            if (const std::optional<Error> bad = extendProblem(before, after))
+                return *bad;
             params.insert(QStringLiteral("task"), QStringLiteral("repaint"));
             // Before: from -before up to the song's start. After: from the song's end to `after` seconds beyond it.
             params.insert(QStringLiteral("start"), before > 0 ? -before : source.duration());
@@ -335,10 +361,8 @@ public:
             // 0 for the end is the end of the song.
             const double end = context.input(QStringLiteral("end")).number();
             const double stop = end > 0 ? end : source.duration();
-            if (stop <= start)
-                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("end"),
-                                      QStringLiteral("The part to redraw ends at %1 seconds, before it starts at %2.")
-                                          .arg(stop).arg(start));
+            if (const std::optional<Error> bad = repaintProblem(start, stop))
+                return *bad;
             params.insert(QStringLiteral("task"), QStringLiteral("repaint"));
             params.insert(QStringLiteral("start"), start);
             params.insert(QStringLiteral("end"), stop);

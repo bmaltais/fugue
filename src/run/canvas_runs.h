@@ -184,11 +184,13 @@ private:
         bool inputMissing = false;
         QHash<QString, QString> inner; // a group's nodes: path id -> state
         QHash<QString, qreal> innerSeconds;
-        void clearError() { error.clear(); errorDetail.clear(); pack.clear(); }
+        bool fromCheck = false; // `error` is a kernel's check() error (#600), not a run's: the next check decides it
+        void clearError() { error.clear(); errorDetail.clear(); pack.clear(); fromCheck = false; }
     };
     struct TabRuns {
         QHash<QString, NodeView> nodes; // by path id: every node, and each group instance holding one
         QVariantList errors;
+        QVariantList checkErrors; // the last check's kernel errors (#600), listed after `errors`; each check replaces them
         QString lastStatus;
         int busy = 0;   // its runs waiting or active
         int epoch = 0;  // runs started, so an older check does not undo a run's states
@@ -203,7 +205,7 @@ private:
     QString startOne(const QString &tab, const QString &target, bool first);
     QString currentTab() const;
     void onEvent(const QString &run, const QJsonObject &event);
-    void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
+    void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors);
     void scheduleCheck(bool edit);
     void showTab();
     void show(const QString &tab, const QString &node);

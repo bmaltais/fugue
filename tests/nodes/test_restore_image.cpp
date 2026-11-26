@@ -225,6 +225,36 @@ private slots:
         QCOMPARE(code(flux), QString("model_unsupported:vae"));
     }
 
+    // The same model_unsupported before a run (ProviderKernel::check, under validate), from the headers alone; a file that is not
+    // here is the scheduler's model_missing, and an input not known yet is not judged.
+    void theCheckBeforeARunTellsAWrongModelOrVaeAndAnOverlapThatDoesNotFit() {
+        const auto codes = [&](Values in, const QStringList &absent = {}) {
+            NodeContext c = context(in);
+            for (const QString &name : absent)
+                c.inputs.remove(name);
+            QStringList found;
+            for (const Error &error : m_kernels.provider("fugue/restore-image")->check(c))
+                found << error.code + ":" + error.input;
+            return found.join(",");
+        };
+        const MediaHandle image = picture(32, 32, 3);
+        QCOMPARE(codes(inputs(image)), QString());
+        Values klein = inputs(image);
+        klein.insert("model", Value(model("klein.safetensors", {"double_blocks.0.img_attn.qkv.weight", "txt_in.weight"})));
+        QCOMPARE(codes(klein), QString("model_unsupported:model"));
+        Values flux = inputs(image);
+        flux.insert("vae", Value(vae("flux.safetensors", {"encoder.conv_in.weight", "decoder.conv_in.weight"})));
+        QCOMPARE(codes(flux), QString("model_unsupported:vae"));
+        QCOMPARE(codes(klein, {"vae"}), QString());
+        Values gone = inputs(image);
+        gone.insert("model", Value(QJsonObject{{"resource", "fugue/seedvr2-model"}, {"hash", "sha256:" + QString(64, 'b')}, {"name", "gone.safetensors"}}));
+        QCOMPARE(codes(gone), QString());
+        Values wide = inputs(image);
+        wide.insert("tile", Value(1024.0));
+        wide.insert("overlap", Value(600.0));
+        QCOMPARE(codes(wide), QString("value_out_of_range:overlap"));
+    }
+
     void colorFixNoneKeepsTheModelsPicture() {
         NodeContext c = context(inputs(picture(8, 6, 3, 100)));
         c.inputs.insert("color_fix", Value(QString("none")));

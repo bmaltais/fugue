@@ -50,6 +50,33 @@ QString nodeStateName(NodeState state) {
 
 namespace {
 
+// What a path literal means to the node, once, for a run and for the check of a node no output reads (#600): trimmed and "~"
+// expanded; a relative file is the workflow folder's (file_roots.h inputFilePath, an error with no folder); a relative folder is
+// the node's to place (Save Image's is under the output folder). Only an input that holds a file or a folder, written as text.
+bool isPathLiteral(const InputSpec &spec, const Value &value) {
+    return (spec.holdsInputFile() || spec.widget() == QLatin1String("folder")) && value.kind() == Value::Kind::Json &&
+           value.json().isString();
+}
+
+Result<QString> normalisedPath(const InputSpec &spec, const QString &text, const QString &workflow) {
+    if (spec.holdsInputFile())
+        return inputFilePath(text, workflow, spec.name);
+    return expandHome(text.trimmed());
+}
+
+// Where a kernel's check() finding goes (#600), for a node a run reaches and one it does not: a model_missing, or a finding the kernel
+// itself calls a warning (one a run may never meet), is a warning, as warnMissingModels reports one; any other is a check error.
+void sortFinding(Error error, const QString &node, Errors &warnings, Errors &checkErrors) {
+    error.node = node;
+    if (error.code == QLatin1String("model_missing") || error.severity == Error::Severity::Warning) {
+        error.severity = Error::Severity::Warning;
+        warnings.append(error);
+        return;
+    }
+    error.severity = Error::Severity::Error;
+    checkErrors.append(error);
+}
+
 const qint64 maxSeed = (1LL << 53) - 1; // the largest integer a workflow may hold (2.1)
 
 enum class Phase { Waiting, Ready, Running, Finished };
@@ -741,6 +768,8 @@ private:
         // or an input linked to a node that has not run.
         std::optional<Errors> hostGone; // set when only the cache may serve this node, with the error of the host being gone
         if (n.providerKernel) {
+            if (m_dry)
+                warnFromKernel(n);
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
             requirement.workflowPin.clear();
@@ -876,7 +905,9 @@ private:
         return selection;
     }
 
-    // What the node's kernel can tell before a run (NodeKernel::check), as warnings.
+    // What the node's kernel can tell before a run (NodeKernel::check), kept as errors in `checkErrors` (#600). A provider
+    // node's kernel is asked too, before a provider is chosen: its written values are wrong whoever serves it. A missing model
+    // file stays a warning, as warnMissingModels reports one (Get ready can fetch it), and so does a finding the kernel calls one.
     void warnFromKernel(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -884,11 +915,8 @@ private:
         context.inputs = n.inputs;
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
-        for (Error warning : n.kernel->check(context)) {
-            warning.severity = Error::Severity::Warning;
-            warning.node = n.path;
-            m_outcome.errors.append(warning);
-        }
+        for (const Error &error : n.providerKernel ? n.providerKernel->check(context) : n.kernel->check(context))
+            sortFinding(error, n.path, m_outcome.errors, m_outcome.checkErrors);
     }
 
     // The node is given a model file that is known to be missing here: a handle with a sha256 of a resource type that is installed,
@@ -1094,21 +1122,14 @@ private:
                     return resolved;
                 }
             }
-            const bool pathLiteral = (spec.holdsInputFile() || spec.widget() == QLatin1String("folder")) &&
-                                     value.kind() == Value::Kind::Json && value.json().isString();
-            // Trimmed and "~" expanded here, once: the node reads, the key names and the share
-            // copy judges (share_copy.h) the same path. A relative file is the workflow folder's
-            // (file_roots.h inputFilePath); a relative folder is the node's to place (Save Image's
-            // is under the output folder).
-            if (pathLiteral && spec.holdsInputFile()) {
-                const Result<QString> located = inputFilePath(value.text(), m_options.workflow, spec.name);
+            const bool pathLiteral = isPathLiteral(spec, value);
+            if (pathLiteral) {
+                const Result<QString> located = normalisedPath(spec, value.text(), m_options.workflow);
                 if (!located) {
                     resolved.problem = located.error();
                     return resolved;
                 }
                 value = Value(located.value());
-            } else if (pathLiteral) {
-                value = Value(expandHome(value.text().trimmed()));
             }
             n.inputs.insert(spec.name, value);
             // A file read by path is keyed by its content, not its path (10.1). Hashing reads
@@ -1785,6 +1806,59 @@ void CheckAbort::abort() {
         m_quit();
 }
 
+namespace {
+
+// What the kernels of the nodes no output needs say of their own values (#600): a run never reaches them, but the person who
+// typed a bad formula into a node not yet wired should hear of it. Only the literals count; a link, an auto value or a list is
+// not known here, so an input holding one is left out, as under validate.
+GraphCheck checkUnusedNodes(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options) {
+    GraphCheck found;
+    if (!environment.registry || !environment.kernels)
+        return found;
+    for (auto it = graph.unused.cbegin(); it != graph.unused.cend(); ++it) {
+        const NodeType *type = environment.registry->nodeTypeFor(it->type, it->version.major);
+        const std::shared_ptr<NodeKernel> kernel = type ? environment.kernels->node(*type) : nullptr;
+        // A provider node's kernel is asked too, as warnFromKernel asks it: its written values are wrong whoever serves it.
+        const std::shared_ptr<ProviderKernel> provider = type && !kernel ? environment.kernels->provider(*type) : nullptr;
+        if (!kernel && !provider)
+            continue;
+        NodeContext context;
+        context.node = it.key();
+        context.type = type;
+        context.hashes = environment.hashes;
+        context.registry = environment.registry;
+        for (const InputSpec &spec : type->inputs) {
+            if (spec.lazy)
+                continue;
+            const auto written = it->inputs.constFind(spec.name);
+            Value value;
+            if (written == it->inputs.constEnd() || written->isEmpty()) {
+                if (!spec.defaultValue.isUndefined())
+                    value = Value(spec.defaultValue);
+            } else if (written->kind() == InputValue::Kind::Literal) {
+                value = Value(written->literal());
+            } else if (written->kind() == InputValue::Kind::Resource) {
+                value = Value(written->handle());
+            }
+            if (value.isEmpty())
+                continue;
+            // A path is read as a run reads it; one that cannot be placed (an unsaved workflow's relative file) is the run's to report.
+            if (isPathLiteral(spec, value)) {
+                const Result<QString> located = normalisedPath(spec, value.text(), options.workflow);
+                if (!located)
+                    continue;
+                value = Value(located.value());
+            }
+            context.inputs.insert(spec.name, value);
+        }
+        for (const Error &error : kernel ? kernel->check(context) : provider->check(context))
+            sortFinding(error, it.key(), found.warnings, found.checkErrors);
+    }
+    return found;
+}
+
+} // namespace
+
 GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options,
                       CheckAbort *abort) {
     Scheduler scheduler(graph, std::nullopt, environment, options, true);
@@ -1806,6 +1880,12 @@ GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environm
     check.keys = scheduler.outcome().keys;
     check.routes = scheduler.outcome().routes;
     check.warnings = scheduler.outcome().errors;
+    check.checkErrors = scheduler.outcome().checkErrors;
+    if (!check.aborted) {
+        const GraphCheck unused = checkUnusedNodes(graph, environment, options);
+        check.warnings += unused.warnings;
+        check.checkErrors += unused.checkErrors;
+    }
     return check;
 }
 

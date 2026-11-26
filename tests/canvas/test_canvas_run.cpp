@@ -70,6 +70,17 @@ const QByteArray kGraph = R"({
   }}
 })";
 
+// An Expression whose Number goes to a Preview, and one that nothing reads.
+const QByteArray kFormula = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "calc": {"type": "fugue/expression", "version": "1.0.0", "inputs": {"formula": "a + b"}},
+    "loose": {"type": "fugue/expression", "version": "1.0.0", "inputs": {"formula": "1 +"}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "calc.number"}}}
+  }},
+  "layout": {"nodes": {"calc": {"pos": [0, 0]}, "show": {"pos": [300, 0]}, "loose": {"pos": [0, 300]}}}
+})";
+
 // A Generate Image, a Resize of it and a Preview of that: the middle one only repeats the picture before it.
 const QByteArray kChain = R"({
   "fugue": 1,
@@ -1088,6 +1099,90 @@ private slots:
         QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
         QTRY_VERIFY(list && list->isVisible());
         QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // #600: a kernel's own check() error (Expression's formula that does not parse) shows on its node
+    // after a committed edit, without a run, and goes when the value is fixed.
+    void aKernelsCheckErrorShowsOnItsNodeWithoutARun() {
+        RunApp r(kFormula);
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QVERIFY(r.app.model.widgets()->setText("calc", "formula", "a +").isEmpty());
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("calc"), QStringLiteral("error"));
+        QVERIFY(r.role("calc", NodeList::Error).toString().contains("Column"));
+        const QVariantList errors = r.runs->errors();
+        QCOMPARE(errors.size(), 2); // calc, and loose which nothing reads
+        for (const QVariant &error : errors) {
+            QCOMPARE(error.toMap().value("input").toString(), QStringLiteral("formula"));
+            QCOMPARE(error.toMap().value("code").toString(), QStringLiteral("formula_invalid"));
+        }
+        QVERIFY(r.role("calc", NodeList::Error).toString().startsWith("Column 4"));
+        QCOMPARE(r.state("loose"), QStringLiteral("error"));
+        QVERIFY(r.jobs().isEmpty()); // no run, no provider call
+        // Fixed: the error goes at the next check.
+        checked.clear();
+        QVERIFY(r.app.model.widgets()->setText("calc", "formula", "a + 1").isEmpty());
+        QTRY_VERIFY(checked.size() >= 1);
+        QVERIFY(r.state("calc") != QStringLiteral("error"));
+        QVERIFY(r.role("calc", NodeList::Error).toString().isEmpty());
+        QCOMPARE(r.runs->errors().size(), 1);
+    }
+
+    // #600: a node whose check() error was shown, then a run that fails with another error (the file was put there
+    // outside the app, and is no image): a later check, which finds nothing wrong with the file's name, keeps the run's error.
+    void aRunsErrorIsNotErasedByALaterCheck() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString file = folder.filePath("x.png");
+        RunApp r(QByteArray(R"({
+          "fugue": 1,
+          "graph": {"nodes": {
+            "load": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": %1}},
+            "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "load.image"}}}
+          }},
+          "layout": {"nodes": {"load": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}}
+        })").replace("%1", '"' + file.toUtf8() + '"'));
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("load"), QStringLiteral("error"));
+        const QString found = r.role("load", NodeList::Error).toString();
+        QVERIFY(found.contains("x.png"));
+        QFile out(file);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        out.write("this is not an image");
+        out.close();
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QVERIFY(!r.runs->start().isEmpty());
+        QTRY_VERIFY(finished.size() >= 1);
+        QTRY_COMPARE(r.state("load"), QStringLiteral("error"));
+        const QString ran = r.role("load", NodeList::Error).toString();
+        QVERIFY(ran != found);
+        checked.clear();
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        QCOMPARE(r.state("load"), QStringLiteral("error"));
+        QCOMPARE(r.role("load", NodeList::Error).toString(), ran);
+    }
+
+    // #600: the pill lists what shows on a node. A dry-run failure of the check itself (a relative file in a workflow
+    // that is not saved has no folder to start from) is not a kernel's finding, and never joined the list.
+    void aDryRunFailureIsNotCountedAsAKernelFinding() {
+        RunApp r(QByteArray(R"({
+          "fugue": 1,
+          "graph": {"nodes": {
+            "load": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "x.png"}},
+            "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "load.image"}}}
+          }},
+          "layout": {"nodes": {"load": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}}
+        })"));
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        QVERIFY(r.runs->errors().isEmpty());
     }
 
     // An edit's check that a newer check replaces before it is answered (only the latest is

@@ -313,6 +313,19 @@ private slots:
         QVERIFY(dynprompt::check("${y:d}", m_options).isEmpty());
         QVERIFY(dynprompt::check("__../x__", m_options).first().message.contains("not allowed"));
     }
+    void checkCallsWhatDependsOnTheChoiceAWarning() {
+        // A run only evaluates the variant it picks: a finding inside one may never be met (#600).
+        const Errors missing = dynprompt::check("{cat|__animals/missing__}", m_options);
+        QCOMPARE(missing.size(), 1);
+        QCOMPARE(missing.first().severity, Error::Severity::Warning);
+        const Errors unset = dynprompt::check("{a|${y}}", m_options);
+        QCOMPARE(unset.size(), 1);
+        QCOMPARE(unset.first().severity, Error::Severity::Warning);
+        // Outside any variant a run meets it every time; a syntax error is never a warning.
+        QCOMPARE(dynprompt::check("__nothere__", m_options).first().severity, Error::Severity::Error);
+        QCOMPARE(dynprompt::check("${y}", m_options).first().severity, Error::Severity::Error);
+        QCOMPARE(dynprompt::check("{a|__x__", m_options).first().severity, Error::Severity::Error);
+    }
 
     // ---- every combination
     void expandAllListsEveryCombination() {

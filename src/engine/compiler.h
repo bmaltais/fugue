@@ -90,6 +90,9 @@ struct CompiledGraph {
     // upstream_empty or not_part_of_output. Bypassed nodes and sinks inside
     // groups are removed without an entry.
     QMap<QString, QString> skipped;
+    // The nodes no sink needs (not_part_of_output), kept only so checkGraph can ask their kernels' check() about
+    // their own values (#600). Never run and not in toJson.
+    QMap<QString, CompiledNode> unused;
     QString target; // for "run to here": the path id the run stops at, or empty
 
     // --- dependencies, for the scheduler ---

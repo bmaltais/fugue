@@ -52,12 +52,13 @@ float at3(const Lut &lut, int r, int g, int b, int c) {
 
 } // namespace
 
-Result<Lut> parseCube(const QString &text) {
+Result<Lut> parseCube(const QString &text, bool headerOnly) {
     Lut lut;
     bool haveSize = false;
     size_t wanted = 0;
     int lineNo = 0;
     int lastLine = 0;
+    bool stopped = false;
     for (const QStringView raw : QStringView(text).split(QLatin1Char('\n'))) {
         ++lineNo;
         QString line = raw.toString();
@@ -74,6 +75,10 @@ Result<Lut> parseCube(const QString &text) {
         if (!keyword) {
             if (!haveSize)
                 return Result<Lut>(Errors{lineError(lineNo, QStringLiteral("a data row comes before LUT_1D_SIZE or LUT_3D_SIZE"))});
+            if (headerOnly) {
+                stopped = true; // the keywords are all above the first row: the rest is not read
+                break;
+            }
             float row[3];
             if (!triple(words, 0, row))
                 return Result<Lut>(Errors{lineError(lineNo, QStringLiteral("expected three numbers, found \"%1\"").arg(line))});
@@ -119,9 +124,11 @@ Result<Lut> parseCube(const QString &text) {
         }
         return Result<Lut>(Errors{lineError(lineNo, QStringLiteral("unknown keyword \"%1\"").arg(word))});
     }
+    if (headerOnly && !stopped)
+        return lut; // the text ended where the file was cut: nothing more is known
     if (!haveSize)
         return Result<Lut>(Errors{lineError(std::max(lastLine, 1), QStringLiteral("no LUT_1D_SIZE or LUT_3D_SIZE"))});
-    if (lut.table.size() != wanted)
+    if (!headerOnly && lut.table.size() != wanted)
         return Result<Lut>(Errors{lineError(std::max(lastLine, 1), QStringLiteral("the file ends after %1 of the %2 rows the size asks for")
                                                                         .arg(lut.table.size() / 3).arg(wanted / 3))});
     for (int c = 0; c < 3; ++c)
@@ -175,8 +182,48 @@ Pixels applyLut(const Pixels &image, const Lut &lut, float strength) {
 
 namespace {
 
+// How much of the file the check reads: the keywords are in the first lines, a data row ends them.
+constexpr qint64 kCheckBytes = 8192;
+
+// The LUT file at `path` as an error would be told, or nothing: that it is there and can be opened, and when
+// `parsed` is not null the whole file is read and parsed into it, else only its first lines (or all of a short file).
+std::optional<Errors> lutProblems(const QString &path, Lut *parsed) {
+    QFile file(path);
+    if (!QFileInfo(path).isFile())
+        return Errors{makeInputError(QStringLiteral("file_not_found"), QStringLiteral("file"),
+                                     QStringLiteral("No LUT file at %1.").arg(path), QStringLiteral("Pick the .cube file again in the node."))};
+    if (!file.open(QIODevice::ReadOnly))
+        return Errors{makeInputError(QStringLiteral("file_not_found"), QStringLiteral("file"),
+                                     QStringLiteral("The LUT file %1 cannot be read: %2").arg(path, file.errorString()))};
+    bool headerOnly = false;
+    QByteArray bytes;
+    if (parsed) {
+        bytes = file.readAll();
+    } else {
+        bytes = file.read(kCheckBytes);
+        if (!file.atEnd()) { // a cut file: only the whole lines, and only what they say
+            headerOnly = true;
+            bytes.truncate(bytes.lastIndexOf('\n') + 1);
+        }
+    }
+    const Result<Lut> lut = parseCube(QString::fromUtf8(bytes), headerOnly);
+    if (!lut)
+        return lut.errors();
+    if (parsed)
+        *parsed = lut.value();
+    return std::nullopt;
+}
+
 class ApplyLutKernel : public NodeKernel {
 public:
+    // Under validate: the file is there, and its first lines are a good .cube header (at most a few KB are read).
+    Errors check(const NodeContext &context) const override {
+        const Value file = context.input(QStringLiteral("file"));
+        if (file.isEmpty() || file.text().isEmpty())
+            return {};
+        return lutProblems(file.text(), nullptr).value_or(Errors{});
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> image = pixelsOf(context.input("image"), "image");
         if (!image.ok())
@@ -193,17 +240,10 @@ public:
                 return readable.errors();
             path = readable.value();
         }
-        QFile file(path);
-        if (!QFileInfo(path).isFile())
-            return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("file"),
-                                  QStringLiteral("No LUT file at %1.").arg(path), QStringLiteral("Pick the .cube file again in the node."));
-        if (!file.open(QIODevice::ReadOnly))
-            return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("file"),
-                                  QStringLiteral("The LUT file %1 cannot be read: %2").arg(path, file.errorString()));
-        const Result<Lut> lut = parseCube(QString::fromUtf8(file.readAll()));
-        if (!lut)
-            return lut.errors();
-        return imageOutput(applyLut(image.value(), lut.value(), float(strength)));
+        Lut lut;
+        if (const std::optional<Errors> problems = lutProblems(path, &lut))
+            return *problems;
+        return imageOutput(applyLut(image.value(), lut, float(strength)));
     }
 };
 

@@ -141,8 +141,9 @@ public:
 signals:
     void event(const QString &run, const QJsonObject &event);
     // nodes: {<path id>: {"state", "reason"?, "runsOn"? ("<instance> (<host>)" for a node routed off this machine)}}; problems: the compiler's and checkGraph's
-    // errors and warnings.
-    void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
+    // errors and warnings;
+    // checkErrors: only what the nodes' kernels' check() found (#600), the errors that show on their nodes.
+    void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors);
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
     // A run would send data off this machine to services the person has not allowed (8.2, #404): `services` is
     // [{"instance", "host", "sends": [..], "text"}]. The run waits (no folder, not queued) for answerRemote.

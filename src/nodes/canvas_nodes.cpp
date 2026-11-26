@@ -139,16 +139,23 @@ Result<PaintDocument> openRevision(const CanvasHandle &handle) {
     return CanvasStore::forSession().load(handle.canvas, handle.revision);
 }
 
+// The error of a canvas that is no canvas id, as run and check tell it.
+std::optional<Error> notACanvasId(const QString &canvasId) {
+    if (canvas::isCanvasId(canvasId))
+        return std::nullopt;
+    return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("canvas"),
+                          QStringLiteral("\"%1\" is not a canvas id.").arg(canvasId),
+                          QStringLiteral("Use the id `fugue canvas new` prints, such as canvas-0123456789ab."));
+}
+
 // The canvas input of Region: the id and a revision that the compile has already named in full.
 Result<CanvasHandle> regionSource(const NodeContext &context) {
     CanvasHandle handle{context.input(QStringLiteral("canvas")).text().trimmed(), context.input(QStringLiteral("revision")).text().trimmed()};
     if (handle.canvas.isEmpty())
         return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("canvas"), QStringLiteral("Choose a canvas: this root has none yet, so there is no active canvas to read."),
                               QStringLiteral("Make one (`fugue canvas new` or `fugue canvas import`, or New canvas in the Canvas view), or give this Canvas Region the id it prints, such as canvas-0123456789ab."));
-    if (!canvas::isCanvasId(handle.canvas))
-        return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("canvas"),
-                              QStringLiteral("\"%1\" is not a canvas id.").arg(handle.canvas),
-                              QStringLiteral("Use the id `fugue canvas new` prints, such as canvas-0123456789ab."));
+    if (const std::optional<Error> bad = notACanvasId(handle.canvas))
+        return *bad;
     if (!isSha256(handle.revision))
         return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("revision"),
                               QStringLiteral("The revision \"%1\" was not named in full when the workflow was compiled.").arg(handle.revision),
@@ -158,6 +165,16 @@ Result<CanvasHandle> regionSource(const NodeContext &context) {
 
 class CanvasRegionKernel : public NodeKernel {
 public:
+    // Under validate: a canvas written is an id. An empty one is the workflow's active canvas, named when a run compiles
+    // (and the revision with it), and the store is not read.
+    Errors check(const NodeContext &context) const override {
+        const QString id = context.input(QStringLiteral("canvas")).text().trimmed();
+        if (id.isEmpty())
+            return {};
+        const std::optional<Error> bad = notACanvasId(id);
+        return bad ? Errors{*bad} : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<CanvasHandle> source = regionSource(context);
         if (!source)
@@ -298,8 +315,26 @@ public:
     }
 };
 
+// A write goes to one target: both Onto fields set is an error, told the same by run and check.
+std::optional<Error> ontoConflict(const QString &onto, const QString &ontoPixels) {
+    if (onto.isEmpty() || ontoPixels.isEmpty())
+        return std::nullopt;
+    return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto_pixels"),
+                          QStringLiteral("Onto (a layer mask) and Onto the pixels of layer are both set: a write goes to one of them."),
+                          QStringLiteral("Empty one of the two."));
+}
+
 class CanvasWriteKernel : public NodeKernel {
 public:
+    // Under validate: the two Onto fields written are not both set.
+    Errors check(const NodeContext &context) const override {
+        if (!context.inputs.contains(QStringLiteral("onto")) || !context.inputs.contains(QStringLiteral("onto_pixels")))
+            return {};
+        const std::optional<Error> both = ontoConflict(context.input(QStringLiteral("onto")).text().trimmed(),
+                                                       context.input(QStringLiteral("onto_pixels")).text().trimmed());
+        return both ? Errors{*both} : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<CanvasHandle> base = canvas::canvasHandleFrom(context.input(QStringLiteral("canvas")).json());
         if (!base)
@@ -353,10 +388,8 @@ public:
                 return Result<Values>(read.errors());
             mask = maskResized(read.value(), width, height);
         }
-        if (!onto.isEmpty() && !ontoPixels.isEmpty())
-            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto_pixels"),
-                                  QStringLiteral("Onto (a layer mask) and Onto the pixels of layer are both set: a write goes to one of them."),
-                                  QStringLiteral("Empty one of the two."));
+        if (const std::optional<Error> both = ontoConflict(onto, ontoPixels))
+            return *both;
         if (!onto.isEmpty())
             return writeLayerMask(context, base.value(), baseTree.value(), onto, box, mask);
         if (shape && !shapeFits(*shape, redrawn->width, redrawn->height))

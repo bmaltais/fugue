@@ -12,6 +12,7 @@ QStringList NodeKernel::lazyInputs(const NodeType &type, const Values &) const {
     return all;
 }
 ProviderKernel::~ProviderKernel() = default;
+Errors ProviderKernel::check(const NodeContext &) const { return {}; }
 Result<std::optional<JobRequest>> ProviderKernel::next(const NodeContext &, const Selection &, const JobResult &) {
     return std::optional<JobRequest>();
 }

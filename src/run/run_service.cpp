@@ -443,7 +443,7 @@ public:
 
 signals:
     void event(const QString &run, const QJsonObject &event);
-    void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
+    void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors);
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
     // A run would send data to off-machine services the person has not allowed (8.2, #404): `services` is
     // [{"instance", "host", "sends": [..], "text"}]. The run waits for answerRemote.
@@ -676,6 +676,7 @@ private:
         const Compilation compilation = compileRequest(m_check);
         QJsonObject nodes;
         Errors problems = compilation.problems();
+        Errors kernelErrors;
         bool aborted = false;
         if (compilation.ok()) {
             RunEnvironment environment = m_process->environment;
@@ -689,6 +690,7 @@ private:
             m_checkAbort = nullptr;
             aborted = graphCheck.aborted;
             problems += graphCheck.warnings;
+            kernelErrors = graphCheck.checkErrors; // a kernel's own check() errors (#600): the canvas shows them as the node's
             const QList<ProviderInstance> instances = cli::registeredInstances(m_compileRegistry);
             for (auto it = graphCheck.states.begin(); it != graphCheck.states.end(); ++it) {
                 QJsonObject node{{"state", nodeStateName(it.value())}};
@@ -709,7 +711,7 @@ private:
         // An aborted check is made again later (once no run is active), unless a newer one
         // replaced it.
         if (!aborted)
-            emit checked(ticket, nodes, toJson(problems));
+            emit checked(ticket, nodes, toJson(problems), toJson(kernelErrors));
         else if (m_checkTicket < 0)
             m_checkTicket = ticket;
         settleAfterCheck();

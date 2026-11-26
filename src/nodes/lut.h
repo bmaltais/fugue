@@ -26,7 +26,11 @@ struct Lut {
 // Parses the text of a `.cube` file: TITLE, DOMAIN_MIN, DOMAIN_MAX, LUT_1D_SIZE or LUT_3D_SIZE (one
 // of them), comments (#) and the data rows. A malformed file is an error whose message names the line
 // ("line 7: ..."), or the file as a whole when it is short of rows.
-Result<Lut> parseCube(const QString &text);
+//
+// `headerOnly`: stops at the first data row, so what is reported is what the keywords above it say
+// (a data row before a size, a bad or second size, an unknown keyword, an empty domain) and the rows are
+// not read or counted: for a file of which only the first lines are at hand (the check, before a run).
+Result<Lut> parseCube(const QString &text, bool headerOnly = false);
 
 // `image` through `lut` (linear interpolation for 1D, trilinear for 3D, an input outside the domain
 // clamped to it), mixed with the image by `strength` (0 is the image). The alpha channel is kept.

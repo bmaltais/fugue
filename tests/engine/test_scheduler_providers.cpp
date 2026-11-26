@@ -5,6 +5,9 @@
 // whose jobs move only when the test moves them, and the ResidentModels of
 // the environment.
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QSemaphore>
 #include <QtTest>
 
@@ -64,6 +67,25 @@ public:
 
 private:
     int m_parts;
+};
+
+// A provider node that can tell from its written prompt alone that it would fail (ProviderKernel::check).
+class CheckingKernel : public FakeGenerateKernel {
+public:
+    Errors check(const NodeContext &context) const override {
+        ++m_checked;
+        if (context.input("prompt").text() == QLatin1String("bad"))
+            return {makeInputError(QStringLiteral("input_invalid"), QStringLiteral("prompt"), QStringLiteral("A bad prompt."))};
+        if (context.input("prompt").text() == QLatin1String("soft")) { // a finding a run may never meet: the kernel says warning
+            Error warning = makeInputError(QStringLiteral("input_invalid"), QStringLiteral("prompt"), QStringLiteral("A soft prompt."));
+            warning.severity = Error::Severity::Warning;
+            return {warning};
+        }
+        if (context.input("prompt").text() == QLatin1String("gone"))
+            return {makeError(QStringLiteral("model_missing"), QStringLiteral("The model is not here."))};
+        return {};
+    }
+    mutable std::atomic<int> m_checked{0};
 };
 
 // A stage-like node (#395): it names no model to the provider (any ready one) and is given a model's files in the job.
@@ -756,6 +778,91 @@ private slots:
         QCOMPARE(world.nextSeed, qint64(1001)); // checking drew no seed
     }
 
+    // A provider kernel's own check is a warning on the node under validate, whether or not a provider serves it, and
+    // is not asked by a run.
+    void checkAsksAProviderKernelWhatItCanTellFromTheWrittenValues() {
+        World world;
+        const auto kernel = std::make_shared<CheckingKernel>();
+        world.kernels.add("fugue/generate", kernel);
+        GraphCheck check = checkGraph(world.graph(generateGraph("bad", model("no-such-model"))), world.environment());
+        QCOMPARE(kernel->m_checked.load(), 1);
+        // The kernel's own finding is an error (#600); the missing model stays a warning, as Get ready can fetch it.
+        QStringList codes;
+        for (const Error &error : check.checkErrors) {
+            QCOMPARE(error.severity, Error::Severity::Error);
+            codes << error.code + ":" + error.node + ":" + error.input;
+        }
+        QVERIFY2(codes.contains("input_invalid:g:prompt"), qPrintable(codes.join(", ")));
+        QStringList warnings;
+        for (const Error &warning : check.warnings) {
+            QCOMPARE(warning.severity, Error::Severity::Warning);
+            warnings << warning.code + ":" + warning.node + ":" + warning.input;
+        }
+        QVERIFY2(warnings.contains("model_missing:g:"), qPrintable(warnings.join(", ")));
+
+        const auto provider = world.provider("This machine", {"flux"});
+        check = checkGraph(world.graph(generateGraph("a cat", model("flux"))), world.environment());
+        QVERIFY(check.warnings.isEmpty());
+        QVERIFY(check.checkErrors.isEmpty());
+        QCOMPARE(kernel->m_checked.load(), 2);
+        QVERIFY(provider->jobs().isEmpty());
+    }
+
+    // A kernel that says warning keeps it: a warning on the node, not a check error (the Dynamic Prompt's choice-dependent findings).
+    // A model_missing is a warning wherever the node sits, wired or not.
+    void checkKeepsAWarningTheKernelSetAndSplitsModelMissingTheSameForUnwiredNodes() {
+        World world;
+        world.kernels.add("fugue/generate", std::make_shared<CheckingKernel>());
+        for (const bool wired : {true, false}) {
+            for (const QString &prompt : {QStringLiteral("soft"), QStringLiteral("gone")}) {
+                QJsonObject nodes = generateGraph(prompt);
+                if (!wired)
+                    nodes.remove("s");
+                const GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+                const QString what = prompt + (wired ? " wired" : " unwired");
+                QVERIFY2(check.checkErrors.isEmpty(), qPrintable(what));
+                QStringList warnings;
+                for (const Error &warning : check.warnings)
+                    if (warning.severity == Error::Severity::Warning)
+                        warnings << warning.code + ":" + warning.node;
+                QVERIFY2(warnings.contains((prompt == "soft" ? "input_invalid" : "model_missing") + QString(":g")), qPrintable(what + ": " + warnings.join(",")));
+            }
+        }
+    }
+
+    // An unwired node's file literal is read as a run reads it: a relative one from the saved workflow's folder, "~" as the
+    // home folder. A file that is not there is still the node's error.
+    void checkReadsAnUnwiredNodesFileTheWayARunDoes() {
+        World world;
+        class FileKernel : public NodeKernel {
+        public:
+            Result<Values> run(const NodeContext &) override { return Values{}; }
+            Errors check(const NodeContext &context) const override {
+                const QString path = context.input("path").text();
+                if (path.isEmpty() || QFileInfo::exists(path)) // not known: not judged
+                    return {};
+                return {makeInputError(QStringLiteral("file_not_found"), QStringLiteral("path"), QStringLiteral("No file at %1").arg(path))};
+            }
+        };
+        world.kernels.add("fugue/load", std::make_shared<FileKernel>());
+        QDir folder(world.dir.path());
+        QVERIFY(folder.mkpath("flow/inputs"));
+        QFile file(folder.filePath("flow/inputs/x.png"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+        RunOptions options;
+        options.workflow = folder.filePath("flow/w.fugue");
+        const auto check = [&](const QString &path) {
+            return checkGraph(world.graph(QJsonObject{{"l", node("fugue/load", {{"path", path}})}}), world.environment(), options);
+        };
+        QVERIFY2(check("inputs/x.png").checkErrors.isEmpty(), "a relative file is the workflow folder's");
+        QCOMPARE(check("inputs/y.png").checkErrors.size(), 1);
+        QVERIFY(check("inputs/y.png").checkErrors.first().message.contains(folder.filePath("flow/inputs/y.png")));
+        // An unsaved workflow has no folder: the run's own answer is the error, not a second one here.
+        options.workflow.clear();
+        QVERIFY(check("inputs/x.png").checkErrors.isEmpty());
+    }
+
     void checkReportsAMissingModelAsAWarning() {
         World world;
         const auto provider = world.provider("This machine", {"flux"});
@@ -803,7 +910,7 @@ private slots:
     // 8.5: the provider checks do not depend on the rest of the node's inputs being known.
     void checkReportsAMissingModelWhenTheSeedIsRandomized() {
         World world;
-        world.provider("This machine", {"flux"});
+        const auto provider = world.provider("This machine", {"flux"});
         world.type("fugue/generate-seeded",
                    "'inputs': [{'name': 'prompt', 'type': 'text'},"
                    " {'name': 'seed', 'type': 'number', 'integer': true, 'widget': 'seed', 'min': 0, 'max': 9999},"
@@ -838,7 +945,7 @@ private slots:
 
         // With a provider that lacks the model, the linked prompt does not hide model_missing.
         nodes.insert("g", node("fugue/generate", {{"prompt", from("p.text")}, {"model", model("no-such-model")}}));
-        world.provider("This machine", {"flux"});
+        const auto provider = world.provider("This machine", {"flux"});
         check = checkGraph(world.graph(nodes), world.environment());
         QCOMPARE(check.warnings.size(), 1);
         QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));

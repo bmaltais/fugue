@@ -1401,6 +1401,19 @@ void walk(const Seq &seq, const std::function<void(const Node &)> &visit) {
     }
 }
 
+// The same walk, saying whether the node sits inside a variant's option: a run evaluates only the option it picks.
+void walkChoice(const Seq &seq, bool inChoice, const std::function<void(const Node &, bool)> &visit) {
+    for (const Node &node : seq.nodes) {
+        visit(node, inChoice);
+        for (const Option &option : node.options)
+            walkChoice(*option.seq, inChoice || node.kind == Node::Kind::Variant, visit);
+        if (node.a)
+            walkChoice(*node.a, inChoice, visit);
+        if (node.b)
+            walkChoice(*node.b, inChoice, visit);
+    }
+}
+
 } // namespace
 
 QString builtinWildcardFolder() { return QStringLiteral(":/fugue/wildcards"); }
@@ -1485,16 +1498,23 @@ Errors check(const QString &templ, const Options &options) {
         });
         Wildcards wildcards(options);
         QSet<QString> checked;
-        walk(*top, [&](const Node &node) {
+        // A finding inside a variant's option may never be met by a run (it picks one): a warning, not an error (#600).
+        const auto add = [&](Error error, bool inChoice) {
+            if (inChoice)
+                error.severity = Error::Severity::Warning;
+            errors << error;
+        };
+        walkChoice(*top, false, [&](const Node &node, bool inChoice) {
             if (node.kind == Node::Kind::VarUse && !node.a && !wildcardsUsed && !assigned.contains(node.text))
-                errors << toError({QStringLiteral("The variable ${%1} is never set in the template (%2).").arg(node.text, top->src->where(node.pos)),
-                                   QStringLiteral("Set it with ${%1=value} or give a default with ${%1:default}.").arg(node.text)});
+                add(toError({QStringLiteral("The variable ${%1} is never set in the template (%2).").arg(node.text, top->src->where(node.pos)),
+                             QStringLiteral("Set it with ${%1=value} or give a default with ${%1:default}.").arg(node.text)}),
+                    inChoice);
             if (node.kind == Node::Kind::Wildcard && !checked.contains(node.text)) {
                 checked.insert(node.text);
                 try {
                     wildcards.lookup(node.text);
                 } catch (const Problem &problem) {
-                    errors << toError({QStringLiteral("%1 (%2)").arg(problem.message, top->src->where(node.pos)), problem.hint});
+                    add(toError({QStringLiteral("%1 (%2)").arg(problem.message, top->src->where(node.pos)), problem.hint}), inChoice);
                 }
             }
         });

@@ -1194,6 +1194,14 @@ class DetailRegionsKernel : public StageKernel {
 public:
     DetailRegionsKernel() : StageKernel(QStringLiteral("latent.sample")) {}
 
+    // Under validate: the boxes written are one `x1 y1 x2 y2` a line. Boxes that are wired are the run's.
+    Errors check(const NodeContext &context) const override {
+        if (!context.inputs.contains(QStringLiteral("boxes")))
+            return {};
+        const Result<std::vector<Corners>> boxes = boxesOf(context);
+        return boxes ? Errors{} : boxes.errors();
+    }
+
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
         const Result<QList<DetailStep>> steps = plan(context);
         if (!steps)
