@@ -71,8 +71,8 @@ private slots:
     void familiesComeFromTheModelsNotTheText() {
         QCOMPARE(modelFamily("fugue/diffusion-model", "flux-2-klein-9b-Q8_0.gguf"), QStringLiteral("FLUX.2 Klein 9B"));
         QCOMPARE(modelFamily("fugue/diffusion-model", "flux-2-klein-base-9b-Q8_0.gguf"), QStringLiteral("FLUX.2 Klein 9B"));
-        QCOMPARE(modelFamily("diffusion-model", "flux-2-klein-4b-Q8_0.gguf"), QStringLiteral("FLUX.2 Klein 4B"));
-        QCOMPARE(modelFamily("fugue/diffusion-model", "z-image-turbo-Q8_0.gguf"), QStringLiteral("Z-Image"));
+        QCOMPARE(modelFamily("diffusion-model", "flux-2-klein-4b-fp8.safetensors"), QStringLiteral("FLUX.2 Klein 4B"));
+        QCOMPARE(modelFamily("fugue/diffusion-model", "z_image_turbo_int8_convrot.safetensors"), QStringLiteral("Z-Image"));
         QCOMPARE(modelFamily("fugue/diffusion-model", "qwen_image_2512_fp8.safetensors"), QStringLiteral("Qwen-Image"));
         QCOMPARE(modelFamily("fugue/diffusion-model", "Wan2.2-I2V-A14B-LowNoise-Q4_K_S.gguf"), QStringLiteral("Wan 2.2"));
         QCOMPARE(modelFamily("fugue/seedvr2-model", "seedvr2_7b_int8_convrot.safetensors"), QStringLiteral("SeedVR2"));

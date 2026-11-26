@@ -400,7 +400,7 @@ private slots:
         const Result<ActionGraph> graph = checkAction(**action, *document, m_registry);
         QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
         const auto &nodes = document->graph.nodes;
-        QCOMPARE(nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(), QStringLiteral("flux-2-klein-4b-Q8_0.gguf"));
+        QCOMPARE(nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(), QStringLiteral("flux-2-klein-4b-fp8.safetensors"));
         QCOMPARE(nodes.value("region").version.toString(), QStringLiteral("1.2.0")); // takes a stored selection
         QCOMPARE(nodes.value("region").inputs.value("max_megapixels").literal().toDouble(), 1.0);
         QCOMPARE(nodes.value("region").inputs.value("multiple").literal().toInt(), 16);
@@ -492,7 +492,7 @@ private slots:
                 seen << key;
             }
         const auto &nodes = document->graph.nodes;
-        QCOMPARE(nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(), QStringLiteral("flux-2-klein-4b-Q8_0.gguf"));
+        QCOMPARE(nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(), QStringLiteral("flux-2-klein-4b-fp8.safetensors"));
         QCOMPARE(nodes.value("region").version.toString(), QStringLiteral("1.2.0"));
         QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
         QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
