@@ -86,8 +86,10 @@ Run `bin/test` once before you open the pull request.
 - If you delete a test, say why in the description.
 - Run `bin/test` locally before you open the pull request; that is still expected. On a pull request from a
   fork, CI then runs a fast lane on Arch: the x86_64 build and the full test suite, offscreen. The first run
-  waits until a maintainer approves it, and takes about 10 to 30 minutes. CUDA, AppImage and aarch64 builds run
-  only on releases. The check to watch is `ci-ok`. If it flags something, fix it; ask in the pull request if you
+  waits until a maintainer approves it, and takes about 10 to 30 minutes. The heavier builds (CUDA helper
+  tarballs, the AppImage, aarch64) do not run for ordinary changes: they run on a release, once a week on main,
+  and on a pull request that changes how they are built (a workflow file, `packaging/`, the PKGBUILD), each waiting
+  for approval the same way. The table in [docs/testing.md](docs/testing.md) lists which. The check to watch is `ci-ok`. If it flags something, fix it; ask in the pull request if you
   cannot reproduce it.
 
 ## Conduct
