@@ -533,7 +533,7 @@ private:
     // its key when the answer is known (so the key is the one a run made), and what feeds every lazy input is still demanded.
     void askLazy(NodeRun &n) {
         n.lazyAsked = true;
-        if (n.lazyOf.isEmpty())
+        if (n.lazyOf.isEmpty() && n.node->lazyDropped.isEmpty())
             return;
         QStringList all;
         for (const InputSpec &spec : n.type->inputs)
@@ -550,7 +550,15 @@ private:
         for (const QString &name : all)
             if (!wanted.contains(name) && !(m_dry && (unknown || broken)))
                 n.declined << name;
-        const QStringList needed = m_dry ? all : wanted;
+        // A lazy input the compiler emptied (its source is muted, or came out empty) is only a problem when it is asked for.
+        QString dropReason;
+        if (!(m_dry && (unknown || broken)))
+            for (const QString &name : std::as_const(wanted))
+                if (n.node->lazyDropped.contains(name)) {
+                    dropReason = n.node->lazyDropped.value(name);
+                    break;
+                }
+        const QStringList needed = m_dry ? all : (dropReason.isEmpty() ? wanted : QStringList());
         // Nodes let go only because their reader could not ask (it failed upstream, or its condition is empty) were not chosen:
         // nothing upstream of them failed.
         for (auto it = n.lazyOf.constBegin(); it != n.lazyOf.constEnd(); ++it) {
@@ -563,6 +571,8 @@ private:
                 letGo(m_nodes[it.key()]);
             }
         }
+        if (!dropReason.isEmpty())
+            skip(n, dropReason);
         m_again = true;
     }
 
@@ -660,7 +670,7 @@ private:
                 continue;
             if (!n.lazyAsked)
                 askLazy(n);
-            if (done(n.waitFor))
+            if (n.phase == Phase::Waiting && done(n.waitFor))
                 prepare(n);
         }
     }
@@ -1572,7 +1582,8 @@ private:
                 value = Value::list({value});
                 outputs.insert(spec.name, value);
             }
-            const QList<Value> items = spec.type.list ? value.items() : QList<Value>{value};
+            // An "any" output that follows a list (a Switch of lists) holds one: its items are checked, not the list.
+            const QList<Value> items = spec.type.list || (spec.type.type.isAny() && value.isList()) ? value.items() : QList<Value>{value};
             for (const Value &item : items)
                 if (!fits(item, spec.type.type))
                     return wrong(spec.name, QStringLiteral("Output %1 is not %2.").arg(spec.name, spec.type.toString()));

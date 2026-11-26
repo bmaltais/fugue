@@ -45,6 +45,9 @@ enum class PortKind {
 struct PortSpec {
     PortType type;
     bool list = false;
+    // Only on an "any" input of a built-in node (manifest `takes_list`): a list output may feed it and arrives as one value,
+    // not a one-item list. A Switch side. Not part of what a type is, so == leaves it out.
+    bool takesList = false;
 
     QString toString() const; // "image", or "list of image"
 
@@ -60,7 +63,7 @@ enum class Compatibility {
 
 // Whether `output` may be linked into `input`. A single value into a list
 // input is compatible (it becomes a one-item list). An "any" input takes
-// every type, but the list rule still applies to it. The compiler reports
+// every type, but the list rule still applies to it, unless the input takes a list as it is (`takesList`). The compiler reports
 // anything but Compatible as `type_mismatch`.
 Compatibility compatibility(const PortSpec &output, const PortSpec &input);
 

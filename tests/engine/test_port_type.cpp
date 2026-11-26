@@ -133,6 +133,11 @@ private slots:
         QCOMPARE(compatibility(port("fugue/latent@3"), port("any")), Compatibility::Compatible);
         QCOMPARE(compatibility(port("text", true), port("any", true)), Compatibility::Compatible);
         QCOMPARE(compatibility(port("text", true), port("any")), Compatibility::ListIntoSingle);
+        PortSpec side = port("any");
+        side.takesList = true; // a Switch side: a list is one value to it
+        QCOMPARE(compatibility(port("text", true), side), Compatibility::Compatible);
+        QCOMPARE(compatibility(port("text"), side), Compatibility::Compatible);
+        QVERIFY(side == port("any")); // not part of what the type is
     }
 
     void reasonsNameBothSides() {
