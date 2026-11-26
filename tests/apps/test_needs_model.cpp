@@ -124,6 +124,22 @@ private slots:
         needs.setReading({{hashA, 42}}); // the same again: no redraw
         QCOMPARE(moved.size(), 1);
     }
+    // #626: a file read for another tab's model must not hold this list's header chip.
+    void theHeaderWaitsOnlyForReadsOfItsOwnModels() {
+        NeedsModel needs;
+        needs.setPlan(modelsPlan());
+        QSignalSpy moved(&needs, &NeedsModel::readingOwnChanged);
+        QVERIFY(!needs.readingOwn());
+        needs.setReading({{"another-tab-hash", 10}});
+        QVERIFY(!needs.readingOwn());
+        QCOMPARE(moved.size(), 0);
+        needs.setReading({{"another-tab-hash", 10}, {hashB, -1}});
+        QVERIFY(needs.readingOwn());
+        QCOMPARE(moved.size(), 1);
+        needs.setReading({});
+        QVERIFY(!needs.readingOwn());
+        QCOMPARE(moved.size(), 2);
+    }
     void aPlanBecomesRowsWithSizeAndLicence() {
         NeedsModel needs;
         QVERIFY(needs.ready());

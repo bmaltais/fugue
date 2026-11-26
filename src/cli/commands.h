@@ -42,6 +42,7 @@ struct Context {
     QString runsRoot;
     QString queueDir;
     QString lockPath;
+    bool json = false; // --json: a notice that would go to stderr is an event on stdout instead
     void (*line)(const QByteArray &) = nullptr; // one stdout line, flushed
     void (*log)(const QString &) = nullptr;     // one stderr diagnostic
 };

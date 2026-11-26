@@ -47,6 +47,8 @@ class NeedsModel : public QObject {
     Q_PROPERTY(QString headerAction READ headerAction NOTIFY changed)
     // The files being read, per model hash: percent (-1 unknown). A row says "Reading your file…" and takes no second press.
     Q_PROPERTY(QVariantMap reading READ reading NOTIFY readingChanged)
+    // Whether one of this list's own models is being read (#626): the header chip waits for those only, not for a file another tab reads.
+    Q_PROPERTY(bool readingOwn READ readingOwn NOTIFY readingOwnChanged)
     // The window can jump to a node of the graph (builders; the app's own window has no graph).
     Q_PROPERTY(bool canShowInGraph READ canShowInGraph NOTIFY changed)
 
@@ -75,6 +77,7 @@ public:
     QString headerAction() const { return m_action; }
     QVariantMap reading() const { return m_reading; }
     void setReading(const QVariantMap &reading);
+    bool readingOwn() const { return m_readingOwn; }
 
     // The node of `document` an item belongs to: a model's, the first whose inputs hold its hash; a pack's, the first of its node types
     // (the type id's namespace is the pack). Empty when none (a node of a group is not found: the group's node is not the model's).
@@ -107,6 +110,7 @@ signals:
     // every model is covered.
     void useRequested(const QStringList &hashes);
     void readingChanged();
+    void readingOwnChanged();
 
 private:
     Plan m_source;
@@ -120,6 +124,8 @@ private:
     int m_covered = 0;
     QString m_action = QStringLiteral("downloadAll");
     QVariantMap m_reading;
+    bool m_readingOwn = false;
+    void updateReadingOwn();
     QTimer m_soon;
 };
 
