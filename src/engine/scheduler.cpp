@@ -70,6 +70,7 @@ struct NodeRun {
     bool lazyAsked = false;
     int potential = 0; // nodes that read from it and may still demand it
     bool settled = false;     // its finish has been counted for its dependencies
+    QStringList gaveUp;       // the dependencies it declined: it no longer counts in their `readers`
     const NodeType *type = nullptr;
     std::shared_ptr<NodeKernel> kernel;
     std::shared_ptr<ProviderKernel> providerKernel;
@@ -502,6 +503,17 @@ private:
             letGo(m_nodes[up]);
     }
 
+    // `reader` declined `dep`: it stops counting in `dep`'s readers now, not when it finishes, so the images of `dep` go as soon as
+    // the readers left have finished (9.2). Once per pair: its finish skips what it gave up.
+    void giveUp(NodeRun &reader, NodeRun &dep) {
+        if (reader.gaveUp.contains(dep.path))
+            return;
+        reader.gaveUp << dep.path;
+        Q_ASSERT(dep.readers > 0);
+        if (--dep.readers == 0 && dep.settled)
+            dropImages(dep.outputs);
+    }
+
     // The values of the inputs that are not lazy, as the kernel will see them, for NodeKernel::lazyInputs. `unknown`: one is not
     // known yet (validate: a node that has not run, a random seed). `empty`: a required one came back with nothing, so the node
     // will not run (upstream_empty, or missing_input), and nothing is asked of its lazy inputs.
@@ -568,6 +580,7 @@ private:
                 n.waitFor << it.key();
                 demand(m_nodes[it.key()]);
             } else {
+                giveUp(n, m_nodes[it.key()]);
                 letGo(m_nodes[it.key()]);
             }
         }
@@ -639,11 +652,16 @@ private:
             if (n.phase != Phase::Finished || n.settled)
                 continue;
             n.settled = true;
+            dropImages(n.inputs); // the copies it read are the dependencies' pixels too; the files stay
             if (n.readers == 0)
                 dropImages(n.outputs);
-            for (const QString &dep : std::as_const(n.dependencies))
+            for (const QString &dep : std::as_const(n.dependencies)) {
+                if (n.gaveUp.contains(dep))
+                    continue; // counted out when it declined
+                Q_ASSERT(m_nodes[dep].readers > 0);
                 if (--m_nodes[dep].readers == 0 && m_nodes[dep].settled)
                     dropImages(m_nodes[dep].outputs);
+            }
         }
     }
 
