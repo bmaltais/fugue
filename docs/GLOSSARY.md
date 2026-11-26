@@ -95,6 +95,10 @@ _Avoid_: mini-app, form, wizard
 The top-level `app` key of `workflow.fugue` that makes a workflow an app: title, inputs bound to node inputs, and outputs. Outside the cache key, kept by older Fugue.
 _Avoid_: app node, app file
 
+**App input**:
+One input of an app as the form and `fugue app info` show it: its kind, default, whether a run needs it, range and choices, and how a typed or text value becomes the value the run binds. Described once, in `engine/app_input`; `engine/app_binding` puts the values in the graph.
+_Avoid_: field (the form's rendering of one), parameter
+
 **App view**:
 The screen of an app: the form, Run, the stage and the takes. A mode of a workflow's tab, a view type of an area, or the whole of an app's own window; Open in Graph shows the same workflow as a graph.
 _Avoid_: app mode, simple mode

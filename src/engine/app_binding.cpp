@@ -4,6 +4,7 @@
 #include <QPair>
 #include <QSet>
 
+#include "engine/app_input.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 
@@ -202,10 +203,6 @@ Errors checkApp(const App &app, const Document &document, const Registry &regist
 }
 
 namespace {
-
-bool isPictureRole(const InputBinding &input) { return input.role == QLatin1String("image") || input.role == QLatin1String("mask"); }
-
-bool isBlank(const QJsonValue &value) { return value.isUndefined() || value.isNull() || (value.isString() && value.toString().trimmed().isEmpty()); }
 
 // The nodes an optional picture switches: its `bypass` list, else the nodes of its targets (a group instance stands for its branch).
 QStringList switched(const InputBinding &input) {

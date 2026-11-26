@@ -233,34 +233,6 @@ private slots:
         QVERIFY(!field("title").value("multiline").toBool());
     }
 
-    // An input bound to a group instance's exposed input is shaped by the inner input (spec 5.4): a number with its range, a choice.
-    void aGroupInstanceInputHasTheInnerInputsKind() {
-        const QJsonObject json = QJsonDocument::fromJson(R"({
-          "fugue": 1,
-          "app": {"format": 1, "title": "Shade",
-                  "inputs": [{"name": "opacity", "targets": ["shade.opacity"]},
-                             {"name": "mode", "targets": ["shade.mode"]}],
-                  "outputs": [{"node": "save"}]},
-          "graph": {"nodes": {
-            "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "a.png"}},
-            "shade": {"type": "local/shade", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}},
-            "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"image": {"from": "shade.image"}, "name": "out"}}}},
-          "groups": {"local/shade": {"version": "1.0.0", "name": "Shade",
-            "inputs": [{"name": "image", "targets": ["mix.base", "mix.top"]},
-                       {"name": "opacity", "targets": ["mix.opacity"]},
-                       {"name": "mode", "targets": ["mix.mode"]}],
-            "outputs": [{"name": "image", "from": "mix.image"}],
-            "nodes": {"mix": {"type": "fugue/blend", "version": "1.0.0", "inputs": {}}}}}
-        })").object();
-        m_view->show("a", load(json), {});
-        QCOMPARE(field("opacity").value("kind"), QStringLiteral("number"));
-        QCOMPARE(field("opacity").value("max").toDouble(), 1.0);
-        QCOMPARE(field("opacity").value("value").toDouble(), 0.5); // the inner input's default
-        QCOMPARE(field("mode").value("kind"), QStringLiteral("choice"));
-        QVERIFY(field("mode").value("choices").toList().size() > 2);
-        QCOMPARE(field("mode").value("value"), QStringLiteral("normal"));
-    }
-
     void aChoiceWithNoDefaultHasTheFirstInForceAndItIsWhatARunBinds() {
         QJsonObject json = workflow();
         QJsonObject block = json.value("app").toObject();

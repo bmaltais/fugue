@@ -25,6 +25,7 @@
 #include "cli/compile_step.h"
 #include "cli/commands.h"
 #include "engine/app_binding.h"
+#include "engine/app_input.h"
 #include "engine/document.h"
 #include "engine/file_roots.h"
 #include "engine/providers.h"
@@ -127,68 +128,19 @@ Result<Loaded> loadApp(const QString &ref, Context &context) {
     return value;
 }
 
-// The spec of the first target, through a group instance to its inner input (spec 5.4).
-const InputSpec *specOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    return input.targets.isEmpty() ? nullptr : targetInputSpec(document, registry, input.targets.first());
-}
-
-bool isFileRole(const InputBinding &input) { return input.role == QLatin1String("image") || input.role == QLatin1String("mask"); }
-
-// What a form would offer: image and mask by role, else the target's port type (a resource is "model"), `choice` when it has words.
-QString typeOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (isFileRole(input))
-        return input.role;
-    const InputSpec *spec = specOf(input, document, registry);
-    if (input.choices || (spec && spec->choices))
-        return QStringLiteral("choice");
-    if (spec)
-        return registry.portKind(spec->type.type) == PortKind::Resource ? QStringLiteral("model") : spec->type.type.toString();
-    return input.role == QLatin1String("model") ? QStringLiteral("model") : QStringLiteral("any");
-}
-
-// What the input holds when nothing is given: the block's default, else the first target's own value in the workflow.
-QJsonValue defaultOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (!input.defaultValue.isUndefined())
-        return input.defaultValue;
-    if (input.optional && isFileRole(input))
-        return QJsonValue::Undefined; // left out means left out: the file the workflow holds is not a default (#484)
-    if (input.targets.isEmpty())
-        return QJsonValue::Undefined;
-    const PortRef &target = input.targets.first();
-    const auto node = document.graph.nodes.constFind(target.node);
-    if (node != document.graph.nodes.constEnd()) {
-        const InputValue held = node->inputs.value(target.port);
-        if (held.kind() == InputValue::Kind::Literal)
-            return held.literal();
-        if (held.kind() == InputValue::Kind::Auto) // a seed left to the engine: the workflow's own value is {"auto": "random"}
-            return held.toJson();
-    }
-    const InputSpec *spec = specOf(input, document, registry);
-    return spec ? spec->defaultValue : QJsonValue(QJsonValue::Undefined);
-}
-
-bool isBlank(const QJsonValue &value) { return value.isUndefined() || value.isNull() || (value.isString() && value.toString().trimmed().isEmpty()); }
-
-// An input a run cannot do without: a picture or a mask with none in the workflow, a prompt that is not optional with no fallback.
-bool isRequired(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (!isBlank(defaultOf(input, document, registry)))
-        return false;
-    if (isFileRole(input))
-        return !input.optional; // left out, an optional picture takes its branch out of the run (#484)
-    return input.role == QLatin1String("prompt") && !input.optional && input.fallback.isEmpty();
-}
-
+// One input as `fugue app info` lists it: the description of engine/app_input.h in the CLI's words.
 QJsonObject inputJson(const InputBinding &given, const Document &document, const Registry &registry) {
-    const InputBinding input = completedBy(given, specOf(given, document, registry));
+    const app::AppInput described = app::describeInput(given, document, &registry);
+    const InputBinding &input = described.binding;
     QJsonObject row{{"key", input.key()},
                     {"role", input.role},
                     {"label", input.label.isEmpty() ? input.key() : input.label},
-                    {"type", typeOf(input, document, registry)},
-                    {"required", isRequired(input, document, registry)},
+                    {"type", app::cliTypeOf(described)},
+                    {"required", described.required},
                     {"optional", input.optional},
-                    {"advanced", input.section.compare(QStringLiteral("Advanced"), Qt::CaseInsensitive) == 0}};
-    if (const QJsonValue value = defaultOf(input, document, registry); !value.isUndefined())
-        row.insert("default", value);
+                    {"advanced", described.advanced}};
+    if (!described.defaultValue.isUndefined())
+        row.insert("default", described.defaultValue);
     if (input.min)
         row.insert("min", *input.min);
     if (input.max)
@@ -303,23 +255,12 @@ Result<QString> textOf(const QString &path) {
     return text;
 }
 
-// The resource type a model input takes: the port's declared type.
-std::optional<PortType> resourceTypeOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (const InputSpec *spec = specOf(input, document, registry); spec && registry.portKind(spec->type.type) == PortKind::Resource)
-        return spec->type.type;
-    return std::nullopt;
-}
-
-// One `--input` value as the input takes it: a picture or mask is a file (made absolute, which must exist); `@<file>` is the file's text;
-// a model is its file name (or a whole handle as JSON); a number, a choice word and text are as typed.
+// One `--input` value as the input takes it (engine/app_input.h): `@<file>` is the file's text (for a picture, the file itself); a model
+// may be given by its file name.
 Result<QJsonValue> valueOf(const InputBinding &input, const QString &raw, const Document &document, Context &context) {
-    const QString type = typeOf(input, document, context.registry);
-    if (isFileRole(input)) {
-        const QString path = QFileInfo(raw.startsWith(QLatin1Char('@')) ? raw.mid(1) : raw).absoluteFilePath();
-        if (!QFileInfo(path).isFile())
-            return Result<QJsonValue>(makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no file %1 for the input \"%2\".").arg(path, input.key())));
-        return QJsonValue(path);
-    }
+    const app::AppInput described = app::describeInput(input, document, &context.registry);
+    if (app::isPictureRole(input))
+        return described.fromText(raw.startsWith(QLatin1Char('@')) ? raw.mid(1) : raw);
     QString text = raw;
     if (raw.startsWith(QLatin1Char('@'))) {
         const Result<QString> read = textOf(raw.mid(1));
@@ -327,34 +268,7 @@ Result<QJsonValue> valueOf(const InputBinding &input, const QString &raw, const 
             return read.errors();
         text = *read;
     }
-    if (input.choices)
-        return QJsonValue(text);
-    if (type == QLatin1String("model")) {
-        const QJsonDocument parsed = QJsonDocument::fromJson(text.toUtf8());
-        if (parsed.isObject())
-            return QJsonValue(parsed.object());
-        const std::optional<PortType> resource = resourceTypeOf(input, document, context.registry);
-        if (!resource)
-            return Result<QJsonValue>(usageProblem(QStringLiteral("The input \"%1\" takes a whole resource handle as JSON.").arg(input.key())));
-        const Result<QJsonObject> handle = modelByName(*resource, text, context);
-        if (!handle)
-            return handle.errors();
-        return QJsonValue(*handle);
-    }
-    if (type == QLatin1String("number")) {
-        bool ok = false;
-        const double number = text.trimmed().toDouble(&ok);
-        if (!ok)
-            return Result<QJsonValue>(usageProblem(QStringLiteral("The input \"%1\" takes a number, not \"%2\".").arg(input.key(), text)));
-        return QJsonValue(number);
-    }
-    if (type == QLatin1String("bool")) {
-        const QString word = text.trimmed().toLower();
-        if (word != QLatin1String("true") && word != QLatin1String("false"))
-            return Result<QJsonValue>(usageProblem(QStringLiteral("The input \"%1\" takes true or false, not \"%2\".").arg(input.key(), text)));
-        return QJsonValue(word == QLatin1String("true"));
-    }
-    return QJsonValue(text);
+    return described.fromText(text, [&context](const PortType &type, const QString &word) { return modelByName(type, word, context); });
 }
 
 // `--input key=value` pairs, bound to the app's inputs: unknown keys, a key given twice, and inputs left out that a run cannot do without.
@@ -389,7 +303,7 @@ Result<QMap<QString, QJsonValue>> givenValues(const Command &command, const Load
     }
     Errors missing;
     for (const InputBinding &input : loaded.app.inputs)
-        if (!values.contains(input.key()) && isRequired(input, loaded.document, context.registry))
+        if (!values.contains(input.key()) && app::describeInput(input, loaded.document, &context.registry).required)
             missing << makeError(QStringLiteral("missing_input"),
                                  QStringLiteral("%1 needs the input \"%2\"%3.").arg(titleOf(loaded), input.key(),
                                                                                     input.label.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(input.label)),
@@ -502,7 +416,7 @@ Reply appInfo(const Command &command, Context &context) {
             facts << QStringLiteral("required");
         else if (row.value("optional").toBool())
             facts << QStringLiteral("optional");
-        if (row.contains("default") && !isBlank(row.value("default")))
+        if (row.contains("default") && !app::isBlank(row.value("default")))
             facts << QStringLiteral("default %1").arg(QString::fromUtf8(QJsonDocument(QJsonArray{row.value("default")}).toJson(QJsonDocument::Compact)).mid(1).chopped(1));
         if (row.contains("min") || row.contains("max"))
             facts << QStringLiteral("%1 to %2").arg(row.contains("min") ? QString::number(row.value("min").toDouble()) : QStringLiteral("..."),

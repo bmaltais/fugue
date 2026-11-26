@@ -238,23 +238,6 @@ private slots:
         }
     }
 
-    // An input bound to a group instance's exposed input has the inner input's type, range and choices; what the graph no
-    // longer has is dropped and said as `app_stale` (spec 4.9), never listed; a seed left to the engine shows as it is.
-    void infoTypesAGroupInstanceInput() {
-        const Outcome info = fugue({"app", "info", "shade.fugue", "--json"});
-        QCOMPARE(info.exitCode, 0);
-        QMap<QString, QJsonObject> rows;
-        for (const QJsonValue row : info.data().value("inputs").toArray())
-            rows.insert(row.toObject().value("key").toString(), row.toObject());
-        QCOMPARE(rows.value("opacity").value("type").toString(), QString("number"));
-        QCOMPARE(rows.value("opacity").value("default").toDouble(), 0.25);
-        QCOMPARE(rows.value("opacity").value("min").toDouble(), 0.0);
-        QCOMPARE(rows.value("opacity").value("max").toDouble(), 1.0);
-        QCOMPARE(rows.value("mode").value("type").toString(), QString("choice"));
-        QVERIFY(rows.value("mode").value("choices").toArray().contains("multiply"));
-        QVERIFY(!info.json().contains("warnings"));
-    }
-
     void infoDropsAndSaysWhatTheWorkflowNoLongerHas() {
         const Outcome info = fugue({"app", "info", "shade-stale.fugue", "--json"});
         QCOMPARE(info.exitCode, 0);

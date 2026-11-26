@@ -64,6 +64,9 @@
 
 namespace fugue {
 
+namespace app {
+struct AppInput; // engine/app_input.h
+}
 class AppModels;
 class ModelDownloads;
 class Registry;
@@ -367,7 +370,10 @@ private:
     void scheduleLive(const QString &tab);
     void syncTake(TabState &state);
     void buildFields();
-    QVariantMap fieldFor(const InputBinding &input) const;
+    // The form's field for an input (a pure read of `state`); startValue first keeps what the form must hold for it.
+    QVariantMap fieldFor(const app::AppInput &described, const TabState &state) const;
+    static void startValue(const app::AppInput &described, TabState &state);
+    static QString seedModeOf(const app::AppInput &described, const TabState &state);
     // The key's input, in this form; null when none.
     const InputBinding *inputOf(const QString &key) const;
     QString kindOfField(const QString &key) const;
