@@ -19,6 +19,7 @@
 
 #include "engine/file_hashes.h"
 #include "engine/media.h"
+#include "engine/model_library.h"
 #include "engine/model_shape.h"
 #include "engine/vips.h"
 #include "../../helper/src/restore.h" // the limits, one source for the node and the helper
@@ -104,8 +105,39 @@ std::optional<Error> checkFiles(const QString &modelPath, const QString &vaePath
     return std::nullopt;
 }
 
+// An overlap the tile cannot hold: the one rule of the pair that a range on each cannot say.
+std::optional<Error> overlapProblem(double overlap, double tile) {
+    if (std::isfinite(overlap) && overlap >= 0 && overlap * 2 <= tile)
+        return std::nullopt;
+    return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("overlap"),
+                          QStringLiteral("An overlap of %1 is not between 0 and half the tile of %2.").arg(overlap).arg(tile),
+                          QStringLiteral("Use an overlap of at most half the tile size."));
+}
+
 class RestoreImageKernel : public ProviderKernel {
 public:
+    // Under validate: the overlap fits the tile, and the model and VAE picked are SeedVR2 files by their headers
+    // (read once, as any check of a model's kind does; a file not on this machine is the scheduler's model_missing).
+    Errors check(const NodeContext &context) const override {
+        if (context.inputs.contains(QStringLiteral("tile")) && context.inputs.contains(QStringLiteral("overlap")))
+            if (const std::optional<Error> bad = overlapProblem(context.input(QStringLiteral("overlap")).number(),
+                                                                context.input(QStringLiteral("tile")).number()))
+                return {*bad};
+        if (!context.hashes || !context.inputs.contains(QStringLiteral("model")) || !context.inputs.contains(QStringLiteral("vae")))
+            return {};
+        const ModelLibrary library = ModelLibrary::current(context.registry);
+        const auto path = [&](const char *input) {
+            const Result<QString> found = library.resolve(context.input(QLatin1String(input)).json().toObject(), *context.hashes,
+                                                          ModelLibrary::Hashing::RememberedOnly);
+            return found ? found.value() : QString();
+        };
+        const QString model = path("model"), vae = path("vae");
+        if (model.isEmpty() || vae.isEmpty())
+            return {};
+        const std::optional<Error> bad = checkFiles(model, vae);
+        return bad ? Errors{*bad} : Errors{};
+    }
+
     Requirement requirement(const NodeType &, const Values &) const override {
         Requirement requirement;
         requirement.capability = QStringLiteral("image.restore");
@@ -123,10 +155,8 @@ public:
         if (!std::isfinite(tile) || tile < fugue_helper::kMinTile || tile > fugue_helper::kMaxTile)
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("tile"),
                                   QStringLiteral("A tile of %1 is outside %2 to %3.").arg(tile).arg(fugue_helper::kMinTile).arg(fugue_helper::kMaxTile));
-        if (!std::isfinite(overlap) || overlap < 0 || overlap * 2 > tile)
-            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("overlap"),
-                                  QStringLiteral("An overlap of %1 is not between 0 and half the tile of %2.").arg(overlap).arg(tile),
-                                  QStringLiteral("Use an overlap of at most half the tile size."));
+        if (const std::optional<Error> bad = overlapProblem(overlap, tile))
+            return *bad;
 
         // The size, from the image's header (nothing is decoded or resampled before it is known to fit).
         const Result<vips::VImage> header = context.input(QStringLiteral("image")).isMedia()

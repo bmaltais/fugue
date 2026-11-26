@@ -741,6 +741,8 @@ private:
         // or an input linked to a node that has not run.
         std::optional<Errors> hostGone; // set when only the cache may serve this node, with the error of the host being gone
         if (n.providerKernel) {
+            if (m_dry)
+                warnFromKernel(n);
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
             requirement.workflowPin.clear();
@@ -876,7 +878,9 @@ private:
         return selection;
     }
 
-    // What the node's kernel can tell before a run (NodeKernel::check), kept as errors in `checkErrors`.
+    // What the node's kernel can tell before a run (NodeKernel::check), kept as errors in `checkErrors` (#600). A provider
+    // node's kernel is asked too, before a provider is chosen: its written values are wrong whoever serves it. A missing model
+    // file stays a warning, as warnMissingModels reports one: Get ready can fetch it.
     void warnFromKernel(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -884,9 +888,14 @@ private:
         context.inputs = n.inputs;
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
-        for (Error error : n.kernel->check(context)) {
-            error.severity = Error::Severity::Error;
+        for (Error error : n.providerKernel ? n.providerKernel->check(context) : n.kernel->check(context)) {
             error.node = n.path;
+            if (error.code == QLatin1String("model_missing")) {
+                error.severity = Error::Severity::Warning;
+                m_outcome.errors.append(error);
+                continue;
+            }
+            error.severity = Error::Severity::Error;
             m_outcome.checkErrors.append(error);
         }
     }

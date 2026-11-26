@@ -46,6 +46,12 @@ struct SaveLocation {
 // opened as a FolderFd (a link met while opening it is refused).
 Result<SaveLocation> saveLocation(const NodeContext &context, const QString &extension);
 
+// What saveLocation says of the written `name` and `folder` alone, with no folder made or opened (a bad name,
+// a relative folder leading out of the output folder, links that loop), for the check before a run. The write
+// roots, the names already in the folder and the `{model}` label are a run's: `{model}` counts as a word here.
+// An input not known yet (wired, not run) is not judged.
+Errors saveLocationProblems(const NodeContext &context, const QString &extension);
+
 // The workflow text a saved `what` ("image", "video", "audio") embeds: the share copy (11.5) with a
 // `run` section holding what was used upstream (11.7). `embed` is full, no-prompts or none. Empty
 // for none, and empty with a warning when the run did not start from a document (a compiled graph).

@@ -19,6 +19,10 @@ Result<Pixels> loadImageMask(const NodeContext &context, const MediaHandle &pict
 // Paint Mask's output: the painted mask at the size of `picture`, all 0 for none.
 Result<Pixels> paintedMask(const NodeContext &context, const MediaHandle &picture, Errors &warnings);
 
+// The `file_not_found` of the `mask` input when it names a painted mask that is not there (what the two nodes' run
+// reports, and their check before a run); nothing for no mask or an input not known yet. Reads no file.
+std::optional<Error> missingPaintedMask(const NodeContext &context);
+
 // Registers fugue/paint-mask.
 void addMaskInputKernels(Kernels &kernels);
 

@@ -68,6 +68,11 @@ class SaveMediaKernel : public NodeKernel {
 public:
     explicit SaveMediaKernel(MediaType type) : m_type(type) {}
 
+    // Under validate: the name and folder written are ones a save can use.
+    Errors check(const NodeContext &context) const override {
+        return context.inputs.contains(QStringLiteral("format")) ? saveLocationProblems(context, context.input("format").text()) : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const QString kind = mediaTypeName(m_type);
         const QString format = context.input("format").text();

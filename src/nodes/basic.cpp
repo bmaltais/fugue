@@ -35,6 +35,18 @@ class LoadMediaKernel : public NodeKernel {
 public:
     explicit LoadMediaKernel(MediaType type) : m_type(type) {}
 
+    // Under validate: the file written (or picked) is there, and so is a painted mask. Reads nothing of it.
+    Errors check(const NodeContext &context) const override {
+        Errors errors;
+        if (const Value file = context.input("file"); !file.isEmpty() && !file.text().isEmpty())
+            if (const std::optional<Error> missing = missingFile(file.text()))
+                errors << *missing;
+        if (m_type == MediaType::Image)
+            if (const std::optional<Error> missing = missingPaintedMask(context))
+                errors << *missing;
+        return errors;
+    }
+
     Result<Values> run(const NodeContext &context) override {
         // The scheduler has expanded "~" (paths.h), so the file is the one the key was made from.
         QString file = context.input("file").text();
@@ -45,10 +57,9 @@ public:
                 return readable.errors();
             file = readable.value();
         }
+        if (const std::optional<Error> missing = missingFile(file))
+            return *missing;
         const QString kind = mediaTypeName(m_type);
-        if (!QFileInfo(file).isFile())
-            return makeError(QStringLiteral("file_not_found"), QStringLiteral("No %1 file at %2.").arg(kind, file),
-                             QStringLiteral("Pick the file again in the node."));
         const Result<MediaHandle> media = MediaHandle::probe(m_type, file, *context.hashes);
         if (!media)
             return media.errors();
@@ -86,11 +97,25 @@ private:
         return Result<Values>(values, warnings);
     }
 
+    // The error of a file that is not there, for Load Image, Load Video or Load Audio: shared by run and check.
+    std::optional<Error> missingFile(const QString &file) const {
+        if (QFileInfo(file).isFile())
+            return std::nullopt;
+        return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("file"),
+                              QStringLiteral("No %1 file at %2.").arg(mediaTypeName(m_type), file),
+                              QStringLiteral("Pick the file again in the node."));
+    }
+
     const MediaType m_type;
 };
 
 class SaveImageKernel : public NodeKernel {
 public:
+    // Under validate: the name and folder written are ones a save can use.
+    Errors check(const NodeContext &context) const override {
+        return context.inputs.contains(QStringLiteral("format")) ? saveLocationProblems(context, context.input("format").text()) : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const QString format = context.input("format").text();
         const Result<SaveLocation> where = saveLocation(context, format);
