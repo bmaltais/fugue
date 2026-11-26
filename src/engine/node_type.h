@@ -96,6 +96,7 @@ struct NodeType {
     // Inputs the type used to have: a saved value for one is dropped without a word, no error and no notice (3.6).
     QStringList retiredInputs;
     bool sink = false;
+    bool viewOnly = false; // a sink whose only effect is showing (Compare Images): kept inside a group when a node reads its outputs (5.5)
     // Whether the node shows a picture (#263): "always", "result" or "never"; empty: by category
     // (node_picture.h pictureRole). Packs say it for their own types.
     QString picture;

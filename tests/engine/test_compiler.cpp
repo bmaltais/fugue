@@ -63,6 +63,16 @@ Registry registry() {
         " 'inputs': [{'name': 'image', 'type': 'image'}, {'name': 'name', 'type': 'text', 'default': 'out'}],"
         " 'outputs': []}",
 
+        "{'manifest': 1, 'id': 'fugue/compare', 'version': '1.0.0', 'name': 'Compare', 'sink': true, 'view_only': true,"
+        " 'runtime': {'kind': 'builtin'},"
+        " 'inputs': [{'name': 'a', 'type': 'image'}, {'name': 'b', 'type': 'image'}],"
+        " 'outputs': [{'name': 'difference', 'type': 'image'}]}",
+
+        "{'manifest': 1, 'id': 'fugue/save-keep', 'version': '1.0.0', 'name': 'Save keep', 'sink': true,"
+        " 'runtime': {'kind': 'builtin'},"
+        " 'inputs': [{'name': 'image', 'type': 'image'}],"
+        " 'outputs': [{'name': 'file', 'type': 'image'}]}",
+
         "{'manifest': 1, 'id': 'fugue/merge', 'version': '1.0.0', 'name': 'Merge',"
         " 'runtime': {'kind': 'builtin'},"
         " 'inputs': [{'name': 'images', 'type': 'image', 'list': true, 'min_items': 1, 'max_items': 3}],"
@@ -185,6 +195,8 @@ private slots:
     void mutedGroupSkipsEveryInnerNode();
     void nodesNoSinkNeedsAreSkippedWithAWarning();
     void sinksInsideGroupsAreDropped();
+    void aSinkInsideAGroupStaysWhenANodeReadsItsOutput();
+    void aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied();
     void runToHereKeepsOnlyWhatTheTargetNeeds();
     void unknownTargetIsAUsageError();
     void providerPinsAreResolvedAndChecked();
@@ -297,8 +309,8 @@ void TestCompiler::unknownTypesAreReportedWithoutFollowOnErrors() {
     QCOMPARE(top.node, QString("gen"));
     QCOMPARE(top.hint, QString("Did you mean \"fugue/generate-image\"?"));
     // Every known type, in full: the registry's and the workflow's groups.
-    QCOMPARE(top.valid, (QJsonArray{"fugue/batch", "fugue/generate-image", "fugue/merge", "fugue/save-image",
-                                    "fugue/text", "io.example.tools/shrink", "local/box"}));
+    QCOMPARE(top.valid, (QJsonArray{"fugue/batch", "fugue/compare", "fugue/generate-image", "fugue/merge", "fugue/save-image",
+                                    "fugue/save-keep", "fugue/text", "io.example.tools/shrink", "local/box"}));
 }
 
 void TestCompiler::invalidLinksAreAllReported() {
@@ -762,6 +774,70 @@ void TestCompiler::sinksInsideGroupsAreDropped() {
     QCOMPARE(result->nodes.keys(), (QStringList{"g/gen", "save"}));
     QVERIFY(result->skipped.isEmpty());
     QCOMPARE(result->sinks(), QStringList{"save"});
+}
+
+// #623: Compare Images is a sink with outputs. Dropped from a group, it left the nodes that read it
+// linked to a node the graph does not have, and the scheduler hung (check) or crashed (run).
+void TestCompiler::aSinkInsideAGroupStaysWhenANodeReadsItsOutput() {
+    const char *groups =
+        "'local/cmp': {'version': '1.0.0', 'name': 'Cmp', 'inputs': [], 'outputs': [{'name': 'image', 'from': %1}],"
+        " 'nodes': {'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'x'}},"
+        "           'cmp': {'type': 'fugue/compare', 'version': '1.0.0',"
+        "                   'inputs': {'a': {'from': 'gen.image'}, 'b': {'from': 'gen.image'}}},"
+        "           'shrink': {'type': 'io.example.tools/shrink', 'version': '1.2.0',"
+        "                      'inputs': {'image': {'from': 'cmp.difference'}}}}}";
+    // The group's output comes from the node after the sink, and from the sink itself.
+    for (const char *out : {"'shrink.image'", "'cmp.difference'"}) {
+        const Document doc = document(withGroups(
+            "'g': {'type': 'local/cmp', 'version': '1.0.0', 'inputs': {}},"
+            "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+            QByteArray(groups).replace("%1", out).constData()));
+        const Compilation result = compile(doc, registry());
+        QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+        QVERIFY(result->nodes.contains("g/cmp"));
+        // Every link goes to a node that is in the graph.
+        for (auto it = result->nodes.cbegin(); it != result->nodes.cend(); ++it)
+            for (const CompiledLink &link : it->links())
+                QVERIFY2(result->nodes.contains(link.from.node), qPrintable(it.key() + " reads missing " + link.from.node));
+        // The inner sink is no root: only the sink outside counts, and the inner one is not a sink of the graph.
+        QCOMPARE(result->sinks(), QStringList{"save"});
+    }
+    // Read by nothing that stays, it is dropped as before.
+    const Document unread = document(withGroups(
+        "'g': {'type': 'local/cmp', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+        QByteArray(groups).replace("%1", "'gen.image'").constData()));
+    const Compilation result = compile(unread, registry());
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY(!result->nodes.contains("g/cmp"));
+    QVERIFY(!result->nodes.contains("g/shrink"));
+    // A view sink nothing needed reads says nothing: only the node that is really unused is warned of.
+    const Document gen = document(withGroups(
+        "'g': {'type': 'local/cmp', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+        QByteArray(groups).replace("%1", "'gen.image'").constData()));
+    const Compilation genResult = compile(gen, registry());
+    for (const Error &problem : genResult.problems())
+        QVERIFY2(problem.node != "g/cmp", qPrintable(dump(problem.node)));
+}
+
+// A sink that writes (Save Image, whose `file` output is read) must not run from inside a group (5.5).
+void TestCompiler::aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied() {
+    const Document doc = document(withGroups(
+        "'g': {'type': 'local/keep', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+        "'local/keep': {'version': '1.0.0', 'name': 'Keep', 'inputs': [], 'outputs': [{'name': 'image', 'from': 'shrink.image'}],"
+        " 'nodes': {'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'x'}},"
+        "           'out': {'type': 'fugue/save-keep', 'version': '1.0.0', 'inputs': {'image': {'from': 'gen.image'}}},"
+        "           'shrink': {'type': 'io.example.tools/shrink', 'version': '1.2.0',"
+        "                      'inputs': {'image': {'from': 'out.file'}}}}}"));
+    const Compilation result = compile(doc, registry());
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY(!result->nodes.contains("g/out"));
+    QCOMPARE(result->skipped.value("g/shrink"), QString("upstream_empty"));
+    for (auto it = result->nodes.cbegin(); it != result->nodes.cend(); ++it)
+        for (const CompiledLink &link : it->links())
+            QVERIFY2(result->nodes.contains(link.from.node), qPrintable(it.key() + " reads missing " + link.from.node));
 }
 
 void TestCompiler::runToHereKeepsOnlyWhatTheTargetNeeds() {
