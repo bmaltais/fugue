@@ -38,6 +38,8 @@ struct InputSpec {
     QString description;
     QJsonValue defaultValue = QJsonValue::Undefined; // Undefined: no default
     bool optional = false;
+    // A lazy input (3.2, 9.9): the scheduler starts what feeds it only when the node asks for it (NodeKernel::lazyInputs).
+    bool lazy = false;
     std::optional<int> minItems; // list inputs only
     std::optional<int> maxItems;
     std::optional<double> min; // number inputs only
@@ -78,6 +80,9 @@ struct OutputSpec {
     // the node's own inputs for it to hold (VAE Encode's latent carries a mask when its `mask` is linked).
     QStringList carries;
     ShownWhen carriesWhen;
+    // Only on an output of type "any" (built-in nodes): the inputs whose link type this output takes (the first one
+    // linked), so a Switch's value is an image when an image feeds it (2.3).
+    QStringList follows;
 };
 
 struct NodeType {

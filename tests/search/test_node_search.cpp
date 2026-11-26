@@ -85,7 +85,12 @@ private slots:
         search->openAt(10, 20);
         QVERIFY(search->active());
         QCOMPARE(search->count(), int(registry.nodeTypes().size()));
-        QCOMPARE(names(search->results()).first(), QString("Image Size")); // Basic, then by name
+        QStringList basic; // Basic first, then by name, whichever nodes that is
+        for (const NodeType *type : registry.nodeTypes())
+            if (type->category == QLatin1String("Basic"))
+                basic << type->name;
+        std::sort(basic.begin(), basic.end(), [](const QString &a, const QString &b) { return a.compare(b, Qt::CaseInsensitive) < 0; });
+        QCOMPARE(names(search->results()).first(), basic.first());
     }
 
     void ranksNameBeforeKeywordBeforeDescription() {

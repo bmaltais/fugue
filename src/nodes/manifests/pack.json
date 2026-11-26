@@ -75,6 +75,7 @@
     "sharpen",
     "solid-mask",
     "stitch",
+    "switch",
     "text",
     "text-concat",
     "text-template",

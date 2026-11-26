@@ -1,0 +1,18 @@
+{
+  "manifest": 1,
+  "id": "fugue/switch",
+  "version": "1.0.0",
+  "name": "If/Else Switch",
+  "description": "Passes on one of two values, chosen by a condition. Only what feeds the chosen side runs.",
+  "category": "Basic",
+  "keywords": ["if", "else", "condition", "branch", "choose", "select", "logic"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "condition", "type": "boolean", "label": "Condition"},
+    {"name": "on_true", "type": "any", "label": "If true", "optional": true, "lazy": true},
+    {"name": "on_false", "type": "any", "label": "If false", "optional": true, "lazy": true}
+  ],
+  "outputs": [
+    {"name": "value", "type": "any", "label": "Value", "follows": ["on_true", "on_false"]}
+  ]
+}

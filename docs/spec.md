@@ -364,6 +364,7 @@ There is one list of named inputs per node type and no separate "parameter" kind
   constraints and show an editable control when unwired; the control is grayed when wired.
 - Media and data inputs are wire-only. Resource inputs are a wire or a picked handle ([2.5](#25-resource-handles)).
 - An input is required unless it has a default or is marked `optional`.
+- An input can be marked **`lazy`** (the "Lazy input" of the [glossary](GLOSSARY.md)): the engine does not start what feeds it until the node asks for it. Once every input that is not lazy has its value, the node's kernel is asked which lazy inputs it needs (`NodeKernel::lazyInputs`, given those values; the default asks for all of them) and only those are fed. A lazy input the node did not ask for is left out of the node's inputs and of its cache key. `lazy` says nothing about whether the input is required: that is `optional` and `default` as before. The If/Else Switch ([14.1](#141-m1-the-first-twelve)) is the first user.
 - In a workflow every input value is stored by name. Nothing is positional.
 
 ### 3.3 Outputs
@@ -382,6 +383,7 @@ There is one list of named inputs per node type and no separate "parameter" kind
 - Any node can be run alone ("run to here"): that node and everything it needs, with no Preview
   added. Sinks elsewhere do not run.
 - A node with no sink downstream does not run, and the canvas marks it "not part of any output".
+- A node that feeds a **lazy input** ([3.2](#32-inputs)) only runs if some node that runs asks for it. A node is *demanded* when it is a sink or the run's target, when a demanded node reads it through an input that is not lazy, or when a node that runs asked for the lazy input that reads it. A node nothing demands is skipped with the reason `not_chosen` (so is what only it needed, up to the nodes something else demands). A node read by both sides of a Switch, or by a demanded node through an input that is not lazy, runs once. **A sink is always a root:** a Save or Preview hanging off a node on the side a Switch did not choose still runs that node and what it needs (ComfyUI's output-node behaviour). A frozen node that is not demanded is skipped, not served.
 
 ### 3.5 Bypass and mute
 
@@ -2549,6 +2551,7 @@ not part of any output, missing models, untrusted packs, a frozen result that is
   the node's bar it covers (`progressFrom`, `progressSpan`). A kernel keeps no state of its own, so
   what comes between the jobs is a file in the work folder, and `abandon` is called when the node
   ends in an error or a cancel so it can remove what is left (the scheduler never removes files).
+- **Demand** ([3.4](#34-what-runs)): a node waits until it is demanded and its inputs that are not lazy are in. When they are, its kernel names the lazy inputs it needs (`NodeKernel::lazyInputs`, on the scheduler thread), the nodes feeding those are demanded, and the node waits for them. A node a consumer let go of is skipped as `not_chosen` once no other node can still demand it, and the same goes upstream. A run's last pass skips whatever is still waiting with nothing left to ask for it (`upstream_failed` when a node failed before it could ask, else `not_chosen`). Under validate ([10.3](#103-per-node-state)) the condition is not known, so every lazy input is taken as needed: both sides show as they would run, never skipped.
 - One run is active at a time. Further runs queue first in, first out, can be moved to the front
   ("run first"), and can be removed or cancelled by id ([9.8](#98-runs-across-processes)).
 
@@ -2654,8 +2657,7 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
 
 ### 9.9 Not in v0.1
 
-Loops, batches, conditionals and several runs in parallel. The engine must not rule out dynamic
-graph expansion later.
+Loops, batches and several runs in parallel. The engine must not rule out dynamic graph expansion later. Conditionals are in: lazy inputs ([3.2](#32-inputs)) and the If/Else Switch ([14.1](#141-m1-the-first-twelve)), which run only the side that is chosen. Node expansion (a node that returns a sub-graph, ComfyUI's loops) is not.
 
 ---
 
@@ -2673,6 +2675,7 @@ A node's key is the SHA-256 of the canonical JSON of:
   built-in pack's versions are the nodes' own);
 - every input: a literal's value, or for a link the content hash of the upstream output;
 - the identity hash of every resource handle ([2.5](#25-resource-handles));
+- a lazy input the node did not ask for is not in the key, nor is the node that feeds it: a Switch's key is its condition and the chosen value ([3.2](#32-inputs));
 - for provider nodes, the engine id ([8.11](#811-the-provider-interface)) and the identity of
   the model the provider resolved;
 - for a node with `deterministic: false`, the run id;
@@ -2713,7 +2716,7 @@ write a duplicate.
 The canvas and `fugue validate --json` show one of these per node: `cached`, `stale` (would
 run), `running`, `frozen`, `error`, `skipped`. `fugue validate --json` gives them in `data` as
 `nodes`, keyed by path id: `{"state": "stale"}`, and for a node the compiler left out
-`{"state": "skipped", "reason": "muted"}`. Without `--json` it prints one line per node. A size view shows what the cache holds per
+`{"state": "skipped", "reason": "muted"}`. A node a Switch did not choose is `skipped` with the reason `not_chosen` in a run (never under validate, which does not know the condition and shows both sides as `stale` or `cached`); it never ran, so it has no key. Without `--json` it prints one line per node. A size view shows what the cache holds per
 workflow and per node.
 
 ### 10.4 Freeze
@@ -4292,6 +4295,7 @@ once and stops on close). Zoomed out, the slot is the label ("Video · 0:04") as
 | `fugue/mask-to-alpha` 1.0.0 | `image`, `mask` | `image` | Apply Mask as Alpha: RGBA, the colors kept, alpha = the image's own alpha (1 if it has none) x the mask, the mask stretched to the image. Not Composite Masked onto a transparent picture: that mixes the destination's color into a soft edge. |
 | `fugue/solid-mask` | `value`, `width`, `height` | `mask` | |
 | `fugue/number-math` | `a`, `operation` (add, subtract, multiply, divide, modulo, power, min, max), `b` | `value` | Python's arithmetic. |
+| `fugue/switch` | `condition` (boolean, required), `on_true` and `on_false` (any one type, lazy, optional) | `value` | Passes on the value of `on_true` when `condition` is true, else of `on_false`. Both sides are lazy ([3.2](#32-inputs)): the hook asks only for the chosen one, so what feeds the other never starts ([3.4](#34-what-runs), [9.2](#92-scheduling)). The output has the type of the first linked side (`"follows"` in its manifest: an output of type `any`, which only built-in nodes may have; the compiler gives it the type of the input it follows, so a text feeds a text input and a number a number one; both sides linked with different types is `type_mismatch`, and a Switch with neither side linked has no type yet). The chosen side unconnected or empty is a `switch_empty` error on that input, never a silent empty output. The cache key is the condition and the chosen value only. Read as a document (readiness, paired placement) the unchosen side is not a requirement: a model that only the other side needs does not block paired placement (`conditionalNodes`, `engine/lazy_reach.h`: a node only lazy inputs reach is not placed; if its side is chosen it fails with its own `model_missing`). Get ready still lists every model the document names, as it reads the document and not the choice. Soft Switch (one side left unconnected) is this node with that side empty, as the issue (#557) asks: an unconnected chosen side is the error. Decisions (2026-11-26): category Basic (the utilities one); `condition` has no default, so an unset one is `missing_input`; a Switch inside a group takes its type only from links written on the Switch itself, not through an exposed input. |
 | `fugue/apply-lut` 1.0.0 (#548) | `image`, `file` (a `.cube`, the file picker; read like Load Image's), `strength` (0 to 1, default 1) | `image` | Colour grading from a 1D or 3D `.cube` table (Adobe's Cube LUT Specification 1.0: `TITLE`, `DOMAIN_MIN`, `DOMAIN_MAX`, DaVinci Resolve's `LUT_1D_INPUT_RANGE` and `LUT_3D_INPUT_RANGE` (one min and max for all channels), `LUT_1D_SIZE` or `LUT_3D_SIZE`, rows of three floats, red index fastest). Each channel is mapped through the domain to the table's index range and clamped; 1D is linear per channel, 3D trilinear; `strength` mixes with the original (0 is the picture). Alpha is kept. A malformed file is `input_invalid` on `file`, the message naming the line (`line 7: ...`; a file short of rows names its last line); a missing file `file_not_found`. Differences from ComfyUI_essentials' `ImageApplyLUT+` (cubiq, MIT, which does not read DOMAIN keywords and takes the LUT by name from a folder): any path, the domain honoured. Worked-number tests, no parity (`tests/nodes/test_lut.cpp`; code in `src/nodes/lut.*`). |
 | `fugue/desaturate` 1.0.0 (#551) | `image`, `amount` (0 to 1, default 1) | `image` | Each color channel moves toward the Rec. 709 luma (0.2126 R + 0.7152 G + 0.0722 B, taken on the values as they are, as ComfyUI_essentials' `ImageDesaturate+` does) by `amount`; 0 is the picture, 1 gray. Alpha is left alone. |
 | `fugue/posterize` 1.0.0 (#551) | `image`, `levels` (2 to 256, default 4) | `image` | Each color channel is rounded to the nearest of `levels` evenly spaced values from 0 to 1 (round half up). Alpha is left alone. |
@@ -4923,6 +4927,8 @@ Each has a confidence and can be overruled; say so on the issue that builds it.
 | A randomized seed is `{"auto": "random"}`; increment is a canvas action | 4.2, 6.2 | medium-high |
 | Lists: one value wraps into a list; a list cannot feed a non-list input | 2.3 | medium-high |
 | No implicit conversions between built-in types | 2.3 | medium-high |
+| Conditionals are lazy inputs: a node asks, once its other inputs are in, which lazy inputs it needs, and only those are fed (ComfyUI's `check_lazy_status`); a node nothing demands is skipped as `not_chosen`, sinks are always roots, validate takes both sides as needed (#557) | 3.2, 3.4, 9.2, 9.9 | medium-high |
+| An output of type `any` (built-in nodes only) takes the type of the input it `follows`; a Switch output is not a wildcard that any input accepts unchecked (#557) | 2.3, 14.1 | medium-high |
 | A mask is a one-channel image, not its own port type | 2.1 | medium |
 | Declared types have a kind, `resource` or `data`, and an integer version | 2.2 | medium-high |
 | Resource inputs show a model picker and store the handle as a literal | 2.5 | medium-high |

@@ -47,7 +47,8 @@ QString PortSpec::toString() const {
 }
 
 Compatibility compatibility(const PortSpec &output, const PortSpec &input) {
-    if (!input.type.isAny() && output.type != input.type)
+    // An "any" output (a Switch's value) takes its type from what feeds it; the compiler checks that type.
+    if (!input.type.isAny() && !output.type.isAny() && output.type != input.type)
         return Compatibility::DifferentType;
     if (output.list && !input.list)
         return Compatibility::ListIntoSingle;

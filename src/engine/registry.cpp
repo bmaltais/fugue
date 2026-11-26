@@ -60,6 +60,21 @@ Errors Registry::add(const NodeType &type) {
                      .arg(input.name, input.type.type.toString()),
                  input.name);
     }
+    for (const OutputSpec &output : type.outputs) {
+        if (output.type.type.isAny()) {
+            if (!builtin)
+                fail(QStringLiteral("output %1 is of type \"any\", which only built-in fugue/ nodes may use.")
+                         .arg(output.name),
+                     {}, output.name);
+            for (const QString &name : output.follows) {
+                const InputSpec *followed = type.input(name);
+                if (!followed || !followed->type.type.isAny())
+                    fail(QStringLiteral("output %1 follows %2, which is not an input of type \"any\".")
+                             .arg(output.name, name),
+                         {}, output.name);
+            }
+        }
+    }
     for (const OutputSpec &output : type.outputs)
         if (portKind(output.type.type) == PortKind::Unknown)
             fail(QStringLiteral("output %1 has the port type %2, which no pack declares.")
