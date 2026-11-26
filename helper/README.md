@@ -77,6 +77,13 @@ five architectures and shares nothing with a local one (a worktree's engine buil
 A cold CUDA build takes about 15 minutes; ccache makes later ones short, also in another worktree: `bin/build-helper` sets `CCACHE_BASEDIR` to the folder holding the worktrees, and configure with `NVCC_CCBIN` set (it changes the CUDA include dirs CMake records, so a hand-run `cmake` configure hashes differently). Check a miss with `CCACHE_DEBUG=1 CCACHE_DEBUGDIR=<dir>` on one `.cu` object (`make acc.cu.o` in its build subfolder). The package builds the
 Vulkan helper into `fugue` and the CUDA one into `fugue-helper-cuda` (`packaging/PKGBUILD`).
 
+### Portable tarballs (x86_64: AppImage and non-Arch hosts)
+
+`bin/package-helper --container cuda|vulkan|cpu` builds `fugue-helper-<backend>-x86_64-linux.tar.zst` in an Ubuntu 22.04
+container (the CUDA one in NVIDIA's `12.9.1-devel-ubuntu22.04` image) with the portable settings, bundles the CUDA runtime
+libraries, and checks the glibc floor and the links; `.github/workflows/helper-tarballs.yml` runs it for a `v*` tag. What is inside, the
+GPU architectures and the CUDA licence: [docs/helper.md](../docs/helper.md).
+
 ### aarch64 CUDA asset (a DGX Spark)
 
 The Arch package cannot serve a paired host that runs Ubuntu on aarch64 (CUDA 13, sm_121). A release
@@ -88,7 +95,7 @@ from a checkout of the tag, with the same script (portable settings: no `-march=
 
 ```sh
 git clone --branch vX https://github.com/bmaltais/fugue && cd fugue
-bin/package-helper                       # about 40 minutes cold, ccache after; writes dist/
+bin/package-helper cuda                  # about 40 minutes cold, ccache after; writes dist/
 gh release upload vX dist/fugue-helper-cuda-aarch64-linux.tar.zst dist/SHA256SUMS --clobber
 ```
 

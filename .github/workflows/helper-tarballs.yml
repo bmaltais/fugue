@@ -1,0 +1,117 @@
+name: Helper tarballs
+
+# fugue-helper-<backend>-x86_64-linux.tar.zst (cuda, vulkan, cpu) for the AppImage and every x86_64 distribution
+# that has no fugue-helper package (docs/helper.md, issue #334). bin/package-helper builds each in an Ubuntu 22.04
+# container on the hosted runner, so the glibc floor is the AppImage's (2.35); compiling CUDA needs no GPU.
+# A v* tag adds the three files and their SHA256SUMS lines to the release package.yml makes (install.sh reads them);
+# a pull request that changes the script or this file builds them without uploading; by hand (workflow_dispatch)
+# builds them and keeps them as workflow artifacts.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: [bin/package-helper, helper/fugue-helper.service, .github/workflows/helper-tarballs.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the ${{ matrix.backend }} tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [cuda, vulkan, cpu]
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1500M
+      FUGUE_CONTAINER_ENGINE: docker
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space (the CUDA image is 16 GB unpacked)
+        if: matrix.backend == 'cuda'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: helper-tarball-${{ matrix.backend }}-${{ github.sha }}
+          restore-keys: helper-tarball-${{ matrix.backend }}-
+
+      - name: Build the tarball
+        run: bin/package-helper --container ${{ matrix.backend }} dist
+
+      - name: What is inside
+        run: |
+          ls -l dist
+          cat dist/SHA256SUMS
+          tar --zstd -tvf dist/fugue-helper-${{ matrix.backend }}-x86_64-linux.tar.zst
+
+      - name: Start it in a clean Ubuntu 22.04 (no GPU: the helper's own HTTP checks, which need no model)
+        # The CUDA helper needs the host's driver (libcuda.so.1) to start; its link check is in bin/package-helper.
+        if: matrix.backend != 'cuda'
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w ubuntu:22.04 bash -c '
+            set -euo pipefail
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends curl zstd libvulkan1 python3 >/dev/null
+            mkdir -p /root/.local/share/fugue/helper
+            tar --zstd --strip-components=1 -xf dist/fugue-helper-${{ matrix.backend }}-x86_64-linux.tar.zst -C /root/.local/share/fugue/helper
+            helper/smoke-http.sh /root/.local/share/fugue/helper/fugue-helper-${{ matrix.backend }}'
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        with:
+          name: helper-${{ matrix.backend }}
+          path: dist/*
+          compression-level: 0 # already zstd
+
+  release:
+    name: Add them to the release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: helper-*
+          path: parts
+      - name: Wait for the release, then add the tarballs and their SHA256SUMS lines
+        # package.yml makes the release for the same tag and uploads the packages with their SHA256SUMS; appimage.yml adds
+        # the AppImage the same way. Each job edits that one file, so this adds its lines and then reads the file back:
+        # a line another job's upload overwrote is added again, up to five times.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dist && cp parts/*/*.tar.zst dist/
+          for _ in $(seq 1 240); do
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx SHA256SUMS; then found=1; break; fi
+            sleep 30
+          done
+          [[ ${found:-0} == 1 ]] || { echo "no release with a SHA256SUMS appeared in two hours (did package.yml fail?)"; exit 1; }
+          cd dist
+          for attempt in 1 2 3 4 5; do
+            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir . --clobber
+            for f in *.tar.zst; do
+              grep -vF " $f" SHA256SUMS > SHA256SUMS.new || true
+              (grep -F " $f" ../parts/*/SHA256SUMS | sed 's/^[^:]*://') >> SHA256SUMS.new
+              mv SHA256SUMS.new SHA256SUMS
+            done
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber *.tar.zst SHA256SUMS
+            sleep 20
+            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir check --clobber
+            ok=1
+            for f in *.tar.zst; do grep -qF " $f" check/SHA256SUMS || ok=0; done
+            [[ $ok == 1 ]] && { cat check/SHA256SUMS; exit 0; }
+            echo "attempt $attempt: a line was overwritten by another job; adding again"
+          done
+          echo "the SHA256SUMS lines of the tarballs did not stay"; exit 1

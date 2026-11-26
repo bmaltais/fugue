@@ -105,7 +105,14 @@ It goes to `~/.local/bin/fugue` with a launcher entry, the icon and the `.fugue`
 `Fugue-*-x86_64.AppImage` from the [latest release](https://github.com/bmaltais/fugue/releases), check it
 against `SHA256SUMS`, `chmod +x` it and run it: with no argument it opens the window, with a command
 (`Fugue-*.AppImage run flow.fugue`) it is the command line. The graphics libraries and drivers come from your system;
-see [docs/appimage.md](docs/appimage.md) for what it needs and the generation helper, which is a separate download.
+see [docs/appimage.md](docs/appimage.md) for what it needs.
+
+The AppImage holds no generation helper (the part that runs the image models on your GPU). On an x86_64 host without
+pacman `install.sh` also downloads it: `fugue-helper-cuda-x86_64-linux.tar.zst` when an NVIDIA driver is present (the CUDA
+libraries are inside; GeForce RTX 20 series and newer), else `fugue-helper-vulkan-x86_64-linux.tar.zst` when a Vulkan
+loader is, checks it against `SHA256SUMS` and unpacks it into `~/.local/share/fugue/helper`, where the AppImage looks.
+`--no-helper` skips it, `--helper cuda|vulkan|cpu` chooses, `--helper-only` adds just the helper to an installed AppImage.
+By hand, [docs/helper.md](docs/helper.md) has the unpack command and what each tarball holds.
 
 Fugue is packaged for Arch and Omarchy. Download the packages from the
 [latest release](https://github.com/bmaltais/fugue/releases) and install:

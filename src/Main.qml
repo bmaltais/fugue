@@ -170,12 +170,13 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             color: App.theme.look.text
-                            text: qsTr("Faster generation on your NVIDIA card: install fugue-helper-cuda")
+                            text: helperNotice.pacman ? qsTr("Faster generation on your NVIDIA card: install fugue-helper-cuda")
+                                                      : qsTr("Faster generation on your NVIDIA card: download the CUDA helper")
                         }
                         ThemedButton {
                             objectName: "helperNoticeCopy"
                             highlighted: true
-                            text: qsTr("Copy %1").arg(helperNotice.command)
+                            text: helperNotice.pacman ? qsTr("Copy %1").arg(helperNotice.command) : qsTr("Copy the install command")
                             onClicked: helperNotice.copy()
                         }
                         ToolButton {

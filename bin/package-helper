@@ -1,34 +1,217 @@
 #!/bin/bash
-# Makes the portable CUDA helper as a release asset for a host the Arch package cannot serve, such as
-# a DGX Spark (Ubuntu aarch64, CUDA 13, sm_121). Run it on that host, from a checkout of the tag:
+# Makes the portable helper as a release asset for a host the Arch package cannot serve:
 #
-#   bin/package-helper [outdir]      # -> <outdir>/fugue-helper-cuda-<arch>-linux.tar.zst and SHA256SUMS
+#   bin/package-helper [--container] [cuda|vulkan|cpu] [outdir]
 #
-# The binary links the host's CUDA runtime and cuBLAS dynamically and is not signed. It is built
-# with the portable settings (no -march=native; sm_121 machine code plus its PTX), so it runs on any
-# GB10 host, not only the one that built it. Upload both files with `gh release upload <tag>`.
+#   x86_64: fugue-helper-<backend>-x86_64-linux.tar.zst for the AppImage and any non-Arch distribution, built in
+#           an Ubuntu 22.04 container (glibc 2.35, the AppImage's floor). `--container` starts the container
+#           (podman, else docker); CI runs the same command on a hosted runner. Nothing needs a GPU to compile.
+#   aarch64: the CUDA helper for a DGX Spark (Ubuntu aarch64, CUDA 13, sm_121), built on that host, which links
+#           the host's CUDA runtime and cuBLAS dynamically.
+#
+# Writes <outdir>/fugue-helper-<backend>-<arch>-linux.tar.zst (default outdir: dist/) and adds its line to
+# <outdir>/SHA256SUMS, keeping the other lines. Upload both with `gh release upload <tag>`. helper/README.md
+# ("Portable tarballs") says what is inside and why. Environment: FUGUE_JOBS (compiles in parallel, default: all cores),
+# CCACHE_DIR (the compiler cache, default: .ccache in the checkout), FUGUE_CONTAINER_ENGINE (podman or docker).
+#
+# The tarball holds one folder, fugue-helper-<backend>-<arch>-linux/ (the binary, fugue-helper.service, and for
+# CUDA lib/ and licenses/). Unpack it with the folder name stripped into the folder AppRun searches:
+#   tar --zstd --strip-components=1 -xf <file> -C ~/.local/share/fugue/helper
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-out="$(realpath -m "${1:-$root/dist}")"
+
+# Pinned: the build images by digest, the tools by sha256. A change to any of them is a change to the release.
+cuda_image='docker.io/nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8'
+ubuntu_image='docker.io/library/ubuntu:22.04@sha256:b000e69a50ff940390233025e7a337fb8469b509e2334fa4d018ac30f3e18cdb'
+cmake_version=3.31.12 # helper/CMakeLists.txt needs 3.25; Ubuntu 22.04 has 3.22 (the same pin as appimage.yml)
+cmake_sha256=0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c
+vulkan_sdk_version=1.4.363.1 # glslc and headers new enough for ggml-vulkan; Ubuntu 22.04's are from 2022
+vulkan_sdk_sha256=b7867d8ca658563813af666f34b93db87f1b1c7d9d69d97e924c210c7ba33eb8
+# Turing (75), Ampere (86), Ada (89) and Blackwell (120, CUDA 12.8 or newer), machine code; PTX of 75 for the rest.
+cuda_archs='75-real;86-real;89-real;120-real;75-virtual'
+glibc_floor=2.35
+
+die() { echo "package-helper: $*" >&2; exit 2; }
+
+# --- arguments -----------------------------------------------------------------------------------
+backend="" out="" container=0
+for a in "$@"; do
+  case $a in
+    --container) container=1 ;;
+    cuda|vulkan|cpu) backend=$a ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d;s/^# \{0,1\}//'; exit 0 ;;
+    -*) die "unknown option $a (try --help)" ;;
+    *) [[ -z $out ]] || die "two output folders: $out and $a"; out=$a ;;
+  esac
+done
 arch="$(uname -m)"
-case $arch in
-  aarch64) archs='121-real;121-virtual' ;;
-  *) echo "package-helper: only aarch64 is built this way; x86_64 has the fugue-helper-cuda package" >&2; exit 2 ;;
+backend="${backend:-cuda}"
+out="$(realpath -m "${out:-$root/dist}")"
+jobs="${FUGUE_JOBS:-$(nproc)}"
+name="fugue-helper-$backend-$arch-linux"
+
+# --- add this archive's line to SHA256SUMS, keeping the others ------------------------------------
+write_sums() {
+  local tmp
+  tmp="$(mktemp)"
+  touch "$out/SHA256SUMS"
+  grep -v " $name.tar.zst\$" "$out/SHA256SUMS" >"$tmp" || true
+  (cd "$out" && sha256sum "$name.tar.zst") >>"$tmp"
+  cat "$tmp" >"$out/SHA256SUMS"
+  rm -f "$tmp"
+}
+
+# --- on the host: start the container ------------------------------------------------------------
+if ((container)); then
+  [[ $arch == x86_64 ]] || die "--container is for x86_64; on $arch build on the host"
+  engine="${FUGUE_CONTAINER_ENGINE:-$(command -v podman || command -v docker || true)}"
+  [[ -n $engine ]] || die "--container needs podman or docker"
+  if [[ $backend == cuda ]]; then image=$cuda_image; else image=$ubuntu_image; fi
+  ccache_dir="$(realpath -m "${CCACHE_DIR:-$root/.ccache}")"
+  mkdir -p "$out" "$ccache_dir"
+  # The checkout is mounted at /src and the output at /out, the same paths on every machine, so ccache hits
+  # across runs (bin/build-helper sets CCACHE_BASEDIR from the checkout's parent). Under docker the container's
+  # root writes the files: the inner run hands them back to the caller's user.
+  "$engine" run --rm -v "$root:/src" -v "$out:/out" -v "$ccache_dir:/ccache" -w /src \
+    -e FUGUE_PACKAGE_IN_CONTAINER=1 -e FUGUE_JOBS="$jobs" -e CCACHE_DIR=/ccache -e CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-2G}" \
+    -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+    "$image" /src/bin/package-helper "$backend" /out
+  echo "$out/$name.tar.zst"
+  exit 0
+fi
+
+# --- in the container: the build tools ---------------------------------------------------------------
+download() { # url sha256 file: kept in the ccache folder, which CI caches
+  local dir="${CCACHE_DIR:-/tmp}/downloads"
+  mkdir -p "$dir"
+  if ! { [[ -f $dir/$3 ]] && echo "$2  $dir/$3" | sha256sum -c - >/dev/null 2>&1; }; then
+    curl -fsSL --retry 3 -o "$dir/$3" "$1"
+    echo "$2  $dir/$3" | sha256sum -c - >/dev/null || die "$3: checksum does not match the pin"
+  fi
+  echo "$dir/$3"
+}
+
+install_tools() {
+  export DEBIAN_FRONTEND=noninteractive
+  local pkgs=(ca-certificates curl xz-utils zstd ccache patchelf make g++ binutils)
+  [[ $backend == vulkan ]] && pkgs+=(libvulkan-dev) # the loader to link; the SDK has the newer headers and glslc
+  apt-get update -qq
+  apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null
+  local f
+  f="$(download "https://github.com/Kitware/CMake/releases/download/v$cmake_version/cmake-$cmake_version-linux-x86_64.tar.gz" "$cmake_sha256" cmake.tar.gz)"
+  mkdir -p /opt/cmake && tar -xzf "$f" -C /opt/cmake --strip-components=1
+  export PATH="/opt/cmake/bin:$PATH"
+  if [[ $backend == vulkan ]]; then
+    f="$(download "https://sdk.lunarg.com/sdk/download/$vulkan_sdk_version/linux/vulkan_sdk.tar.xz" "$vulkan_sdk_sha256" vulkan-sdk.tar.xz)"
+    mkdir -p /opt/vulkan && tar -xJf "$f" -C /opt/vulkan --strip-components=1 \
+      "$vulkan_sdk_version/x86_64/bin" "$vulkan_sdk_version/x86_64/include" "$vulkan_sdk_version/x86_64/lib" "$vulkan_sdk_version/x86_64/share/cmake"
+  fi
+  cmake --version | head -1
+}
+
+# The libraries ldd finds, copied unmodified (the CUDA EULA lets applications redistribute only unmodified files)
+# under the soname the binary asks for. ldd runs without the image's LD_LIBRARY_PATH, which names the toolkit.
+bundle_libs() { # binary destination-folder library-prefix...
+  local bin=$1 dest=$2 lib soname path
+  shift 2
+  mkdir -p "$dest"
+  for lib in "$@"; do
+    read -r soname _ path _ < <(env -u LD_LIBRARY_PATH ldd "$bin" | awk -v l="$lib" 'index($1, l ".") == 1 && $3 ~ "^/" {print; exit}') || true
+    [[ -n ${path:-} ]] || die "$bin does not link $lib: has the engine's linking changed?"
+    cp -L "$path" "$dest/$soname"
+  done
+}
+
+# What the binary needs from the host must be the GPU driver and the Vulkan loader, nothing else. (The CUDA image's
+# ldd finds libcuda.so.1 in /usr/local/cuda/compat; only the three libraries bundled above are copied, and no driver
+# library is in the tarball: checked below.)
+check_links() { # binary
+  local missing
+  missing="$(env -u LD_LIBRARY_PATH ldd "$1" | awk '/not found/ {print $1}' | grep -vxE 'libcuda\.so\.1|libvulkan\.so\.1' || true)"
+  [[ -z $missing ]] || die "$1 needs libraries nothing provides: $missing"
+}
+
+check_glibc() { # binary: the newest glibc symbol must not exceed the floor
+  local newest
+  newest="$(objdump -T "$1" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)"
+  echo "package-helper: $(basename "$1") needs glibc $newest (floor $glibc_floor)"
+  [[ $(printf '%s\n%s\n' "$newest" "$glibc_floor" | sort -V | tail -1) == "$glibc_floor" ]] || die "glibc $newest is newer than the floor $glibc_floor"
+}
+
+# --- build ---------------------------------------------------------------------------------------
+cmake_args=()
+case $arch:${FUGUE_PACKAGE_IN_CONTAINER:-0} in
+  x86_64:1)
+    install_tools
+    export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
+    export PATH="/opt/cmake/bin:/usr/local/cuda/bin:$PATH"
+    case $backend in
+      # NCCL (multi-GPU, found in the image) is a library hosts lack and a one-card helper never uses.
+      cuda) cmake_args=(-DGGML_NATIVE=OFF -DGGML_CUDA_NCCL=OFF -DCMAKE_CUDA_ARCHITECTURES="$cuda_archs") ;;
+      vulkan)
+        sdk=/opt/vulkan/x86_64
+        export VULKAN_SDK=$sdk PATH="$sdk/bin:$PATH"
+        cmake_args=(-DGGML_NATIVE=OFF -DVulkan_INCLUDE_DIR="$sdk/include" -DVulkan_GLSLC_EXECUTABLE="$sdk/bin/glslc" -DCMAKE_PREFIX_PATH="$sdk")
+        ;;
+      cpu) cmake_args=(-DGGML_NATIVE=OFF) ;;
+    esac
+    ;;
+  x86_64:*) die "an x86_64 helper is built in a container: bin/package-helper --container $backend" ;;
+  aarch64:*)
+    [[ $backend == cuda ]] || die "only the CUDA helper is built on aarch64"
+    cmake_args=(-DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES='121-real;121-virtual')
+    ;;
+  *) die "no portable helper for $arch" ;;
 esac
 
-FUGUE_HELPER_PORTABLE=1 "$root/bin/build-helper" cuda -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES="$archs"
+start=$SECONDS
+FUGUE_HELPER_PORTABLE=1 "$root/bin/build-helper" "$backend" "${cmake_args[@]}"
+echo "package-helper: built in $((SECONDS - start)) s"
+command -v ccache >/dev/null && ccache -s | head -8
 
-name="fugue-helper-cuda-$arch-linux"
+bin="$root/build-helper-$backend/fugue-helper-$backend"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
-mkdir -p "$stage/$name" "$out"
-install -m755 "$root/build-helper-cuda/fugue-helper-cuda" "$stage/$name/fugue-helper-cuda"
-install -m644 "$root/helper/fugue-helper.service" "$stage/$name/fugue-helper.service"
-tar -C "$stage" --zstd -cf "$out/$name.tar.zst" "$name"
-# SHA256SUMS keeps the other assets' lines: replace only this archive's.
-touch "$out/SHA256SUMS"
-grep -v " $name.tar.zst\$" "$out/SHA256SUMS" > "$stage/sums" || true
-(cd "$out" && sha256sum "$name.tar.zst") >> "$stage/sums"
-cp "$stage/sums" "$out/SHA256SUMS"
+dir="$stage/$name"
+mkdir -p "$dir" "$out"
+install -m755 "$bin" "$dir/fugue-helper-$backend"
+install -m644 "$root/helper/fugue-helper.service" "$dir/fugue-helper.service"
+
+if [[ $arch == x86_64 ]]; then
+  strip --strip-unneeded "$dir/fugue-helper-$backend"
+  check_glibc "$dir/fugue-helper-$backend"
+  # libgomp (OpenMP, ggml's CPU threads) is bundled for all three: a minimal host lacks it. GPLv3 with the GCC Runtime
+  # Library Exception, which allows this; its notice travels with it.
+  mkdir -p "$dir/licenses"
+  install -m644 /usr/share/doc/libgomp1/copyright "$dir/licenses/libgomp-copyright.txt"
+  case $backend in
+    cuda)
+      bundle_libs "$bin" "$dir/lib" libgomp.so libcudart.so libcublas.so libcublasLt.so
+      # The NVIDIA licence and its third-party list is the toolkit packages' copyright file.
+      install -m644 /usr/share/doc/cuda-cudart-12-9/copyright "$dir/licenses/NVIDIA-CUDA-EULA.txt"
+      cat >"$dir/licenses/README" <<EOF
+lib/ holds libgomp (GCC's OpenMP runtime, libgomp-copyright.txt) and the CUDA runtime (libcudart) and cuBLAS (libcublas,
+libcublasLt) of the CUDA Toolkit, unmodified, as Attachment A of the NVIDIA CUDA Toolkit EULA (NVIDIA-CUDA-EULA.txt, 2.2
+and 2.6) lets applications distribute them. The GPU driver (libcuda.so.1) is never included: it comes from the host.
+EOF
+      ;;
+    vulkan | cpu) bundle_libs "$bin" "$dir/lib" libgomp.so ;;
+  esac
+  # shellcheck disable=SC2016 # $ORIGIN is for the loader, not the shell
+  patchelf --set-rpath '$ORIGIN/lib' "$dir/fugue-helper-$backend"
+  check_links "$dir/fugue-helper-$backend"
+  if find "$dir" -name 'libcuda.so*' -o -name 'libnvidia*' | grep -q .; then die "a driver library is in the tarball: it must come from the host"; fi
+  (cd "$dir" && env -u LD_LIBRARY_PATH ldd "fugue-helper-$backend")
+fi
+
+rm -f "$out/$name.tar.zst"
+# zstd -10: the CUDA libraries are mostly compressed machine code; a higher level costs minutes for a few percent.
+tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner --use-compress-program="zstd -T0 -10" -cf "$out/$name.tar.zst" "$name"
+write_sums
+if [[ -n ${HOST_UID:-} && -n ${HOST_GID:-} && $(stat -c %u "$root") != 0 ]]; then
+  # Docker: the container's root wrote these; give them back. (Rootless podman maps root to the caller.)
+  chown -R "$HOST_UID:$HOST_GID" "$out" "$root/build-helper-$backend" "${CCACHE_DIR:-/ccache}" 2>/dev/null || true
+fi
+echo "package-helper: $(du -h "$out/$name.tar.zst" | cut -f1) $out/$name.tar.zst"
 echo "$out/$name.tar.zst"

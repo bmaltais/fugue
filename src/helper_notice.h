@@ -15,12 +15,14 @@ class HelperNotice : public QObject {
     QML_ELEMENT
     Q_PROPERTY(bool shown READ shown NOTIFY shownChanged)
     Q_PROPERTY(QString command READ command CONSTANT)
+    Q_PROPERTY(bool pacman READ pacman CONSTANT) // the command is pacman's; else it downloads the tarball
 
 public:
     explicit HelperNotice(QObject *parent = nullptr);
 
     bool shown() const { return m_shown; }
     QString command() const { return CudaHelperNotice::command(); }
+    bool pacman() const { return CudaHelperNotice::usesPacman(); }
 
     Q_INVOKABLE void copy();
     Q_INVOKABLE void dismiss();
