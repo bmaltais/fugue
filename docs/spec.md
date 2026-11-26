@@ -3745,8 +3745,11 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   keep one run per tab in it, so the queue never grows; the window losing the focus changes nothing (the queue is the cap).
   Nothing is armed or polled while both are off (no timer runs). Both switches are Tab stops and Space or Enter flips them;
   they are hidden while the app has a problem (Run cannot).
-- **Controls per kind** (#386, `AppInput.qml` picks, no control for an input the block does not bind): *text*, a well of
-  several lines for the prompt roles (Enter is a new line, Tab leaves it) and a line for the rest; *number*, a drag field with
+- **Controls per kind** (#386, `AppInput.qml` picks, no control for an input the block does not bind): *text*, always a
+  wrapping well that grows with its text up to 8 lines, then scrolls (#567; a long default reads whole, never as one line
+  that scrolls sideways): the prompt roles start three lines tall, any other text one line tall. Enter is a new line only for
+  the prompt roles and a target whose widget is `multiline`; in any other text Enter types nothing and a pasted line break
+  becomes a space. Tab leaves it, Ctrl+Enter runs; *number*, a drag field with
   its range (`min` and `max`) as a slider with the value in a small editable field at its end (`AppSlider.qml`: a press or drag sets
   it, arrows step, a double click puts back the default), else a typed field (empty means the workflow's own); *toggle*, a switch (Space or Enter);
   *choice*, a drop-down; *seed*, one row of the height of the other fields: the number, a small dice for a new

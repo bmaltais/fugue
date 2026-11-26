@@ -98,7 +98,7 @@ Item {
                                : root.field.kind === "image" ? imageInput
                                : root.field.kind === "mask" ? maskInput
                                : root.field.kind === "model" ? modelInput
-                               : root.field.multiline === true ? areaInput : textInput
+                               : areaInput
             }
         }
     }
@@ -110,6 +110,8 @@ Item {
             width: parent?.width ?? 0
             look: root.look
             label: root.field.label
+            minLines: root.field.minLines ?? 3
+            singleLine: root.field.multiline !== true
             text: root.current === undefined || root.current === null ? "" : String(root.current)
             onEdited: t => {
                 root.current = t
@@ -151,20 +153,6 @@ Item {
             field: root.field
             appView: root.appView
             look: root.look
-        }
-    }
-    Component {
-        id: textInput
-        AppField {
-            objectName: "appInput-" + root.field.key
-            look: root.look
-            width: parent?.width ?? 0
-            text: root.current === undefined || root.current === null ? "" : String(root.current)
-            label: root.field.label
-            onTextEdited: {
-                root.current = text
-                root.edited(root.field.key, text)
-            }
         }
     }
     Component {
