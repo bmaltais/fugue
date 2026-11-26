@@ -625,6 +625,33 @@ private slots:
         QVERIFY(row.value("hint2").toString().contains("Not counted"));
         for (const QString &touched : std::as_const(m_touched))
             QVERIFY2(!touched.startsWith(m_mnt), qPrintable("touched " + touched));
+        // Its pinned layout does not make it a download choice or the default, and no statfs asks about it.
+        QStringList asked;
+        setup.setFreeSpace([&asked](const QString &folder) { asked << folder; return qint64(100) * 1000 * 1000 * 1000; });
+        for (const QVariant &choice : setup.choices())
+            QVERIFY(!choice.toMap().value("value").toString().startsWith(m_mnt));
+        QCOMPARE(setup.download(), dataDir() + "/models");
+        for (const QString &folder : std::as_const(asked))
+            QVERIFY2(!folder.startsWith(m_mnt), qPrintable("asked " + folder));
+        // The yes keeps the root as it is, and still stats nothing there.
+        setup.apply();
+        QCOMPARE(readSettings(settingsPath()).settings.modelPaths, QStringList{m_mnt + "/d/models"});
+    }
+
+    // A row ticked and then left off does not hold the yes while its job runs.
+    void aTickedThenUntickedBusyRowDoesNotHoldTheYes() {
+        touchFile(m_home + "/invokeai/invokeai.yaml");
+        touchFile(m_home + "/invokeai/models/sdxl/main/x.safetensors", 100);
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        searchAll(setup);
+        const QString row = rowOf(setup.rows(), "invokeai/models").value("path").toString();
+        setup.setRowOn(row, true);
+        QVERIFY(!setup.primaryEnabled());
+        setup.setRowOn(row, false);
+        QVERIFY(setup.primaryEnabled());
     }
 
     // A found folder is "slow to write to" by where it really is, not only by the path it was found as.

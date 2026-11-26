@@ -200,7 +200,17 @@ Reply modelFindFolders(const Command &command, Context &context) {
             }
         }
     }
+    const QList<FinderLocation> named = chosen;
     chosen = finderLocations(env, chosen); // the existing ones among them, with their resolved paths
+    if (command.has("only"))
+        for (const FinderLocation &place : named)
+            if (std::none_of(chosen.begin(), chosen.end(), [&place](const FinderLocation &c) { return c.id == place.id; })) {
+                Error error = makeError("usage", QStringLiteral("%1 is not there (or leads onto a network drive), so it cannot be searched.").arg(place.path),
+                                        "Name a place that exists, by its path or id.");
+                for (const FinderLocation &candidate : std::as_const(table))
+                    error.valid.append(candidate.path);
+                return Reply::failure(error);
+            }
     // What was left off is kept out of by its written path alone: reading its links would be touching it.
     QList<FinderLocation> offered = chosen;
     for (const FinderLocation &place : std::as_const(table))

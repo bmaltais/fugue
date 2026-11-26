@@ -413,15 +413,22 @@ QString SettingsModel::markModelSetup(const QString &state) {
     return {};
 }
 
-QVariantMap SettingsModel::applyModelSetup(const QVariantList &folders, const QString &download, bool markDone) {
+QVariantMap SettingsModel::applyModelSetup(const QVariantList &folders, const QString &download, bool markDone, const QStringList &notLookedInto) {
     auto failed = [](const QString &why) { return QVariantMap{{"error", why}, {"added", 0}, {"removed", 0}, {"vanished", 0}}; };
     loadSettings(); // what the file holds now: a change made since the sheet opened (the CLI's, an editor's) is kept
     if (!m_file.writable)
         return failed(tr("Fix %1 first: it is not a JSON object.").arg(tilde(m_path)));
     const QString own = ModelLibrary::roots(m_effective.settings).value(0);
     QSet<QString> roots; // canonical, every root in effect (the Default's too): a folder is added once
-    for (const QString &root : ModelLibrary::roots(m_effective.settings))
+    QSet<QString> rootPaths; // as written: a folder that is one already needs no stat
+    for (const QString &root : ModelLibrary::roots(m_effective.settings)) {
+        rootPaths.insert(root);
+        if (notLookedInto.contains(root)) { // in a place the person left off: nothing is stat'd there
+            roots.insert(root);
+            continue;
+        }
         roots.insert(QFileInfo(root).canonicalFilePath().isEmpty() ? root : QFileInfo(root).canonicalFilePath());
+    }
     QStringList list = m_file.settings.modelPaths;
     for (const QString &path : m_effective.settings.inheritedModelPaths)
         list.removeAll(path); // the project's own entries only
@@ -440,6 +447,8 @@ QVariantMap SettingsModel::applyModelSetup(const QVariantList &folders, const QS
                 }
             continue;
         }
+        if (rootPaths.contains(path))
+            continue; // already a model folder: the person's own entry stays as it is
         const QFileInfo info(path);
         if (!info.isDir()) {
             ++vanished;

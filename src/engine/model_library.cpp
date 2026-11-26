@@ -145,16 +145,16 @@ constexpr int kFilesRead = 8;
 constexpr int kSampleDepth = 3;
 
 // Up to kFilesRead model files under `folder`, in name order, depth first, listed by `lister` (the finder's guarded one, or QDir's).
-void sample(const ModelLibrary::DirLister &lister, const std::atomic<bool> *cancel, const QString &folder, int depth, QStringList &out) {
+void sample(const ModelLibrary::DirLister &lister, const std::function<bool()> &stop, const QString &folder, int depth, QStringList &out) {
     QList<ModelLibrary::DirEntry> entries;
-    if ((cancel && cancel->load()) || !lister(folder, entries))
+    if ((stop && stop()) || !lister(folder, entries))
         return;
     for (const ModelLibrary::DirEntry &entry : std::as_const(entries)) {
-        if (out.size() >= kFilesRead || (cancel && cancel->load()))
+        if (out.size() >= kFilesRead || (stop && stop()))
             return;
         if (entry.isDir) {
             if (depth < kSampleDepth)
-                sample(lister, cancel, entry.path, depth + 1, out);
+                sample(lister, stop, entry.path, depth + 1, out);
         } else if (hasExtension(entry.name, {QStringLiteral(".safetensors"), QStringLiteral(".gguf")})) {
             out << entry.path;
         }
@@ -227,7 +227,7 @@ bool ModelLibrary::layoutFromFolders(const QHash<QString, QString> &typeOfFolder
 }
 
 QString ModelLibrary::detectKind(const QString &root, const QHash<QString, QString> &typeOfFolder,
-                                 const QHash<QString, QString> &typeOfFiles, const DirLister &listing, const std::atomic<bool> *cancel) {
+                                 const QHash<QString, QString> &typeOfFiles, const DirLister &listing, const std::function<bool()> &stop) {
     const DirLister &lister = listing ? listing : DirLister(listWithQDir);
     QList<DirEntry> top;
     if (!lister(root, top))
@@ -244,10 +244,10 @@ QString ModelLibrary::detectKind(const QString &root, const QHash<QString, QStri
         return kLayout;
     // Else the type whose files most of a few of its files are (pack.json "files").
     QStringList files;
-    sample(lister, cancel, root, 0, files);
+    sample(lister, stop, root, 0, files);
     QHash<QString, int> votes;
     for (const QString &file : std::as_const(files)) {
-        if (cancel && cancel->load())
+        if (stop && stop())
             return {};
         if (const std::optional<ModelShape> shape = ModelShapes::shared().of(file); shape && shape->kind)
             ++votes[modelKindName(*shape->kind)];

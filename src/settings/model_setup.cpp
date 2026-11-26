@@ -563,7 +563,7 @@ QString ModelSetup::defaultDownload() const {
     QString best = ownRoot();
     qint64 biggest = -1;
     for (const Row &row : m_rows) {
-        if (row.inherited || !row.on || row.busy || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
+        if (row.inherited || !row.on || row.busy || row.found.leftOff || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
             continue;
         if (slowToWriteTo(row))
             continue; // a network or removable drive is a choice the person makes, never the default
@@ -591,7 +591,21 @@ bool ModelSetup::slowToWriteTo(const Row &row) const {
 }
 
 // Free bytes where a folder is, asked once for each folder (a statfs is not asked again every time the sheet changes).
+// Whether `path` is in a place the person left off (as written or as resolved): nothing is asked of it, not even a statfs.
+bool ModelSetup::inLeftOffPlace(const QString &path) const {
+    for (const FinderLocation &place : m_locations) {
+        if (!m_unticked.contains(place.id))
+            continue;
+        for (const QString &where : {place.path, place.resolved, place.scope, place.resolvedScope})
+            if (!where.isEmpty() && (path == where || path.startsWith(where + QLatin1Char('/'))))
+                return true;
+    }
+    return false;
+}
+
 qint64 ModelSetup::freeSpace(const QString &path) const {
+    if (inLeftOffPlace(path))
+        return -1; // unknown, no I/O
     const auto it = m_freeCache.constFind(path);
     if (it != m_freeCache.constEnd())
         return it.value();
@@ -616,7 +630,7 @@ QVariantList ModelSetup::choices() const {
     list.append(entry(own, ReadinessSheet::rootTitle(own, own)));
     QList<const Row *> picked;
     for (const Row &row : m_rows)
-        if (!row.inherited && row.on && row.writable && row.kind == ModelLibrary::kLayout && row.found.tool != QLatin1String("InvokeAI"))
+        if (!row.inherited && row.on && !row.found.leftOff && row.writable && row.kind == ModelLibrary::kLayout && row.found.tool != QLatin1String("InvokeAI"))
             picked << &row;
     std::stable_sort(picked.begin(), picked.end(), [](const Row *a, const Row *b) { return a->found.size > b->found.size; });
     for (const Row *row : std::as_const(picked))
@@ -692,8 +706,8 @@ bool ModelSetup::primaryEnabled() const {
     if (m_looking)
         return false;
     for (const Row &row : m_rows)
-        if (row.busy)
-            return false; // a folder still being counted
+        if (row.busy && (row.on || row.inUse))
+            return false; // a folder still being counted (one ticked and then left off does not hold the yes)
     for (const Row &row : m_rows)
         if (row.on && !row.inherited && row.kind.isEmpty() && !row.inUse && row.found.tool != QLatin1String("InvokeAI"))
             return false; // a folder the person must say what it holds first
@@ -747,7 +761,11 @@ void ModelSetup::apply() {
     int left = 0;
     const QVariantList folders = foldersToWrite(&left);
     const QString chosen = download();
-    const QVariantMap result = m_settings->applyModelSetup(folders, chosen, m_firstRun);
+    QStringList leftOff; // roots in a place left off: the yes stats nothing there
+    for (const Row &row : std::as_const(m_rows))
+        if (row.found.leftOff)
+            leftOff << row.path;
+    const QVariantMap result = m_settings->applyModelSetup(folders, chosen, m_firstRun, leftOff);
     if (!result.value("error").toString().isEmpty()) {
         m_message = result.value("error").toString();
         emit changed();

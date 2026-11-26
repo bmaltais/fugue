@@ -259,6 +259,11 @@ public:
             return false;
         if (deadline < 0)
             deadline = m_listDeadline;
+        if (deadline >= 0 && m_env.now() > deadline) {
+            if (tooMany)
+                *tooMany = true; // out of time before it began
+            return false;
+        }
         touch(dir);
         DIR *handle = opendir(QFile::encodeName(dir).constData());
         if (!handle)
@@ -329,6 +334,9 @@ public:
     }
     // The listing detectKind() and the InvokeAI sampling go by: the finder's own, so no place left off and no link is followed blindly,
     // and it stops at `deadline`.
+    std::function<bool()> stopAt(qint64 deadline) const {
+        return [this, deadline] { return cancelled() || m_env.now() > deadline; };
+    }
     ModelLibrary::DirLister lister(qint64 deadline) const {
         return [this, deadline](const QString &dir, QList<ModelLibrary::DirEntry> &out) {
             QList<Entry> entries;
@@ -536,9 +544,9 @@ public:
         m_listDeadline = deadline;
         const ModelLibrary::DirLister listing = lister(deadline);
         const auto kindOf = [&](const QString &dir) {
-            if (blocked(dir) || cancelled())
+            if (blocked(dir) || cancelled() || m_env.now() > deadline)
                 return QString();
-            const QString kind = ModelLibrary::detectKind(dir, m_types.typeOfFolder, m_types.typeOfFiles, listing, m_env.cancel);
+            const QString kind = ModelLibrary::detectKind(dir, m_types.typeOfFolder, m_types.typeOfFiles, listing, stopAt(deadline));
             return kind == ModelLibrary::kLayout ? QString() : kind;
         };
         QList<Entry> level1;
@@ -630,7 +638,7 @@ public:
         folder.tool = toolName(real);
         // What it holds is kindOf()'s decision, made here on the worker from plain values; a folder of one kind keeps its top-level files.
         if (readHeaders)
-            folder.kind = ModelLibrary::detectKind(real, m_types.typeOfFolder, m_types.typeOfFiles, lister(deadline), m_env.cancel);
+            folder.kind = ModelLibrary::detectKind(real, m_types.typeOfFolder, m_types.typeOfFiles, lister(deadline), stopAt(deadline));
         else
             folder.kind = ModelLibrary::layoutFromFolders(m_types.typeOfFolder, typeDirs.keys(), holdsModels(entries)) ? ModelLibrary::kLayout : QString();
         folder.layout = folder.kind == ModelLibrary::kLayout;

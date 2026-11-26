@@ -91,6 +91,13 @@ private slots:
         QVERIFY(!QFileInfo::exists(m_dir.filePath("config/fugue/settings.json")));
     }
 
+    void aPlaceThatIsNamedButNotThereIsAUsageError() {
+        int exitCode = -1;
+        const QJsonObject reply = run({"--only", home() + "/ComfyUI/models"}, &exitCode); // a usual place, not made here
+        QCOMPARE(exitCode, 1);
+        QCOMPARE(reply.value("errors").toArray().at(0).toObject().value("code").toString(), QStringLiteral("usage"));
+    }
+
     void aPlaceItCannotSearchIsAUsageError() {
         int exitCode = -1;
         const QJsonObject reply = run({"--only", m_dir.filePath("nowhere")}, &exitCode);

@@ -157,6 +157,7 @@ private:
     FinderJob makeJob() const;
     QList<FinderLocation> tickedLocations() const;
     qint64 freeSpace(const QString &path) const;
+    bool inLeftOffPlace(const QString &path) const;
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
