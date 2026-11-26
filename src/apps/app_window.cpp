@@ -1,15 +1,17 @@
 #include "apps/app_window.h"
 
-#include <algorithm>
+#include <chrono>
 #include <functional>
 #include <memory>
+
+#include <QJsonDocument>
 
 #include "apps/app_launcher.h"
 #include "apps/app_shelf.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/providers.h"
-#include "engine/remote_placement.h"
+#include "engine/paired_placement.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 #include "workflow/readiness_sheet.h"
@@ -18,7 +20,7 @@
 namespace fugue {
 
 void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunService &service, CommandRegistry &commands,
-                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf) {
+                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf, PairedProbe probeSource) {
     const auto shown = std::make_shared<QString>(); // the tab given to the view last, so a title change does not give it again
     const auto give = [&view, &workflows, &canvas, shown](bool force) {
         const QVariantList tabs = workflows.tabs();
@@ -49,56 +51,50 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // The Needs panel (#469): the shown app's missing models and packs, from the Get ready sheet's own plan, looked at only while the
     // shown workflow is an app that lacks something; its actions go through the paths the window already has.
     NeedsModel *needs = view.needs();
-    // The app runs on the paired helper when its models are not here, that host answers, and it can take every node that needs them
-    // (#395, #491): "Runs on <host>" says so. Whether the host has the model files cannot be asked (describe lists no model of a
-    // helper that takes its files in the job), so the rows of the models stay, marked as the host's if it has them (#493). A host
-    // that cannot take a node leaves the rows and adds the node and why (`blocked`).
-    const auto blocked = std::make_shared<Errors>();
-    view.setPlacementSource([&workflows, &canvas, registry = view.registry(), needs, blocked, capabilityOf = std::move(capabilityOf)](std::function<void(const QString &)> done) {
-        const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-        probePairedHelpers(instances ? instances.value() : QList<ProviderInstance>(),
-                           [&workflows, &canvas, registry, needs, blocked, capabilityOf, instances = instances ? instances.value() : QList<ProviderInstance>(),
-                            done = std::move(done)](const QMap<QString, Description> &answered) {
-            blocked->clear();
-            QString host; // the first helper, in the user's order, that answered
-            for (const ProviderInstance &instance : instances)
-                if (host.isEmpty() && answered.contains(instance.name))
-                    host = instance.name;
-            if (!host.isEmpty()) {
-                RemotePlacement placement;
-                placement.instances = instances;
-                placement.capabilityOf = capabilityOf;
-                placement.registry = registry;
-                for (auto it = answered.cbegin(); it != answered.cend(); ++it) { // what each said just now, not a file read back
-                    QStringList capabilities;
-                    for (const CapabilityOffer &offer : it->capabilities)
-                        capabilities << offer.capability;
-                    placement.hostCapabilities.insert(it.key(), capabilities);
-                }
-                *blocked = remoteRunProblems(canvas.document(), workflows.readiness()->currentPlan(), placement);
-            }
-            if (!blocked->isEmpty())
-                needs->refreshSoon(); // the answer is "not there", which changes nothing the view signals: the panel names the nodes now
-            done(blocked->isEmpty() ? host : QString());
+    // Where the app runs when its models are not here (#395, #491, #581): the paired verdict of engine/paired_placement.h, the CLI's
+    // too. It is made again, asynchronously, whenever the plan or the document changes (a recent answer of the hosts is reused), and
+    // the line and the panel read the last one made. "Runs on <hosts>" when every node that needs a model has a host that answered; a
+    // silent host is said ("<host> is not answering") and the model rows stay; a node no host can take is named with why (`blocked`).
+    // Whether the host has the model files cannot be asked (describe lists no model of a helper that takes its files in the job), so
+    // the rows of the models stay, marked as the host's if it has them (#493).
+    struct Placement {
+        QByteArray key; // the plan and document the verdict is for; empty before any
+        PairedVerdict verdict;
+    };
+    const auto placement = std::make_shared<Placement>();
+    const auto probe = keptPairedProbe(probeSource ? std::move(probeSource) : livePairedProbe(), std::chrono::seconds(30));
+    const auto decide = [&canvas, registry = view.registry(), needs, placement, probe,
+                         capabilityOf = std::move(capabilityOf)](const ReadinessPlan &plan) {
+        const Document document = canvas.document();
+        const QByteArray key = QJsonDocument(plan.toJson()).toJson(QJsonDocument::Compact) + QJsonDocument(document.toJson()).toJson(QJsonDocument::Compact);
+        if (key == placement->key)
+            return;
+        placement->key = key;
+        placement->verdict = {};
+        PairedPlacementRequest request;
+        if (const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath()); instances)
+            request.instances = instances.value();
+        request.capabilityOf = capabilityOf;
+        request.registry = registry;
+        decidePairedPlacement(document, plan, request, probe, [placement, needs, key](const PairedVerdict &verdict) {
+            if (placement->key != key)
+                return; // the plan or the document changed while the hosts were asked
+            placement->verdict = verdict;
+            needs->refreshSoon(); // the answer may be "not there" or "not answering", which changes nothing the view signals
         });
-    });
-    needs->setPlanSource([&view, &workflows, blocked] {
+    };
+    needs->setPlanSource([&view, &workflows, placement, decide] {
         if (!view.isApp() || !workflows.missingSomething()) {
-            view.askPlacement(false);
+            placement->key.clear();
+            placement->verdict = {};
+            view.setPairedHosts({}, {});
             return ReadinessPlan();
         }
-        ReadinessPlan plan = workflows.readiness()->currentPlan();
-        const auto isDownloadProblem = [](const Error &problem) {
-            return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
-        };
-        view.askPlacement(!plan.models.isEmpty() || std::any_of(plan.problems.cbegin(), plan.problems.cend(), isDownloadProblem));
-        if (!view.runsOn().isEmpty()) {
-            for (ReadinessModel &model : plan.models)
-                model.onHost = view.runsOn();
-        } else {
-            plan.problems += *blocked;
-        }
-        return plan;
+        const ReadinessPlan plan = workflows.readiness()->currentPlan();
+        decide(plan);
+        const PairedVerdict &verdict = placement->verdict;
+        view.setPairedHosts(verdict.runsOn() ? verdict.hosts().join(QStringLiteral(", ")) : QString(), verdict.silent.join(QStringLiteral(", ")));
+        return planUnder(plan, verdict);
     });
     QObject::connect(&view, &AppView::runsOnChanged, needs, &NeedsModel::refreshSoon);
     // A node routed to a service off this machine (#404) is said on the same "Runs on" line.

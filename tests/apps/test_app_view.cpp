@@ -144,52 +144,34 @@ private slots:
             [this](const QString &run) { m_cancelled << run; }, &m_registry);
     }
 
-    // #395: where the app runs. The source is the window's probe of the paired helper; the store only asks it once per tab.
-    void theFormSaysWhereItRunsWhenItsModelsAreOnlyOnTheAnsweringHost() {
-        int asked = 0;
-        std::function<void(const QString &)> answer;
-        m_view->setPlacementSource([&](std::function<void(const QString &)> done) { ++asked; answer = std::move(done); });
+    // #395, #581: where the app runs is the window's paired verdict, given as hosts or as a silent host; a tab shown again clears it, and a
+    // service off this machine (#404) takes the place of both.
+    void theFormSaysWhereItRunsOrThatTheHostIsNotAnswering() {
         QSignalSpy changed(m_view.get(), &AppView::runsOnChanged);
         m_view->show("a", load(workflow()), {});
-        QVERIFY(m_view->runsOn().isEmpty());
+        QVERIFY(m_view->runsOn().isEmpty() && m_view->silentHost().isEmpty());
 
-        m_view->askPlacement(false); // models are here: nothing is asked
-        QCOMPARE(asked, 0);
-        m_view->askPlacement(true);
-        m_view->askPlacement(true); // once per tab
-        QCOMPARE(asked, 1);
-        answer("gx10");
-        QCOMPARE(m_view->runsOn(), QString("gx10"));
+        m_view->setPairedHosts("gx10, gx11", {});
+        QCOMPARE(m_view->runsOn(), QString("gx10, gx11"));
         QCOMPARE(changed.size(), 1);
-
-        m_view->show("b", load(workflow()), {}); // another tab: not its host, asked again
+        m_view->setPairedHosts("gx10, gx11", {}); // nothing changed
+        QCOMPARE(changed.size(), 1);
+        m_view->setPairedHosts({}, "gx10"); // the host went quiet: no host is named
         QVERIFY(m_view->runsOn().isEmpty());
-        m_view->askPlacement(true);
-        QCOMPARE(asked, 2);
-        m_view->show("a", load(workflow()), {}); // an answer that comes after the tab changed is dropped
-        answer("gx10");
-        QVERIFY(m_view->runsOn().isEmpty());
-
-        m_view->askPlacement(true);
-        answer("");  // the host does not answer: it runs here
-        QVERIFY(m_view->runsOn().isEmpty());
-        m_view->askPlacement(true);
-        answer("gx10");
-        m_view->askPlacement(false); // the models arrived here
-        QVERIFY(m_view->runsOn().isEmpty());
-    }
-
-    // #404: a node routed to a service off this machine is said on the same line, and takes the paired host's place.
-    void theSameLineNamesAServiceOffThisMachine() {
-        QSignalSpy changed(m_view.get(), &AppView::runsOnChanged);
-        m_view->show("a", load(workflow()), {});
-        m_view->setOffMachine("Cloud (api.example.com)");
+        QCOMPARE(m_view->silentHost(), QString("gx10"));
+        m_view->setOffMachine("Cloud (api.example.com)"); // a service off this machine is the one line
         QCOMPARE(m_view->runsOn(), QString("Cloud (api.example.com)"));
-        QCOMPARE(changed.size(), 1);
+        QVERIFY(m_view->silentHost().isEmpty());
+        QCOMPARE(changed.size(), 3);
         m_view->setOffMachine("Cloud (api.example.com)"); // nothing changed
-        QCOMPARE(changed.size(), 1);
+        QCOMPARE(changed.size(), 3);
         m_view->setOffMachine({});
-        QVERIFY(m_view->runsOn().isEmpty());
+        QCOMPARE(m_view->silentHost(), QString("gx10"));
+
+        m_view->show("a", load(workflow()), {}); // the same tab again keeps it
+        QCOMPARE(m_view->silentHost(), QString("gx10"));
+        m_view->show("b", load(workflow()), {}); // another tab: not its host
+        QVERIFY(m_view->runsOn().isEmpty() && m_view->silentHost().isEmpty());
     }
 
     void aWorkflowWithoutABlockIsNoApp() {

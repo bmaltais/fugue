@@ -154,46 +154,28 @@ void AppView::setDownloads(ModelDownloads *downloads) {
         m_models->setDownloads(downloads);
 }
 
-void AppView::askPlacement(bool modelsAreElsewhere) {
-    if (!modelsAreElsewhere || !m_app || !m_placement) {
-        m_placementTab.clear();
-        setRunsOn({});
+void AppView::setPairedHosts(const QString &runsOn, const QString &silentHost) {
+    if (runsOn == m_runsOn && silentHost == m_silentHost)
         return;
-    }
-    if (m_placementTab == m_tab)
-        return; // asked for this tab already
-    m_placementTab = m_tab;
-    const QString tab = m_tab;
-    const QPointer<AppView> self(this);
-    m_placement([self, tab](const QString &host) {
-        if (self && self->m_tab == tab && self->m_placementTab == tab)
-            self->setRunsOn(host);
-    });
-}
-
-void AppView::setRunsOn(const QString &host) {
-    if (host == m_runsOn)
-        return;
-    const QString before = runsOn();
-    m_runsOn = host;
-    if (runsOn() != before)
+    const QString before = this->runsOn(), silentBefore = this->silentHost();
+    m_runsOn = runsOn;
+    m_silentHost = silentHost;
+    if (this->runsOn() != before || this->silentHost() != silentBefore)
         emit runsOnChanged();
 }
 
 void AppView::setOffMachine(const QString &services) {
     if (services == m_offMachine)
         return;
-    const QString before = runsOn();
+    const QString before = runsOn(), silentBefore = silentHost();
     m_offMachine = services;
-    if (runsOn() != before)
+    if (runsOn() != before || silentHost() != silentBefore)
         emit runsOnChanged();
 }
 
 void AppView::show(const QString &tab, const Document &document, const QString &file, const QString &templateFolder) {
-    if (tab != m_tab) { // another tab: where it runs is asked again
-        m_placementTab.clear();
-        setRunsOn({});
-    }
+    if (tab != m_tab) // another tab: where it runs is decided again
+        setPairedHosts({}, {});
     m_tab = tab;
     m_file = file;
     m_takesKey = !file.isEmpty() ? file : templateFolder.isEmpty() ? QString() : QDir(templateFolder).filePath("workflow.fugue");

@@ -17,6 +17,7 @@
 #include <QPointer>
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -28,7 +29,7 @@
 #include "engine/file_roots.h"
 #include "engine/providers.h"
 #include "engine/readiness.h"
-#include "engine/remote_placement.h"
+#include "engine/paired_placement.h"
 #include "engine/registry.h"
 #include "engine/share_package.h"
 #include "engine/templates.h"
@@ -213,85 +214,45 @@ ReadinessPlan planFor(const Loaded &loaded, const Document &document, Context &c
 
 bool isReady(const ReadinessPlan &plan) { return plan.empty() && plan.problems.isEmpty(); }
 
-// Only model files are missing here, and a helper on a paired host is configured: the run goes there and the host checks the
-// files (#395; a host that does not have them, or is gone, answers with an error of its own).
-// A model with no source to download from, or with one that cannot be used, is a `model_missing` or `download_failed` problem of the
-// plan: the host may have it all the same.
-bool onlyModelsMissing(const ReadinessPlan &plan) {
-    if (!plan.packs.isEmpty() || (plan.models.isEmpty() && plan.problems.isEmpty()))
-        return false;
-    return std::all_of(plan.problems.cbegin(), plan.problems.cend(), [](const Error &problem) {
-        return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
-    });
-}
-// Whether the paired helper can take the run: only models are missing and a helper is configured, and no node of the app is pinned to
-// a provider on this machine or needs what the helper does not offer (#491). `problems` says which node and why when the answer is
-// no because of that; it is empty when there is no helper, or something else than models is missing.
-bool mayRunOnHost(const ReadinessPlan &plan, const Document &document, Context &context, Errors &problems) {
-    if (!onlyModelsMissing(plan))
-        return false;
+// Where the app runs when its models are not here (#395, #491, #581): the one verdict of engine/paired_placement.h, waited for here.
+// The pins and what the hosts last said decide first; the hosts are asked (10 s at most each) only when those pass. `probe` keeps the
+// answers, so one command asks the hosts once whatever number of times it looks.
+PairedVerdict pairedVerdict(const ReadinessPlan &plan, const Document &document, Context &context, const PairedProbe &probe) {
     const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-    if (!instances || pairedHelperName(instances.value()).isEmpty())
-        return false;
-    RemotePlacement placement;
-    placement.instances = instances.value();
-    placement.capabilityOf = [&context](const QString &typeId) {
+    PairedPlacementRequest request;
+    request.instances = instances ? instances.value() : QList<ProviderInstance>();
+    request.registry = &context.registry;
+    request.capabilityOf = [&context](const QString &typeId) {
         const NodeType *type = context.registry.nodeType(typeId);
         const std::shared_ptr<ProviderKernel> kernel = type ? context.kernels.provider(*type) : nullptr;
         return kernel ? kernel->requirement(*type, {}).capability : QString();
     };
-    placement.registry = &context.registry;
-    // Pins decide without the host. Only when they pass is the host asked what it offers now (it may have gained a capability since it
-    // last answered: a refusal here never reaches the scheduler, which is what would update what is kept); what it last said stands
-    // in only for a host that does not answer.
-    problems = remoteRunProblems(document, plan, placement);
-    if (!problems.isEmpty())
-        return false;
-    QMap<QString, Description> answered;
-    {
-        // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared
-        // state, never in this frame, and quits no loop.
-        struct Wait {
-            QMap<QString, Description> answered;
-            bool finished = false;
-            QPointer<QEventLoop> loop;
-        };
-        const auto wait = std::make_shared<Wait>();
-        QEventLoop loop;
-        wait->loop = &loop;
-        QTimer limit;
-        limit.setSingleShot(true);
-        QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
-        probePairedHelpers(instances.value(), [wait](const QMap<QString, Description> &got) {
-            wait->answered = got;
-            wait->finished = true;
-            if (wait->loop)
-                wait->loop->quit();
-        });
-        limit.start(12000); // a describe on a paired host gives up after 10 s of silence
-        if (!wait->finished)
-            loop.exec();
-        wait->loop = nullptr;
-        if (wait->finished)
-            answered = wait->answered;
-    }
-    for (const ProviderInstance &instance : instances.value()) {
-        if (!instance.enabled || !isPairedHelper(instance))
-            continue;
-        std::optional<Description> offered;
-        if (answered.contains(instance.name))
-            offered = answered.value(instance.name);
-        else
-            offered = rememberedPairedHelper(instance);
-        if (!offered)
-            continue;
-        QStringList capabilities;
-        for (const CapabilityOffer &offer : offered->capabilities)
-            capabilities << offer.capability;
-        placement.hostCapabilities.insert(instance.name, capabilities);
-    }
-    problems = remoteRunProblems(document, plan, placement);
-    return problems.isEmpty();
+    // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared state, never
+    // in this frame, and quits no loop.
+    struct Wait {
+        std::optional<PairedVerdict> verdict;
+        QPointer<QEventLoop> loop;
+    };
+    const auto wait = std::make_shared<Wait>();
+    QEventLoop loop;
+    wait->loop = &loop;
+    QTimer limit;
+    limit.setSingleShot(true);
+    QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
+    decidePairedPlacement(document, plan, request, probe, [wait](const PairedVerdict &made) {
+        wait->verdict = made;
+        if (wait->loop)
+            wait->loop->quit();
+    });
+    limit.start(12000); // a describe on a paired host gives up after 10 s of silence
+    if (!wait->verdict)
+        loop.exec();
+    wait->loop = nullptr;
+    if (wait->verdict)
+        return *wait->verdict;
+    PairedVerdict none;
+    none.applies = true; // no word from the hosts in time: the same as silent, the run goes ahead
+    return none;
 }
 
 // The paired hosts that ran a node of the run (run.json: the nodes a provider that does not share this machine's files served), once each.
@@ -318,11 +279,11 @@ Error notReady(const Loaded &loaded, const ReadinessPlan &plan) {
 }
 
 // Why a run is refused: the nodes the paired host cannot serve (each named, with the `prepare` hint of the app), else what is not ready.
-Errors refused(const Loaded &loaded, const ReadinessPlan &plan, const Errors &hostProblems) {
-    if (hostProblems.isEmpty())
+Errors refused(const Loaded &loaded, const ReadinessPlan &plan, const PairedVerdict &verdict) {
+    if (verdict.blocked.isEmpty())
         return {notReady(loaded, plan)};
     const QString hint = notReady(loaded, plan).hint;
-    Errors errors = hostProblems;
+    Errors errors = verdict.blocked;
     for (Error &error : errors)
         error.hint = QStringLiteral("%1 %2").arg(error.hint, hint);
     return errors;
@@ -563,20 +524,32 @@ Reply appInfo(const Command &command, Context &context) {
                      {"inputs", inputs},
                      {"outputs", outputsJson(*loaded)},
                      {"ready", ready}};
-    Errors hostProblems;
-    if (!ready && mayRunOnHost(plan, loaded->document, context, hostProblems)) {
-        // Not here, but the paired helper is configured: Run goes there and the host checks the files (#395).
-        const QString host = pairedHelperName(loadProviderInstances(providersPath()).value());
-        data.insert("runs_on", host);
-        lines << QStringLiteral("Runs on %1: its models are not on this machine.").arg(host);
+    PairedVerdict placement;
+    if (!ready)
+        placement = pairedVerdict(plan, loaded->document, context, livePairedProbe());
+    if (placement.runsOn()) {
+        // Not here, but the paired helpers take it: Run goes there and the host checks the files (#395).
+        const QString hosts = placement.hosts().join(QStringLiteral(", "));
+        QJsonObject nodes;
+        for (auto it = placement.hostOf.cbegin(); it != placement.hostOf.cend(); ++it)
+            nodes.insert(it.key(), it.value());
+        data.insert("runs_on", hosts);
+        data.insert("runs_on_nodes", nodes);
+        lines << QStringLiteral("Runs on %1: its models are not on this machine.").arg(hosts);
+    }
+    if (!placement.silent.isEmpty()) {
+        // The only host that could take it does not answer (#581): not named as the host. A run still starts (a cached re-run can work).
+        const QString hosts = placement.silent.join(QStringLiteral(", "));
+        data.insert("silent_host", hosts);
+        lines << QStringLiteral("%1 is not answering: its models are not on this machine.").arg(hosts);
     }
     if (!ready) {
         data.insert("needs", plan.toJson());
         lines << QStringLiteral("Not ready: %1").arg(notReady(*loaded, plan).message);
         // A paired helper is there, but it cannot take these nodes (#491): which node and why.
-        if (!hostProblems.isEmpty()) {
-            data.insert("host_problems", toJson(hostProblems));
-            for (const Error &problem : hostProblems)
+        if (!placement.blocked.isEmpty()) {
+            data.insert("host_problems", toJson(placement.blocked));
+            for (const Error &problem : placement.blocked)
                 lines << problem.message;
         }
     }
@@ -634,9 +607,10 @@ Reply appRun(const Command &command, Context &context) {
 
     // Ready before the block is checked: a missing pack leaves nodes the block names unknown.
     const ReadinessPlan plan = planFor(*loaded, loaded->document, context);
-    Errors hostProblems;
-    if (!isReady(plan) && !mayRunOnHost(plan, loaded->document, context, hostProblems))
-        return Reply::failure(refused(*loaded, plan, hostProblems));
+    const PairedProbe probe = keptPairedProbe(livePairedProbe(), std::chrono::minutes(1)); // one question to the hosts per command
+    if (!isReady(plan))
+        if (const PairedVerdict placement = pairedVerdict(plan, loaded->document, context, probe); !placement.allowsRun())
+            return Reply::failure(refused(*loaded, plan, placement));
     if (const Errors invalid = app::checkApp(loaded->app, loaded->document, context.registry); hasErrors(invalid))
         return Reply::failure(invalid);
 
@@ -645,8 +619,9 @@ Reply appRun(const Command &command, Context &context) {
         return Reply::failure(bound.errors());
     // A model picked with --input has to be here too.
     if (!values->isEmpty())
-        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen) && !mayRunOnHost(chosen, *bound, context, hostProblems))
-            return Reply::failure(refused(*loaded, chosen, hostProblems));
+        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen))
+            if (const PairedVerdict placement = pairedVerdict(chosen, *bound, context, probe); !placement.allowsRun())
+                return Reply::failure(refused(*loaded, chosen, placement));
     if (command.has("out")) {
         const QString dir = QDir(command.value("out")).absolutePath();
         // 13.6: judged before the folder is made, so a refused --out leaves nothing behind.

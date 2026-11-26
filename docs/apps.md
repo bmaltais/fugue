@@ -43,5 +43,8 @@ fugue app export restyle restyle.fugueapp
 fugue --app restyle                  # its own window
 ```
 
+When an app's models are not on this machine and a paired helper is set up, `app info` says "Runs on gx10" if it answers, or "gx10 is
+not answering" if not (the window says the same above Run); a node no helper can take is named with why, before anything runs.
+
 `app run` prints the files the app's output made, one per line (`--json` for the data). An id is a template's name or the path to a
 workflow file. See [spec 13](spec.md#13-cli-and-agent-interface) for every option.

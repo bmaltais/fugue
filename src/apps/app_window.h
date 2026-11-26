@@ -15,6 +15,7 @@
 
 #include "apps/app_ref.h"
 #include "apps/app_view.h"
+#include "engine/paired_placement.h"
 
 class CanvasModel;
 
@@ -29,9 +30,10 @@ class Workflows;
 
 // Call after CanvasRuns::registerCommands (the handlers of run.* are replaced). Everything must outlive the window.
 // `capabilityOf` says which capability a node type asks a provider for (empty for a type that is none): with it the Needs panel names the
-// node a paired helper cannot take (#491); without it the host is taken to serve every node.
+// node a paired helper cannot take (#491); without it no node is placed or refused. `probe` asks the paired hosts what they offer (a test
+// gives a fake; the default asks them, probePairedHelpers).
 void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunService &service, CommandRegistry &commands,
-                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf = {});
+                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf = {}, PairedProbe probe = {});
 
 // The App | Graph switch's shelf states (call after bindAppView): on the shelf the Graph segment is Start blank and the App segment is
 // chosen; on the empty graph Start blank gave, the App segment brings the shelf back. view.toggle-app does the same as the other segment.
