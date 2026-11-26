@@ -94,14 +94,23 @@ menu_command() {
   tour_fail "no menu holds the command $command"
 }
 
-# probe_gone QUERY [seconds]: wait until nothing matches any more (false after the limit).
+# probe_gone QUERY [seconds]: wait until a reply says nothing matches any more. Returns 0 then, 1 when something still
+# matches after the limit, and 2 when the app stopped answering (a failed probe is never taken for "gone").
 probe_gone() {
-  local end=$((SECONDS + ${2:-60}))
+  local end=$((SECONDS + ${2:-60})) found
   while ((SECONDS < end)); do
-    probe_all "$1" | grep -q . || return 0
+    found=$(probe_all "$1") || return 2
+    [[ -z $found ]] && return 0
     sleep 0.5
   done
   return 1
+}
+
+# probe_count QUERY: how many items match; fails (and prints nothing) when the app does not answer.
+probe_count() {
+  local found
+  found=$(probe_all "$1") || return 1
+  grep -c . <<<"$found" || true
 }
 
 # template_open ID: File > Browse templates, type the template's id in the search (it matches ids, so one card is left),

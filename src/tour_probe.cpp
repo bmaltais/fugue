@@ -57,7 +57,7 @@ void startTourProbe(QQuickWindow *window, QObject *parent) {
                 continue;
             out += "? " + query.toUtf8() + '\n';
             for (QQuickItem *item : resolve(window, query.split('/', Qt::SkipEmptyParts))) {
-                const QRectF box(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height()));
+                const QRectF box = item->mapRectToScene(QRectF(0, 0, item->width(), item->height())); // a scaled view (after Fit) scales the size too
                 out += item->objectName().toUtf8() + ' ' + QByteArray::number(qRound(box.x())) + ' ' + QByteArray::number(qRound(box.y())) + ' '
                        + QByteArray::number(qRound(box.width())) + ' ' + QByteArray::number(qRound(box.height())) + '\n';
             }
