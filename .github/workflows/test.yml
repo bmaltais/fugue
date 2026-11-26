@@ -1,10 +1,15 @@
 name: Test
 
-# Not on every push to main: the suite is run locally before a merge (the repo's own workflow), so
-# the hosted runs are for a release (a v* tag), a pull request and by hand (workflow_dispatch).
+# The full suite runs locally before every merge, so a hosted run proves something only when it tests what the local
+# run cannot: a change to this workflow or to the package's dependency list, aarch64, or a release. So it runs on a
+# v* tag, on a pull request that changes this file or the PKGBUILD, once a week on main (aarch64 drift, and it keeps
+# the compiler cache warm for the tag), and by hand (workflow_dispatch). Owner, 2026-11-26.
 on:
   pull_request:
+    paths: [.github/workflows/test.yml, packaging/PKGBUILD]
   workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
   push:
     tags: ['v*']
 
@@ -44,9 +49,11 @@ jobs:
           pacman -S --noconfirm --needed base-devel ccache cmake dbus "${wanted[@]}"
 
       - name: Restore the compiler cache
-        # A new entry is saved on every run (the key has the commit); the newest older one is the start.
-        # It is restored before the chown below, so the build user owns it.
-        uses: actions/cache@v6
+        # The newest entry is the start. It is restored before the chown below, so the build user owns it.
+        # It is saved right after the build (below), not at the end of the job: a run that is cancelled or whose
+        # tests fail still keeps what it compiled. (With actions/cache's own end-of-job save, cancelled runs saved
+        # nothing, so every run compiled from scratch.)
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: test-ccache-${{ github.sha }}
@@ -64,6 +71,13 @@ jobs:
 
       - name: Build
         run: su tester -c bin/build
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: test-ccache-${{ github.sha }}
 
       - name: Test
         run: su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
@@ -89,7 +103,8 @@ jobs:
           submodules: true # the bundled templates: bmaltais/fugue-workflows, a public repo
 
       - name: Restore the compiler cache
-        uses: actions/cache@v6
+        # Saved right after the build, as in the x86 job.
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: test-aarch64-ccache-${{ github.sha }}
@@ -130,6 +145,13 @@ jobs:
 
       - name: Build
         run: docker exec arch su tester -c bin/build
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: test-aarch64-ccache-${{ github.sha }}
 
       - name: Test
         run: docker exec arch su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
