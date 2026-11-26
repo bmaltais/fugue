@@ -122,6 +122,13 @@ ApplicationWindow {
                 onTapped: App.workflows.readiness.show()
             }
             ViewButton {
+                objectName: "appNoticeUndo"
+                look: win.look
+                text: qsTr("Undo")
+                visible: App.workflows.noticeUndoable
+                onTapped: App.workflows.undoNotice()
+            }
+            ViewButton {
                 objectName: "appNoticeDismiss"
                 look: win.look
                 glyph: "x"

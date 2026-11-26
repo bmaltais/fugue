@@ -299,6 +299,8 @@ Rectangle {
                                 objectName: "appUseUndo-" + useRow.modelData.hash
                                 look: page.look
                                 text: qsTr("Undo")
+                                tip: useRow.modelData.size !== "" ? qsTr("Back to %1, which needs a download (%2)").arg(useRow.modelData.name).arg(useRow.modelData.size)
+                                                                  : qsTr("Back to %1, which needs a download").arg(useRow.modelData.name)
                                 anchors.verticalCenter: parent.verticalCenter
                                 onTapped: page.appView.undoUse(useRow.modelData.hash)
                             }

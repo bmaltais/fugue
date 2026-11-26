@@ -7,7 +7,7 @@ import "KitTone.js" as KitTone
 // A recessed glass track with a raised translucent thumb in the window's tone sliding to the chosen option. `options` is a list of
 // texts, `currentIndex` the chosen one; the control never sets it: a press or a key asks with `moved(index)` and the model decides.
 // Keys, one tab stop: Left and Right (mirrored right to left) move to the next option and choose it, Home and End the ends; Space and
-// Enter keep the choice. Each option is at least 7u wide to press and the widest text sets every option's width; a wider `width` is
+// Enter keep the choice (Enter goes up to the host when `keepsEnter` is false). Each option is at least 7u wide to press and the widest text sets every option's width; a wider `width` is
 // shared out equally. With Frost at 0 the track and thumb are opaque. Assistive tools hear a radio group named by `text`.
 Item {
     id: seg
@@ -20,6 +20,8 @@ Item {
     // A press takes the keyboard's place, so the arrows then move the choice; a chooser in the window bar (App | Graph) leaves it
     // where it was, as the bar's other buttons do.
     property bool focusOnPress: true
+    // Enter keeps the choice and stops there. A sheet whose Enter runs its primary sets this false, so the key goes up to it.
+    property bool keepsEnter: true
     signal moved(int index)
 
     readonly property color toneColor: tone === "" || look.params.controlColour === "accent" ? look.accent : look.tone(tone).glass
@@ -148,7 +150,8 @@ Item {
         case Qt.Key_Left: seg.choose(seg.currentIndex - dir); break
         case Qt.Key_Home: seg.choose(0); break
         case Qt.Key_End: seg.choose(seg.count - 1); break
-        case Qt.Key_Space: case Qt.Key_Return: case Qt.Key_Enter: break // the choice stays
+        case Qt.Key_Space: break // the choice stays
+        case Qt.Key_Return: case Qt.Key_Enter: if (!seg.keepsEnter) return; break // the choice stays, or the key goes up
         default: return
         }
         event.accepted = true

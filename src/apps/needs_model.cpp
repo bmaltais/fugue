@@ -109,23 +109,47 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
              {"action", QString()}},
             {});
 
+    // The headline counts what a download would fetch; the models the person has a file for are said after it.
+    int covered = 0, downloads = 0;
+    qint64 bytes = 0;
+    bool unknown = false;
+    for (const ReadinessModel &m : plan.models) {
+        const QString hash = m.entry.value("hash").toString();
+        if (m_useSource && !hash.isEmpty() && !m_useSource(hash).isEmpty()) {
+            ++covered;
+            continue;
+        }
+        ++downloads;
+        if (m.size >= 0)
+            bytes += m.size;
+        else
+            unknown = true;
+    }
     QStringList counts;
     if (const int n = int(plan.packs.size()))
         counts << tr("%n packs", nullptr, n);
-    if (const int n = int(plan.models.size()))
-        counts << (plan.downloadBytes > 0 ? tr("%n models (%1)", nullptr, n).arg((plan.unknownSizes ? tr("at least ") : QString()) + ModelDownloads::sizeText(plan.downloadBytes))
-                                          : tr("%n models", nullptr, n));
-    const QString headline = counts.isEmpty() ? (items.isEmpty() ? QString() : tr("This app cannot be made ready from this machine."))
-                                              : tr("This app needs %1.").arg(counts.join(tr(" and ")));
-    const bool atOnce = plan.packs.isEmpty() && !plan.models.isEmpty() && !plan.lowSpace()
+    if (downloads > 0)
+        counts << (bytes > 0 ? tr("%n models (%1)", nullptr, downloads).arg((unknown ? tr("at least ") : QString()) + ModelDownloads::sizeText(bytes))
+                             : tr("%n models", nullptr, downloads));
+    QString headline = counts.isEmpty() ? (items.isEmpty() || covered > 0 ? QString() : tr("This app cannot be made ready from this machine."))
+                                        : tr("This app needs %1.").arg(counts.join(tr(" and ")));
+    if (covered > 0 && counts.isEmpty())
+        headline = tr("This app needs %n models, and you have them on disk.", nullptr, covered);
+    else if (covered > 0)
+        headline += QLatin1Char(' ') + tr("You have %n on disk.", nullptr, covered);
+    const bool atOnce = covered == 0 && plan.packs.isEmpty() && !plan.models.isEmpty() && !plan.lowSpace()
                         && std::none_of(plan.models.cbegin(), plan.models.cend(), [](const ReadinessModel &m) { return m.deferred; });
+    const bool allCovered = covered > 0 && covered == int(plan.models.size()) && plan.packs.isEmpty() && plan.problems.isEmpty();
+    const QString action = allCovered ? QStringLiteral("use") : covered > 0 || !atOnce ? QStringLiteral("getReady") : QStringLiteral("downloadAll");
 
-    if (items == m_items && headline == m_headline && atOnce == m_atOnce)
+    if (items == m_items && headline == m_headline && atOnce == m_atOnce && covered == m_covered && action == m_action)
         return;
     m_items = items;
     m_entries = entries;
     m_headline = headline;
     m_atOnce = atOnce;
+    m_covered = covered;
+    m_action = action;
     emit changed();
 }
 
@@ -146,12 +170,27 @@ void NeedsModel::useOnDisk(int index) {
         return;
     const QVariantMap item = m_items.at(index).toMap();
     if (item.value("kind").toString() == QLatin1String("model") && !item.value("use").toMap().isEmpty())
-        emit useRequested(item.value("hash").toString());
+        emit useRequested({item.value("hash").toString()});
+}
+
+void NeedsModel::setReading(const QVariantMap &reading) {
+    if (m_reading == reading)
+        return;
+    m_reading = reading;
+    emit readingChanged();
 }
 
 void NeedsModel::downloadAll() {
     if (m_items.isEmpty())
         return;
+    if (m_action == QLatin1String("use")) { // everything is a file the person has: no sheet, no download
+        QStringList hashes;
+        for (const QVariant &entry : std::as_const(m_items))
+            if (entry.toMap().value("kind").toString() == QLatin1String("model"))
+                hashes << entry.toMap().value("hash").toString();
+        emit useRequested(hashes);
+        return;
+    }
     emit getReadyRequested(m_atOnce);
 }
 

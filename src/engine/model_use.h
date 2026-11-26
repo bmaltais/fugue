@@ -44,11 +44,10 @@ struct OnDiskMatch {
 struct OnDiskUse {
     QJsonObject wanted; // the handle a workflow names (resource, hash, name)
     OnDiskMatch match;
+    qint64 wantedSize = -1; // the size of the model that is missing, when its record says (what Undo would bring back to download)
 
     // "same model, bf16"; "same model, Q8_0, from another source".
     QString sameModelText() const;
-    // "Use what you have: z_image_turbo_bf16.safetensors (same model, bf16)".
-    QString offerText() const;
     // "the same model is on disk as <path>; set <input> to it, or pass --use-on-disk" (an input may be empty).
     QString cliHint(const QString &input) const;
 };

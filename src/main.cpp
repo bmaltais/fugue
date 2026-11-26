@@ -199,6 +199,7 @@ int main(int argc, char *argv[]) {
     // window shows it, so a window started on a file or on the last session's tabs pays nothing for it.
     fugue::AppShelf appShelf([&workflows] { return workflows.templates(); },
                              [&workflows](const QString &id) { return workflows.openTemplateById(id); });
+    appShelf.setOpenThen([&workflows](const QString &id, std::function<void(bool)> opened) { return workflows.openTemplateByIdThen(id, std::move(opened)); });
     appShelf.setBookmarksFile(fugue::stateDir() + "/app-bookmarks.json"); // pinned apps, per user (#470)
     appShelf.setActions([&workflows](const QString &id, const QString &title) { return workflows.duplicateTemplate(id, title); },
                         [&workflows](const QString &id, const QString &title) { return workflows.renameTemplate(id, title); });
@@ -292,8 +293,7 @@ int main(int argc, char *argv[]) {
     if (appArgument) {
         // The app's workflow is its one tab, shown as the App view whatever its block's defaultView says; a file that is
         // not an app says so in the window. The launcher entry and Open in Fugue are about this app, a package included.
-        fugue::openApp(workflows, *appRef);
-        appView.showApp();
+        fugue::openApp(workflows, *appRef, [&appView] { appView.showApp(); });
         appLauncher.setApp(*appRef);
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
         if (window && !appRef->preview.isEmpty())
@@ -308,8 +308,7 @@ int main(int argc, char *argv[]) {
                     window->setIcon(QIcon(chosen.preview));
             });
     } else if (appRef) {
-        if (fugue::openApp(workflows, *appRef))
-            appView.openInGraph();
+        fugue::openApp(workflows, *appRef, [&appView] { appView.openInGraph(); });
     } else if (parser.positionalArguments().isEmpty()) {
         workflows.restoreSession();
     } else {

@@ -49,6 +49,11 @@ public:
     using Duplicate = std::function<QString(const QString &id, const QString &title)>; // Workflows::duplicateTemplate: the new id
     using Rename = std::function<bool(const QString &id, const QString &title)>;       // Workflows::renameTemplate
 
+    // Opens with a callback for when the tab exists (Workflows::openTemplateByIdThen): a template that opens with the person's files does so
+    // after reading them, and `chosen` must follow the tab, not the click. Used instead of `Open` when set.
+    using OpenThen = std::function<bool(const QString &id, std::function<void(bool)> opened)>;
+    void setOpenThen(OpenThen open) { m_openThen = std::move(open); }
+
     AppShelf(Source source, Open open, QObject *parent = nullptr);
 
     // The apps among `templates`, as cards, ready ones first; the `bookmarks` (ids) before the rest.
@@ -100,6 +105,7 @@ private:
 
     Source m_source;
     Open m_open;
+    OpenThen m_openThen;
     Duplicate m_duplicate;
     Rename m_rename;
     QVariantList m_templates; // as the source gave them at the last refresh

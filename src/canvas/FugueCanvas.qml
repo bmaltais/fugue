@@ -1574,8 +1574,9 @@ FocusScope {
         warningsPinned = pin
         warningsNode = nodeId
         warningsTip.text = warnings.join("\n")
-        // A model that is not on disk but whose same weights are (#605): the card kept up offers the file, one click, one undo step.
-        warningsTip.offers = pin ? model.widgets.onDiskOffers(nodeId) : []
+        // A model that is not on disk but whose same weights are (#605): the hover card says so, the card kept up offers "Use my file", one
+        // press, one undo step.
+        warningsTip.offers = model.widgets.onDiskOffers(nodeId)
         const at = badge.mapToItem(canvas, badge.width, badge.height)
         warningsTip.x = Math.max(8, Math.min(at.x - warningsTip.width, canvas.width - warningsTip.width - 8))
         warningsTip.y = Math.min(at.y + canvas.look.unit, canvas.height - warningsTip.height - 8)
@@ -1585,8 +1586,30 @@ FocusScope {
             warningsNode = ""
     }
     function closeWarnings() {
+        const hadFocus = warningsTip.focusInside
         warningsPinned = false
         warningsNode = ""
+        warningsWaiting = ""
+        if (hadFocus)
+            canvas.forceActiveFocus() // Escape gives the focus back to the canvas
+    }
+    // The input whose file is being read for the card kept up (the card stays until it is set), else "".
+    property string warningsWaiting: ""
+    // A card pinned from the keyboard puts the focus on its first button; Tab moves between the offers.
+    function focusWarnings() {
+        Qt.callLater(function () {
+            const item = warningsTip.offerItem
+            if (item && warningsPinned && item.firstButton)
+                item.firstButton.forceActiveFocus()
+        })
+    }
+    Connections {
+        target: canvas.model.widgets
+        function onHashingChanged() {
+            if (canvas.warningsWaiting === "" || canvas.model.widgets.hashState(canvas.warningsNode, canvas.warningsWaiting).name !== undefined)
+                return
+            canvas.closeWarnings() // the file was read (or could not be): the input says which
+        }
     }
     Connections {
         target: canvas.model
@@ -1601,6 +1624,13 @@ FocusScope {
         z: 10
         property var offers: []
         readonly property Item offerItem: offersLoader.item as Item
+        // The focus is on one of the card's buttons (the card itself is a plain Item, so the window's focus item is walked up).
+        readonly property bool focusInside: {
+            let at = Window.activeFocusItem
+            while (at && at !== warningsTip)
+                at = at.parent
+            return at === warningsTip
+        }
         width: Math.max(Math.min(warningsText.implicitWidth, 360), offerItem ? offerItem.implicitWidth : 0) + 3.5 * canvas.look.unit + 14 + 2
         height: warningsText.height + (offerItem ? offerItem.height + canvas.look.unit : 0) + 2.5 * canvas.look.unit + 2
         Shadow {
@@ -1637,34 +1667,52 @@ FocusScope {
                 font.pixelSize: canvas.look.labelSize
             }
             // The files of the same model that are here: what the missing one can be swapped for (#605). Made only when there are some.
+            // Hovered, a line says so; kept up, "Use my file" is a button, with the file and its tier beside it.
             Loader {
                 id: offersLoader
                 active: warningsTip.offers.length > 0
                 x: warningsText.x
                 y: warningsText.y + warningsText.height + canvas.look.unit
                 sourceComponent: Column {
+                    id: offersColumn
                     objectName: "warningsOffers"
                     spacing: canvas.look.unit
+                    readonly property Item firstButton: offersRepeater.count > 0 ? offersRepeater.itemAt(0)?.button ?? null : null
                     Repeater {
+                        id: offersRepeater
                         model: warningsTip.offers
                         delegate: Row {
                             id: offer
                             required property var modelData
+                            readonly property Item button: useButton
+                            readonly property bool reading: canvas.warningsWaiting === offer.modelData.input
                             spacing: canvas.look.unit
                             ThemedButton {
+                                id: useButton
                                 objectName: "useOnDisk-" + offer.modelData.input
-                                text: qsTr("Use it")
-                                Accessible.name: offer.modelData.text
+                                visible: canvas.warningsPinned
+                                enabled: !offer.reading
+                                text: offer.reading ? qsTr("Reading your file…") + (canvas.model.widgets.hashRevision >= 0 ? canvas.readingPercent(offer.modelData.input) : "") : qsTr("Use my file")
+                                Accessible.name: qsTr("Use my file: %1 (%2)").arg(offer.modelData.file).arg(offer.modelData.same)
+                                Keys.onReturnPressed: event => { useButton.clicked(); event.accepted = true }
+                                Keys.onEnterPressed: event => { useButton.clicked(); event.accepted = true }
                                 onClicked: {
-                                    canvas.model.widgets.setDiskModel(canvas.warningsNode, offer.modelData.input, offer.modelData.path)
-                                    canvas.closeWarnings()
+                                    const failed = canvas.model.widgets.setDiskModel(canvas.warningsNode, offer.modelData.input, offer.modelData.path)
+                                    if (failed === "" && canvas.model.widgets.hashState(canvas.warningsNode, offer.modelData.input).name !== undefined)
+                                        canvas.warningsWaiting = offer.modelData.input // the file is read first: the card stays and says so
+                                    else
+                                        canvas.closeWarnings()
                                 }
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: Math.min(implicitWidth, 300)
-                                text: offer.modelData.text
-                                elide: Text.ElideMiddle
+                                // Kept up: the file and its tier beside the button, cut in the middle when long. Hovered: the whole sentence,
+                                // wrapped, because its end says how to keep the card up.
+                                width: canvas.warningsPinned ? Math.min(implicitWidth, 300) : Math.min(implicitWidth, 340)
+                                text: canvas.warningsPinned ? qsTr("%1 (%2)").arg(offer.modelData.file).arg(offer.modelData.same)
+                                                            : qsTr("Use my file: %1 (%2). Click the warning to keep this card up.").arg(offer.modelData.file).arg(offer.modelData.same)
+                                wrapMode: canvas.warningsPinned ? Text.NoWrap : Text.Wrap
+                                elide: canvas.warningsPinned ? Text.ElideMiddle : Text.ElideNone
                                 color: canvas.look.text
                                 font.pixelSize: canvas.look.labelSize
                             }
@@ -1673,6 +1721,11 @@ FocusScope {
                 }
             }
         }
+    }
+    // " 42%" while the file of the input is read, else "".
+    function readingPercent(input) {
+        const state = model.widgets.hashState(warningsNode, input)
+        return state.progress !== undefined && state.progress > 0 ? " " + Math.round(state.progress * 100) + "%" : ""
     }
 
     // A node's error chip was clicked (4.7): the run pill lists the errors, and the node comes

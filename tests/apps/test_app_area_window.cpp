@@ -12,6 +12,8 @@
 #include "../workspace/window_items.h"
 #include "apps/app_shelf.h"
 #include "apps/app_window.h"
+#include "engine/paths.h"
+#include "engine/settings.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 
@@ -30,6 +32,31 @@ const char *appWorkflow = R"({
     "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
   }}
 })";
+
+
+const char *zWorkflow = R"JSON({
+  "fugue": 1,
+  "app": {"format": 1, "title": "Restyle", "defaultView": "app",
+          "inputs": [{"role": "prompt", "targets": ["encode.prompt"], "label": "Prompt"}],
+          "outputs": [{"node": "save", "label": "Picture"}]},
+  "requires": {"models": [{"resource": "fugue/diffusion-model", "hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "name": "z_image_turbo_int8_convrot.safetensors", "source": "http:\u002f\u002f127.0.0.1:9/z.safetensors", "size": 5000000000}]},
+  "graph": {"nodes": {
+    "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "name": "z_image_turbo_int8_convrot.safetensors"}}},
+    "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "old words"}},
+    "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
+  }}
+})JSON";
+
+void writeZ(const QString &folder) {
+    const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]}, "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+    QByteArray file;
+    for (int i = 0; i < 8; ++i)
+        file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+    QDir().mkpath(folder + "/diffusion_models");
+    QFile out(folder + "/diffusion_models/z_image_turbo_bf16.safetensors");
+    if (out.open(QIODevice::WriteOnly))
+        out.write(file + header);
+}
 
 const char *blank = R"({"fugue": 1, "graph": {"nodes": {}}})";
 
@@ -94,6 +121,31 @@ class TestAppAreaWindow : public QObject {
 
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+
+    // #616: the sheet's yes with Use my file in the App view: the file is read, the app keeps it, the sheet closes by itself.
+    void theGetReadyRowUsesAFileInTheAppViewAndLeavesThePlan() {
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        writeZ(models.path());
+        App app(load(zWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QVERIFY(rig.view.shown());
+        ReadinessSheet *sheet = app.workflows.readiness();
+        sheet->show();
+        QCOMPARE(sheet->view().value("models").toList().size(), 1);
+        const QString hash = sheet->view().value("models").toList().at(0).toMap().value("hash").toString();
+        QCOMPARE(sheet->view().value("models").toList().at(0).toMap().value("choice").toString(), QString("disk"));
+        sheet->start();
+        QVERIFY(app.workflows.hashingUses());
+        QTRY_VERIFY(!sheet->isOpen()); // nothing else to get: it closes
+        QVERIFY(!app.workflows.hashingUses());
+        QCOMPARE(rig.view.usesList().size(), 1); // the app's own state: its workflow is not written
+        QVERIFY(sheet->view().value("models").toList().isEmpty());
+        QVERIFY(!app.workflows.downloads()->busy());
+        qDeleteAll(app.engine.rootObjects());
+    }
 
     void oneAreaIsTheTabModeAsBefore() {
         App app(load(appWorkflow));

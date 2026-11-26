@@ -5,6 +5,7 @@
 // tab like any other, shown as the App view). The same words as `fugue app info <id|file>` (src/cli/app.cpp): a path that
 // exists wins over an id.
 
+#include <functional>
 #include <QList>
 #include <QString>
 #include <optional>
@@ -36,6 +37,7 @@ std::optional<QString> appRefFromArgs(int argc, char **argv, const char *option 
 
 // Opens it as a tab of `workflows` (a template as a new unnamed tab, as the Templates window does; a file as that file).
 // False with the notice the window shows.
-bool openApp(Workflows &workflows, const AppRef &app);
+// `opened` runs when the tab exists: at once, or later when a template's files had to be read first (the view is chosen then).
+bool openApp(Workflows &workflows, const AppRef &app, std::function<void()> opened = {});
 
 } // namespace fugue

@@ -14,7 +14,8 @@
 # Copy buttons for error messages (owner, 2026-11-25): the workflow notice holds a Loader for its KitCopyButton (made only while a notice shows) and so do the group banner and the task bar's error line: two items more.
 # #524: the Seed and Run again choosers' thumb is named (kitSegmentedThumb) so a test can find it: no new item, one more name.
 # #605: the node warnings card holds its "Use it" offers in a Loader, made only while there are some: one item more.
-items 273
+# #616 (UI design 2026-11-26): the workflow notice holds a Loader for Undo (a template opened with the person's files), made only while that line shows: one item more.
+items 274
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 appViewSwitch 1

@@ -67,20 +67,62 @@ private slots:
         NeedsModel needs;
         ReadinessPlan plan = modelsPlan();
         needs.setUseSource([](const QString &hash) {
-            return hash == hashA ? QVariantMap{{"text", "Use what you have: klein-q8.gguf (same model, Q8_0)"}} : QVariantMap();
+            return hash == hashA ? QVariantMap{{"file", "klein-q8.gguf"}, {"same", "same model, Q8_0"}} : QVariantMap();
         });
         needs.setPlan(plan);
-        QVERIFY(needs.items().at(0).toMap().value("use").toMap().contains("text"));
+        QVERIFY(needs.items().at(0).toMap().value("use").toMap().contains("file"));
         QVERIFY(needs.items().at(1).toMap().value("use").toMap().isEmpty());
         QSignalSpy asked(&needs, &NeedsModel::useRequested);
         needs.useOnDisk(1); // no offer on this row: nothing asked
         QCOMPARE(asked.size(), 0);
         needs.useOnDisk(0);
         QCOMPARE(asked.size(), 1);
-        QCOMPARE(asked.first().first().toString(), hashA);
+        QCOMPARE(asked.first().first().toStringList(), QStringList{hashA});
         plan.models.removeFirst(); // the window applied it: the plan has one model less
         needs.setPlan(plan);
         QCOMPARE(needs.items().size(), 1);
+    }
+
+    // Check 7 (UI design 2026-11-26): the header chip. Every model covered and no pack: it uses the files at once (useRequested with every
+    // hash, no sheet); some covered: Get ready… with the covered ones counted apart, never a download-all that would fetch them.
+    void theHeaderChipUsesTheFilesWhenEveryModelIsCovered() {
+        NeedsModel needs;
+        needs.setUseSource([](const QString &) { return QVariantMap{{"file", "have.safetensors"}, {"same", "same model, INT8"}}; });
+        needs.setPlan(modelsPlan());
+        QCOMPARE(needs.headerAction(), QString("use"));
+        QCOMPARE(needs.coveredCount(), 2);
+        QVERIFY2(needs.headline().contains("you have them on disk"), qPrintable(needs.headline()));
+        QSignalSpy used(&needs, &NeedsModel::useRequested);
+        QSignalSpy sheet(&needs, &NeedsModel::getReadyRequested);
+        needs.downloadAll();
+        QCOMPARE(used.size(), 1);
+        QCOMPARE(used.first().first().toStringList(), (QStringList{hashA, hashB}));
+        QCOMPARE(sheet.size(), 0);
+    }
+    void theHeaderChipAsksGetReadyInTheMixedCaseAndCountsOnlyDownloads() {
+        NeedsModel needs;
+        needs.setUseSource([](const QString &hash) { return hash == hashA ? QVariantMap{{"file", "have.safetensors"}, {"same", "same model, INT8"}} : QVariantMap(); });
+        needs.setPlan(modelsPlan());
+        QCOMPARE(needs.headerAction(), QString("getReady"));
+        QVERIFY(!needs.startsAtOnce()); // Download all would fetch the covered model
+        QVERIFY2(needs.headline().contains("needs 1 model") && needs.headline().contains("You have 1 on disk."), qPrintable(needs.headline()));
+        QSignalSpy used(&needs, &NeedsModel::useRequested);
+        QSignalSpy sheet(&needs, &NeedsModel::getReadyRequested);
+        needs.downloadAll();
+        QCOMPARE(used.size(), 0);
+        QCOMPARE(sheet.size(), 1);
+        QCOMPARE(sheet.first().first().toBool(), false);
+    }
+    void aRowReadsItsOwnFileOnly() {
+        NeedsModel needs;
+        needs.setPlan(modelsPlan());
+        QSignalSpy moved(&needs, &NeedsModel::readingChanged);
+        needs.setReading({{hashA, 42}});
+        QCOMPARE(moved.size(), 1);
+        QVERIFY(needs.reading().contains(hashA));
+        QVERIFY(!needs.reading().contains(hashB));
+        needs.setReading({{hashA, 42}}); // the same again: no redraw
+        QCOMPARE(moved.size(), 1);
     }
     void aPlanBecomesRowsWithSizeAndLicence() {
         NeedsModel needs;
