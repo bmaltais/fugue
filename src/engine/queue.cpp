@@ -327,6 +327,34 @@ bool Lock::otherRootWaiting(const QString &crossRoot, int freshMs) {
     return mark.exists() && mark.lastModified().msecsTo(QDateTime::currentDateTime()) <= freshMs;
 }
 
+qint64 Lock::holderPid(const QString &path, qint64 exceptPid) {
+    struct stat info {};
+    if (::stat(QFile::encodeName(path).constData(), &info) != 0)
+        return 0;
+    // One line per lock: `1: FLOCK  ADVISORY  WRITE 4242 08:02:1234567 0 EOF` (pid, then major:minor:inode). The
+    // device is not compared: on btrfs subvolumes stat() and /proc/locks name different ones. The inode picks the
+    // candidates, and a candidate counts only when one of its open files is this very file.
+    const QByteArray inode = ':' + QByteArray::number(quint64(info.st_ino));
+    QFile locks(QStringLiteral("/proc/locks"));
+    if (!locks.open(QIODevice::ReadOnly))
+        return 0;
+    for (const QByteArray &line : locks.readAll().split('\n')) {
+        const QList<QByteArray> fields = line.simplified().split(' ');
+        if (fields.size() < 6 || fields.at(1) != "FLOCK" || !fields.at(5).endsWith(inode))
+            continue;
+        const qint64 pid = fields.at(4).toLongLong();
+        if (pid <= 0 || pid == exceptPid)
+            continue;
+        const QDir fds(QStringLiteral("/proc/%1/fd").arg(pid));
+        for (const QString &fd : fds.entryList(QDir::AllEntries | QDir::System | QDir::NoDotAndDotDot)) {
+            struct stat opened {};
+            if (::stat(QFile::encodeName(fds.filePath(fd)).constData(), &opened) == 0 && opened.st_ino == info.st_ino && opened.st_dev == info.st_dev)
+                return pid;
+        }
+    }
+    return 0;
+}
+
 void Lock::release() {
     if (m_held) {
         if (m_crossFd >= 0)

@@ -7,6 +7,7 @@
   "category": "Image",
   "keywords": ["ab", "a/b", "diff", "difference", "before", "after", "slider", "wipe", "viewer", "side by side"],
   "sink": true,
+  "view_only": true,
   "runtime": {"kind": "builtin"},
   "inputs": [
     {"name": "a", "type": "image", "label": "A"},

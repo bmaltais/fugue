@@ -723,7 +723,7 @@ only ever execute this form, and `fugue compile` prints it.
   bypassed output that has no matching input is removed: an optional input becomes unset, and a
   node with a required input left that way is dropped as `upstream_empty`. Muted nodes and their
   dependents are dropped and listed in `skipped` with the reason.
-- Sinks inside a group are dropped ([5.5](#55-sinks-inside-a-group)).
+- Sinks inside a group are dropped ([5.5](#55-sinks-inside-a-group)), except a view sink (Compare Images) that a needed node reads: it stays as a plain node, not as a sink (#623). Links into a dropped sink count as empty.
 - Nodes with no sink downstream are dropped, unless the run is "run to here".
 - `auto` values are kept; the engine resolves them when the run starts.
 - A compiled graph can be run directly: `fugue run compiled.json`. `--set`, `--to` and
@@ -910,6 +910,12 @@ with an id and a version, and it appears in node search.
 A group never starts a run and never writes a file or shows a preview from inside when it runs
 as a node. Whatever is wanted from it is exposed as an output and the sink sits outside.
 
+- A view sink (manifest `view_only`, Compare Images only: it shows and writes nothing) whose output a
+  needed node reads, or that is the group's output, is kept as a plain node: its value is needed, and
+  it is no sink of the run (#623). One nothing needed reads is dropped without a warning. Any other
+  inner sink, a Save Image whose `file` is read for one, is dropped, and what read its outputs sees
+  them as empty, as after a bypass: a required input makes the reader `upstream_empty`, a lazy input
+  is dropped.
 - While the user has entered a group, its inner sinks work; they go quiet on leaving. The canvas
   passes the entered instance's path id to the compiler, which keeps that level's sinks (not those
   of groups nested in it).
@@ -2691,6 +2697,11 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
   the advisory lock `~/.local/state/fugue/engine.lock` (and, across project roots and the Default session, the cross-root GPU lock of [1.4.2](#142-projects)). "Run first" writes an entry that sorts
   ahead of the waiting ones; removing a queued run deletes its entry. An entry whose process is
   gone is discarded, and its run is ended as `failed`.
+- `fugue run --wait` that has been queued behind another run for about a second says so once: on stderr
+  `Waiting for another Fugue run to finish (pid N)…`, and with `--json` a `{"event":"waiting","run":…,"pid":N}` line on
+  stdout instead (the line is not written to the run's `events.jsonl`). `N` is the active run's process, else the holder of the engine or
+  GPU lock (read from `/proc/locks`); without one the message ends after `finish…`, and the event has no `pid`.
+  `runs events --follow` does not say it. `fugue validate` runs nothing and takes neither lock, so it never waits for one.
 - A process that holds the lock is alive, so an active entry is dead exactly when someone else
   can take the lock. A waiting entry is dead when the process id it records is not that run's
   worker; a process id alone is not trusted, because ids are reused.

@@ -151,6 +151,7 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
     m_covered = covered;
     m_action = action;
     emit changed();
+    updateReadingOwn();
 }
 
 void NeedsModel::download(int index) {
@@ -178,6 +179,17 @@ void NeedsModel::setReading(const QVariantMap &reading) {
         return;
     m_reading = reading;
     emit readingChanged();
+    updateReadingOwn();
+}
+
+void NeedsModel::updateReadingOwn() {
+    bool own = false;
+    for (const QVariant &item : std::as_const(m_items))
+        own = own || m_reading.contains(item.toMap().value("hash").toString());
+    if (own == m_readingOwn)
+        return;
+    m_readingOwn = own;
+    emit readingOwnChanged();
 }
 
 void NeedsModel::downloadAll() {

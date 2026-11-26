@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -75,7 +76,44 @@ void endDeadRuns(const Context &context, Lock &lock) {
     }
 }
 
-RunStatus streamEvents(const RunFolder &folder, Context &context) {
+namespace {
+
+// Says that the run is waiting its turn (#625): its queue entry is not active, so another run, of this root or of
+// another, has the engine or the GPU. The pid is the active run's, else the process that holds either lock (not
+// `ownWorker`: the run's own worker briefly holds the engine lock while it tries for the GPU's). False, and nothing said,
+// when nobody can be named and no other entry is active: the run may only be starting, so it is looked at again.
+bool announceWaiting(const RunFolder &folder, qint64 ownWorker, Context &context) {
+    qint64 pid = 0;
+    bool otherActive = false;
+    for (const QueueEntry &entry : Queue(context.queueDir).entries())
+        if (entry.active && entry.run != folder.id()) {
+            otherActive = true;
+            if (pid == 0 && entry.pid > 0)
+                pid = entry.pid;
+        }
+    for (const QString &path : {context.lockPath, Queue::crossRootLockFor(context.lockPath)})
+        if (pid == 0 && !path.isEmpty())
+            pid = Lock::holderPid(path, ownWorker);
+    if (pid == 0 && !otherActive)
+        return false;
+    if (context.json) {
+        QJsonObject event{{"event", "waiting"}, {"run", folder.id()}};
+        if (pid > 0)
+            event.insert("pid", double(pid));
+        context.line(compactJson(event));
+    } else {
+        context.log(pid > 0 ? QStringLiteral("Waiting for another Fugue run to finish (pid %1)…").arg(pid)
+                            : QStringLiteral("Waiting for another Fugue run to finish…"));
+    }
+    return true;
+}
+
+} // namespace
+
+RunStatus streamEvents(const RunFolder &folder, Context &context, bool sayWaiting) {
+    QElapsedTimer waited;
+    waited.start();
+    bool announced = !sayWaiting;
     int printed = 0;
     int settling = 0;
     int orphaned = 0;
@@ -105,6 +143,15 @@ RunStatus streamEvents(const RunFolder &folder, Context &context) {
             orphaned = orphan ? orphaned + 1 : 0;
             if (orphaned >= 2)
                 folder.finish(RunStatus::Failed, {workerGone()}, utcNow());
+        }
+        if (!announced && waited.elapsed() >= 1000) {
+            QueueEntry mine;
+            if (Queue(context.queueDir).find(folder.id(), &mine)) {
+                if (mine.active)
+                    announced = true; // started: not looked at again
+                else
+                    announced = announceWaiting(folder, mine.pid, context);
+            }
         }
         QThread::msleep(50);
     }
@@ -228,7 +275,7 @@ Reply startRun(const Command &command, Context &context) {
             context.log(note.message + QLatin1Char(' ') + note.hint);
         Reply reply;
         reply.streamed = true;
-        reply.exitCode = streamEvents(*folder, context) == RunStatus::Ok ? 0 : 1;
+        reply.exitCode = streamEvents(*folder, context, true) == RunStatus::Ok ? 0 : 1;
         return reply;
     }
     Reply reply = Reply::success(QJsonObject{{"run", folder->id()}, {"status", runStatusName(RunStatus::Queued)}}, folder->id());
