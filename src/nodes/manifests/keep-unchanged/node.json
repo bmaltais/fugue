@@ -1,0 +1,120 @@
+{
+  "manifest": 1,
+  "id": "fugue/keep-unchanged",
+  "version": "1.0.0",
+  "name": "Keep unchanged areas",
+  "description": "After an edit model redraws a picture, keep the original everywhere the edit did not really change it: a soft mask of the changed areas, and the edit pasted through it onto the original, so the rest stays the original pixel for pixel.",
+  "category": "Image/Mask",
+  "keywords": [
+    "edit",
+    "keep",
+    "unchanged",
+    "difference",
+    "change mask",
+    "restore",
+    "protect",
+    "preserve",
+    "compare"
+  ],
+  "runtime": {
+    "kind": "group",
+    "definition": "group.fugue"
+  },
+  "inputs": [
+    {
+      "name": "original",
+      "type": "image",
+      "label": "Original"
+    },
+    {
+      "name": "edited",
+      "type": "image",
+      "label": "Edited",
+      "description": "The edit model's result. It may be another size or aspect ratio; it is fitted to the original first."
+    },
+    {
+      "name": "blur",
+      "type": "number",
+      "label": "Blur",
+      "description": "Blur radius in pixels applied to both pictures before they are compared, so the model's fine grain is not mistaken for a change.",
+      "default": 4,
+      "min": 0,
+      "max": 64,
+      "step": 1,
+      "integer": true,
+      "section": "Change detection"
+    },
+    {
+      "name": "threshold",
+      "type": "number",
+      "label": "Threshold",
+      "description": "How different a pixel must be to count as changed (0 to 1). Lower catches fainter changes and more noise.",
+      "default": 0.04,
+      "min": 0,
+      "max": 1,
+      "step": 0.005,
+      "section": "Change detection"
+    },
+    {
+      "name": "speck",
+      "type": "number",
+      "label": "Speck size",
+      "description": "Changed areas smaller than this many pixels across are dropped as noise.",
+      "default": 12,
+      "min": 0,
+      "max": 256,
+      "step": 1,
+      "integer": true,
+      "section": "Clean up"
+    },
+    {
+      "name": "close",
+      "type": "number",
+      "label": "Fill gaps",
+      "description": "Unchanged gaps narrower than this many pixels inside a changed area are filled.",
+      "default": 24,
+      "min": 0,
+      "max": 256,
+      "step": 1,
+      "integer": true,
+      "section": "Clean up"
+    },
+    {
+      "name": "margin",
+      "type": "number",
+      "label": "Margin",
+      "description": "Pixels added around the changed areas. A larger margin (about 28) also catches dark-to-dark changes.",
+      "default": 16,
+      "min": 0,
+      "max": 256,
+      "step": 1,
+      "integer": true,
+      "section": "Clean up"
+    },
+    {
+      "name": "feather",
+      "type": "number",
+      "label": "Feather",
+      "description": "How far the edge of the mask fades outward, in pixels.",
+      "default": 16,
+      "min": 0,
+      "max": 256,
+      "step": 1,
+      "integer": true,
+      "section": "Clean up"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask",
+      "role": "mask"
+    }
+  ]
+}
