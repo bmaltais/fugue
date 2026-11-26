@@ -43,14 +43,14 @@ struct Rig {
     }
     ~Rig() { QCoreApplication::removeTranslator(&translator); }
     // The window's part: the files of `hashes` were read and set, so the workflow no longer lacks those models.
-    void windowSets(const QStringList &hashes) {
+    void windowSets(const QStringList &hashes, int token) {
         QJsonArray left;
         for (const QJsonValue &m : std::as_const(models))
             if (!hashes.contains(m.toObject().value("hash").toString()))
                 left.append(m);
         models = left;
         sheet.refresh();
-        sheet.usesFinished(hashes, {});
+        sheet.usesFinished(hashes, {}, token);
     }
     QVariantMap view() const { return sheet.view(); }
     QVariantMap row(int i) const { return sheet.view().value("models").toList().at(i).toMap(); }
@@ -79,7 +79,7 @@ private slots:
         QCOMPARE(asked.first().first().toStringList(), QStringList{hashA});
         QVERIFY(rig.view().value("busy").toBool()); // the rows wait for the file to be read
         QCOMPARE(rig.sheet.phase(), QString("review")); // no run: nothing is downloaded
-        rig.windowSets({hashA});
+        rig.windowSets({hashA}, asked.first().at(1).toInt());
         QCOMPARE(succeeded.size(), 1);
         QVERIFY(!rig.sheet.isOpen());
         QCOMPARE(rig.sheet.phase(), QString("review"));
@@ -112,8 +112,43 @@ private slots:
         QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
         rig.sheet.start();
         QCOMPARE(asked.first().first().toStringList(), QStringList{hashA});
-        rig.windowSets({hashA});
+        rig.windowSets({hashA}, asked.first().at(1).toInt());
         QCOMPARE(rig.sheet.phase(), QString("running")); // the rest of the plan goes on
+        QCOMPARE(rig.view().value("models").toList().size(), 1);
+        rig.sheet.cancel();
+        QVERIFY(rig.sheet.waitIdle(30000));
+    }
+
+    // Another surface's read of a file (the Needs panel's) that ends while this sheet waits for its own is not the sheet's answer: the sheet
+    // goes on only when its own request (its token) is answered, so a model set to Use my file is not downloaded early.
+    void onlyTheAnswerToItsOwnRequestContinuesTheSheet() {
+        Rig rig({hashA, hashB}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9), model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)});
+        rig.sheet.show();
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        rig.sheet.start();
+        QCOMPARE(asked.size(), 1);
+        const int mine = asked.first().at(1).toInt();
+        QVERIFY(mine != 0);
+        // The Needs panel's earlier read of A alone ends first (token 0, or any other): the plan is not run, B is not downloaded.
+        rig.models = QJsonArray{model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)};
+        rig.sheet.refresh();
+        rig.sheet.usesFinished({hashA}, {}, 0);
+        rig.sheet.usesFinished({hashA}, {}, mine + 1);
+        QCOMPARE(rig.sheet.phase(), QString("review"));
+        QVERIFY(rig.view().value("busy").toBool()); // still waiting for its own
+        rig.models = QJsonArray{};
+        rig.sheet.refresh();
+        rig.sheet.usesFinished({hashA, hashB}, {}, mine);
+        QVERIFY(!rig.sheet.isOpen()); // its own answer: done
+    }
+
+    // A model still set to Use my file when the answer comes (it was not set: the tab changed) is never downloaded: it leaves what is run.
+    void aModelStillOnItsFileIsNeverRun() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9), model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)});
+        rig.sheet.show();
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        rig.sheet.start();
+        rig.sheet.usesFinished({}, {}, asked.first().at(1).toInt()); // nothing applied, no failure: A is still in the plan
         QCOMPARE(rig.view().value("models").toList().size(), 1);
         rig.sheet.cancel();
         QVERIFY(rig.sheet.waitIdle(30000));
@@ -141,7 +176,7 @@ private slots:
         rig.sheet.cancel();
         QCOMPARE(cancelled.size(), 1);
         QVERIFY(!rig.sheet.isOpen());
-        rig.sheet.usesFinished({hashA}, {}); // a late answer: nothing happens
+        rig.sheet.usesFinished({hashA}, {}, 1); // a late answer: nothing happens
         QVERIFY(!rig.sheet.isOpen());
     }
 
@@ -152,10 +187,10 @@ private slots:
         rig.sheet.show();
         rig.sheet.start();
         rig.sheet.say("Could not read qwen_3_8b_int8_convrot.safetensors, so it is not used.");
-        rig.sheet.usesFinished({}, {hashA});
+        rig.sheet.usesFinished({}, {hashA}, 1);
         QVERIFY(rig.sheet.isOpen()); // the person decides what next
         QCOMPARE(rig.row(0).value("choice").toString(), QString("download"));
-        QVERIFY(rig.row(0).value("error").toString().contains("could not be read"));
+        QVERIFY(rig.row(0).value("error").toString().contains("is not used"));
         QVERIFY(rig.view().value("message").toString().contains("Could not read"));
         QVERIFY(!rig.view().value("busy").toBool());
         rig.sheet.setChoice(hashA, true);

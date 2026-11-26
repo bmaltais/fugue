@@ -72,7 +72,7 @@ public:
     void setReading(const QVariantMap &reading);
     // The window read the files asked for with useRequested: the hashes now using their file and those whose file could not be read.
     // What is left of the plan goes on, or the sheet closes when nothing is left.
-    void usesFinished(const QStringList &applied, const QStringList &failed);
+    void usesFinished(const QStringList &applied, const QStringList &failed, int token);
     // The list again after something outside changed what is missing (a file chosen in place of a model); only while reviewing.
     void refresh();
     // A line in the sheet's message place while it is open for review (the use of a file failed): shown with the rows, not behind them.
@@ -101,9 +101,10 @@ signals:
     // A run ended (ok: every row done).
     void finished(bool ok);
     // The yes was given with these models set to Use my file (#605): the window reads their files and sets them (usesFinished).
-    void useRequested(const QStringList &hashes);
+    // `token` identifies this request: the window answers it with usesFinished(…, token), and only that answer continues the sheet.
+    void useRequested(const QStringList &hashes, int token);
     // The sheet was cancelled while those files were read: the window drops the result.
-    void useCancelled();
+    void useCancelled(int token);
     // The sheet was opened (show()).
     void shown();
     // A run ended with everything ready: the sheet has closed itself.
@@ -139,7 +140,9 @@ private:
     QSet<QString> m_seenOffers;           // those that were offered: a model offered for the first time starts on its file
     QHash<QString, QString> m_rowErrors;  // a file that could not be read, by hash
     QVariantMap m_reading;
-    bool m_usesPending = false;           // the chosen files are being read
+    bool m_usesPending = false;
+    int m_usesToken = 0;                  // the request the sheet waits for (0: none)
+    int m_lastToken = 0;           // the chosen files are being read
     ReadinessPlan m_plan;
     bool m_open = false;
     QString m_phase = QStringLiteral("review");

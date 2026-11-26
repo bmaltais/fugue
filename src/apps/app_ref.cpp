@@ -72,7 +72,7 @@ std::optional<QString> appRefFromArgs(int argc, char **argv, const char *option)
 
 bool openApp(Workflows &workflows, const AppRef &app) {
     if (app.templ)
-        return workflows.openTemplate(*app.templ);
+        return workflows.openTemplateWithFiles(*app.templ);
     return workflows.openPath(app.file);
 }
 

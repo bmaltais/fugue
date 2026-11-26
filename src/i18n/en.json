@@ -2203,9 +2203,10 @@
     "one": "You have %n on disk.",
     "other": "You have %n on disk."
   },
-  "Reading your file... %1%": "Reading your file... %1%",
   "Warnings: %1": "Warnings: %1",
   "Back to the template's models": "Back to the template's models",
   "Use my file: %1 (%2)": "Use my file: %1 (%2)",
-  "Your file could not be read. Download is chosen for it now.": "Your file could not be read. Download is chosen for it now."
+  "Your file is not used. Download is chosen for it now.": "Your file is not used. Download is chosen for it now.",
+  "The files were read, but the tab changed, so they were not used. Choose again.": "The files were read, but the tab changed, so they were not used. Choose again.",
+  "Reading your file… %1%": "Reading your file… %1%"
 }

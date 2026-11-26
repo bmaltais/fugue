@@ -1539,6 +1539,130 @@ private slots:
         QVERIFY(QFile::setPermissions(weights, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
     }
 
+    // Undo of the banner puts back exactly the inputs that were changed, each its own value: two missing models that one file stands in
+    // for get their two originals back, and a node that already used that file is not touched.
+    void undoOfTheOpenedWithBannerRestoresEachInputItsOwnModel() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hashX = "sha256:" + QString(64, u'e'), hashY = "sha256:" + QString(64, u'f');
+        const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", hashX}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        const QJsonObject y{{"resource", "fugue/diffusion-model"}, {"hash", hashY}, {"name", "z_image_turbo_fp8.safetensors"}};
+        QJsonObject xr = x, yr = y;
+        xr.insert("source", "http://127.0.0.1:9/x");
+        yr.insert("source", "http://127.0.0.1:9/y");
+        makeTemplate(f.bundled.filePath("twin"), {{"title", "Twin"}},
+                     workflow({{"a", node("fugue/load-models", {{"diffusion_model", x}})}, {"b", node("fugue/load-models", {{"diffusion_model", y}})}},
+                              {{"models", QJsonArray{xr, yr}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("twin"));
+        QTRY_VERIFY(canvas.document().graph.nodes.contains("a"));
+        const auto handleOf = [&](const char *node) { return canvas.document().graph.nodes.value(node).inputs.value("diffusion_model").handle(); };
+        QCOMPARE(handleOf("a").value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
+        QCOMPARE(handleOf("b").value("hash").toString(), handleOf("a").value("hash").toString()); // one file for both
+        QTRY_VERIFY(workflows.noticeUndoable());
+        workflows.dismissNotice(); // the line is gone or replaced: Undo is still the tab's until it is edited
+        workflows.notify("something else");
+        QVERIFY(workflows.noticeUndoable());
+        workflows.undoNotice();
+        QCOMPARE(handleOf("a").value("hash").toString(), hashX);
+        QCOMPARE(handleOf("b").value("hash").toString(), hashY);
+        QVERIFY(!workflows.noticeUndoable());
+    }
+
+    // Cancelling the sheet while its files are read takes only the sheet's ask away: another surface's read of the same file goes on and applies.
+    void aSheetsCancelLeavesAnotherSurfacesReadAlone() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hash = "sha256:" + QString(64, u'8');
+        const QJsonObject wanted{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject recorded = wanted;
+        recorded.insert("source", "http://127.0.0.1:9/z");
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}}, workflow({{"models", node("fugue/load-models", {{"diffusion_model", wanted}})}}, {{"models", QJsonArray{recorded}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateForDownload("zit"));
+        ReadinessSheet *sheet = workflows.readiness();
+        sheet->show();
+        workflows.useOnDisk({hash}); // the Needs panel's read of the file
+        sheet->start();              // the sheet joins the same read
+        sheet->cancel();
+        QVERIFY(workflows.reading().contains(hash)); // the other surface still reads
+        QTRY_VERIFY(!workflows.hashingUses());
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(),
+                 QString("z_image_turbo_bf16.safetensors")); // and its result applied
+    }
+
+    // A mixed card's Download fetches only what its label counts: the model a file of the person's stands in for is not downloaded.
+    void aMixedCardsDownloadFetchesOnlyTheModelsWithoutAFileOfTheirOwn() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        const QByteArray bytes = "the other model";
+        server.on("GET", "/z.safetensors", [&](const fugue::test::HttpRequest &) { return fugue::test::HttpResponse{200, "z", "application/octet-stream"}; });
+        server.on("GET", "/o.gguf", [&](const fugue::test::HttpRequest &) { return fugue::test::HttpResponse{200, bytes, "application/octet-stream"}; });
+        QJsonObject covered{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'c')}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject other{{"resource", "fugue/diffusion-model"}, {"hash", sha256(bytes)}, {"name", "o.gguf"}};
+        QJsonObject coveredRecord = covered, otherRecord = other;
+        coveredRecord.insert("source", QString::fromLatin1(server.origin() + "/z.safetensors"));
+        coveredRecord.insert("size", 1);
+        otherRecord.insert("source", QString::fromLatin1(server.origin() + "/o.gguf"));
+        otherRecord.insert("size", bytes.size());
+        makeTemplate(f.bundled.filePath("mix"), {{"title", "Mix"}},
+                     workflow({{"a", node("fugue/load-models", {{"diffusion_model", covered}})}, {"b", node("fugue/load-models", {{"diffusion_model", other}})}},
+                              {{"models", QJsonArray{coveredRecord, otherRecord}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        workflows.downloadTemplate("mix");
+        QTRY_COMPARE(server.requestsTo("GET", "/o.gguf").size(), 1);
+        QTRY_VERIFY(!workflows.downloads()->busy());
+        QCOMPARE(server.requestsTo("GET", "/z.safetensors").size(), 0); // the one the person's file stands in for
+        forgetDownloads();
+    }
+
     // The window side of "Use my file" (UI design 2026-11-26, #616): in the Templates dialog a card that is ready only through the person's
     // file says so with a check, Enter on it opens the template with the file and no sheet, a banner names the file and has Undo, the
     // details offer the template's own download as a secondary, and a card with a model that has no file shows the one download. With
@@ -1624,6 +1748,16 @@ private slots:
         QCOMPARE(own->property("text").toString(), QString("Download 8.7 GB…"));
         shoot("template-details-download");
         QVERIFY(QMetaObject::invokeMethod(dialog, "closeDetails"));
+
+        // The mixed card's chip fetches only what it counts (5.9 GB): the download line names the one model, never the one the file stands in for.
+        QQuickItem *chip = item(window->contentItem(), "templateDownload-mix");
+        QVERIFY(chip && chip->isVisible());
+        QMetaObject::invokeMethod(chip, "tapped");
+        QTRY_VERIFY(workflows.downloads()->busy() || workflows.downloads()->failedWhat() == QString("template:mix"));
+        const QString line = workflows.downloads()->busy() ? workflows.downloads()->label() : workflows.downloads()->failure();
+        QVERIFY2(!line.contains("z_image_turbo"), qPrintable(line));
+        workflows.downloads()->cancel();
+        QTRY_VERIFY(!workflows.downloads()->busy());
 
         // Enter on the card: opens with the file, no sheet, the banner says so, Undo puts the template's own model back.
         QTRY_VERIFY(item(window->contentItem(), "templatesGrid"));

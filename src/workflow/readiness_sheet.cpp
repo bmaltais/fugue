@@ -196,14 +196,15 @@ void ReadinessSheet::setReading(const QVariantMap &reading) {
         publishSoon();
 }
 
-void ReadinessSheet::usesFinished(const QStringList &applied, const QStringList &failed) {
+void ReadinessSheet::usesFinished(const QStringList &applied, const QStringList &failed, int token) {
     Q_UNUSED(applied)
-    if (!m_usesPending)
-        return; // another surface's choice, not this sheet's yes
+    if (!m_usesPending || token == 0 || token != m_usesToken)
+        return; // another surface's choice (the Needs panel's), not the answer to this sheet's yes
     m_usesPending = false;
+    m_usesToken = 0;
     for (const QString &hash : failed) {
         m_useDisk.remove(hash); // Try again offers the row with Download
-        m_rowErrors.insert(hash, tr("Your file could not be read. Download is chosen for it now."));
+        m_rowErrors.insert(hash, tr("Your file is not used. Download is chosen for it now."));
     }
     const QString said = m_message; // Workflows said which file, just before
     rebuild();
@@ -247,6 +248,7 @@ void ReadinessSheet::show() {
     m_seenOffers.clear();
     m_rowErrors.clear();
     m_usesPending = false;
+    m_usesToken = 0;
     rebuild();
     m_phase = QStringLiteral("review");
     m_message.clear();
@@ -272,7 +274,8 @@ void ReadinessSheet::cancel() {
     // The choices are discarded with the sheet: the document is as it was, and a file being read is not applied.
     if (m_usesPending) {
         m_usesPending = false;
-        emit useCancelled();
+        const int token = std::exchange(m_usesToken, 0); // its answer, when it comes, is no one's
+        emit useCancelled(token);
     }
     close();
 }
@@ -315,17 +318,27 @@ void ReadinessSheet::start() {
             chosen << m.entry.value(QStringLiteral("hash")).toString();
     if (!chosen.isEmpty()) {
         m_usesPending = true;
+        m_usesToken = ++m_lastToken;
         m_message.clear();
         m_rowErrors.clear();
         publish();
-        emit useRequested(chosen);
+        emit useRequested(chosen, m_usesToken);
         return;
     }
     runPlan();
 }
 
 void ReadinessSheet::runPlan() {
-    if (m_thread || m_phase != QLatin1String("review") || m_plan.empty() || lowSpaceNow())
+    if (m_thread || m_phase != QLatin1String("review"))
+        return;
+    // A model set to Use my file is never downloaded, whatever order the answers came in: it leaves what is run.
+    if (m_plan.models.removeIf([this](const ReadinessModel &m) { return usesFile(m); })) {
+        m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
+        m_details = QStringList(m_plan.rowCount());
+        m_fractions = QList<double>(m_plan.rowCount(), 0.0);
+        publish();
+    }
+    if (m_plan.empty() || lowSpaceNow())
         return;
     // The yes also makes the folder choice the settings': a picked folder joins the model folders (ComfyUI layout) and the\n    // folder becomes download_folder. Nothing was written before this.
     if (!savePlacement())
@@ -506,7 +519,8 @@ void ReadinessSheet::publish() {
     view["usesCount"] = uses;
     view["busy"] = m_usesPending;
     // The one primary: Install while anything is installed, trusted, set up or downloaded; "Use my file" when only the person's files are left.
-    view["primary"] = !m_plan.packs.isEmpty() || downloads > 0 || uses == 0 ? tr("Install") : tr("Use my %n files", nullptr, uses);
+    const bool morethanFiles = !m_plan.packs.isEmpty() || m_plan.installCount() > 0 || m_plan.trustOnlyCount() > 0 || m_plan.environmentCount() > 0 || downloads > 0;
+    view["primary"] = morethanFiles || uses == 0 ? tr("Install") : tr("Use my %n files", nullptr, uses);
     QVariantList packs;
     for (int i = 0; i < m_plan.packs.size(); ++i) {
         const ReadinessPack &row = m_plan.packs.at(i);

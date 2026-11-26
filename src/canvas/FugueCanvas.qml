@@ -1624,8 +1624,13 @@ FocusScope {
         z: 10
         property var offers: []
         readonly property Item offerItem: offersLoader.item as Item
-        // The focus is on one of the card's buttons.
-        readonly property bool focusInside: offerItem !== null && offerItem.firstButton !== null && warningsTip.activeFocus
+        // The focus is on one of the card's buttons (the card itself is a plain Item, so the window's focus item is walked up).
+        readonly property bool focusInside: {
+            let at = Window.activeFocusItem
+            while (at && at !== warningsTip)
+                at = at.parent
+            return at === warningsTip
+        }
         width: Math.max(Math.min(warningsText.implicitWidth, 360), offerItem ? offerItem.implicitWidth : 0) + 3.5 * canvas.look.unit + 14 + 2
         height: warningsText.height + (offerItem ? offerItem.height + canvas.look.unit : 0) + 2.5 * canvas.look.unit + 2
         Shadow {

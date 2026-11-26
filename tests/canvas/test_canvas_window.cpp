@@ -775,6 +775,7 @@ private slots:
         }
         QTest::keyClick(app.window, Qt::Key_Escape);
         QTRY_VERIFY(!tip->isVisible()); // Escape closes it and gives the focus back
+        QTRY_VERIFY(app.canvas->hasActiveFocus());
         QCOMPARE(app.model.undoStack()->count(), steps);
         // Hovered, the card says there is a file and how to keep the card up; it has no button yet.
         const QPoint on = badge->mapToScene(QPointF(badge->width() / 2, badge->height() / 2)).toPoint();
