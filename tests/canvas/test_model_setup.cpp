@@ -676,6 +676,56 @@ private slots:
         QCOMPARE(setup.download(), dataDir() + "/models");
     }
 
+    // The download folder is a link into a place left off: it is not offered, and nothing there is stat'd or asked about.
+    void aDownloadFolderBehindALinkIntoAPlaceLeftOffIsNeverAskedAbout() {
+        touchFile(m_mnt + "/data/models/checkpoints/a.safetensors", 1000);
+        QDir().mkpath(m_mnt + "/data/models/loras");
+        QVERIFY(QFile::link(m_mnt + "/data/models", m_home + "/models"));
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{m_home + "/models"}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "model_folder_kinds", QJsonObject{{m_home + "/models", "layout"}}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "download_folder", m_home + "/models").isEmpty());
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        QStringList asked;
+        setup.setFreeSpace([&asked](const QString &folder) { asked << folder; return qint64(100) * 1000 * 1000 * 1000; });
+        setup.show(false);
+        setup.setLocationChecked("drive:" + m_mnt, false);
+        m_touched.clear();
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        QVERIFY(rowOf(setup.rows(), "/models").value("hint2").toString().contains("Not counted"));
+        for (const QVariant &choice : setup.choices())
+            QVERIFY(choice.toMap().value("value").toString() != m_home + "/models");
+        QCOMPARE(setup.download(), dataDir() + "/models");
+        for (const QString &folder : std::as_const(asked))
+            QVERIFY2(!folder.startsWith(m_mnt) && folder != m_home + "/models", qPrintable("asked " + folder));
+        for (const QString &touched : std::as_const(m_touched))
+            QVERIFY2(!touched.startsWith(m_mnt + "/"), qPrintable("touched " + touched));
+    }
+
+    // The longest place decides: a ticked install folder inside an unticked home keeps its free-space text.
+    void aTickedInstallFolderInAnUntickedHomeKeepsItsFreeSpace() {
+        comfy(m_home + "/ComfyUI");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.setFreeSpace([](const QString &) { return qint64(100) * 1000 * 1000 * 1000; });
+        setup.show(true);
+        setup.setLocationChecked("home", false);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        bool seen = false;
+        for (const QVariant &choice : setup.choices())
+            if (choice.toMap().value("value").toString() == m_home + "/ComfyUI/models") {
+                seen = true;
+                QVERIFY(!choice.toMap().value("free").toString().isEmpty());
+            }
+        QVERIFY(seen);
+    }
+
     // InvokeAI is off by default; when ticked, the folders it can tell apart are added single-kind.
     void invokeAiIsOffAndWhenTickedIsAddedByTheFoldersItCanTell() {
         touchFile(m_home + "/invokeai/invokeai.yaml");

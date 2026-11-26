@@ -593,19 +593,30 @@ bool ModelSetup::slowToWriteTo(const Row &row) const {
 // Free bytes where a folder is, asked once for each folder (a statfs is not asked again every time the sheet changes).
 // Whether `path` is in a place the person left off (as written or as resolved): nothing is asked of it, not even a statfs.
 bool ModelSetup::inLeftOffPlace(const QString &path) const {
+    if (path == ownRoot() || path.startsWith(ownRoot() + QLatin1Char('/')))
+        return false; // Fugue's own folder is never a place to keep out of
+    // The longest place that covers the path decides, as the finder's own rule does: a ticked install folder inside an unticked home is
+    // fine, an unticked one inside a ticked home is not.
+    int best = -1;
+    bool bestTicked = true;
     for (const FinderLocation &place : m_locations) {
-        if (!m_unticked.contains(place.id))
-            continue;
+        const bool ticked = !m_unticked.contains(place.id);
         for (const QString &where : {place.path, place.resolved, place.scope, place.resolvedScope})
-            if (!where.isEmpty() && (path == where || path.startsWith(where + QLatin1Char('/'))))
-                return true;
+            if (!where.isEmpty() && (path == where || path.startsWith(where + QLatin1Char('/'))) && int(where.size()) > best) {
+                best = int(where.size());
+                bestTicked = ticked;
+            }
     }
-    return false;
+    return best >= 0 && !bestTicked;
 }
 
 qint64 ModelSetup::freeSpace(const QString &path) const {
     if (inLeftOffPlace(path))
         return -1; // unknown, no I/O
+    // A folder the search found to lead into a place left off (a link) is never asked about either, whatever its path says.
+    for (const Row &row : m_rows)
+        if (row.found.leftOff && (row.path == path || row.found.canonical == path))
+            return -1;
     const auto it = m_freeCache.constFind(path);
     if (it != m_freeCache.constEnd())
         return it.value();
@@ -638,7 +649,7 @@ QVariantList ModelSetup::choices() const {
     // The download folder the person has (set in Settings or by the CLI) that is not one of these rows is kept, not replaced.
     if (m_downloadChosen && m_download != own) {
         const bool listed = std::any_of(list.begin(), list.end(), [this](const QVariant &c) { return c.toMap().value("value").toString() == m_download; });
-        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && !r.on; });
+        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && (!r.on || r.found.leftOff); });
         if (!listed && !leftOff) // its row is on but not a layout (a single-kind root), or it has none: still the person's choice
             list.append(entry(m_download, tilde(m_download)));
     }
