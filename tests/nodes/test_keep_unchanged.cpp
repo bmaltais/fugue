@@ -94,15 +94,15 @@ Pixels edit(const Pixels &original, bool blueOnly = false) {
     return blurred;
 }
 
-// The edit scaled by 1.05 and cut to 330 wide: another size and another aspect ratio, the same picture.
+// The edit resized to 330 x 252, each axis by its own factor: another size and a slightly other aspect
+// ratio, the same framing. The group's contract is a resized edit, never a cropped one.
 Pixels reshaped(const Pixels &edited) {
-    const float scale = 1.05f;
-    Pixels r(330, int(std::lround(H * scale)), 3);
-    const float offsetX = (W * scale - r.width) / 2;
+    Pixels r(330, 252, 3);
+    const float sx = float(W) / r.width, sy = float(H) / r.height;
     for (int y = 0; y < r.height; ++y)
         for (int x = 0; x < r.width; ++x)
             for (int c = 0; c < 3; ++c)
-                r.at(x, y, c) = bilinear(edited, (x + offsetX + 0.5f) / scale - 0.5f, (y + 0.5f) / scale - 0.5f, c);
+                r.at(x, y, c) = bilinear(edited, (x + 0.5f) * sx - 0.5f, (y + 0.5f) * sy - 0.5f, c);
     return r;
 }
 
@@ -317,6 +317,40 @@ private slots:
         const Pixels original = picture();
         const Pixels edited = edit(original);
         check(run(dir, original, reshaped(edited)), edited, 0, "another size");
+    }
+
+    // A fixed rough cutoff above the threshold knob left a faint change in Color Match's statistics, which
+    // matched it away: a uniform +20/255 grey patch on a flat picture (a summed difference of 0.235) vanished.
+    void aFaintChangeIsNotMatchedAway() {
+        QTemporaryDir dir;
+        Pixels original(W, H, 3, 102.0f / 255.0f);
+        Pixels edited = original;
+        for (int y = RY; y < RY + RH; ++y)
+            for (int x = RX; x < RX + RW; ++x)
+                for (int c = 0; c < 3; ++c)
+                    edited.at(x, y, c) = 122.0f / 255.0f;
+        check(run(dir, original, edited), edited, 0, "faint patch");
+    }
+
+    // The face of an embedded instance keeps the manifest's bounds (a negative Margin would shrink the edit).
+    void anEmbeddedInstanceKeepsTheKnobBounds() {
+        Registry registry;
+        addBuiltinNodeTypes(registry);
+        const NodeType *group = registry.nodeType("fugue/keep-unchanged");
+        QVERIFY(group);
+        for (const auto &[knob, value] : {std::pair<const char *, int>{"margin", -5}, {"speck", 300}, {"close", -1}, {"blur", 0}, {"feather", 600}}) {
+            Document doc;
+            Node instance;
+            instance.type = group->id;
+            instance.version = group->version;
+            instance.inputs.insert(QLatin1String(knob), InputValue::literal(value));
+            doc.graph.nodes.insert("keep", instance);
+            embedGroupTypes(doc, registry);
+            bool rejected = false;
+            for (const Error &error : compile(doc, registry).errors())
+                rejected |= error.severity == Error::Severity::Error && error.code == QLatin1String("value_out_of_range");
+            QVERIFY2(rejected, knob);
+        }
     }
 
     // Desaturate weighs blue 0.072, so a blue-only change had to be about 0.55 to pass 0.04.

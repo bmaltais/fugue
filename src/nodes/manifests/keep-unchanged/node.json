@@ -3,7 +3,7 @@
   "id": "fugue/keep-unchanged",
   "version": "1.0.0",
   "name": "Keep unchanged areas",
-  "description": "After an edit model redraws a picture, keep the original everywhere the edit did not really change it: a soft mask of the changed areas, and the edit pasted through it onto the original, so the rest stays the original pixel for pixel.",
+  "description": "After an edit model redraws a picture, keep the original everywhere the edit did not really change it: a soft mask of the changed areas, and the edit pasted through it onto the original, so the rest stays the original pixel for pixel. The edit must have the same framing as the original, only resized: it is stretched to the original's size, so a cropped edit would be displaced.",
   "category": "Image/Mask",
   "keywords": [
     "edit",
@@ -30,7 +30,7 @@
       "name": "edited",
       "type": "image",
       "label": "Edited",
-      "description": "The edit model's result. It may be another size or aspect ratio; it is fitted to the original first."
+      "description": "The edit model's result. It may be another size or aspect ratio, but the same framing (resized, not cropped or padded); it is stretched to the original's size first."
     },
     {
       "name": "blur",

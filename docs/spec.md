@@ -4601,7 +4601,8 @@ original everywhere the edit did not really change it. In: `original`, `edited` 
 `blur` (4, range 1 to 31, as Blur's radius), `threshold` (0.12), `speck` (12), `close` ("Fill gaps", 24), `margin` (16), `feather` (16); out: `image` (the composite)
 and `mask` (the change mask, 0 to 1). The chain, inner ids in brackets: fit the edit to the original's size (Composite Masked with
 `resize_source`, no mask: `fit`; an edit model returns another aspect ratio); a rough change map (Blur both, Blend `difference`,
-the summed channel difference as below, Threshold Mask at 0.3) grown 20 px; Color Match (`match`) of the fitted edit onto the original,
+the summed channel difference as below, Threshold Mask at the same `threshold` as the final one, bound to the same knob: a stricter rough cutoff left a faint change in Color Match's
+statistics and matched it away) grown 20 px; Color Match (`match`) of the fitted edit onto the original,
 measured only where that map is 0, so the global drift is measured on unchanged pixels (a single pass is pulled by the changed
 area); Blur both (`blur`), Blend `difference`, the three channels of the difference as masks (Image to Mask red, green, blue) added by
 Combine Masks `add` (held to 1), so the magnitude is the sum of the channel differences and a change in blue or in hue alone
@@ -4617,7 +4618,10 @@ the edit shows as a soft transition inside the feather band: intended, the edit 
 Masked keeps the destination's channels, so an RGBA original keeps its alpha where the mask is 0; where the mask is above 0 the
 alpha mixes toward the edit's alpha, or toward 1 (opaque) when the edit has no alpha. Resizing the fit is bilinear (Composite
 Masked offers no other filter), so an edit much larger than the original is aliased a little; it is detection and paste alike,
-not a seam. Known limit: a dark-to-dark change (an old dark sleeve against a dark background) stays under the threshold and leaves dark
+not a seam. Contract: the edit has the original's framing and is only resized. The fit stretches each axis to the original's size (Composite Masked
+`resize_source`), so a cropped or padded edit has its details displaced, and the group does not detect that. The exposed knobs carry the
+manifest's `min` and `max` in `group.fugue`, so an embedded instance keeps them (the face takes `step` and `integer` from the first target, so
+the integer inner input is listed first). Known limit: a dark-to-dark change (an old dark sleeve against a dark background) stays under the threshold and leaves dark
 fragments at margin 16; margin 28 clears most of them. What the group cannot do (a relative or structural difference for
 low-contrast changes, round morphology where Grow Mask leaves diamond facets, removal of small regions by area) is the case for a
 Change Mask node, optional and not built.

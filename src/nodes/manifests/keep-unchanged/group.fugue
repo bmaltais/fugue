@@ -27,6 +27,8 @@
         },
         {
           "label": "Blur",
+          "max": 31,
+          "min": 1,
           "name": "blur",
           "section": "Change detection",
           "targets": [
@@ -37,32 +39,41 @@
         },
         {
           "label": "Threshold",
+          "max": 1,
+          "min": 0,
           "name": "threshold",
           "section": "Change detection",
           "targets": [
-            "threshold.value"
+            "threshold.value",
+            "threshold_rough.value"
           ]
         },
         {
           "label": "Speck size",
+          "max": 256,
+          "min": 0,
           "name": "speck",
           "section": "Clean up",
           "targets": [
-            "negate_speck.b",
-            "regrow.expand"
+            "regrow.expand",
+            "negate_speck.b"
           ]
         },
         {
           "label": "Fill gaps",
+          "max": 256,
+          "min": 0,
           "name": "close",
           "section": "Clean up",
           "targets": [
-            "negate_fill.b",
-            "fill_grow.expand"
+            "fill_grow.expand",
+            "negate_fill.b"
           ]
         },
         {
           "label": "Margin",
+          "max": 256,
+          "min": 0,
           "name": "margin",
           "section": "Clean up",
           "targets": [
@@ -71,6 +82,8 @@
         },
         {
           "label": "Feather",
+          "max": 256,
+          "min": 0,
           "name": "feather",
           "section": "Clean up",
           "targets": [
@@ -391,7 +404,7 @@
             "mask": {
               "from": "rough_sum.mask"
             },
-            "value": 0.3
+            "value": 0.12
           },
           "type": "fugue/threshold-mask",
           "version": "1.0.0"
