@@ -776,17 +776,24 @@ private slots:
         world.kernels.add("fugue/generate", kernel);
         GraphCheck check = checkGraph(world.graph(generateGraph("bad", model("no-such-model"))), world.environment());
         QCOMPARE(kernel->m_checked.load(), 1);
+        // The kernel's own finding is an error (#600); the missing model stays a warning, as Get ready can fetch it.
         QStringList codes;
-        for (const Error &warning : check.warnings) {
-            QCOMPARE(warning.severity, Error::Severity::Warning);
-            codes << warning.code + ":" + warning.node + ":" + warning.input;
+        for (const Error &error : check.checkErrors) {
+            QCOMPARE(error.severity, Error::Severity::Error);
+            codes << error.code + ":" + error.node + ":" + error.input;
         }
         QVERIFY2(codes.contains("input_invalid:g:prompt"), qPrintable(codes.join(", ")));
-        QVERIFY2(codes.contains("model_missing:g:"), qPrintable(codes.join(", "))); // the provider's own is kept
+        QStringList warnings;
+        for (const Error &warning : check.warnings) {
+            QCOMPARE(warning.severity, Error::Severity::Warning);
+            warnings << warning.code + ":" + warning.node + ":" + warning.input;
+        }
+        QVERIFY2(warnings.contains("model_missing:g:"), qPrintable(warnings.join(", ")));
 
         const auto provider = world.provider("This machine", {"flux"});
         check = checkGraph(world.graph(generateGraph("a cat", model("flux"))), world.environment());
         QVERIFY(check.warnings.isEmpty());
+        QVERIFY(check.checkErrors.isEmpty());
         QCOMPARE(kernel->m_checked.load(), 2);
         QVERIFY(provider->jobs().isEmpty());
     }
