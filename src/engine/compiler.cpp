@@ -826,7 +826,7 @@ void Compiler::checkNode(Scope *scope, const QString &id, Flat &flat, bool face)
             checkValue(flat, spec, values.value(spec.name));
             continue;
         }
-        if (face || !spec.required())
+        if (face || !spec.required() || m_options.allowUnsetInputs)
             continue;
         Error error = nodeError(QStringLiteral("missing_input"), flat.path,
                                 QStringLiteral("Input %1 of %2 is required and not set.").arg(spec.name, flat.path));

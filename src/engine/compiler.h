@@ -137,6 +137,9 @@ struct CompileOptions {
     // pack's INSTALLED version (Registry::packVersion). Every run path sets it; only a pure
     // check of meaning (tests) leaves it out.
     std::function<bool(const QString &pack, const QString &version)> trusted;
+    // Do not report a required input that holds nothing (`missing_input`): for a reading of the nodes before a run, such as where an app
+    // goes (engine/paired_placement), when an app's inputs are filled by the run's own values. A run never sets it.
+    bool allowUnsetInputs = false;
 };
 
 // What compiling gives: the compiled graph with the warnings found, or, when

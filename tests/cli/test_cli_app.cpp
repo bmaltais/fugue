@@ -410,6 +410,8 @@ private slots:
                       "class H(http.server.BaseHTTPRequestHandler):\n"
                       "    def do_POST(self):\n"
                       "        n = int(self.headers.get('Content-Length', 0)); self.rfile.read(n)\n"
+                      "        if not self.path.endswith('/describe'):\n"
+                      "            self.send_response(500); self.send_header('Content-Length', '0'); self.end_headers(); return\n"
                       "        body = json.dumps({'protocol': 1, 'engine': 'sdcpp', 'shares_filesystem': False, 'host': 'gx10', 'capabilities': ['text.encode']}).encode()\n"
                       "        self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)\n"
                       "    def log_message(self, *a): pass\n"
@@ -433,8 +435,12 @@ private slots:
               QStringLiteral("{\"gx10\": {\"address\": \"http://0.0.0.0:%1\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}").arg(port).toUtf8());
         const Outcome freshInfo = fugue({"app", "info", "staged.fugue", "--json"});
         QCOMPARE(freshInfo.data().value("runs_on").toString(), QString("gx10"));
-        // The run is not refused up front. (It is not started: the staged graph is a real one now, and this fake host cannot serve a job.)
         QVERIFY(!freshInfo.data().contains("host_problems"));
+        // The run is let through: it starts and goes to the host, whose job POSTs fail (HTTP 500), so it ends with a provider error and
+        // not with the refusal (`model_missing`) it gets when no host takes the node.
+        const Outcome through = fugue({"app", "run", "staged.fugue", "--json"});
+        QVERIFY2(!through.code().isEmpty(), through.out + through.err);
+        QVERIFY2(through.code() != QString("model_missing") && through.code() != QString("app_not_ready"), through.out + through.err);
         host.kill();
         host.waitForFinished(2000);
 

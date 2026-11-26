@@ -7,6 +7,7 @@
 
 #include <optional>
 
+#include "engine/compiler.h"
 #include "engine/group_library.h"
 #include "engine/paired_placement.h"
 #include "engine/pack_loader.h"
@@ -155,6 +156,17 @@ private slots:
         QCOMPARE(hosts.asked, 1);
         FakeHosts pinned({{"gx10", {"text.encode"}}});
         QCOMPARE(verdict(workflow("gx10"), missing(), request(), pinned).hostOf.value("enc"), QStringLiteral("gx10")); // pinned to the host itself
+    }
+
+    // #587: a required input left for the app's own values (`--input`) does not stop the placement, as it does not stop the run.
+    void aRequiredInputLeftUnsetIsNoReasonToPlaceNothing() {
+        Document document = workflow();
+        document.graph.nodes["enc"].inputs.remove("prompt");
+        QVERIFY(!compile(document, registry())); // the plain compile refuses it: missing_input
+        FakeHosts hosts({{"gx10", {"text.encode"}}});
+        const PairedVerdict made = verdict(document, missing(), request(), hosts);
+        QCOMPARE(made.hostOf, (QMap<QString, QString>{{"enc", "gx10"}}));
+        QVERIFY(made.runsOn());
     }
 
     // #581: a host that is silent is never named as the host; the run may still start (a cached re-run works).

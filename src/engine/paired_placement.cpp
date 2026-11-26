@@ -89,11 +89,14 @@ QList<Need> nodesNeedingModels(const Document &document, const ReadinessPlan &pl
         return {};
 
     const Registry &registry = *request.registry;
-    // The nodes the scheduler runs: groups expanded, pins merged, muted nodes out. A document that does not compile runs nothing.
+    // The nodes the scheduler runs: groups expanded, pins merged, muted nodes out. A document that does not compile runs nothing (an input left unset is no error here: the run's values fill it).
     // A library or pack group named only by its type id runs from its definition, as in compileForRun (5.3, 6.1).
     Document embedded = document;
     embedGroupTypes(embedded, registry);
-    const Compilation compiled = compile(embedded, registry);
+    // An input the app's own values fill at the run (a required target left for `--input`) is not a reason to place nothing (#587).
+    CompileOptions options;
+    options.allowUnsetInputs = true;
+    const Compilation compiled = compile(embedded, registry, options);
     if (!compiled)
         return {};
     const QMap<QString, CompiledNode> &nodes = compiled->nodes;
