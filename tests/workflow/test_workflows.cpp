@@ -582,6 +582,20 @@ private slots:
         QVERIFY(f.restart(third)->recoverable().isEmpty());
     }
 
+    void aQuitLeavesNothingToRecover() {
+        // Spec 11.3: the copies are for a crash. A quit asked about the unsaved work already, so the next start offers nothing
+        // (a new machine asked "Fugue closed with unsaved work" after a quit, of a template tab never edited).
+        Fixture f;
+        f.canvas.addNode("fugue/text", 0, 0);
+        f.workflows->writeRecoveryCopies();
+        QCOMPARE(QDir(f.locations.recoveryDir).entryList({"*.fugue"}).size(), 1);
+        f.workflows->dropRecoveryCopies();
+        QVERIFY(QDir(f.locations.recoveryDir).entryList({"*.fugue"}).isEmpty());
+        f.workflows.reset();
+        CanvasModel again(&f.registry);
+        QVERIFY(f.restart(again)->recoverable().isEmpty());
+    }
+
     void closingATabRemovesItsRecoveryCopy() {
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);

@@ -281,6 +281,9 @@ public:
     // Opens every recovery copy of an earlier session as an unsaved tab, or deletes them.
     Q_INVOKABLE void recover();
     Q_INVOKABLE void discardRecovery();
+    // The person quit (spec 11.3): the unsaved work was asked about, so this window's copies go and the next start offers
+    // nothing. A crash never gets here, so its copies stay. Copies of an earlier session not yet answered stay too.
+    void dropRecoveryCopies();
     // Writes a copy of each tab with unsaved content, removes the copy of a tab that has
     // none. Runs every 30 seconds.
     void writeRecoveryCopies();

@@ -2920,7 +2920,9 @@ kept within a limit (#141):
 
 On by default. Every 30 seconds Fugue writes a recovery copy of each workflow with unsaved
 content to `~/.local/state/fugue/recovery/`. It never overwrites the user's file. On the next
-start it offers to recover.
+start it offers to recover. The copies are for a crash: a quit (Ctrl+Q, the bar's close, the window manager's
+close such as Super+W, all of which ask about unsaved work first) removes the window's copies, so the next start
+offers nothing. Copies of an earlier session the person has not answered yet stay.
 
 ### 11.4 Import
 

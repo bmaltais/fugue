@@ -30,6 +30,8 @@ ApplicationWindow {
     Material.accent: App.theme.accent
     Material.background: App.theme.background
     Material.foreground: App.theme.foreground
+    // The window manager's close (Super+W, the title bar's x) asks about unsaved work as Quit does (spec 11.3).
+    onClosing: close => close.accepted = App.commands.mayCloseWindow()
 
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     // Rounded spaces with gaps (docs/canvas-look.md 20.1, 20.21): the canvas or the areas, and a side panel, are cards a gap of window
