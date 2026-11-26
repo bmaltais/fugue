@@ -175,6 +175,8 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
         else if (graph)
             graph();
     });
+    // With no area showing the Graph its context is off; an App area still takes the picture.
+    commands.setAlsoWhen(QStringLiteral("edit.paste"), [&view] { return view.shown(); });
     commands.setHandler(QStringLiteral("run.cancel"), [&view, &runs] {
         if (view.shown())
             view.cancel();

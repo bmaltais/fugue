@@ -20,6 +20,8 @@ Item {
     readonly property CanvasLook look: App.theme.look
     // The canvas, to turn a drop point into world coordinates.
     property FugueCanvas canvasView
+    // No area shows the Graph (Main.qml): a dropped file adds nothing to it.
+    property bool graphHidden: false
     property real noticeInset: 0 // the rail at the window's left edge, which the notice keeps clear of
     property alias closeQuestion: closeAsk
     property alias trustQuestion: trustAsk
@@ -100,7 +102,7 @@ Item {
         anchors.fill: parent
         keys: ["text/uri-list"]
         onDropped: (drop) => {
-            if (!drop.hasUrls)
+            if (!drop.hasUrls || root.graphHidden)
                 return
             const p = root.canvasView ? root.canvasView.mapFromItem(dropArea, drop.x, drop.y) : Qt.point(0, 0)
             const w = root.canvasView ? root.canvasView.toWorld(p.x, p.y) : p

@@ -56,8 +56,8 @@ void addRow(CommandRegistry &commands, const Row &row) {
     spec.description = QString::fromUtf8(row.description);
     spec.label = QString::fromUtf8(row.label);
     spec.keys = row.keys;
-    // The keyed one is a canvas key, as L and N are.
-    spec.context = row.keys.isEmpty() ? QStringLiteral("app") : QStringLiteral("canvas");
+    // Focus mode (H) is the window's: it must work while no area shows the Graph. A Canvas view's Hand tool (H) outranks it there.
+    spec.context = QStringLiteral("app");
     spec.versus = QStringLiteral("added");
     if (const QString problem = commands.add(spec); !problem.isEmpty())
         qCritical().noquote() << "chrome command:" << problem;

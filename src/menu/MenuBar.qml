@@ -305,6 +305,7 @@ Rectangle {
             look: bar.look
             appShown: App.appView !== null && App.appView.shown
             atHome: App.appShelf !== null && App.appShelf.atHome
+            graphHidden: App.workspace !== null && App.workspace.count > 0 && App.workspace.graphArea === 0
             plainGraph: App.appView !== null && !App.appView.isApp && !(App.appShelf !== null && App.appShelf.landing)
             anchors.right: chipLoader.left
             anchors.rightMargin: 2 * bar.u

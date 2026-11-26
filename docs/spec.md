@@ -3726,8 +3726,14 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   The Graph may have **no area** (`Workspace::graphArea()` is 0): it is then hidden but alive (`Main.qml`: the canvas is
   not visible, so its run toolbar, queue panel and context menu go with it, and the areas' `views` map does not list it, so no
   area places it); the commands that act on it are off (the `canvas` command context follows "the Graph is shown in an
-  area" while the window has areas: node search, the edit, node, group and view keys, the panels that hang from it), and
-  Run, the file and window commands stay (context `app`). Closing the Graph's area just closes it (Blender); Ctrl+Alt+G
+  area" while the window has areas, and the group-selected, group and compare contexts, which are its selection's, go with it: node
+  search, the edit, node, group, compare and Graph view keys, and the queue panel, which hangs from it), and Run, the file
+  and window commands stay (context `app`), so do Focus mode (H), the node library and workflows panels (N, W: the strip still
+  opens them; a library row brings the Graph into the active area first, a drop over where the Graph is not adds nothing) and Ctrl+V
+  into an App area (`CommandRegistry::setAlsoWhen`). Opening a workflow from the workflows panel or Edit workflow from a Canvas area
+  brings the Graph into the active area, so it is seen; in the App | Graph switch neither segment is chosen while the Graph is hidden
+  and Graph brings it back. A search or context menu open on the Graph closes when it hides. The one area that showed the App and
+  is given the Graph shows the Graph (the tab's mode is set to it). Closing the Graph's area just closes it (Blender); Ctrl+Alt+G
   or the area menu's Graph brings it back into the active area, where it re-places itself. A layout file with no Graph
   is kept as it is (no Graph is forced into it); a second Graph in a file shows a Canvas. The active area and what a
   command acts on fall back to the Graph's area, else the first area. A **split's new area** shows the view of
@@ -3753,7 +3759,7 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   | `area.close` | Close area | Ctrl+Alt+W | the area beside it takes its place; off with one area |
   | `area.view-graph` | Graph | Ctrl+Alt+G | the active area shows the Graph (it moves there); checked where it is |
   | `area.view-canvas` | Canvas | Ctrl+Alt+C | the active area shows a Canvas (the Graph's too: the Graph is then hidden) |
-  | `view.reset-layout` | Reset layout | none | one area showing the Graph again; off with one area |
+  | `view.reset-layout` | Reset layout | none | one area showing the Graph again; off in the default window (a one-area Canvas or App window has it on) |
 
   The keys are free in every context and none is a text field's (12.4); a keymap file can rebind them (12.5).
 - **Drawing** (`workspace/AreaNode.qml`, recursive: a branch makes one per child). An area is not an item: every view

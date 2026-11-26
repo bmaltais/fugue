@@ -62,8 +62,8 @@ QList<Row> defaultRows() {
         {"view.zoom-in", QT_TRANSLATE_NOOP("Command", "Zoom in"), {"Alt+=", "Ctrl+=", "+"}, {}, "canvas", "Ctrl, + added"},
         {"view.zoom-out", QT_TRANSLATE_NOOP("Command", "Zoom out"), {"Alt+-", "Ctrl+-", "-"}, {}, "canvas", "Ctrl, - added"},
         {"view.toggle-links", QT_TRANSLATE_NOOP("Command", "Hide or show links"), {"L"}, {}, "canvas", same},
-        {"panel.nodes", QT_TRANSLATE_NOOP("Command", "Toggle the node library"), {"N"}, {}, "canvas", same},
-        {"panel.workflows", QT_TRANSLATE_NOOP("Command", "Toggle the workflows panel"), {"W"}, {}, "canvas", same},
+        {"panel.nodes", QT_TRANSLATE_NOOP("Command", "Toggle the node library"), {"N"}, {}, "app", same},
+        {"panel.workflows", QT_TRANSLATE_NOOP("Command", "Toggle the workflows panel"), {"W"}, {}, "app", same},
         {"panel.queue", QT_TRANSLATE_NOOP("Command", "Toggle the run queue"), {"Alt+Q"}, {}, "canvas", "added"},
         // The Canvas view's layers panel (#226): its keys while the pointer is over it (Blender's hover rule).
         {"canvas-layers.visible", QT_TRANSLATE_NOOP("Command", "Hide or show the selected layers"), {"H"}, {"Click the eye", "Alt+click the eye: that layer alone"}, "canvas-layers", "added"},

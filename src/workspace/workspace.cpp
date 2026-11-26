@@ -374,7 +374,7 @@ void Workspace::registerCommands(CommandRegistry &commands) {
         commands.setCheckedWhen(id, [this, target, view] { return viewOf(target()) == view; });
     }
     commands.setHandler("view.reset-layout", [this] { reset(); });
-    commands.setEnabledWhen("view.reset-layout", [this] { return m_tree.count() > 1; });
+    commands.setEnabledWhen("view.reset-layout", [this] { return !isDefault(m_tree); });
 }
 
 } // namespace fugue
