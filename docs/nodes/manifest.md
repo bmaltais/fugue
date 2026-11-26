@@ -53,6 +53,7 @@ what you need to write one.
 | `category` | Where it sits in the node menu; `/` makes levels. |
 | `description`, `keywords`, `aliases` | Search. `aliases` are old ids this node answers to after a rename. |
 | `sink` | The node is an end of a graph (it saves or shows something). Default false. |
+| `view_only` | Needs `sink`. The sink only shows (Compare Images) and writes nothing. Inside a group such a sink is kept as a plain node when a node that stays reads one of its outputs; any other sink inside a group is dropped, and what read its outputs sees them as empty (spec 5.5). Default false. |
 | `deterministic` | Default true: the same inputs give the same outputs, so a result is cached. Set false when the answer changes (a clock, a counter, the web); Fugue then runs it every time. |
 | `runtime` | `{"kind": "command", "entry": "./run.sh"}` plus `mode`, `idle_timeout_s`, `timeout_s` ([persistent](persistent.md), [protocol](protocol.md)). |
 | `inputs`, `outputs` | Lists; may be empty. |

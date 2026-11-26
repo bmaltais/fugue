@@ -162,6 +162,7 @@ int run(int argc, char **argv, const Hooks &hooks) {
     context.runsRoot = RunFolder::defaultRoot();
     context.queueDir = Queue::defaultDir();
     context.lockPath = Queue::defaultLockPath();
+    context.json = json;
     if (hooks.addNodeTypes)
         hooks.addNodeTypes(context.registry);
     if (hooks.addKernels)

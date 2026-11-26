@@ -723,7 +723,7 @@ only ever execute this form, and `fugue compile` prints it.
   bypassed output that has no matching input is removed: an optional input becomes unset, and a
   node with a required input left that way is dropped as `upstream_empty`. Muted nodes and their
   dependents are dropped and listed in `skipped` with the reason.
-- Sinks inside a group are dropped ([5.5](#55-sinks-inside-a-group)).
+- Sinks inside a group are dropped ([5.5](#55-sinks-inside-a-group)), except a view sink (Compare Images) that a needed node reads: it stays as a plain node, not as a sink (#623). Links into a dropped sink count as empty.
 - Nodes with no sink downstream are dropped, unless the run is "run to here".
 - `auto` values are kept; the engine resolves them when the run starts.
 - A compiled graph can be run directly: `fugue run compiled.json`. `--set`, `--to` and
@@ -910,6 +910,12 @@ with an id and a version, and it appears in node search.
 A group never starts a run and never writes a file or shows a preview from inside when it runs
 as a node. Whatever is wanted from it is exposed as an output and the sink sits outside.
 
+- A view sink (manifest `view_only`, Compare Images only: it shows and writes nothing) whose output a
+  needed node reads, or that is the group's output, is kept as a plain node: its value is needed, and
+  it is no sink of the run (#623). One nothing needed reads is dropped without a warning. Any other
+  inner sink, a Save Image whose `file` is read for one, is dropped, and what read its outputs sees
+  them as empty, as after a bypass: a required input makes the reader `upstream_empty`, a lazy input
+  is dropped.
 - While the user has entered a group, its inner sinks work; they go quiet on leaving. The canvas
   passes the entered instance's path id to the compiler, which keeps that level's sinks (not those
   of groups nested in it).
@@ -2691,6 +2697,11 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
   the advisory lock `~/.local/state/fugue/engine.lock` (and, across project roots and the Default session, the cross-root GPU lock of [1.4.2](#142-projects)). "Run first" writes an entry that sorts
   ahead of the waiting ones; removing a queued run deletes its entry. An entry whose process is
   gone is discarded, and its run is ended as `failed`.
+- `fugue run --wait` that has been queued behind another run for about a second says so once: on stderr
+  `Waiting for another Fugue run to finish (pid N)…`, and with `--json` a `{"event":"waiting","run":…,"pid":N}` line on
+  stdout instead (the line is not written to the run's `events.jsonl`). `N` is the active run's process, else the holder of the engine or
+  GPU lock (read from `/proc/locks`); without one the message ends after `finish…`, and the event has no `pid`.
+  `runs events --follow` does not say it. `fugue validate` runs nothing and takes neither lock, so it never waits for one.
 - A process that holds the lock is alive, so an active entry is dead exactly when someone else
   can take the lock. A waiting entry is dead when the process id it records is not that run's
   worker; a process id alone is not trusted, because ids are reused.
@@ -4606,6 +4617,38 @@ the template (#177) adds the group like any other and the workflow embeds the de
 `prompt`, `seed`, `steps`, `guidance`, `denoise` (default 1), `padding`, `megapixels`, `blend`;
 out: `image`.
 
+**Keep unchanged areas (#621).** `fugue/keep-unchanged` 1.0.0, "Keep unchanged areas", `Image/Mask`, a second group
+of the `fugue` pack, shipped as `fugue/inpaint-crop-stitch` is (`src/nodes/manifests/keep-unchanged`, test
+`tests/nodes/test_keep_unchanged.cpp`). After an edit model (FLUX.2 Klein and the like) redraws a whole picture, it keeps the
+original everywhere the edit did not really change it. In: `original`, `edited` (any size or aspect ratio), and the knobs
+`blur` (4, range 1 to 31, as Blur's radius), `threshold` (0.12), `speck` (12), `close` ("Fill gaps", 24), `margin` (16), `feather` (16); out: `image` (the composite)
+and `mask` (the change mask, 0 to 1). The chain, inner ids in brackets: fit the edit to the original's size (Composite Masked with
+`resize_source`, no mask: `fit`; an edit model returns another aspect ratio); a rough change map (Blur both, Blend `difference`,
+the summed channel difference as below, Threshold Mask at the same `threshold` as the final one, bound to the same knob: a stricter rough cutoff left a faint change in Color Match's
+statistics and matched it away) grown 20 px; Color Match (`match`) of the fitted edit onto the original,
+measured only where that map is 0, so the global drift is measured on unchanged pixels (a single pass is pulled by the changed
+area); Blur both (`blur`), Blend `difference`, the three channels of the difference as masks (Image to Mask red, green, blue) added by
+Combine Masks `add` (held to 1), so the magnitude is the sum of the channel differences and a change in blue or in hue alone
+counts (Desaturate's luma weights, blue 0.072, needed a blue-only change near 0.55; Combine Masks `or` rounds to 0 or 1 and is
+no maximum), Threshold Mask (`threshold`; the sum is about 3 times the gray value, hence 0.12 where the Desaturate version used
+0.04, and on the same test pair the mask covers the same 5.7% of the picture); an open (Grow Mask by -`speck`, then +`speck`; Number Math negates) that drops specks; a close
+(Grow +`close`, then -`close`) that fills gaps; Grow +`margin`; Feather Mask outward by `feather`; Composite Masked, destination the
+original, source the fitted edit, through that mask. Where the mask is 0 the output is the original pixel for pixel (tested
+exactly, with a 16-bit mask). Blend `difference` stands in for Compare Images, which hangs inside a group (#623). Exposed inputs
+bind to inner literals (`blur` to three Blurs, `speck` to Number Math and the regrow, `close` likewise), as the Inpaint group's do.
+The paste uses the fitted edit, not the colour-matched one (Color Match only decides where the change is), so a global drift of
+the edit shows as a soft transition inside the feather band: intended, the edit is kept as the model made it. Alpha: Composite
+Masked keeps the destination's channels, so an RGBA original keeps its alpha where the mask is 0; where the mask is above 0 the
+alpha mixes toward the edit's alpha, or toward 1 (opaque) when the edit has no alpha. Resizing the fit is bilinear (Composite
+Masked offers no other filter), so an edit much larger than the original is aliased a little; it is detection and paste alike,
+not a seam. Contract: the edit has the original's framing and is only resized. The fit stretches each axis to the original's size (Composite Masked
+`resize_source`), so a cropped or padded edit has its details displaced, and the group does not detect that. The exposed knobs carry the
+manifest's `min` and `max` in `group.fugue`, so an embedded instance keeps them (the face takes `step` and `integer` from the first target, so
+the integer inner input is listed first). Known limit: a dark-to-dark change (an old dark sleeve against a dark background) stays under the threshold and leaves dark
+fragments at margin 16; margin 28 clears most of them. What the group cannot do (a relative or structural difference for
+low-contrast changes, round morphology where Grow Mask leaves diamond facets, removal of small regions by area) is the case for a
+Change Mask node, optional and not built.
+
 **Generating with a mask, staged (14.3).**
 
 - VAE Encode 1.1.0 takes an optional `mask`. The latent's `meta` carries `mask` (its media
@@ -5324,6 +5367,7 @@ Building M4 made these further choices.
 | Generate Image's mask as built (#175, 2026-11-21): the capability is a model property `inputs: ["mask"]` (not a new capability: the same models serve `image.generate` with or without a mask); the node checks it in `request()` from the selection and does not make it a hard routing requirement, because a hard one answers a named model that cannot with `model_missing` and gives no list of the ones that can, while a preference (`Requirement::preferred`, `Selection::preferredOffers`) picks a capable ready model for "any model" and lets the node say `mask_unsupported` with the names. The omarchy provider reads `features_by_mode.img_gen.mask_image` (the mirror `features` when there is no mode-aware object); it refuses a mask for a model without it rather than drop it. The mask must be the start image's size, as VAE Encode's (no `mask_resized` scaling here: a mask of another shape cut by cover would not line up with the picture). The put-back is over the picture as it went to the model, at the result's size. Not checked on a live sd-server (none on this machine) and not on a GPU (the helper has no `image.generate`) | 8.1, 8.3, 8.7, 14.4 | medium |
 | Composite back is a node in staged graphs (Composite Masked, Stitch), and built into Generate Image, the coarse node whose promise is that the outside is unchanged. Soft edges come from Feather Mask and Stitch's blend, in pixels, because the library rounds the mask in the latent | 14.4 | medium |
 | Crop and stitch as built (#176): the group ships from the built-in pack (a `group.fugue` resource beside its `node.json`; the loader, `loadLibraryGroup` and `embedGroupTypes` took it with no change), so #177's template only adds it. Choices made while building: the handle's `meta` names the picture and mask as the inputs' own media handles, so the cache and the hash follow them, and a mask of another size is kept as given and stretched in Stitch (a resized mask written to the node's folder would move into the cache's store and leave a stale path); the shape check compares the picture with the handle's own `size`, not with the box, so the rounding to a multiple of 16 never causes `stitch_mismatch`; no side of a crop passes 4096 (a sliver box would otherwise be 16 x 65536 at 1 MP); a crop that is not resized takes no resampling, so megapixels 0 with blend 0 returns the original byte for byte; the mask is feathered over the whole picture and cut at the box, not feathered inside the box, so the edge fades alike at the box's border; the box is the bounds of the pixels above 0, so a faint stroke counts and an 8-bit mask's 1/255 is not ignored; no ComfyUI golden (the formulas are the shared resize and feather kernels; the GPL Inpaint Crop and Stitch node was not read beyond its README); `mask_full` is not a warning of Crop to Mask (the box is the picture) | 14.4 | medium-high |
+| Keep unchanged areas (#621): a group first, built from existing nodes (Blur, Blend difference, Image to Mask and Combine Masks add for the summed channel difference, Threshold, Grow, Feather, Color Match, Composite Masked); a Change Mask node is optional and waits until the group shows what it cannot do (low-contrast changes, round morphology, removal by area). Two-pass Color Match, a fit step and a close step were needed, found on real Klein edits; defaults tuned there (blur 4, threshold 0.12, speck 12, fill 24, margin 16, feather 16) | 14.4 | medium-high |
 | Names and defaults the owner may change: Feather Mask (`fugue/feather-mask`, a blur of the mask outward by default; ComfyUI's FeatherMask, which fades from the picture's borders, would convert to another node), Combine Masks for MaskComposite, Crop to Mask's padding 64 px and 1 megapixel, Stitch's blend 16 px, the overlay in the accent at 50% | 14.4 | medium |
 | Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content was checked on the 3090 (#177, same seed, both ways): for the inpaint crop the reference helps (without it the chair lost its legs and its place), so the group keeps it; for the outpaint it makes Klein keep Pad's gray border, so the template gives Text Encode no reference | 11.10, 14.4 | high |
 | Color Match as built (#180, 2026-11-21): one node, not a group (nothing in it splits further; Feather Mask and Composite Masked stay the nodes that decide the seam). Statistics are weighted by 1 - m rather than cut at a threshold, so a half-masked pixel counts half, as Fill Masked does. The mask describes the picture; the reference shares its weights only at the same size, because for an outpaint the reference (the original, smaller) and the redraw do not line up, and measuring a different-sized reference whole needs no offset input. The pictures go to linear light before the paper's LMS matrix (the paper leaves the RGB unspecified; sRGB values are not light). Strength mixes in l-alpha-beta, which equals mixing the mean and the scale. A mask of all 1 measures the whole picture with a warning rather than failing. `mask_full` and `mask_resized` are reused, so there is no new error code. The Outpaint template is unchanged: whether the node visibly helps on the 3090 is for the owner to check (before and after on #180), then it goes before Composite Masked | 14.4 | medium-high |
