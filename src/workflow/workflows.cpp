@@ -531,8 +531,16 @@ void Workflows::useOnDisk(const QStringList &hashes, int token) {
             clearReading(wanted);
             bool anyApplied = false, anyDropped = false;
             QList<QPair<int, QStringList>> done, notRead;
+            // Each distinct destination (tab, view, files) takes the result once, however many asks wanted it; every ask is still answered.
+            QHash<QString, bool> appliedTo;
             for (const UseAsk &ask : finished.asks) {
-                const bool applied = applyUses(ask.tab, ask.chosen, resolved, ask.inApp);
+                QStringList chosenHashes;
+                for (const OnDiskUse &use : ask.chosen)
+                    chosenHashes << use.wanted.value(QStringLiteral("hash")).toString();
+                const QString where = ask.tab + QLatin1Char('|') + (ask.inApp ? QLatin1Char('a') : QLatin1Char('g')) + QLatin1Char('|') + chosenHashes.join(QLatin1Char(','));
+                if (!appliedTo.contains(where))
+                    appliedTo.insert(where, applyUses(ask.tab, ask.chosen, resolved, ask.inApp));
+                const bool applied = appliedTo.value(where);
                 anyApplied |= applied;
                 anyDropped |= !applied && !resolved.isEmpty();
                 QStringList ok, no;

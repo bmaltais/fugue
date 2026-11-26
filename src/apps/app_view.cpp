@@ -364,6 +364,12 @@ void AppView::takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const
             if (tab == m_tab)
                 emit valueChanged(field.key());
         }
+        // Chosen again (a second press while the file was read): the fields the first choice changed already hold the file, so they are kept,
+        // or Undo would leave the file in the form.
+        if (const auto earlier = state.uses.constFind(hash); earlier != state.uses.constEnd())
+            for (const QString &key : earlier->keys)
+                if (!kept.keys.contains(key))
+                    kept.keys << key;
         state.uses.insert(hash, kept);
     }
     emit usesChanged();

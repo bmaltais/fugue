@@ -1701,7 +1701,9 @@ private slots:
         workflows.cancelUses(7);        // cancelled while the file is read
         inApp = true;                   // the person goes to the App view and asks again
         workflows.useOnDisk({hash}, 0);
-        QTRY_COMPARE(taken, 1);         // the App view's state took it
+        workflows.useOnDisk({hash}, 0); // a second press during the read: the same destination takes the result once
+        QTRY_VERIFY(!workflows.hashingUses());
+        QCOMPARE(taken, 1);             // the App view's state took it
         QCOMPARE(canvas.undoStack()->count(), steps); // the workflow itself was not edited
         QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(), hash);
     }

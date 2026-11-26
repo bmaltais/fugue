@@ -79,6 +79,8 @@ Item {
                           : panel.needs.headerAction === "downloadAll" ? qsTr("Download all") : qsTr("Get ready…")
                     toned: true
                     current: true
+                    // A file being read is not asked for again (the rows say so too).
+                    enabled: Object.keys(panel.needs.reading).length === 0
                     visible: panel.needs.items.some(i => i.kind !== "problem")
                     onTapped: panel.needs.downloadAll()
                 }
