@@ -1075,6 +1075,34 @@ private slots:
         QVERIFY(changed.count() >= 1);
     }
 
+    // The file is chosen in tab A, and tab B is shown by the time its hash is read: A's model field still takes the file, so A shows it
+    // when it comes back and its run (and the take it leaves) has it.
+    void aFileChosenForATabThatIsNoLongerShownIsInItsFormWhenItComesBack() {
+        const QString type = QStringLiteral("fugue/upscale-model");
+        const QString missing = QStringLiteral("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        const QString chosen = QStringLiteral("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        const QJsonObject wanted{{"resource", type}, {"hash", missing}, {"name", "x4plus.pth"}};
+        const QJsonObject replacement{{"resource", type}, {"hash", chosen}, {"name", "x4.pth"}};
+        QJsonObject json = mediaWorkflow();
+        QJsonObject graph = json.value("graph").toObject(), nodes = graph.value("nodes").toObject(), up = nodes.value("up").toObject();
+        up.insert("inputs", QJsonObject{{"model", wanted}});
+        nodes.insert("up", up);
+        graph.insert("nodes", nodes);
+        json.insert("graph", graph);
+        OnDiskUse use{wanted, {}};
+        use.match.name = QStringLiteral("x4.pth");
+        m_view->show("a", load(json), {});
+        m_view->show("b", load(mediaWorkflow()), {});
+        m_view->takeUses("a", {use}, {{missing, replacement}}); // A's file was read while B is shown
+        QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), QString()); // B's form is not touched
+        m_view->show("a", load(json), {});
+        QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), chosen);
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("hash").toString(), chosen);
+        QCOMPARE(m_view->takes().size(), 1);
+        QCOMPARE(m_view->values().value("model").toObject().value("hash").toString(), chosen); // what the take records and Reuse restores
+    }
+
     // A hash read on the pool answers the tab and the field that asked, even when another tab is shown by then.
     void aModelReadAfterATabSwitchGoesToTheTabThatAskedForIt() {
         QTemporaryDir models;

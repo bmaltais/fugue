@@ -222,6 +222,12 @@ void AppView::buildFields() {
         startValue(described, state);
         m_fields << fieldFor(described, state);
     }
+    state.modelHeld.clear();
+    for (const QVariant &field : std::as_const(m_fields)) {
+        const QVariantMap map = field.toMap();
+        if (map.value("kind").toString() == QLatin1String("model"))
+            state.modelHeld.insert(map.value("key").toString(), map.value("value").toMap().value("hash").toString());
+    }
 }
 
 // What the form keeps for an input it shows, so that what is shown is what every run binds: a choice with none in force takes
@@ -346,17 +352,17 @@ void AppView::takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const
         if (handle == resolved.constEnd())
             continue;
         TabState::ModelUse kept{use.wanted.value("name").toString(), use.match.name, use.match.tier, use.match.otherSource, handle.value(), {}};
-        // A model field of the form that holds the missing model takes the file: it is what the form shows and the takes record.
-        if (tab == m_tab)
-            for (const QVariant &field : std::as_const(m_fields)) {
-                const QVariantMap map = field.toMap();
-                const QString key = map.value("key").toString();
-                if (map.value("kind").toString() == QLatin1String("model") && valueOf(key).toMap().value("hash").toString() == hash) {
-                    state.values.insert(key, handle.value());
-                    kept.keys << key;
-                    emit valueChanged(key);
-                }
-            }
+        // A model field of the form that holds the missing model takes the file: it is what the form shows and the takes record. The
+        // tab's own state holds it, so it holds for a tab that is not shown too (it shows the file when it comes back).
+        for (auto field = state.modelHeld.cbegin(); field != state.modelHeld.cend(); ++field) {
+            const QString held = state.values.contains(field.key()) ? state.values.value(field.key()).toObject().value("hash").toString() : field.value();
+            if (held != hash)
+                continue;
+            state.values.insert(field.key(), handle.value());
+            kept.keys << field.key();
+            if (tab == m_tab)
+                emit valueChanged(field.key());
+        }
         state.uses.insert(hash, kept);
     }
     emit usesChanged();

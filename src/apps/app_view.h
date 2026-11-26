@@ -386,6 +386,9 @@ private:
             QStringList keys;
         };
         QMap<QString, ModelUse> uses;
+        // The model fields of the form and the hash each held when the form was last built, so a choice that lands on a tab that is
+        // not shown (its file was read while another tab came forward) still finds the fields that hold the missing model.
+        QMap<QString, QString> modelHeld;
     };
     static constexpr int maxTakes = 30;
     QString inputsLine(const QMap<QString, QJsonValue> &values, const QMap<QString, QString> &modes) const;
