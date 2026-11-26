@@ -2154,5 +2154,7 @@
     "one": "%n folder",
     "other": "%n folders"
   },
-  "inherited, %1": "inherited, %1"
+  "inherited, %1": "inherited, %1",
+  "A list of %1 cannot feed this side: the other side is a single value.": "A list of %1 cannot feed this side: the other side is a single value.",
+  "A single %1 cannot feed this side: the other side is a list.": "A single %1 cannot feed this side: the other side is a list."
 }

@@ -474,6 +474,35 @@ private slots:
         QVERIFY(hasErrors(registry.add(packPreview)));
     }
 
+    // `takes_list` (a Switch side takes a list as one value) is for a single-value "any" input of a built-in node.
+    void takesListIsOnlyForBuiltInAnyInputs() {
+        const auto manifest = [](const char *id, const char *input) {
+            return object(QByteArray("{\"manifest\": 1, \"id\": \"") + id + "\", \"version\": \"1.0.0\", \"name\": \"N\","
+                          "\"description\": \"N.\", \"category\": \"Text\", \"runtime\": {\"kind\": \"command\", \"entry\": \"./n.sh\"},"
+                          "\"inputs\": [" + input + "], \"outputs\": [{\"name\": \"out\", \"type\": \"text\"}]}");
+        };
+        const char *id = "io.github.alice.tools/n";
+        const Result<NodeType> notAny = NodeType::fromJson(manifest(id, "{\"name\": \"a\", \"type\": \"text\", \"takes_list\": true}"));
+        QVERIFY(!notAny.ok());
+        QVERIFY2(dump(notAny.errors()).contains("takes_list"), qPrintable(dump(notAny.errors())));
+        const Result<NodeType> list = NodeType::fromJson(manifest(id, "{\"name\": \"a\", \"type\": \"any\", \"list\": true, \"takes_list\": true}"));
+        QVERIFY(!list.ok());
+        QVERIFY2(dump(list.errors()).contains("takes_list"), qPrintable(dump(list.errors())));
+
+        InputSpec side;
+        side.name = "side";
+        side.type = PortSpec{*PortType::parse("any"), false, true};
+        NodeType builtin = fakeType("fugue/sidey");
+        builtin.inputs << side;
+        NodeType pack = fakeType("io.github.alice.tools/sidey");
+        pack.inputs << side;
+        Registry registry;
+        QVERIFY(registry.add(builtin).isEmpty());
+        const Errors refused = registry.add(pack);
+        QVERIFY(hasErrors(refused));
+        QVERIFY2(dump(refused).contains("takes_list"), qPrintable(dump(refused)));
+    }
+
     // 6.12: one registry of node types, port types and providers.
     void theRegistryHoldsTheConfiguredProvidersInTheUsersOrder() {
         Registry registry;

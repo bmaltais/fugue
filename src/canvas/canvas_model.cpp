@@ -6,6 +6,7 @@
 
 #include "engine/compare_scale.h"
 #include "engine/compiler.h"
+#include "engine/followed_type.h"
 #include "engine/group_library.h"
 #include "engine/groups.h"
 #include "engine/input_use.h"
@@ -1017,8 +1018,61 @@ const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QStrin
 }
 
 std::optional<PortSpec> CanvasModel::portType(const QString &node, const QString &port, bool output) const {
+    return resolvedType(node, port, output);
+}
+
+bool CanvasModel::takesLinkedType(const QString &node, const QString &port) const {
+    const Port *found = findPort(node, port, false);
+    if (!found || !found->type || !found->type->type.isAny())
+        return false;
+    const std::optional<PortSpec> type = resolvedType(node, port, false);
+    return type && !type->type.isAny();
+}
+
+QString CanvasModel::portColor(const QString &node, const Port &port) const {
+    const std::optional<PortSpec> type = resolvedType(node, port.name, port.output);
+    return colorKey(type, type && type != port.type && m_registry ? m_registry->portKind(type->type) : port.kind);
+}
+
+std::optional<PortSpec> CanvasModel::resolvedType(const QString &node, const QString &port, bool output) const {
+    Resolving walk;
+    return resolvedType(node, port, output, walk);
+}
+
+std::optional<PortSpec> CanvasModel::resolvedType(const QString &node, const QString &port, bool output, Resolving &walk) const {
     const Port *found = findPort(node, port, output);
-    return found ? found->type : std::nullopt;
+    if (!found || !found->type)
+        return found ? found->type : std::nullopt;
+    const QString key = node + QLatin1Char(output ? '>' : '<') + port;
+    if (const auto done = walk.done.constFind(key); done != walk.done.constEnd())
+        return *done;
+    // A document with a cycle of Switches reads a port it is resolving: that read is the port's own type, an `any` that types nothing.
+    if (walk.active.contains(key))
+        return found->type;
+    const auto document = m_document.graph.nodes.constFind(node);
+    const NodeType *type =
+        m_registry && document != m_document.graph.nodes.constEnd() ? m_registry->nodeTypeFor(document->type, document->version.major) : nullptr;
+    if (!type)
+        return found->type;
+    walk.active.insert(key);
+    // What the node's own links give an input: the type of the output it reads, as that resolves.
+    const LinkedTypeOf linked = [&](const QString &input) -> std::optional<PortSpec> {
+        const auto value = document->inputs.constFind(input);
+        return value != document->inputs.constEnd() && value->kind() == InputValue::Kind::Link
+                   ? resolvedType(value->from().node, value->from().port, true, walk)
+                   : std::nullopt;
+    };
+    std::optional<PortSpec> resolved;
+    if (output) {
+        if (const OutputSpec *spec = type->output(port))
+            resolved = followedOutputType(*spec, linked);
+    } else {
+        resolved = followedInputType(type->outputs, port, linked);
+    }
+    walk.active.remove(key);
+    const std::optional<PortSpec> result = resolved ? resolved : found->type;
+    walk.done.insert(key, result);
+    return result;
 }
 
 // --- links -------------------------------------------------------------------
@@ -1048,7 +1102,7 @@ void CanvasModel::rebuildLinks() {
     for (int i = 0; i < int(m_links.size()); ++i) {
         const LinkRow &link = m_links[size_t(i)];
         const Port *out = findPort(link.from.node, link.from.port, true);
-        m_links[size_t(i)].color = out ? colorKey(out->type, out->kind) : QStringLiteral("unknown");
+        m_links[size_t(i)].color = out ? portColor(link.from.node, *out) : QStringLiteral("unknown");
         refreshLinkEnds(i);
     }
 }
@@ -1143,14 +1197,21 @@ QString CanvasModel::problem(const QString &fromNode, const QString &output, con
                 .arg(plain(m_document.graph.nodes.value(m_rows[size_t(r)].id).type));
     if (!out->type || !in->type)
         return tr("The type of this port is not known.");
-    switch (compatibility(*out->type, *in->type)) {
+    // A Switch's value and its sides are typed by what is linked to them (#591), not by their `any`.
+    const PortSpec outType = resolvedType(fromNode, output, true).value_or(*out->type);
+    const PortSpec inType = resolvedType(toNode, input, false).value_or(*in->type);
+    switch (compatibility(outType, inType)) {
     case Compatibility::Compatible: break;
     case Compatibility::DifferentType:
         return tr("%1 cannot feed %2: the types differ, and Fugue does not convert between them.")
-            .arg(type(out->type->type.toString()), type(in->type->type.toString()));
+            .arg(type(outType.type.toString()), type(inType.type.toString()));
     case Compatibility::ListIntoSingle:
-        return tr("A list of %1 cannot feed an input that takes one.").arg(type(out->type->type.toString()));
+        return tr("A list of %1 cannot feed an input that takes one.").arg(type(outType.type.toString()));
     }
+    // A Switch side that took its type from the other side takes its list-ness too: the compiler refuses a list and a single value.
+    if (outType.list != inType.list && takesLinkedType(toNode, input))
+        return outType.list ? tr("A list of %1 cannot feed this side: the other side is a single value.").arg(type(outType.type.toString()))
+                            : tr("A single %1 cannot feed this side: the other side is a list.").arg(type(outType.type.toString()));
     // A link into toNode from fromNode closes a cycle when fromNode already reads from toNode.
     const bool cycle = useDrag ? m_dragUnreachable.contains(m_drag.value("output").toBool() ? toNode : fromNode)
                                : upstreamOf(fromNode).contains(toNode);
@@ -1252,7 +1313,7 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
     m_drag = {{"node", startNode},
               {"port", startPort},
               {"output", startOutput},
-              {"color", colorKey(start->type, start->kind)},
+              {"color", portColor(startNode, *start)},
               {"x", row.pos.x() + (startOutput ? row.shownWidth() : 0)},
               {"y", row.pos.y() + start->y}};
     emit linkDragChanged();
@@ -1369,7 +1430,7 @@ void CanvasModel::beginLinksMove(const QString &node, const QString &output) {
     m_drag = {{"node", toNode},
               {"port", toInput},
               {"output", false},
-              {"color", colorKey(out->type, out->kind)},
+              {"color", portColor(node, *out)},
               {"x", row.pos.x()},
               {"y", row.pos.y() + (in ? in->y : 0)},
               {"targets", targets},

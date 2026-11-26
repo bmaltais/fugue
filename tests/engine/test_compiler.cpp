@@ -909,6 +909,7 @@ void TestCompiler::compiledGraphRoundTripsThroughJson() {
     CompiledGraph graph = *result;
     graph.nodes["g7/gen"].frozen = "sha256:00";
     graph.nodes["g7/gen"].inputs["seed"] = InputValue::autoRandom();
+    graph.nodes["g7/gen"].lazyDropped["image"] = "upstream_muted";
     graph.nodes["g7/gen"].inputs["model"] = InputValue::resource(QJsonObject{{"resource", "fugue/lora"}, {"name", "x"}});
 
     const Result<CompiledGraph> back = CompiledGraph::fromJson(graph.toJson());
@@ -935,6 +936,12 @@ void TestCompiler::compiledGraphJsonIsChecked() {
         seen << QStringLiteral("%1 %2 %3").arg(error.code, error.node, error.input);
     QCOMPARE(seen, (QStringList{"invalid_document B ", "invalid_document g7/a ", "invalid_document g7/a text",
                                 "invalid_document c "}));
+
+    errors = CompiledGraph::fromJson(json("{'fugue-compiled': 1, 'source': 'x', 'nodes': {"
+                                          " 'a': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {}, 'lazy_dropped': 5}}}"))
+                 .errors();
+    QCOMPARE(codes(errors), QStringList{"invalid_document"});
+    QVERIFY(errors.first().message.contains("lazy_dropped"));
 }
 
 QTEST_GUILESS_MAIN(TestCompiler)

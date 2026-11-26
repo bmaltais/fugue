@@ -405,7 +405,13 @@ public:
     // The type of a port of a node on the canvas, or nothing when the node or port is not
     // there or its type is not known (a placeholder's port). Node search uses it to filter
     // by the port a link was dragged from.
+    // The type of a port as links see it: its own, except an `any` output that follows inputs (a Switch's value) takes the
+    // type of the first followed input linked here, and a followed input takes the type of another one linked (3.2, #591).
+    // Nothing linked leaves `any`, a wildcard. A link that no longer fits is kept: the compiler reports type_mismatch.
     std::optional<fugue::PortSpec> portType(const QString &node, const QString &port, bool output) const;
+    // Whether an input is an `any` side that took a type from what is linked to the other side (so a link into it must match that
+    // type's list-ness too, as the compiler requires).
+    bool takesLinkedType(const QString &node, const QString &port) const;
 
     // --- nodes ---
 
@@ -872,6 +878,15 @@ private:
     QVariantList portMaps(const NodeRow &row, bool outputs) const;
     QVariantMap portMap(const NodeRow &row, const Port &port) const;
     const Port *findPort(const QString &node, const QString &port, bool output) const;
+    // portType() over one walk of the links: `active` are the ports being resolved (a cycle ends there), `done` the ports resolved, so
+    // a chain of Switches with both sides linked is walked once.
+    struct Resolving {
+        QSet<QString> active;
+        QHash<QString, std::optional<fugue::PortSpec>> done;
+    };
+    std::optional<fugue::PortSpec> resolvedType(const QString &node, const QString &port, bool output, Resolving &walk) const;
+    std::optional<fugue::PortSpec> resolvedType(const QString &node, const QString &port, bool output) const;
+    QString portColor(const QString &node, const Port &port) const;
     // The spec of a node's input: its type's, or for a group instance the inner input an
     // exposed input leads to. None for a placeholder or an unknown name.
     const fugue::InputSpec *inputSpec(const QString &node, const QString &input) const;

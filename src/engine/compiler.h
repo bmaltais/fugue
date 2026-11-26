@@ -71,6 +71,10 @@ struct CompiledNode {
     bool sink = false;
     QString provider; // the pinned provider instance, or empty for auto (8.3)
     QString frozen;   // a result-cache key, or empty (10.4)
+    // Lazy inputs (3.2) that lost their value because what feeds them is muted or came out empty, by name, with the
+    // reason: upstream_muted or upstream_empty. They are left out of `inputs`. The node is skipped with that reason when
+    // it asks for one (9.9), and runs as usual when it does not.
+    QMap<QString, QString> lazyDropped;
 
     // Every link of inputs, list items included, in input name order.
     QList<CompiledLink> links() const;
