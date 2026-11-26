@@ -45,6 +45,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addTextGenerationKernels(kernels);
     addDynamicPromptKernels(kernels);
     addTextTemplateKernels(kernels);
+    addExpressionKernels(kernels);
     addUpscaleKernels(kernels);
     addToneKernels(kernels);
     addRestoreKernels(kernels);

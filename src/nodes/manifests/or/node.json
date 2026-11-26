@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "fugue/or",
+  "version": "1.0.0",
+  "name": "Or",
+  "description": "True when at least one linked boolean is true.",
+  "category": "Basic",
+  "keywords": ["logic", "boolean", "condition", "all", "any"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "values", "type": "boolean", "label": "Values", "list": true, "min_items": 1,
+     "description": "The booleans, as many links as needed."}
+  ],
+  "outputs": [
+    {"name": "value", "type": "boolean", "label": "Value"}
+  ]
+}
