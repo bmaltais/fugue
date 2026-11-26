@@ -1,0 +1,32 @@
+# Colour palettes: a few named colors to steer the look of a picture.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+warm oranges and deep teals
+soft pastel pinks and mint
+muted earth tones of ochre and olive
+deep indigo and gold
+faded sepia and cream
+fresh green and white
+sunset magenta and amber
+cool blues and silver
+rust red and dusty blue
+lavender and butter yellow
+black, white and a single red accent
+forest green and burnt orange
+coral, turquoise and sand
+charcoal grey and warm yellow
+navy and cream
+peach and sky blue
+moss green and mustard
+plum and rose gold
+ice blue and pale pink
+terracotta and sage
+emerald and brass
+candy colors on a white ground
+monochrome blue
+golden browns and soft greens
+cherry red and teal
+smoky purple and peach
+bright primary colors
+dusty rose and olive
+midnight blue and lantern orange
+seafoam and coral

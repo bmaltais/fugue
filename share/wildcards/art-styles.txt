@@ -1,0 +1,42 @@
+# Art styles: painting, print, drawing and photo styles; no living artists' names.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+a gouache illustration
+a watercolor painting
+an oil painting with visible brush strokes
+a woodblock print
+a linocut print
+a risograph print in two colors
+a vintage travel poster in flat colors
+a pencil and ink sketch
+a charcoal drawing
+a pastel drawing
+an impressionist painting
+a post-impressionist painting
+an art nouveau illustration
+an Art Deco poster
+a mid-century modern illustration
+a children's picture book illustration
+a faded Kodachrome photograph
+a black and white photograph with film grain
+a hand-tinted photograph
+a cyanotype print
+a stained glass design
+a paper cut-out collage
+a miniature diorama
+a Japanese ukiyo-e print
+a medieval illuminated manuscript page
+an etching with fine cross-hatching
+a screen print with bold shapes
+a soft focus 35mm photograph
+a Polaroid snapshot
+a hand-painted animation background
+a low-poly 3D render
+a felt and fabric craft scene
+an embroidery sampler
+a pixel art scene
+an ink wash painting
+a tempera painting
+a mosaic of small tiles
+a chalk pastel on toned paper
+a lithograph with a limited palette
+a cinematic film still

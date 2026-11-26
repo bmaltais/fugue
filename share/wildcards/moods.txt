@@ -1,0 +1,32 @@
+# Moods: feelings a scene can carry, as adjectives.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+cozy
+serene
+dreamy
+nostalgic
+whimsical
+mysterious
+joyful
+melancholy
+adventurous
+peaceful
+magical
+lonely
+festive
+romantic
+dramatic
+hopeful
+playful
+solemn
+bustling
+timeless
+quiet
+wistful
+epic
+sleepy
+cheerful
+eerie
+warm
+fresh
+majestic
+gentle

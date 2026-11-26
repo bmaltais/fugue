@@ -1,0 +1,27 @@
+# Times of day: light and hour of a scene.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+at sunrise
+at dawn
+early in the morning
+mid-morning
+at noon
+in the early afternoon
+in the late afternoon
+at golden hour
+at sunset
+at dusk
+at twilight
+at blue hour
+in the evening
+at night
+under a full moon
+at midnight
+just before dawn
+in the long light of a summer evening
+in the low light of a winter afternoon
+in the glow of street lamps
+at first light
+after the last light has gone
+in the hush of early morning
+as the lamps come on
+at the end of the day

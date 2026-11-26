@@ -815,10 +815,20 @@ QStringList listWildcardFiles(const QString &root) {
     return out;
 }
 
+// The built-in collection is a Qt resource folder: compiled in, read-only, no symlinks, so it needs
+// (and, as ":/" paths have no canonical form for the check below) gets no canonical-path check. Only
+// this exact root is trusted; any other folder, including another ":/" one, is checked as before.
+bool isBuiltinRoot(const QString &root) { return root == builtinWildcardFolder(); }
+
 class Wildcards {
 public:
     Wildcards(const Options &options) : m_options(options) {
         for (const QString &folder : options.folders) {
+            if (isBuiltinRoot(folder)) {
+                if (QFileInfo(folder).isDir() && !m_roots.contains(folder))
+                    m_roots << folder;
+                continue;
+            }
             const QString canonical = QFileInfo(folder).canonicalFilePath();
             if (!canonical.isEmpty() && QFileInfo(canonical).isDir() && !m_roots.contains(canonical))
                 m_roots << canonical;
@@ -933,10 +943,11 @@ private:
     // folder, which already lets its owner change the wildcards; not defended.)
     QByteArray readChecked(const QString &root, const QString &path, const QString &what) {
         const QFileInfo info(path);
-        const QString canonical = info.canonicalFilePath();
+        const bool builtin = isBuiltinRoot(root); // names cannot hold "..", so the path stays under the root
+        const QString canonical = builtin ? path : info.canonicalFilePath();
         if (canonical.isEmpty() || !info.isFile())
             raise(QStringLiteral("The wildcard file %1 cannot be read.").arg(what));
-        if (!canonical.startsWith(root + QLatin1Char('/')))
+        if (!builtin && !canonical.startsWith(root + QLatin1Char('/')))
             raise(QStringLiteral("The wildcard file %1 is a link to outside the wildcard folders and is not read.").arg(what),
                   QStringLiteral("Copy the file into %1 instead of linking it.").arg(root));
         if (info.size() > m_options.limits.maxFileBytes)
@@ -1392,6 +1403,8 @@ void walk(const Seq &seq, const std::function<void(const Node &)> &visit) {
 
 } // namespace
 
+QString builtinWildcardFolder() { return QStringLiteral(":/fugue/wildcards"); }
+
 QStringList wildcardFolders() {
     QStringList folders{dataDir() + QStringLiteral("/wildcards")};
     if (sessionInherits().contains(QStringLiteral("prompts"))) {
@@ -1406,6 +1419,7 @@ QStringList wildcardFolders() {
                 if (QFileInfo(folder).isDir() && !folders.contains(folder))
                     folders << folder;
             }
+    folders << builtinWildcardFolder(); // last: a user's or a pack's list of the same name wins
     return folders;
 }
 

@@ -1,0 +1,32 @@
+# Creatures: animals and make-believe beings, as short noun phrases.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+a red fox
+a sleepy owl
+a pair of swans
+a small dragon
+a herd of deer
+a flock of starlings
+a sea turtle
+a friendly whale
+a curious cat
+a heron standing in the shallows
+a white horse
+a family of ducks
+a tiny robot
+a snow leopard
+a lantern-carrying spirit
+a giant tortoise
+a school of silver fish
+a hummingbird
+a gentle forest giant
+a mountain goat
+a pair of otters
+a wise old badger
+a paper crane
+a dancing crowd of fireflies
+a unicorn
+a flying fish
+a tame griffin
+a lazy lion
+a family of penguins
+a baby elephant

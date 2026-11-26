@@ -117,6 +117,15 @@ foreach(look ${fugue_look_files})
 endforeach()
 qt_add_resources(fugue_core fugue_looks PREFIX /fugue/looks FILES ${fugue_look_sources})
 
+# The starter wildcards (#556): share/wildcards/*.txt compiled in under :/fugue/wildcards, the last folder Dynamic Prompt searches.
+file(GLOB fugue_wildcard_files CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/share/wildcards share/wildcards/*.txt)
+set(fugue_wildcard_sources)
+foreach(wildcard ${fugue_wildcard_files})
+  set_source_files_properties(share/wildcards/${wildcard} PROPERTIES QT_RESOURCE_ALIAS ${wildcard})
+  list(APPEND fugue_wildcard_sources share/wildcards/${wildcard})
+endforeach()
+qt_add_resources(fugue_engine fugue_wildcards PREFIX /fugue/wildcards FILES ${fugue_wildcard_sources})
+
 # The `fal` provider's model table (spec 8.7): share/providers/fal-models.json compiled in under :/fugue/providers.
 set_source_files_properties(share/providers/fal-models.json PROPERTIES QT_RESOURCE_ALIAS fal-models.json)
 set_source_files_properties(share/providers/gemini-models.json PROPERTIES QT_RESOURCE_ALIAS gemini-models.json)
