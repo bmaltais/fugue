@@ -13,12 +13,23 @@ name: Package
 #
 # Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
+# A tag (the release), a pull request that changes the package recipe or this file (tested before the merge, not
+# after it), or by hand.
 on:
   push:
-    branches: [main, master]
-    paths: [packaging/**, share/**, bin/build, bin/build-helper, bin/package-helper, helper/**, CMakeLists.txt, .github/workflows/package.yml]
     tags: ['v*']
+  # Weekly on main: a tag can only read caches made on the default branch, so this keeps them warm for the release.
+  schedule:
+    - cron: '37 6 * * 1'
+  pull_request:
+    paths: [packaging/PKGBUILD, .github/workflows/package.yml]
   workflow_dispatch:
+
+# A new push to a pull request cancels that pull request's older run. Tags, the weekly runs and manual runs each get
+# their own group (run_id), so a release is never cancelled. (llama.cpp's expression; docs/ci-research in the workbench.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,9 +43,13 @@ jobs:
       run:
         shell: bash
     env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 800M
     steps:
+      # In a container job `github.workspace` is the host's path (/home/runner/work/...), not where the checkout is
+      # mounted (/__w/...), so ccache would write outside the folder the cache steps restore and save (#335).
+      - name: Point ccache at the cached folder
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
 

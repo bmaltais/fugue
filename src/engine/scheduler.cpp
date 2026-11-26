@@ -91,7 +91,9 @@ struct NodeRun {
     // that is not waits, and is skipped as not_chosen when every node that could demand it has let it go.
     QStringList strictDeps;
     QMap<QString, QStringList> lazyOf;
-    QStringList waitFor;  // the lazy dependencies the node asked for
+    QStringList waitFor;  // the lazy dependencies the node asked for (under validate: all of them, so both sides show as they would run)
+    QStringList chosen;   // the ones whose lazy inputs the kernel named; empty while that is not known (validate, condition unknown)
+    bool chosenKnown = false;
     QStringList declined; // the lazy inputs the node did not ask for: they stay out of its inputs and its key
     bool demanded = false;
     bool lazyAsked = false;
@@ -597,10 +599,19 @@ private:
                     dropReason = n.node->lazyDropped.value(name);
                     break;
                 }
-        const QStringList needed = m_dry ? all : (dropReason.isEmpty() ? wanted : QStringList());
+        // A valid frozen result is served whatever the inputs are (10.4), so a dropped input does not skip the node.
+        const bool frozenServes = !dropReason.isEmpty() && !n.node->frozen.isEmpty() &&
+                                  m_env.cache->peek(n.node->frozen, *m_env.hashes).has_value();
+        if (frozenServes)
+            dropReason.clear();
+        const QStringList needed = m_dry ? all : (dropReason.isEmpty() && !frozenServes ? wanted : QStringList());
         // Nodes let go only because their reader could not ask (it failed upstream, or its condition is empty) were not chosen:
         // nothing upstream of them failed.
+        n.chosenKnown = !(m_dry && (unknown || broken));
         for (auto it = n.lazyOf.constBegin(); it != n.lazyOf.constEnd(); ++it) {
+            if (n.chosenKnown && std::any_of(it.value().cbegin(), it.value().cend(),
+                                             [&](const QString &name) { return wanted.contains(name); }))
+                n.chosen << it.key();
             const bool take = std::any_of(it.value().cbegin(), it.value().cend(),
                                           [&](const QString &name) { return needed.contains(name); });
             if (take) {
@@ -618,7 +629,8 @@ private:
 
     // Why the node cannot run because of what it reads: a failed or cancelled node upstream. Empty when it can.
     QString brokenUpstream(const NodeRun &n) const {
-        for (const QStringList &deps : {n.strictDeps, n.waitFor})
+        // What the node reads: under validate a declined side is not read when the answer is known, as in a run.
+        for (const QStringList &deps : {n.strictDeps, n.chosenKnown ? n.chosen : n.waitFor})
             for (const QString &dep : deps) {
                 const NodeRun &d = *m_nodes.constFind(dep);
                 if (d.state == NodeState::Error ||
@@ -742,11 +754,13 @@ private:
             return skip(n, broken);
         // A Switch skipped because its chosen side is muted: what reads it is muted too, as a compile-time mute does (3.5), also
         // through an optional input, which would otherwise run without it.
-        for (const QString &dep : std::as_const(n.strictDeps)) {
-            const NodeRun &d = *m_nodes.constFind(dep);
-            if (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_muted"))
-                return skip(n, QStringLiteral("upstream_muted"));
-        }
+        // The chosen lazy sources count with the strict ones; the declined are not looked at, nor are any while the answer is unknown.
+        for (const QStringList &deps : {n.strictDeps, n.chosen})
+            for (const QString &dep : deps) {
+                const NodeRun &d = *m_nodes.constFind(dep);
+                if (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_muted"))
+                    return skip(n, QStringLiteral("upstream_muted"));
+            }
         if (!n.type) {
             Error error = nodeError(QStringLiteral("unknown_node_type"),
                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type));
@@ -1097,7 +1111,8 @@ private:
                 resolved.unknown = true;
                 continue;
             }
-            const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked);
+            // A linked empty list is an absent value, except on an input that takes a list as it is (a Switch side): there it is the value.
+            const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked && !spec.type.takesList);
             if (empty && !spec.defaultValue.isUndefined()) {
                 value = Value(spec.defaultValue);
             } else if (empty && spec.required()) {

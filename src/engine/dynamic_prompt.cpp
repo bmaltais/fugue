@@ -1497,7 +1497,7 @@ Errors check(const QString &templ, const Options &options) {
                 wildcardsUsed = true;
         });
         Wildcards wildcards(options);
-        QSet<QString> checked;
+        QHash<QString, qsizetype> checked; // a wildcard name -> where its finding sits in `errors`, or -1 when it is fine
         // A finding inside a variant's option may never be met by a run (it picks one): a warning, not an error (#600).
         const auto add = [&](Error error, bool inChoice) {
             if (inChoice)
@@ -1509,11 +1509,17 @@ Errors check(const QString &templ, const Options &options) {
                 add(toError({QStringLiteral("The variable ${%1} is never set in the template (%2).").arg(node.text, top->src->where(node.pos)),
                              QStringLiteral("Set it with ${%1=value} or give a default with ${%1:default}.").arg(node.text)}),
                     inChoice);
-            if (node.kind == Node::Kind::Wildcard && !checked.contains(node.text)) {
-                checked.insert(node.text);
+            if (node.kind == Node::Kind::Wildcard && checked.contains(node.text)) {
+                // Each name is looked up once, but the strongest severity of its occurrences stands: one outside a choice is met by every run.
+                const qsizetype at = checked.value(node.text);
+                if (at >= 0 && !inChoice)
+                    errors[at].severity = Error::Severity::Error;
+            } else if (node.kind == Node::Kind::Wildcard) {
+                checked.insert(node.text, -1);
                 try {
                     wildcards.lookup(node.text);
                 } catch (const Problem &problem) {
+                    checked[node.text] = errors.size();
                     add(toError({QStringLiteral("%1 (%2)").arg(problem.message, top->src->where(node.pos)), problem.hint}), inChoice);
                 }
             }
