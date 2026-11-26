@@ -967,6 +967,66 @@ private slots:
         QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("name").toString(), QStringLiteral("served"));
     }
 
+    // #605: the same model is on disk in another file and the person chose it. A model field that holds the missing model takes the file
+    // (so Reuse inputs and the takes know it); a model the form does not show is the tab's own override; Run binds both into the copy it
+    // runs, the shown document is never changed, and Undo puts the template's file back.
+    void aFileChosenInPlaceOfAMissingModelIsTheAppsOwnAndCanBeUndone() {
+        const QString type = QStringLiteral("fugue/upscale-model");
+        const QString missing = QStringLiteral("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        const QString chosen = QStringLiteral("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        const QJsonObject wanted{{"resource", type}, {"hash", missing}, {"name", "x4plus.pth"}};
+        const QJsonObject replacement{{"resource", type}, {"hash", chosen}, {"name", "x4.pth"}};
+        const auto withMissing = [&](bool asInput) {
+            QJsonObject json = mediaWorkflow();
+            QJsonObject graph = json.value("graph").toObject(), nodes = graph.value("nodes").toObject(), up = nodes.value("up").toObject();
+            up.insert("inputs", QJsonObject{{"model", wanted}});
+            nodes.insert("up", up);
+            graph.insert("nodes", nodes);
+            json.insert("graph", graph);
+            if (!asInput) {
+                QJsonObject app = json.value("app").toObject();
+                QJsonArray inputs;
+                for (const QJsonValue input : app.value("inputs").toArray())
+                    if (input.toObject().value("role").toString() != QLatin1String("model"))
+                        inputs.append(input);
+                app.insert("inputs", inputs);
+                json.insert("app", app);
+            }
+            return json;
+        };
+        OnDiskUse use{wanted, {}};
+        use.match.name = QStringLiteral("x4.pth");
+        use.match.tier = QStringLiteral("bf16");
+        const QList<OnDiskUse> chosenUses{use};
+        const Uses resolved{{missing, replacement}};
+
+        m_view->show("a", load(withMissing(true)), {});
+        QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), missing);
+        QSignalSpy changed(m_view.get(), &AppView::usesChanged);
+        m_view->takeUses("a", chosenUses, resolved);
+        QCOMPARE(changed.size(), 1);
+        QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), chosen); // the field holds the file
+        QCOMPARE(m_view->usesOf("a").value(missing), replacement);
+        QCOMPARE(m_view->usesList().size(), 1);
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("hash").toString(), chosen);
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        m_view->undoUse(missing);
+        QVERIFY(m_view->usesOf("a").isEmpty());
+        QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), missing); // back to the template's file
+
+        // Not an input of the form: the override alone, bound into the run's copy.
+        m_view->show("b", load(withMissing(false)), {});
+        m_view->takeUses("b", chosenUses, resolved);
+        QCOMPARE(m_view->usesOf("b").value(missing), replacement);
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("hash").toString(), chosen);
+        m_view->undoUse(missing);
+        m_view->onEvent("run2", evt("run.done", {{"status", "ok"}}));
+        m_view->run();
+        QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("hash").toString(), missing);
+    }
+
     // A hash read on the pool answers the tab and the field that asked, even when another tab is shown by then.
     void aModelReadAfterATabSwitchGoesToTheTabThatAskedForIt() {
         QTemporaryDir models;

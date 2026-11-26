@@ -30,6 +30,9 @@ Rectangle {
     // Why a row failed, in the error color.
     property string error
     signal toggled
+    // Use what you have (#605): the offer beside the download, "Use what you have: <file> (same model, <tier>)"; empty for none.
+    property string useText
+    signal useRequested
 
     readonly property bool expandable: more !== ""
     readonly property real u: look.unit
@@ -123,6 +126,16 @@ Rectangle {
             elide: Text.ElideRight
             color: row.look.label
             font.pixelSize: row.look.labelSize
+        }
+        // Choosing it takes the model out of what is to be downloaded.
+        ThemedButton {
+            objectName: "getReadyUse"
+            visible: row.useText !== "" && !row.running
+            Layout.leftMargin: 6 * row.u
+            Layout.maximumWidth: parent.width - 11 * row.u
+            text: row.useText
+            Accessible.name: row.useText
+            onClicked: row.useRequested()
         }
         ProgressBar {
             visible: row.running

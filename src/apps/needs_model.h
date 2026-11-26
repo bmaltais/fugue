@@ -12,7 +12,7 @@
 //
 // Items: [{kind ("pack", "model" or "problem"), key, name, detail (the row's quiet line), size (text, empty when none), licence,
 // licenceUrl, canDownload (a model that can be had on its own: the pack rows and the models of a pack's type come with the
-// sheet), action ("Download" or "Install"), node (the graph's node, empty when unknown)}].
+// sheet), use (a model with a file of the same weights on disk: {text, file, tier, ...}, else empty), action ("Download" or "Install"), node (the graph's node, empty when unknown)}].
 
 #include <QJsonObject>
 #include <QObject>
@@ -51,6 +51,10 @@ public:
     explicit NeedsModel(QObject *parent = nullptr);
 
     void setPlanSource(Plan source) { m_source = std::move(source); }
+    // Use what you have (#605): for a missing model's hash, the file on disk of the same weights as {text, file, tier, ...}, or empty. A
+    // model row with one carries it as `use`; choosing it (useOnDisk) leaves the panel's list, because the window's plan leaves the model out.
+    using UseSource = std::function<QVariantMap(const QString &hash)>;
+    void setUseSource(UseSource source) { m_useSource = std::move(source); }
     void setLocator(Locate locate) { m_locate = std::move(locate); m_graph = bool(m_locate); }
     // The graph is not there to jump to (the app's own window).
     void setGraphAvailable(bool available);
@@ -73,6 +77,8 @@ public:
     // Download the one model of row `index` (a model with a source that does not wait for a pack); a pack row, or a model that
     // does, opens the Get ready sheet as Download all does.
     Q_INVOKABLE void download(int index);
+    // Use the file on disk in place of the model of row `index` (a row with `use`): `useRequested(hash)`.
+    Q_INVOKABLE void useOnDisk(int index);
     // The whole plan once, through the Get ready path: `getReadyRequested(startNow)`.
     Q_INVOKABLE void downloadAll();
     // Switch to the graph and centre the node of row `index`: `showNodeRequested(node)`.
@@ -85,10 +91,13 @@ signals:
     // Download this model (Document::models()'s form) on the window's download line.
     void downloadRequested(const QJsonObject &model);
     void showNodeRequested(const QString &node);
+    // The person chose to use the file they have for the model with this hash (#605).
+    void useRequested(const QString &hash);
 
 private:
     Plan m_source;
     Locate m_locate;
+    UseSource m_useSource;
     bool m_graph = false;
     QVariantList m_items;
     QList<QJsonObject> m_entries; // each model row's workflow handle, by item index (empty object for the other rows)

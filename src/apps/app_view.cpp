@@ -336,6 +336,73 @@ QVariant AppView::valueOf(const QString &key) const {
     return {};
 }
 
+void AppView::takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
+    TabState &state = m_state[tab];
+    for (const OnDiskUse &use : chosen) {
+        const QString hash = use.wanted.value("hash").toString();
+        const auto handle = resolved.constFind(hash);
+        if (handle == resolved.constEnd())
+            continue;
+        TabState::ModelUse kept{use.wanted.value("name").toString(), use.match.name, use.match.tier, use.match.otherSource, handle.value(), {}};
+        // A model field of the form that holds the missing model takes the file: it is what the form shows and the takes record.
+        if (tab == m_tab)
+            for (const QVariant &field : std::as_const(m_fields)) {
+                const QVariantMap map = field.toMap();
+                const QString key = map.value("key").toString();
+                if (map.value("kind").toString() == QLatin1String("model") && valueOf(key).toMap().value("hash").toString() == hash) {
+                    state.values.insert(key, handle.value());
+                    kept.keys << key;
+                    emit valueChanged(key);
+                }
+            }
+        state.uses.insert(hash, kept);
+    }
+    emit usesChanged();
+}
+
+Uses AppView::usesOf(const QString &tab) const {
+    Uses out;
+    const auto state = m_state.constFind(tab);
+    if (state != m_state.constEnd())
+        for (auto it = state->uses.cbegin(); it != state->uses.cend(); ++it)
+            out.insert(it.key(), it->handle);
+    return out;
+}
+
+QVariantList AppView::usesList() const {
+    QVariantList list;
+    const auto state = m_state.constFind(m_tab);
+    if (state == m_state.constEnd())
+        return list;
+    for (auto it = state->uses.cbegin(); it != state->uses.cend(); ++it) {
+        OnDiskUse text;
+        text.match.name = it->file;
+        text.match.tier = it->tier;
+        text.match.otherSource = it->otherSource;
+        list.append(QVariantMap{{"hash", it.key()},
+                                {"name", it->name},
+                                {"file", it->file},
+                                {"tier", it->tier},
+                                {"text", tr("Using %1 in place of %2 (%3).").arg(it->file, it->name, text.sameModelText())}});
+    }
+    return list;
+}
+
+void AppView::undoUse(const QString &hash) {
+    TabState &state = m_state[m_tab];
+    const auto use = state.uses.constFind(hash);
+    if (use == state.uses.constEnd())
+        return;
+    // A field the person has changed since keeps its value; one still holding the file goes back to the workflow's own.
+    for (const QString &key : use->keys)
+        if (state.values.value(key).toObject() == use->handle) {
+            state.values.remove(key);
+            emit valueChanged(key);
+        }
+    state.uses.erase(use);
+    emit usesChanged();
+}
+
 const InputBinding *AppView::inputOf(const QString &key) const {
     if (m_app)
         for (const InputBinding &input : std::as_const(m_app->inputs))
@@ -767,7 +834,7 @@ QString AppView::run() {
     for (auto it = shownModes.cbegin(); it != shownModes.cend(); ++it)
         modesJson.insert(it.key(), it.value());
     RunRequest request;
-    request.document = bound.value();
+    request.document = withUses(bound.value(), usesOf(m_tab)); // the files chosen in place of missing models (#605)
     // The form as it was run, in the run's own folder: what makes the run a take after a restart (apps/app_takes.h).
     if (!m_takesKey.isEmpty())
         request.document.extra.insert(QLatin1String(app::takeKey), app::takeRecord(m_takesKey, valuesJson, modesJson));

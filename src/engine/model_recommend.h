@@ -91,7 +91,8 @@ class ModelLibrary;
 
 // For a model a template names that is not on disk: the file of the same weights (one family, one stem:
 // another quantization of it) that is, as the file name under its folder, and the Recommended one when
-// there are several; empty when none is. A template keeps its file: this is only said on its card.
+// there are several; empty when none is. A template keeps its file. engine/model_use.h's findOnDisk() is the full answer (the path,
+// the tier, whether it is another source's); this is its name.
 QString suggestOnDisk(const QJsonObject &handle, const ModelLibrary &library, const RecommendContext &context, ModelShapes &shapes);
 
 // A resource type's kind as the family table names it: "fugue/model" is a checkpoint.

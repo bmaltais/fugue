@@ -20,6 +20,7 @@
 #include "engine/hash.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
+#include "engine/model_use.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "widget_fixture.h"
@@ -420,6 +421,42 @@ private slots:
         QCOMPARE(f.edits.setDiskModel("all", "model", path), QString());
         QVERIFY(f.edits.hashState("all", "model").isEmpty());
         QCOMPARE(f.stored("all", "model").toObject().value("hash").toString(), hash);
+    }
+
+    // #605: a node whose model is not on disk, whose same weights are in another file, offers it; Use it is the pick of that file,
+    // one undo step, and Undo gives the node its own model back.
+    void aMissingModelOffersTheFileOfTheSameWeightsAndUseItIsOneUndoStep() {
+        QTemporaryDir models;
+        Fixture f;
+        const QString type = QStringLiteral("fugue/diffusion-model");
+        const QString folder = ModelLibrary({models.path()}, &f.registry).folders(*PortType::parse(type)).value(0);
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        file += header;
+        const QString path = folder + "/z_image_turbo_bf16.safetensors";
+        QVERIFY(writeModel(path, file));
+        const QJsonObject wanted{{"resource", type}, {"name", "z_image_turbo_int8_convrot.safetensors"},
+                                 {"hash", "sha256:" + QString(64, QLatin1Char('9'))}};
+        f.canvas.setDocument(document(QByteArray(R"({"fugue": 1, "graph": {"nodes": {"models": {"type": "fugue/load-models", "version": "1.0.0",
+            "inputs": {"diffusion_model": )" + QJsonDocument(wanted).toJson(QJsonDocument::Compact) + "}}}}}").constData()));
+        f.edits.setModelRoots({models.path()});
+
+        const QVariantList offers = f.edits.onDiskOffers("models");
+        QCOMPARE(offers.size(), 1);
+        QCOMPARE(offers.first().toMap().value("input").toString(), QString("diffusion_model"));
+        QCOMPARE(offers.first().toMap().value("file").toString(), QString("z_image_turbo_bf16.safetensors"));
+        QVERIFY(offers.first().toMap().value("text").toString().startsWith("Use what you have: z_image_turbo_bf16.safetensors (same model, bf16)"));
+
+        const int before = f.steps();
+        QCOMPARE(f.edits.setDiskModel("models", "diffusion_model", offers.first().toMap().value("path").toString()), QString());
+        QTRY_COMPARE(f.stored("models", "diffusion_model").toObject().value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
+        QCOMPARE(f.steps(), before + 1);
+        QVERIFY(f.edits.onDiskOffers("models").isEmpty()); // the file is here now: nothing to offer
+        f.canvas.undoStack()->undo();
+        QCOMPARE(f.stored("models", "diffusion_model").toObject(), wanted);
     }
 
     void anotherValueSetWhileAFileIsHashedWins() {

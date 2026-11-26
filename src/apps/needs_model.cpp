@@ -98,6 +98,7 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
         add({{"kind", "model"}, {"key", "model:" + m.name}, {"name", m.name}, {"id", QString()}, {"hash", m.entry.value("hash").toString()},
              {"detail", parts.join(QStringLiteral(" · "))}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")},
              {"licence", m.license}, {"licenceUrl", m.licenseUrl}, {"canDownload", !m.deferred && !m.entry.isEmpty()},
+             {"use", m_useSource && !m.entry.value("hash").toString().isEmpty() ? m_useSource(m.entry.value("hash").toString()) : QVariantMap()},
              {"action", tr("Download")}},
             m.entry);
     }
@@ -138,6 +139,14 @@ void NeedsModel::download(int index) {
         emit downloadRequested(m_entries.at(index));
     else
         emit getReadyRequested(false);
+}
+
+void NeedsModel::useOnDisk(int index) {
+    if (index < 0 || index >= m_items.size())
+        return;
+    const QVariantMap item = m_items.at(index).toMap();
+    if (item.value("kind").toString() == QLatin1String("model") && !item.value("use").toMap().isEmpty())
+        emit useRequested(item.value("hash").toString());
 }
 
 void NeedsModel::downloadAll() {

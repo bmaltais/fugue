@@ -1190,6 +1190,49 @@ private slots:
         forgetDownloads();
     }
 
+    // #605: a template whose model is not on disk but whose same weights are in another file is ready to run with it, says so, and
+    // "Open with what you have" opens a tab with the file in place, the template's own file untouched.
+    void aTemplateWithTheSameWeightsOnDiskIsReadyAndOpensWithThem() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'6');
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash},
+                                                                                              {"name", "z_image_turbo_int8_convrot.safetensors"}}}})}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        const QVariantMap card = workflows.templates().at(0).toMap();
+        QVERIFY(card.value("ready").toBool());
+        QVERIFY(card.value("usesOnDisk").toBool());
+        QCOMPARE(card.value("onDisk").toList().size(), 1);
+        QVERIFY(card.value("onDisk").toList().at(0).toMap().value("text").toString().contains("z_image_turbo_bf16.safetensors (same model, bf16)"));
+        QCOMPARE(card.value("status").toString(), QString("Uses another file of the same model"));
+
+        QVERIFY(workflows.openTemplateWithWhatYouHave("zit")); // the hash is read on a worker: the tab comes when it is known
+        QTRY_VERIFY(canvas.document().graph.nodes.contains("models"));
+        const QJsonObject opened = canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle();
+        QCOMPARE(opened.value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
+        QVERIFY(opened.value("hash").toString() != hash);
+        QVERIFY(!workflows.missingSomething()); // nothing left to download
+        QFile own(f.bundled.filePath("zit/workflow.fugue")); // the template itself is as it was
+        QVERIFY(own.open(QIODevice::ReadOnly));
+        QVERIFY(own.readAll().contains("z_image_turbo_int8_convrot.safetensors"));
+    }
+
     // #164: a card says where its models are: on this machine, on a paired host, both, or
     // nowhere (then the Models missing line); a host that is offline is not a place.
     void aTemplateSaysWhereItsModelsAre() {

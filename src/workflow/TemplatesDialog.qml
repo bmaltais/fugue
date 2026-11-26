@@ -183,6 +183,12 @@ Popup {
             close()
     }
 
+    // A card's Open with what you have: the template opens with its missing models set to the files on disk (#605).
+    function openWithWhatYouHave(id) {
+        if (App.workflows.openTemplateWithWhatYouHave(id))
+            close()
+    }
+
     function openTemplate(id) {
         if (App.workflows.openTemplateById(id))
             close()
@@ -545,16 +551,27 @@ Popup {
                                         wrapMode: Text.Wrap
                                         maximumLineCount: 2
                                         elide: Text.ElideRight
-                                        color: statusRow.downloading ? dialog.look.label : dialog.look.error
+                                        color: statusRow.downloading || cell.modelData.usesOnDisk ? dialog.look.label : dialog.look.error
                                         font.pixelSize: dialog.look.labelSize
                                         // Which files and where each goes, or the whole failure, on hover.
                                         ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
                                         ToolTip.delay: App.theme.look.tooltipDelay
                                         ToolTip.text: statusRow.failed ? statusRow.downloads.failure
                                                       : cell.modelData.missingModels.map(m => m.suggest !== ""
-                                                          ? qsTr("%1, into %2. You have %3, another quantization of it.").arg(m.name, m.folder, m.suggest)
+                                                          ? qsTr("%1, into %2. You have %3, the same model.").arg(m.name, m.folder, m.suggest)
                                                           : qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
                                         HoverHandler { id: statusHover }
+                                    }
+                                    // The same model is on disk in another file (#605): the template opens with it, unchanged on disk.
+                                    ThemedButton {
+                                        objectName: "templateUseOnDisk-" + cell.modelData.id
+                                        Layout.topMargin: dialog.u
+                                        Layout.alignment: Qt.AlignLeft
+                                        visible: cell.modelData.onDisk.length > 0 && !statusRow.downloading
+                                        text: qsTr("Open with what you have")
+                                        Accessible.name: text
+                                        tip: cell.modelData.onDisk.map(m => m.text).join("\n")
+                                        onClicked: dialog.openWithWhatYouHave(cell.modelData.id)
                                     }
                                     // Its own press target: a click here does not open the template.
                                     ThemedButton {

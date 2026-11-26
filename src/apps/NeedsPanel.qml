@@ -91,7 +91,7 @@ Item {
                         objectName: "appNeed-" + modelData.key
                         look: panel.look
                         label: modelData.name
-                        hint: [modelData.size, modelData.licence, modelData.detail].filter(t => t !== "").join(" · ")
+                        hint: [modelData.size, modelData.licence, modelData.detail, modelData.use && modelData.use.text ? modelData.use.text : ""].filter(t => t !== "").join(" · ")
                         KitChip {
                             objectName: "appNeedShow-" + row.modelData.key
                             look: panel.look
@@ -100,6 +100,15 @@ Item {
                             round: true
                             visible: panel.jump && row.modelData.node !== ""
                             onTapped: panel.needs.showInGraph(row.index)
+                        }
+                        // The same model is on disk in another file (#605): the choice beside the download; it leaves this list.
+                        KitChip {
+                            objectName: "appNeedUse-" + row.modelData.key
+                            look: panel.look
+                            text: qsTr("Use what you have")
+                            tip: row.modelData.use && row.modelData.use.text ? row.modelData.use.text : ""
+                            visible: row.modelData.kind === "model" && !!(row.modelData.use && row.modelData.use.text)
+                            onTapped: panel.needs.useOnDisk(row.index)
                         }
                         KitChip {
                             objectName: "appNeedGet-" + row.modelData.key

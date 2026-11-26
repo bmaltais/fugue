@@ -24,6 +24,7 @@
 #include "cli/canvas_run.h"
 #include "cli/compile_step.h"
 #include "cli/commands.h"
+#include "cli/use_on_disk.h"
 #include "engine/app_binding.h"
 #include "engine/app_input.h"
 #include "engine/document.h"
@@ -511,9 +512,18 @@ Reply appExport(const Command &command, Context &context) {
 }
 
 Reply appRun(const Command &command, Context &context) {
-    const Result<Loaded> loaded = loadApp(command.positionals.at(0), context);
-    if (!loaded)
-        return Reply::failure(loaded.errors());
+    Result<Loaded> read = loadApp(command.positionals.at(0), context);
+    if (!read)
+        return Reply::failure(read.errors());
+    // --use-on-disk (#605): a model that is not on disk, whose same weights are, is swapped for this run only; the app's file is not written.
+    if (command.has("use-on-disk"))
+        read->document = useOnDisk(read->document, context);
+    const Result<Loaded> &loaded = read;
+    const auto failure = [&](Errors errors) {
+        if (!command.has("use-on-disk"))
+            addOnDiskHints(errors, loaded->document, context);
+        return Reply::failure(errors);
+    };
     const Result<QMap<QString, QJsonValue>> values = givenValues(command, *loaded, context);
     if (!values)
         return Reply::failure(values.errors());
@@ -523,7 +533,7 @@ Reply appRun(const Command &command, Context &context) {
     const PairedProbe probe = keptPairedProbe(livePairedProbe(), std::chrono::minutes(1)); // one question to the hosts per command
     if (!isReady(plan))
         if (const PairedVerdict placement = pairedVerdict(plan, loaded->document, context, probe); !placement.allowsRun())
-            return Reply::failure(refused(*loaded, plan, placement));
+            return failure(refused(*loaded, plan, placement));
     if (const Errors invalid = app::checkApp(loaded->app, loaded->document, context.registry); hasErrors(invalid))
         return Reply::failure(invalid);
 
@@ -534,7 +544,7 @@ Reply appRun(const Command &command, Context &context) {
     if (!values->isEmpty())
         if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen))
             if (const PairedVerdict placement = pairedVerdict(chosen, *bound, context, probe); !placement.allowsRun())
-                return Reply::failure(refused(*loaded, chosen, placement));
+                return failure(refused(*loaded, chosen, placement));
     if (command.has("out")) {
         const QString dir = QDir(command.value("out")).absolutePath();
         // 13.6: judged before the folder is made, so a refused --out leaves nothing behind.

@@ -19,8 +19,8 @@ struct Spec {
     Handler handler = nullptr; // null: a later milestone, parsed but not run
 };
 
-const Spec runSpec{1, 1, {"to", "provider", "set", "allow-remote"}, {"wait", "first"}, startRun};
-const Spec validateSpec{1, 1, {}, {}, validateWorkflow};
+const Spec runSpec{1, 1, {"to", "provider", "set", "allow-remote"}, {"wait", "first", "use-on-disk"}, startRun};
+const Spec validateSpec{1, 1, {}, {"use-on-disk"}, validateWorkflow};
 const Spec compileSpec{1, 1, {}, {}, compileWorkflow};
 
 // The commands of 13.1 by the first word. A group with an empty-named entry in
@@ -62,7 +62,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
         {"app",
          {{"list", {0, 0, {}, {}, appList}},
           {"info", {1, 1, {}, {}, appInfo}},
-          {"run", {1, 1, {"input", "out", "allow-remote"}, {}, appRun}},
+          {"run", {1, 1, {"input", "out", "allow-remote"}, {"use-on-disk"}, appRun}},
           {"export", {2, 2, {}, {}, appExport}}}},
         {"cache",
          {{"status", {0, 0, {}, {}, cacheStatus}},

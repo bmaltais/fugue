@@ -61,6 +61,7 @@
 #include "apps/needs_model.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
+#include "engine/model_use.h"
 
 namespace fugue {
 
@@ -125,6 +126,9 @@ class AppView : public QObject {
     // Repeat is chosen but no seed is Random or Increment, so the next run would be the same: it waits (the form says why) and goes on
     // once a seed is set to vary.
     Q_PROPERTY(bool repeatWaits READ repeatWaits NOTIFY liveChanged)
+    // The files the person chose in place of models the app names that are not on disk (#605): [{hash, name, file, tier, text}], the
+    // shown tab's. The Use line under the form offers Undo for each.
+    Q_PROPERTY(QVariantList uses READ usesList NOTIFY usesChanged)
     // What the app still needs (a missing model or pack), listed while it is not ready (#469).
     Q_PROPERTY(fugue::NeedsModel *needs READ needs CONSTANT)
     // The paired host(s) the app runs on, when its models are not on this machine and the paired verdict says so (#395, #581); empty when
@@ -257,6 +261,18 @@ public:
     NeedsModel *needs() const { return m_needs; }
     const Registry *registry() const { return m_registry; }
 
+    // Use what you have (#605, spec 4.9): the person chose, in Needs or Get ready, the file they have for a model the app names that
+    // is not on disk. The choice is kept with this tab's form values: a model field that holds the missing model takes the file as
+    // its value (so it is what Reuse inputs and the takes know), and a model the form does not show is kept as an override of the
+    // tab. Run binds it into the copy it runs; the app's workflow is never written. `resolved` has each file's handle (its hash read).
+    void takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved);
+    // What the tab runs in place of each missing model, by the missing handle's hash (the window's plan leaves those out).
+    Uses usesOf(const QString &tab) const;
+    QVariantList usesList() const;
+    // Back to the template's file: the field is as the workflow has it, the override gone.
+    Q_INVOKABLE void undoUse(const QString &hash);
+    QString tab() const { return m_tab; }
+
     // Where the app runs (#395, #581): the window gives the paired verdict's hosts (comma separated) and the silent host, or none of
     // them. A tab shown again clears them until the verdict is made again.
     void setPairedHosts(const QString &runsOn, const QString &silentHost);
@@ -320,6 +336,8 @@ signals:
     // A picture taken by the page's paste or drop was refused (`text`) or taken (empty): the picture input `key` shows it.
     void imageNotice(const QString &key, const QString &text);
     void modelsChanged();
+    // A use was chosen or undone (#605): the window looks at what the app needs again.
+    void usesChanged();
     void runChanged();
     void progressChanged();
     void liveChanged();
@@ -356,6 +374,15 @@ private:
         bool liveDirty = false;               // an input changed (or the last run ended in Repeat) and a run is owed
         QString storedFor;                    // the file the takes of History were read for
         bool cleared = false; // Clear emptied the stage and the strip
+        // Use what you have (#605): the file chosen in place of a missing model, by the missing handle's hash; `keys` are the form's
+        // model fields that took it as their value.
+        struct ModelUse {
+            QString name, file, tier;
+            bool otherSource = false;
+            QJsonObject handle;
+            QStringList keys;
+        };
+        QMap<QString, ModelUse> uses;
     };
     static constexpr int maxTakes = 30;
     QString inputsLine(const QMap<QString, QJsonValue> &values, const QMap<QString, QString> &modes) const;
