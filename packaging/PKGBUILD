@@ -54,7 +54,7 @@ checkdepends=(
   'noto-fonts'
 )
 # Fugue's fork, tag fugue-2026-11-24c: upstream 3b12781f plus Fugue's engine commits.
-_sdcpp=6cf1fddfa4ee9dd1358af65fb22e7f18b6164504
+_sdcpp=d4befb9a2cc309acdc811d338004f5c537cddb7b
 _ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
 _cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
 _src=${FUGUE_SRC:+file://$FUGUE_SRC}
@@ -66,7 +66,7 @@ source=("$pkgbase::git+$_src${FUGUE_REF:+#$FUGUE_REF}"
         "cutlass-$_cutlass.tar.gz::https://github.com/NVIDIA/cutlass/archive/$_cutlass.tar.gz")
 sha256sums=('SKIP'
             'SKIP'
-            '23552ebf2ab42e8bb5f19309fc1e878fcf82b8e1a6a375aaa405e37d99e72de5'
+            'd7a7f4d2a01bd27c9bb23b73e9a6e109d17cf4e62e36cbec1c325a484de44da4'
             '8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2'
             '36429479df2ab1cd1c7981c2d34e786106326ccfefc8846f902f76151a65e112')
 

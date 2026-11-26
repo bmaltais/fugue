@@ -1622,6 +1622,45 @@ private slots:
         QCOMPARE(sample->params.value("ref_images"), encode->params.value("ref_images"));
     }
 
+    // Edit format: default sends nothing; Moss-Image-Edit sends the engine's moss_edit_format in both
+    // stages, the Sampler's value coming from the conditioning.
+    void mossImageEditFormatReachesBothStages() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Value picture0(picture(bench, QStringLiteral("edit-ref.png"), 320, 192));
+        const Values base{{"model", Value(model)}, {"prompt", Value("make it night")}, {"references", Value::list({picture0})}};
+        const Result<JobRequest> plain = bench.request(kTextEncode, base);
+        QVERIFY(plain);
+        QVERIFY(!plain->params.contains("moss_edit_format"));
+        Values chosenDefault = base;
+        chosenDefault.insert("edit_format", Value("default"));
+        const Result<JobRequest> same = bench.request(kTextEncode, chosenDefault);
+        QVERIFY(same);
+        QCOMPARE(same->params, plain->params); // default is the request as before
+
+        Values moss = base;
+        moss.insert("edit_format", Value("Moss-Image-Edit"));
+        const Result<JobRequest> encode = bench.request(kTextEncode, moss);
+        QVERIFY(encode);
+        QCOMPARE(encode->params.value("moss_edit_format").toString(), QStringLiteral("moss-image-edit"));
+
+        const QString file = bench.workDir() + "/conditioning.bin";
+        const Result<Values> out =
+            bench.outputs(kTextEncode, moss, JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        const Result<Values> empty = bench.run(kEmptyLatent, {{"width", Value(320)}, {"height", Value(192)}});
+        const Result<JobRequest> sample =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", out->value("conditioning")},
+                                     {"latent", empty->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
+        QVERIFY(sample);
+        QCOMPARE(sample->params.value("moss_edit_format"), encode->params.value("moss_edit_format"));
+
+        // With no references there is nothing to lay out: nothing is sent.
+        const Result<JobRequest> none = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a cat")}, {"edit_format", Value("Moss-Image-Edit")}});
+        QVERIFY(none);
+        QVERIFY(!none->params.contains("moss_edit_format"));
+    }
+
     // A reference whose file is gone or changed since Text Encode ran (a cached conditioning
     // outlives it) is said as such, not sent to the helper.
     void aReferenceThatChangedSinceTheEncodeIsAnError() {

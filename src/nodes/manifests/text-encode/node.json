@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/text-encode",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Text Encode",
   "description": "Turns a prompt into conditioning for the Sampler, with the model's text encoder, and carries the reference pictures of an edit, or the first frame of a clip, to it. Kept while only the sampling changes, so a new seed does not encode the prompt again.",
   "category": "Diffusion",
@@ -18,6 +18,9 @@
     {"name": "reference_size", "type": "text", "label": "Reference size", "default": "auto", "advanced": true,
      "choices": ["auto", "exact"],
      "description": "Auto: the engine scales each reference to at most a megapixel (and the output's area), to a multiple of 16, before the model sees it. Exact: each keeps the size the graph gave it, as ComfyUI's edit does; a side that is not a multiple of 16 (32 for Qwen-Image) is cut from the middle down to one, as ComfyUI's VAE Encode does."},
+    {"name": "edit_format", "type": "text", "label": "Edit format", "default": "default", "advanced": true,
+     "choices": ["default", "Moss-Image-Edit"],
+     "description": "For MOSS-Image edits only; other models ignore it. Default: the engine's own layout (the references also go to the text encoder when it has a vision tower). Moss-Image-Edit: ComfyUI's format of that name, which the edit LoRA is trained for: the references go to the model through the VAE only, with no vision tokens, anchored at the text start. Up to four references."},
     {"name": "first_frame", "type": "image", "label": "First frame", "optional": true,
      "description": "The picture a clip starts from, for an image-to-video model (Wan 2.2 I2V or TI2V). It is scaled to cover the size of Clip and cut from the middle."},
     {"name": "clip", "type": "fugue/latent", "label": "Clip", "optional": true,

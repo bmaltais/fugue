@@ -4346,7 +4346,9 @@ rescale the picture to the nearest multiple (330x190 to 336x192, a slight stretc
 the VAE (`reference N: WxH -> WxH`). Checked on the RTX 3090 (FLUX.2 Klein 9B Q8_0, 256 x 256, 4 steps, references
 320x192, 256x256 and 192x320): `exact` reached the VAE as 320x192, 256x256 and 192x320, in the encode and the
 sample; `auto` gave 656x400, 512x512 and 400x656 at the encode (no output size, so a megapixel) and 336x192, 256x256
-and 192x336 at the sample. **Reference indices.** FLUX.2 (`sd_version_is_flux2`) sets `ref_index_mode = increase`
+and 192x336 at the sample. **Edit format (#574, 2026-11-25).** Text Encode 1.2.0 has an advanced `edit_format`: `default` or `Moss-Image-Edit`, for MOSS-Image edits only (other models ignore it; `shown_when` reads only the node's own inputs, so the row is always shown and its description says so). `Moss-Image-Edit` sends the engine option `moss_edit_format = "moss-image-edit"` with `ref_images` (and puts `edit_format` on the conditioning's descriptor, so the Sampler sends the same): ComfyUI's TextEncodeMOSSImageEdit format of that name, the references enter the DiT through the VAE only (no vision tokens even when the encoder has a vision tower), RoPE text_start anchor, references isolated at t=0. `default` sends nothing (the engine's ai-toolkit layout, as before). With `exact` reference size the MOSS references keep the graph's size (the engine at the #573 commit: a 1 MP 3:2 reference is no longer capped to 1024 on its long edge), and the engine strips the prompt as ComfyUI does. The engine logs `MOSS-Image edit layout moss-image-edit: N reference(s)...` and `reference N: WxH -> WxH before the VAE`.
+
+**Reference indices.** FLUX.2 (`sd_version_is_flux2`) sets `ref_index_mode = increase`
 on the predictor (`generation_image.cpp`, the `increase` list in `image_references`, and `flux.hpp` forces it again
 for the model), the target takes time index 0, the references start at 1 (`rope.hpp`, `gen_flux_ids`, `x_index + 1`)
 and each takes `index * ref_index_scale` with the scale 10 for FLUX.2 (`flux.hpp`, the flux2 config), so the

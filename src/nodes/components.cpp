@@ -460,6 +460,18 @@ void sendReferenceSize(QJsonObject &params, const QString &size) {
         params.insert(QStringLiteral("ref_image_args"), QLatin1String(kExactReferenceArgs));
 }
 
+// The layout of a MOSS-Image edit (the engine's moss_edit_format): "default" is the engine's own
+// (the ai-toolkit layout, vision on when the encoder has it), "Moss-Image-Edit" is ComfyUI's
+// TextEncodeMOSSImageEdit format of that name (VAE references only). Other models ignore it. Text
+// Encode's input; the conditioning carries it to the Sampler. Default sends nothing.
+constexpr auto kMossImageEditFormat = "Moss-Image-Edit";
+constexpr auto kMossImageEditEngineFormat = "moss-image-edit";
+
+void sendEditFormat(QJsonObject &params, const QString &format) {
+    if (format == QLatin1String(kMossImageEditFormat))
+        params.insert(QStringLiteral("moss_edit_format"), QLatin1String(kMossImageEditEngineFormat));
+}
+
 // The references a conditioning carries (Text Encode puts them in its descriptor, as ComfyUI's
 // ReferenceLatent puts reference latents on a conditioning). Each must still be the picture
 // Text Encode had: a cached conditioning can outlive a file it names.
@@ -805,6 +817,7 @@ public:
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
             sendReferenceSize(params, context.input(QStringLiteral("reference_size")).text());
+            sendEditFormat(params, context.input(QStringLiteral("edit_format")).text());
         }
         JobRequest request = job(*files, params, true);
         // An image-to-video model makes its start from the first frame in the encode (Wan 2.2 I2V's
@@ -847,6 +860,8 @@ public:
             descriptor.insert(QStringLiteral("references"), carried);
             if (const QString size = context.input(QStringLiteral("reference_size")).text(); size == QLatin1String(kExactReferences))
                 descriptor.insert(QStringLiteral("reference_size"), size);
+            if (const QString format = context.input(QStringLiteral("edit_format")).text(); format == QLatin1String(kMossImageEditFormat))
+                descriptor.insert(QStringLiteral("edit_format"), format);
         }
         return Values{{QStringLiteral("conditioning"), Value(dataHandle(kConditioningType, path.value(), descriptor))}};
     }
@@ -943,6 +958,8 @@ public:
             params.insert(QStringLiteral("ref_images"), sent.value());
             sendReferenceSize(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta"))
                                           .toObject().value(QStringLiteral("reference_size")).toString());
+            sendEditFormat(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta"))
+                                       .toObject().value(QStringLiteral("edit_format")).toString());
         }
         // The first frame of an image-to-video conditioning, for the clip it was encoded for.
         const Result<CarriedFrame> carried = firstFrameOf(context.input(QStringLiteral("conditioning")), *context.hashes);
