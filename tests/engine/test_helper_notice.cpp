@@ -20,7 +20,21 @@ class HelperNoticeTest : public QObject {
         file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     }
 
+    QByteArray m_helper, m_mark;
+    bool m_helperSet = false, m_markSet = false;
+
 private slots:
+    void init() { // the tests below change the helper variables: put them back after each
+        m_helperSet = qEnvironmentVariableIsSet("FUGUE_HELPER");
+        m_helper = qgetenv("FUGUE_HELPER");
+        m_markSet = qEnvironmentVariableIsSet("FUGUE_HELPER_FROM_APPRUN");
+        m_mark = qgetenv("FUGUE_HELPER_FROM_APPRUN");
+    }
+    void cleanup() {
+        if (m_helperSet) qputenv("FUGUE_HELPER", m_helper); else qunsetenv("FUGUE_HELPER");
+        if (m_markSet) qputenv("FUGUE_HELPER_FROM_APPRUN", m_mark); else qunsetenv("FUGUE_HELPER_FROM_APPRUN");
+    }
+
     void showsOnlyForNvidiaWithVulkanHelper() {
         QTemporaryDir lib, state;
         make(lib, "fugue-helper-vulkan");
@@ -42,6 +56,31 @@ private slots:
         CudaHelperNotice::dismiss(state.path() + "/fugue");               // makes the folder
         QVERIFY(!CudaHelperNotice::due({lib.path()}, true, state.path() + "/fugue"));
         QVERIFY(CudaHelperNotice::due({lib.path()}, true, state.path())); // another state folder
+    }
+
+    void anAppRunChoiceDoesNotHideTheOffer() {
+        // AppRun exports FUGUE_HELPER for the helper it found; only a helper the person named hides the notice.
+        qunsetenv("FUGUE_HELPER");
+        qunsetenv("FUGUE_HELPER_FROM_APPRUN");
+        QVERIFY(!CudaHelperNotice::helperChosenByUser());
+
+        qputenv("FUGUE_HELPER", "/x/fugue-helper-vulkan");
+        QVERIFY(CudaHelperNotice::helperChosenByUser()); // the person's own override
+        qputenv("FUGUE_HELPER_FROM_APPRUN", "1");
+        QVERIFY(!CudaHelperNotice::helperChosenByUser()); // AppRun's pick
+        qputenv("FUGUE_HELPER", "");
+        QVERIFY(!CudaHelperNotice::helperChosenByUser()); // still AppRun's mark
+
+        qunsetenv("FUGUE_HELPER_FROM_APPRUN");
+        QVERIFY(CudaHelperNotice::helperChosenByUser()); // empty, no mark: the person chose no helper
+    }
+
+    void dueFollowsTheOverrideOnThisMachine() {
+        // The no-argument due() reads this machine's folders and GPU, so only the override's effect is checked: a
+        // person's FUGUE_HELPER makes it false, whatever the machine has.
+        qputenv("FUGUE_HELPER", "/x/fugue-helper-vulkan");
+        qunsetenv("FUGUE_HELPER_FROM_APPRUN");
+        QVERIFY(!CudaHelperNotice::due());
     }
 
     void commandIsThePacmanInstallOnArch() {

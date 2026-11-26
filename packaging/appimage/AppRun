@@ -12,8 +12,12 @@ export APPDIR
 
 # The helper is a separate download (it is large and ties to a GPU stack): look for it where a package or
 # the user puts it, in the order the packaged build tries (CUDA on an NVIDIA machine, then Vulkan, then CPU).
-# FUGUE_HELPER set by the user, even empty (no helper), wins.
-if [ -z "${FUGUE_HELPER+x}" ]; then
+# FUGUE_HELPER set by the user, even empty (no helper), wins. What this script finds is marked with
+# FUGUE_HELPER_FROM_APPRUN=1, so the window can tell it from a choice (its "faster generation" offer is hidden
+# only for a helper the user named). A stale mark inherited from a parent Fugue is dropped when the user names one.
+if [ -n "${FUGUE_HELPER+x}" ]; then
+    unset FUGUE_HELPER_FROM_APPRUN
+else
     names="fugue-helper-vulkan fugue-helper-cpu"
     [ -e /proc/driver/nvidia/version ] && names="fugue-helper-cuda $names"
     # FUGUE_HELPER_DIRS (colon separated) replaces the folders searched.
@@ -25,7 +29,8 @@ if [ -z "${FUGUE_HELPER+x}" ]; then
         for name in $names; do
             if [ -f "$dir/$name" ] && [ -x "$dir/$name" ]; then
                 FUGUE_HELPER=$dir/$name
-                export FUGUE_HELPER
+                FUGUE_HELPER_FROM_APPRUN=1
+                export FUGUE_HELPER FUGUE_HELPER_FROM_APPRUN
                 break
             fi
         done

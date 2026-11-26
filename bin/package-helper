@@ -12,8 +12,10 @@
 # Writes <outdir>/fugue-helper-<backend>-<arch>-linux.tar.zst (default outdir: ~/.cache/fugue-package-helper/dist) and adds its line to
 # <outdir>/SHA256SUMS, keeping the other lines. Upload both with `gh release upload <tag>`. helper/README.md
 # ("Portable tarballs") says what is inside and why. Environment: FUGUE_JOBS (compiles in parallel, default: all cores),
-# CCACHE_DIR (the compiler cache and the downloaded tools, default: ~/.cache/fugue-package-helper/ccache, outside the
-# checkout so removing a worktree keeps them), FUGUE_CONTAINER_ENGINE (podman or docker). The build folder is
+# CCACHE_DIR (the compiler cache and the downloaded tools, default: ~/.cache/fugue-package-helper/ccache for every build,
+# native aarch64 too, outside the checkout so removing a worktree keeps them), FUGUE_CONTAINER_ENGINE (podman or docker).
+# The output folder, its SHA256SUMS and the downloads are shared by every worktree: each is changed under a flock on a
+# file in that folder (.lock), so two runs at once wait for each other and neither loses a line. The build folder is
 # build-package-<backend>/ in the checkout, never the build-helper-<backend>/ of the native bin/build-helper.
 #
 # The tarball holds one folder, fugue-helper-<backend>-<arch>-linux/ (the binary, fugue-helper.service, and for
@@ -51,18 +53,41 @@ arch="$(uname -m)"
 backend="${backend:-cuda}"
 cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/fugue-package-helper"
 out="$(realpath -m "${out:-$cache_home/dist}")"
+# Every mode, native aarch64 included, compiles with the same cache (bin/build-helper's ccache reads it). In the container
+# the host's run overrides it with the mounted /ccache.
+export CCACHE_DIR="${CCACHE_DIR:-$cache_home/ccache}"
 jobs="${FUGUE_JOBS:-$(nproc)}"
 name="fugue-helper-$backend-$arch-linux"
+
+# --- locks -----------------------------------------------------------------------------------------
+# The output folder, its SHA256SUMS and the downloaded tools are shared by every worktree and every run (they live
+# under ~/.cache), so each is changed under an exclusive flock on a file in that folder: a second run waits its turn
+# instead of losing a line or reading a half-written download. The lock is on the folder, not the checkout, and
+# works across containers that mount the same folder. (A long build holds none: only the short steps below do.)
+locked() { # lockfile command [args...]
+  local lock=$1
+  shift
+  mkdir -p "$(dirname "$lock")"
+  (
+    flock -x 9
+    "$@"
+  ) 9>"$lock"
+}
 
 # --- add this archive's line to SHA256SUMS, keeping the others ------------------------------------
 write_sums() {
   local tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp "$out/SHA256SUMS.XXXXXX")"
   touch "$out/SHA256SUMS"
   grep -v " $name.tar.zst\$" "$out/SHA256SUMS" >"$tmp" || true
   (cd "$out" && sha256sum "$name.tar.zst") >>"$tmp"
-  cat "$tmp" >"$out/SHA256SUMS"
-  rm -f "$tmp"
+  mv -f "$tmp" "$out/SHA256SUMS"
+}
+
+# Move the finished archive into place and update SHA256SUMS: one step under the output folder's lock.
+publish() { # staged-archive
+  mv -f "$1" "$out/$name.tar.zst"
+  write_sums
 }
 
 # --- on the host: start the container ------------------------------------------------------------
@@ -85,13 +110,18 @@ if ((container)); then
 fi
 
 # --- in the container: the build tools ---------------------------------------------------------------
-download() { # url sha256 file: kept in the ccache folder, which CI caches
-  local dir="${CCACHE_DIR:-/tmp}/downloads"
-  mkdir -p "$dir"
-  if ! { [[ -f $dir/$3 ]] && echo "$2  $dir/$3" | sha256sum -c - >/dev/null 2>&1; }; then
-    curl -fsSL --retry 3 -o "$dir/$3" "$1"
-    echo "$2  $dir/$3" | sha256sum -c - >/dev/null || die "$3: checksum does not match the pin"
+fetch_pinned() { # dir url sha256 file: under the downloads lock
+  local dir=$1
+  if ! { [[ -f $dir/$4 ]] && echo "$3  $dir/$4" | sha256sum -c - >/dev/null 2>&1; }; then
+    curl -fsSL --retry 3 -o "$dir/$4.part" "$2"
+    echo "$3  $dir/$4.part" | sha256sum -c - >/dev/null || { rm -f "$dir/$4.part"; die "$4: checksum does not match the pin"; }
+    mv -f "$dir/$4.part" "$dir/$4"
   fi
+}
+
+download() { # url sha256 file: kept in the ccache folder, which CI caches; another run may be fetching the same file
+  local dir="${CCACHE_DIR:-/tmp}/downloads"
+  locked "$dir/.lock" fetch_pinned "$dir" "$1" "$2" "$3"
   echo "$dir/$3"
 }
 
@@ -210,10 +240,12 @@ EOF
   (cd "$dir" && env -u LD_LIBRARY_PATH ldd "fugue-helper-$backend")
 fi
 
-rm -f "$out/$name.tar.zst"
 # zstd -10: the CUDA libraries are mostly compressed machine code; a higher level costs minutes for a few percent.
-tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner --use-compress-program="zstd -T0 -10" -cf "$out/$name.tar.zst" "$name"
-write_sums
+# Packed outside the output folder's lock (it takes minutes), then moved in with the SHA256SUMS line under it.
+staged="$out/.$name.tar.zst.$$"
+trap 'rm -rf "$stage" "$staged"' EXIT
+tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner --use-compress-program="zstd -T0 -10" -cf "$staged" "$name"
+locked "$out/.lock" publish "$staged"
 if [[ -n ${HOST_UID:-} && -n ${HOST_GID:-} && $(stat -c %u "$root") != 0 ]]; then
   # Docker: the container's root wrote these; give them back. (Rootless podman maps root to the caller.)
   chown -R "$HOST_UID:$HOST_GID" "$out" "$FUGUE_HELPER_BUILD_DIR" "${CCACHE_DIR:-/ccache}" 2>/dev/null || true

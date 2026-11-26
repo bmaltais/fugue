@@ -60,7 +60,10 @@ struct CudaHelperNotice {
     static bool usesPacman();
     static bool due(const QStringList &folders, bool nvidia, const QString &stateFolder);
     static void dismiss(const QString &stateFolder);
-    // On this machine; never due when FUGUE_HELPER names the helper.
+    // True when the person named the helper: FUGUE_HELPER is set and the AppImage's AppRun did not set it (AppRun exports
+    // FUGUE_HELPER_FROM_APPRUN=1 beside the helper it found, so its own choice does not hide the offer).
+    static bool helperChosenByUser();
+    // On this machine; never due when the person set FUGUE_HELPER.
     static bool due();
     static void dismiss();
 };

@@ -3,7 +3,8 @@ name: Helper tarballs
 # fugue-helper-<backend>-x86_64-linux.tar.zst (cuda, vulkan, cpu) for the AppImage and every x86_64 distribution
 # that has no fugue-helper package (docs/helper.md, issue #334). bin/package-helper builds each in an Ubuntu 22.04
 # container on the hosted runner, so the glibc floor is the AppImage's (2.35); compiling CUDA needs no GPU.
-# A v* tag adds the three files and their SHA256SUMS lines to the release package.yml makes (install.sh reads them);
+# A v* tag adds the three files and their checksum files to the release package.yml makes; release-sums.yml then writes
+# the SHA256SUMS that install.sh reads;
 # a pull request that changes the script or this file builds them without uploading; by hand (workflow_dispatch)
 # builds them and keeps them as workflow artifacts.
 on:
@@ -85,33 +86,19 @@ jobs:
         with:
           pattern: helper-*
           path: parts
-      - name: Wait for the release, then add the tarballs and their SHA256SUMS lines
-        # package.yml makes the release for the same tag and uploads the packages with their SHA256SUMS; appimage.yml adds
-        # the AppImage the same way. Each job edits that one file, so this adds its lines and then reads the file back:
-        # a line another job's upload overwrote is added again, up to five times.
+      - name: Wait for the release, then add the tarballs and their checksum files
+        # package.yml makes the release for the same tag. This only adds its own files: each tarball and its
+        # <name>.sha256. Nothing here touches SHA256SUMS: release-sums.yml is its one writer (docs/release.md).
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir dist && cp parts/*/*.tar.zst dist/
           for _ in $(seq 1 240); do
-            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx SHA256SUMS; then found=1; break; fi
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then found=1; break; fi
             sleep 30
           done
-          [[ ${found:-0} == 1 ]] || { echo "no release with a SHA256SUMS appeared in two hours (did package.yml fail?)"; exit 1; }
+          [[ ${found:-0} == 1 ]] || { echo "no release appeared in two hours (did package.yml fail?)"; exit 1; }
           cd dist
-          for attempt in 1 2 3 4 5; do
-            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir . --clobber
-            for f in *.tar.zst; do
-              grep -vF " $f" SHA256SUMS > SHA256SUMS.new || true
-              (grep -F " $f" ../parts/*/SHA256SUMS | sed 's/^[^:]*://') >> SHA256SUMS.new
-              mv SHA256SUMS.new SHA256SUMS
-            done
-            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber *.tar.zst SHA256SUMS
-            sleep 20
-            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir check --clobber
-            ok=1
-            for f in *.tar.zst; do grep -qF " $f" check/SHA256SUMS || ok=0; done
-            [[ $ok == 1 ]] && { cat check/SHA256SUMS; exit 0; }
-            echo "attempt $attempt: a line was overwritten by another job; adding again"
-          done
-          echo "the SHA256SUMS lines of the tarballs did not stay"; exit 1
+          for f in *.tar.zst; do sha256sum "$f" > "$f.sha256"; done
+          cat ./*.sha256
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber ./*.tar.zst ./*.sha256

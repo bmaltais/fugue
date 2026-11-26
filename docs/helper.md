@@ -53,8 +53,8 @@ Not inside, on purpose: `libcuda.so.1` and every other NVIDIA driver library (th
 
 `bin/package-helper [--container] cuda|vulkan|cpu [outdir]` is the one script, for CI and for a local run (`--container` starts
 podman, else docker; `FUGUE_JOBS` caps the compiles; the output goes to `~/.cache/fugue-package-helper/dist` (or the `outdir` argument) with its `SHA256SUMS` line).
-The compiler cache and the downloaded tools live in `~/.cache/fugue-package-helper/ccache` (`CCACHE_DIR` overrides; `XDG_CACHE_HOME` moves
-both), outside the checkout, so removing a worktree keeps a 50-minute build's cache and tarball. The build folder is
+The compiler cache and the downloaded tools live in `~/.cache/fugue-package-helper/ccache` for every build, native aarch64 included (`CCACHE_DIR` overrides; `XDG_CACHE_HOME` moves
+both), outside the checkout, so removing a worktree keeps a 50-minute build's cache and tarball. Worktrees share the output folder, its `SHA256SUMS` and the downloads, so each is changed under a `flock` on a `.lock` file in it (tested by `tests/package_helper_lock.sh`): two runs at once wait for each other, neither loses a line. The build folder is
 `build-package-<backend>/` in the checkout (`FUGUE_HELPER_BUILD_DIR`, read by `bin/build-helper`), so it never overwrites the native
 `build-helper-<backend>/` that local GPU runs use. It runs `bin/build-helper` with the portable settings inside a container pinned in the script, then bundles, strips, checks
 and packs:
@@ -73,7 +73,7 @@ and packs:
   (CUDA 12.9 can build for them, but each architecture adds compile time and the file grows). Adding 80 and 90 for the data-centre
   cards is a one-line change to `cuda_archs`.
 - **CI.** `.github/workflows/helper-tarballs.yml` runs the script on a hosted runner for each of the three backends. A `v*` tag
-  adds the files and their `SHA256SUMS` lines to the release `package.yml` makes; a pull request that changes the script or the
+  adds the files and their `.sha256` files to the release `package.yml` makes (`release-sums.yml` writes `SHA256SUMS`, [release.md](release.md)); a pull request that changes the script or the
   workflow builds them without uploading; by hand (Run workflow) keeps them as artifacts. The CPU and Vulkan tarballs are also
   unpacked in a clean `ubuntu:22.04` container and checked with `helper/smoke-http.sh`. The compiler cache (`.ccache`, with the
   downloaded tools; the workflow sets `CCACHE_DIR` and the output folder `dist` itself) is cached per backend.

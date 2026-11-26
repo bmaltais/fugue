@@ -116,8 +116,12 @@ void CudaHelperNotice::dismiss(const QString &stateFolder) {
         marker.close();
 }
 
+bool CudaHelperNotice::helperChosenByUser() {
+    return qEnvironmentVariableIsSet("FUGUE_HELPER") && !qEnvironmentVariableIsSet("FUGUE_HELPER_FROM_APPRUN");
+}
+
 bool CudaHelperNotice::due() {
-    return !qEnvironmentVariableIsSet("FUGUE_HELPER") && due(helperFolders(), hasNvidiaGpu(), stateDir());
+    return !helperChosenByUser() && due(helperFolders(), hasNvidiaGpu(), stateDir());
 }
 
 void CudaHelperNotice::dismiss() { dismiss(stateDir()); }

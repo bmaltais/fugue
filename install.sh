@@ -16,8 +16,9 @@
 # tarball for the machine: the CUDA one when an NVIDIA driver is present, else the Vulkan one when a Vulkan loader
 # is, and unpacks it into ~/.local/share/fugue/helper, where the AppImage looks (docs/helper.md). --no-helper skips
 # that, --helper cuda|vulkan|cpu chooses the backend, --helper-only installs only the helper (what the window's
-# "faster generation" notice copies) and works with an AppImage already installed. A release without the tarball
-# is reported and the rest carries on.
+# "faster generation" notice copies) and works with an AppImage already installed. A helper install replaces the helper before it (binary, libs,
+# licences, markers): AppRun prefers cuda, then vulkan, then cpu, so a leftover cuda binary would shadow a cpu install. Unpacking
+# needs zstd, checked before anything is downloaded. A release without the tarball is reported and the rest carries on.
 set -euo pipefail
 
 repo="bmaltais/fugue"
@@ -100,6 +101,10 @@ if [[ $mode == appimage && $helper != none ]]; then
   elif [[ $have_vulkan == 1 ]]; then tarball=vulkan
   else say "no NVIDIA driver and no Vulkan loader found: no generation helper installed (--helper cpu for the slow CPU one)"
   fi
+fi
+# A tarball is unpacked with zstd: find out before anything is downloaded (the CUDA one is about 590 MiB).
+if [[ -n $tarball ]]; then
+  command -v zstd >/dev/null || die "missing tool: zstd (install the zstd package; the helper tarball needs it to unpack). Nothing was downloaded or changed"
 fi
 if [[ $mode == appimage ]]; then
   what="no pacman: using the AppImage"; ((helper_only)) && what="helper only"
@@ -193,7 +198,7 @@ if [[ -n $tarball_url ]]; then
   tarball_sum="$(sum_of "$tarball_file")"
   [[ -n $tarball_sum ]] || die "$tarball_file is not in SHA256SUMS"
   helper_marker="$helper_dir/.installed-$tarball"
-  if [[ -f $helper_marker && $(cat "$helper_marker") == "$tag $tarball_sum" ]]; then
+  if [[ -f $helper_marker && -x $helper_dir/fugue-helper-$tarball && $(cat "$helper_marker") == "$tag $tarball_sum" ]]; then
     say "the $tarball helper in $helper_dir is $tag's: nothing to do for it"
   else
     todo+=("$tarball_url")
@@ -234,11 +239,12 @@ fi
 
 if [[ -n $tarball_url && -f $work/$tarball_file ]]; then
   # The tarball holds one folder; its content goes into the folder AppRun searches. A CUDA one carries its own lib/.
-  command -v zstd >/dev/null || die "the helper tarball needs zstd to unpack (install the zstd package) and the AppImage is not changed"
   say "unpacking the $tarball helper into $helper_dir"
   mkdir -p "$work/helper" "$helper_dir"
   tar --zstd --strip-components=1 -xf "$work/$tarball_file" -C "$work/helper"
-  rm -rf "${helper_dir:?}/lib" "${helper_dir:?}/licenses"
+  # One backend at a time: AppRun prefers cuda, then vulkan, then cpu, so a leftover binary of another backend
+  # would shadow the one just installed. Its libraries, licences and marker go with it.
+  rm -rf "${helper_dir:?}/lib" "${helper_dir:?}/licenses" "${helper_dir:?}"/fugue-helper-{cuda,vulkan,cpu} "${helper_dir:?}"/.installed-{cuda,vulkan,cpu}
   cp -a "$work/helper/." "$helper_dir/"
   printf '%s %s\n' "$tag" "$tarball_sum" >"$helper_marker"
 fi

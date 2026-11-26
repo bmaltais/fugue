@@ -1369,3 +1369,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: the owner's words; a file the model cannot work without is not a choice (Hick: one fewer control on the node), and the place people already look for what is missing is Get ready.
 - Rules met: Primary (the sheet's Install is still the one accent), Gaps and Keys unchanged (the sheet's own rows). Nothing new to lay out: a control left out.
 - Not checked by a person: a real window (offscreen picture only); a MOSS model that is only on a paired host does not show its tokenizer in Get ready (its header is read here).
+
+### 2026-11-26 CUDA helper notice: wording for a host without pacman, and shown in an AppImage (#334)
+
+- Control: `helperNotice`, `helperNoticeCopy` and `helperNoticeDismiss` in `src/Main.qml`, unchanged in place, size and order.
+- Old: one line, "Faster generation on your NVIDIA card: install fugue-helper-cuda", and a button "Copy sudo pacman -S fugue-helper-cuda", on every host; in an AppImage with a Vulkan helper it never showed, because `AppRun` sets `FUGUE_HELPER` and the notice read that as the person's choice.
+- New: on a host that runs the packaged build (pacman, not an AppImage) the words are as before. Elsewhere the line reads "Faster generation on your NVIDIA card: download the CUDA helper" and the button "Copy the install command", which copies `curl -fsSL https://raw.githubusercontent.com/bmaltais/fugue/main/install.sh | bash -s -- --helper-only` (the command is a full pipeline, so the button says what the click puts on the clipboard instead of showing it). `AppRun` now marks its own pick with `FUGUE_HELPER_FROM_APPRUN=1`, so only a `FUGUE_HELPER` the person set hides the notice.
+- Why: an AppImage host has no pacman, so the pacman command would not run; the install script is the same helper download `docs/helper.md` documents. The notice's point is unchanged, one action then the ×.
+- Rules met: Floor (button and × unchanged), Primary (Copy stays the row's one highlighted control), Gaps (8px inside the row, as before), Posture (transient, asks nothing). Words: the label names the action, not the mechanism.
+- Not checked by a person: a real AppImage on an NVIDIA host (`tests/engine/test_helper_notice.cpp` covers the rule, `packaging/appimage/test-apprun.sh` the mark); the notice is not in the offscreen picture tests.

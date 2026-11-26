@@ -227,22 +227,18 @@ jobs:
         with:
           name: appimage
           path: dist
-      - name: Wait for the release, then add the AppImage and its SHA256SUMS line
-        # package.yml makes the release for the same tag and uploads the packages with their SHA256SUMS. This waits
-        # for that file, adds the AppImage and its checksum line to the same release, and never replaces a line
-        # of another file.
+      - name: Wait for the release, then add the AppImage and its checksum file
+        # package.yml makes the release for the same tag. This adds the AppImage and <image>.sha256 (made by
+        # build-appimage.sh) and nothing else: release-sums.yml is the one writer of SHA256SUMS (docs/release.md).
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           for _ in $(seq 1 240); do
-            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx SHA256SUMS; then found=1; break; fi
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then found=1; break; fi
             sleep 30
           done
-          [[ ${found:-0} == 1 ]] || { echo "no release with a SHA256SUMS appeared in two hours (did package.yml fail?)"; exit 1; }
+          [[ ${found:-0} == 1 ]] || { echo "no release appeared in two hours (did package.yml fail?)"; exit 1; }
           cd dist
           image=$(ls ./*-x86_64.AppImage); image=${image#./}
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir .
-          grep -vF " $image" SHA256SUMS > SHA256SUMS.new || true
-          cat "$image.sha256" >> SHA256SUMS.new
-          mv SHA256SUMS.new SHA256SUMS
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "$image" SHA256SUMS
+          sha256sum -c "$image.sha256"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "$image" "$image.sha256"
