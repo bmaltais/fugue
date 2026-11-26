@@ -54,7 +54,8 @@ Reply runWorker(const Command &command, Context &context);
 // `lock` is the engine lock, held or not; it is left as it was.
 void endDeadRuns(const Context &context, Lock &lock);
 
-// Writes events as JSON lines as they arrive until run.done; returns its status.
-RunStatus streamEvents(const RunFolder &folder, Context &context);
+// Writes events as JSON lines as they arrive until run.done; returns its status. With `sayWaiting` (`fugue run --wait`,
+// not `runs events --follow`) it says once, after about a second, that the run waits for another (#625).
+RunStatus streamEvents(const RunFolder &folder, Context &context, bool sayWaiting = false);
 
 } // namespace fugue::cli

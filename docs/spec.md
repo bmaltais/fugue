@@ -2754,6 +2754,11 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
   the advisory lock `~/.local/state/fugue/engine.lock` (and, across project roots and the Default session, the cross-root GPU lock of [1.4.2](#142-projects)). "Run first" writes an entry that sorts
   ahead of the waiting ones; removing a queued run deletes its entry. An entry whose process is
   gone is discarded, and its run is ended as `failed`.
+- `fugue run --wait` that has been queued behind another run for about a second says so once: on stderr
+  `Waiting for another Fugue run to finish (pid N)…`, and with `--json` a `{"event":"waiting","run":…,"pid":N}` line on
+  stdout instead (the line is not written to the run's `events.jsonl`). `N` is the active run's process, else the holder of the engine or
+  GPU lock (read from `/proc/locks`); without one the message ends after `finish…`, and the event has no `pid`.
+  `runs events --follow` does not say it. `fugue validate` runs nothing and takes neither lock, so it never waits for one.
 - A process that holds the lock is alive, so an active entry is dead exactly when someone else
   can take the lock. A waiting entry is dead when the process id it records is not that run's
   worker; a process id alone is not trusted, because ids are reused.
