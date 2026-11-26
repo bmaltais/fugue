@@ -10,6 +10,9 @@
 # -DCMAKE_CUDA_ARCHITECTURES=..., keeps the portable settings: the package (packaging/PKGBUILD) and
 # bin/package-helper use them. Without nvidia-smi or a GPU the portable default stays.
 #
+# FUGUE_HELPER_BUILD_DIR=<folder> builds there instead of build-helper-<backend>/ (bin/package-helper uses its own, so a
+# portable build never overwrites the native one).
+#
 # FUGUE_SDCPP_SOURCE=<a clone of github.com/bmaltais/stable-diffusion.cpp> builds that folder instead of the
 # pinned tarball, so an engine edit rebuilds only what it touches (helper/README.md, Changing the engine).
 set -euo pipefail
@@ -21,6 +24,7 @@ if [[ ! $backend =~ ^(cuda|vulkan|cpu)$ ]]; then
   echo "usage: bin/build-helper cuda|vulkan|cpu [cmake options]" >&2
   exit 2
 fi
+build_dir="${FUGUE_HELPER_BUILD_DIR:-$root/build-helper-$backend}"
 args=()
 if [[ -n ${FUGUE_SDCPP_SOURCE:-} ]]; then
   if [[ ! -f $FUGUE_SDCPP_SOURCE/CMakeLists.txt ]]; then
@@ -60,9 +64,9 @@ if [[ $backend == cuda ]]; then
   fi
 fi
 # Quiet unless it fails.
-if ! out=$(cmake -S "$root/helper" -B "$root/build-helper-$backend" -DFUGUE_HELPER_BACKEND="$backend" "${args[@]}" "$@" 2>&1); then
+if ! out=$(cmake -S "$root/helper" -B "$build_dir" -DFUGUE_HELPER_BACKEND="$backend" "${args[@]}" "$@" 2>&1); then
   echo "$out" >&2
   exit 1
 fi
 # CMAKE_BUILD_PARALLEL_LEVEL caps the compiles (a quieter machine); unset, one per core.
-cmake --build "$root/build-helper-$backend" -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+cmake --build "$build_dir" -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"

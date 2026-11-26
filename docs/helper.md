@@ -52,8 +52,11 @@ Not inside, on purpose: `libcuda.so.1` and every other NVIDIA driver library (th
 ## How they are built
 
 `bin/package-helper [--container] cuda|vulkan|cpu [outdir]` is the one script, for CI and for a local run (`--container` starts
-podman, else docker; `FUGUE_JOBS` caps the compiles; the output goes to `dist/`, which git ignores, with its `SHA256SUMS` line).
-It runs `bin/build-helper` with the portable settings inside a container pinned in the script, then bundles, strips, checks
+podman, else docker; `FUGUE_JOBS` caps the compiles; the output goes to `~/.cache/fugue-package-helper/dist` (or the `outdir` argument) with its `SHA256SUMS` line).
+The compiler cache and the downloaded tools live in `~/.cache/fugue-package-helper/ccache` (`CCACHE_DIR` overrides; `XDG_CACHE_HOME` moves
+both), outside the checkout, so removing a worktree keeps a 50-minute build's cache and tarball. The build folder is
+`build-package-<backend>/` in the checkout (`FUGUE_HELPER_BUILD_DIR`, read by `bin/build-helper`), so it never overwrites the native
+`build-helper-<backend>/` that local GPU runs use. It runs `bin/build-helper` with the portable settings inside a container pinned in the script, then bundles, strips, checks
 and packs:
 
 | Backend | Image | Build tools |
@@ -73,7 +76,7 @@ and packs:
   adds the files and their `SHA256SUMS` lines to the release `package.yml` makes; a pull request that changes the script or the
   workflow builds them without uploading; by hand (Run workflow) keeps them as artifacts. The CPU and Vulkan tarballs are also
   unpacked in a clean `ubuntu:22.04` container and checked with `helper/smoke-http.sh`. The compiler cache (`.ccache`, with the
-  downloaded tools) is cached per backend.
+  downloaded tools; the workflow sets `CCACHE_DIR` and the output folder `dist` itself) is cached per backend.
 - **Locally**: `bin/package-helper --container cuda` needs about 16 GB of disk for the image and a cold build takes the time under
   Sizes; later builds hit ccache. Nothing needs a GPU to compile.
 
