@@ -6,6 +6,12 @@
 
 #include <QtTest>
 
+#include <atomic>
+
+#include <vips/vips8>
+
+#include "engine/vips.h"
+
 #include "scheduler_support.h"
 
 using namespace fugue;
@@ -266,6 +272,46 @@ private slots:
         QCOMPARE(compiled.errors().first().code, QStringLiteral("type_mismatch"));
         QCOMPARE(compiled.errors().first().node, QStringLiteral("n"));
         QVERIFY(compiled.errors().first().message.contains("text"));
+    }
+
+    // 9.2: a node the Switch declined but another node reads is let go of by the Switch at once, so its decoded image
+    // is released when that other node finishes, while the Switch still waits on its chosen side.
+    void aDeclinedNodesImagesAreReleasedWhenTheOtherReadersFinish() {
+        QVERIFY(initVips());
+        World world;
+        addTypes(world);
+        std::atomic<bool> finalized{false};
+        std::optional<bool> releasedWhenTheChosenSideRan;
+        world.type("fugue/picture", "'inputs': [{'name': 'text', 'type': 'text', 'optional': true}], 'outputs': [{'name': 'image', 'type': 'image'}]",
+                   [&](const NodeContext &context) -> Result<Values> {
+                       if (context.node == QLatin1String("f"))
+                           releasedWhenTheChosenSideRan = finalized.load(); // the chosen side runs after c finished
+                       const auto made = MediaHandle::fromImage(vips::VImage::black(8, 6).cast(VIPS_FORMAT_UCHAR));
+                       if (!made)
+                           return made.error();
+                       if (context.node == QLatin1String("p"))
+                           g_object_weak_ref(G_OBJECT(made.value().image().value().get_image()),
+                                             [](gpointer flag, GObject *) { static_cast<std::atomic<bool> *>(flag)->store(true); }, &finalized);
+                       return Values{{"image", made.value()}};
+                   });
+        world.type("fugue/eye", "'inputs': [{'name': 'image', 'type': 'image'}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &) -> Result<Values> { return Values{{"text", Value(QStringLiteral("seen"))}}; });
+        // p is read by the Switch (lazily, declined) and by c; the chosen side f waits for c through d.
+        const QByteArray graph =
+            "{'p': {'type': 'fugue/picture'},"
+            " 'c': {'type': 'fugue/eye', 'inputs': {'image': {'from': 'p.image'}}},"
+            " 'd': {'type': 'fugue/join', 'inputs': {'a': {'from': 'c.text'}, 'b': 'd'}},"
+            " 'e': {'type': 'fugue/join', 'inputs': {'a': {'from': 'd.text'}, 'b': 'e'}},"
+            " 'f': {'type': 'fugue/picture', 'inputs': {'text': {'from': 'e.text'}}},"
+            " 'flag': {'type': 'fugue/flag', 'inputs': {'text': 'no'}},"
+            " 'sw': {'type': 'fugue/pick', 'inputs': {'condition': {'from': 'flag.flag'},"
+            " 'on_true': {'from': 'p.image'}, 'on_false': {'from': 'f.image'}}},"
+            " 'out': {'type': 'fugue/save', 'inputs': {'value': {'from': 'sw.value'}}}}";
+        const Ran ran = world.run(world.graph(graph));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(world.calls.count("p"), 1);
+        QVERIFY(releasedWhenTheChosenSideRan.has_value());
+        QVERIFY(*releasedWhenTheChosenSideRan);
     }
 };
 
