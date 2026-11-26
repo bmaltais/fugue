@@ -10,3 +10,4 @@ __pycache__/
 /packaging/pkg/
 /packaging/fugue/
 /packaging/fugue-workflows/
+/.ccache/

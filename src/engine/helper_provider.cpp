@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QStandardPaths>
 
 #include <algorithm>
 #include <cmath>
@@ -84,7 +85,17 @@ QString helperProgram(bool nvidia) {
     return helperProgram(helperFolders(), nvidia);
 }
 
-QString CudaHelperNotice::command() { return QStringLiteral("sudo pacman -S fugue-helper-cuda"); }
+QString CudaHelperNotice::command(bool pacman) {
+    return pacman ? QStringLiteral("sudo pacman -S fugue-helper-cuda")
+                  : QStringLiteral("curl -fsSL https://raw.githubusercontent.com/bmaltais/fugue/main/install.sh | bash -s -- --helper-only");
+}
+
+bool CudaHelperNotice::usesPacman() {
+    // The AppImage runtime sets APPIMAGE; a host without pacman cannot run the command anyway.
+    return !qEnvironmentVariableIsSet("APPIMAGE") && !QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty();
+}
+
+QString CudaHelperNotice::command() { return command(usesPacman()); }
 
 namespace {
 QString noticeMarker(const QString &stateFolder) {

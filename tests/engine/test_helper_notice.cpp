@@ -44,8 +44,22 @@ private slots:
         QVERIFY(CudaHelperNotice::due({lib.path()}, true, state.path())); // another state folder
     }
 
-    void commandIsThePacmanInstall() {
-        QCOMPARE(CudaHelperNotice::command(), QStringLiteral("sudo pacman -S fugue-helper-cuda"));
+    void commandIsThePacmanInstallOnArch() {
+        QCOMPARE(CudaHelperNotice::command(true), QStringLiteral("sudo pacman -S fugue-helper-cuda"));
+    }
+
+    void commandIsTheTarballDownloadElsewhere() {
+        const QString command = CudaHelperNotice::command(false);
+        QVERIFY(command.contains(QStringLiteral("install.sh")));
+        QVERIFY(command.endsWith(QStringLiteral("--helper-only")));
+        QVERIFY(!command.contains(QStringLiteral("pacman")));
+    }
+
+    void anAppImageIsNotAPacmanHost() {
+        qputenv("APPIMAGE", "/tmp/Fugue.AppImage");
+        QVERIFY(!CudaHelperNotice::usesPacman());
+        QCOMPARE(CudaHelperNotice::command(), CudaHelperNotice::command(false));
+        qunsetenv("APPIMAGE");
     }
 };
 

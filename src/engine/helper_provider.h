@@ -52,7 +52,12 @@ bool hasNvidiaGpu();
 // Vulkan helper is the one found in `folders` (no `fugue-helper-cuda` in any folder before it),
 // and the person has not dismissed it. The dismissal is a marker file in `stateFolder`.
 struct CudaHelperNotice {
-    static QString command(); // `sudo pacman -S fugue-helper-cuda`
+    // What to run to get the CUDA helper: `sudo pacman -S fugue-helper-cuda` where the package manager is pacman, else
+    // install.sh's helper download (the portable tarball, docs/helper.md).
+    static QString command(bool pacman);
+    static QString command();
+    // True on Arch (and Arch-based) hosts that run the packaged build; false in an AppImage or without pacman.
+    static bool usesPacman();
     static bool due(const QStringList &folders, bool nvidia, const QString &stateFolder);
     static void dismiss(const QString &stateFolder);
     // On this machine; never due when FUGUE_HELPER names the helper.
