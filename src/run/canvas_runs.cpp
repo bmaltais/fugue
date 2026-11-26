@@ -545,6 +545,9 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             updateRunning();
         }
         emit finished(run, status);
+        // What a run did not reach (a run to a node, an early failure) was cleared at its start: the check lists it again, and keeps
+        // the run's own errors (it is not from an edit).
+        scheduleCheck(false);
         return;
     }
     if (path.isEmpty())

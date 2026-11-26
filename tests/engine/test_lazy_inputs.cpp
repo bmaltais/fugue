@@ -357,6 +357,55 @@ private slots:
         QCOMPARE(textOf(ran, "sw", "value"), QStringLiteral("t1++"));
     }
 
+    // The check reads what a run would read: a side the answer declines is not looked at, so a muted one does not mute the Switch.
+    void theCheckDoesNotMuteASwitchForItsDeclinedSide() {
+        World world;
+        addTypes(world);
+        QByteArray graph = graphFor("yes");
+        graph.replace("'f3': {'type': 'fugue/join',", "'f3': {'type': 'fugue/join', 'mode': 'mute',");
+        const CompiledGraph compiled = world.graph(graph);
+        world.run(compiled); // the condition is known now
+        const GraphCheck check = checkGraph(compiled, world.environment());
+        QCOMPARE(check.states.value("sw"), NodeState::Cached);
+        QCOMPARE(check.states.value("out"), NodeState::Cached);
+    }
+
+    // A declined side that is itself a Switch skipped for its muted chosen side does not mute the Switch that declined it.
+    void theCheckDoesNotMuteASwitchThatDeclinedAMutedSwitch() {
+        World world;
+        addTypes(world);
+        const QByteArray graph =
+            "{'m': {'type': 'fugue/join', 'mode': 'mute', 'inputs': {'a': 'x', 'b': '+'}},"
+            " 'b': {'type': 'fugue/pick', 'inputs': {'condition': false, 'on_false': {'from': 'm.text'}}},"
+            " 'c': {'type': 'fugue/text', 'inputs': {'text': 'c'}},"
+            " 'a': {'type': 'fugue/pick', 'inputs': {'condition': true, 'on_true': {'from': 'c.text'}, 'on_false': {'from': 'b.value'}}},"
+            " 'out': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.value'}}}}";
+        const CompiledGraph compiled = world.graph(graph);
+        const GraphCheck check = checkGraph(compiled, world.environment());
+        QVERIFY(check.states.value("a") != NodeState::Skipped);
+        QVERIFY(check.states.value("out") != NodeState::Skipped);
+        const Ran ran = world.run(compiled);
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(ran.outcome.states.value("a"), NodeState::Cached);
+    }
+
+    // The check agrees with a run on a frozen Switch whose chosen side is muted: its frozen result stands.
+    void theCheckShowsAFrozenSwitchWithAMutedSideAsFrozen() {
+        World world;
+        addTypes(world);
+        const Ran first = world.run(world.graph(graphFor("yes")));
+        const QString key = first.outcome.keys.value("sw");
+        QVERIFY(world.cache->freeze(key));
+        QJsonObject nodes = json(graphFor("no").replace("'f3': {'type': 'fugue/join',", "'f3': {'type': 'fugue/join', 'mode': 'mute',"));
+        QJsonObject sw = nodes.value("sw").toObject();
+        sw.insert("frozen", key);
+        nodes.insert("sw", sw);
+        const CompiledGraph compiled = world.graph(nodes);
+        world.run(compiled); // the condition is known now
+        const GraphCheck check = checkGraph(compiled, world.environment());
+        QCOMPARE(check.states.value("sw"), NodeState::Frozen);
+    }
+
     // A linked empty list is the value on an input that takes a list as it is, so a Switch passes it on (not switch_empty).
     void aSwitchPassesAnEmptyListThrough() {
         World world;

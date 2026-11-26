@@ -1197,6 +1197,36 @@ private slots:
         QCOMPARE(r.runs->errors().size(), 0);
     }
 
+    // A run clears the check's findings at its start; after it a check lists what it did not reach (a run to a node), and the
+    // run's own error stays.
+    void aCheckFollowsARunAndListsWhatItDidNotReach() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        RunApp r(QByteArray(R"({
+          "fugue": 1,
+          "graph": {"nodes": {
+            "l1": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "%1/one.png"}},
+            "p1": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "l1.image"}}},
+            "l2": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "%1/two.png"}},
+            "p2": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "l2.image"}}}
+          }},
+          "layout": {"nodes": {"l1": {"pos": [0, 0]}, "p1": {"pos": [300, 0]}, "l2": {"pos": [0, 200]}, "p2": {"pos": [300, 200]}}}
+        })").replace("%1", folder.path().toUtf8()));
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("l1"), QStringLiteral("error"));
+        QCOMPARE(r.state("l2"), QStringLiteral("error"));
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.model.select({"p1"});
+        QVERIFY(!r.runs->runToSelected().isEmpty());
+        QTRY_VERIFY(finished.size() >= 1);
+        // Never reached by the run, and found again by the check that follows it, with no edit.
+        QTRY_COMPARE(r.state("l2"), QStringLiteral("error"));
+        QTRY_COMPARE(r.runs->errors().size(), 2);
+    }
+
     // #600: the pill lists what shows on a node. A dry-run failure of the check itself (a relative file in a workflow
     // that is not saved has no folder to start from) is not a kernel's finding, and never joined the list.
     void aDryRunFailureIsNotCountedAsAKernelFinding() {
