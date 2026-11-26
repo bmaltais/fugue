@@ -535,10 +535,25 @@ void Workflows::startUses(const QStringList &hashes, int token, bool automatic) 
             QList<QPair<int, QStringList>> done, notRead;
             // Each distinct destination (tab, view, files) takes the result once, however many asks wanted it; every ask is still answered.
             QHash<QString, bool> appliedTo;
+            bool offerNow = false;
             for (const UseAsk &ask : finished.asks) {
                 QStringList chosenHashes;
                 for (const OnDiskUse &use : ask.chosen)
                     chosenHashes << use.wanted.value(QStringLiteral("hash")).toString();
+                if (ask.automatic) {
+                    // Not a failure: the tab is not the one shown (a session restored several), or the person opened Get ready meanwhile and
+                    // its choice wins. The read is remembered, so the next look at the tab (setCurrent) uses the file at once.
+                    const bool tabOpen = std::any_of(m_tabs.begin(), m_tabs.end(), [&ask](const Tab &t) { return t.id == ask.tab; });
+                    const bool shown = m_current >= 0 && m_tabs[size_t(m_current)].id == ask.tab;
+                    if (tabOpen && (m_readiness->isOpen() || (!ask.inApp && !shown))) {
+                        for (const QString &hash : std::as_const(chosenHashes))
+                            m_autoTried.remove(ask.tab + QLatin1Char(' ') + hash);
+                        done.append({ask.token, QStringList()});
+                        notRead.append({ask.token, QStringList()});
+                        continue;
+                    }
+                    offerNow |= shown;
+                }
                 const QString where = ask.tab + QLatin1Char('|') + (ask.inApp ? QLatin1Char('a') : QLatin1Char('g')) + QLatin1Char('|') + chosenHashes.join(QLatin1Char(','));
                 if (!appliedTo.contains(where))
                     appliedTo.insert(where, applyUses(ask.tab, ask.chosen, resolved, ask.inApp, ask.automatic));
@@ -562,14 +577,23 @@ void Workflows::startUses(const QStringList &hashes, int token, bool automatic) 
             }
             for (int i = 0; i < done.size(); ++i)
                 emit usesFinished(done.at(i).second, notRead.at(i).second, done.at(i).first);
-            // What waited for the files (the Get ready sheet of a tab just opened) opens now, for what is left.
-            if (std::any_of(finished.asks.begin(), finished.asks.end(), [](const UseAsk &ask) { return ask.automatic; }))
+            // The line of the read is gone (a failure or the swap's own line replaced it, or nothing was applied).
+            if (m_notice.startsWith(tr("Reading your file… %1%").section(QStringLiteral(" %1"), 0, 0))) {
+                m_notice.clear();
+                setNotice(m_missingNotice);
+            }
+            // What waited for the files (the Get ready sheet of the tab just opened) opens now, for what is left.
+            if (offerNow)
                 offerReadiness();
         },
         [this, key](const OnDiskUse &use, int percent) {
             const auto job = m_useJobs.constFind(key);
-            if (job != m_useJobs.constEnd() && !job->cancelled)
-                setReading({use.wanted.value(QStringLiteral("hash")).toString()}, percent);
+            if (job == m_useJobs.constEnd() || job->cancelled)
+                return;
+            setReading({use.wanted.value(QStringLiteral("hash")).toString()}, percent);
+            // An automatic read has no sheet to show it: the banner does, as an opened template's does.
+            if (std::any_of(job->asks.begin(), job->asks.end(), [](const UseAsk &ask) { return ask.automatic; }))
+                setNotice(tr("Reading your file… %1%").arg(percent));
         });
 }
 
@@ -590,7 +614,10 @@ bool Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, co
             return false; // another tab is shown: the document on the canvas is not this one's
         // The graph: the document itself, one undo step; the file is written only when the person saves it.
         before = m_canvas->document();
-        m_canvas->commitWhole(withUses(before, resolved), tr("Use the files you have"));
+        const Document after = withUses(before, resolved);
+        if (announce && after.toJson() == before.toJson())
+            return true; // the person changed those inputs while the file was read: nothing to change, nothing to say
+        m_canvas->commitWhole(after, tr("Use the files you have"));
         m_onDiskKey.clear();
     }
     usesChanged();
@@ -605,13 +632,28 @@ void Workflows::usesChanged() {
     refreshMissing(false);
 }
 
+bool Workflows::autoPending() const {
+    if (m_current < 0)
+        return false;
+    const QString tab = m_tabs[size_t(m_current)].id;
+    for (const UseJob &job : m_useJobs)
+        for (const UseAsk &ask : job.asks)
+            if (ask.automatic && ask.tab == tab && !job.cancelled)
+                return true;
+    return false;
+}
+
 bool Workflows::autoUseOn() const { return currentSettings().useOnDisk == QLatin1String("use"); }
 
-bool Workflows::autoUse() {
+bool Workflows::autoUse(bool cheap) {
     // Never under a sheet the person is deciding in, nor while a template is opening with its files, nor with nothing shown.
     if (m_current < 0 || m_opening || m_readiness->isOpen() || !m_registry || !autoUseOn())
         return false;
     const QString tab = m_tabs[size_t(m_current)].id;
+    // Switching back and forth must not walk the model folders again: a tab whose models were found to need nothing stays so until they change.
+    const QByteArray idle = QJsonDocument(modelsToHave(shownDocument(), *m_registry)).toJson(QJsonDocument::Compact);
+    if (cheap && m_autoIdle.value(tab) == idle)
+        return false;
     QStringList hashes;
     for (const OnDiskUse &use : onDiskNow()) {
         const QString hash = use.wanted.value(QStringLiteral("hash")).toString();
@@ -619,8 +661,11 @@ bool Workflows::autoUse() {
             continue;
         hashes << hash;
     }
-    if (hashes.isEmpty())
+    if (hashes.isEmpty()) {
+        m_autoIdle.insert(tab, idle);
         return false;
+    }
+    m_autoIdle.remove(tab);
     for (const QString &hash : std::as_const(hashes))
         m_autoTried.insert(tab + QLatin1Char(' ') + hash);
     startUses(hashes, 0, true);
@@ -967,7 +1012,7 @@ void Workflows::setCurrent(int index) {
     refreshRegistry();
     emit tabsChanged();
     emit currentChanged(from, index);
-    autoUse(); // the tab shown now (restored with the session, or reached from another)
+    autoUse(true); // the tab shown now (restored with the session, or reached from another)
 }
 
 void Workflows::removeTab(int index) {
@@ -975,6 +1020,9 @@ void Workflows::removeTab(int index) {
         return;
     const QString id = m_tabs[size_t(index)].id;
     m_recovery.remove(id);
+    m_autoIdle.remove(id);
+    for (auto it = m_autoTried.begin(); it != m_autoTried.end();)
+        it = it->startsWith(id + QLatin1Char(' ')) ? m_autoTried.erase(it) : std::next(it);
     if (count() == 1) {
         // The window always has a workflow: closing the last one leaves a fresh one.
         m_tabs.clear();
@@ -1810,11 +1858,12 @@ void Workflows::setDownloadRoot(const QString &root) {
 void Workflows::offerReadiness() {
     // "Use my file" (#618): a model with a file of its own on disk is used first, and the sheet opens for what is really missing when the
     // file has been read (the read runs off the window's thread; autoUse() offers again when it ends).
-    if (autoUse())
+    if (autoUse() || autoPending())
         return;
     // Opened but not ready: the Get ready sheet opens by itself (one yes covers the packs, trust, environments and models).
-    // Nothing happens before that yes; Cancel leaves the banner's Get ready… button to open it again.
-    if (getReadyOffer())
+    // Nothing happens before that yes; Cancel leaves the banner's Get ready… button to open it again. The line may be another (the swap's
+    // own), so what is left is read from the offer itself, not from the banner.
+    if (!m_offer.packs.isEmpty() || (!m_offer.text.isEmpty() && !m_downloads->busy()))
         m_readiness->show();
 }
 
@@ -2123,6 +2172,10 @@ void Workflows::refreshNodeTypes() {
         setNotice(missing);
     m_missingNotice = missing;
     emit noticeChanged(); // the offer
+    // A model folder added or the setting changed (the registry and settings reload end here): what is on disk may cover a missing model now.
+    m_onDiskKey.clear();
+    m_autoIdle.clear();
+    autoUse();
 
     // The question follows what is installed and trusted now: a pack trusted meanwhile (the
     // Packs page, the CLI) is not asked about, nor one at a version no longer installed; a pack

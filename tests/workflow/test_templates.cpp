@@ -1702,11 +1702,136 @@ private slots:
                     QCOMPARE(handle().value("hash").toString(), hash);
                 }
                 QTRY_VERIFY(!workflows.hashingUses());
-                QVERIFY(!workflows.readiness()->isOpen()); // nothing really missing is left to ask
+                if (mode != QLatin1String("app")) // (the fake taker keeps nothing, so the model is still missing there and the sheet rightly asks)
+                    QVERIFY(!workflows.readiness()->isOpen()); // nothing really missing is left to ask
                 QVERIFY2(workflows.notice().contains("z_image_turbo_bf16.safetensors") || mode == QLatin1String("use"), qPrintable(workflows.notice()));
             }
             QCOMPARE(readFile(path), written); // the file is changed only when the person saves
         }
+    }
+
+    // #629 review: a session restored with two tabs reads both files at once; the result for the tab that is no longer shown is not a failure
+    // (no notice, no sheet), and the tab gets its file when it is shown again. A tab that closes forgets what was tried for it.
+    void tabsOpenedTogetherBothEndWithTheFileWithoutAStrayNoticeOrSheet() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models, work;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        writeZImageFile(models);
+        const QString hash = "sha256:" + QString(64, u'8');
+        const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject xr = x;
+        xr.insert("source", "http://127.0.0.1:9/x");
+        for (const char *name : {"a.fugue", "b.fugue"})
+            writeJson(work.filePath(name), workflow({{"models", node("fugue/load-models", {{"diffusion_model", x}})}}, {{"models", QJsonArray{xr}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QStringList notices;
+        connect(&workflows, &Workflows::noticeChanged, this, [&] { notices << workflows.notice(); });
+        bool sheet = false;
+        connect(workflows.readiness(), &ReadinessSheet::changed, this, [&] { sheet |= workflows.readiness()->isOpen(); });
+        QVERIFY(workflows.openPath(work.filePath("a.fugue")));
+        const int a = workflows.current();
+        QVERIFY(workflows.openPath(work.filePath("b.fugue")));
+        const int b = workflows.current();
+        const auto swapped = [&] { return canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString() != hash; };
+        QTRY_VERIFY(swapped()); // b, shown
+        QTRY_VERIFY(!workflows.hashingUses());
+        workflows.setCurrent(a); // a was read meanwhile and is not tried in vain: it takes its file now
+        QTRY_VERIFY(swapped());
+        QTRY_VERIFY(!workflows.hashingUses());
+        workflows.setCurrent(b);
+        QVERIFY(swapped()); // b kept it
+        for (const QString &notice : std::as_const(notices))
+            QVERIFY2(!notice.contains("Choose again"), qPrintable(notice));
+        QVERIFY(!sheet);
+    }
+
+    // #629 review: the sheet waits for the read of a tab just opened, then opens for what is really left (no file for it), though the banner's
+    // line is the swap's own. A person's open Get ready is not applied over; an input the person changed meanwhile is not announced.
+    void theSheetWaitsForTheReadThenAsksForTheRestAndAnEditedInputIsNotAnnounced() {
+        for (const QString &mode : {QString("rest"), QString("sheet"), QString("edited")}) {
+            forgetDownloads();
+            Fixture f;
+            QTemporaryDir models, work;
+            QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+            writeZImageFile(models);
+            const QString covered = "sha256:" + QString(64, u'1'), absent = "sha256:" + QString(64, u'2');
+            const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", covered}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+            const QJsonObject w{{"resource", "fugue/vae"}, {"hash", absent}, {"name", "flux2-vae.safetensors"}};
+            QJsonObject xr = x, wr = w;
+            xr.insert("source", "http://127.0.0.1:9/x");
+            wr.insert("source", "http://127.0.0.1:9/w");
+            writeJson(work.filePath("p.fugue"), workflow({{"models", node("fugue/load-models", {{"diffusion_model", x}, {"vae", w}})}}, {{"models", QJsonArray{xr, wr}}}));
+            CanvasModel canvas(&f.registry);
+            CommandRegistry commands;
+            QTemporaryDir state;
+            WorkflowLocations locations;
+            locations.recoveryDir = state.filePath("recovery");
+            locations.trustPath = state.filePath("trust.json");
+            locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+            Workflows workflows(&canvas, &f.registry, &commands, locations);
+            QVERIFY(workflows.openPath(work.filePath("p.fugue")));
+            const auto handle = [&](const char *input) { return canvas.document().graph.nodes.value("models").inputs.value(input).handle(); };
+            QVERIFY(!workflows.readiness()->isOpen()); // waits for the read
+            QVERIFY(workflows.hashingUses());
+            if (mode == QLatin1String("rest")) {
+                QTRY_VERIFY(workflows.readiness()->isOpen());
+                QCOMPARE(workflows.readiness()->view().value("models").toList().size(), 1);
+                QCOMPARE(handle("diffusion_model").value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
+            } else if (mode == QLatin1String("sheet")) {
+                workflows.readiness()->show(); // the person opens Get ready while the file is read
+                QTRY_VERIFY(!workflows.hashingUses());
+                QCOMPARE(handle("diffusion_model").value("hash").toString(), covered); // their sheet's choice wins: not applied over it
+            } else {
+                Document edited = canvas.document();
+                edited.graph.nodes["models"].inputs.insert("diffusion_model", InputValue::fromJson(QJsonObject{{"resource", "fugue/diffusion-model"},
+                    {"hash", "sha256:" + QString(64, u'3')}, {"name", "mine.safetensors"}}));
+                canvas.commitWhole(edited, "edit");
+                const int steps = canvas.undoStack()->count();
+                QTRY_VERIFY(!workflows.hashingUses());
+                QCOMPARE(handle("diffusion_model").value("name").toString(), QString("mine.safetensors"));
+                QCOMPARE(canvas.undoStack()->count(), steps);
+                QVERIFY2(!workflows.notice().contains("Used your file"), qPrintable(workflows.notice()));
+            }
+        }
+    }
+
+    // #629 review: switching Ask me to Use my file (the settings reload ends in refreshNodeTypes) uses the file for the tab already shown.
+    void changingTheSettingToUseMyFileUsesItForTheShownTab() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models, work;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "use_on_disk", "ask").isEmpty());
+        writeZImageFile(models);
+        const QString hash = "sha256:" + QString(64, u'4');
+        const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject xr = x;
+        xr.insert("source", "http://127.0.0.1:9/x");
+        writeJson(work.filePath("w.fugue"), workflow({{"models", node("fugue/load-models", {{"diffusion_model", x}})}}, {{"models", QJsonArray{xr}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openPath(work.filePath("w.fugue")));
+        QVERIFY(workflows.readiness()->isOpen());
+        workflows.readiness()->cancel();
+        const auto handle = [&] { return canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle(); };
+        QCOMPARE(handle().value("hash").toString(), hash);
+        QVERIFY(changeSetting(settingsPath(), "use_on_disk", "use").isEmpty());
+        workflows.refreshNodeTypes();
+        QTRY_VERIFY(handle().value("hash").toString() != hash);
     }
 
     // Cancelling the sheet while its files are read takes only the sheet's ask away: another surface's read of the same file goes on and applies.

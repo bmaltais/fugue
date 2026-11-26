@@ -441,7 +441,9 @@ private:
     bool autoUseOn() const;
     // Uses the files for the shown tab's missing models that have one, once per tab and model (a file that could not be read is not
     // asked again, nor one the person took back with Undo). True when a read was started: the Get ready sheet waits for its result.
-    bool autoUse();
+    bool autoUse(bool cheap = false);
+    // An automatic read for the shown tab is going on: the Get ready sheet waits for it.
+    bool autoPending() const;
     void startUses(const QStringList &hashes, int token, bool automatic);
     // The notice naming each file used in place of a model, with Undo for the graph's document (`before` is the document as it was).
     void announceUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, const Document &before);
@@ -564,6 +566,7 @@ private:
         QList<Change> changes;
     };
     OpenedWith m_openedWith;
+    QHash<QString, QByteArray> m_autoIdle; // tab -> its models when autoUse() found nothing to do
     QSet<QString> m_autoTried; // "<tab> <hash>" of every model autoUse() asked for
     bool m_opening = false;    // a template is opening with its files: autoUse() leaves it alone
     QList<std::function<void()>> m_afterSheet;

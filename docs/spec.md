@@ -332,8 +332,7 @@ Rules:
   is on disk") is `use` (the default) or `ask`. With `use`, wherever the choice would come up it is made: a template or app opens with every covered
   model in place and Get ready opens only for what is really missing (a partly covered template included; a pack to install still opens the sheet,
   for the pack); an opened workflow file, a tab reached later, and a model whose file appears (a folder added, a download ended) use their files once the
-  hash is read on the worker, and the Get ready sheet of a tab just opened waits for that read; the Needs panel, the node card and Get ready therefore
-  have nothing covered to offer. Every automatic swap is said in the banner (naming the file and the tier: "Used your file <file> in place of <name>
+  hash is read on the worker ("Reading your file… %" in the banner) and the Get ready sheet of a tab just opened waits for that read, then opens for what is left; a tab that is not shown when its read ends is not a failure: it takes its file when it is shown. Once a tab has been looked at, the Needs panel, the node card and Get ready have nothing covered to offer, except while a file is being read, after Undo, and after a file that could not be read (they offer it as under `ask`). A Get ready the person has open is never applied over, and an input they changed during the read is left as it is. Every automatic swap is said in the banner (naming the file and the tier: "Used your file <file> in place of <name>
   (same model, <tier>)."), with Undo in the graph (one step; the App view's line has its own); an Undo is not undone by the next check, and a file that
   could not be read is said and not tried again for that tab. The rules of #605 hold unchanged (same weights, fits, the best tier; a file of the quantization
   the workflow names, from another source, stands in before a better-ranked other quantization, #624), nothing is swapped silently and a workflow file is

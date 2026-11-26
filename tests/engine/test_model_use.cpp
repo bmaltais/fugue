@@ -125,6 +125,20 @@ private slots:
         QVERIFY(!match->recommended);
     }
 
+    // The pinned quantization from another source takes precedence only when it fits the device, as Recommended does: a 10 GB bf16 on an
+    // 8 GB device loses to the 5 GB fp8 that fits.
+    void theSameQuantizationThatDoesNotFitDoesNotBeatOneThatDoes() {
+        const QString folder = root("m") + "/diffusion_models/";
+        writeZImage(folder + "other/z_image_turbo_bf16.safetensors");
+        writeZImage(folder + "z_image_turbo_fp8_e4m3fn.safetensors");
+        QVERIFY(QFile::resize(folder + "other/z_image_turbo_bf16.safetensors", 10'000'000'000LL));
+        QVERIFY(QFile::resize(folder + "z_image_turbo_fp8_e4m3fn.safetensors", 5'000'000'000LL));
+        const RecommendContext small{ComputeDevice{"cuda", "small GPU", 8.6, 8192}, 0, nullptr};
+        const std::optional<OnDiskMatch> match = findOnDisk(wanted("zimage/z_image_turbo_bf16.safetensors"), library("m"), small, m_shapes);
+        QVERIFY(match);
+        QCOMPARE(match->name, QStringLiteral("z_image_turbo_fp8_e4m3fn.safetensors"));
+    }
+
     // Another model of the family (the base, a different stem) is never offered, nor a file of another kind.
     void anotherModelIsNeverOffered() {
         const QString folder = root("c") + "/diffusion_models/";
