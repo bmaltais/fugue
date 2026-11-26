@@ -1,6 +1,7 @@
 #include "engine/paired_placement.h"
 
 #include "engine/compiler.h"
+#include "engine/group_library.h"
 
 #include <algorithm>
 #include <memory>
@@ -89,7 +90,10 @@ QList<Need> nodesNeedingModels(const Document &document, const ReadinessPlan &pl
 
     const Registry &registry = *request.registry;
     // The nodes the scheduler runs: groups expanded, pins merged, muted nodes out. A document that does not compile runs nothing.
-    const Compilation compiled = compile(document, registry);
+    // A library or pack group named only by its type id runs from its definition, as in compileForRun (5.3, 6.1).
+    Document embedded = document;
+    embedGroupTypes(embedded, registry);
+    const Compilation compiled = compile(embedded, registry);
     if (!compiled)
         return {};
     const QMap<QString, CompiledNode> &nodes = compiled->nodes;

@@ -2,11 +2,14 @@
 // why, and the host that does not answer. No disk, no provider; the probe is a fake. Seam: engine/paired_placement.h.
 
 #include <QJsonDocument>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include <optional>
 
+#include "engine/group_library.h"
 #include "engine/paired_placement.h"
+#include "engine/pack_loader.h"
 #include "nodes/builtin.h"
 
 using namespace fugue;
@@ -225,6 +228,18 @@ private slots:
         QCOMPARE(pinnedHere.asked, 0);
         QCOMPARE(pinned.blocked.first().node, QStringLiteral("g/enc"));
         QVERIFY(pinned.blocked.first().message.contains("pinned to desk"));
+        // A library group named only by its type id (no definition in `groups`) is placed as well: like a run, the verdict compiles it
+        // from the library's definition.
+        QTemporaryDir packs;
+        QVERIFY(saveToLibrary(grouped({}), "local/enc", registry(), packs.filePath("local")).ok());
+        Registry library;
+        nodes::addBuiltinNodeTypes(library);
+        loadPacks(library, {packs.path()});
+        Document bare = grouped({});
+        bare.groups.clear();
+        PairedPlacementRequest fromLibrary = request();
+        fromLibrary.registry = &library;
+        QCOMPARE(verdict(bare, missing(), fromLibrary, hosts).hostOf, (QMap<QString, QString>{{"g/enc", "gx10"}}));
     }
 
     // The pins decide before the probe: an app they block never waits for a host.
