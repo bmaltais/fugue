@@ -93,6 +93,21 @@ Result<QString> expandSaveName(const QString &typed, const QDateTime &now, const
     return name;
 }
 
+Errors saveLocationProblems(const NodeContext &context, const QString &extension) {
+    if (context.inputs.contains(QStringLiteral("name")) && !extension.isEmpty()) {
+        const Result<QString> name = expandSaveName(context.input("name").text(), QDateTime::currentDateTime(),
+                                                    modelLabel(context.upstreamModel), extension);
+        if (!name)
+            return name.errors();
+    }
+    if (context.inputs.contains(QStringLiteral("folder"))) {
+        const Result<QString> base = baseFolder(context);
+        if (!base)
+            return base.errors();
+    }
+    return {};
+}
+
 Result<SaveLocation> saveLocation(const NodeContext &context, const QString &extension) {
     const Result<QString> relative = expandSaveName(context.input("name").text(), QDateTime::currentDateTime(),
                                                     modelLabel(context.upstreamModel), extension);

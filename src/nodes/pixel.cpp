@@ -14,6 +14,8 @@
 #include <QString>
 
 #include <algorithm>
+#include <array>
+#include <optional>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -412,8 +414,34 @@ public:
 // the canvas resize's): gray 0.5 (alpha 1) as ComfyUI, the nearest picture stretched outward ("edge"), that
 // blurred ("edge-blur", the default: the benchmark's best outpaint start), or transparent. Mask 1 over the
 // new area and 0 over the original; feathering fades the mask inward from the padded edges as ((f - d) / f)^2.
+// What Pad's written sizes cannot be together: a target of one side only, or a target and a side. An input not
+// known (wired, not run yet) is none, and a rule that needs it is not judged.
+std::optional<Error> padConflict(std::optional<int> targetWidth, std::optional<int> targetHeight, const std::array<std::optional<int>, 4> &sides) {
+    static constexpr const char *names[4] = {"left", "top", "right", "bottom"};
+    if (targetWidth && targetHeight && (*targetWidth > 0) != (*targetHeight > 0))
+        return makeInputError(QStringLiteral("input_invalid"), QString::fromLatin1(*targetWidth > 0 ? "target_height" : "target_width"),
+                              QStringLiteral("Set both target_width and target_height, or neither."));
+    if (targetWidth && targetHeight && *targetWidth > 0)
+        for (size_t i = 0; i < sides.size(); ++i)
+            if (sides[i] && *sides[i] != 0)
+                return makeInputError(QStringLiteral("input_invalid"), QString::fromLatin1(names[i]),
+                                      QStringLiteral("A target size and left, top, right or bottom cannot both be set."));
+    return std::nullopt;
+}
+
 class PadKernel : public NodeKernel {
 public:
+    // Under validate: the target size and the four sides that are written agree (what a run says of them alone).
+    Errors check(const NodeContext &context) const override {
+        const auto known = [&](const char *name) {
+            const Value value = context.input(QString::fromLatin1(name));
+            return value.isEmpty() ? std::optional<int>() : std::optional<int>(toInt(value));
+        };
+        const std::optional<Error> conflict = padConflict(known("target_width"), known("target_height"),
+                                                          {known("left"), known("top"), known("right"), known("bottom")});
+        return conflict ? Errors{*conflict} : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
@@ -450,15 +478,9 @@ public:
                 return makeInputError(QStringLiteral("value_out_of_range"), QString::fromLatin1(name),
                                       QStringLiteral("A %1 of %2 is outside 0 to %3.")
                                           .arg(QString::fromLatin1(name)).arg(value).arg(kMaxSide));
-        if ((targetWidth > 0) != (targetHeight > 0))
-            return makeInputError(QStringLiteral("input_invalid"),
-                                  QString::fromLatin1(targetWidth > 0 ? "target_height" : "target_width"),
-                                  QStringLiteral("Set both target_width and target_height, or neither."));
+        if (const std::optional<Error> conflict = padConflict(targetWidth, targetHeight, {sides[0], sides[1], sides[2], sides[3]}))
+            return *conflict;
         if (targetWidth > 0) {
-            for (int i = 0; i < 4; ++i)
-                if (sides[i] != 0)
-                    return makeInputError(QStringLiteral("input_invalid"), QString::fromLatin1(names[i]),
-                                          QStringLiteral("A target size and left, top, right or bottom cannot both be set."));
             const double scale = std::min({1.0, double(targetWidth) / in.width, double(targetHeight) / in.height});
             if (scale < 1.0) {
                 const int w = std::min(targetWidth, std::max(1, int(std::lround(in.width * scale))));
@@ -781,46 +803,61 @@ public:
 // ---- numbers --------------------------------------------------------------------------
 
 // Python's operators: `%` takes the sign of b; dividing by zero is an error, as it is in Python.
+// What Number Math makes of its inputs, or the error a run gives: one function for run and check.
+Result<double> numberMath(const QString &op, double a, double b) {
+    double result = 0;
+    if (op == QLatin1String("add")) {
+        result = a + b;
+    } else if (op == QLatin1String("subtract")) {
+        result = a - b;
+    } else if (op == QLatin1String("multiply")) {
+        result = a * b;
+    } else if (op == QLatin1String("min")) {
+        result = std::min(a, b);
+    } else if (op == QLatin1String("max")) {
+        result = std::max(a, b);
+    } else if (op == QLatin1String("power")) {
+        result = std::pow(a, b);
+    } else if (op == QLatin1String("divide") || op == QLatin1String("modulo")) {
+        if (b == 0)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("b"),
+                                  QStringLiteral("Cannot %1 by zero.")
+                                      .arg(op == QLatin1String("divide") ? QStringLiteral("divide") : QStringLiteral("take a modulo")));
+        if (op == QLatin1String("divide")) {
+            result = a / b;
+        } else {
+            result = std::fmod(a, b);
+            if (result != 0 && (result < 0) != (b < 0))
+                result += b;
+        }
+    } else {
+        return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("operation"),
+                              QStringLiteral("\"%1\" is not an operation this node knows.").arg(op));
+    }
+    if (!std::isfinite(result))
+        return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("a"), QStringLiteral("The result is not a finite number."));
+    return result;
+}
+
 class NumberMathKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
-        const double a = context.input("a").number();
-        const double b = context.input("b").number();
-        const QString op = context.input("operation").text();
-        double result = 0;
-        if (op == QLatin1String("add")) {
-            result = a + b;
-        } else if (op == QLatin1String("subtract")) {
-            result = a - b;
-        } else if (op == QLatin1String("multiply")) {
-            result = a * b;
-        } else if (op == QLatin1String("min")) {
-            result = std::min(a, b);
-        } else if (op == QLatin1String("max")) {
-            result = std::max(a, b);
-        } else if (op == QLatin1String("power")) {
-            result = std::pow(a, b);
-        } else if (op == QLatin1String("divide") || op == QLatin1String("modulo")) {
-            if (b == 0)
-                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("b"),
-                                      QStringLiteral("Cannot %1 by zero.")
-                                          .arg(op == QLatin1String("divide") ? QStringLiteral("divide")
-                                                                             : QStringLiteral("take a modulo")));
-            if (op == QLatin1String("divide")) {
-                result = a / b;
-            } else {
-                result = std::fmod(a, b);
-                if (result != 0 && (result < 0) != (b < 0))
-                    result += b;
-            }
-        } else {
-            return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("operation"),
-                                  QStringLiteral("\"%1\" is not an operation this node knows.").arg(op));
-        }
-        if (!std::isfinite(result))
-            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("a"),
-                                  QStringLiteral("The result is not a finite number."));
-        return Values{{"value", Value(result)}};
+        const Result<double> result = numberMath(context.input("operation").text(), context.input("a").number(), context.input("b").number());
+        if (!result)
+            return result.errors();
+        return Values{{"value", Value(result.value())}};
+    }
+
+    // Under validate: a division by zero, or a result that is no number, from what is written. An `a` not known yet
+    // is taken as 0 and only the error on `b` is kept: the result then says nothing.
+    Errors check(const NodeContext &context) const override {
+        if (!context.inputs.contains(QStringLiteral("b")) || !context.inputs.contains(QStringLiteral("operation")))
+            return {};
+        const bool haveA = context.inputs.contains(QStringLiteral("a"));
+        const Result<double> result = numberMath(context.input("operation").text(), context.input("a").number(), context.input("b").number());
+        if (result || (!haveA && result.error().input != QLatin1String("b")))
+            return {};
+        return result.errors();
     }
 };
 

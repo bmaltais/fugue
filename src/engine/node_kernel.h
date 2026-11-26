@@ -158,6 +158,11 @@ public:
     // write files (MediaHandle::plainFile for a video input).
     virtual Result<JobRequest> request(const NodeContext &context, const Selection &selection) = 0;
 
+    // As NodeKernel::check: what request() would refuse these written inputs for, with no provider
+    // chosen and nothing read but a few KB of a file. An input that is linked or not run yet is
+    // absent. Called on the scheduler's thread, before a provider is selected (so also when none is).
+    virtual Errors check(const NodeContext &context) const;
+
     // What else decides the job's answer that is not an input or the model: data the kernel reads
     // itself (the prompt template Enhance Prompt asks with, #140), as text that changes when it
     // does. It goes into the cache key (10.1), so a changed template is not served from the old

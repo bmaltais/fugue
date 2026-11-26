@@ -741,6 +741,8 @@ private:
         // or an input linked to a node that has not run.
         std::optional<Errors> hostGone; // set when only the cache may serve this node, with the error of the host being gone
         if (n.providerKernel) {
+            if (m_dry)
+                warnFromKernel(n);
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
             requirement.workflowPin.clear();
@@ -877,6 +879,7 @@ private:
     }
 
     // What the node's kernel can tell before a run (NodeKernel::check), as warnings.
+    // A provider node's kernel is asked too, before a provider is chosen: its written values are wrong whoever serves it.
     void warnFromKernel(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -884,7 +887,7 @@ private:
         context.inputs = n.inputs;
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
-        for (Error warning : n.kernel->check(context)) {
+        for (Error warning : n.providerKernel ? n.providerKernel->check(context) : n.kernel->check(context)) {
             warning.severity = Error::Severity::Warning;
             warning.node = n.path;
             m_outcome.errors.append(warning);

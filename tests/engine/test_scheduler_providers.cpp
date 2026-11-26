@@ -66,6 +66,18 @@ private:
     int m_parts;
 };
 
+// A provider node that can tell from its written prompt alone that it would fail (ProviderKernel::check).
+class CheckingKernel : public FakeGenerateKernel {
+public:
+    Errors check(const NodeContext &context) const override {
+        ++m_checked;
+        if (context.input("prompt").text() == QLatin1String("bad"))
+            return {makeInputError(QStringLiteral("input_invalid"), QStringLiteral("prompt"), QStringLiteral("A bad prompt."))};
+        return {};
+    }
+    mutable std::atomic<int> m_checked{0};
+};
+
 // A stage-like node (#395): it names no model to the provider (any ready one) and is given a model's files in the job.
 class StagedKernel : public FakeGenerateKernel {
 public:
@@ -756,6 +768,29 @@ private slots:
         QCOMPARE(world.nextSeed, qint64(1001)); // checking drew no seed
     }
 
+    // A provider kernel's own check is a warning on the node under validate, whether or not a provider serves it, and
+    // is not asked by a run.
+    void checkAsksAProviderKernelWhatItCanTellFromTheWrittenValues() {
+        World world;
+        const auto kernel = std::make_shared<CheckingKernel>();
+        world.kernels.add("fugue/generate", kernel);
+        GraphCheck check = checkGraph(world.graph(generateGraph("bad", model("no-such-model"))), world.environment());
+        QCOMPARE(kernel->m_checked.load(), 1);
+        QStringList codes;
+        for (const Error &warning : check.warnings) {
+            QCOMPARE(warning.severity, Error::Severity::Warning);
+            codes << warning.code + ":" + warning.node + ":" + warning.input;
+        }
+        QVERIFY2(codes.contains("input_invalid:g:prompt"), qPrintable(codes.join(", ")));
+        QVERIFY2(codes.contains("model_missing:g:"), qPrintable(codes.join(", "))); // the provider's own is kept
+
+        const auto provider = world.provider("This machine", {"flux"});
+        check = checkGraph(world.graph(generateGraph("a cat", model("flux"))), world.environment());
+        QVERIFY(check.warnings.isEmpty());
+        QCOMPARE(kernel->m_checked.load(), 2);
+        QVERIFY(provider->jobs().isEmpty());
+    }
+
     void checkReportsAMissingModelAsAWarning() {
         World world;
         const auto provider = world.provider("This machine", {"flux"});
@@ -803,7 +838,7 @@ private slots:
     // 8.5: the provider checks do not depend on the rest of the node's inputs being known.
     void checkReportsAMissingModelWhenTheSeedIsRandomized() {
         World world;
-        world.provider("This machine", {"flux"});
+        const auto provider = world.provider("This machine", {"flux"});
         world.type("fugue/generate-seeded",
                    "'inputs': [{'name': 'prompt', 'type': 'text'},"
                    " {'name': 'seed', 'type': 'number', 'integer': true, 'widget': 'seed', 'min': 0, 'max': 9999},"
@@ -838,7 +873,7 @@ private slots:
 
         // With a provider that lacks the model, the linked prompt does not hide model_missing.
         nodes.insert("g", node("fugue/generate", {{"prompt", from("p.text")}, {"model", model("no-such-model")}}));
-        world.provider("This machine", {"flux"});
+        const auto provider = world.provider("This machine", {"flux"});
         check = checkGraph(world.graph(nodes), world.environment());
         QCOMPARE(check.warnings.size(), 1);
         QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));

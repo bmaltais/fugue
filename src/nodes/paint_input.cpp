@@ -43,8 +43,25 @@ Result<int> sizeOf(const NodeContext &context, const QString &name) {
     return int(rounded);
 }
 
+// The error of a painting file that is not there: one text for run and check.
+std::optional<Error> paintingMissing(const QString &file) {
+    if (QFileInfo(file).isFile())
+        return std::nullopt;
+    return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("paint"),
+                          QStringLiteral("The painting %1 is not there.").arg(file), QStringLiteral("Paint again."));
+}
+
 class PaintKernel : public NodeKernel {
 public:
+    // Under validate: the painting named is there. The size rules need to know whether a picture is wired: not checked.
+    Errors check(const NodeContext &context) const override {
+        const QString file = context.input(QStringLiteral("paint")).text();
+        if (file.trimmed().isEmpty())
+            return {};
+        const std::optional<Error> missing = paintingMissing(file);
+        return missing ? Errors{*missing} : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Value image = context.input(QStringLiteral("image"));
         const bool hasImage = image.isMedia();
@@ -60,10 +77,8 @@ public:
                     return Result<Values>(readable.errors());
                 file = readable.value();
             }
-            if (!QFileInfo(file).isFile())
-                return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("paint"),
-                                      QStringLiteral("The painting %1 is not there.").arg(file),
-                                      QStringLiteral("Paint again."));
+            if (const std::optional<Error> missing = paintingMissing(file))
+                return *missing;
             Result<PaintDocument> loaded = mask::readPaintFile(file);
             if (!loaded)
                 return Result<Values>(withInput(loaded.errors(), QStringLiteral("paint")));

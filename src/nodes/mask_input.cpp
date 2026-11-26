@@ -11,6 +11,14 @@ namespace fugue::nodes {
 
 namespace {
 
+// The error of a painted mask file that is not there: one text for run and check.
+std::optional<Error> paintedFileMissing(const QString &file) {
+    if (QFileInfo(file).isFile())
+        return std::nullopt;
+    return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("mask"),
+                          QStringLiteral("The painted mask %1 is not there.").arg(file), QStringLiteral("Paint the mask again."));
+}
+
 // The painted mask the `mask` input names, as one channel at the size of `picture`; an empty buffer
 // (no width) when nothing is painted.
 Result<Pixels> readPainted(const NodeContext &context, const MediaHandle &picture, Errors &warnings) {
@@ -24,10 +32,8 @@ Result<Pixels> readPainted(const NodeContext &context, const MediaHandle &pictur
             return readable.errors();
         file = readable.value();
     }
-    if (!QFileInfo(file).isFile())
-        return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("mask"),
-                              QStringLiteral("The painted mask %1 is not there.").arg(file),
-                              QStringLiteral("Paint the mask again."));
+    if (const std::optional<Error> missing = paintedFileMissing(file))
+        return *missing;
     const Result<MediaHandle> media = MediaHandle::probe(MediaType::Image, file, *context.hashes);
     if (!media)
         return media.errors();
@@ -49,6 +55,11 @@ Result<Pixels> readPainted(const NodeContext &context, const MediaHandle &pictur
 
 class PaintMaskKernel : public NodeKernel {
 public:
+    Errors check(const NodeContext &context) const override {
+        const std::optional<Error> missing = missingPaintedMask(context);
+        return missing ? Errors{*missing} : Errors{};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Value image = context.input(QStringLiteral("image"));
         if (!image.isMedia())
@@ -66,6 +77,11 @@ public:
 };
 
 } // namespace
+
+std::optional<Error> missingPaintedMask(const NodeContext &context) {
+    const QString file = context.input(QStringLiteral("mask")).text();
+    return file.trimmed().isEmpty() ? std::nullopt : paintedFileMissing(file);
+}
 
 Result<Pixels> paintedMask(const NodeContext &context, const MediaHandle &picture, Errors &warnings) {
     Result<Pixels> painted = readPainted(context, picture, warnings);
