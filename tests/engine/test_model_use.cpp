@@ -111,6 +111,34 @@ private slots:
         QVERIFY(use.sameModelText().contains("from another source"));
     }
 
+    // #624: the owner's Qwen3-8B Q8_0 from another publisher sits beside a better-ranked other quantization (an INT8 file the picker
+    // marks Recommended). The file of the quantization the workflow pins is the one it needs, so it wins and says "from another source".
+    void theSameQuantizationFromAnotherSourceBeatsARecommendedOtherQuantization() {
+        const QString folder = root("q") + "/diffusion_models/";
+        writeZImage(folder + "z_image_turbo_bf16.safetensors");
+        writeZImage(folder + "other/z_image_turbo_fp8_e4m3fn.safetensors");
+        const std::optional<OnDiskMatch> match =
+            findOnDisk(wanted("zimage/z_image_turbo_fp8_e4m3fn.safetensors"), library("q"), context(), m_shapes);
+        QVERIFY(match);
+        QCOMPARE(match->name, QStringLiteral("other/z_image_turbo_fp8_e4m3fn.safetensors"));
+        QVERIFY(match->otherSource);
+        QVERIFY(!match->recommended);
+    }
+
+    // The pinned quantization from another source takes precedence only when it fits the device, as Recommended does: a 10 GB bf16 on an
+    // 8 GB device loses to the 5 GB fp8 that fits.
+    void theSameQuantizationThatDoesNotFitDoesNotBeatOneThatDoes() {
+        const QString folder = root("m") + "/diffusion_models/";
+        writeZImage(folder + "other/z_image_turbo_bf16.safetensors");
+        writeZImage(folder + "z_image_turbo_fp8_e4m3fn.safetensors");
+        QVERIFY(QFile::resize(folder + "other/z_image_turbo_bf16.safetensors", 10'000'000'000LL));
+        QVERIFY(QFile::resize(folder + "z_image_turbo_fp8_e4m3fn.safetensors", 5'000'000'000LL));
+        const RecommendContext small{ComputeDevice{"cuda", "small GPU", 8.6, 8192}, 0, nullptr};
+        const std::optional<OnDiskMatch> match = findOnDisk(wanted("zimage/z_image_turbo_bf16.safetensors"), library("m"), small, m_shapes);
+        QVERIFY(match);
+        QCOMPARE(match->name, QStringLiteral("z_image_turbo_fp8_e4m3fn.safetensors"));
+    }
+
     // Another model of the family (the base, a different stem) is never offered, nor a file of another kind.
     void anotherModelIsNeverOffered() {
         const QString folder = root("c") + "/diffusion_models/";

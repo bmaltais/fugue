@@ -234,7 +234,7 @@ private slots:
         write(path("work/wants-int8.fugue"), kWantsInt8);
         const QByteArray before = kWantsInt8;
         // No such file yet: nothing to suggest.
-        QVERIFY(!fugue({"app", "run", "wants-int8.fugue", "--input", "image=" + picture(), "--json"}).error().value("hint").toString().contains("--use-on-disk"));
+        QVERIFY(!fugue({"app", "run", "wants-int8.fugue", "--no-use-on-disk", "--input", "image=" + picture(), "--json"}).error().value("hint").toString().contains("--use-on-disk"));
         // The other two models are here by name (a check reads no file); only the diffusion model is the missing one.
         write(path("root/data/fugue/models/text_encoders/t.safetensors"), "abc");
         write(path("root/data/fugue/models/vae/v.safetensors"), "abc");
@@ -242,7 +242,7 @@ private slots:
         zImage("z_image_turbo_fp8_e4m3fn.safetensors");
         const QString file = path("root/data/fugue/models/diffusion_models/z_image_turbo_bf16.safetensors");
 
-        const Outcome refused = fugue({"app", "run", "wants-int8.fugue", "--input", "image=" + picture(), "--json"});
+        const Outcome refused = fugue({"app", "run", "wants-int8.fugue", "--no-use-on-disk", "--input", "image=" + picture(), "--json"});
         QCOMPARE(refused.code(), QString("app_not_ready"));
         QVERIFY2(refused.error().value("hint").toString().contains(file), refused.out);
         QVERIFY(refused.error().value("hint").toString().contains("--use-on-disk"));
@@ -250,7 +250,7 @@ private slots:
         // validate: the node's own warning (a missing model is a warning there) carries the same words.
         // The bundled Z-Image Turbo template is a graph that reaches the model; its files are not here, but the INT8 one has same weights.
         QVERIFY(QFile::copy(QString(FUGUE_SOURCE_DIR) + "/templates/z-image-turbo/workflow.fugue", path("work/zit.fugue")));
-        const Outcome checked = fugue({"validate", "zit.fugue", "--json"});
+        const Outcome checked = fugue({"validate", "zit.fugue", "--no-use-on-disk", "--json"});
         QCOMPARE(checked.exitCode, 0);
         QStringList hints;
         for (const QJsonValue warning : checked.json().value("warnings").toArray())
@@ -269,6 +269,32 @@ private slots:
         QCOMPARE(valid.exitCode, 0);
         for (const QJsonValue warning : valid.json().value("warnings").toArray())
             QVERIFY2(warning.toObject().value("input").toString() != "diffusion_model", valid.out);
+    }
+
+    // #618: the file is used by default (the setting use_on_disk is "use"), with no flag; --no-use-on-disk opts out, and "ask" is #605's
+    // behaviour (a hint, no swap). Each swap is a line on stderr.
+    void theFileIsUsedByDefaultUnlessOptedOutOrTheSettingIsAsk() {
+        write(path("work/wants-int8.fugue"), kWantsInt8);
+        write(path("root/data/fugue/models/text_encoders/t.safetensors"), "abc");
+        write(path("root/data/fugue/models/vae/v.safetensors"), "abc");
+        zImage("z_image_turbo_bf16.safetensors");
+        const QString file = path("root/data/fugue/models/diffusion_models/z_image_turbo_bf16.safetensors");
+        const QStringList run{"app", "run", "wants-int8.fugue", "--input", "image=" + picture(), "--json"};
+
+        const Outcome bare = fugue(run);
+        QVERIFY2(bare.code() != QString("app_not_ready"), bare.out + bare.err);
+        QVERIFY2(bare.err.contains("z_image_turbo_int8_convrot.safetensors -> " + file.toUtf8()), bare.err);
+
+        QCOMPARE(fugue(run + QStringList{"--no-use-on-disk"}).code(), QString("app_not_ready"));
+        QVERIFY(fugue(run + QStringList{"--use-on-disk", "--no-use-on-disk"}).code() == QString("usage"));
+
+        write(path("root/config/fugue/settings.json"), "{\"use_on_disk\": \"ask\"}");
+        const Outcome asked = fugue(run);
+        QCOMPARE(asked.code(), QString("app_not_ready"));
+        QVERIFY(asked.error().value("hint").toString().contains("--use-on-disk"));
+        const Outcome forced = fugue(run + QStringList{"--use-on-disk"}); // the flag still wins over "ask"
+        QVERIFY2(forced.code() != QString("app_not_ready") && forced.err.contains(file.toUtf8()), forced.out + forced.err);
+        QFile::remove(path("root/config/fugue/settings.json"));
     }
 
     // The binding writes a field's default over the node; the file chosen for --use-on-disk has to be put in after it, or the command says

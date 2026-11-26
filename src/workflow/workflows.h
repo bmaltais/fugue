@@ -433,9 +433,20 @@ private:
     // The missing models of the shown workflow that have a file of the same weights on disk, kept for a moment (the Needs panel and
     // the Get ready sheet ask for each row).
     const QList<OnDiskUse> &onDiskNow() const;
-    bool applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp);
+    bool applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, bool announce = false);
     // The uses that make `chosen` ready and nothing else is missing (no pack to get): what a card click opens with. Empty otherwise.
-    QList<OnDiskUse> coveringUses(const Template &chosen) const;
+    // The files a template opens with: with "Ask me" only when they cover every missing model, else (partial) whatever is covered (#618).
+    QList<OnDiskUse> coveringUses(const Template &chosen, bool partial = false) const;
+    // The setting use_on_disk is "use" (the default): the file is used by itself and said, instead of asked about.
+    bool autoUseOn() const;
+    // Uses the files for the shown tab's missing models that have one, once per tab and model (a file that could not be read is not
+    // asked again, nor one the person took back with Undo). True when a read was started: the Get ready sheet waits for its result.
+    bool autoUse(bool cheap = false);
+    // An automatic read for the shown tab is going on: the Get ready sheet waits for it.
+    bool autoPending() const;
+    void startUses(const QStringList &hashes, int token, bool automatic);
+    // The notice naming each file used in place of a model, with Undo for the graph's document (`before` is the document as it was).
+    void announceUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, const Document &before);
     bool openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened);
     bool finishOpenWithUses(const Template &chosen, const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed);
     // Runs `what` now, or when the Get ready sheet has closed.
@@ -535,6 +546,7 @@ private:
         QString tab;       // the tab it is for
         bool inApp = false; // the App view's state (true) or the graph's document (false)
         QList<OnDiskUse> chosen;
+        bool automatic = false; // the setting's "Use my file" asked, not a person: the result is announced, with Undo (#618)
     };
     struct UseJob {
         QStringList wanted;
@@ -554,6 +566,9 @@ private:
         QList<Change> changes;
     };
     OpenedWith m_openedWith;
+    QHash<QString, QByteArray> m_autoIdle; // tab -> its models when autoUse() found nothing to do
+    QSet<QString> m_autoTried; // "<tab> <hash>" of every model autoUse() asked for
+    bool m_opening = false;    // a template is opening with its files: autoUse() leaves it alone
     QList<std::function<void()>> m_afterSheet;
     ReadinessSheet *m_readiness;
     QString m_readyTabId; // the tab the Get ready sheet was opened for
