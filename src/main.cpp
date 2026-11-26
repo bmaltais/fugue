@@ -285,6 +285,8 @@ int main(int argc, char *argv[]) {
         QObject::connect(&appSettings, &fugue::SettingsModel::changed, &workflows,
                          [&workflows, &appSettings] { workflows.setSessionEnabled(appSettings.restoreTabs()); });
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::flushSession);
+        // A quit, not a crash: the recovery copies are not offered on the next start (spec 11.3).
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::dropRecoveryCopies);
     }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &workspace, &fugue::Workspace::flush);
     // The first time, in the Default session, with no model folder yet: ask, before searching anything (#619).
@@ -338,10 +340,10 @@ int main(int argc, char *argv[]) {
             });
         }
         const int delay = qEnvironmentVariableIsSet("OMARCHY_LOOK_DELAY_MS") ? qEnvironmentVariableIntValue("OMARCHY_LOOK_DELAY_MS") : 1500;
-        QTimer::singleShot(800 + keys.size() * 300 + delay, &app, [&engine, shot] {
+        QTimer::singleShot(800 + keys.size() * 300 + delay, &app, [&engine, &commands, shot] {
             if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()))
                 window->grabWindow().save(shot);
-            QCoreApplication::quit();
+            commands.quitNow(); // not quit(): the window would ask about unsaved work and the shot never ends
         });
     }
 

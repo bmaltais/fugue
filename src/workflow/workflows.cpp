@@ -2159,6 +2159,14 @@ void Workflows::discardRecovery() {
     emit recoverableChanged();
 }
 
+void Workflows::dropRecoveryCopies() {
+    m_timer.stop();
+    for (Tab &tab : m_tabs) {
+        m_recovery.remove(tab.id);
+        tab.recoveryHash.clear();
+    }
+}
+
 void Workflows::writeRecoveryCopies() {
     refreshUnsaved();
     for (int i = 0; i < count(); ++i) {

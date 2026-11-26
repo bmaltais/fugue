@@ -436,7 +436,17 @@ void CommandRegistry::menuShown(bool shown) {
         emit menuOpenChanged();
 }
 
-void CommandRegistry::quitNow() { QCoreApplication::quit(); }
+void CommandRegistry::quitNow() {
+    m_quitting = true;
+    QCoreApplication::quit();
+}
+
+bool CommandRegistry::mayCloseWindow() {
+    if (m_quitting || !m_unsavedWork)
+        return true;
+    emit quitConfirmationRequested();
+    return false;
+}
 
 void CommandRegistry::requestQuit() {
     if (m_unsavedWork)

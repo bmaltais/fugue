@@ -502,6 +502,20 @@ private slots:
         QCOMPARE(asked.size(), 2);
     }
 
+    void closingTheWindowAsksAsQuitDoes() {
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        QSignalSpy asked(&registry, &CommandRegistry::quitConfirmationRequested);
+        QVERIFY(registry.mayCloseWindow()); // nothing unsaved: the window manager's close closes
+        QCOMPARE(asked.size(), 0);
+        registry.setUnsavedWork(true);
+        QVERIFY(!registry.mayCloseWindow()); // Super+W with unsaved work: the window stays and asks
+        QCOMPARE(asked.size(), 1);
+        registry.quitNow(); // the person said Quit: Qt closes the windows next, and none asks again
+        QVERIFY(registry.mayCloseWindow());
+        QCOMPARE(asked.size(), 1);
+    }
+
     void theWindowListsEveryCommandAndAnswersTheKeys() {
         QTemporaryDir dir;
         Translator translator(dir.path() + "/language");

@@ -172,6 +172,9 @@ public:
     // open workflow, or quits the same way when none is open.
     Q_INVOKABLE void quitNow();
     void requestQuit();
+    // The window is being closed (the window manager's close, Super+W): true when it may close. With unsaved work and no
+    // quit said yet it asks the quit question instead (quitConfirmationRequested) and keeps the window.
+    Q_INVOKABLE bool mayCloseWindow();
     void requestClose();
 
 signals:
@@ -214,6 +217,7 @@ private:
     int m_openMenus = 0;
     bool m_textFieldFocus = false;
     bool m_unsavedWork = false;
+    bool m_quitting = false; // quitNow() ran: Qt closes the windows next, and none asks again
     bool m_workflowOpen = false;
 };
 

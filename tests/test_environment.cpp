@@ -12,7 +12,9 @@
 // Nor does a test read or write the owner's files: run by hand with the owner's own HOME, a
 // test gets a home of its own (a temporary folder, removed at exit) and XDG folders in it,
 // so Omarchy's state (~/.local/state/omarchy), the queue, caches and settings are the
-// test's. Under ctest HOME is the test's already and nothing changes here.
+// test's. Run with a HOME of the caller's, an XDG folder still naming the owner's own goes
+// under that HOME. Under ctest HOME and the XDG folders are the test's already and nothing
+// changes here.
 
 #include <QByteArray>
 #include <QtGlobal>
@@ -32,22 +34,49 @@ void removeHome() {
     std::filesystem::remove_all(g_home, ignored);
 }
 
+// The XDG folders a test reads and writes, with where the owner's own are when the variable is unset.
+struct XdgFolder {
+    const char *variable;
+    const char *underHome;
+};
+constexpr XdgFolder kXdgFolders[] = {{"XDG_CONFIG_HOME", "/.config"},
+                                     {"XDG_STATE_HOME", "/.local/state"},
+                                     {"XDG_DATA_HOME", "/.local/share"},
+                                     {"XDG_CACHE_HOME", "/.cache"}};
+
+// Lexically, a trailing slash ignored: `~/.config/` is the owner's `~/.config`.
+std::filesystem::path normal(const std::string &path) {
+    std::filesystem::path p = std::filesystem::path(path).lexically_normal();
+    return p.has_filename() || p == p.root_path() ? p : p.parent_path();
+}
+
+bool samePath(const std::string &a, const std::string &b) { return normal(a) == normal(b); }
+
 void isolateFromTheOwnersFiles() {
     const passwd *owner = ::getpwuid(::getuid());
-    const char *home = std::getenv("HOME");
-    if (!owner || !owner->pw_dir
-        || (home && std::filesystem::path(home).lexically_normal() != std::filesystem::path(owner->pw_dir).lexically_normal()))
+    if (!owner || !owner->pw_dir)
         return;
-    std::string made = (std::filesystem::temp_directory_path() / "fugue-test-home-XXXXXX").string();
-    if (!::mkdtemp(made.data()))
-        qFatal("cannot make a home for the test under %s", made.c_str());
-    g_home = made;
-    std::atexit(removeHome);
-    qputenv("HOME", QByteArray::fromStdString(g_home));
-    qputenv("XDG_CONFIG_HOME", QByteArray::fromStdString(g_home + "/.config"));
-    qputenv("XDG_STATE_HOME", QByteArray::fromStdString(g_home + "/.local/state"));
-    qputenv("XDG_DATA_HOME", QByteArray::fromStdString(g_home + "/.local/share"));
-    qputenv("XDG_CACHE_HOME", QByteArray::fromStdString(g_home + "/.cache"));
+    const std::string ownerHome = owner->pw_dir;
+    const char *home = std::getenv("HOME");
+    if (!home || !*home || samePath(home, ownerHome)) {
+        std::string made = (std::filesystem::temp_directory_path() / "fugue-test-home-XXXXXX").string();
+        if (!::mkdtemp(made.data()))
+            qFatal("cannot make a home for the test under %s", made.c_str());
+        g_home = made;
+        std::atexit(removeHome);
+        qputenv("HOME", QByteArray::fromStdString(g_home));
+        for (const XdgFolder &folder : kXdgFolders)
+            qputenv(folder.variable, QByteArray::fromStdString(g_home + folder.underHome));
+        return;
+    }
+    // A home of the caller's (a scratch HOME, ctest's): its XDG folders are kept, except one that is still the owner's own.
+    // A desktop session exports XDG_CONFIG_HOME=~/.config and the rest, so `HOME=/tmp/x build/test_x` from such a shell wrote
+    // the owner's settings.json (2026-11-26: test_templates left model_paths on a deleted temporary folder).
+    for (const XdgFolder &folder : kXdgFolders) {
+        const char *value = std::getenv(folder.variable);
+        if (value && samePath(value, ownerHome + folder.underHome))
+            qputenv(folder.variable, QByteArray::fromStdString(normal(home).string() + folder.underHome));
+    }
 }
 
 void isolateFromTheDesktop() {
