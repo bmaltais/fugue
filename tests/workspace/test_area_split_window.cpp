@@ -195,6 +195,14 @@ private slots:
         QTRY_VERIFY(find(app.window, "areaType-2"));
         settle();
         QCOMPARE(app.workspace.viewOf(2), QString("canvas"));
+        // The Graph area's menu fits its rows: a view's name and the note beside it both show.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "areaType-1")));
+        QObject *graphMenu = nullptr;
+        QTRY_VERIFY((graphMenu = app.window->findChild<QObject *>("areaViewMenu")) && graphMenu->property("opened").toBool());
+        QVERIFY2(graphMenu->property("width").toReal() >= graphMenu->property("implicitWidth").toReal(),
+                 qPrintable(QString("%1 < %2").arg(graphMenu->property("width").toReal()).arg(graphMenu->property("implicitWidth").toReal())));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.window->findChild<QObject *>("areaViewMenu"));
         // Area 2's menu: Graph moves here.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "areaType-2")));
         QObject *menu = nullptr;
