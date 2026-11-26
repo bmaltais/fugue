@@ -1182,7 +1182,6 @@
   "Fugue could not start a window for %1.": "Fugue could not start a window for %1.",
   "Holds: %1": "Holds: %1",
   "Inherited from Default": "Inherited from Default",
-  "Left empty, it goes to %1.": "Left empty, it goes to %1.",
   "Missing: its folder or project.json is not there (a drive that is not mounted?)": "Missing: its folder or project.json is not there (a drive that is not mounted?)",
   "Models": "Models",
   "New project": "New project",
@@ -1214,7 +1213,6 @@
   "The Default project's model folders and model catalog, read-only. No second copy on disk.": "The Default project's model folders and model catalog, read-only. No second copy on disk.",
   "The Default project's node packs, with the trust you gave them, read-only. A pack still runs from the Default's folder.": "The Default project's node packs, with the trust you gave them, read-only. A pack still runs from the Default's folder.",
   "The Default project's prompt templates. They can hold text of other clients, so this is off unless you choose it.": "The Default project's prompt templates. They can hold text of other clients, so this is off unless you choose it.",
-  "The folder becomes the project's root; it is made if it is not there.": "The folder becomes the project's root; it is made if it is not there.",
   "The folder stays where it is: %1": "The folder stays where it is: %1",
   "The templates you saved in the Default project, read-only.": "The templates you saved in the Default project, read-only.",
   "This window has workflows with unsaved changes, so it stays open. Open %1 in a new window and keep working here, or save and then switch.": "This window has workflows with unsaved changes, so it stays open. Open %1 in a new window and keep working here, or save and then switch.",
@@ -2307,5 +2305,9 @@
   "Counting its models": "Counting its models",
   "The search stopped early to stay quick, so some folders may be missing. Switch off big places and search again, or add a folder.": "The search stopped early to stay quick, so some folders may be missing. Switch off big places and search again, or add a folder.",
   "Search again": "Search again",
-  "Not counted: it is in a place you left off": "Not counted: it is in a place you left off"
+  "Not counted: it is in a place you left off": "Not counted: it is in a place you left off",
+  "Folder to make it in": "Folder to make it in",
+  "Left empty, the project goes in Fugue's projects folder.": "Left empty, the project goes in Fugue's projects folder.",
+  "The project gets a folder of its own inside this one.": "The project gets a folder of its own inside this one.",
+  "The project will be made at %1": "The project will be made at %1"
 }

@@ -119,6 +119,20 @@ private slots:
         QVERIFY(!model->indicatorShown()); // other projects change nothing: no chip reads as the Default
     }
 
+    void aProjectGetsAFolderOfItsOwnInsideTheChosenOneAndTheFolderIsMade() {
+        const auto model = make();
+        QCOMPARE(model->projectPath("Acme Corp", QString()), path("base/data/fugue/projects/acme-corp"));
+        const QString parent = path("clients/new");
+        QCOMPARE(model->projectPath("Acme Corp", parent), path("clients/new/acme-corp"));
+        QCOMPARE(model->projectPath("Acme Corp", QUrl::fromLocalFile(parent)), path("clients/new/acme-corp"));
+        QVERIFY(!QFileInfo::exists(parent)); // nothing is made by asking
+        const QVariantMap made = model->create("Acme Corp", model->projectPath("Acme Corp", parent), model->defaultInherits());
+        QVERIFY2(made.value("error").toString().isEmpty(), qPrintable(made.value("error").toString()));
+        QCOMPARE(made.value("root").toString(), path("clients/new/acme-corp"));
+        QVERIFY(QFileInfo::exists(path("clients/new/acme-corp/project.json")));
+        QCOMPARE(model->projectPath("Acme Corp", parent), path("clients/new/acme-corp-2")); // a taken folder is not reused
+    }
+
     void aNewProjectInheritsWhatTheDefaultsListSaysAndGoesToTheDefaultPlace() {
         const auto model = make();
         QCOMPARE(model->defaultInherits(), (QStringList{"models", "packs", "preferences"}));

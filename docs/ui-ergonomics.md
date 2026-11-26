@@ -1422,3 +1422,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: an AppImage host has no pacman, so the pacman command would not run; the install script is the same helper download `docs/helper.md` documents. The notice's point is unchanged, one action then the ×.
 - Rules met: Floor (button and × unchanged), Primary (Copy stays the row's one highlighted control), Gaps (8px inside the row, as before), Posture (transient, asks nothing). Words: the label names the action, not the mechanism.
 - Not checked by a person: a real AppImage on an NVIDIA host (`tests/engine/test_helper_notice.cpp` covers the rule, `packaging/appimage/test-apprun.sh` the mark); the notice is not in the offscreen picture tests.
+
+### 2026-11-26 New project: the name survives, and the project gets a folder of its own (owner report)
+
+- Control: `newProjectName`, `newProjectFolder`, `newProjectChoose` and the new line `newProjectPath` in `src/settings/ProjectsDialog.qml`; the buttons are unchanged in place, size and order.
+- Old: the name typed was lost when the person went to the folder (the portal's picker takes the window's focus, and a `Field` gives its stored `value` back on focus loss; these two fields stored nothing). The Folder was the project's root itself, so a new folder could only be had from the picker, and neither the portal's nor Qt's own picker is certain to offer one (Qt's has no "new folder").
+- New: both fields keep what is typed (the dialog's `newNameText` and `newFolderText` follow every keystroke), and the field is now "Folder to make it in": the project gets a folder of its own named from its name inside it (`<folder>/<slug>`, `-2`, `-3` when taken), made with its parents on Create. A line under the field shows the full path ("The project will be made at ..."), recomputed as the name or folder changes. Empty keeps the default place.
+- Why (medium-high): VS Code's and Godot's new-project flows take a parent folder and a name and make the folder; Blender's browser has a create-directory button only because it browses. A new project's folder is almost always new, so no picker button is needed, and it does not depend on which backend answers. An existing folder to use as the root stays possible from the CLI (`fugue project new --in`) and `Open folder…` for one that is already a project.
+- Rules met: Primary (no new control), Words (the line says what will be made and where), Floor (field and Choose… unchanged), Gaps (a caption line, as the notes).
+- Not checked by a person: the portal picker in the real window.

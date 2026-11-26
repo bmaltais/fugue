@@ -32,6 +32,12 @@ Popup {
     // The words ticked in the New and the settings views.
     property var newInherits: []
     property var settingsInherits: []
+    // What was typed or chosen in the New view. A Field gives its text back to its `value` when it loses the focus (the portal's
+    // picker takes it), so each field is bound to these and they follow every keystroke; the name and the folder then survive.
+    property string newNameText: ""
+    property string newFolderText: ""
+    // The folder the new project will be made in: the chosen folder plus a name of its own, shown whole.
+    readonly property string newProjectPath: model.projectPath(newNameText, newFolderText)
 
     function reset() {
         view = "list"
@@ -41,6 +47,9 @@ Popup {
     }
     // Runs a call that returns a refusal, or "" when done.
     function apply(result) { error = result; return result === "" }
+
+    // The root a new project is made at: empty for the default place, else the chosen folder's own subfolder.
+    function createRoot() { return newFolderText.trim() === "" ? "" : model.projectPath(newNameText, newFolderText) }
 
     function toggled(list, id, on) {
         const out = list.filter(word => word !== id)
@@ -327,25 +336,35 @@ Popup {
                 visible: dialog.view === "new"
                 Layout.fillWidth: true
                 spacing: 3 * dialog.u
+                Connections {
+                    target: newName.input
+                    function onTextChanged() { dialog.newNameText = newName.input.text }
+                }
+                Connections {
+                    target: newFolder.input
+                    function onTextChanged() { dialog.newFolderText = newFolder.input.text }
+                }
                 SettingsParts.Setting {
                     title: qsTr("Name")
                     note: qsTr("What the window title and the project chip show. No slash or dot.")
                     SettingsParts.Field {
                         id: newName
                         objectName: "newProjectName"
+                        value: dialog.newNameText
                         placeholder: qsTr("Name")
                     }
                 }
                 SettingsParts.Setting {
-                    title: qsTr("Folder")
-                    note: newFolder.input.text === "" ? qsTr("Left empty, it goes to %1.").arg(dialog.model.defaultLocation(newName.input.text))
-                                                      : qsTr("The folder becomes the project's root; it is made if it is not there.")
+                    title: qsTr("Folder to make it in")
+                    note: newFolder.input.text === "" ? qsTr("Left empty, the project goes in Fugue's projects folder.")
+                                                      : qsTr("The project gets a folder of its own inside this one.")
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: dialog.u
                         SettingsParts.Field {
                             id: newFolder
                             objectName: "newProjectFolder"
+                            value: dialog.newFolderText
                             placeholder: qsTr("Optional: another folder, such as a client's")
                         }
                         SettingsParts.SmallButton {
@@ -353,6 +372,14 @@ Popup {
                             text: qsTr("Choose…")
                             onClicked: dialog.pickFolder(url => newFolder.input.text = decodeURIComponent(url.toString().replace("file://", "")))
                         }
+                    }
+                    Text {
+                        objectName: "newProjectPath"
+                        Layout.fillWidth: true
+                        wrapMode: Text.WrapAnywhere
+                        text: qsTr("The project will be made at %1").arg(dialog.newProjectPath)
+                        color: dialog.look.label
+                        font.pixelSize: dialog.look.captionSize
                     }
                 }
                 SettingsParts.Setting {
@@ -395,7 +422,7 @@ Popup {
                         objectName: "newProjectCreate"
                         text: qsTr("Create")
                         onClicked: {
-                            if (dialog.apply(dialog.model.create(newName.input.text, newFolder.input.text, dialog.newInherits).error))
+                            if (dialog.apply(dialog.model.create(newName.input.text, dialog.createRoot(), dialog.newInherits).error))
                                 dialog.view = "list"
                         }
                     }
@@ -404,7 +431,7 @@ Popup {
                         highlighted: true
                         text: qsTr("Create and open")
                         onClicked: {
-                            const made = dialog.model.create(newName.input.text, newFolder.input.text, dialog.newInherits)
+                            const made = dialog.model.create(newName.input.text, dialog.createRoot(), dialog.newInherits)
                             if (dialog.apply(made.error))
                                 dialog.apply(dialog.model.switchTo(made.root))
                         }

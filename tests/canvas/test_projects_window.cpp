@@ -330,6 +330,35 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    void aTypedNameAndAChosenFolderSurviveEachOtherAndTheProjectIsMadeInsideTheNewFolder() {
+        std::unique_ptr<ProjectModel> model; // made before the window, so it outlives its QML
+        App app(load(emptyDoc));
+        model = makeModel(app);
+        QVERIFY(app.open());
+        app.commands.trigger("file.projects");
+        QTRY_VERIFY(open(app.window, "projectsDialog"));
+        click(app, NEED("projectNew"));
+        QQuickItem *nameInput = NEED("newProjectName")->property("input").value<QQuickItem *>();
+        QQuickItem *folderInput = NEED("newProjectFolder")->property("input").value<QQuickItem *>();
+        type(app, NEED("newProjectName"), "acme");
+        // Moving to the folder field takes the focus from the name (as the portal's picker does), which gave a field its stored
+        // value back: the name was lost. Then the folder is chosen, as the picker's answer sets it.
+        click(app, NEED("newProjectFolder"));
+        folderInput->setProperty("text", path("clients/new-one"));
+        QCOMPARE(textOf(nameInput), QString("acme"));
+        QTRY_COMPARE(textOf(NEED("newProjectPath")), QString("The project will be made at %1").arg(path("clients/new-one/acme")));
+        // The other way: a name typed after the folder leaves the folder alone.
+        type(app, NEED("newProjectName"), "beta");
+        folderInput->forceActiveFocus(); // the focus leaves the name again
+        QCOMPARE(textOf(folderInput), path("clients/new-one"));
+        QTRY_COMPARE(textOf(NEED("newProjectPath")), QString("The project will be made at %1").arg(path("clients/new-one/beta")));
+        QCOMPARE(textOf(nameInput), QString("beta"));
+        click(app, NEED("newProjectCreate"));
+        QTRY_VERIFY(find(app.window, "project-1"));
+        QVERIFY(QFileInfo::exists(path("clients/new-one/beta/project.json"))); // the folder was not there before
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aRefusedNewShowsWhyAndMakesNothing() {
         std::unique_ptr<ProjectModel> model; // made before the window, so it outlives its QML
         App app(load(emptyDoc));

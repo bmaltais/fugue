@@ -156,6 +156,18 @@ QString ProjectModel::defaultLocation(const QString &name) const {
     return tilde(baseDataDir() + QStringLiteral("/projects/") + projectSlug(name.isEmpty() ? QStringLiteral("project") : name));
 }
 
+QString ProjectModel::projectPath(const QString &name, const QVariant &parentFolder) const {
+    const QString text = folderText(parentFolder);
+    if (text.isEmpty())
+        return defaultLocation(name.trimmed());
+    const QString slug = projectSlug(name.trimmed().isEmpty() ? QStringLiteral("project") : name.trimmed());
+    const QString base = QDir(expandHome(text)).absoluteFilePath(slug);
+    QString root = base;
+    for (int n = 2; QFileInfo::exists(root); ++n)
+        root = base + QLatin1Char('-') + QString::number(n);
+    return tilde(root);
+}
+
 QVariantMap ProjectModel::create(const QString &name, const QVariant &folder, const QStringList &inherits) {
     const Result<ProjectEntry> made = createProject(name.trimmed(), expandHome(folderText(folder)), inherits);
     if (!made)
