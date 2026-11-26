@@ -569,6 +569,20 @@ void probePairedHelpers(const QList<ProviderInstance> &instances, std::function<
     }
 }
 
+SilentHelpers silentPairedHelpers(const QList<Candidate> &candidates, const QString &capability) {
+    SilentHelpers silent;
+    for (const Candidate &candidate : candidates) {
+        if (!candidate.instance.enabled || candidate.description.ok() || !isPairedHelper(candidate.instance))
+            continue;
+        // A host that could never serve this node is not why it fails (#491).
+        if (candidate.remembered && !candidate.remembered->offer(capability))
+            silent.neverOffered.append(candidate.instance.name);
+        else
+            silent.couldServe.append(&candidate);
+    }
+    return silent;
+}
+
 Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {
     const QString pin = requirement.nodePin.isEmpty() ? requirement.workflowPin : requirement.nodePin;
     if (!pin.isEmpty()) {
@@ -622,15 +636,9 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
             usable = remote;
         } else {
             // A paired helper that does not answer: say so, not the model_missing of a machine that never had the files.
-            QStringList neverOffered; // hosts that did not offer the capability when they last answered
-            for (const Candidate &candidate : candidates) {
-                if (!candidate.instance.enabled || candidate.description.ok() || !isPairedHelper(candidate.instance))
-                    continue;
-                // A host that could never serve this node is not why it fails (#491).
-                if (candidate.remembered && !candidate.remembered->offer(requirement.capability)) {
-                    neverOffered.append(candidate.instance.name);
-                    continue;
-                }
+            const SilentHelpers silent = silentPairedHelpers(candidates, requirement.capability);
+            if (!silent.couldServe.isEmpty()) {
+                const Candidate &candidate = *silent.couldServe.first();
                 const QString why = candidate.description.errors().isEmpty() ? QString()
                                                                              : candidate.description.errors().first().message;
                 return failed(makeError(
@@ -640,11 +648,11 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
                     QStringLiteral("Start the helper on %1, or get the model files onto this machine (Get ready).")
                         .arg(candidate.instance.name)));
             }
-            if (!neverOffered.isEmpty())
+            if (!silent.neverOffered.isEmpty())
                 return failed(makeError(
                     QStringLiteral("model_missing"),
                     QStringLiteral("The model files are not on this machine, and the paired host %1 did not offer %2 when it last answered.")
-                        .arg(neverOffered.join(QStringLiteral(", ")), requirement.capability),
+                        .arg(silent.neverOffered.join(QStringLiteral(", ")), requirement.capability),
                     QStringLiteral("Get the model files onto this machine (Get ready).")));
         }
     }

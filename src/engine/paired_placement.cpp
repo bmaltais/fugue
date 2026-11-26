@@ -1,5 +1,8 @@
 #include "engine/paired_placement.h"
 
+#include "engine/compiler.h"
+#include "engine/group_library.h"
+
 #include <algorithm>
 #include <memory>
 
@@ -37,16 +40,43 @@ void collectLinks(const InputValue &value, QList<PortRef> &nodes) {
     }
 }
 
-// A node that holds a missing model itself (through its own Resource inputs) and asks a provider for a capability.
+// A node that holds a missing model itself (through its own Resource inputs) and asks a provider for something.
 struct Need {
-    QString node;
+    QString node; // its path id
     QString models; // the names, comma separated
-    QString capability;
-    QString pin;    // the node's own pin, else the workflow's
+    Requirement requirement; // as the scheduler asks for it, with the node's pin (the workflow's merged in by the compile)
+    QString capability() const { return requirement.capability; }
+    QString pin() const { return requirement.nodePin; }
 };
 
+// The inputs a node holds before anything runs, as the scheduler's resolveInputs would give them for what is known: literals, handles
+// and lists of them, else the spec's default. A link's value and a random seed are not known yet, so they are left out, as under validate.
+Values knownInputs(const NodeType &type, const CompiledNode &node) {
+    Values values;
+    for (const InputSpec &spec : type.inputs) {
+        const InputValue written = node.inputs.value(spec.name);
+        Value value;
+        if (written.isEmpty()) {
+            if (!spec.defaultValue.isUndefined())
+                value = Value(spec.defaultValue);
+        } else if (written.kind() == InputValue::Kind::Literal || written.kind() == InputValue::Kind::Resource) {
+            value = Value(written.toJson());
+        } else if (written.kind() == InputValue::Kind::List) {
+            QList<Value> items;
+            for (const InputValue &item : written.items())
+                if (item.kind() == InputValue::Kind::Literal || item.kind() == InputValue::Kind::Resource)
+                    items.append(Value(item.toJson()));
+            if (items.size() == written.items().size())
+                value = Value::list(items);
+        }
+        if (!value.isEmpty())
+            values.insert(spec.name, value);
+    }
+    return values;
+}
+
 QList<Need> nodesNeedingModels(const Document &document, const ReadinessPlan &plan, const PairedPlacementRequest &request) {
-    if (!request.capabilityOf || !request.registry)
+    if (!request.requirementOf || !request.registry)
         return {};
     QMap<QString, QString> missing; // hash -> the model's name
     for (const ReadinessModel &model : plan.models)
@@ -59,9 +89,16 @@ QList<Need> nodesNeedingModels(const Document &document, const ReadinessPlan &pl
         return {};
 
     const Registry &registry = *request.registry;
-    const Nodes &nodes = document.graph.nodes;
-    const auto typeOf = [&](const Node &node) { return registry.nodeTypeFor(node.type, node.version.major); };
-    const auto isResourceInput = [&](const Node &node, const QString &input) {
+    // The nodes the scheduler runs: groups expanded, pins merged, muted nodes out. A document that does not compile runs nothing.
+    // A library or pack group named only by its type id runs from its definition, as in compileForRun (5.3, 6.1).
+    Document embedded = document;
+    embedGroupTypes(embedded, registry);
+    const Compilation compiled = compile(embedded, registry);
+    if (!compiled)
+        return {};
+    const QMap<QString, CompiledNode> &nodes = compiled->nodes;
+    const auto typeOf = [&](const CompiledNode &node) { return registry.nodeTypeFor(node.type, node.version.major); };
+    const auto isResourceInput = [&](const CompiledNode &node, const QString &input) {
         const NodeType *type = typeOf(node);
         const InputSpec *spec = type ? type->input(input) : nullptr;
         return spec && registry.portKind(spec->type.type) == PortKind::Resource;
@@ -114,11 +151,15 @@ QList<Need> nodesNeedingModels(const Document &document, const ReadinessPlan &pl
     for (auto node = nodes.cbegin(); node != nodes.cend(); ++node) {
         if (!reaching.contains(node.key()))
             continue;
-        const QString capability = request.capabilityOf(node->type);
-        if (capability.isEmpty())
+        const NodeType *type = typeOf(*node);
+        std::optional<Requirement> requirement = type ? request.requirementOf(*type, knownInputs(*type, *node)) : std::nullopt;
+        if (!requirement || requirement->capability.isEmpty())
             continue; // not a provider node: it reads the file on this machine itself, which is not this check's
-        found.append({node.key(), reaching.value(node.key()).join(QStringLiteral(", ")), capability,
-                      node->provider.isEmpty() ? document.graph.provider : node->provider});
+        requirement->nodePin = node->provider;
+        requirement->workflowPin.clear();
+        // The scheduler's rule (#395): a node that names its model is not placed by where the files are.
+        requirement->modelsElsewhere = requirement->model.isEmpty();
+        found.append({node.key(), reaching.value(node.key()).join(QStringLiteral(", ")), *requirement});
     }
     return found;
 }
@@ -131,14 +172,14 @@ Error modelMissing(const QString &node, const QString &why) {
 
 QString capabilityWhy(const Need &need, const QStringList &hosts) {
     return QStringLiteral("Node %1 needs the model %2, which is not here, and the paired host %3 does not offer %4.")
-        .arg(need.node, need.models, hosts.join(QStringLiteral(", ")), need.capability);
+        .arg(need.node, need.models, hosts.join(QStringLiteral(", ")), need.capability());
 }
 
 // The hosts one node may go to, and the hosts of those that a pin and what each last said leave.
 struct Reach {
     Need need;
     QStringList candidates; // the helpers its pin allows, in the user's order
-    QStringList open;       // of them, those asked
+    QMap<QString, ProviderInstance> instances; // by name
 };
 
 } // namespace
@@ -149,6 +190,13 @@ bool onlyModelsMissing(const ReadinessPlan &plan) {
     return std::all_of(plan.problems.cbegin(), plan.problems.cend(), [](const Error &problem) {
         return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
     });
+}
+
+std::optional<Requirement> kernelRequirement(const Kernels &kernels, const NodeType &type, const Values &inputs) {
+    const std::shared_ptr<ProviderKernel> kernel = kernels.provider(type);
+    if (!kernel)
+        return std::nullopt;
+    return kernel->requirement(type, inputs);
 }
 
 QStringList PairedVerdict::hosts() const {
@@ -173,13 +221,7 @@ QByteArray pairedPlacementKey(const Document &document, const ReadinessPlan &pla
     codes.sort();
     hashes.sort();
     parts << codes.join(QLatin1Char(',')) << hashes.join(QLatin1Char(',')) << document.graph.provider;
-    for (auto node = document.graph.nodes.cbegin(); node != document.graph.nodes.cend(); ++node) {
-        QJsonObject inputs;
-        for (auto input = node->inputs.cbegin(); input != node->inputs.cend(); ++input)
-            inputs.insert(input.key(), input->toJson());
-        parts << node.key() + QLatin1Char('|') + node->type + QLatin1Char('|') + QString::number(node->version.major) + QLatin1Char('|')
-                     + node->provider + QLatin1Char('|') + QString::fromUtf8(QJsonDocument(inputs).toJson(QJsonDocument::Compact));
-    }
+    parts << document.sourceHash(); // the graph and its groups: every node (type, pin, inputs, mode) and the workflow's pin
     for (const ProviderInstance &instance : instances)
         parts << QStringList{instance.name, instance.type, instance.address, instance.enabled ? "1" : "0"}.join(QLatin1Char('|'));
     return parts.join(QLatin1Char('\n')).toUtf8();
@@ -273,27 +315,29 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
     QList<Reach> reaches;
     for (const Need &need : needs) {
         Reach reach{need, {}, {}};
-        const ProviderInstance *pinned = need.pin.isEmpty() ? nullptr : instanceNamed(need.pin);
-        if (!need.pin.isEmpty() && !pinned) {
+        const ProviderInstance *pinned = need.pin().isEmpty() ? nullptr : instanceNamed(need.pin());
+        if (!need.pin().isEmpty() && !pinned) {
             verdict.blocked.append(modelMissing(need.node, QStringLiteral("Node %1 is pinned to %2, but no provider is named %2, and the model %3 it needs is not here.")
-                                                               .arg(need.node, need.pin, need.models)));
+                                                               .arg(need.node, need.pin(), need.models)));
             continue;
         }
         if (pinned && !isPairedHelper(*pinned)) {
             verdict.blocked.append(modelMissing(need.node, QStringLiteral("Node %1 is pinned to %2, which runs on this machine, and the model %3 it needs is not here.")
-                                                               .arg(need.node, need.pin, need.models)));
+                                                               .arg(need.node, need.pin(), need.models)));
             continue;
         }
         if (pinned && !pinned->enabled) {
             verdict.blocked.append(modelMissing(need.node, QStringLiteral("Node %1 is pinned to %2, which is disabled, and the model %3 it needs is not here.")
-                                                               .arg(need.node, need.pin, need.models)));
+                                                               .arg(need.node, need.pin(), need.models)));
             continue;
         }
         for (const ProviderInstance &helper : std::as_const(helpers))
             if (!pinned || helper.name == pinned->name)
                 reach.candidates << helper.name;
-        reach.open = reach.candidates;
-        if (reach.open.isEmpty())
+        for (const ProviderInstance &helper : std::as_const(helpers))
+            if (reach.candidates.contains(helper.name))
+                reach.instances.insert(helper.name, helper);
+        if (reach.candidates.isEmpty())
             verdict.blocked.append(modelMissing(need.node, capabilityWhy(need, reach.candidates)));
         else
             reaches.append(reach);
@@ -307,29 +351,46 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
     // answered: a refusal here never reaches the scheduler, which is what would update what is kept).
     QList<ProviderInstance> toAsk;
     for (const ProviderInstance &helper : std::as_const(helpers))
-        if (std::any_of(reaches.cbegin(), reaches.cend(), [&helper](const Reach &reach) { return reach.open.contains(helper.name); }))
+        if (std::any_of(reaches.cbegin(), reaches.cend(), [&helper](const Reach &reach) { return reach.candidates.contains(helper.name); }))
             toAsk.append(helper);
     probe(toAsk, [verdict, reaches, remembered, done = std::move(done)](const QMap<QString, Description> &answered) mutable {
         for (const Reach &reach : std::as_const(reaches)) {
-            QString host, silent;
-            for (const QString &name : reach.open) {
-                if (!answered.contains(name)) {
-                    // Silent: what it last said only refuses (the scheduler's `neverOffered`); it never places a node.
-                    const std::optional<Description> &said = remembered.value(name);
-                    if (silent.isEmpty() && (!said || said->offer(reach.need.capability)))
-                        silent = name;
-                } else if (host.isEmpty() && answered.value(name).offer(reach.need.capability)) {
-                    host = name;
+            // The scheduler's own choice among the hosts the node may go to, on what they said just now: a host that did not answer
+            // has the error of its describe, and what it last said (which only refuses, never places).
+            QList<Candidate> candidates;
+            for (const QString &name : reach.candidates) {
+                Candidate candidate;
+                candidate.instance = reach.instances.value(name);
+                candidate.description = answered.contains(name)
+                                            ? Result<Description>(answered.value(name))
+                                            : Result<Description>(makeError(QStringLiteral("provider_unreachable"), QStringLiteral("It did not answer.")));
+                candidate.remembered = remembered.value(name);
+                candidates.append(candidate);
+            }
+            const Result<Selection> selection = selectProvider(candidates, reach.need.requirement);
+            if (selection && !selection->sharesFilesystem) {
+                verdict.hostOf.insert(reach.need.node, selection->instance); // a host on this machine's files is not a place for the model files
+                continue;
+            }
+            const bool silent = !selection && selection.errors().first().code == QLatin1String("provider_unreachable");
+            if (silent) {
+                const QString pin = reach.need.pin();
+                const QList<const Candidate *> waiting = silentPairedHelpers(candidates, reach.need.capability()).couldServe;
+                const QString name = !pin.isEmpty() ? pin : waiting.isEmpty() ? QString() : waiting.first()->instance.name;
+                if (!name.isEmpty()) {
+                    if (!verdict.silent.contains(name))
+                        verdict.silent << name;
+                    continue;
                 }
             }
-            if (!host.isEmpty())
-                verdict.hostOf.insert(reach.need.node, host);
-            else if (!silent.isEmpty()) {
-                if (!verdict.silent.contains(silent))
-                    verdict.silent << silent;
-            } else {
-                verdict.blocked.append(modelMissing(reach.need.node, capabilityWhy(reach.need, reach.candidates)));
-            }
+            const QString why = selection && selection->sharesFilesystem
+                                    ? QStringLiteral("the host %1 reads this machine's files, which do not have the model.").arg(selection->instance)
+                                    : (!selection && selection.errors().first().code != QLatin1String("capability_unavailable")
+                                           ? selection.errors().first().message
+                                           : QString());
+            verdict.blocked.append(modelMissing(reach.need.node, why.isEmpty() ? capabilityWhy(reach.need, reach.candidates)
+                                                                              : QStringLiteral("Node %1 needs the model %2, which is not here. %3")
+                                                                                    .arg(reach.need.node, reach.need.models, why)));
         }
         done(verdict);
     });

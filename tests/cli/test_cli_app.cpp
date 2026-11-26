@@ -78,6 +78,8 @@ const char *kShadeStale = R"({"fugue": 1,
  "app": {"format": 1, "title": "Shade",
          "inputs": [{"role": "image", "targets": ["load.file"]},
                     {"name": "old", "targets": ["shade.gone"]},
+                    {"name": "opacity", "targets": ["shade.opacity"]},
+                    {"name": "mode", "targets": ["shade.mode"]},
                     {"role": "seed", "targets": ["sample.seed"]}],
          "outputs": [{"node": "save"}, {"node": "gone", "label": "Lost"}]},
  "graph": {"nodes": {
@@ -242,10 +244,19 @@ private slots:
         const Outcome info = fugue({"app", "info", "shade-stale.fugue", "--json"});
         QCOMPARE(info.exitCode, 0);
         QStringList keys;
-        for (const QJsonValue row : info.data().value("inputs").toArray())
+        QMap<QString, QJsonObject> rows;
+        for (const QJsonValue row : info.data().value("inputs").toArray()) {
             keys << row.toObject().value("key").toString();
-        QCOMPARE(keys, (QStringList{"image", "seed"})); // `old` is dropped, not listed
-        QCOMPARE(info.data().value("inputs").toArray().at(1).toObject().value("default").toObject(), (QJsonObject{{"auto", "random"}}));
+            rows.insert(keys.last(), row.toObject());
+        }
+        QCOMPARE(keys, (QStringList{"image", "opacity", "mode", "seed"})); // `old` is dropped, not listed
+        QCOMPARE(rows.value("seed").value("default").toObject(), (QJsonObject{{"auto", "random"}}));
+        // A group instance's exposed inputs take the inner inputs' type, range and choices, and the instance's own literal as the default.
+        QCOMPARE(rows.value("opacity").value("type").toString(), QString("number"));
+        QCOMPARE(rows.value("opacity").value("default").toDouble(), 0.25);
+        QCOMPARE(rows.value("opacity").value("max").toDouble(), 1.0);
+        QCOMPARE(rows.value("mode").value("type").toString(), QString("choice"));
+        QVERIFY(rows.value("mode").value("choices").toArray().contains("multiply"));
         QCOMPARE(info.data().value("outputs").toArray().size(), 1); // `gone` is dropped, not listed
         QStringList codes, said;
         for (const QJsonValue w : info.json().value("warnings").toArray()) {
@@ -352,7 +363,11 @@ private slots:
 
     void aRunTheHostCannotTakeIsRefusedNamingTheNode() {
         QByteArray staged = kSampled;
-        staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"save\":");
+        // What Load Models also needs to compile, as a run would.
+        staged.replace("\"name\": \"m.safetensors\"}}},\n   \"save\"", "\"name\": \"m.safetensors\"},"
+                       " \"text_encoder\": {\"resource\": \"fugue/text-encoder\", \"hash\": \"sha256:8888888888888888888888888888888888888888888888888888888888888888\", \"name\": \"t.safetensors\"},"
+                       " \"vae\": {\"resource\": \"fugue/vae\", \"hash\": \"sha256:7777777777777777777777777777777777777777777777777777777777777777\", \"name\": \"v.safetensors\"}}},\n   \"save\"");
+        staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"show\": {\"type\": \"fugue/preview\", \"version\": \"1.0.0\", \"inputs\": {\"value\": {\"from\": \"enc.conditioning\"}}},\n   \"save\":");
         write(path("work/staged.fugue"), staged);
         QByteArray pinned = staged;
         pinned.replace("\"version\": \"1.0.0\", \"inputs\": {\"model\"", "\"version\": \"1.0.0\", \"provider\": \"desk\", \"inputs\": {\"model\"");
@@ -381,7 +396,7 @@ private slots:
         QVERIFY(!fugue({"app", "info", "staged.fugue", "--json"}).data().contains("runs_on"));
         const Outcome noCapability = fugue({"app", "run", "staged.fugue", "--json"});
         QCOMPARE(noCapability.code(), QString("model_missing"));
-        QVERIFY2(noCapability.error().value("message").toString().contains("does not offer text.encode"), noCapability.out);
+        QVERIFY2(noCapability.error().value("message").toString().contains("did not offer text.encode when it last answered"), noCapability.out);
         write(path("root/state/fugue/paired_helpers.json"),
               "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"text.encode\"]}}");
         const Outcome remembered = fugue({"app", "info", "staged.fugue", "--json"}); // what it last said stands in for nothing: still silent
@@ -418,7 +433,8 @@ private slots:
               QStringLiteral("{\"gx10\": {\"address\": \"http://0.0.0.0:%1\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}").arg(port).toUtf8());
         const Outcome freshInfo = fugue({"app", "info", "staged.fugue", "--json"});
         QCOMPARE(freshInfo.data().value("runs_on").toString(), QString("gx10"));
-        QVERIFY(fugue({"app", "run", "staged.fugue", "--json"}).code() != QString("model_missing"));
+        // The run is not refused up front. (It is not started: the staged graph is a real one now, and this fake host cannot serve a job.)
+        QVERIFY(!freshInfo.data().contains("host_problems"));
         host.kill();
         host.waitForFinished(2000);
 

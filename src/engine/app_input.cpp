@@ -66,6 +66,9 @@ QString kindOf(const InputBinding &input, const QJsonValue &held, const InputSpe
 QJsonValue initialOf(const InputBinding &input, const QString &kind, const InputSpec *spec, const QJsonValue &shown) {
     QJsonValue value = shown;
     // The workflow holds no value (a group instance left at its inner input's default): the spec's default.
+    // A held Auto is a seed's own word: for any other kind it is no value (a hand-written block can point a number at one).
+    if (kind != QLatin1String("seed") && value.isObject() && value.toObject().contains(QLatin1String("auto")))
+        value = QJsonValue::Undefined;
     if (value.isUndefined() && spec && !spec->defaultValue.isUndefined()
         && (kind == QLatin1String("number") || kind == QLatin1String("text") || kind == QLatin1String("toggle")))
         value = spec->defaultValue;
@@ -156,7 +159,8 @@ Result<QJsonValue> AppInput::fromText(const QString &text, const ModelLookup &lo
             return handle.errors();
         return QJsonValue(*handle);
     }
-    if (kind == QLatin1String("seed") || kind == QLatin1String("number")) {
+    // A number-list port reads as a number on the command line (its CLI type says so, cliTypeOf), as it always did.
+    if (kind == QLatin1String("seed") || kind == QLatin1String("number") || (kind == QLatin1String("text") && portType == QLatin1String("number"))) {
         const QString word = text.trimmed().toLower();
         if (kind == QLatin1String("seed") && (word == QLatin1String("auto") || word == QLatin1String("random")))
             return QJsonValue(QJsonObject{{QStringLiteral("auto"), QStringLiteral("random")}});

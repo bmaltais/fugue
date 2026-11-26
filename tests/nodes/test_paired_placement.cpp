@@ -2,11 +2,14 @@
 // why, and the host that does not answer. No disk, no provider; the probe is a fake. Seam: engine/paired_placement.h.
 
 #include <QJsonDocument>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include <optional>
 
+#include "engine/group_library.h"
 #include "engine/paired_placement.h"
+#include "engine/pack_loader.h"
 #include "nodes/builtin.h"
 
 using namespace fugue;
@@ -14,15 +17,19 @@ using namespace fugue;
 namespace {
 
 const QString hash = "sha256:" + QString(64, QLatin1Char('c'));
+// The rest of what Load Models needs, which are here: the workflow must compile, as the scheduler would have it.
+const QString others = QStringLiteral(R"("text_encoder": {"resource": "fugue/text-encoder", "hash": "sha256:%1", "name": "t.safetensors"}, "vae": {"resource": "fugue/vae", "hash": "sha256:%2", "name": "v.safetensors"})")
+                           .arg(QString(64, QLatin1Char('d')), QString(64, QLatin1Char('e')));
 
 // A loader holding the model, a stage node reading it (unpinned or pinned), and a node that is no provider node.
 Document workflow(const QString &pin = {}, const QString &graphPin = {}) {
     const QByteArray json = QStringLiteral(R"({"fugue": 1, "graph": {%1"nodes": {
-      "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%2", "name": "m.safetensors"}}},
+      "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%2", "name": "m.safetensors"}, %4}},
       "enc": {"type": "fugue/text-encode", "version": "1.0.0" %3, "inputs": {"model": {"from": "models.model"}, "prompt": "a cat"}},
-      "num": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})")
+      "num": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}},
+      "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "enc.conditioning"}}}}}})")
                                 .arg(graphPin.isEmpty() ? QString() : QStringLiteral("\"provider\": \"%1\", ").arg(graphPin), hash,
-                                     pin.isEmpty() ? QString() : QStringLiteral(", \"provider\": \"%1\"").arg(pin))
+                                     pin.isEmpty() ? QString() : QStringLiteral(", \"provider\": \"%1\"").arg(pin), others)
                                 .toUtf8();
     const Result<Document> loaded = Document::fromJson(QJsonDocument::fromJson(json).object());
     if (!loaded)
@@ -54,31 +61,58 @@ Registry &registry() {
     return made;
 }
 
+// What the last text-encode asked with, and how a test makes the requirement depend on it.
+Values &seenInputs() {
+    static Values seen;
+    return seen;
+}
+std::function<QJsonObject(const Values &)> &propertiesOf() {
+    static std::function<QJsonObject(const Values &)> made = [](const Values &) { return QJsonObject(); };
+    return made;
+}
+
 PairedPlacementRequest request(bool paired = true) {
     PairedPlacementRequest made;
     made.registry = &registry();
     made.instances = {instance("desk", "omarchy")};
     if (paired)
         made.instances << instance("gx10", "fugue-helper", "http://gx10.example.ts.net:8787");
-    made.capabilityOf = [](const QString &type) {
+    // What the stage kernels ask for, with the inputs a node holds (the real kernels are read by the scheduler's own tests).
+    made.requirementOf = [](const NodeType &type, const Values &inputs) -> std::optional<Requirement> {
         static const QMap<QString, QString> capabilities{{"fugue/text-encode", "text.encode"}, {"fugue/sampler", "latent.sample"},
                                                          {"fugue/vae-decode", "latent.decode"}, {"fugue/upscale-with-model", "image.upscale"}};
-        return capabilities.value(type);
+        if (!capabilities.contains(type.id))
+            return std::nullopt;
+        Requirement requirement;
+        requirement.capability = capabilities.value(type.id);
+        if (type.id == QLatin1String("fugue/text-encode"))
+            seenInputs() = inputs;
+        requirement.properties = propertiesOf()(inputs);
+        return requirement;
     };
     made.remembered = [](const ProviderInstance &) { return std::optional<Description>(); }; // nothing kept: no disk
     return made;
 }
 
-Description offering(const QStringList &capabilities) {
+// A host's description: one ready model with no handle per capability (a helper takes its model files in the job, 8.10), of these
+// properties, and whether it reads this machine's files (a paired host does not).
+Description offering(const QStringList &capabilities, const QJsonObject &properties = {}, bool sharesFiles = false) {
     Description made;
-    for (const QString &capability : capabilities)
-        made.capabilities << CapabilityOffer{capability, {}};
+    made.sharesFilesystem = sharesFiles;
+    for (const QString &capability : capabilities) {
+        OfferedModel model;
+        model.status = ModelStatus::Ready;
+        model.properties = properties;
+        made.capabilities << CapabilityOffer{capability, {model}};
+    }
     return made;
 }
 
 // The probe is a fake: the hosts named in `offers` answer with these capabilities, the others are silent.
 struct FakeHosts {
     QMap<QString, QStringList> offers;
+    QJsonObject properties;  // of every model they offer
+    bool sharesFiles = false; // they read this machine's files
     int asked = 0;
 
     FakeHosts() = default;
@@ -90,7 +124,7 @@ struct FakeHosts {
             QMap<QString, Description> answered;
             for (const ProviderInstance &helper : helpers) {
                 if (offers.contains(helper.name))
-                    answered.insert(helper.name, offering(offers.value(helper.name)));
+                    answered.insert(helper.name, offering(offers.value(helper.name), properties, sharesFiles));
             }
             done(answered);
         };
@@ -131,6 +165,81 @@ private slots:
         QVERIFY(made.hostOf.isEmpty() && made.blocked.isEmpty());
         QVERIFY(!made.runsOn());
         QVERIFY(made.allowsRun());
+    }
+
+    // #584: only a host that does not read this machine's files takes a node whose model files are not here.
+    void aHostThatSharesThisMachinesFilesIsNoPlaceForTheModel() {
+        FakeHosts hosts({{"gx10", {"text.encode"}}});
+        hosts.sharesFiles = true;
+        const PairedVerdict made = verdict(workflow(), missing(), request(), hosts);
+        QVERIFY(made.hostOf.isEmpty() && made.silent.isEmpty());
+        QCOMPARE(made.blocked.size(), 1);
+        QCOMPARE(made.blocked.first().node, QStringLiteral("enc"));
+        QVERIFY(!made.allowsRun());
+    }
+
+    // #584: the requirement is the kernel's for the inputs the node holds (a literal, a default), and its properties must be the
+    // model's: a host whose model lacks them cannot take the node, one that has them can.
+    void theRequirementIsReadWithTheNodesInputsAndItsPropertiesMustHold() {
+        propertiesOf() = [](const Values &inputs) { return QJsonObject{{"prompt", inputs.value("prompt").text()}}; };
+        const auto reset = qScopeGuard([] { propertiesOf() = [](const Values &) { return QJsonObject(); }; });
+        FakeHosts fits({{"gx10", {"text.encode"}}});
+        fits.properties = QJsonObject{{"prompt", "a cat"}};
+        QCOMPARE(verdict(workflow(), missing(), request(), fits).hostOf.value("enc"), QStringLiteral("gx10"));
+        QCOMPARE(seenInputs().value("prompt").text(), QStringLiteral("a cat"));          // a literal the node holds
+        QCOMPARE(seenInputs().value("edit_format").text(), QStringLiteral("default"));   // the spec's default for one it does not
+        QVERIFY(seenInputs().value("model").isEmpty());                                  // a link's value is not known before the run
+        FakeHosts lacks({{"gx10", {"text.encode"}}});
+        lacks.properties = QJsonObject{{"prompt", "a dog"}};
+        const PairedVerdict refused = verdict(workflow(), missing(), request(), lacks);
+        QCOMPARE(refused.blocked.size(), 1);
+        QVERIFY(refused.hostOf.isEmpty() && refused.silent.isEmpty());
+    }
+
+    // #584: the scheduler runs the compiled graph, so a node inside a group instance is placed (under its path id), reads the inputs
+    // the instance gives it, and takes the instance's pin.
+    void aNodeInsideAGroupInstanceIsPlacedLikeAnyOther() {
+        const auto grouped = [](const QString &pin) {
+            const QByteArray json = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+              "g": {"type": "local/enc", "version": "1.0.0" %3, "inputs": {"prompt": "from the instance"}},
+              "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "g.conditioning"}}}}},
+              "groups": {"local/enc": {"version": "1.0.0", "name": "Enc",
+                "inputs": [{"name": "prompt", "targets": ["enc.prompt"]}],
+                "outputs": [{"name": "conditioning", "from": "enc.conditioning"}],
+                "nodes": {"models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%1", "name": "m.safetensors"}, %2}},
+                          "enc": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}}}}}}})")
+                                        .arg(hash, others, pin.isEmpty() ? QString() : QStringLiteral(", \"provider\": \"%1\"").arg(pin))
+                                        .toUtf8();
+            const Result<Document> loaded = Document::fromJson(QJsonDocument::fromJson(json).object());
+            if (!loaded)
+                qFatal("fixture does not load: %s", qPrintable(loaded.error().message));
+            return loaded.value();
+        };
+        FakeHosts hosts({{"gx10", {"text.encode"}}});
+        const PairedVerdict placed = verdict(grouped({}), missing(), request(), hosts);
+        QCOMPARE(placed.hostOf, (QMap<QString, QString>{{"g/enc", "gx10"}}));
+        QCOMPARE(seenInputs().value("prompt").text(), QStringLiteral("from the instance"));
+        FakeHosts none({{"gx10", {"image.generate"}}});
+        const PairedVerdict refused = verdict(grouped({}), missing(), request(), none); // a model missing inside a group is not left out
+        QCOMPARE(refused.blocked.size(), 1);
+        QCOMPARE(refused.blocked.first().node, QStringLiteral("g/enc"));
+        FakeHosts pinnedHere;
+        const PairedVerdict pinned = verdict(grouped("desk"), missing(), request(), pinnedHere); // the instance's pin reaches the node in it
+        QCOMPARE(pinnedHere.asked, 0);
+        QCOMPARE(pinned.blocked.first().node, QStringLiteral("g/enc"));
+        QVERIFY(pinned.blocked.first().message.contains("pinned to desk"));
+        // A library group named only by its type id (no definition in `groups`) is placed as well: like a run, the verdict compiles it
+        // from the library's definition.
+        QTemporaryDir packs;
+        QVERIFY(saveToLibrary(grouped({}), "local/enc", registry(), packs.filePath("local")).ok());
+        Registry library;
+        nodes::addBuiltinNodeTypes(library);
+        loadPacks(library, {packs.path()});
+        Document bare = grouped({});
+        bare.groups.clear();
+        PairedPlacementRequest fromLibrary = request();
+        fromLibrary.registry = &library;
+        QCOMPARE(verdict(bare, missing(), fromLibrary, hosts).hostOf, (QMap<QString, QString>{{"g/enc", "gx10"}}));
     }
 
     // The pins decide before the probe: an app they block never waits for a host.
@@ -174,7 +283,7 @@ private slots:
         const PairedVerdict refused = verdict(workflow(), missing(), lacking, silent);
         QCOMPARE(silent.asked, 1);
         QCOMPARE(refused.blocked.size(), 1);
-        QVERIFY(refused.blocked.first().message.contains("gx10 does not offer text.encode"));
+        QVERIFY(refused.blocked.first().message.contains("gx10 did not offer text.encode when it last answered")); // the scheduler's words
         QVERIFY(refused.silent.isEmpty());
 
         FakeHosts quiet; // (c) silent, nothing remembered (or it offered it): silent, never the host
@@ -214,11 +323,13 @@ private slots:
     // The scheduler decides per node, from the node's own Resource inputs: a model reaches the sampler, not what reads the picture it makes.
     void onlyTheNodesThatHoldTheModelThemselvesAreChecked() {
         const QByteArray json = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
-          "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%1", "name": "m.safetensors"}}},
+          "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%1", "name": "m.safetensors"}, %2}},
           "enc": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}, "prompt": "a cat"}},
-          "samp": {"type": "fugue/sampler", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}, "conditioning": {"from": "enc.conditioning"}}},
+          "samp": {"type": "fugue/sampler", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}, "conditioning": {"from": "enc.conditioning"}, "latent": {"from": "lat.latent"}}},
           "dec": {"type": "fugue/vae-decode", "version": "1.0.0", "inputs": {"latent": {"from": "samp.latent"}}},
-          "up": {"type": "fugue/upscale-with-model", "version": "1.0.0", "provider": "desk", "inputs": {"image": {"from": "dec.image"}}}}}})").arg(hash).toUtf8();
+          "lat": {"type": "fugue/empty-latent", "version": "1.0.0", "inputs": {}},
+          "up": {"type": "fugue/upscale-with-model", "version": "1.0.0", "provider": "desk", "inputs": {"image": {"from": "dec.image"}, "model": {"resource": "fugue/upscale-model", "hash": "sha256:%3", "name": "u.pth"}}},
+          "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "up.image"}}}}}})").arg(hash, others, QString(64, QLatin1Char('f'))).toUtf8();
         const Result<Document> loaded = Document::fromJson(QJsonDocument::fromJson(json).object());
         QVERIFY(loaded);
         FakeHosts all({{"gx10", {"text.encode", "latent.sample"}}});
@@ -252,7 +363,7 @@ private slots:
             QVERIFY(made.hostOf.isEmpty() && made.blocked.isEmpty() && made.silent.isEmpty());
         }
         PairedPlacementRequest unknown = request();
-        unknown.capabilityOf = {};
+        unknown.requirementOf = {};
         QVERIFY(verdict(workflow("desk"), missing(), unknown, hosts).blocked.isEmpty()); // no kernel map: nothing is known of the nodes
         PairedPlacementRequest disabled = request();
         disabled.instances.last().enabled = false;

@@ -38,7 +38,9 @@ const char *kBlock = R"({
                      {"name": "soft", "targets": ["sample.soft_mask"]},
                      {"role": "model", "targets": ["sample.model"]},
                      {"name": "note", "targets": ["blank.text"], "default": "hello"},
-                     {"name": "bare", "targets": ["sample.flow_shift"]}],
+                     {"name": "bare", "targets": ["sample.flow_shift"]},
+                     {"name": "autonum", "targets": ["sample.seed"]},
+                     {"name": "levels", "targets": ["curve.levels"]}],
           "outputs": [{"node": "save"}]},
   "graph": {"nodes": {
     "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "a.png"}},
@@ -46,6 +48,7 @@ const char *kBlock = R"({
     "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "old words"}},
     "blank": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": ""}},
     "sample": {"type": "fugue/sampler", "version": "1.5.0", "inputs": {"seed": {"auto": "random"}, "steps": 4}},
+    "curve": {"type": "io.example.test/curve", "version": "1.0.0", "inputs": {}},
     "sample2": {"type": "fugue/sampler", "version": "1.5.0", "inputs": {"seed": 7}},
     "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"image": {"from": "load.image"}, "name": "out"}}}}
 })";
@@ -95,6 +98,13 @@ class TestAppInput : public QObject {
 private slots:
     void initTestCase() {
         nodes::addBuiltinNodeTypes(m_registry);
+        // A node whose port is a list of numbers: no built-in has one.
+        const Result<NodeType> curve = NodeType::fromJson(QJsonObject{
+            {"manifest", 1}, {"id", "io.example.test/curve"}, {"version", "1.0.0"}, {"name", "Curve"}, {"runtime", QJsonObject{{"kind", "builtin"}}},
+            {"inputs", QJsonArray{QJsonObject{{"name", "levels"}, {"type", "number"}, {"list", true}, {"optional", true}}}},
+            {"outputs", QJsonArray{QJsonObject{{"name", "out"}, {"type", "number"}}}}});
+        QVERIFY2(curve.ok(), qPrintable(curve.ok() ? QString() : curve.error().message));
+        QVERIFY(m_registry.add(curve.value()).isEmpty());
         m_kinds = load(kBlock);
         m_group = load(kGroup);
         m_kindsApp = **appOf(m_kinds);
@@ -151,6 +161,9 @@ private slots:
         QCOMPARE(of("words").initial, QJsonValue("simple"));
         QCOMPARE(of("steps").initial, QJsonValue(4));
         QVERIFY(of("seed").initial.isUndefined());                      // {"auto": "random"} is no number
+        QCOMPARE(of("autonum").kind, QStringLiteral("number"));         // a number field on a seed target: the held Auto is no value
+        QVERIFY(!of("autonum").initial.isObject());                     // it starts on the spec's default instead
+        QCOMPARE(of("autonum").initial, of("autonum").spec->defaultValue);
         QCOMPARE(of("fixed").initial, QJsonValue(7));
         QVERIFY(of("region").initial.isUndefined());
         QVERIFY(of("model").initial.isUndefined());
@@ -208,6 +221,10 @@ private slots:
         QCOMPARE(*of("seed").fromText("Random"), QJsonValue(QJsonObject{{"auto", "random"}})); // the engine's own
         QCOMPARE(*of("seed").fromText("auto"), QJsonValue(QJsonObject{{"auto", "random"}}));
         QVERIFY(!of("steps").fromText("random"));
+        // A number-list port says "number" on the command line and takes one number, as it always did.
+        QCOMPARE(cliTypeOf(of("levels")), QStringLiteral("number"));
+        QCOMPARE(*of("levels").fromText("0.5"), QJsonValue(0.5));
+        QVERIFY(!of("levels").fromText("a b"));
         QCOMPARE(*of("soft").fromText(" TRUE "), QJsonValue(true));
         QVERIFY(!of("soft").fromText("yes"));
         QCOMPARE(*of("words").fromText("karras"), QJsonValue("karras"));

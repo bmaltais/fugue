@@ -21,7 +21,7 @@
 namespace fugue {
 
 void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunService &service, CommandRegistry &commands,
-                 CanvasRuns &runs, std::function<QString(const QString &typeId)> capabilityOf, PairedProbe probeSource) {
+                 CanvasRuns &runs, PairedRequirementOf requirementOf, PairedProbe probeSource) {
     const auto shown = std::make_shared<QString>(); // the tab given to the view last, so a title change does not give it again
     const auto give = [&view, &workflows, &canvas, shown](bool force) {
         const QVariantList tabs = workflows.tabs();
@@ -65,7 +65,7 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     const auto placement = std::make_shared<Placement>();
     const auto probe = keptPairedProbe(probeSource ? std::move(probeSource) : livePairedProbe(), std::chrono::seconds(30));
     const auto decide = [&canvas, registry = view.registry(), needs = QPointer<NeedsModel>(needs), placement, probe,
-                         capabilityOf = std::move(capabilityOf)](const ReadinessPlan &plan) {
+                         requirementOf = std::move(requirementOf)](const ReadinessPlan &plan) {
         const Document document = canvas.document();
         PairedPlacementRequest request;
         if (const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath()); instances)
@@ -76,7 +76,7 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
         if (key == placement->key)
             return;
         placement->key = key;
-        request.capabilityOf = capabilityOf;
+        request.requirementOf = requirementOf;
         request.registry = registry;
         decidePairedPlacement(document, plan, request, probe, [placement, needs, key](const PairedVerdict &verdict) {
             if (placement->key != key)
