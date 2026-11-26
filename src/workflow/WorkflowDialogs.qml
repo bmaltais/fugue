@@ -6,6 +6,7 @@ import Fugue
 import "../menu"
 import "../canvas"
 import "../kit"
+import "../settings"
 
 // Everything the workflows show besides the tabs (spec 11): the file pickers (the desktop
 // portal, Qt's own dialog when it is not there), the save/discard/cancel question, the trust question, the offer
@@ -248,6 +249,20 @@ Item {
         function onChanged() {
             if (App.workflows.readiness.open && !root.getReadySheet)
                 root.getReadySheet = getReadyComponent.createObject(root)
+        }
+    }
+
+    // The model folder setup (#619): made the first time it opens, at the first run or from Settings > Folders, and kept.
+    property var modelSetupSheet: null
+    Component {
+        id: modelSetupComponent
+        ModelSetupSheet {}
+    }
+    Connections {
+        target: App.settings ? App.settings.modelSetup : null
+        function onChanged() {
+            if (App.settings.modelSetup.open && !root.modelSetupSheet)
+                root.modelSetupSheet = modelSetupComponent.createObject(root)
         }
     }
 

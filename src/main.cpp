@@ -154,6 +154,9 @@ int main(int argc, char *argv[]) {
     fugue::SettingsModel appSettings;
     appSettings.attach(&translator, &canvasModel, &registry, &theme);
     appSettings.registerCommands(commands, [](const QUrl &url) { QDesktopServices::openUrl(url); });
+    // The first-run model folder setup (#619): a yes changes what the templates and the banner find on disk.
+    QObject::connect(appSettings.modelSetup(), &fugue::ModelSetup::applied, &workflows, &fugue::Workflows::modelFoldersChanged);
+    QObject::connect(appSettings.modelSetup(), &fugue::ModelSetup::applied, workflows.readiness(), &fugue::ReadinessSheet::refresh);
     // The cache is kept within its limits at start and while idle, never during a run (10.6, #141).
     appSettings.cache()->startAutomatic();
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
@@ -283,6 +286,9 @@ int main(int argc, char *argv[]) {
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::flushSession);
     }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &workspace, &fugue::Workspace::flush);
+    // The first time, in the Default session, with no model folder yet: ask, before searching anything (#619).
+    if (!appArgument)
+        QTimer::singleShot(0, appSettings.modelSetup(), [&appSettings] { appSettings.modelSetup()->maybeOffer(); });
     if (appArgument) {
         // The app's workflow is its one tab, shown as the App view whatever its block's defaultView says; a file that is
         // not an app says so in the window. The launcher entry and Open in Fugue are about this app, a package included.

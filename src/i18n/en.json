@@ -2168,5 +2168,95 @@
   "A single %1 cannot feed this side: the other side is a list.": "A single %1 cannot feed this side: the other side is a list.",
   "Could not read %1, so it is not used.": "Could not read %1, so it is not used.",
   "Opened without %1: the file could not be read.": "Opened without %1: the file could not be read.",
-  "Reading your files...": "Reading your files..."
+  "Reading your files...": "Reading your files...",
+  "Your model folders": "Your model folders",
+  "Fugue can use the models you already have. Nothing is moved or copied.": "Fugue can use the models you already have. Nothing is moved or copied.",
+  "Fugue can look for model folders you already have (ComfyUI, Forge, A1111, InvokeAI, SwarmUI, Stability Matrix) so templates use your models instead of downloading them again. It only reads folder names and file sizes; nothing is opened, changed or sent anywhere.": "Fugue can look for model folders you already have (ComfyUI, Forge, A1111, InvokeAI, SwarmUI, Stability Matrix) so templates use your models instead of downloading them again. It only reads folder names and file sizes; nothing is opened, changed or sent anywhere.",
+  "Places Fugue would look": "Places Fugue would look",
+  "Fugue does not look in a place you switch off.": "Fugue does not look in a place you switch off.",
+  "Found on this computer": "Found on this computer",
+  "Looking in your home folder and drives…": "Looking in your home folder and drives…",
+  "Fugue looked in the usual places. Add any folder it missed.": "Fugue looked in the usual places. Add any folder it missed.",
+  "Fugue found no model folders. If you have models, add their folder; if not, Fugue downloads what a template needs when you open it.": "Fugue found no model folders. If you have models, add their folder; if not, Fugue downloads what a template needs when you open it.",
+  "ComfyUI": "ComfyUI",
+  "ComfyUI portable": "ComfyUI portable",
+  "ComfyUI Desktop": "ComfyUI Desktop",
+  "Stability Matrix": "Stability Matrix",
+  "Automatic1111": "Automatic1111",
+  "Forge": "Forge",
+  "SwarmUI": "SwarmUI",
+  "InvokeAI": "InvokeAI",
+  "Model folder": "Model folder",
+  "%1+ models": "%1+ models",
+  "%n LoRAs": {
+    "one": "%n LoRA",
+    "other": "%n LoRAs"
+  },
+  "%n checkpoints": {
+    "one": "%n checkpoint",
+    "other": "%n checkpoints"
+  },
+  "%n diffusion models": {
+    "one": "%n diffusion model",
+    "other": "%n diffusion models"
+  },
+  "%n text encoders": {
+    "one": "%n text encoder",
+    "other": "%n text encoders"
+  },
+  "%n VAEs": {
+    "one": "%n VAE",
+    "other": "%n VAEs"
+  },
+  "%n upscale models": {
+    "one": "%n upscale model",
+    "other": "%n upscale models"
+  },
+  "%1 and more": "%1 and more",
+  "In use": "In use",
+  "No models yet": "No models yet",
+  "Read only": "Read only",
+  "Also reached as %1": "Also reached as %1",
+  "Counting stopped: slow drive": "Counting stopped: slow drive",
+  "On a network drive: not counted": "On a network drive: not counted",
+  "Read only: Fugue can use it but not download into it.": "Read only: Fugue can use it but not download into it.",
+  "InvokeAI sorts models its own way: Fugue adds the folders it can tell apart.": "InvokeAI sorts models its own way: Fugue adds the folders it can tell apart.",
+  "Choose what it holds": "Choose what it holds",
+  "That folder is already in the list.": "That folder is already in the list.",
+  "%1 is not a folder.": "%1 is not a folder.",
+  "Show %n more": {
+    "one": "Show %n more",
+    "other": "Show %n more"
+  },
+  "Add a folder…": "Add a folder…",
+  "New downloads": "New downloads",
+  "Download new models to": "Download new models to",
+  "Only %1 free there.": "Only %1 free there.",
+  "Use %n folders": {
+    "one": "Use this folder",
+    "other": "Use %n folders"
+  },
+  "You can change this later in Settings > Folders.": "You can change this later in Settings > Folders.",
+  "Fugue now uses your models in %n folders. New downloads go to %1.": {
+    "one": "Fugue now uses your models in %n folder. New downloads go to %1.",
+    "other": "Fugue now uses your models in %n folders. New downloads go to %1."
+  },
+  "%n folders of InvokeAI were left out: Fugue could not tell what they hold.": {
+    "one": "%n folder of InvokeAI was left out: Fugue could not tell what it holds.",
+    "other": "%n folders of InvokeAI were left out: Fugue could not tell what they hold."
+  },
+  "Find model folders": "Find model folders",
+  "Find model folders…": "Find model folders…",
+  "Looks in the usual places for ComfyUI's and other apps' models": "Looks in the usual places for ComfyUI's and other apps' models",
+  "Usual install folder": "Usual install folder",
+  "Your home folder, %n levels deep": {
+    "one": "Your home folder, %n level deep",
+    "other": "Your home folder, %n levels deep"
+  },
+  "Each drive in it, %n levels deep": {
+    "one": "Each drive in it, %n level deep",
+    "other": "Each drive in it, %n levels deep"
+  },
+  "Pick a folder of models": "Pick a folder of models",
+  "%1 is not one of the model folders.": "%1 is not one of the model folders."
 }

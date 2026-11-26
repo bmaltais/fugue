@@ -30,6 +30,10 @@ against the release's `SHA256SUMS` and installs them with `sudo pacman -U`, so i
 Read it first at [install.sh](install.sh); `bash -s -- --dry-run` shows what it would do and changes nothing,
 `--version TAG` pins a release, `--no-cuda` skips the helper. Other ways to install are [below](#install-by-hand).
 
+On first run Fugue offers to find your ComfyUI models: it first says what it would read (folder names and file sizes, nothing
+opened or sent) and lists each place with a switch, and searches only when you press Search. Models it finds are used where they
+are, so templates do not download them again; nothing is moved or copied. Later: Settings > Folders > Find model folders…
+
 ## A short tour
 
 - **Canvas.** Place nodes, wire their ports, search for a node, undo, work in tabs and save.

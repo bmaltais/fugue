@@ -8,6 +8,7 @@ import ".."
 import "../canvas"
 import "../workflow"
 import "../run"
+import "../settings"
 
 // An app as its own application (#398, epic #397, spec 12.18): `fugue --app <id|file>` opens this instead of Main.qml. The window
 // is the App view and nothing else: no menu bar, no graph, no node library, no panels, no tabs. Its title is the app's own
@@ -150,6 +151,19 @@ ApplicationWindow {
         function onChanged() {
             if (App.workflows.readiness.open && !win.getReadySheet)
                 win.getReadySheet = getReadyComponent.createObject(win.contentItem)
+        }
+    }
+    // Get ready's "Find model folders…" (#619): the setup sheet, made the first time it opens.
+    property var modelSetupSheet: null
+    Component {
+        id: modelSetupComponent
+        ModelSetupSheet {}
+    }
+    Connections {
+        target: App.settings ? App.settings.modelSetup : null
+        function onChanged() {
+            if (App.settings.modelSetup.open && !win.modelSetupSheet)
+                win.modelSetupSheet = modelSetupComponent.createObject(win.contentItem)
         }
     }
 }

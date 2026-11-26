@@ -1322,6 +1322,13 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     return lines.join(QLatin1Char(' '));
 }
 
+void Workflows::modelFoldersChanged(const QString &notice) {
+    refreshMissing(false);
+    if (!notice.isEmpty())
+        setNotice(notice);
+    emit templatesChanged(); // templates() reads the model folders afresh, so a card whose model is now on disk reads as ready
+}
+
 void Workflows::refreshMissing(bool force) {
     if (m_current < 0)
         return;

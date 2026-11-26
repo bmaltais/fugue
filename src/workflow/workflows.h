@@ -348,6 +348,8 @@ public:
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
     Q_INVOKABLE void notify(const QString &text) { setNotice(text); }
+    // The model folders changed (the first-run setup, #619): the templates' and the banner's missing models are read again, and `notice` is said when not empty.
+    void modelFoldersChanged(const QString &notice);
 
 signals:
     // What templates() says changed: the paired hosts' models arrived.

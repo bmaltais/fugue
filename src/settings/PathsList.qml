@@ -160,6 +160,19 @@ Column {
         }
     }
 
+    // Finds the model folders ComfyUI and other apps made (spec 8.9, #619): the consent screen first, nothing is searched until Search.
+    KitRow {
+        visible: paths.key === "model_paths"
+        look: paths.look
+        label: qsTr("Find model folders")
+        hint: qsTr("Looks in the usual places for ComfyUI's and other apps' models")
+        KitChip {
+            objectName: paths.key + "-find"
+            look: paths.look
+            text: qsTr("Find model folders…")
+            onTapped: App.settings.modelSetup.show(false)
+        }
+    }
     KitRow {
         look: paths.look
         label: qsTr("Add a folder")
