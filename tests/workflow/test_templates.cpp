@@ -230,6 +230,13 @@ struct UseRig {
         writeJson(work.filePath(name), workflow({{"models", node("fugue/load-models", inputs)}}, {{"models", recorded}}));
         return work.filePath(name);
     }
+    // A bundled template whose model the person's file covers.
+    void makeZit() {
+        const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject xr = x;
+        xr.insert("source", "http://127.0.0.1:9/x");
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}}, workflow({{"models", node("fugue/load-models", {{"diffusion_model", x}})}}, {{"models", QJsonArray{xr}}}));
+    }
     QString plain(const QString &name) {
         writeJson(work.filePath(name), workflow({{"n", node("fugue/load-models", {})}}));
         return work.filePath(name);
@@ -1973,9 +1980,56 @@ private slots:
         rig.workflows->setCurrent(a); // asked already: found idle
         rig.workflows->setCurrent(b); // the read ends with b shown: dropped
         QTRY_VERIFY(!rig.workflows->hashingUses());
-        QVERIFY(!rig.swapped() || rig.workflows->current() == b);
+        QCOMPARE(rig.workflows->current(), b);
         rig.workflows->setCurrent(a);
         QTRY_VERIFY(rig.swapped());
+    }
+
+    // #633 review: a choice made when a tab opens (Download, or Undo of the file) covers both views of the tab, whichever one showed at open.
+    void aChoiceMadeAtOpenHoldsInBothViewsAfterATabSwitch() {
+        for (const QString &mode : {QString("download"), QString("undo")}) {
+            UseRig rig;
+            rig.makeZit();
+            bool inApp = true; // an app template opens in the App view
+            rig.workflows->setAppShown([&inApp](const QString &) { return inApp; });
+            rig.workflows->setUseTaker([](const QString &, const QList<OnDiskUse> &, const Uses &) { return true; });
+            if (mode == QLatin1String("download")) {
+                QVERIFY(rig.workflows->openTemplateForDownload("zit"));
+                rig.workflows->readiness()->cancel(); // the download goes on (nothing here starts one): the sheet is closed
+            } else {
+                QVERIFY(rig.workflows->openTemplateById("zit"));
+                QTRY_VERIFY(rig.workflows->noticeUndoable());
+                rig.workflows->undoNotice();
+            }
+            QTRY_VERIFY(!rig.workflows->hashingUses());
+            const int zit = rig.workflows->current();
+            inApp = false; // Edit in graph
+            QVERIFY(rig.workflows->openPath(rig.plain("b.fugue")));
+            rig.workflows->setCurrent(zit);
+            QTest::qWait(300);
+            QVERIFY(!rig.workflows->hashingUses());
+            QVERIFY2(!rig.swapped(), qPrintable(mode));
+        }
+    }
+
+    // #633 review: one swap per model: the graph's read and the App view's join the same job, and the second is not asked for.
+    void theTwoViewsDoNotBothSwapOneModel() {
+        UseRig rig;
+        bool inApp = false;
+        int taken = 0;
+        rig.workflows->setAppShown([&inApp](const QString &) { return inApp; });
+        rig.workflows->setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
+            ++taken;
+            return true;
+        });
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
+        QVERIFY(rig.workflows->hashingUses());
+        inApp = true; // the person goes to the App view during the read
+        rig.workflows->refreshNodeTypes();
+        QTRY_VERIFY(rig.swapped());
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QCOMPARE(taken, 0);
+        QVERIFY(rig.workflows->noticeUndoable()); // the graph's banner Undo stands
     }
 
     // Cancelling the sheet while its files are read takes only the sheet's ask away: another surface's read of the same file goes on and applies.

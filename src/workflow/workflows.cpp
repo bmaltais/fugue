@@ -547,9 +547,12 @@ void Workflows::startUses(const QStringList &hashes, int token, bool automatic, 
                     const bool tabOpen = std::any_of(m_tabs.begin(), m_tabs.end(), [&ask](const Tab &t) { return t.id == ask.tab; });
                     const bool shown = m_current >= 0 && m_tabs[size_t(m_current)].id == ask.tab;
                     if (tabOpen && (m_readiness->isOpen() || (!ask.inApp && !shown))) {
-                        if (!shown)
-                            for (const QString &hash : std::as_const(chosenHashes))
+                        for (const QString &hash : std::as_const(chosenHashes)) {
+                            if (shown)
+                                markTried(ask.tab, hash); // the person's choice holds in both views
+                            else
                                 m_autoTried.remove(autoKey(ask.tab, ask.inApp, hash));
+                        }
                         m_autoIdle.remove(ask.tab); // what it found idle before the read may no longer hold (A, B, A, B during one read)
                         done.append({ask.token, QStringList()});
                         notRead.append({ask.token, QStringList()});
@@ -649,6 +652,11 @@ bool Workflows::autoPending() const {
 
 bool Workflows::autoUseOn() const { return currentSettings().useOnDisk == QLatin1String("use"); }
 
+void Workflows::markTried(const QString &tab, const QString &hash) {
+    m_autoTried.insert(autoKey(tab, true, hash));
+    m_autoTried.insert(autoKey(tab, false, hash));
+}
+
 QString Workflows::autoKey(const QString &tab, bool inApp, const QString &hash) {
     return tab + QLatin1Char(' ') + (inApp ? QLatin1Char('a') : QLatin1Char('g')) + QLatin1Char(' ') + hash;
 }
@@ -664,14 +672,27 @@ bool Workflows::autoUse(bool cheap, bool offer) {
         return false;
     const bool inApp = m_appShown && m_appShown(tab);
     QStringList hashes;
+    bool waiting = false; // a read of the other view is going: not idle
     for (const OnDiskUse &use : onDiskNow()) {
         const QString hash = use.wanted.value(QStringLiteral("hash")).toString();
         if (m_autoTried.contains(autoKey(tab, inApp, hash)))
             continue;
+        // One automatic swap per model at a time: the other view's read of it is still going, and a second would announce over the first.
+        bool pending = false;
+        for (const UseJob &job : std::as_const(m_useJobs))
+            for (const UseAsk &ask : job.asks)
+                if (ask.automatic && ask.tab == tab && !job.cancelled)
+                    for (const OnDiskUse &chosen : ask.chosen)
+                        pending |= chosen.wanted.value(QStringLiteral("hash")).toString() == hash;
+        if (pending) {
+            waiting = true;
+            continue;
+        }
         hashes << hash;
     }
     if (hashes.isEmpty()) {
-        m_autoIdle.insert(tab, idle);
+        if (!waiting)
+            m_autoIdle.insert(tab, idle);
         return false;
     }
     m_autoIdle.remove(tab);
@@ -768,6 +789,8 @@ void Workflows::announceUses(const QString &tab, const QList<OnDiskUse> &chosen,
                          .arg(use.match.name, use.wanted.value(QStringLiteral("name")).toString(), use.sameModelText());
     if (lines.isEmpty())
         return;
+    if (m_current < 0 || m_tabs[size_t(m_current)].id != tab)
+        return; // not the tab shown: its line would stand on another tab's banner
     setNotice(lines.join(QLatin1Char(' ')));
     if (!inApp || m_openedWith.tab == tab)
         m_openedWith = {}; // another tab's Undo is left alone by an App-view swap
@@ -828,7 +851,7 @@ bool Workflows::finishOpenWithUses(const Template &chosen, const QList<OnDiskUse
     m_openUses.clear();
     if (opened && m_current >= 0)
         for (const OnDiskUse &use : uses) // asked once: Undo is not undone by the next check, nor is a file that could not be read tried again
-            m_autoTried.insert(autoKey(m_tabs[size_t(m_current)].id, m_appShown && m_appShown(m_tabs[size_t(m_current)].id), use.wanted.value(QStringLiteral("hash")).toString()));
+            markTried(m_tabs[size_t(m_current)].id, use.wanted.value(QStringLiteral("hash")).toString()); // the choice covers both views
     if (!failed.isEmpty())
         setNotice(tr("Opened without %1: the file could not be read.").arg(failed.join(QStringLiteral(", "))));
     if (!opened || resolved.isEmpty() || m_current < 0)
@@ -890,7 +913,7 @@ bool Workflows::openTemplateForDownload(const QString &id) {
         return false;
     if (m_current >= 0)
         for (const OnDiskUse &use : onDiskNow())
-            m_autoTried.insert(autoKey(m_tabs[size_t(m_current)].id, m_appShown && m_appShown(m_tabs[size_t(m_current)].id), use.wanted.value(QStringLiteral("hash")).toString()));
+            markTried(m_tabs[size_t(m_current)].id, use.wanted.value(QStringLiteral("hash")).toString()); // the choice covers both views
     if (m_readiness->isOpen())
         m_readiness->chooseAll(false);
     return true;

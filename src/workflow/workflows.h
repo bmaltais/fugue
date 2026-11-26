@@ -442,6 +442,7 @@ private:
     // Uses the files for the shown tab's missing models that have one, once per tab and model (a file that could not be read is not
     // asked again, nor one the person took back with Undo). True when a read was started: the Get ready sheet waits for its result.
     bool autoUse(bool cheap = false, bool offer = false);
+    void markTried(const QString &tab, const QString &hash);
     static QString autoKey(const QString &tab, bool inApp, const QString &hash);
     // An automatic read for the shown tab is going on: the Get ready sheet waits for it.
     bool autoPending() const;
