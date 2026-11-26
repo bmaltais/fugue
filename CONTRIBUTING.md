@@ -21,9 +21,14 @@ Not sure where to start? Issues labelled
 
 ## Building
 
-Fugue needs Qt 6.12 and a C++ compiler, so the easy path is Arch Linux or Omarchy. Install the build
-dependencies listed in `packaging/PKGBUILD` (`depends` and `makedepends`; skip `cuda`), plus `ninja`, `lld` and
-`ccache` to build faster.
+Fugue needs Qt 6.12 and a C++ compiler, so the easy path is Arch Linux or Omarchy. The build dependencies
+(from `packaging/PKGBUILD`, without `cuda`), with `ninja`, `lld` and `ccache` to build faster:
+
+```sh
+sudo pacman -S --needed base-devel clang cmake ffmpeg git hicolor-icon-theme libarchive libvips pkgconf \
+  qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-multimedia-ffmpeg qt6-shadertools qt6-wayland \
+  shaderc spirv-headers vulkan-headers vulkan-icd-loader ninja lld ccache
+```
 
 ```sh
 git clone --recurse-submodules https://github.com/bmaltais/fugue.git
@@ -34,6 +39,7 @@ bin/test --changed       # only the tests your change can affect (what to run wh
 ```
 
 The `templates/` submodule must be checked out: with it empty, six tests fail.
+`bin/build` and `bin/test` take a machine-wide lock, so a second build waits quietly for the first to finish.
 
 On another distro, the AppImage ([docs/appimage.md](docs/appimage.md)) runs Fugue but does not build it. The Qt
 6.12 that CI builds with comes from aqtinstall, in `packaging/appimage/build-appimage.sh`; that is a place to
