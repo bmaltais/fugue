@@ -102,3 +102,7 @@ after reading the diff, and a fork's pull request that touches `.github/` is rev
 `.github/workflows`. A workflow error otherwise shows only when GitHub runs it, and for the release jobs that is only on a
 tag. It uses `actionlint` from PATH, else the pinned `rhysd/actionlint` image if podman already has it, and is skipped
 otherwise (`podman pull docker.io/rhysd/actionlint:1.7.7` once to enable it).
+
+## Review
+
+Every pull request is reviewed by GitHub Copilot code review once, when it opens (the repository ruleset "Copilot review on open"). After a round of fixes, ask for another review with `gh pr edit <n> --add-reviewer @copilot`. What it looks for is in `.github/copilot-instructions.md`. Copilot reads that file from the pull request's branch, and it does not read replies to its comments. A pull request merges when no High or Medium finding is left unanswered. Low findings are fixed or filed as issues.
