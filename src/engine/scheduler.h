@@ -164,6 +164,9 @@ struct RunOutcome {
     QMap<QString, Values> outputs;    // what each finished node produced
     QStringList ran;                  // the nodes whose kernel ran, in finishing order
     QMap<QString, NodeRoute> routes;  // the instance each provider node was routed to, and what it sends (cached nodes too)
+    // Under validate only: what a kernel's own check() reported, errors naming their node (and input), kept apart from
+    // `errors` (warnings) because a run would fail on each (10.3, #600).
+    Errors checkErrors;
 };
 
 // One run. start() returns at once; finished() comes later from the event
@@ -223,6 +226,9 @@ struct GraphCheck {
     // node (model_missing and the other 8.5 codes), which a run that reaches
     // the node reports as errors.
     Errors warnings;
+    // What the nodes' kernels reported from check() (a formula that does not parse): errors, each naming its node and,
+    // when it has one, its input, that a run of the same values would fail on. No run is needed to know them.
+    Errors checkErrors;
     // Ended early by CheckAbort::abort(): what is above is incomplete.
     bool aborted = false;
 };

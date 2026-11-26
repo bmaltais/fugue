@@ -689,6 +689,7 @@ private:
             m_checkAbort = nullptr;
             aborted = graphCheck.aborted;
             problems += graphCheck.warnings;
+            problems += graphCheck.checkErrors; // a kernel's own check() errors (#600): the canvas shows them as the node's
             const QList<ProviderInstance> instances = cli::registeredInstances(m_compileRegistry);
             for (auto it = graphCheck.states.begin(); it != graphCheck.states.end(); ++it) {
                 QJsonObject node{{"state", nodeStateName(it.value())}};

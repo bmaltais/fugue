@@ -70,6 +70,17 @@ const QByteArray kGraph = R"({
   }}
 })";
 
+// An Expression whose Number goes to a Preview, and one that nothing reads.
+const QByteArray kFormula = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "calc": {"type": "fugue/expression", "version": "1.0.0", "inputs": {"formula": "a + b"}},
+    "loose": {"type": "fugue/expression", "version": "1.0.0", "inputs": {"formula": "1 +"}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "calc.number"}}}
+  }},
+  "layout": {"nodes": {"calc": {"pos": [0, 0]}, "show": {"pos": [300, 0]}, "loose": {"pos": [0, 300]}}}
+})";
+
 // A Generate Image, a Resize of it and a Preview of that: the middle one only repeats the picture before it.
 const QByteArray kChain = R"({
   "fugue": 1,
@@ -1088,6 +1099,34 @@ private slots:
         QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
         QTRY_VERIFY(list && list->isVisible());
         QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // #600: a kernel's own check() error (Expression's formula that does not parse) shows on its node
+    // after a committed edit, without a run, and goes when the value is fixed.
+    void aKernelsCheckErrorShowsOnItsNodeWithoutARun() {
+        RunApp r(kFormula);
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QVERIFY(r.app.model.widgets()->setText("calc", "formula", "a +").isEmpty());
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("calc"), QStringLiteral("error"));
+        QVERIFY(r.role("calc", NodeList::Error).toString().contains("Column"));
+        const QVariantList errors = r.runs->errors();
+        QCOMPARE(errors.size(), 2); // calc, and loose which nothing reads
+        for (const QVariant &error : errors) {
+            QCOMPARE(error.toMap().value("input").toString(), QStringLiteral("formula"));
+            QCOMPARE(error.toMap().value("code").toString(), QStringLiteral("formula_invalid"));
+        }
+        QVERIFY(r.role("calc", NodeList::Error).toString().startsWith("Column 4"));
+        QCOMPARE(r.state("loose"), QStringLiteral("error"));
+        QVERIFY(r.jobs().isEmpty()); // no run, no provider call
+        // Fixed: the error goes at the next check.
+        checked.clear();
+        QVERIFY(r.app.model.widgets()->setText("calc", "formula", "a + 1").isEmpty());
+        QTRY_VERIFY(checked.size() >= 1);
+        QVERIFY(r.state("calc") != QStringLiteral("error"));
+        QVERIFY(r.role("calc", NodeList::Error).toString().isEmpty());
+        QCOMPARE(r.runs->errors().size(), 1);
     }
 
     // An edit's check that a newer check replaces before it is answered (only the latest is

@@ -33,6 +33,11 @@ Validation validateDocument(const Document &document, Context &context, const QS
     options.workflow = QFileInfo(workflow).absoluteFilePath();
     const GraphCheck check = checkGraph(*compilation, process.environment, options);
     validation.errors += check.warnings;
+    // What a node's own check found is a warning here, as before: validate's exit stays about the compile (8.5).
+    for (Error error : check.checkErrors) {
+        error.severity = Error::Severity::Warning;
+        validation.errors.append(error);
+    }
     for (auto it = check.states.begin(); it != check.states.end(); ++it)
         validation.nodes.insert(it.key(), QJsonObject{{"state", nodeStateName(it.value())}});
     for (auto it = compilation->skipped.begin(); it != compilation->skipped.end(); ++it)
