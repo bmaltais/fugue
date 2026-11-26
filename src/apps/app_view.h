@@ -268,6 +268,9 @@ public:
     void takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved);
     // What the tab runs in place of each missing model, by the missing handle's hash (the window's plan leaves those out).
     Uses usesOf(const QString &tab) const;
+    // usesOf() while the App view of `tab` is what shows: the graph runs and is judged by the workflow's own models, so what the
+    // graph's readiness reads is empty once the tab shows its graph.
+    Uses usesInForce(const QString &tab) const { return shown() && m_tab == tab ? usesOf(tab) : Uses(); }
     QVariantList usesList() const;
     // Back to the template's file: the field is as the workflow has it, the override gone.
     Q_INVOKABLE void undoUse(const QString &hash);

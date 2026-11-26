@@ -1027,6 +1027,34 @@ private slots:
         QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("hash").toString(), missing);
     }
 
+    // The choice is the App view's: the graph is judged by the workflow's own models, so what the graph's readiness reads is empty while
+    // the tab shows its graph. The lines follow the shown tab, and a forgotten one.
+    void theChoiceIsTheAppViewsAndTheLinesFollowTheShownTab() {
+        const QString type = QStringLiteral("fugue/upscale-model");
+        const QString missing = QStringLiteral("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        const QJsonObject wanted{{"resource", type}, {"hash", missing}, {"name", "x4plus.pth"}};
+        const QJsonObject replacement{{"resource", type}, {"hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, {"name", "x4.pth"}};
+        OnDiskUse use{wanted, {}};
+        use.match.name = QStringLiteral("x4.pth");
+        m_view->show("a", load(mediaWorkflow()), {});
+        m_view->takeUses("a", {use}, {{missing, replacement}});
+        QCOMPARE(m_view->usesInForce("a").value(missing), replacement);
+        QCOMPARE(m_view->usesList().size(), 1);
+        m_view->openInGraph();
+        QVERIFY(m_view->usesInForce("a").isEmpty());
+        QVERIFY(!m_view->usesOf("a").isEmpty()); // kept for when the App view comes back
+        m_view->showApp();
+        QCOMPARE(m_view->usesInForce("a").value(missing), replacement);
+
+        QSignalSpy changed(m_view.get(), &AppView::usesChanged);
+        m_view->show("b", load(mediaWorkflow()), {});
+        QVERIFY(changed.count() >= 1);
+        QVERIFY(m_view->usesList().isEmpty()); // not a's line
+        changed.clear();
+        m_view->forget("b");
+        QVERIFY(changed.count() >= 1);
+    }
+
     // A hash read on the pool answers the tab and the field that asked, even when another tab is shown by then.
     void aModelReadAfterATabSwitchGoesToTheTabThatAskedForIt() {
         QTemporaryDir models;

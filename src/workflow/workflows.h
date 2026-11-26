@@ -80,6 +80,8 @@ class Workflows : public QObject {
     Q_PROPERTY(QVariantList pendingTrust READ pendingTrust NOTIFY pendingTrustChanged)
     // A line for the banner: what failed to open, or what the workflow lacks. Empty for none.
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
+    // A file chosen in place of a missing model is being read (#605): its button waits, and a second click does nothing.
+    Q_PROPERTY(bool hashingUses READ hashingUses NOTIFY hashingUsesChanged)
     // Where the file picker starts: ~/Documents/Fugue as a file URL.
     Q_PROPERTY(QUrl suggestedFolder READ suggestedFolder CONSTANT)
     // The models being downloaded (#89).
@@ -320,6 +322,7 @@ public:
     // Opens the template with its missing models set to the files on disk (the template itself is unchanged); the files' hashes are
     // read first. False when there is no such template or nothing to use.
     Q_INVOKABLE bool openTemplateWithWhatYouHave(const QString &id);
+    bool hashingUses() const { return !m_hashing.isEmpty(); }
     // What the App view keeps changed: the banner, the Get ready list and the Needs panel look again.
     void usesChanged();
     // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
@@ -354,6 +357,7 @@ signals:
     void noticeChanged();
     // A file on disk was chosen in place of a missing model and applied (#605).
     void usesApplied();
+    void hashingUsesChanged();
     void openDialogRequested();
     void saveAsRequested();
     void exportShareRequested();
@@ -411,6 +415,10 @@ private:
     bool isPristine(int index) const;
     QString untitledName() const;
     void setNotice(const QString &text);
+    // Reads the hash of each file of `uses` in turn on the worker; `done` gets the handles resolved and the names of the files that
+    // could not be read.
+    void hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done);
+    void setHashing(const QString &key, bool on);
     void analyze(const Document &document, const QString &title);
     // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
     void offerReadiness();
@@ -480,6 +488,7 @@ private:
     mutable QList<OnDiskUse> m_onDisk; // onDiskNow()'s answer
     mutable QByteArray m_onDiskKey;
     mutable QElapsedTimer m_onDiskAge;
+    QSet<QString> m_hashing; // the targets whose chosen file is being read ("use:<tab> <hashes>", "open:<template>")
     Uses m_openUses; // the files a template opens with (openTemplateWithWhatYouHave)
     ReadinessSheet *m_readiness;
     QString m_readyTabId; // the tab the Get ready sheet was opened for

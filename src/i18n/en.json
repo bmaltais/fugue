@@ -2165,5 +2165,8 @@
   },
   "inherited, %1": "inherited, %1",
   "A list of %1 cannot feed this side: the other side is a single value.": "A list of %1 cannot feed this side: the other side is a single value.",
-  "A single %1 cannot feed this side: the other side is a list.": "A single %1 cannot feed this side: the other side is a list."
+  "A single %1 cannot feed this side: the other side is a list.": "A single %1 cannot feed this side: the other side is a list.",
+  "Could not read %1, so it is not used.": "Could not read %1, so it is not used.",
+  "Opened without %1: the file could not be read.": "Opened without %1: the file could not be read.",
+  "Reading your files...": "Reading your files..."
 }

@@ -305,8 +305,12 @@ Rules:
   quantization, or the same name and quantization from another publisher), offers that file wherever it offers a download. One piece
   decides (`findOnDisk`, engine/model_use.h): the file of one family and one stem that the engine can load, the Recommended one when
   there are several; never a file of another family, one with no readable header, or one the engine cannot load (SVDQuant, NVFP4 and the
-  like). A file with the wanted file's own name and quantization is offered too, said to be from another source (the bytes are not verified
-  identical). Nothing is swapped by itself, and a workflow file is rewritten only when the person saves. The offer reads "Use what you have:
+  like). When a file of the wanted model's own name is here, a file whose header figures differ from it is not the same weights and is not offered
+  (a model that is not on disk has no header, so family and stem decide). A file of the same quantization is said to be from another source,
+  whatever the spelling of its name (the bytes are not verified identical). The file's hash is read once on the worker: a second click for the
+  same target meanwhile does nothing, the button waits, and a file that cannot be read is said ("Could not read ..."; a template then opens
+  without it). In the App view the choice is the App view's alone: once the tab shows its graph, the graph's readiness and run use the
+  workflow's own models. Nothing is swapped by itself, and a workflow file is rewritten only when the person saves. The offer reads "Use what you have:
   <file> (same model, <tier>)" and is on: the node's yellow missing-model card ("Use it", one undo step), the Needs panel and the Get ready
   sheet (choosing it takes the row out of what is to be downloaded), the template card ("Open with what you have": the template opens with
   the files set; "Ready to run" counts it ready with the note "Uses another file of the same model"), and the CLI. In the graph the choice

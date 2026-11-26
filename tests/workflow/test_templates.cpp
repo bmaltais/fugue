@@ -1223,7 +1223,14 @@ private slots:
         QCOMPARE(card.value("status").toString(), QString("Uses another file of the same model"));
 
         QVERIFY(workflows.openTemplateWithWhatYouHave("zit")); // the hash is read on a worker: the tab comes when it is known
+        QVERIFY(workflows.hashingUses());
+        QVERIFY(workflows.openTemplateWithWhatYouHave("zit")); // a second click while it is read opens nothing more
         QTRY_VERIFY(canvas.document().graph.nodes.contains("models"));
+        QTRY_VERIFY(!workflows.hashingUses());
+        int opened_ = 0;
+        for (const QVariant &tab : workflows.tabs())
+            opened_ += tab.toMap().value("title").toString() == QLatin1String("Z");
+        QCOMPARE(opened_, 1);
         const QJsonObject opened = canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle();
         QCOMPARE(opened.value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
         QVERIFY(opened.value("hash").toString() != hash);
@@ -1231,6 +1238,39 @@ private slots:
         QFile own(f.bundled.filePath("zit/workflow.fugue")); // the template itself is as it was
         QVERIFY(own.open(QIODevice::ReadOnly));
         QVERIFY(own.readAll().contains("z_image_turbo_int8_convrot.safetensors"));
+    }
+
+    // A file that cannot be read when its hash is wanted is said: the template opens without it and the banner says why.
+    void aFileThatCannotBeReadIsSaidAndTheTemplateOpensWithout() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        const QString weights = models.filePath("diffusion_models/z_image_turbo_fp8.safetensors");
+        writeFile(weights, file + header);
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'5')},
+                                                                                              {"name", "z_image_turbo_int8_convrot.safetensors"}}}})}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QCOMPARE(workflows.templates().at(0).toMap().value("onDisk").toList().size(), 1); // the header is read and remembered
+        QVERIFY(QFile::setPermissions(weights, QFileDevice::Permissions()));
+        QVERIFY(workflows.openTemplateWithWhatYouHave("zit"));
+        QTRY_VERIFY(workflows.notice().contains("could not be read"));
+        QVERIFY2(workflows.notice().contains("z_image_turbo_fp8.safetensors"), qPrintable(workflows.notice()));
+        QVERIFY(!workflows.hashingUses());
+        QVERIFY(QFile::setPermissions(weights, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
     }
 
     // #164: a card says where its models are: on this machine, on a paired host, both, or

@@ -568,7 +568,8 @@ Popup {
                                         Layout.topMargin: dialog.u
                                         Layout.alignment: Qt.AlignLeft
                                         visible: cell.modelData.onDisk.length > 0 && !statusRow.downloading
-                                        text: qsTr("Open with what you have")
+                                        enabled: !App.workflows.hashingUses
+                                        text: App.workflows.hashingUses ? qsTr("Reading your files...") : qsTr("Open with what you have")
                                         Accessible.name: text
                                         tip: cell.modelData.onDisk.map(m => m.text).join("\n")
                                         onClicked: dialog.openWithWhatYouHave(cell.modelData.id)

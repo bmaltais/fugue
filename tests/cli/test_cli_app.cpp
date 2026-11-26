@@ -134,6 +134,18 @@ const char *kWantsInt8 = R"({"fugue": 1,
      "vae": {"resource": "fugue/vae", "hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "name": "v.safetensors"}}},
    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "name": "app"}}}}})";
 
+// The same app, its model also a field of the app whose default holds the model the file names (binding writes that default back).
+const char *kWantsInt8Field = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Wants INT8 field", "inputs": [{"role": "image", "targets": ["load.file"]},
+   {"name": "unet", "targets": ["models.diffusion_model"], "default": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "z_image_turbo_int8_convrot.safetensors"}}],
+   "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": ""}},
+   "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "z_image_turbo_int8_convrot.safetensors"},
+     "text_encoder": {"resource": "fugue/text-encoder", "hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "name": "t.safetensors"},
+     "vae": {"resource": "fugue/vae", "hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "name": "v.safetensors"}}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "name": "app"}}}}})";
+
 const char *kPlain = R"({"fugue": 1, "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})";
 
 } // namespace
@@ -257,6 +269,20 @@ private slots:
         QCOMPARE(valid.exitCode, 0);
         for (const QJsonValue warning : valid.json().value("warnings").toArray())
             QVERIFY2(warning.toObject().value("input").toString() != "diffusion_model", valid.out);
+    }
+
+    // The binding writes a field's default over the node; the file chosen for --use-on-disk has to be put in after it, or the command says
+    // it chose the file and runs with the missing model.
+    void useOnDiskSurvivesAFieldWhoseDefaultIsTheMissingModel() {
+        write(path("work/wants-field.fugue"), kWantsInt8Field);
+        write(path("root/data/fugue/models/text_encoders/t.safetensors"), "abc");
+        write(path("root/data/fugue/models/vae/v.safetensors"), "abc");
+        zImage("z_image_turbo_bf16.safetensors");
+        const Outcome ran = fugue({"app", "run", "wants-field.fugue", "--use-on-disk", "--input", "image=" + picture(), "--json"});
+        QVERIFY2(ran.err.contains("--use-on-disk: z_image_turbo_int8_convrot.safetensors -> "), ran.err);
+        QVERIFY2(ran.code() != QString("app_not_ready") && ran.code() != QString("model_missing"), ran.out + ran.err);
+        const Outcome bare = fugue({"app", "run", "wants-field.fugue", "--use-on-disk", "--json"});
+        QVERIFY2(bare.code() != QString("app_not_ready") && bare.code() != QString("model_missing"), bare.out + bare.err);
     }
 
     void listShowsTheAppsAndNotThePlainTemplates() {

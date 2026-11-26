@@ -45,16 +45,6 @@ QString OnDiskUse::cliHint(const QString &input) const {
         .arg(match.path, input.isEmpty() ? QStringLiteral("the input") : input);
 }
 
-namespace {
-
-// The same words, so only the folder or the extension's case differs: the file wanted, from another source.
-bool sameNameAndQuantization(const QString &wanted, const QString &file) {
-    return modelNameWords(wanted) == modelNameWords(file) &&
-           QFileInfo(wanted).suffix().toLower() == QFileInfo(file).suffix().toLower();
-}
-
-} // namespace
-
 std::optional<OnDiskMatch> findOnDisk(const QJsonObject &handle, const ModelLibrary &library, const RecommendContext &context, ModelShapes &shapes) {
     const QString resource = handle.value(QStringLiteral("resource")).toString();
     const QString wanted = handle.value(QStringLiteral("name")).toString();
@@ -65,14 +55,27 @@ std::optional<OnDiskMatch> findOnDisk(const QJsonObject &handle, const ModelLibr
     if (family.isEmpty())
         return std::nullopt;
     const QString stem = modelStem(wanted);
+    // The wanted model's header figures, when a file of its name is here (another folder, another hash): then a renamed file of another
+    // architecture is never offered (model_weights.h's rule). A model that is not on disk has no header to read, so its family and stem
+    // are all there is to go by.
+    QString wantedKey;
+    for (const ModelFile &file : library.list(*type))
+        if (QFileInfo(file.name).fileName().compare(QFileInfo(wanted).fileName(), Qt::CaseInsensitive) == 0) {
+            wantedKey = weightsKey(shapes.of(file.path), file.name);
+            if (!wantedKey.isEmpty())
+                break;
+        }
     // The same weights: one family, one stem, a header that reads and a quantization the engine can load.
     QList<ModelFile> same;
     for (const ModelFile &file : library.list(*type)) {
         if (modelFamily(familyKindOf(resource), file.name) != family || modelStem(file.name) != stem)
             continue;
         const std::optional<ModelShape> shape = shapes.of(file.path);
-        if (shape && shape->unloadable.isEmpty())
-            same << file;
+        if (!shape || !shape->unloadable.isEmpty())
+            continue;
+        if (!wantedKey.isEmpty() && weightsKey(shape, file.name) != wantedKey)
+            continue;
+        same << file;
     }
     if (same.isEmpty())
         return std::nullopt;
@@ -107,7 +110,8 @@ std::optional<OnDiskMatch> findOnDisk(const QJsonObject &handle, const ModelLibr
     match.tier = quantLabel(chosen->name);
     match.size = chosen->size;
     match.recommended = recommended;
-    match.otherSource = sameNameAndQuantization(wanted, chosen->name);
+    // The same quantization and not the same file (it is missing by hash): another source than the one the workflow names, whatever the words.
+    match.otherSource = quantLabel(wanted) == quantLabel(chosen->name);
     return match;
 }
 

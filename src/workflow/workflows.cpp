@@ -384,32 +384,73 @@ QVariantMap Workflows::onDiskOffer(const QString &hash) const {
     return {};
 }
 
+void Workflows::hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done) {
+    // A file's hash is read once and remembered (a file the pickers hashed before is known): on the worker, never the window's thread.
+    struct Chain {
+        Uses resolved;
+        QStringList failed;
+        std::function<void(int)> step;
+    };
+    const auto chain = std::make_shared<Chain>();
+    // The step holds the chain weakly: the pending read holds it, so a finished chain frees itself (no cycle).
+    chain->step = [this, uses, done = std::move(done), weak = std::weak_ptr<Chain>(chain)](int index) {
+        const std::shared_ptr<Chain> self = weak.lock();
+        if (!self)
+            return;
+        if (index >= uses.size()) {
+            const Uses resolved = self->resolved;
+            const QStringList failed = self->failed;
+            done(resolved, failed);
+            return;
+        }
+        const OnDiskUse use = uses.at(index);
+        m_work.hash(this, use.match.path, nullptr, [use, self, index](const QString &hash) {
+            if (hash.isEmpty())
+                self->failed << use.match.name;
+            else
+                self->resolved.insert(use.wanted.value(QStringLiteral("hash")).toString(), useHandle(use, hash));
+            self->step(index + 1);
+        });
+    };
+    chain->step(0);
+}
+
+void Workflows::setHashing(const QString &key, bool on) {
+    const bool was = hashingUses();
+    if (on)
+        m_hashing.insert(key);
+    else
+        m_hashing.remove(key);
+    if (was != hashingUses())
+        emit hashingUsesChanged();
+}
+
 void Workflows::useOnDisk(const QStringList &hashes) {
     if (m_current < 0)
         return;
     QList<OnDiskUse> chosen;
-    for (const OnDiskUse &use : onDiskNow())
-        if (hashes.isEmpty() || hashes.contains(use.wanted.value(QStringLiteral("hash")).toString()))
+    QStringList wanted;
+    for (const OnDiskUse &use : onDiskNow()) {
+        const QString hash = use.wanted.value(QStringLiteral("hash")).toString();
+        if (hashes.isEmpty() || hashes.contains(hash)) {
             chosen << use;
+            wanted << hash;
+        }
+    }
     if (chosen.isEmpty())
         return;
-    // A file's hash is read once and remembered (a file the pickers hashed before is known): on the worker, never the window's thread.
     const QString tab = m_tabs[size_t(m_current)].id;
-    const auto resolved = std::make_shared<Uses>();
-    const auto next = std::make_shared<std::function<void(int)>>();
-    *next = [this, tab, chosen, resolved, next](int index) {
-        if (index >= chosen.size()) {
-            applyUses(tab, chosen, *resolved);
-            return;
-        }
-        const OnDiskUse use = chosen.at(index);
-        m_work.hash(this, use.match.path, nullptr, [this, use, resolved, next, index](const QString &hash) {
-            if (!hash.isEmpty())
-                resolved->insert(use.wanted.value(QStringLiteral("hash")).toString(), useHandle(use, hash));
-            (*next)(index + 1);
-        });
-    };
-    (*next)(0);
+    wanted.sort();
+    const QString key = QStringLiteral("use:") + tab + QLatin1Char(' ') + wanted.join(QLatin1Char(' '));
+    if (m_hashing.contains(key))
+        return; // a second click for the same target while its file is being read
+    setHashing(key, true);
+    hashUses(chosen, [this, tab, chosen, key](const Uses &resolved, const QStringList &failed) {
+        setHashing(key, false);
+        applyUses(tab, chosen, resolved);
+        if (!failed.isEmpty())
+            setNotice(tr("Could not read %1, so it is not used.").arg(failed.join(QStringLiteral(", "))));
+    });
 }
 
 void Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
@@ -417,7 +458,7 @@ void Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, co
         return; // a file that could not be read, or another tab was shown meanwhile
     if (!(m_useTaker && m_useTaker(tab, chosen, resolved))) {
         // The graph: the document itself, one undo step; the file is written only when the person saves.
-        m_canvas->commit(withUses(m_canvas->document(), resolved), tr("Use the files you have"));
+        m_canvas->commitWhole(withUses(m_canvas->document(), resolved), tr("Use the files you have"));
         m_onDiskKey.clear();
     }
     usesChanged();
@@ -440,24 +481,19 @@ bool Workflows::openTemplateWithWhatYouHave(const QString &id) {
                                              ModelShapes::shared());
     if (uses.isEmpty())
         return false;
+    const QString key = QStringLiteral("open:") + id;
+    if (m_hashing.contains(key))
+        return true; // a second click while the files are being read opens no second tab
     // The files' hashes are read first (once, on the worker); the template opens when they are known.
-    const auto resolved = std::make_shared<Uses>();
-    const auto next = std::make_shared<std::function<void(int)>>();
-    *next = [this, chosen = *chosen, uses, resolved, next](int index) {
-        if (index >= uses.size()) {
-            m_openUses = *resolved;
-            openTemplate(chosen);
-            m_openUses.clear();
-            return;
-        }
-        const OnDiskUse use = uses.at(index);
-        m_work.hash(this, use.match.path, nullptr, [use, resolved, next, index](const QString &hash) {
-            if (!hash.isEmpty())
-                resolved->insert(use.wanted.value(QStringLiteral("hash")).toString(), useHandle(use, hash));
-            (*next)(index + 1);
-        });
-    };
-    (*next)(0);
+    setHashing(key, true);
+    hashUses(uses, [this, chosen = *chosen, key](const Uses &resolved, const QStringList &failed) {
+        setHashing(key, false);
+        m_openUses = resolved;
+        openTemplate(chosen);
+        m_openUses.clear();
+        if (!failed.isEmpty())
+            setNotice(tr("Opened without %1: the file could not be read.").arg(failed.join(QStringLiteral(", "))));
+    });
     return true;
 }
 

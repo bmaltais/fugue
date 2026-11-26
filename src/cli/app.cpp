@@ -21,6 +21,8 @@
 #include <memory>
 #include <optional>
 
+#include <utility>
+
 #include "cli/canvas_run.h"
 #include "cli/compile_step.h"
 #include "cli/commands.h"
@@ -540,6 +542,13 @@ Reply appRun(const Command &command, Context &context) {
     Result<Document> bound = app::bindApp(loaded->document, loaded->app, *values);
     if (!bound)
         return Reply::failure(bound.errors());
+    // A field's default may hold the missing model, and binding writes it over the file chosen above: put the file in again, saying
+    // nothing twice, before the readiness check that follows.
+    if (command.has("use-on-disk")) {
+        const auto log = std::exchange(context.log, nullptr);
+        *bound = useOnDisk(*bound, context);
+        context.log = log;
+    }
     // A model picked with --input has to be here too.
     if (!values->isEmpty())
         if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen))

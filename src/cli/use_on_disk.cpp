@@ -39,9 +39,11 @@ QString inputOf(const Document &document, const QString &hash) {
 QList<OnDiskUse> usesFor(const Document &document, Context &context) {
     FileHashes hashes(FileHashes::defaultPath());
     const ModelLibrary library = ModelLibrary::current(&context.registry);
+    const QList<MissingModel> missing = library.missing(modelsToHave(document, context.registry), hashes);
+    if (missing.isEmpty())
+        return {}; // a plain run with everything here reads no folder, no header and no device
     const ModelSpeeds speeds;
-    return onDiskUses(library.missing(modelsToHave(document, context.registry), hashes), library,
-                      RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared());
+    return onDiskUses(missing, library, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared());
 }
 
 } // namespace

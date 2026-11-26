@@ -170,6 +170,7 @@ void AppView::show(const QString &tab, const Document &document, const QString &
             scheduleLive(tab);
     }
     emit appChanged();
+    emit usesChanged(); // the "Using ..." lines are the shown tab's
     emit runChanged();
     emit progressChanged();
     emit liveChanged();
@@ -196,6 +197,7 @@ void AppView::forget(const QString &tab) {
         m_app.reset();
         m_fields.clear();
         emit appChanged();
+        emit usesChanged();
         emit runChanged();
     }
 }

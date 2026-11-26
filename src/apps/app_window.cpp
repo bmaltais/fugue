@@ -111,7 +111,7 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // choice is the app's own (kept with its form's values, never written to its workflow); in the graph it edits the document.
     needs->setUseSource([&workflows](const QString &hash) { return workflows.onDiskOffer(hash); });
     QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QString &hash) { workflows.useOnDisk({hash}); });
-    workflows.setUsesProvider([&view](const QString &tab) { return view.usesOf(tab); });
+    workflows.setUsesProvider([&view](const QString &tab) { return view.usesInForce(tab); });
     workflows.setUseTaker([&view](const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
         if (!view.shown() || view.tab() != tab)
             return false;

@@ -10,6 +10,7 @@
 
 #include "apps/app_builder.h"
 #include "canvas/canvas_model.h"
+#include "canvas/group_edit.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
 #include "engine/registry.h"
@@ -58,6 +59,30 @@ class TestAppBuilder : public QObject {
     Q_OBJECT
 
 private slots:
+    // Apply while a group is entered writes the app block of the whole workflow: the group's definition is not replaced by the top level.
+    void applyingInsideAGroupLeavesTheGroupDefinitionAlone() {
+        Fixture f;
+        f.canvas.select({"grow"});
+        const QString instance = f.canvas.groups()->makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(f.canvas.groups()->problem()));
+        QVERIFY(f.builder.begin(QStringLiteral("In a group")));
+        QVERIFY(f.builder.exposeInput("load", "file"));
+        QVERIFY(f.builder.addOutput("save"));
+        const Document before = f.canvas.document();
+        QVERIFY(f.canvas.groups()->enterGroup(instance));
+        const int steps = f.canvas.undoStack()->count();
+        QVERIFY(f.builder.apply(false));
+        QCOMPARE(f.canvas.undoStack()->count(), steps + 1);
+        QVERIFY(f.canvas.inGroup());
+        const Document after = f.canvas.document();
+        QCOMPARE(after.toJson().value("groups"), before.toJson().value("groups"));
+        QCOMPARE(after.toJson().value("graph"), before.toJson().value("graph"));
+        QVERIFY(after.extra.value(QStringLiteral("app")).isObject());
+        f.canvas.undoStack()->undo();
+        QCOMPARE(f.canvas.document().toJson().value("groups"), before.toJson().value("groups"));
+        QVERIFY(!f.canvas.document().extra.value(QStringLiteral("app")).isObject());
+    }
+
     void aNewWorkflowBecomesAnAppInAFewCallsAsOneUndoStep() {
         Fixture f;
         QVERIFY(!f.builder.hasBlock());
