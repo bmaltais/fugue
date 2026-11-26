@@ -131,6 +131,13 @@ public:
     // files of Dynamic Prompt), as text that changes when they do. It goes into the cache key (10.1);
     // empty (the default) leaves the key as it was. Called on the scheduler's thread.
     virtual QString keyExtra(const Values &inputs) const { Q_UNUSED(inputs); return {}; }
+
+    // The lazy inputs (InputSpec::lazy) the node needs, asked once every input that is not lazy has its value
+    // (`ready`: those inputs, by name, as they will reach the kernel; an empty one is absent). What feeds a lazy input
+    // that is not returned is not started for this node (9.9); a node that nothing else asks for is skipped as
+    // `not_chosen`. The default asks for them all. Not called under validate, where every lazy input is taken as
+    // needed. Called on the scheduler's thread, so it must be quick.
+    virtual QStringList lazyInputs(const NodeType &type, const Values &ready) const;
 };
 
 class ProviderKernel {

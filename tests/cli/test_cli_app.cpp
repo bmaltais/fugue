@@ -96,6 +96,16 @@ const char *kSampled = R"({"fugue": 1,
    "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "m.safetensors"}}},
    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}}}}})";
 
+// #557: a model only a Switch's lazy side reaches, with the condition fixed to the other side: the run needs nothing that is missing.
+const char *kSwitchedOff = R"({"fugue": 1,
+ "requires": {"models": [{"resource": "fugue/image-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "m.safetensors", "source": "h.example/m.safetensors", "size": 7}]},
+ "app": {"format": 1, "title": "Switched", "inputs": [{"role": "image", "targets": ["load.file"]}], "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "inputs/pic.png"}},
+   "gen": {"type": "fugue/generate-image", "version": "1.1.0", "inputs": {"prompt": "a cat", "model": {"resource": "fugue/image-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "m.safetensors"}}},
+   "sw": {"type": "fugue/switch", "version": "1.0.0", "inputs": {"condition": false, "on_true": {"from": "gen.image"}, "on_false": {"from": "load.image"}}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "sw.value"}, "name": "app"}}}}})";
+
 // A second picture that is optional (#484): it is the mask of a Color Match, and left out its Load Image is bypassed, so the mask is absent.
 const char *kOptionalMask = R"({"fugue": 1,
  "app": {"format": 1, "title": "Match", "inputs": [{"role": "image", "targets": ["load.file"]},
@@ -339,6 +349,19 @@ private slots:
         QVERIFY2(ran.code() != QString("app_not_ready"), ran.out + ran.err);
         QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
         QCOMPARE(fugue({"app", "run", "unsourced.fugue", "--json"}).code(), QString("app_not_ready")); // no helper: refused as before
+    }
+
+    // #557: no paired helper, and the model is held only by the side the Switch does not take: the run is not refused as not ready (it
+    // would fail with its own model_missing if the other side were chosen, as it does here with the condition flipped).
+    void aModelOnlyAnUnchosenSwitchSideNeedsDoesNotRefuseTheRun() {
+        write(path("work/switched.fugue"), kSwitchedOff);
+        QVERIFY(fugue({"app", "info", "switched.fugue", "--json"}).data().value("ready").toBool());
+        const Outcome ran = fugue({"app", "run", "switched.fugue", "--input", "image=" + picture(), "--json"});
+        QVERIFY2(ran.exitCode == 0, ran.out + ran.err);
+        QByteArray chosen = kSwitchedOff;
+        chosen.replace("\"condition\": false", "\"condition\": true");
+        write(path("work/chosen.fugue"), chosen);
+        QCOMPARE(fugue({"app", "run", "chosen.fugue", "--input", "image=" + picture(), "--json"}).code(), QString("model_missing"));
     }
 
     // #491: the run is refused up front, naming the node, when the paired helper cannot take it: a node pinned to a provider on this

@@ -1,0 +1,16 @@
+{
+  "manifest": 1,
+  "id": "fugue/not",
+  "version": "1.0.0",
+  "name": "Not",
+  "description": "Flips a boolean: true becomes false and false becomes true.",
+  "category": "Basic",
+  "keywords": ["logic", "boolean", "invert", "negate", "condition"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "value", "type": "boolean", "label": "Value", "default": false, "widget": "toggle"}
+  ],
+  "outputs": [
+    {"name": "value", "type": "boolean", "label": "Value"}
+  ]
+}

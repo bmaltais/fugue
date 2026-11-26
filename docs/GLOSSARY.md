@@ -20,6 +20,10 @@ _Avoid_: control type, editor
 A named, typed slot on a node that takes either a literal value or a link from another node's output. There is no separate "parameter" kind.
 _Avoid_: parameter, socket, pin
 
+**Lazy input**:
+An input marked `lazy`: what feeds it is not started until the node asks for it, once its other inputs are in. The If/Else Switch asks only for the side its condition chooses; a node nothing asks for is skipped as `not_chosen`.
+_Avoid_: conditional input, deferred input
+
 **Output**:
 A named, typed slot on a node that carries a value it produced or used, such as the seed it actually ran with. May be optional.
 _Avoid_: result, return value

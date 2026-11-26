@@ -1,0 +1,24 @@
+{
+  "manifest": 1,
+  "id": "fugue/expression",
+  "version": "1.0.0",
+  "name": "Expression",
+  "description": "Works out a formula over up to six values, a to f (numbers or booleans). Operators: + - * / % ** (power), == != < > <= >=, and or not, and x if c else y. Functions: round floor ceil abs min max clamp sqrt pow log log2 log10 sin cos tan. Also true, false and pi. A comparison, and, or and not give a boolean; a boolean counts as 1 or 0 in arithmetic and a number is true unless it is 0. Dividing by zero, the log of a value of 0 or less and a result beyond 1e15 are errors. An input that is not connected is an error only when the formula reaches it.",
+  "category": "Basic",
+  "keywords": ["math", "formula", "calculate", "condition", "compare", "equation", "logic", "if", "else", "switch"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "formula", "type": "text", "label": "Formula", "default": "a + b", "widget": "line",
+     "description": "For example a * 2 + 1, a > 1024 and b, or clamp(a / b, 0, 1)."},
+    {"name": "a", "type": "any", "label": "A", "optional": true},
+    {"name": "b", "type": "any", "label": "B", "optional": true},
+    {"name": "c", "type": "any", "label": "C", "optional": true},
+    {"name": "d", "type": "any", "label": "D", "optional": true},
+    {"name": "e", "type": "any", "label": "E", "optional": true},
+    {"name": "f", "type": "any", "label": "F", "optional": true}
+  ],
+  "outputs": [
+    {"name": "number", "type": "number", "label": "Number", "description": "The result as a number; a boolean result is 1 or 0."},
+    {"name": "boolean", "type": "boolean", "label": "Boolean", "description": "The result as a boolean: true unless it is 0."}
+  ]
+}

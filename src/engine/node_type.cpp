@@ -211,6 +211,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.string(o, "label", input.label, where, n);
     r.string(o, "description", input.description, where, n);
     r.boolean(o, "optional", input.optional, where, n);
+    r.boolean(o, "lazy", input.lazy, where, n);
     r.count(o, "min_items", input.minItems, where, n);
     r.count(o, "max_items", input.maxItems, where, n);
     r.number(o, "min", input.min, where, n);
@@ -232,7 +233,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     }
     input.defaultValue = o.value("default");
     r.unknownFields(o,
-                    {"name", "type", "label", "description", "default", "optional", "list", "min_items",
+                    {"name", "type", "label", "description", "default", "optional", "lazy", "list", "min_items",
                      "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
                      "advanced", "role", "over", "shown_when"},
                     where, n);
@@ -314,8 +315,8 @@ std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int ind
         r.fail(where + QStringLiteral(" has %1 as its \"type\", which is not a port type.").arg(shown(type)), {},
                n);
         bad = true;
-    } else if (parsed->isAny()) {
-        r.fail(where + QStringLiteral(" cannot be of type \"any\"; only inputs of built-in nodes can."), {}, n);
+    } else if (parsed->isAny() && !o.contains("follows")) {
+        r.fail(where + QStringLiteral(" cannot be of type \"any\" unless it has \"follows\"; only built-in nodes can."), {}, n);
         bad = true;
     } else {
         output.type.type = *parsed;
@@ -326,10 +327,13 @@ std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int ind
     r.boolean(o, "optional", output.optional, where, {}, n);
     r.string(o, "role", output.role, where, {}, n);
     r.strings(o, "carries", output.carries, where);
+    r.strings(o, "follows", output.follows, where);
+    if (o.contains("follows") && (!parsed || !parsed->isAny() || output.follows.isEmpty()))
+        r.fail(where + QStringLiteral(" has \"follows\" but is not of type \"any\", or names no input."), {}, n);
     readCondition(r, o, "carries_when", output.carriesWhen, where, {}, n);
     if (o.contains("carries_when") && output.carries.isEmpty())
         r.fail(where + QStringLiteral(" has \"carries_when\" but carries nothing."), {}, n);
-    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional", "role", "carries", "carries_when"},
+    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional", "role", "carries", "follows", "carries_when"},
                     where, {}, n);
     if (!output.role.isEmpty() && (output.role != QLatin1String(kMaskRole) || !parsed || parsed->id != "image"))
         r.fail(where + QStringLiteral(" has the role \"%1\"; the only role is \"mask\", on an image port.")
@@ -572,6 +576,7 @@ QJsonObject NodeType::toJson() const {
         if (!input.defaultValue.isUndefined())
             i.insert("default", input.defaultValue);
         putIfTrue(i, "optional", input.optional);
+        putIfTrue(i, "lazy", input.lazy);
         putIf(i, "min_items", input.minItems);
         putIf(i, "max_items", input.maxItems);
         putIf(i, "min", input.min);
@@ -599,6 +604,8 @@ QJsonObject NodeType::toJson() const {
         putIf(out, "description", output.description);
         putIfTrue(out, "optional", output.optional);
         putIf(out, "role", output.role);
+        if (!output.follows.isEmpty())
+            out.insert("follows", QJsonArray::fromStringList(output.follows));
         if (!output.carries.isEmpty())
             out.insert("carries", QJsonArray::fromStringList(output.carries));
         if (!output.carriesWhen.isEmpty())

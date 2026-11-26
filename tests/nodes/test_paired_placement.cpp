@@ -355,6 +355,46 @@ private slots:
         QVERIFY(!blockedOne.runsOn());
     }
 
+    // #557: a node that only a lazy input reaches (a Switch's side) may never run, so its missing model blocks nothing; the one that
+    // is also read through an input that is not lazy is certain to run and is still placed.
+    void aNodeOnlyALazyInputReachesIsNotPlaced() {
+        const QByteArray json = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+          "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%1", "name": "m.safetensors"}, %2}},
+          "a": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}, "prompt": "a cat"}},
+          "b": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}, "prompt": "a dog"}},
+          "pick": {"type": "fugue/switch", "version": "1.0.0", "inputs": {"condition": true, "on_true": {"from": "a.conditioning"}, "on_false": {"from": "b.conditioning"}}},
+          "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "pick.value"}}},
+          "also": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "b.conditioning"}}}}}})").arg(hash, others).toUtf8();
+        const Result<Document> loaded = Document::fromJson(QJsonDocument::fromJson(json).object());
+        QVERIFY(loaded);
+        FakeHosts none({{"gx10", {"latent.sample"}}}); // nobody offers text.encode
+        const PairedVerdict made = verdict(loaded.value(), missing(), request(), none);
+        QCOMPARE(made.blocked.size(), 1);
+        QCOMPARE(made.blocked.first().node, QStringLiteral("b")); // a sink reads it, so it always runs
+    }
+
+    // #557: the same rule for what a run is refused on (`fugue app run`, the Needs panel, Get ready): a model only a lazy input reaches
+    // is not asked for; the one a node that is certain to run holds still is.
+    void aModelOnlyALazyInputReachesIsNotInTheReadinessRequest() {
+        const QString other = "sha256:" + QString(64, QLatin1Char('f'));
+        const QByteArray json = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+          "m1": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%1", "name": "m.safetensors"}, %3}},
+          "m2": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%2", "name": "n.safetensors"}, %3}},
+          "a": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"model": {"from": "m1.model"}, "prompt": "a cat"}},
+          "b": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"model": {"from": "m2.model"}, "prompt": "a dog"}},
+          "pick": {"type": "fugue/switch", "version": "1.0.0", "inputs": {"condition": false, "on_true": {"from": "a.conditioning"}, "on_false": {"from": "b.conditioning"}}},
+          "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "pick.value"}}},
+          "also": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "b.conditioning"}}}}}})")
+                                    .arg(hash, other, others).toUtf8();
+        const Result<Document> loaded = Document::fromJson(QJsonDocument::fromJson(json).object());
+        QVERIFY(loaded);
+        QStringList hashes;
+        for (const QJsonValue model : requestFor(loaded.value(), registry()).models)
+            hashes << model.toObject().value("hash").toString();
+        QVERIFY(!hashes.contains(hash));   // only a, which only the Switch's lazy side reads
+        QVERIFY(hashes.contains(other));   // b is read by a sink too
+    }
+
     void aModelWithNoSourceCountsAsMissingToo() {
         ReadinessPlan plan;
         plan.unobtainable << QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "m.safetensors"}};

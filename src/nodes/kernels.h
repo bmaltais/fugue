@@ -25,6 +25,8 @@ void addPixelKernels(Kernels &kernels);           // pixel.cpp
 void addSaveMediaKernels(Kernels &kernels);       // save_media.cpp
 void addDynamicPromptKernels(Kernels &kernels);  // dynamic_prompt.cpp
 void addTextTemplateKernels(Kernels &kernels);   // text_template.cpp
+void addExpressionKernels(Kernels &kernels);     // expression.cpp
+void addSwitchKernels(Kernels &kernels);         // switch.cpp
 void addTextGenerationKernels(Kernels &kernels);  // text_generation.cpp
 void addUpscaleKernels(Kernels &kernels);         // upscale.cpp
 void addRestoreKernels(Kernels &kernels);         // restore.cpp

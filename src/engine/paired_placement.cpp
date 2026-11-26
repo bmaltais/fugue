@@ -1,4 +1,5 @@
 #include "engine/paired_placement.h"
+#include "engine/lazy_reach.h"
 
 #include "engine/compiler.h"
 #include "engine/group_library.h"
@@ -16,20 +17,6 @@
 namespace fugue {
 
 namespace {
-
-// The hashes of the handles anywhere inside `value` (a derived handle nests its parts).
-void collectHashes(const QJsonValue &value, QSet<QString> &hashes) {
-    if (value.isArray()) {
-        for (const QJsonValue &item : value.toArray())
-            collectHashes(item, hashes);
-    } else if (value.isObject()) {
-        const QJsonObject object = value.toObject();
-        if (const QString hash = object.value("hash").toString(); !hash.isEmpty())
-            hashes.insert(hash);
-        for (auto it = object.begin(); it != object.end(); ++it)
-            collectHashes(it.value(), hashes);
-    }
-}
 
 void collectLinks(const InputValue &value, QList<PortRef> &nodes) {
     if (value.kind() == InputValue::Kind::Link) {
@@ -150,9 +137,12 @@ QList<Need> nodesNeedingModels(const Document &document, const ReadinessPlan &pl
             }
     }
 
+    // A node only a lazy input reaches may never run (a Switch's other side): its model does not stop the run, and if the
+    // side is chosen the node fails with its own model_missing error (3.4).
+    const QSet<QString> conditional = conditionalNodes(*compiled, registry);
     QList<Need> found;
     for (auto node = nodes.cbegin(); node != nodes.cend(); ++node) {
-        if (!reaching.contains(node.key()))
+        if (!reaching.contains(node.key()) || conditional.contains(node.key()))
             continue;
         const NodeType *type = typeOf(*node);
         std::optional<Requirement> requirement = type ? request.requirementOf(*type, knownInputs(*type, *node)) : std::nullopt;

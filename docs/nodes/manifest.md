@@ -70,6 +70,7 @@ and in `fugue pack list`. It never stops Fugue.
 | `label`, `description` | Shown on the node face and in tooltips. |
 | `default` | For `text`, `number` and `boolean`. An input with no default and not `optional` must be given. |
 | `optional` | May be unset or unwired; then it is absent from the request. |
+| `lazy` | The engine starts what feeds this input only when the node asks for it (`NodeKernel::lazyInputs` for a built-in node; a pack program's lazy inputs are all asked for). Required or optional as declared. A lazy input the node did not ask for is absent from its inputs and its cache key. See spec 3.2 and 3.4. |
 | `list`, `min_items`, `max_items` | A list input and its size limits. |
 | `min`, `max`, `step`, `integer` | Number limits. A value outside them is `value_out_of_range`. |
 | `choices` | Allowed values of a `text` input; it becomes a choice. |
@@ -92,6 +93,6 @@ Widgets come from a fixed set: no pack ships UI code, so every node looks alike.
 | `paint` | text: a painted canvas with layers, the path of an `.ora` file in the inputs folder; `over` names the `image` input it is painted over (the paint window edits it, spec 14.4) |
 | `seed` | number: fixed, randomize or increment |
 
-Outputs have `name`, `type`, `label`, `description`, `list`, `optional` and `role` (`"mask"` on an `image` output that holds a mask).
+Outputs have `name`, `type`, `label`, `description`, `list`, `optional` and `role` (`"mask"` on an `image` output that holds a mask). A built-in node's output of type `any` has `follows`, a list of its `any` inputs: it takes the type of the first of them that is linked (the If/Else Switch's `value`).
 
 Unknown fields are a warning, not an error. `ui` must be absent.

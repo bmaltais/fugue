@@ -16,6 +16,7 @@
 
 #include "engine/document.h"
 #include "engine/file_hashes.h"
+#include "engine/lazy_reach.h"
 #include "engine/model_catalog.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
@@ -59,7 +60,7 @@ QString packName(const PackSummary &pack) { return pack.name.isEmpty() ? pack.id
 ReadinessRequest requestFor(const Document &document, const Registry &registry, const QList<CarriedPack> &carried,
                             const QString &baseFolder) {
     ReadinessRequest request;
-    request.models = document.models();
+    request.models = modelsToHave(document, registry); // not a model only a Switch's lazy side holds (#557)
     const QStringList needed = packsNeeded(document, registry);
     const QJsonObject recorded = document.requirements.value(QStringLiteral("packs")).toObject();
     for (const PackUse &use : TrustStore::packsUsed(document, registry)) {
