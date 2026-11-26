@@ -8,6 +8,7 @@ cmake_file="$root/helper/CMakeLists.txt"
 # shellcheck source=/dev/null
 source "$root/packaging/PKGBUILD"
 status=0
+# shellcheck disable=SC2154 # _sdcpp, _ggml and _cutlass come from the PKGBUILD sourced above
 for commit in "$_sdcpp" "$_ggml" "$_cutlass"; do
   grep -q "$commit" "$cmake_file" || { echo "packaging/PKGBUILD pins $commit, helper/CMakeLists.txt does not"; status=1; }
 done

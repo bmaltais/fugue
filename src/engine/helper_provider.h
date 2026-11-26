@@ -59,8 +59,14 @@ struct CudaHelperNotice {
     // True on Arch (and Arch-based) hosts that run the packaged build; false in an AppImage or without pacman.
     static bool usesPacman();
     static bool due(const QStringList &folders, bool nvidia, const QString &stateFolder);
+    // The same question when AppRun chose the helper (`helperPath` is its FUGUE_HELPER): the AppImage ships none, so the
+    // folders above do not hold it. Due when it is the Vulkan or the CPU helper, not already the CUDA one.
+    static bool dueForHelper(const QString &helperPath, bool nvidia, const QString &stateFolder);
     static void dismiss(const QString &stateFolder);
-    // On this machine; never due when FUGUE_HELPER names the helper.
+    // True when the person named the helper: FUGUE_HELPER is set and the AppImage's AppRun did not set it (AppRun exports
+    // FUGUE_HELPER_FROM_APPRUN=1 beside the helper it found, so its own choice does not hide the offer).
+    static bool helperChosenByUser();
+    // On this machine; never due when the person set FUGUE_HELPER.
     static bool due();
     static void dismiss();
 };

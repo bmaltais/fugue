@@ -93,3 +93,10 @@ fast lane. One check, `ci-ok`, covers both kinds of pull request, and branch pro
 Only main, weekly, tag and manual runs save the compiler cache; a pull request restores it and never saves.
 A new push cancels that pull request's older run. `ci.yml` uses plain `pull_request`, with no secrets and a
 read-only token, so a fork's code never runs with the repo's permissions.
+
+## Workflow lint
+
+`workflows_lint` (tests/workflows_lint.sh) runs actionlint, and the shellcheck it applies to every `run:` block, over
+`.github/workflows`. A workflow error otherwise shows only when GitHub runs it, and for the release jobs that is only on a
+tag. It uses `actionlint` from PATH, else the pinned `rhysd/actionlint` image if podman already has it, and is skipped
+otherwise (`podman pull docker.io/rhysd/actionlint:1.7.7` once to enable it).
