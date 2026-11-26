@@ -308,16 +308,23 @@ Rules:
   like). When a file of the wanted model's own name is here, a file whose header figures differ from it is not the same weights and is not offered
   (a model that is not on disk has no header, so family and stem decide). A file of the same quantization is said to be from another source,
   whatever the spelling of its name (the bytes are not verified identical). The file's hash is read once on the worker: a second click for the
-  same target meanwhile does nothing, the button waits, and a file that cannot be read is said ("Could not read ..."; a template then opens
+  same target meanwhile does nothing, that model's own row says it is reading, and a file that cannot be read is said ("Could not read ..."; a template then opens
   without it). In the App view the choice is the App view's alone: once the tab shows its graph, the graph's readiness and run use the
-  workflow's own models. Nothing is swapped by itself, and a workflow file is rewritten only when the person saves. The offer reads "Use what you have:
-  <file> (same model, <tier>)" and is on: the node's yellow missing-model card ("Use it", one undo step), the Needs panel and the Get ready
-  sheet (choosing it takes the row out of what is to be downloaded), the template card ("Open with what you have": the template opens with
-  the files set; "Ready to run" counts it ready with the note "Uses another file of the same model"), and the CLI. In the graph the choice
-  edits the document (one undo step). In the App view it is the app's own: a model field of the form that holds the missing model takes the
-  file as its value (kept with the form's values, so Reuse inputs and the takes know it), a model the form does not show is kept as an
-  override of the tab, and Run binds it into the copy it runs; the app's workflow is never written, and the line under the Needs panel
-  ("Using <file> in place of <name>") has Undo, back to the template's file. The app is Ready when every missing model has a chosen file.
+  workflow's own models. Nothing is swapped by itself, and a workflow file is rewritten only when the person saves. The choice is **Use my file** or **Download**, per model, on every surface that offers the download, and nothing happens before the surface's yes.
+  In Get ready each matched row has a `Use my file | Download <size>` choice, on Use my file at first (owner, 2026-11-26): the headline, the totals and
+  the Destination follow it, the primary is Install while anything downloads or installs and Use my file when only the person's files are left, the
+  yes reads the files first (each row says "Reading your file…" with the hash's own percent), then runs the rest, and the sheet closes by itself when
+  nothing is left; Cancel discards the choices. A template card that is Ready only through the person's files (its other models are here, no pack
+  is needed) opens straight away with them, with no sheet: the banner names the file ("Opened with your file <file> in place of <name> (same model,
+  <tier>).") and has Undo; the card says "Ready · uses your <tier> file", and a mixed card says how many the person has and counts only the models a
+  download would fetch; the template details' "Download <size>…" opens the template as it is with Get ready on Download. The Needs panel has Use my
+  file beside each such row, and its header chip uses every file at once when all are covered (Get ready… when some are; Download all never fetches a
+  covered model). The node's yellow missing-model card says it on hover and has the **Use my file** button when kept up (one undo step); its badge is
+  reached by the keyboard. In the graph the choice edits the document (one undo step). In the App view it is the app's own: a model field of the
+  form that holds the missing model takes the file as its value (kept with the form's values, so Reuse inputs and the takes know it), a model the
+  form does not show is kept as an override of the tab, and Run binds it into the copy it runs; the app's workflow is never written, and the line
+  under the Needs panel ("Using <file> in place of <name>") has Undo, back to the template's file, with a tip that says it needs a download. The app
+  is Ready when every missing model has a chosen file.
   The CLI says it in `model_missing` and `app_not_ready` ("the same model is on disk as <path>; set <node>.<input> to it, or pass
   --use-on-disk") and `fugue run`, `fugue app run` and `fugue validate` take `--use-on-disk`: the same piece, for that command only, each
   substitution printed on stderr.

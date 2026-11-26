@@ -24,6 +24,7 @@
 #include "engine/port_type.h"
 #include "engine/registry.h"
 #include "workflow/image_inputs.h"
+#include "workflow/model_downloads.h"
 #include "run/run_service.h"
 
 namespace fugue {
@@ -351,7 +352,7 @@ void AppView::takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const
         const auto handle = resolved.constFind(hash);
         if (handle == resolved.constEnd())
             continue;
-        TabState::ModelUse kept{use.wanted.value("name").toString(), use.match.name, use.match.tier, use.match.otherSource, handle.value(), {}};
+        TabState::ModelUse kept{use.wanted.value("name").toString(), use.match.name, use.match.tier, use.match.otherSource, handle.value(), use.wantedSize, {}};
         // A model field of the form that holds the missing model takes the file: it is what the form shows and the takes record. The
         // tab's own state holds it, so it holds for a tab that is not shown too (it shows the file when it comes back).
         for (auto field = state.modelHeld.cbegin(); field != state.modelHeld.cend(); ++field) {
@@ -363,6 +364,12 @@ void AppView::takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const
             if (tab == m_tab)
                 emit valueChanged(field.key());
         }
+        // Chosen again (a second press while the file was read): the fields the first choice changed already hold the file, so they are kept,
+        // or Undo would leave the file in the form.
+        if (const auto earlier = state.uses.constFind(hash); earlier != state.uses.constEnd())
+            for (const QString &key : earlier->keys)
+                if (!kept.keys.contains(key))
+                    kept.keys << key;
         state.uses.insert(hash, kept);
     }
     emit usesChanged();
@@ -393,6 +400,7 @@ QVariantList AppView::usesList() const {
                                 {"name", it->name},
                                 {"file", it->file},
                                 {"tier", it->tier},
+                                {"size", it->wantedSize >= 0 ? ModelDownloads::sizeText(it->wantedSize) : QString()},
                                 {"text", tr("Using %1 in place of %2 (%3).").arg(it->file, it->name, text.sameModelText())}});
     }
     return list;

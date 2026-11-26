@@ -383,6 +383,7 @@ private:
             QString name, file, tier;
             bool otherSource = false;
             QJsonObject handle;
+            qint64 wantedSize = -1; // the download Undo brings back, when it is known
             QStringList keys;
         };
         QMap<QString, ModelUse> uses;

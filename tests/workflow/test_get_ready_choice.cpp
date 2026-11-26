@@ -1,0 +1,218 @@
+// The Get ready sheet's choice for a model whose same weights are on disk (UI design 2026-11-26, #616): "Use my file" (the default) or
+// "Download", kept in the sheet and acting only at the yes. The sheet is ReadinessSheet over a made-up request (two models that are not on
+// disk, a use source that says one or both have a file of their own); the window's part (reading the file, setting it in the document) is
+// played by the test, so nothing is read, installed or downloaded here. The Workflows side is test_templates.
+
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QSignalSpy>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include "engine/registry.h"
+#include "nodes/builtin.h"
+#include "translator.h"
+#include "workflow/readiness_sheet.h"
+
+using namespace fugue;
+
+namespace {
+
+const QString hashA = QStringLiteral("sha256:") + QString(64, u'a');
+const QString hashB = QStringLiteral("sha256:") + QString(64, u'b');
+
+QJsonObject model(const QString &name, const QString &hash, double size) {
+    return {{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", name}, {"source", "http://127.0.0.1:9/" + name}, {"size", size}};
+}
+
+struct Rig {
+    QTemporaryDir dir;
+    Registry registry;
+    Translator translator{dir.filePath("language")}; // English plural forms come from the catalog, as in the app
+    QJsonArray models; // what the "workflow" still lacks: the test plays the window and takes a model out when its file is set
+    QStringList covered; // the hashes that have a file of the same weights
+    ReadinessSheet sheet;
+
+    explicit Rig(const QStringList &haveFiles, const QJsonArray &wanted)
+        : models(wanted), covered(haveFiles),
+          sheet((nodes::addBuiltinNodeTypes(registry), &registry), dir.filePath("trust.json"), [this] { return ReadinessRequest{{}, models}; }) {
+        QCoreApplication::installTranslator(&translator);
+        sheet.setUseSource([this](const QString &hash) {
+            return covered.contains(hash) ? QVariantMap{{"file", "qwen_3_8b_int8_convrot.safetensors"}, {"same", "same model, INT8"}} : QVariantMap();
+        });
+    }
+    ~Rig() { QCoreApplication::removeTranslator(&translator); }
+    // The window's part: the files of `hashes` were read and set, so the workflow no longer lacks those models.
+    void windowSets(const QStringList &hashes, int token) {
+        QJsonArray left;
+        for (const QJsonValue &m : std::as_const(models))
+            if (!hashes.contains(m.toObject().value("hash").toString()))
+                left.append(m);
+        models = left;
+        sheet.refresh();
+        sheet.usesFinished(hashes, {}, token);
+    }
+    QVariantMap view() const { return sheet.view(); }
+    QVariantMap row(int i) const { return sheet.view().value("models").toList().at(i).toMap(); }
+};
+
+} // namespace
+
+class TestGetReadyChoice : public QObject {
+    Q_OBJECT
+
+private slots:
+    // Check 1: one covered model starts on its file, says there is nothing to download, and the yes asks the window for the file and
+    // starts no download; once it is set the sheet has nothing left and closes itself.
+    void oneCoveredModelStartsOnItsFileAndTheYesDownloadsNothing() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9)});
+        rig.sheet.show();
+        QCOMPARE(rig.row(0).value("choice").toString(), QString("disk"));
+        QCOMPARE(rig.view().value("headline").toString(), QString("Nothing to download: Fugue will use the file you already have."));
+        QVERIFY(!rig.view().value("hasDownloads").toBool());
+        QCOMPARE(rig.view().value("sizeText").toString(), QString());
+        QCOMPARE(rig.view().value("primary").toString(), QString("Use my file"));
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        QSignalSpy succeeded(&rig.sheet, &ReadinessSheet::succeeded);
+        rig.sheet.start();
+        QCOMPARE(asked.size(), 1);
+        QCOMPARE(asked.first().first().toStringList(), QStringList{hashA});
+        QVERIFY(rig.view().value("busy").toBool()); // the rows wait for the file to be read
+        QCOMPARE(rig.sheet.phase(), QString("review")); // no run: nothing is downloaded
+        rig.windowSets({hashA}, asked.first().at(1).toInt());
+        QCOMPARE(succeeded.size(), 1);
+        QVERIFY(!rig.sheet.isOpen());
+        QCOMPARE(rig.sheet.phase(), QString("review"));
+        QVERIFY(rig.sheet.waitIdle(10)); // no thread was ever made
+    }
+
+    // Check 2: Download chosen, the headline and the totals are the download's, the primary is Install and the destination is shown.
+    void switchedToDownloadTheTotalsFollow() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9)});
+        rig.sheet.show();
+        rig.sheet.setChoice(hashA, false);
+        QCOMPARE(rig.row(0).value("choice").toString(), QString("download"));
+        QCOMPARE(rig.view().value("headline").toString(), QString("Fugue will download 1 model, 8.7 GB."));
+        QCOMPARE(rig.view().value("sizeText").toString(), QString("8.7 GB"));
+        QVERIFY(rig.view().value("hasDownloads").toBool());
+        QCOMPARE(rig.view().value("primary").toString(), QString("Install"));
+        rig.sheet.setChoice(hashA, true); // and back: the choice is only kept, nothing was done
+        QCOMPARE(rig.view().value("primary").toString(), QString("Use my file"));
+    }
+
+    // Check 3: one covered, one not: the headline says both, the size is the download's alone, and the yes sends only the covered one to
+    // the window; once it is set, the rest of the plan runs (the download, which fails to connect here and ends the run).
+    void aMixedPlanDownloadsOnlyWhatIsNotCovered() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9), model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)});
+        rig.sheet.show();
+        QCOMPARE(rig.view().value("headline").toString(), QString("Fugue will download 1 model, 5.9 GB and use 1 file you already have."));
+        QCOMPARE(rig.view().value("sizeText").toString(), QString("5.9 GB"));
+        QCOMPARE(rig.view().value("primary").toString(), QString("Install"));
+        QCOMPARE(rig.row(1).value("choice").toString(), QString()); // no file of its own: no choice
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        rig.sheet.start();
+        QCOMPARE(asked.first().first().toStringList(), QStringList{hashA});
+        rig.windowSets({hashA}, asked.first().at(1).toInt());
+        QCOMPARE(rig.sheet.phase(), QString("running")); // the rest of the plan goes on
+        QCOMPARE(rig.view().value("models").toList().size(), 1);
+        rig.sheet.cancel();
+        QVERIFY(rig.sheet.waitIdle(30000));
+    }
+
+    // Another surface's read of a file (the Needs panel's) that ends while this sheet waits for its own is not the sheet's answer: the sheet
+    // goes on only when its own request (its token) is answered, so a model set to Use my file is not downloaded early.
+    void onlyTheAnswerToItsOwnRequestContinuesTheSheet() {
+        Rig rig({hashA, hashB}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9), model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)});
+        rig.sheet.show();
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        rig.sheet.start();
+        QCOMPARE(asked.size(), 1);
+        const int mine = asked.first().at(1).toInt();
+        QVERIFY(mine != 0);
+        // The Needs panel's earlier read of A alone ends first (token 0, or any other): the plan is not run, B is not downloaded.
+        rig.models = QJsonArray{model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)};
+        rig.sheet.refresh();
+        rig.sheet.usesFinished({hashA}, {}, 0);
+        rig.sheet.usesFinished({hashA}, {}, mine + 1);
+        QCOMPARE(rig.sheet.phase(), QString("review"));
+        QVERIFY(rig.view().value("busy").toBool()); // still waiting for its own
+        rig.models = QJsonArray{};
+        rig.sheet.refresh();
+        rig.sheet.usesFinished({hashA, hashB}, {}, mine);
+        QVERIFY(!rig.sheet.isOpen()); // its own answer: done
+    }
+
+    // A model still set to Use my file when the answer comes (it was not set: the tab changed) is never downloaded: it leaves what is run.
+    void aModelStillOnItsFileIsNeverRun() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9), model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)});
+        rig.sheet.show();
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        rig.sheet.start();
+        rig.sheet.usesFinished({}, {}, asked.first().at(1).toInt()); // nothing applied, no failure: A is still in the plan
+        QCOMPARE(rig.view().value("models").toList().size(), 1);
+        rig.sheet.cancel();
+        QVERIFY(rig.sheet.waitIdle(30000));
+    }
+
+    // Check 4 (the sheet's part): Cancel discards the choices; the next opening starts on the files again.
+    void cancelDiscardsTheChoices() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9)});
+        rig.sheet.show();
+        rig.sheet.setChoice(hashA, false);
+        QSignalSpy asked(&rig.sheet, &ReadinessSheet::useRequested);
+        rig.sheet.cancel();
+        QVERIFY(!rig.sheet.isOpen());
+        QCOMPARE(asked.size(), 0); // nothing was asked of the window
+        rig.sheet.show();
+        QCOMPARE(rig.row(0).value("choice").toString(), QString("disk"));
+    }
+
+    // Cancel while the file is read tells the window to drop the result.
+    void cancelWhileTheFileIsReadStopsItsResult() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9)});
+        rig.sheet.show();
+        QSignalSpy cancelled(&rig.sheet, &ReadinessSheet::useCancelled);
+        rig.sheet.start();
+        rig.sheet.cancel();
+        QCOMPARE(cancelled.size(), 1);
+        QVERIFY(!rig.sheet.isOpen());
+        rig.sheet.usesFinished({hashA}, {}, 1); // a late answer: nothing happens
+        QVERIFY(!rig.sheet.isOpen());
+    }
+
+    // A failure said for the file goes away when the choice changes (it would be stale), and a file that could not be read is
+    // offered again with Download chosen.
+    void aFailureIsStaleOnceTheChoiceChanges() {
+        Rig rig({hashA}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9)});
+        rig.sheet.show();
+        rig.sheet.start();
+        rig.sheet.say("Could not read qwen_3_8b_int8_convrot.safetensors, so it is not used.");
+        rig.sheet.usesFinished({}, {hashA}, 1);
+        QVERIFY(rig.sheet.isOpen()); // the person decides what next
+        QCOMPARE(rig.row(0).value("choice").toString(), QString("download"));
+        QVERIFY(rig.row(0).value("error").toString().contains("is not used"));
+        QVERIFY(rig.view().value("message").toString().contains("Could not read"));
+        QVERIFY(!rig.view().value("busy").toBool());
+        rig.sheet.setChoice(hashA, true);
+        QCOMPARE(rig.view().value("message").toString(), QString());
+        QCOMPARE(rig.row(0).value("error").toString(), QString());
+        QCOMPARE(rig.row(0).value("choice").toString(), QString("disk"));
+    }
+
+    // The reading of each file is shown on its own row, not on the others.
+    void eachRowShowsItsOwnReading() {
+        Rig rig({hashA, hashB}, {model("Qwen3-8B-Q8_0.gguf", hashA, 8.7e9), model("flux-2-klein-9b-Q4_K_M.gguf", hashB, 5.9e9)});
+        rig.sheet.show();
+        rig.sheet.setReading({{hashA, 42}, {hashB, -1}});
+        QCOMPARE(rig.row(0).value("state").toString(), QString("reading"));
+        QCOMPARE(rig.row(0).value("fraction").toDouble(), 0.42);
+        QCOMPARE(rig.row(1).value("state").toString(), QString("reading"));
+        QCOMPARE(rig.row(1).value("fraction").toDouble(), -1.0);
+        rig.sheet.setReading({{hashB, 10}});
+        QCOMPARE(rig.row(0).value("state").toString(), QString("waiting"));
+        QTRY_COMPARE(rig.row(1).value("fraction").toDouble(), 0.10); // a percent alone is published soon, not at once
+    }
+};
+
+QTEST_MAIN(TestGetReadyChoice)
+#include "test_get_ready_choice.moc"

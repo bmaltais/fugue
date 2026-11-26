@@ -35,6 +35,7 @@ public:
     QVariantMap view;
     int started = 0;
     int cancelled = 0;
+    QList<QPair<QString, bool>> choices; // setChoice(hash, useDisk), as the sheet asked
 
     Q_INVOKABLE void start() { ++started; }
     Q_INVOKABLE void cancel() {
@@ -42,6 +43,7 @@ public:
         open = false;
         emit changed();
     }
+    Q_INVOKABLE void setChoice(const QString &hash, bool useDisk) { choices.append({hash, useDisk}); }
     Q_INVOKABLE void close() {}
     Q_INVOKABLE void show() {}
     Q_INVOKABLE void changeDestination(const QString &) {}
@@ -56,7 +58,8 @@ QVariantMap bigView() {
     const auto model = [](const QString &name, const QString &size, const QString &license, const QString &typeFrom) {
         return QVariantMap{{"name", name}, {"size", size}, {"host", "huggingface.co"}, {"license", license}, {"licenseUrl", ""},
                            {"folder", typeFrom.isEmpty() ? "~/.local/share/fugue/models/diffusion_models" : "its folder, once the pack is installed"},
-                           {"typeFrom", typeFrom}, {"state", ""}, {"detail", ""}, {"fraction", 0.0}};
+                           {"typeFrom", typeFrom}, {"state", ""}, {"detail", ""}, {"fraction", 0.0}, {"hash", name}, {"use", QVariantMap()},
+                           {"choice", ""}, {"sizeKnown", true}, {"error", ""}};
     };
     return {{"headline", "Fugue will install and trust 1 pack, set up 1 environment and download 4 models, 19.7 GB."},
             {"packs", QVariantList{QVariantMap{{"id", "segment"}, {"name", "Segment Nodes"}, {"version", "1.2.0"}, {"install", true}, {"pending", false},
@@ -69,18 +72,45 @@ QVariantMap bigView() {
                                     model("ae.safetensors", "335 MB", "", "type from Segment Nodes"),
                                     model("sam2_hiera_large.pt", "898 MB", "Apache-2.0", "type from Segment Nodes")}},
             {"destination", "/home/me/.local/share/fugue/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}},
-            {"hasModels", true}, {"freeText", "343.2 GB free"}, {"sizeText", "19.7 GB"}, {"lowSpace", false}, {"problems", QStringList{}},
+            {"hasModels", true}, {"hasDownloads", true}, {"busy", false}, {"primary", "Install"}, {"usesCount", 0}, {"freeText", "343.2 GB free"},
+            {"sizeText", "19.7 GB"}, {"lowSpace", false}, {"problems", QStringList{}},
             {"question", QVariantMap{}}, {"message", ""}, {"ok", false}, {"retry", QStringList{}}, {"empty", false}};
 }
 
 QVariantMap fakeView() {
     const QVariantMap model{{"name", "flux-2-klein-9b-Q4_K_M.gguf"}, {"size", "5.9 GB"}, {"host", "huggingface.co"}, {"license", "FLUX Non-Commercial"},
                             {"licenseUrl", ""}, {"folder", "~/.local/share/fugue/models/diffusion_models"}, {"typeFrom", ""},
-                            {"state", ""}, {"detail", ""}, {"fraction", 0.0}};
+                            {"state", ""}, {"detail", ""}, {"fraction", 0.0}, {"hash", "h1"}, {"use", QVariantMap()}, {"choice", ""},
+                            {"sizeKnown", true}, {"error", ""}};
     return {{"headline", "Fugue will download 1 model, 5.9 GB."}, {"packs", QVariantList{}}, {"models", QVariantList{model}},
             {"destination", "/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}}, {"hasModels", true},
+            {"hasDownloads", true}, {"busy", false}, {"primary", "Install"}, {"usesCount", 0},
             {"freeText", "300 GB free"}, {"sizeText", "5.9 GB"}, {"lowSpace", false}, {"problems", QStringList{}}, {"question", QVariantMap{}},
             {"message", ""}, {"ok", false}, {"retry", QStringList{}}, {"empty", false}};
+}
+
+// The Qwen3-8B case: the model is on disk in another file, and the sheet starts on "Use my file" (the owner's #616). `mixed` adds a model
+// that has no file of its own.
+QVariantMap coveredView(bool mixed = false, const QString &choice = "disk") {
+    const auto row = [](const QString &name, const QString &size, const QString &hash, bool covered, const QString &choice) {
+        return QVariantMap{{"name", name}, {"size", size}, {"host", "huggingface.co"}, {"license", "Apache-2.0"}, {"licenseUrl", ""},
+                           {"folder", "~/.local/share/fugue/models/diffusion_models"}, {"typeFrom", ""}, {"state", ""}, {"detail", ""},
+                           {"fraction", 0.0}, {"hash", hash}, {"sizeKnown", true}, {"error", ""},
+                           {"use", covered ? QVariantMap{{"file", "qwen_3_8b_int8_convrot.safetensors"}, {"same", "same model, INT8"}} : QVariantMap()},
+                           {"choice", covered ? choice : QString()}};
+    };
+    QVariantList models{row("Qwen3-8B-Q8_0.gguf", "8.7 GB", "qwen", true, choice)};
+    if (mixed)
+        models << row("flux-2-klein-9b-Q4_K_M.gguf", "5.9 GB", "flux", false, "");
+    const bool downloads = mixed || choice == "download";
+    QString headline = mixed ? "Fugue will download 1 model, 5.9 GB and use 1 file you already have."
+                       : choice == "download" ? "Fugue will download 1 model, 8.7 GB."
+                                              : "Nothing to download: Fugue will use the file you already have.";
+    return {{"headline", headline}, {"packs", QVariantList{}}, {"models", models},
+            {"destination", "/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}}, {"hasModels", true},
+            {"hasDownloads", downloads}, {"busy", false}, {"primary", downloads ? "Install" : "Use my file"}, {"usesCount", mixed ? 1 : choice == "disk" ? 1 : 0},
+            {"freeText", "1979 GB free"}, {"sizeText", mixed ? "5.9 GB" : choice == "download" ? "8.7 GB" : ""}, {"lowSpace", false},
+            {"problems", QStringList{}}, {"question", QVariantMap{}}, {"message", ""}, {"ok", false}, {"retry", QStringList{}}, {"empty", false}};
 }
 
 QQuickItem *visibleItem(QQuickItem *from, const QString &name) {
@@ -146,6 +176,38 @@ private slots:
         QTRY_VERIFY(!sheet->property("visible").toBool());
         QTRY_COMPARE(app.window->activeFocusItem(), before);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #616 (UI design 2026-11-26): a model with a file of its own has a segmented choice on "Use my file"; the primary reads "Use my file"
+    // and has the focus, Enter runs it, Tab reaches the choice, Left and Right choose, Enter on the choice runs the primary too.
+    void theChoiceIsOneTabStopAndEnterGoesToThePrimary() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.workflows.readiness()->show();
+        QObject *sheet = nullptr;
+        QTRY_VERIFY((sheet = app.window->findChild<QObject *>("getReadySheet")));
+        FakeSheet fake;
+        fake.view = coveredView();
+        QVERIFY(sheet->setProperty("sheetModel", QVariant::fromValue(static_cast<QObject *>(&fake))));
+        QQuickItem *primary = nullptr;
+        QTRY_VERIFY((primary = find(app.window, "getReadyAll")) && primary->hasActiveFocus());
+        QCOMPARE(primary->property("text").toString(), QString("Use my file"));
+        QVERIFY(!find(app.window, "getReadyDestination")); // nothing is downloaded: no destination
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QCOMPARE(fake.started, 1);
+        QQuickItem *choice = find(app.window, "getReadyChoice-Qwen3-8B-Q8_0.gguf");
+        QVERIFY(choice);
+        for (int i = 0; i < 8 && !choice->hasActiveFocus(); ++i)
+            QTest::keyClick(app.window, Qt::Key_Tab);
+        QVERIFY(choice->hasActiveFocus()); // reached by Tab
+        QTest::keyClick(app.window, Qt::Key_Right);
+        QCOMPARE(fake.choices.size(), 1);
+        QCOMPARE(fake.choices.first(), (QPair<QString, bool>{"qwen", false}));
+        QTest::keyClick(app.window, Qt::Key_Return); // Enter on the choice is the yes, not a toggle of the choice
+        QCOMPARE(fake.started, 2);
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QCOMPARE(fake.cancelled, 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join("\n")));
     }
 
     // #544: a workflow with a MOSS Image model whose Qwen3.5 tokenizer is not on disk opens with the real plan offering the tokenizer
@@ -222,6 +284,17 @@ private slots:
             QTest::qWait(400);
             QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/get-ready-%2x%3.png").arg(out).arg(size.width()).arg(size.height())));
         }
+        // The Use what you have states (UI design 2026-11-26): everything covered, Download chosen, and a mixed plan.
+        for (const auto &state : {QPair<QString, QVariantMap>{"covered", coveredView()}, {"download", coveredView(false, "download")},
+                                  {"mixed", coveredView(true)}}) {
+            fake.view = state.second;
+            emit fake.changed();
+            app.window->resize(900, 700);
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/get-ready-%2.png").arg(out, state.first)));
+        }
+        fake.view = bigView();
+        emit fake.changed();
         // Open on a model's details, then part-way through the run.
         sheet->setProperty("expanded", QVariantMap{{"model:Qwen3-8B-Q8_0.gguf", true}, {"pack:segment", true}});
         QVariantMap running = bigView();

@@ -110,7 +110,8 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // Use what you have (#605): a missing model whose same weights are on disk offers that file beside its download. In the App view the
     // choice is the app's own (kept with its form's values, never written to its workflow); in the graph it edits the document.
     needs->setUseSource([&workflows](const QString &hash) { return workflows.onDiskOffer(hash); });
-    QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QString &hash) { workflows.useOnDisk({hash}); });
+    QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QStringList &hashes) { workflows.useOnDisk(hashes); });
+    QObject::connect(&workflows, &Workflows::readingChanged, needs, [&workflows, needs] { needs->setReading(workflows.reading()); });
     workflows.setUsesProvider([&view](const QString &tab) { return view.usesInForce(tab); });
     workflows.setAppShown([&view](const QString &tab) { return view.shown() && view.tab() == tab; });
     workflows.setUseTaker([&view](const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {

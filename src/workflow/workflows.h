@@ -82,6 +82,11 @@ class Workflows : public QObject {
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     // A file chosen in place of a missing model is being read (#605): its button waits, and a second click does nothing.
     Q_PROPERTY(bool hashingUses READ hashingUses NOTIFY hashingUsesChanged)
+    // The files being read, per row (UI design 2026-11-26): the wanted model's hash -> percent read (-1 while not known). A row shows its
+    // own busy state from it; the others stay pressable.
+    Q_PROPERTY(QVariantMap reading READ reading NOTIFY readingChanged)
+    // The banner's line says a template opened with the person's files and Undo puts the template's own models back.
+    Q_PROPERTY(bool noticeUndoable READ noticeUndoable NOTIFY noticeChanged)
     // Where the file picker starts: ~/Documents/Fugue as a file URL.
     Q_PROPERTY(QUrl suggestedFolder READ suggestedFolder CONSTANT)
     // The models being downloaded (#89).
@@ -162,6 +167,12 @@ public:
     // `fromPackage`: its folder goes away once it is open (openPackage), so an input still
     // naming a file in it (a file the sender lacked, or one not an image) keeps only the bare name.
     bool openTemplate(const Template &chosen, bool fromPackage = false);
+    // openTemplate, but a template that is ready only through the person's files opens with them (what a card click does); the launcher's --app too.
+    // `opened(ok)` runs when the tab exists: at once, or after the person's files were read (the caller then chooses the view it shows).
+    bool openTemplateWithFiles(const Template &chosen, std::function<void(bool)> opened = {});
+    // The template's own models, a tab at once (the canvas actions' workflows, which act on the tab): no files swapped in.
+    bool openTemplateAsIs(const QString &id);
+    bool openTemplateByIdThen(const QString &id, std::function<void(bool)> opened);
     // The suffix File > Export for sharing gives the shown workflow: `fugueapp` when it has an `app` block (an app bundle,
     // #394), else `fuguepack`.
     Q_INVOKABLE QString shareSuffix() const;
@@ -316,12 +327,22 @@ public:
     // Whether the App view of `tab` is what shows: asked when a file is chosen, so that choice goes where it was made.
     using AppShown = std::function<bool(const QString &tab)>;
     void setAppShown(AppShown shown) { m_appShown = std::move(shown); }
-    // For a missing model of the shown workflow (by its hash): {text ("Use what you have: ..."), file, path, tier, size, otherSource,
+    // For a missing model of the shown workflow (by its hash): {same, file, path, tier, size, otherSource,
     // recommended}; empty when no file of the same weights is here.
     Q_INVOKABLE QVariantMap onDiskOffer(const QString &hash) const;
     // Uses the files on disk for the missing models with these hashes (all of the shown workflow's that have one when empty): the
     // files' hashes are read first (a worker thread, once), then the choice is applied. `usesApplied` follows.
-    Q_INVOKABLE void useOnDisk(const QStringList &hashes);
+    // `usesFinished` follows when the reads end (also when nothing could be used).
+    // `token` is a sheet's own request id: `usesFinished` echoes it, so a sheet takes only the answer to what it asked (0: not a sheet's).
+    Q_INVOKABLE void useOnDisk(const QStringList &hashes, int token = 0);
+    // The person left the Get ready sheet while its files were read: that request's result is not applied.
+    void cancelUses(int token);
+    QVariantMap reading() const { return m_reading; }
+    bool noticeUndoable() const;
+    // Undo of the banner: the template's own models back in the tab that was opened with the person's files.
+    Q_INVOKABLE void undoNotice();
+    // Opens the template as it is and the Get ready sheet with every model set to Download (the details' "Download <size>…").
+    Q_INVOKABLE bool openTemplateForDownload(const QString &id);
     // Opens the template with its missing models set to the files on disk (the template itself is unchanged); the files' hashes are
     // read first. False when there is no such template or nothing to use.
     Q_INVOKABLE bool openTemplateWithWhatYouHave(const QString &id);
@@ -361,6 +382,9 @@ signals:
     // A file on disk was chosen in place of a missing model and applied (#605).
     void usesApplied();
     void hashingUsesChanged();
+    void readingChanged();
+    // The files asked for with useOnDisk were read: the hashes of the models now using their file, and of those whose file could not be read.
+    void usesFinished(const QStringList &applied, const QStringList &failed, int token);
     void openDialogRequested();
     void saveAsRequested();
     void exportShareRequested();
@@ -409,7 +433,13 @@ private:
     // The missing models of the shown workflow that have a file of the same weights on disk, kept for a moment (the Needs panel and
     // the Get ready sheet ask for each row).
     const QList<OnDiskUse> &onDiskNow() const;
-    void applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp);
+    bool applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp);
+    // The uses that make `chosen` ready and nothing else is missing (no pack to get): what a card click opens with. Empty otherwise.
+    QList<OnDiskUse> coveringUses(const Template &chosen) const;
+    bool openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened);
+    bool finishOpenWithUses(const Template &chosen, const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed);
+    // Runs `what` now, or when the Get ready sheet has closed.
+    void after(std::function<void()> what);
     // `replace`: a file at `path` may be replaced (the dialog asked, or it is the tab's own).
     bool saveTab(int index, const QString &path, bool replace = true);
     void snapshotCurrent();
@@ -420,7 +450,11 @@ private:
     void setNotice(const QString &text);
     // Reads the hash of each file of `uses` in turn on the worker; `done` gets the handles resolved and the names of the files that
     // could not be read.
-    void hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done);
+    // `progress` is told the file of a use and the percent read as it goes (only while a file is really read).
+    void hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done,
+                  std::function<void(const OnDiskUse &, int)> progress = {});
+    void setReading(const QStringList &hashes, int percent);
+    void clearReading(const QStringList &hashes);
     void setHashing(const QString &key, bool on);
     void analyze(const Document &document, const QString &title);
     // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
@@ -494,6 +528,33 @@ private:
     mutable QElapsedTimer m_onDiskAge;
     QSet<QString> m_hashing; // the targets whose chosen file is being read ("use:<tab> <hashes>", "open:<template>")
     Uses m_openUses; // the files a template opens with (openTemplateWithWhatYouHave)
+    // The asks waiting on one read of files, by its target: a sheet's request ids, how many others asked, and whether nobody is left.
+    // One ask for a file to be used, with everything its completion needs, taken when it was asked: nothing is read again later.
+    struct UseAsk {
+        int token = 0;     // a sheet's request id, or 0
+        QString tab;       // the tab it is for
+        bool inApp = false; // the App view's state (true) or the graph's document (false)
+        QList<OnDiskUse> chosen;
+    };
+    struct UseJob {
+        QStringList wanted;
+        QList<UseAsk> asks;
+        bool cancelled = false;
+    };
+    QHash<QString, UseJob> m_useJobs;
+    QVariantMap m_reading; // reading()
+    // What Undo of the banner puts back: the tab opened with files, and the file handle -> the template's own handle.
+    struct OpenedWith {
+        QString tab;
+        int undoIndex = 0; // the tab's undo index just after the open: Undo is offered while it is unchanged
+        struct Change {
+            QVariantList path;
+            QJsonValue original, applied;
+        };
+        QList<Change> changes;
+    };
+    OpenedWith m_openedWith;
+    QList<std::function<void()>> m_afterSheet;
     ReadinessSheet *m_readiness;
     QString m_readyTabId; // the tab the Get ready sheet was opened for
     ModelSource m_source; // empty: listOfferedModels

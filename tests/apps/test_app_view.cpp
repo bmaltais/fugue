@@ -1028,6 +1028,8 @@ private slots:
         QCOMPARE(m_view->valueOf("model").toMap().value("hash").toString(), chosen); // the field holds the file
         QCOMPARE(m_view->usesOf("a").value(missing), replacement);
         QCOMPARE(m_view->usesList().size(), 1);
+        m_view->takeUses("a", chosenUses, resolved); // chosen twice (a second press during the read): the fields that took the file are still known
+        QCOMPARE(m_view->usesList().size(), 1);
         m_view->run();
         QCOMPARE(inputOf(m_started.last().document, "up", "model").toObject().value("hash").toString(), chosen);
         m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));

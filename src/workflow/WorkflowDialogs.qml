@@ -154,6 +154,15 @@ Item {
                         onClicked: App.workflows.readiness.show()
                     }
                 }
+                // A template opened with the person's files in place of its models: Undo puts its own models back.
+                Loader {
+                    active: App.workflows.noticeUndoable
+                    sourceComponent: ThemedButton {
+                        objectName: "noticeUndo"
+                        text: qsTr("Undo")
+                        onClicked: App.workflows.undoNotice()
+                    }
+                }
                 ToolButton {
                     // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
                     contentItem: Glyph { look: App.theme.look; name: "x"; color: App.theme.look.label; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }

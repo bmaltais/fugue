@@ -448,7 +448,7 @@ private slots:
         QCOMPARE(offers.size(), 1);
         QCOMPARE(offers.first().toMap().value("input").toString(), QString("diffusion_model"));
         QCOMPARE(offers.first().toMap().value("file").toString(), QString("z_image_turbo_bf16.safetensors"));
-        QVERIFY(offers.first().toMap().value("text").toString().startsWith("Use what you have: z_image_turbo_bf16.safetensors (same model, bf16)"));
+        QCOMPARE(offers.first().toMap().value("same").toString(), QString("same model, bf16"));
 
         const int before = f.steps();
         QCOMPARE(f.edits.setDiskModel("models", "diffusion_model", offers.first().toMap().value("path").toString()), QString());

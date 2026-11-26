@@ -947,6 +947,22 @@ Item {
                                 objectName: "warningsBadge"
                                 width: warningsRow.implicitWidth
                                 height: warningsRow.implicitHeight
+                                // Reachable by the keyboard: Enter or Space keeps the card up, with the focus on its first button.
+                                activeFocusOnTab: true
+                                Accessible.role: Accessible.Button
+                                Accessible.name: qsTr("Warnings: %1").arg(node.warnings.length)
+                                Keys.onReturnPressed: event => { node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, true); node.canvasView.focusWarnings(); event.accepted = true }
+                                Keys.onEnterPressed: event => { node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, true); node.canvasView.focusWarnings(); event.accepted = true }
+                                Keys.onSpacePressed: event => { node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, true); node.canvasView.focusWarnings(); event.accepted = true }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: -2
+                                    visible: warningsBadge.activeFocus && FocusInput.keyboard
+                                    color: "transparent"
+                                    radius: 3
+                                    border.width: 2
+                                    border.color: node.look.accent
+                                }
                                 Row {
                                     id: warningsRow
                                     spacing: face.u

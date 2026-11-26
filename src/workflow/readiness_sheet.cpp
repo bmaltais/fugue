@@ -118,11 +118,117 @@ void ReadinessSheet::rebuild() {
     m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
     m_details = QStringList(m_plan.rowCount());
     m_fractions = QList<double>(m_plan.rowCount(), 0.0);
+    // The files of the same weights: each model that has one starts on "Use my file" (the sheet is the explicit yes; nothing happens before it).
+    m_offers.clear();
+    for (const ReadinessModel &m : m_plan.models) {
+        const QString hash = m.entry.value(QStringLiteral("hash")).toString();
+        const QVariantMap offer = m_useSource && !hash.isEmpty() ? m_useSource(hash) : QVariantMap();
+        if (offer.isEmpty())
+            continue;
+        m_offers.insert(hash, offer);
+        if (!m_seenOffers.contains(hash)) {
+            m_seenOffers.insert(hash);
+            m_useDisk.insert(hash);
+        }
+    }
+    m_useDisk.removeIf([this](const QString &hash) { return !m_offers.contains(hash); });
 }
 
-void ReadinessSheet::useOnDisk(const QString &hash) {
-    if (m_phase == QLatin1String("review") && m_open)
-        emit useRequested(hash);
+bool ReadinessSheet::usesFile(const ReadinessModel &model) const {
+    return m_useDisk.contains(model.entry.value(QStringLiteral("hash")).toString());
+}
+
+qint64 ReadinessSheet::downloadBytesNow(int *count, bool *unknown) const {
+    qint64 bytes = 0;
+    int n = 0;
+    bool noSize = false;
+    for (const ReadinessModel &m : m_plan.models) {
+        if (usesFile(m))
+            continue;
+        ++n;
+        if (m.size >= 0)
+            bytes += m.size;
+        else
+            noSize = true;
+    }
+    if (count)
+        *count = n;
+    if (unknown)
+        *unknown = noSize;
+    return bytes;
+}
+
+bool ReadinessSheet::lowSpaceNow() const {
+    return m_plan.freeBytes >= 0 && downloadBytesNow(nullptr, nullptr) > m_plan.freeBytes;
+}
+
+void ReadinessSheet::setChoice(const QString &hash, bool useDisk) {
+    if (m_phase != QLatin1String("review") || !m_open || m_usesPending || !m_offers.contains(hash))
+        return;
+    if (m_useDisk.contains(hash) == useDisk && !m_rowErrors.contains(hash) && m_message.isEmpty())
+        return;
+    if (useDisk)
+        m_useDisk.insert(hash);
+    else
+        m_useDisk.remove(hash);
+    m_rowErrors.remove(hash);
+    m_message.clear(); // a failure said for the choice before this one
+    publish();
+}
+
+void ReadinessSheet::chooseAll(bool useDisk) {
+    if (m_phase != QLatin1String("review") || !m_open || m_usesPending)
+        return;
+    m_useDisk = useDisk ? QSet<QString>(m_offers.keyBegin(), m_offers.keyEnd()) : QSet<QString>();
+    m_rowErrors.clear();
+    m_message.clear();
+    publish();
+}
+
+void ReadinessSheet::setReading(const QVariantMap &reading) {
+    const bool rowsMoved = reading.keys() != m_reading.keys(); // a row starts or stops reading: shown at once; a percent only soon
+    m_reading = reading;
+    if (!m_open)
+        return;
+    if (rowsMoved)
+        publish();
+    else
+        publishSoon();
+}
+
+void ReadinessSheet::usesFinished(const QStringList &applied, const QStringList &failed, int token) {
+    Q_UNUSED(applied)
+    if (!m_usesPending || token == 0 || token != m_usesToken)
+        return; // another surface's choice (the Needs panel's), not the answer to this sheet's yes
+    m_usesPending = false;
+    m_usesToken = 0;
+    for (const QString &hash : failed) {
+        m_useDisk.remove(hash); // Try again offers the row with Download
+        m_rowErrors.insert(hash, tr("Your file is not used. Download is chosen for it now."));
+    }
+    const QString said = m_message; // Workflows said which file, just before
+    rebuild();
+    m_message = said;
+    if (!failed.isEmpty()) {
+        m_ok = false;
+        publish();
+        return;
+    }
+    if (m_plan.empty()) { // everything was a file on disk: nothing to run, the sheet has done its work
+        m_open = false;
+        publish();
+        emit succeeded();
+        return;
+    }
+    runPlan();
+}
+
+void ReadinessSheet::say(const QString &message) {
+    if (!m_open || m_thread || m_phase != QLatin1String("review"))
+        return;
+    m_message = message;
+    m_ok = false;
+    publish();
 }
 
 void ReadinessSheet::refresh() {
@@ -138,6 +244,11 @@ void ReadinessSheet::show() {
     m_destination.clear();
     m_picked.clear();
     m_question.clear();
+    m_useDisk.clear();
+    m_seenOffers.clear();
+    m_rowErrors.clear();
+    m_usesPending = false;
+    m_usesToken = 0;
     rebuild();
     m_phase = QStringLiteral("review");
     m_message.clear();
@@ -156,10 +267,17 @@ void ReadinessSheet::close() {
 }
 
 void ReadinessSheet::cancel() {
-    if (m_thread)
+    if (m_thread) {
         m_cancel = true;
-    else
-        close();
+        return;
+    }
+    // The choices are discarded with the sheet: the document is as it was, and a file being read is not applied.
+    if (m_usesPending) {
+        m_usesPending = false;
+        const int token = std::exchange(m_usesToken, 0); // its answer, when it comes, is no one's
+        emit useCancelled(token);
+    }
+    close();
 }
 
 void ReadinessSheet::changeDestination(const QString &root) {
@@ -191,7 +309,36 @@ void ReadinessSheet::pickDestination(const QString &folder) {
 }
 
 void ReadinessSheet::start() {
-    if (m_thread || m_phase != QLatin1String("review") || m_plan.empty() || m_plan.lowSpace())
+    if (m_thread || m_usesPending || m_phase != QLatin1String("review") || m_plan.empty() || lowSpaceNow())
+        return;
+    // The yes: the files chosen go in first (the window reads them and sets them in the document), then the rest of the plan runs.
+    QStringList chosen;
+    for (const ReadinessModel &m : m_plan.models)
+        if (usesFile(m))
+            chosen << m.entry.value(QStringLiteral("hash")).toString();
+    if (!chosen.isEmpty()) {
+        m_usesPending = true;
+        m_usesToken = ++m_lastToken;
+        m_message.clear();
+        m_rowErrors.clear();
+        publish();
+        emit useRequested(chosen, m_usesToken);
+        return;
+    }
+    runPlan();
+}
+
+void ReadinessSheet::runPlan() {
+    if (m_thread || m_phase != QLatin1String("review"))
+        return;
+    // A model set to Use my file is never downloaded, whatever order the answers came in: it leaves what is run.
+    if (m_plan.models.removeIf([this](const ReadinessModel &m) { return usesFile(m); })) {
+        m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
+        m_details = QStringList(m_plan.rowCount());
+        m_fractions = QList<double>(m_plan.rowCount(), 0.0);
+        publish();
+    }
+    if (m_plan.empty() || lowSpaceNow())
         return;
     // The yes also makes the folder choice the settings': a picked folder joins the model folders (ComfyUI layout) and the\n    // folder becomes download_folder. Nothing was written before this.
     if (!savePlacement())
@@ -354,15 +501,26 @@ void ReadinessSheet::publish() {
         parts << tr("trust %n packs", nullptr, n);
     if (const int n = m_plan.environmentCount())
         parts << tr("set up %n environments", nullptr, n);
-    if (!m_plan.models.isEmpty()) {
-        const int n = int(m_plan.models.size());
-        parts << (m_plan.downloadBytes > 0
-                      ? tr("download %n models, %1", nullptr, n)
-                            .arg((m_plan.unknownSizes ? tr("at least ") : QString()) + ModelDownloads::sizeText(m_plan.downloadBytes))
-                      : tr("download %n models", nullptr, n));
-    }
-    view["headline"] = parts.isEmpty() ? (m_plan.problems.isEmpty() ? tr("There is nothing to get ready.") : tr("Nothing here can be made ready from this machine."))
-                                       : tr("Fugue will %1.").arg(joinParts(parts));
+    int downloads = 0;
+    bool unknownSize = false;
+    const qint64 downloadBytes = downloadBytesNow(&downloads, &unknownSize);
+    const int uses = int(m_plan.models.size()) - downloads;
+    const bool onlyUses = parts.isEmpty() && downloads == 0 && uses > 0;
+    if (downloads > 0)
+        parts << (downloadBytes > 0 ? tr("download %n models, %1", nullptr, downloads)
+                                          .arg((unknownSize ? tr("at least ") : QString()) + ModelDownloads::sizeText(downloadBytes))
+                                    : tr("download %n models", nullptr, downloads));
+    if (uses > 0 && !onlyUses)
+        parts << tr("use %n files you already have", nullptr, uses);
+    view["headline"] = onlyUses ? tr("Nothing to download: Fugue will use %n files you already have.", nullptr, uses)
+                       : parts.isEmpty() ? (m_plan.problems.isEmpty() ? tr("There is nothing to get ready.") : tr("Nothing here can be made ready from this machine."))
+                                         : tr("Fugue will %1.").arg(joinParts(parts));
+    view["hasDownloads"] = downloads > 0;
+    view["usesCount"] = uses;
+    view["busy"] = m_usesPending;
+    // The one primary: Install while anything is installed, trusted, set up or downloaded; "Use my file" when only the person's files are left.
+    const bool morethanFiles = !m_plan.packs.isEmpty() || m_plan.installCount() > 0 || m_plan.trustOnlyCount() > 0 || m_plan.environmentCount() > 0 || downloads > 0;
+    view["primary"] = morethanFiles || uses == 0 ? tr("Install") : tr("Use my %n files", nullptr, uses);
     QVariantList packs;
     for (int i = 0; i < m_plan.packs.size(); ++i) {
         const ReadinessPack &row = m_plan.packs.at(i);
@@ -387,14 +545,24 @@ void ReadinessSheet::publish() {
         const ReadinessModel &m = m_plan.models.at(i);
         const int row = int(m_plan.packs.size()) + i;
         const QString hash = m.entry.value(QStringLiteral("hash")).toString();
+        const bool reading = m_reading.contains(hash);
+        const bool disk = m_useDisk.contains(hash);
+        QString state = stateName(m_states.value(row));
+        double fraction = m_fractions.value(row);
+        if (reading) {
+            state = QStringLiteral("reading");
+            fraction = m_reading.value(hash).toInt() >= 0 ? m_reading.value(hash).toInt() / 100.0 : -1;
+        }
         models << QVariantMap{{"hash", hash},
-                              {"use", m_useSource && !hash.isEmpty() ? m_useSource(hash) : QVariantMap()},
-                              {"name", m.name}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")},
+                              {"use", m_offers.value(hash)},
+                              {"choice", m_offers.contains(hash) ? (disk ? QStringLiteral("disk") : QStringLiteral("download")) : QString()},
+                              {"name", m.name}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")}, {"sizeKnown", m.size >= 0},
                               {"host", m.host}, {"license", m.license}, {"licenseUrl", m.licenseUrl},
                               {"folder", m.deferred ? tr("its folder, once the pack is installed") : m.folder},
                               {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},
-                              {"state", stateName(m_states.value(row))}, {"detail", m_details.value(row)},
-                              {"fraction", m_fractions.value(row)}};
+                              {"state", state}, {"detail", m_rowErrors.value(hash, m_details.value(row))},
+                              {"error", m_rowErrors.value(hash)},
+                              {"fraction", fraction}};
     }
     view["models"] = models;
     const QString &own = m_ownRoot; // not the settings again for every progress step
@@ -406,8 +574,8 @@ void ReadinessSheet::publish() {
     view["destinations"] = destinations;
     view["hasModels"] = !m_plan.models.isEmpty();
     view["freeText"] = m_plan.freeBytes >= 0 ? tr("%1 free").arg(ModelDownloads::sizeText(m_plan.freeBytes)) : QString();
-    view["sizeText"] = m_plan.downloadBytes > 0 ? ModelDownloads::sizeText(m_plan.downloadBytes) : QString();
-    view["lowSpace"] = m_plan.lowSpace();
+    view["sizeText"] = downloadBytes > 0 ? ModelDownloads::sizeText(downloadBytes) : QString();
+    view["lowSpace"] = lowSpaceNow();
     QStringList problems;
     for (const Error &problem : m_plan.problems)
         problems << (problem.hint.isEmpty() ? problem.message : problem.message + QLatin1Char(' ') + problem.hint);

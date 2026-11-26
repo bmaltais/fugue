@@ -126,7 +126,7 @@ QVariantMap CanvasActions::editWorkflow(const QString &id) {
     // A template opens as templates do (its sample files taken in, its packs offered); a file compiled into Fugue opens
     // as a copy. Either is a tab with no file: Save asks where, and the original is never written.
     const QString name = e->action ? e->action->name : e->id;
-    const bool opened = e->library ? m_workflows->openTemplateById(e->id) : m_workflows->openCopyOf(e->file, name);
+    const bool opened = e->library ? m_workflows->openTemplateAsIs(e->id) : m_workflows->openCopyOf(e->file, name);
     if (!opened)
         return refuse(m_workflows->notice());
     return {{"ok", true}, {"action", e->id}, {"name", name}};

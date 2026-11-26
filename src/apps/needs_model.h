@@ -12,7 +12,7 @@
 //
 // Items: [{kind ("pack", "model" or "problem"), key, name, detail (the row's quiet line), size (text, empty when none), licence,
 // licenceUrl, canDownload (a model that can be had on its own: the pack rows and the models of a pack's type come with the
-// sheet), use (a model with a file of the same weights on disk: {text, file, tier, ...}, else empty), action ("Download" or "Install"), node (the graph's node, empty when unknown)}].
+// sheet), use (a model with a file of the same weights on disk: {file, same, tier, ...}, else empty), action ("Download" or "Install"), node (the graph's node, empty when unknown)}].
 
 #include <QJsonObject>
 #include <QObject>
@@ -40,6 +40,13 @@ class NeedsModel : public QObject {
     // Every model of the list can be downloaded on its own and no pack is among the rows: Download all starts at once (nothing to
     // approve); else it opens the Get ready sheet for the one yes.
     Q_PROPERTY(bool startsAtOnce READ startsAtOnce NOTIFY changed)
+    // Use what you have (#605, UI design 2026-11-26): how many models of the list have a file of the same weights on disk, and what the
+    // header chip does with them: "use" (every model is covered and no pack: the files go in at once), "getReady" (some are covered:
+    // the sheet asks, with Use my file chosen for them), "downloadAll" (none; starts at once when it can) or "getReady" for the rest.
+    Q_PROPERTY(int coveredCount READ coveredCount NOTIFY changed)
+    Q_PROPERTY(QString headerAction READ headerAction NOTIFY changed)
+    // The files being read, per model hash: percent (-1 unknown). A row says "Reading your file…" and takes no second press.
+    Q_PROPERTY(QVariantMap reading READ reading NOTIFY readingChanged)
     // The window can jump to a node of the graph (builders; the app's own window has no graph).
     Q_PROPERTY(bool canShowInGraph READ canShowInGraph NOTIFY changed)
 
@@ -51,7 +58,7 @@ public:
     explicit NeedsModel(QObject *parent = nullptr);
 
     void setPlanSource(Plan source) { m_source = std::move(source); }
-    // Use what you have (#605): for a missing model's hash, the file on disk of the same weights as {text, file, tier, ...}, or empty. A
+    // Use what you have (#605): for a missing model's hash, the file on disk of the same weights as {file, same, tier, ...}, or empty. A
     // model row with one carries it as `use`; choosing it (useOnDisk) leaves the panel's list, because the window's plan leaves the model out.
     using UseSource = std::function<QVariantMap(const QString &hash)>;
     void setUseSource(UseSource source) { m_useSource = std::move(source); }
@@ -64,6 +71,10 @@ public:
     QString headline() const { return m_headline; }
     bool startsAtOnce() const { return m_atOnce; }
     bool canShowInGraph() const { return m_graph; }
+    int coveredCount() const { return m_covered; }
+    QString headerAction() const { return m_action; }
+    QVariantMap reading() const { return m_reading; }
+    void setReading(const QVariantMap &reading);
 
     // The node of `document` an item belongs to: a model's, the first whose inputs hold its hash; a pack's, the first of its node types
     // (the type id's namespace is the pack). Empty when none (a node of a group is not found: the group's node is not the model's).
@@ -77,9 +88,10 @@ public:
     // Download the one model of row `index` (a model with a source that does not wait for a pack); a pack row, or a model that
     // does, opens the Get ready sheet as Download all does.
     Q_INVOKABLE void download(int index);
-    // Use the file on disk in place of the model of row `index` (a row with `use`): `useRequested(hash)`.
+    // Use the file on disk in place of the model of row `index` (a row with `use`): `useRequested({hash})`.
     Q_INVOKABLE void useOnDisk(int index);
-    // The whole plan once, through the Get ready path: `getReadyRequested(startNow)`.
+    // The header chip: `useRequested` with every hash when all are covered, else the whole plan once through the Get ready path:
+    // `getReadyRequested(startNow)` (the sheet leaves the covered models on Use my file).
     Q_INVOKABLE void downloadAll();
     // Switch to the graph and centre the node of row `index`: `showNodeRequested(node)`.
     Q_INVOKABLE void showInGraph(int index);
@@ -91,8 +103,10 @@ signals:
     // Download this model (Document::models()'s form) on the window's download line.
     void downloadRequested(const QJsonObject &model);
     void showNodeRequested(const QString &node);
-    // The person chose to use the file they have for the model with this hash (#605).
-    void useRequested(const QString &hash);
+    // The person chose to use the files they have for the models with these hashes (#605): one row's Use my file, or the header's when
+    // every model is covered.
+    void useRequested(const QStringList &hashes);
+    void readingChanged();
 
 private:
     Plan m_source;
@@ -103,6 +117,9 @@ private:
     QList<QJsonObject> m_entries; // each model row's workflow handle, by item index (empty object for the other rows)
     QString m_headline;
     bool m_atOnce = false;
+    int m_covered = 0;
+    QString m_action = QStringLiteral("downloadAll");
+    QVariantMap m_reading;
     QTimer m_soon;
 };
 

@@ -951,8 +951,18 @@ QString WidgetEdit::setDiskModel(const QString &node, const QString &input, cons
 }
 
 QVariantList WidgetEdit::onDiskOffers(const QString &node) {
-    QVariantList offers;
+    // Asked on every hover of a warning badge: the answer is kept for a moment (until a model input of the node changes, or 2 s).
     const Document level = m_canvas->scopeDocument();
+    QJsonObject inputs;
+    const auto here = level.graph.nodes.constFind(node);
+    if (here != level.graph.nodes.constEnd())
+        for (auto input = here->inputs.cbegin(); input != here->inputs.cend(); ++input)
+            if (input->kind() == InputValue::Kind::Resource)
+                inputs.insert(input.key(), input->handle());
+    const QByteArray key = m_canvas->scopePath().toUtf8() + '\0' + node.toUtf8() + '\0' + QJsonDocument(inputs).toJson(QJsonDocument::Compact);
+    if (key == m_offersKey && m_offersAge.isValid() && m_offersAge.elapsed() < 2000)
+        return m_offers;
+    QVariantList offers;
     const auto found = level.graph.nodes.constFind(node);
     if (found == level.graph.nodes.constEnd())
         return offers;
@@ -971,11 +981,14 @@ QVariantList WidgetEdit::onDiskOffers(const QString &node) {
         const OnDiskUse use{handle, *match};
         offers.append(QVariantMap{{"input", input.key()},
                                   {"file", match->name},
+                                  {"same", use.sameModelText()},
                                   {"path", match->path},
                                   {"tier", match->tier},
-                                  {"otherSource", match->otherSource},
-                                  {"text", use.offerText()}});
+                                  {"otherSource", match->otherSource}});
     }
+    m_offersKey = key;
+    m_offers = offers;
+    m_offersAge.restart();
     return offers;
 }
 
