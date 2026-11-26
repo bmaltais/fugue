@@ -548,17 +548,28 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
     row.missing = true;
 }
 
-// The width of a node the layout does not pin: 60u, wider for the longest text value a `line`
-// input shows (its label and value side by side, the whole value), up to 120u.
+// The width of a node the layout does not pin: 60u, wider for the longest value a `line` input, a model picker or a choice
+// shows (its label and value side by side, the whole value; a picker's chevron after it), up to 120u. A node opens wide
+// enough for its model names (flux-2-klein-4b.safetensors) instead of being widened by hand each time.
 qreal CanvasModel::autoWidth(const NodeRow &row, const Node &node) const {
+    const qreal glyph = std::round(m_textSize * 1.5) + m_textSize / 3.0; // InputWidget.qml: glyphZone, then a unit
     qreal needed = 0;
     for (const Port &port : row.inputs) {
-        if (!port.widget || port.widgetType != QLatin1String("line"))
+        if (!port.widget)
+            continue;
+        const bool line = port.widgetType == QLatin1String("line");
+        const bool picker = port.widgetType == QLatin1String("model") || port.widgetType == QLatin1String("choice");
+        if (!line && !picker)
             continue;
         const InputValue value = node.inputs.value(port.name);
-        if (value.kind() != InputValue::Kind::Literal || !value.literal().isString() || value.literal().toString().isEmpty())
+        QString text;
+        if (value.kind() == InputValue::Kind::Literal && value.literal().isString())
+            text = value.literal().toString();
+        else if (picker && value.kind() == InputValue::Kind::Resource)
+            text = value.handle().value(QStringLiteral("name")).toString();
+        if (text.isEmpty())
             continue;
-        needed = std::max(needed, node_size::lineWidgetWidth(port.label, value.literal().toString(), m_textSize));
+        needed = std::max(needed, node_size::lineWidgetWidth(port.label, text, m_textSize) + (picker ? glyph : 0));
     }
     return std::clamp(needed, m_defaultWidth, maxWidth());
 }
