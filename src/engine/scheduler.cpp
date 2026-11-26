@@ -1619,7 +1619,7 @@ private:
     // What a sink shows: its inputs as resolved (Preview's whole result; Compare Images' A and B
     // beside its outputs). Other nodes show nothing of their own (their outputs are what they have).
     static QJsonObject shownBy(const NodeRun &n) {
-        return n.type && n.type->sink ? valuesJson(n.inputs) : QJsonObject();
+        return n.node && n.node->sink ? valuesJson(n.inputs) : QJsonObject();
     }
 
     bool checkOutputs(const NodeRun &n, Values &outputs, Error &bad) const {

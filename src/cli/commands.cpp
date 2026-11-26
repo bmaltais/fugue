@@ -137,9 +137,12 @@ Reply validateWorkflow(const Command &command, Context &context) {
     if (!document)
         return loadFailed(document.errors());
     // A model that is not on disk, whose same weights are: used for this check when asked, else said (#605).
-    const Document checked = command.has("use-on-disk") ? useOnDisk(*document, context) : *document;
+    if (const Errors conflict = onDiskFlagConflict(command); !conflict.isEmpty())
+        return Reply::failure(conflict);
+    const bool swaps = usesOnDisk(command);
+    const Document checked = swaps ? useOnDisk(*document, context) : *document;
     Validation validation = validateDocument(checked, context, command.positionals.at(0));
-    if (!command.has("use-on-disk"))
+    if (!swaps)
         addOnDiskHints(validation.errors, *document, context);
     if (hasErrors(validation.errors))
         return Reply::failure(validation.errors);

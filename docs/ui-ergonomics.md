@@ -1387,6 +1387,16 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Decisions taken without the owner (each to confirm): the card for a template that needs a pack still opens Get ready (the sheet has more to ask); a card whose models are covered but a host serves another keeps today's rule; Undo of the opened-with banner is the tab's own undo step (Ctrl+Z also works) and shows only while that line is the banner's and its tab is shown; hover offers are kept 2 s per node (`onDiskOffers`).
 - Not checked: that Tab alone reaches the warnings badge from the canvas (the window's Tab is also Add a node by search; the test focuses the badge and drives the rest by keys); by a person: a real window and a real 9 GB file (offscreen pictures, a small bf16 header file whose hash is read on the worker); the pictures are in `~/Pictures/fugue-use-ui/`.
 
+### 2026-11-26 Use my file by itself: the setting (#618; follows the #616 row)
+
+- Control: Settings > General, `src/settings/SettingsPanel.qml` "When a model is missing but the same model is on disk" (`useOnDisk`), a `Choices` of two (Use my file, Ask me), after Sampler preview. Writes `use_on_disk` in settings.json; Use my file is the default and leaves the file.
+- Old: every covered model waited for a click (the sheet's yes, the card, the Needs chip), even for the person who always says yes.
+- New (owner decision 2026-11-26): with Use my file the click is gone. A template or an app opens with its covered models in place and Get ready only for the rest (a template that needs a pack still opens the sheet); a workflow file or a tab shown later takes its files once they are read (the sheet of a tab just opened waits for that); Get ready, the Needs panel and the node card find nothing covered to offer. One banner line names the file and the tier ("Used your file <file> in place of <name> (same model, <tier>)."), and its Undo is one step in the graph (the App view's line has its own). With Ask me, the #616 flow is unchanged.
+- Why: the choice with a safe default and an undo is the pattern the owner wants (Primary, Undo); a swap is never silent, and the workflow file is written only on save.
+- Rules met: Primary (no extra control on any surface), Words (the line names file, model and tier), Undo (one step, not undone by the next check), Floor (the setting is a two-option `Choices` like its neighbours).
+- Decisions taken without the owner (each to confirm): the setting is a general preference (inherited by a project like `new_seed`), key `use_on_disk` with values `use` and `ask`; the template details' Download button and a Get ready the person opened by hand are not auto-applied; a model whose file could not be read, or whose swap was undone, is not tried again for that tab; Run does not read files itself, it relies on the swap done at open (a run started while a file is still being read runs without it); the CLI's `validate` follows the setting too, so it answers what `run` would do.
+- Not checked: by a person: the banner and its Undo in a real window with a real 9 GB file; the Settings row's look.
+
 ### 2026-11-26 CUDA helper notice: wording for a host without pacman, and shown in an AppImage (#334)
 
 - Control: `helperNotice`, `helperNoticeCopy` and `helperNoticeDismiss` in `src/Main.qml`, unchanged in place, size and order.

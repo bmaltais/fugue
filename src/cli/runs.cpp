@@ -196,7 +196,9 @@ Plan graphToRun(const Command &command, Context &context) {
         return {Compilation(setErrors), {}};
     // The files on disk of the models it names that are not (#605): used for this run when asked, else said.
     Errors notes;
-    if (command.has("use-on-disk"))
+    if (const Errors conflict = onDiskFlagConflict(command); !conflict.isEmpty())
+        return {Compilation(conflict), {}};
+    if (usesOnDisk(command))
         *document = useOnDisk(*document, context);
     else
         notes = onDiskNotes(*document, context);

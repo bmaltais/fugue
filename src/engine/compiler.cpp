@@ -208,6 +208,7 @@ private:
     CompiledGraph shape();
     InputValue bypassValue(const QString &path, const QString &port, int depth) const;
     InputValue rewire(const InputValue &value, int depth) const;
+    bool quiet(const Flat &flat) const; // a sink inside a group that does not run (5.5)
     void checkCarried(const Flat &flat, const QString &input, const InputValue &written);
 
     const Document &m_doc;
@@ -220,6 +221,7 @@ private:
     QHash<QString, Status> m_status;
     QHash<QString, const NodeType *> m_types; // leaf path id -> installed type
     QMap<QString, Flat> m_flat;               // by path id
+    QSet<QString> m_gone;                     // inner sinks dropped (5.5): a link into one is empty, as into a bypass with no way through
     QSet<QString> m_reported;                 // link errors already given, by where they were written
 };
 
@@ -1028,6 +1030,8 @@ InputValue Compiler::rewire(const InputValue &value, int depth) const {
         const auto it = m_flat.constFind(from.node);
         if (it != m_flat.constEnd() && it->mode == NodeMode::Bypass)
             return bypassValue(from.node, from.port, depth);
+        if (m_gone.contains(from.node))
+            return {};
         return value;
     }
     if (value.kind() != InputValue::Kind::List)
@@ -1082,15 +1086,29 @@ void Compiler::checkCarried(const Flat &flat, const QString &input, const InputV
 }
 
 // Bypass, mute, sinks inside groups, and what no sink needs (4.8).
+bool Compiler::quiet(const Flat &flat) const {
+    const bool entered = !m_options.entered.isEmpty() && flat.path.section(QLatin1Char('/'), 0, -2) == m_options.entered;
+    return flat.inGroup && flat.spec().sink && flat.path != m_options.target && !entered;
+}
+
 CompiledGraph Compiler::shape() {
     CompiledGraph graph;
     graph.source = m_doc.sourceHash();
     graph.target = m_options.target;
 
     // Bypass: rewire the links, then leave the bypassed nodes out.
+    // Sinks inside a group never run (5.5), unless the run stops at one, or the user has
+    // entered the instance that holds it. A view sink (Compare Images) stays as a plain node
+    // when a needed node reads its outputs, for that value (#623); any other, a Save Image
+    // whose `file` is read, is dropped, and what read it sees the value as empty, as after a
+    // bypass. A link to a dropped node used to stay in the graph and hang or crash a run.
+    m_gone.clear();
+    for (auto it = m_flat.constBegin(); it != m_flat.constEnd(); ++it)
+        if (!it->hidden && it->mode != NodeMode::Bypass && quiet(*it) && !it->spec().viewOnly)
+            m_gone.insert(it.key());
     QMap<QString, Flat> live;
     for (auto it = m_flat.constBegin(); it != m_flat.constEnd(); ++it)
-        if (!it->hidden && it->mode != NodeMode::Bypass)
+        if (!it->hidden && it->mode != NodeMode::Bypass && !m_gone.contains(it.key()))
             live[it.key()] = *it;
     for (Flat &flat : live) {
         QMap<QString, InputValue> rewired;
@@ -1110,16 +1128,6 @@ CompiledGraph Compiler::shape() {
                 flat.emptied = true;
         }
         flat.inputs = rewired;
-    }
-
-    // Sinks inside a group never run (5.5), unless the run stops at one, or the user has
-    // entered the instance that holds it.
-    for (auto it = live.begin(); it != live.end();) {
-        const bool entered = !m_options.entered.isEmpty() && it.key().section(QLatin1Char('/'), 0, -2) == m_options.entered;
-        if (it->inGroup && it->spec().sink && it.key() != m_options.target && !entered)
-            it = live.erase(it);
-        else
-            ++it;
     }
 
     // Mute (3.5) and inputs a bypass left empty, in dependency order.
@@ -1176,7 +1184,7 @@ CompiledGraph Compiler::shape() {
             roots << m_options.target;
     } else {
         for (const Flat &flat : live)
-            if (flat.spec().sink)
+            if (flat.spec().sink && !quiet(flat))
                 roots << flat.path;
     }
     QSet<QString> needed;
@@ -1189,6 +1197,8 @@ CompiledGraph Compiler::shape() {
     }
     for (const Flat &flat : live) {
         if (!needed.contains(flat.path)) {
+            if (quiet(flat))
+                continue; // a view sink nothing needed reads: nothing was lost, so nothing to warn of
             graph.skipped[flat.path] = QStringLiteral("not_part_of_output");
             if (m_options.target.isEmpty()) {
                 CompiledNode unused;
@@ -1207,7 +1217,7 @@ CompiledGraph Compiler::shape() {
         node.type = flat.spec().id;
         node.version = flat.spec().version;
         node.inputs = flat.inputs;
-        node.sink = flat.spec().sink;
+        node.sink = flat.spec().sink && !quiet(flat);
         node.provider = flat.provider;
         node.frozen = flat.frozen;
         node.lazyDropped = flat.lazyDropped;

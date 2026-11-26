@@ -301,6 +301,23 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === "general"
+                        title: qsTr("When a model is missing but the same model is on disk")
+                        key: "use_on_disk"
+                        origin: panel.model.origins["use_on_disk"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("use_on_disk"))
+                        note: panel.model.useOnDisk === "ask"
+                              ? qsTr("Get ready and the Needs panel offer your file beside the download, with your file chosen. Nothing is swapped until you say yes.")
+                              : qsTr("Fugue uses your file by itself when it opens a template, an app or a workflow, and says which file it used, with Undo. The workflow file is changed only when you save it.")
+                        Choices {
+                            Layout.fillWidth: true
+                            name: "useOnDisk"
+                            current: panel.model.useOnDisk
+                            options: [{value: "use", text: qsTr("Use my file")}, {value: "ask", text: qsTr("Ask me")}]
+                            onPicked: value => panel.apply(panel.model.set("use_on_disk", value))
+                        }
+                    }
+                    SettingsParts.Setting {
+                        visible: panel.page === "general"
                         title: qsTr("Reopen tabs at start")
                         key: "restore_tabs"
                         origin: panel.model.origins["restore_tabs"] ?? ""
