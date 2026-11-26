@@ -177,6 +177,8 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     });
     // With no area showing the Graph its context is off; an App area still takes the picture.
     commands.setAlsoWhen(QStringLiteral("edit.paste"), [&view] { return view.shown(); });
+    // The window's Shortcut list (activeKeys) is made again on `changed` only: a shown App flips the paste on with no other change.
+    QObject::connect(&view, &AppView::shownChanged, &commands, &CommandRegistry::changed);
     commands.setHandler(QStringLiteral("run.cancel"), [&view, &runs] {
         if (view.shown())
             view.cancel();

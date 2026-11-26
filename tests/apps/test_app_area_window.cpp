@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QQuickStyle>
+#include <QSignalSpy>
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
@@ -224,6 +225,11 @@ private slots:
         QTRY_VERIFY(rig.view.shown());
         QVERIFY(!app.commands.isEnabled("node.search"));
         QVERIFY(app.commands.isEnabled("edit.paste")); // the App's picture, not the hidden Graph's
+        // The Shortcut list is remade when the App is shown or hidden, so Ctrl+V is a live key, not only an enabled command.
+        QSignalSpy remade(&app.commands, &CommandRegistry::changed);
+        emit rig.view.shownChanged();
+        QVERIFY(!remade.isEmpty());
+        QVERIFY(app.commands.activeKeys().contains("Ctrl+V"));
         QVERIFY(app.commands.isEnabled("view.reset-layout")); // not the default window
         QVERIFY(app.workspace.showView(1, "graph"));
         QTRY_VERIFY(!find(app.window, "areaHost"));

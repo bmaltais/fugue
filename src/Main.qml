@@ -809,16 +809,13 @@ ApplicationWindow {
             look: App.theme.look
             tabs: App.workflows.tabs
             recent: App.recentFiles.entries
-            onTabRequested: index => {
-                App.workflows.current = index
-                win.showGraph()
-            }
+            onTabRequested: index => App.workflows.current = index // as the tab bar: the active area keeps its view
             onTabCloseRequested: index => App.workflows.closeTab(index)
             onFileRequested: path => {
                 if (!App.workflows.openPath(path))
                     App.recentFiles.forget(path)
-                else
-                    win.showGraph()
+                else if (!(App.appView && App.appView.shown))
+                    win.showGraph() // an app opened into a shown App stays there
             }
             onCloseRequested: App.sidePanels.tab = ""
             // What the browser remembers: the view, the mode and the favorites filter (media_state.h).
