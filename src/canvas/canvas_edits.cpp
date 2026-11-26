@@ -402,7 +402,7 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
                 row.toInput = in.key();
                 row.item = item;
                 const Port *out = findPort(from.node, from.port, true);
-                row.color = out ? colorKey(out->type, out->kind) : QStringLiteral("unknown");
+                row.color = out ? portColor(from.node, *out) : QStringLiteral("unknown");
                 fresh.push_back(row);
                 ends << from.node << it.key();
             }
@@ -422,6 +422,20 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
             reroutes |= link.curves.size() > 1;
         }
         m_linkList->endInsertRows();
+    }
+    // A wire out of a node that takes its type from its sides (a Switch) changes color when a side upstream does, also when
+    // that node was not itself touched (a Switch that reads another).
+    for (int i = 0; i < int(m_links.size()); ++i) {
+        LinkRow &link = m_links[size_t(i)];
+        const Port *out = findPort(link.from.node, link.from.port, true);
+        if (!out || !out->type || !out->type->type.isAny())
+            continue;
+        const QString color = portColor(link.from.node, *out);
+        if (color == link.color)
+            continue;
+        link.color = color;
+        const QModelIndex index = m_linkList->index(i, 0);
+        emit m_linkList->dataChanged(index, index, {LinkList::Color});
     }
     for (const QString &id : ends)
         refreshPorts(id);
