@@ -9,9 +9,18 @@ name: Helper tarballs
 on:
   push:
     tags: ['v*']
+  # Weekly on main: a tag can only read caches made on the default branch, so this keeps the CUDA build warm.
+  schedule:
+    - cron: '7 7 * * 1'
   pull_request:
     paths: [bin/package-helper, helper/fugue-helper.service, .github/workflows/helper-tarballs.yml]
   workflow_dispatch:
+
+# A new push to a pull request cancels that pull request's older run. Tags, the weekly runs and manual runs each get
+# their own group (run_id), so a release is never cancelled. (llama.cpp's expression; docs/ci-research in the workbench.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
