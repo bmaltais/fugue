@@ -445,18 +445,30 @@ void Workflows::useOnDisk(const QStringList &hashes) {
     if (m_hashing.contains(key))
         return; // a second click for the same target while its file is being read
     setHashing(key, true);
-    hashUses(chosen, [this, tab, chosen, key](const Uses &resolved, const QStringList &failed) {
+    // Where the choice goes is decided now, by what the person is looking at: a switch of views while the file is read changes nothing.
+    const bool inApp = m_appShown && m_appShown(tab);
+    hashUses(chosen, [this, tab, chosen, key, inApp](const Uses &resolved, const QStringList &failed) {
         setHashing(key, false);
-        applyUses(tab, chosen, resolved);
+        applyUses(tab, chosen, resolved, inApp);
         if (!failed.isEmpty())
             setNotice(tr("Could not read %1, so it is not used.").arg(failed.join(QStringLiteral(", "))));
     });
 }
 
-void Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
-    if (resolved.isEmpty() || m_current < 0 || m_tabs[size_t(m_current)].id != tab)
-        return; // a file that could not be read, or another tab was shown meanwhile
-    if (!(m_useTaker && m_useTaker(tab, chosen, resolved))) {
+void Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp) {
+    if (resolved.isEmpty())
+        return; // no file could be read
+    const bool open = std::any_of(m_tabs.begin(), m_tabs.end(), [&tab](const Tab &t) { return t.id == tab; });
+    if (!open)
+        return; // the tab was closed meanwhile
+    if (inApp) {
+        // The App view's own state, whichever view shows now; the workflow is never written.
+        if (!m_useTaker)
+            return;
+        m_useTaker(tab, chosen, resolved);
+    } else {
+        if (m_current < 0 || m_tabs[size_t(m_current)].id != tab)
+            return; // another tab is shown: the document on the canvas is not this one's
         // The graph: the document itself, one undo step; the file is written only when the person saves.
         m_canvas->commitWhole(withUses(m_canvas->document(), resolved), tr("Use the files you have"));
         m_onDiskKey.clear();

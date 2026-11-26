@@ -360,6 +360,8 @@ void AppView::takeUses(const QString &tab, const QList<OnDiskUse> &chosen, const
         state.uses.insert(hash, kept);
     }
     emit usesChanged();
+    if (tab == m_tab)
+        inputEdited(); // the file is an input of the run: Live runs again with it
 }
 
 Uses AppView::usesOf(const QString &tab) const {
@@ -403,6 +405,7 @@ void AppView::undoUse(const QString &hash) {
         }
     state.uses.erase(use);
     emit usesChanged();
+    inputEdited();
 }
 
 const InputBinding *AppView::inputOf(const QString &key) const {

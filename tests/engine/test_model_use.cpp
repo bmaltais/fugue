@@ -207,6 +207,23 @@ private slots:
         QVERIFY(!listed.first().toObject().contains("source")); // the old model's source is not the file's
     }
 
+    // An app field (or an action's) whose default is the missing model takes the file too, or a run would bind the missing one back.
+    void anAppFieldDefaultHoldingTheMissingModelTakesTheFile() {
+        const QByteArray text = R"({"fugue": 1, "graph": {"nodes": {
+            "models": {"type": "fugue/load-models", "version": "1.0.0",
+                       "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "z_image_turbo_int8_convrot.safetensors"}}}}},
+            "app": {"format": 1, "inputs": [{"name": "unet", "targets": ["models.diffusion_model"], "default": {"resource": "fugue/diffusion-model", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "z_image_turbo_int8_convrot.safetensors"}}]}})";
+        const Result<Document> loaded = Document::load(text);
+        QVERIFY(loaded);
+        const QString replacement = QStringLiteral("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        OnDiskUse use{wanted("z_image_turbo_int8_convrot.safetensors"), {}};
+        use.match.name = QStringLiteral("z_image_turbo_bf16.safetensors");
+        use.match.resource = kType;
+        const Document swapped = withUses(*loaded, Uses{{kWanted, useHandle(use, replacement)}});
+        const QJsonObject field = swapped.extra.value("app").toObject().value("inputs").toArray().first().toObject();
+        QCOMPARE(field.value("default").toObject().value("hash").toString(), replacement);
+    }
+
     void quantizationReadsAsPeopleSayIt() {
         QCOMPARE(quantLabel("z_image_turbo_bf16.safetensors"), QStringLiteral("bf16"));
         QCOMPARE(quantLabel("z-image-turbo-Q8_0.gguf"), QStringLiteral("Q8_0"));

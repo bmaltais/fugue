@@ -112,9 +112,8 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     needs->setUseSource([&workflows](const QString &hash) { return workflows.onDiskOffer(hash); });
     QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QString &hash) { workflows.useOnDisk({hash}); });
     workflows.setUsesProvider([&view](const QString &tab) { return view.usesInForce(tab); });
+    workflows.setAppShown([&view](const QString &tab) { return view.shown() && view.tab() == tab; });
     workflows.setUseTaker([&view](const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
-        if (!view.shown() || view.tab() != tab)
-            return false;
         view.takeUses(tab, chosen, resolved);
         return true;
     });

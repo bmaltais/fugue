@@ -313,6 +313,9 @@ public:
     using UseTaker = std::function<bool(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved)>;
     void setUsesProvider(UsesProvider provider) { m_usesProvider = std::move(provider); }
     void setUseTaker(UseTaker taker) { m_useTaker = std::move(taker); }
+    // Whether the App view of `tab` is what shows: asked when a file is chosen, so that choice goes where it was made.
+    using AppShown = std::function<bool(const QString &tab)>;
+    void setAppShown(AppShown shown) { m_appShown = std::move(shown); }
     // For a missing model of the shown workflow (by its hash): {text ("Use what you have: ..."), file, path, tier, size, otherSource,
     // recommended}; empty when no file of the same weights is here.
     Q_INVOKABLE QVariantMap onDiskOffer(const QString &hash) const;
@@ -406,7 +409,7 @@ private:
     // The missing models of the shown workflow that have a file of the same weights on disk, kept for a moment (the Needs panel and
     // the Get ready sheet ask for each row).
     const QList<OnDiskUse> &onDiskNow() const;
-    void applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved);
+    void applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp);
     // `replace`: a file at `path` may be replaced (the dialog asked, or it is the tab's own).
     bool saveTab(int index, const QString &path, bool replace = true);
     void snapshotCurrent();
@@ -485,6 +488,7 @@ private:
     ModelWorkers m_work; // reads the hash of a file chosen in place of a missing model (#605)
     UsesProvider m_usesProvider;
     UseTaker m_useTaker;
+    AppShown m_appShown;
     mutable QList<OnDiskUse> m_onDisk; // onDiskNow()'s answer
     mutable QByteArray m_onDiskKey;
     mutable QElapsedTimer m_onDiskAge;

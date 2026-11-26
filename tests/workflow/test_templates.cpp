@@ -1240,6 +1240,46 @@ private slots:
         QVERIFY(own.readAll().contains("z_image_turbo_int8_convrot.safetensors"));
     }
 
+    // A file chosen in the App view is the app's own: switching to the graph while its hash is read must not edit the workflow.
+    void aChoiceMadeInTheAppViewStaysThereWhenTheViewSwitchesWhileItsFileIsRead() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'4');
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash},
+                                                                                              {"name", "z_image_turbo_int8_convrot.safetensors"}}}})}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("zit"));
+        bool appShown = true;
+        int taken = 0;
+        workflows.setAppShown([&appShown](const QString &) { return appShown; });
+        workflows.setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
+            ++taken;
+            return true;
+        });
+        const int steps = canvas.undoStack()->count();
+        workflows.useOnDisk({hash});
+        appShown = false; // the person switches to the graph while the file is read
+        QTRY_COMPARE(taken, 1);
+        QCOMPARE(canvas.undoStack()->count(), steps);
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(), hash);
+    }
+
     // A file that cannot be read when its hash is wanted is said: the template opens without it and the banner says why.
     void aFileThatCannotBeReadIsSaidAndTheTemplateOpensWithout() {
         forgetDownloads();

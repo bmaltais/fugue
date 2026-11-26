@@ -809,6 +809,26 @@ private slots:
         QCOMPARE(m_started.size(), 1);
     }
 
+    // The file chosen for a missing model (or put back) is an input of the run: Live runs again, as for a field edit.
+    void choosingOrUndoingAFileInPlaceOfAMissingModelRunsLiveAgain() {
+        const QString type = QStringLiteral("fugue/upscale-model");
+        const QString missing = QStringLiteral("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        const QJsonObject wanted{{"resource", type}, {"hash", missing}, {"name", "x4plus.pth"}};
+        const QJsonObject replacement{{"resource", type}, {"hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, {"name", "x4.pth"}};
+        OnDiskUse use{wanted, {}};
+        use.match.name = QStringLiteral("x4.pth");
+        m_view->setLiveDelay(10);
+        m_view->show("a", load(workflow()), {});
+        m_view->setLiveMode("live");
+        m_view->takeUses("a", {use}, {{missing, replacement}});
+        QVERIFY(m_view->liveArmed());
+        QTRY_COMPARE(m_started.size(), 1);
+        m_view->onEvent("run1", evt("run.done", {{"status", "ok"}}));
+        m_view->undoUse(missing);
+        QVERIFY(m_view->liveArmed());
+        QTRY_COMPARE(m_started.size(), 2);
+    }
+
     void aSupersededWaitingRunIsCancelledAndARunningOneIsNot() {
         m_view->setLiveDelay(10);
         m_view->show("a", load(workflow()), {});

@@ -179,6 +179,10 @@ Document withUses(const Document &document, const Uses &uses) {
             if (input.defaultValue && (input.defaultValue->kind() == InputValue::Kind::Resource || input.defaultValue->kind() == InputValue::Kind::List))
                 input.defaultValue = InputValue::fromJson(withUses(input.defaultValue->toJson(), uses));
     }
+    // A field of the app (or action) block whose default is the missing model would write it back over the file before a run.
+    for (const char *block : {"app", "action"})
+        if (out.extra.contains(QLatin1String(block)))
+            out.extra.insert(QLatin1String(block), withUses(out.extra.value(QLatin1String(block)), uses));
     return out;
 }
 
