@@ -6,7 +6,7 @@
 #include "engine/fal_provider.h"
 #include "engine/gemini_provider.h"
 #include "engine/replicate_provider.h"
-#include "engine/http_provider.h"
+#include "engine/remote_request.h"
 #include "engine/json.h"
 #include "engine/node_type.h"
 #include "engine/paths.h"

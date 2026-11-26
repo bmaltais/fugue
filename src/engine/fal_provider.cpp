@@ -5,7 +5,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -18,6 +17,7 @@
 
 #include "engine/http_provider.h"
 #include "engine/paths.h"
+#include "engine/remote_request.h"
 #include "engine/server_api.h"
 
 namespace fugue {
@@ -35,15 +35,13 @@ constexpr int kStorageLifetimeS = 3600;
 constexpr qint64 kUploadReuseMs = 30LL * 60 * 1000;
 constexpr qint64 kJsonCap = 64LL << 20;
 constexpr qint64 kPictureCap = 512LL << 20;
-constexpr int kMaxHops = 3;
-constexpr int kMaxTransientPolls = 5;
-const char *const kCapped = "fugue-capped";
 
 const QString kImageResource = QStringLiteral("fugue/image-model");
 const QString kImageGenerate = QStringLiteral("image.generate");
 const QString kImageEdit = QStringLiteral("image.edit");
 
-int codeOf(QNetworkReply *reply) { return reply->property(kCapped).toBool() ? 0 : httpStatus(reply); }
+using remote::statusOf;
+using remote::wholeUrl;
 
 QString oneLine(QString text) {
     text = text.simplified();
@@ -89,14 +87,6 @@ QString errorTypeOf(const QJsonObject &answer) {
     return detail.isEmpty() ? QString() : detail.first().toObject().value("type").toString();
 }
 
-bool wholeUrl(const QUrl &url) {
-    return (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) && !url.host().isEmpty();
-}
-
-QString originOf(const QUrl &url) {
-    return QStringLiteral("%1://%2:%3").arg(url.scheme(), url.host().toLower()).arg(url.port(url.scheme() == QLatin1String("https") ? 443 : 80));
-}
-
 } // namespace
 
 QString falDefaultAddress() { return QStringLiteral("https://queue.fal.run"); }
@@ -108,11 +98,6 @@ QString trimmedAddress(QString address) {
     while (address.endsWith(QLatin1Char('/')))
         address.chop(1);
     return address;
-}
-bool loopbackHost(const QString &host) {
-    QHostAddress address;
-    return host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
-           (address.setAddress(host) && address.isLoopback());
 }
 } // namespace
 
@@ -127,7 +112,7 @@ QString falRestAddress(const ProviderInstance &instance) {
         return set;
     // The storage host is fal's own even when the queue's address is typed in; only a loopback fake serves both.
     const QString address = trimmedAddress(instance.address);
-    return !address.isEmpty() && loopbackHost(QUrl(address).host()) ? address : falDefaultRestAddress();
+    return !address.isEmpty() && remote::loopbackHost(QUrl(address).host()) ? address : falDefaultRestAddress();
 }
 
 QList<FalModel> falShippedModels() {
@@ -209,30 +194,25 @@ QUrl FalProvider::restUrl(const QString &path) const { return QUrl(falRestAddres
 QString FalProvider::host() const { return queueUrl({}).host(); }
 
 bool FalProvider::isApiUrl(const QUrl &url) const {
-    return wholeUrl(url) && (originOf(url) == originOf(queueUrl({})) || originOf(url) == originOf(restUrl({})));
+    return wholeUrl(url) && (remote::originOf(url) == remote::originOf(queueUrl({})) || remote::originOf(url) == remote::originOf(restUrl({})));
 }
 
 QNetworkReply *FalProvider::send(const QUrl &url, const QByteArray &method, const QByteArray &body, const QByteArray &contentType, bool withKey,
                                  qint64 cap, const QList<QPair<QByteArray, QByteArray>> &headers) {
-    QNetworkRequest request(url);
-    request.setTransferTimeout(timeoutMs());
-    // No redirect is followed by Qt: a picture's is checked by download(), hop by hop, and an API call's is an error.
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     // The key goes to fal's own API hosts and nowhere else: a URL the service named is sent it only when it is one.
-    if (withKey && !m_instance.key.isEmpty() && isApiUrl(url))
-        request.setRawHeader("Authorization", "Key " + m_instance.key.toUtf8());
-    for (const auto &header : headers)
-        request.setRawHeader(header.first, header.second);
-    if (method != "GET")
-        request.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
-    QNetworkReply *reply = m_network.sendCustomRequest(request, method, body);
-    connect(reply, &QNetworkReply::downloadProgress, reply, [reply, cap](qint64 got, qint64) {
-        if (got > cap && !reply->property(kCapped).toBool()) {
-            reply->setProperty(kCapped, true);
-            reply->abort();
-        }
-    });
-    return reply;
+    remote::Session session;
+    session.scheme = "Key";
+    session.key = m_instance.key;
+    session.origins = {queueUrl({}), restUrl({})};
+    session.transferTimeoutMs = timeoutMs();
+    remote::Call call;
+    call.method = method;
+    call.body = body;
+    call.contentType = contentType;
+    call.cap = cap;
+    call.withKey = withKey;
+    call.headers = headers;
+    return remote::send(m_network, session, url, call);
 }
 
 QString FalProvider::clean(const QString &text) const {
@@ -248,10 +228,10 @@ QString FalProvider::clean(const QString &text) const {
 
 Error FalProvider::failure(QNetworkReply *reply, const QJsonObject &answer, bool submitting) const {
     const QString who = m_instance.name;
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const QString said = clean(saidBy(answer));
     const QString type = errorTypeOf(answer);
-    if (reply->property(kCapped).toBool())
+    if (remote::wasCapped(reply))
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent more data than Fugue reads in one answer.").arg(who),
                          QStringLiteral("Check the address of %1: it should be fal's queue, https://queue.fal.run.").arg(who));
     if (code == 0) {
@@ -356,7 +336,7 @@ Result<Description> FalProvider::description() const {
     // The key goes with every call: only to https, or to a loopback fake.
     if (!m_instance.key.isEmpty()) {
         for (const QUrl &url : {queue, restUrl({})})
-            if (url.scheme() != QLatin1String("https") && !loopbackHost(url.host()))
+            if (!remote::keyTransportOk(url))
                 return Result<Description>(makeError(QStringLiteral("provider_unreachable"),
                                                       QStringLiteral("%1 would send its key over plain http to %2.").arg(m_instance.name, url.host()),
                                                       QStringLiteral("Use https:// for the address of %1 in %2.").arg(m_instance.name, where())));
@@ -522,7 +502,7 @@ void FalProvider::submit(const JobRequest &request, Reply<QString> reply) {
     job->status.stage = job->uploads.isEmpty() ? QStringLiteral("submitting") : QStringLiteral("uploading");
     m_jobs.insert(id, job);
     // One deadline for the whole job, every phase: a transfer timeout restarts with each byte, so a trickle never trips it.
-    QTimer::singleShot(timeoutMs() * 6, this, [this, id] { giveUp(id); });
+    QTimer::singleShot(remote::jobDeadlineMs(timeoutMs()), this, [this, id] { giveUp(id); });
     reply(Result<QString>(id));
     uploadNext(id);
 }
@@ -551,7 +531,7 @@ void FalProvider::uploadNext(const QString &id) {
     const QByteArray body = QJsonDocument(QJsonObject{{"content_type", upload.type}, {"file_name", upload.name}}).toJson(QJsonDocument::Compact);
     call(id, send(restUrl(QStringLiteral("/storage/upload/initiate?storage_type=fal-cdn-v3")), "POST", body, "application/json", true, kJsonCap, headers),
          [this, id, job](QNetworkReply *initiated) {
-             const int code = codeOf(initiated);
+             const int code = statusOf(initiated);
              const QJsonObject answer = answerOf(initiated);
              if (code != 200)
                  return fail(id, failure(initiated, answer));
@@ -563,7 +543,7 @@ void FalProvider::uploadNext(const QString &id) {
              const Job::Upload &upload = job->uploads.at(job->uploadAt);
              // The storage URL is presigned: it takes no key.
              call(id, send(uploadUrl, "PUT", upload.bytes, upload.type.toUtf8(), false, kJsonCap), [this, id, job, fileUrl](QNetworkReply *put) {
-                 const int status = codeOf(put);
+                 const int status = statusOf(put);
                  if (status == 0)
                      return fail(id, failure(put, {}));
                  if (status < 200 || status >= 300)
@@ -636,7 +616,7 @@ void FalProvider::sendJob(const QString &id) {
     call(id, send(queueUrl(QStringLiteral("/") + job->handle.value("name").toString()), "POST", QJsonDocument(job->sent).toJson(QJsonDocument::Compact),
                   "application/json", true, kJsonCap, headers),
          [this, id, job](QNetworkReply *posted) {
-             const int code = codeOf(posted);
+             const int code = statusOf(posted);
              const QJsonObject answer = answerOf(posted);
              const QString statusUrl = answer.value("status_url").toString();
              const QString responseUrl = answer.value("response_url").toString();
@@ -686,7 +666,7 @@ void FalProvider::giveUp(const QString &id) {
     const auto job = m_jobs.value(id);
     if (!job || job->status.isTerminal())
         return;
-    fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() * 6 / 1000),
+    fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(remote::jobDeadlineMs(timeoutMs()) / 1000),
                        QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, where())));
     if (job->reply && job->phase != Phase::Submitting)
         job->reply->abort();
@@ -698,14 +678,12 @@ void FalProvider::pollNow(const QString &id) {
     if (!job || job->status.isTerminal())
         return;
     call(id, send(QUrl(job->statusUrl), "GET"), [this, id, job](QNetworkReply *reply) {
-        const int code = codeOf(reply);
+        const int code = statusOf(reply);
         // No answer, a rate limit or a gateway hiccup: try again a few times, waiting longer each time.
-        if (code == 0 || code == 429 || code == 500 || code == 502 || code == 503 || code == 504) {
-            if (++job->failures >= kMaxTransientPolls)
+        if (remote::transientStatus(code)) {
+            if (remote::pollsExhausted(job->failures))
                 return fail(id, failure(reply, answerOf(reply)));
-            bool seconds = false;
-            const int retryAfter = QString::fromLatin1(reply->rawHeader("Retry-After")).trimmed().toInt(&seconds);
-            return pollLater(id, seconds ? std::clamp(retryAfter, 0, 30) * 1000 : 0);
+            return pollLater(id, remote::retryAfterMs(reply));
         }
         job->failures = 0;
         // fal answers 202 while the job is queued or running, 200 when it is done.
@@ -745,7 +723,7 @@ void FalProvider::fetchResult(const QString &id) {
     status.stage = QStringLiteral("fetching");
     change(id, status);
     call(id, send(QUrl(job->responseUrl), "GET"), [this, id, job](QNetworkReply *reply) {
-        const int code = codeOf(reply);
+        const int code = statusOf(reply);
         const QJsonObject answer = answerOf(reply);
         if (code != 200)
             return fail(id, failure(reply, answer));
@@ -779,10 +757,10 @@ void FalProvider::download(const QString &id, const QUrl &url) {
     status.stage = QStringLiteral("downloading");
     change(id, status);
     call(id, send(url, "GET", {}, {}, false, kPictureCap), [this, id, job](QNetworkReply *reply) {
-        const int code = codeOf(reply);
-        if (code >= 300 && code < 400 && code != 304) {
-            const QUrl next = reply->url().resolved(QUrl(QString::fromLatin1(reply->rawHeader("Location"))));
-            if (++job->hops > kMaxHops)
+        const int code = statusOf(reply);
+        if (remote::isRedirect(code)) {
+            const QUrl next = remote::redirectTarget(reply);
+            if (!remote::followHop(job->hops))
                 return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent the picture link on too many times.").arg(m_instance.name),
                                           QStringLiteral("Run the node again.")));
             return download(id, next);

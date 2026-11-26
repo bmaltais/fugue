@@ -3,7 +3,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -15,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "engine/remote_request.h"
 #include "engine/server_api.h"
 
 namespace fugue {
@@ -29,7 +29,6 @@ constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
 constexpr qint64 kAnswerCap = 128LL << 20;
 // Google's limit for one request with inline pictures (text, instructions and inline bytes): 20 MB.
 constexpr qint64 kRequestCap = 20LL << 20;
-const char *const kCapped = "fugue-capped";
 
 const QString kImageResource = QStringLiteral("fugue/image-model");
 const QString kImageGenerate = QStringLiteral("image.generate");
@@ -49,15 +48,7 @@ QString trimmedAddress(QString address) {
     return address;
 }
 
-bool loopbackHost(const QString &host) {
-    QHostAddress address;
-    return host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
-           (address.setAddress(host) && address.isLoopback());
-}
-
-bool wholeUrl(const QUrl &url) {
-    return (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) && !url.host().isEmpty();
-}
+using remote::wholeUrl;
 
 // Google's error body: {"error": {"code": 429, "message": "...", "status": "RESOURCE_EXHAUSTED", "details": [{"reason": ...}]}}.
 QString saidBy(const QJsonObject &answer) {
@@ -179,11 +170,11 @@ QString GeminiProvider::clean(const QString &text) const {
 
 Error GeminiProvider::failure(QNetworkReply *reply, const QJsonObject &answer) const {
     const QString who = m_instance.name;
-    const int code = reply->property(kCapped).toBool() ? 0 : httpStatus(reply);
+    const int code = remote::statusOf(reply);
     const QString said = clean(saidBy(answer));
     const QString status = errorStatusOf(answer);
     const QString tail = said.isEmpty() ? QStringLiteral(".") : QStringLiteral(": ") + said;
-    if (reply->property(kCapped).toBool())
+    if (remote::wasCapped(reply))
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent more data than Fugue reads in one answer.").arg(who),
                          QStringLiteral("Check the address of %1: it should be %2.").arg(who, geminiDefaultAddress()));
     if (code == 0) {
@@ -254,7 +245,7 @@ Result<Description> GeminiProvider::description() const {
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 has no usable address.").arg(m_instance.name),
                                              QStringLiteral("Remove the address of %1 in %2: Google Gemini needs none.").arg(m_instance.name, where())));
     // The key goes with every call: only to https, or to a loopback fake.
-    if (!m_instance.key.isEmpty() && base.scheme() != QLatin1String("https") && !loopbackHost(base.host()))
+    if (!m_instance.key.isEmpty() && !remote::keyTransportOk(base))
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"),
                                               QStringLiteral("%1 would send its key over plain http to %2.").arg(m_instance.name, base.host()),
                                               QStringLiteral("Use https:// for the address of %1 in %2.").arg(m_instance.name, where())));
@@ -418,19 +409,19 @@ void GeminiProvider::submit(const JobRequest &request, Reply<QString> reply) {
     m_jobs.insert(id, job);
 
     // The key is in the header and in no URL; no redirect is followed (the API answers in place).
-    QNetworkRequest http(QUrl(geminiAddress(m_instance) + QStringLiteral("/v1beta/models/%1:generateContent").arg(modelId)));
-    http.setTransferTimeout(0);
-    http.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    http.setRawHeader("x-goog-api-key", m_instance.key.toUtf8());
-    http.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QNetworkReply *post = m_network.post(http, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    // The model may be silent until the picture is done, so no transfer timeout: the job's own deadline below ends it.
+    remote::Session session;
+    session.header = "x-goog-api-key";
+    session.key = m_instance.key;
+    session.origins = {QUrl(geminiAddress(m_instance))};
+    remote::Call call;
+    call.method = "POST";
+    call.contentType = "application/json";
+    call.body = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    call.cap = kAnswerCap;
+    call.withKey = true;
+    QNetworkReply *post = remote::send(m_network, session, QUrl(geminiAddress(m_instance) + QStringLiteral("/v1beta/models/%1:generateContent").arg(modelId)), call);
     job->reply = post;
-    connect(post, &QNetworkReply::downloadProgress, post, [post](qint64 got, qint64) {
-        if (got > kAnswerCap && !post->property(kCapped).toBool()) {
-            post->setProperty(kCapped, true);
-            post->abort();
-        }
-    });
     connect(post, &QNetworkReply::finished, this, [this, id, post] {
         post->deleteLater();
         const auto found = m_jobs.value(id);
@@ -451,7 +442,7 @@ void GeminiProvider::submit(const JobRequest &request, Reply<QString> reply) {
 }
 
 void GeminiProvider::finish(const QString &id, QNetworkReply *reply) {
-    const int code = reply->property(kCapped).toBool() ? 0 : httpStatus(reply);
+    const int code = remote::statusOf(reply);
     const QJsonObject answer = reply->isOpen() ? jsonBody(reply) : QJsonObject{};
     if (code != 200)
         return fail(id, failure(reply, answer));

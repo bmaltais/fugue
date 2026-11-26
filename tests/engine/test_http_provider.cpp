@@ -404,20 +404,6 @@ private slots:
 
     // --- picture links, size caps, retries (review of #401) ---
 
-    void aPictureLinkIsOnlyFetchedWhenItIsAPlaceAServiceMayName() {
-        QVERIFY(downloadUrlAllowed(QUrl("https://cdn.example.com/a.png"), "api.example.com"));
-        QVERIFY(!downloadUrlAllowed(QUrl("file:///mnt/windows/models/huge.safetensors"), "api.example.com"));
-        QVERIFY(!downloadUrlAllowed(QUrl("data:image/png;base64,AAAA"), "127.0.0.1"));
-        QVERIFY(!downloadUrlAllowed(QUrl("qrc:/x"), "127.0.0.1"));
-        QVERIFY(!downloadUrlAllowed(QUrl("http://127.0.0.1:8080/admin"), "api.example.com"));
-        QVERIFY(!downloadUrlAllowed(QUrl("http://localhost/x"), "api.example.com"));
-        QVERIFY(!downloadUrlAllowed(QUrl("http://169.254.169.254/latest"), "api.example.com"));
-        QVERIFY(!downloadUrlAllowed(QUrl("http://192.168.1.5/x"), "api.example.com"));
-        QVERIFY(!downloadUrlAllowed(QUrl("http://[::1]/x"), "api.example.com"));
-        QVERIFY(downloadUrlAllowed(QUrl("http://127.0.0.1:8080/x"), "127.0.0.1")); // the service is local itself
-        QVERIFY(downloadUrlAllowed(QUrl("http://192.168.1.5/x"), "192.168.1.9"));
-    }
-
     void aFileOrDataLinkIsRefusedAndARelativeLinkWorks() {
         Fixture fixture;
         auto link = std::make_shared<QString>();

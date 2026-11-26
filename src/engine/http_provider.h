@@ -43,13 +43,6 @@ namespace fugue {
 
 // Whether a model id from an OpenAI-style /models list is one that draws pictures (dall-e-3,
 // gpt-image-1, flux, ...): the guess used when the instance names no image_models.
-// Whether a host is on this machine or its own network: localhost, *.local and *.internal names, loopback, link-local,
-// private (RFC 1918, unique local) and CGNAT (100.64/10, Tailscale) addresses, the unspecified address. A host that is not is
-// off-machine (remote_consent.h).
-bool isLocalHost(const QString &host);
-// Whether a picture link a service names may be fetched: http or https, and not a loopback, link-local
-// or private address unless the instance itself (`instanceHost`) is at one.
-bool downloadUrlAllowed(const QUrl &url, const QString &instanceHost);
 bool looksLikeImageModel(const QString &id);
 // Whether a model id is not a chat model at all (embeddings, speech): never offered as text.
 bool looksLikeOtherModel(const QString &id);

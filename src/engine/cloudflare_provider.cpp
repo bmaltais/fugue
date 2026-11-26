@@ -3,7 +3,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QHostAddress>
 #include <QHttpMultiPart>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -15,7 +14,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "engine/http_provider.h"
+#include "engine/remote_request.h"
 #include "engine/server_api.h"
 #include "engine/vips.h"
 
@@ -32,13 +31,13 @@ constexpr qint64 kAnswerCap = 32LL << 20;
 constexpr qint64 kSeedRange = 2147483647;
 // The documentation asks for reference pictures under 512x512.
 constexpr int kPictureSide = 511;
-const char *const kCapped = "fugue-capped";
 
 const QString kImageResource = QStringLiteral("fugue/image-model");
 const QString kImageGenerate = QStringLiteral("image.generate");
 const QString kImageEdit = QStringLiteral("image.edit");
 
-int codeOf(QNetworkReply *reply) { return reply->property(kCapped).toBool() ? 0 : httpStatus(reply); }
+using remote::statusOf;
+using remote::wholeUrl;
 
 QString oneLine(QString text) {
     text = text.simplified();
@@ -46,16 +45,6 @@ QString oneLine(QString text) {
 }
 
 QString where() { return QStringLiteral("Settings > Providers"); }
-
-bool wholeUrl(const QUrl &url) {
-    return (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) && !url.host().isEmpty();
-}
-
-bool loopbackHost(const QString &host) {
-    QHostAddress address;
-    return host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
-           (address.setAddress(host) && address.isLoopback());
-}
 
 // The first of Cloudflare's `errors` ({code, message}), else a plain `error` or `message`.
 QString saidBy(const QJsonObject &answer) {
@@ -163,10 +152,10 @@ QString CloudflareProvider::clean(const QString &text) const {
 
 Error CloudflareProvider::failure(QNetworkReply *reply, const QJsonObject &answer) const {
     const QString who = m_instance.name;
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const QString said = clean(saidBy(answer));
     const QString after = said.isEmpty() ? QStringLiteral(".") : QStringLiteral(": ") + said;
-    if (reply->property(kCapped).toBool())
+    if (remote::wasCapped(reply))
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent more data than Fugue reads in one answer.").arg(who),
                          QStringLiteral("Check the address of %1: it should be Cloudflare's API, https://api.cloudflare.com.").arg(who));
     if (code == 0) {
@@ -252,7 +241,7 @@ Result<Description> CloudflareProvider::description() const {
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 has no usable address.").arg(m_instance.name),
                                              QStringLiteral("Remove the address of %1 in %2: Cloudflare needs none.").arg(m_instance.name, where())));
     // The token goes with every call: only to https, or to a loopback fake.
-    if (!m_instance.key.isEmpty() && api.scheme() != QLatin1String("https") && !loopbackHost(api.host()))
+    if (!m_instance.key.isEmpty() && !remote::keyTransportOk(api))
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"),
                                               QStringLiteral("%1 would send its token over plain http to %2.").arg(m_instance.name, api.host()),
                                               QStringLiteral("Use https:// for the address of %1 in %2.").arg(m_instance.name, where())));
@@ -441,12 +430,16 @@ void CloudflareProvider::submit(const JobRequest &request, Reply<QString> reply)
     job->status.stage = QStringLiteral("running");
     m_jobs.insert(id, job);
 
-    QNetworkRequest http(runUrl(modelId));
-    http.setTransferTimeout(timeoutMs());
     // No redirect is followed: an answer that is one is an error, and the token goes nowhere else.
-    http.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    http.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
-    QNetworkReply *posted = nullptr;
+    remote::Session session;
+    session.scheme = "Bearer";
+    session.key = m_instance.key;
+    session.origins = {QUrl(cloudflareAddress(m_instance))};
+    session.transferTimeoutMs = timeoutMs();
+    remote::Call call;
+    call.method = "POST";
+    call.cap = kAnswerCap;
+    call.withKey = true;
     if (spec.multipart) {
         auto *form = new QHttpMultiPart(QHttpMultiPart::FormDataType);
         for (auto it = sent.begin(); it != sent.end(); ++it) {
@@ -465,19 +458,13 @@ void CloudflareProvider::submit(const JobRequest &request, Reply<QString> reply)
             part.setBody(pictures.at(i).bytes);
             form->append(part);
         }
-        posted = m_network.post(http, form);
-        form->setParent(posted);
+        call.form = form;
     } else {
-        http.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-        posted = m_network.post(http, QJsonDocument(sent).toJson(QJsonDocument::Compact));
+        call.contentType = "application/json";
+        call.body = QJsonDocument(sent).toJson(QJsonDocument::Compact);
     }
+    QNetworkReply *posted = remote::send(m_network, session, runUrl(modelId), call);
     job->reply = posted;
-    connect(posted, &QNetworkReply::downloadProgress, posted, [posted](qint64 got, qint64) {
-        if (got > kAnswerCap && !posted->property(kCapped).toBool()) {
-            posted->setProperty(kCapped, true);
-            posted->abort();
-        }
-    });
     connect(posted, &QNetworkReply::finished, this, [this, id, posted] {
         posted->deleteLater();
         const auto found = m_jobs.value(id);
@@ -486,11 +473,11 @@ void CloudflareProvider::submit(const JobRequest &request, Reply<QString> reply)
         finish(id, posted);
     });
     // One deadline for the whole job: a transfer timeout restarts with each byte, so a trickle never trips it.
-    QTimer::singleShot(timeoutMs() * 6, this, [this, id] {
+    QTimer::singleShot(remote::jobDeadlineMs(timeoutMs()), this, [this, id] {
         const auto found = m_jobs.value(id);
         if (!found || found->status.isTerminal())
             return;
-        fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() * 6 / 1000),
+        fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(remote::jobDeadlineMs(timeoutMs()) / 1000),
                            QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, where())));
         if (found->reply)
             found->reply->abort();
@@ -499,7 +486,7 @@ void CloudflareProvider::submit(const JobRequest &request, Reply<QString> reply)
 }
 
 void CloudflareProvider::finish(const QString &id, QNetworkReply *reply) {
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const QByteArray raw = reply->isOpen() ? reply->readAll() : QByteArray{};
     const QString type = reply->header(QNetworkRequest::ContentTypeHeader).toString();
     if (code == 200 && type.startsWith(QLatin1String("image/"))) {
