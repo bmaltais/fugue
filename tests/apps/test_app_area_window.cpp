@@ -126,6 +126,7 @@ private slots:
     void theGetReadyRowUsesAFileInTheAppViewAndLeavesThePlan() {
         QTemporaryDir models;
         QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "use_on_disk", "ask").isEmpty()); // "Use my file" would have used it before the sheet
         writeZ(models.path());
         App app(load(zWorkflow));
         Rig rig(app);

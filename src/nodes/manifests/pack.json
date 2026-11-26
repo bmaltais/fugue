@@ -48,6 +48,7 @@
     "inpaint-crop-stitch",
     "invert",
     "invert-mask",
+    "keep-unchanged",
     "load-audio",
     "load-image",
     "load-models",

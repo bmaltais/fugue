@@ -23,7 +23,7 @@ const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "models_setup", "pack_paths",    "new_seed",
                         "embed_workflow", "look_corners_omarchy",  "hover_magnifier",
-                        "restore_tabs",   "picture_mode", "step_preview", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style"};
+                        "restore_tabs",   "picture_mode", "step_preview", "use_on_disk", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -98,6 +98,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.pictureMode = value.toString();
     else if (key == QLatin1String("step_preview"))
         settings.stepPreview = value.toString();
+    else if (key == QLatin1String("use_on_disk"))
+        settings.useOnDisk = value.toString();
     else if (key == QLatin1String("look_preset"))
         settings.lookPreset = value.toString();
     else if (key == QLatin1String("node_style"))
@@ -161,7 +163,7 @@ QString settingOriginName(SettingOrigin origin) {
 }
 
 SettingClass settingClass(const QString &key) {
-    static const QStringList preferences{"navigation", "language", "look_corners_omarchy", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview"};
+    static const QStringList preferences{"navigation", "language", "look_corners_omarchy", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview", "use_on_disk"};
     if (preferences.contains(key))
         return SettingClass::Preferences;
     if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
@@ -196,6 +198,8 @@ QJsonValue settingDefault(const QString &key) {
         return QStringLiteral("smart");
     if (key == QLatin1String("step_preview"))
         return QStringLiteral("fast");
+    if (key == QLatin1String("use_on_disk"))
+        return QStringLiteral("use");
     if (key == QLatin1String("look_corners_omarchy"))
         return false;
     if (key == QLatin1String("hover_magnifier"))
@@ -243,6 +247,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return oneOf(value, {"smart", "sinks", "all"}, key);
     if (key == QLatin1String("step_preview"))
         return oneOf(value, {"off", "fast", "tae", "vae"}, key);
+    if (key == QLatin1String("use_on_disk"))
+        return oneOf(value, {"use", "ask"}, key);
     if (key == QLatin1String("look_corners_omarchy"))
         return value.isBool() ? QString() : QStringLiteral("look_corners_omarchy must be true or false.");
     if (key == QLatin1String("frost"))
@@ -477,6 +483,8 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
         return settings.pictureMode;
     if (key == QLatin1String("step_preview"))
         return settings.stepPreview;
+    if (key == QLatin1String("use_on_disk"))
+        return settings.useOnDisk;
     if (key == QLatin1String("hover_magnifier"))
         return settings.hoverMagnifier;
     if (key == QLatin1String("frost"))

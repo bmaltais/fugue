@@ -87,6 +87,7 @@ struct Settings {
     QString embedWorkflow = QStringLiteral("full");
     QString pictureMode = QStringLiteral("smart"); // which nodes show a picture (#263)
     QString stepPreview = QStringLiteral("fast"); // the Sampler's picture while it runs (#297)
+    QString useOnDisk = QStringLiteral("use"); // "use": a missing model whose same weights are on disk is swapped for the file, said; "ask": the person chooses (#618)
     double frost = 0.6;          // the frosted glass of the kit's controls over a picture, 0 (off) to 1
     QString lookPreset = QStringLiteral("calm"); // the look preset whose parameters are the base of the look
     QString nodeStyle = QStringLiteral("compact"); // the node card's face: the Drift card, or today's flat one (#466)
