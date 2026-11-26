@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -75,7 +76,39 @@ void endDeadRuns(const Context &context, Lock &lock) {
     }
 }
 
+namespace {
+
+// Says once, after about a second, that the run is waiting its turn (#625): its queue entry is not active, so
+// another run, of this root or of another, has the engine or the GPU. The pid is the active run's, else the
+// process that holds either lock; without one the message says no more than it knows.
+void announceWaiting(const RunFolder &folder, Context &context) {
+    const Queue queue(context.queueDir);
+    qint64 pid = 0;
+    for (const QueueEntry &entry : queue.entries())
+        if (entry.active && entry.pid > 0) {
+            pid = entry.pid;
+            break;
+        }
+    for (const QString &path : {context.lockPath, Queue::crossRootLockFor(context.lockPath)})
+        if (pid == 0 && !path.isEmpty())
+            pid = Lock::holderPid(path);
+    if (context.json) {
+        QJsonObject event{{"event", "waiting"}, {"run", folder.id()}};
+        if (pid > 0)
+            event.insert("pid", double(pid));
+        context.line(compactJson(event));
+    } else {
+        context.log(pid > 0 ? QStringLiteral("Waiting for another Fugue run to finish (pid %1)…").arg(pid)
+                            : QStringLiteral("Waiting for another Fugue run to finish…"));
+    }
+}
+
+} // namespace
+
 RunStatus streamEvents(const RunFolder &folder, Context &context) {
+    QElapsedTimer waited;
+    waited.start();
+    bool announced = false;
     int printed = 0;
     int settling = 0;
     int orphaned = 0;
@@ -105,6 +138,14 @@ RunStatus streamEvents(const RunFolder &folder, Context &context) {
             orphaned = orphan ? orphaned + 1 : 0;
             if (orphaned >= 2)
                 folder.finish(RunStatus::Failed, {workerGone()}, utcNow());
+        }
+        if (!announced && waited.elapsed() >= 1000) {
+            QueueEntry mine;
+            if (Queue(context.queueDir).find(folder.id(), &mine)) {
+                announced = true; // started already, or told once: not looked at again
+                if (!mine.active)
+                    announceWaiting(folder, context);
+            }
         }
         QThread::msleep(50);
     }

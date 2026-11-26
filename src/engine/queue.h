@@ -114,6 +114,10 @@ public:
     // stops counting after `freshMs`). The holder asks it to give the GPU's memory back for the one that waits.
     static bool otherRootWaiting(const QString &crossRoot, int freshMs = 3000);
 
+    // The process that holds the lock file `path` (an flock, read from /proc/locks), or 0 when nobody does or
+    // the kernel does not say. Only for telling a person who is in the way; never for deciding anything.
+    static qint64 holderPid(const QString &path);
+
 private:
     int m_fd = -1;
     int m_crossFd = -1;

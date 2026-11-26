@@ -22,6 +22,8 @@
 #include <QtTest>
 
 #include <csignal>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -72,6 +74,25 @@ const QByteArray node(const char *id, const char *type, const char *inputs = "{}
     return QByteArray("\"") + id + "\": {\"type\": \"" + type + "\", \"version\": \"1.0.0\", \"inputs\": " + inputs + "}";
 }
 
+// Holds the lock file the way another Fugue does (flock), from this process, until destroyed.
+struct Held {
+    explicit Held(const QString &file) {
+        QDir().mkpath(QFileInfo(file).path());
+        fd = ::open(QFile::encodeName(file).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+            ::close(fd);
+            fd = -1;
+        }
+    }
+    ~Held() { release(); }
+    void release() {
+        if (fd >= 0)
+            ::close(fd);
+        fd = -1;
+    }
+    int fd = -1;
+};
+
 } // namespace
 
 class TestCliRun : public QObject {
@@ -100,6 +121,10 @@ class TestCliRun : public QObject {
         env.insert("XDG_CACHE_HOME", path("cache"));
         env.insert("XDG_STATE_HOME", path("state"));
         env.insert("XDG_CONFIG_HOME", path("config"));
+        // The GPU lock (spec 1.4.2) is in the runtime folder: the test's own, never the session's.
+        QDir().mkpath(path("runtime"));
+        env.insert("XDG_RUNTIME_DIR", path("runtime"));
+        env.remove("FUGUE_BASE_XDG_RUNTIME_DIR");
         // Not the developer's Omarchy state: its paired hosts would be instances (8.2).
         env.insert("HOME", path("home"));
         if (!m_dataHome.isEmpty())
@@ -299,6 +324,48 @@ private slots:
         QVERIFY(started(a) < started(c));
         QVERIFY(started(c) < started(b));
         QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty(), 10000);
+    }
+
+    // #625: `fugue run --wait` behind another Fugue says so after about a second (stderr; with --json an event on
+    // stdout), names the holder's pid, and goes on when the lock is let go.
+    void runWaitSaysItWaitsForTheEngineLockAndGoesOnWhenItIsFree_data() {
+        QTest::addColumn<QString>("lockFile");
+        QTest::newRow("engine lock") << "state/fugue/engine.lock";
+        QTest::newRow("gpu lock") << QString("runtime/fugue-gpu-%1.lock").arg(::getuid());
+    }
+
+    void runWaitSaysItWaitsForTheEngineLockAndGoesOnWhenItIsFree() {
+        QFETCH(QString, lockFile);
+        for (const bool json : {false, true}) {
+            Held held(path(lockFile));
+            QVERIFY(held.fd >= 0);
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.remove("QT_QPA_PLATFORM");
+            env.insert("XDG_CACHE_HOME", path("cache"));
+            env.insert("XDG_STATE_HOME", path("state"));
+            env.insert("XDG_CONFIG_HOME", path("config"));
+            env.insert("XDG_RUNTIME_DIR", path("runtime"));
+            env.insert("HOME", path("home"));
+            env.insert("FUGUE_NODE_MANIFESTS", path("manifests"));
+            env.insert("FUGUE_TEST_GATE", gate());
+            QProcess process;
+            process.setProcessEnvironment(env);
+            process.start(FUGUE_FAKE_BINARY, QStringList{"run", path("flow.fugue"), "--wait"} + (json ? QStringList{"--json"} : QStringList{}));
+            QVERIFY(process.waitForStarted());
+            const QByteArray expected = json ? QByteArray("\"waiting\"") : QByteArray("Waiting for another Fugue run to finish");
+            QByteArray seen;
+            QTRY_VERIFY_WITH_TIMEOUT((seen += json ? process.readAllStandardOutput() : process.readAllStandardError(), seen.contains(expected)), 30000);
+            QVERIFY2(seen.contains(QByteArray::number(qint64(::getpid()))), seen.constData()); // the holder is this process
+            QCOMPARE(process.state(), QProcess::Running); // still waiting
+            held.release();
+            QVERIFY(process.waitForFinished(60000));
+            QCOMPARE(process.exitCode(), 0);
+            // Said once, and a run that did not wait says nothing: the same run again, lock free.
+            QCOMPARE(seen.count(json ? "\"waiting\"" : "Waiting for"), 1);
+            const Outcome again = fugue({"run", path("flow.fugue"), "--wait"});
+            QCOMPARE(again.exitCode, 0);
+            QVERIFY(!again.err.contains("Waiting for"));
+        }
     }
 
     void cancelStopsARunningRun() {
