@@ -10,6 +10,7 @@
 // there; it writes only the project's own file). Skip, Escape or closing writes `models_setup: "skipped"`; finishing writes "done";
 // a rerun writes no `models_setup`.
 
+#include <QMutex>
 #include <QObject>
 #include <QString>
 #include <QVariantList>
@@ -173,6 +174,12 @@ private:
     QString m_message;
     int m_generation = 0;
     std::shared_ptr<std::atomic<bool>> m_cancel = std::make_shared<std::atomic<bool>>(false); // each job holds it: no wait on a worker
+    // How the worker reaches this object: cleared by the destructor under the lock, so a late post meets nobody.
+    struct Receiver {
+        QMutex mutex;
+        ModelSetup *target = nullptr;
+    };
+    std::shared_ptr<Receiver> m_receiver;
     FinderEnv m_envNow;   // the mounts as they were when the sheet opened, for what the window checks
 };
 

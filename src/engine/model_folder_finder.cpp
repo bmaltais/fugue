@@ -22,7 +22,7 @@ namespace {
 
 // The exact install folders (spec 8.9), relative to the home: a data table, in one place. `ComfyUI-Installs` is a parent: each
 // child folder's models/ is one (ComfyUI Desktop's installs).
-const QStringList kProbes{
+const QStringList &kProbes = *new QStringList{
     QStringLiteral("ComfyUI/models"),
     QStringLiteral("ComfyUI-Shared"),
     QStringLiteral("ComfyUI-Installs"),
@@ -33,11 +33,11 @@ const QStringList kProbes{
     QStringLiteral("SwarmUI/Models"),
     QStringLiteral("invokeai/models"),
 };
-const QString kInstalls = QStringLiteral("ComfyUI-Installs");
-const QString kShared = QStringLiteral("ComfyUI-Shared");
+const QString &kInstalls = *new QString(QStringLiteral("ComfyUI-Installs")); // never destroyed: a worker may outlive main()
+const QString &kShared = *new QString(QStringLiteral("ComfyUI-Shared"));
 
 // Folders the walk never enters.
-const QSet<QString> kSkipNames{QStringLiteral("node_modules"),     QStringLiteral("site-packages"), QStringLiteral("venv"),
+const QSet<QString> &kSkipNames = *new QSet<QString>{QStringLiteral("node_modules"),     QStringLiteral("site-packages"), QStringLiteral("venv"),
                                QStringLiteral("__pycache__"),       QStringLiteral("Trash"),         QStringLiteral("$RECYCLE.BIN"),
                                QStringLiteral("System Volume Information"), QStringLiteral("Windows")};
 
@@ -153,11 +153,11 @@ QList<FinderLocation> allLocations(const FinderEnv &env) {
         // An install folder's neighbours name its tool, so the place is the install folder (its models/'s parent).
         const QString name = QFileInfo(path).fileName();
         const QString scope = name == kShared || name == kInstalls ? path : QFileInfo(path).absolutePath();
-        list.append({QStringLiteral("probe:") + path, path, tilde(path, env.home), 0, scope});
+        list.append({QStringLiteral("probe:") + path, path, tilde(path, env.home), 0, {}, scope});
     }
-    list.append({QStringLiteral("home"), env.home, QStringLiteral("~"), kHomeDepth, env.home});
+    list.append({QStringLiteral("home"), env.home, QStringLiteral("~"), kHomeDepth, {}, env.home});
     for (const QString &parent : env.driveParents)
-        list.append({QStringLiteral("drive:") + parent, parent, parent, kDriveDepth, parent});
+        list.append({QStringLiteral("drive:") + parent, parent, parent, kDriveDepth, {}, parent});
     return list;
 }
 
@@ -170,13 +170,24 @@ public:
             m_skipped.insert(path);
         // Only a place that was offered and left off is a place to keep out of; one that was never listed (it does not exist) is not.
         QSet<QString> tickedIds;
+        // A place is kept as written and as resolved: the walk goes by resolved paths, and a home behind a link (/home -> /var/home) or a
+        // link from elsewhere into it must meet the same scope.
+        const auto addScope = [this](const FinderLocation &location, bool isTicked) {
+            m_scopes.append({location.scope, isTicked});
+            if (!location.resolved.isEmpty()) {
+                m_scopes.append({location.resolved, isTicked});
+                const QString parent = QFileInfo(location.resolved).absolutePath();
+                if (location.scope != location.path)
+                    m_scopes.append({parent, isTicked}); // an install folder: the resolved models folder's parent
+            }
+        };
         for (const FinderLocation &location : ticked) {
             tickedIds.insert(location.id);
-            m_scopes.append({location.scope, true});
+            addScope(location, true);
         }
         for (const FinderLocation &location : offered)
             if (!tickedIds.contains(location.id))
-                m_scopes.append({location.scope, false});
+                addScope(location, false);
     }
 
     bool cancelled() const { return m_env.cancel && m_env.cancel->load(); }
@@ -300,6 +311,16 @@ public:
         return toolOf(modelsDir, [this](const QString &path) { return lstatHas(path); });
     }
 
+    // How many different kinds the type folders named are (`Lora/` and `LyCORIS/` are one): a folder needs two, and then it is a
+    // layout by the same rule kindOf() uses (ModelLibrary::layoutFromFolders), so the finder and the library never disagree.
+    bool isLayoutBy(const QStringList &names) const {
+        QSet<QString> kinds;
+        for (const QString &name : names)
+            if (m_types.typeOfFolder.contains(name))
+                kinds.insert(m_types.typeOfFolder.value(name));
+        return kinds.size() >= 2 && ModelLibrary::layoutFromFolders(m_types.typeOfFolder, names);
+    }
+
     // What `dir` is, when it is a model folder: its type folders' names and the tool. A tool needs two type folders (InvokeAI,
     // which sorts models its own way, is told by invokeai.yaml beside its models/ instead).
     bool evaluate(const QString &dir, FoundFolder &folder, QHash<QString, QString> &typeDirs) {
@@ -311,12 +332,14 @@ public:
                 typeDirs.insert(entry.name, m_types.typeOfFolder.value(entry.name));
         const QString parent = QFileInfo(dir).absolutePath();
         const bool invoke = QFileInfo(dir).fileName() == QLatin1String("models") && lstatHas(parent + QStringLiteral("/invokeai.yaml"));
-        if (typeDirs.size() < 2 && !invoke)
+        const bool layout = isLayoutBy(typeDirs.keys());
+        if (!layout && !invoke)
             return false;
         folder = FoundFolder();
         folder.path = dir;
-        folder.tool = invoke && typeDirs.size() < 2 ? QStringLiteral("InvokeAI") : toolName(dir);
-        folder.layout = folder.tool != QLatin1String("InvokeAI");
+        folder.tool = invoke && !layout ? QStringLiteral("InvokeAI") : toolName(dir);
+        folder.layout = layout && folder.tool != QLatin1String("InvokeAI");
+        folder.kind = folder.layout ? ModelLibrary::kLayout : QString();
         return true;
     }
 
@@ -373,19 +396,19 @@ public:
             return;
         m_walked.insert(dir);
         QList<Entry> entries;
-        if (!list(dir, m_env.tooManyEntries, entries))
+        if (cancelled() || !list(dir, m_env.tooManyEntries, entries, nullptr, false, m_deadline))
             return;
-        int named = 0;
+        QStringList names;
         bool invoke = false;
         for (const Entry &entry : std::as_const(entries)) {
             if (entry.isDir && m_types.typeOfFolder.contains(entry.name))
-                ++named;
+                names << entry.name;
             if (!entry.isDir && entry.name == QLatin1String("invokeai.yaml"))
                 invoke = true;
             if (!entry.isDir && entry.name == QLatin1String("model_index.json"))
                 return; // a diffusers repo: its folders are not a model library
         }
-        if (named >= 2) {
+        if (isLayoutBy(names)) {
             consider(dir, dir);
             return; // nothing below a candidate
         }
@@ -469,6 +492,67 @@ public:
         }
     }
 
+    bool hasModelBelow(const QString &dir, int depth) const {
+        QList<Entry> entries;
+        if (cancelled() || !list(dir, m_env.tooManyEntries, entries))
+            return false;
+        for (const Entry &entry : std::as_const(entries)) {
+            if (entry.name.startsWith(QLatin1Char('.')) || (entry.isLink && entry.resolved.isEmpty()))
+                continue;
+            if (!entry.isDir && m_types.takes(QStringLiteral("fugue/model"), entry.name))
+                return true;
+            if (entry.isDir && depth > 0 && hasModelBelow(childPath(dir, entry), depth - 1))
+                return true;
+        }
+        return false;
+    }
+    // InvokeAI sorts models its own way: the folders under its models/ (2 levels) whose files agree on one kind are told, on the
+    // worker, so the yes has nothing to read; the others with models are counted as left out.
+    void fillInvoke(FoundFolder &folder, const QString &real) {
+        if (folder.tool != QLatin1String("InvokeAI") || folder.network || real.isEmpty())
+            return;
+        const auto kindOf = [this](const QString &dir) {
+            if (blocked(dir))
+                return QString();
+            const QString kind = ModelLibrary::detectKind(dir, m_types.typeOfFolder, m_types.typeOfFiles);
+            return kind == ModelLibrary::kLayout ? QString() : kind;
+        };
+        QList<Entry> level1;
+        if (!list(real, m_env.tooManyEntries, level1))
+            return;
+        for (const Entry &one : std::as_const(level1)) {
+            if (cancelled())
+                return;
+            if (!one.isDir || one.name.startsWith(QLatin1Char('.')) || (one.isLink && one.resolved.isEmpty()))
+                continue;
+            const QString dir = childPath(real, one);
+            if (!hasModelBelow(dir, 3))
+                continue;
+            if (const QString kind = kindOf(dir); !kind.isEmpty()) {
+                folder.told.append({dir, kind});
+                continue;
+            }
+            bool any = false;
+            QList<Entry> level2;
+            if (list(dir, m_env.tooManyEntries, level2))
+                for (const Entry &two : std::as_const(level2)) {
+                    if (!two.isDir || two.name.startsWith(QLatin1Char('.')) || (two.isLink && two.resolved.isEmpty()))
+                        continue;
+                    const QString sub = childPath(dir, two);
+                    if (!hasModelBelow(sub, 2))
+                        continue;
+                    if (const QString kind = kindOf(sub); !kind.isEmpty()) {
+                        folder.told.append({sub, kind});
+                        any = true;
+                    } else {
+                        ++folder.leftOut;
+                    }
+                }
+            if (!any && folder.leftOut == 0)
+                ++folder.leftOut;
+        }
+    }
+
     // A folder the person chose: what it is and what it holds, with no need for two type folders.
     FoundFolder describe(const QString &dir) {
         FoundFolder folder;
@@ -494,7 +578,11 @@ public:
                 if (entry.isDir && m_types.typeOfFolder.contains(entry.name))
                     typeDirs.insert(entry.name, m_types.typeOfFolder.value(entry.name));
         folder.tool = toolName(real);
-        folder.layout = !typeDirs.isEmpty();
+        // What it holds is kindOf()'s decision, made here on the worker from plain values; a folder of one kind keeps its top-level files.
+        folder.kind = ModelLibrary::detectKind(real, m_types.typeOfFolder, m_types.typeOfFiles);
+        folder.layout = folder.kind == ModelLibrary::kLayout;
+        if (!folder.layout)
+            typeDirs.clear(); // counted as a whole folder, below
         for (auto it = typeDirs.begin(); it != typeDirs.end(); ++it) {
             const QString typeReal = resolve(real + QLatin1Char('/') + it.key());
             if (!typeReal.isEmpty())
@@ -502,6 +590,7 @@ public:
         }
         m_typeDirs.insert(real, typeDirs);
         count(folder, real, m_env.now() + m_env.countCapMs);
+        fillInvoke(folder, real);
         folder.writable = ::access(QFile::encodeName(real).constData(), W_OK) == 0;
         return folder;
     }
@@ -530,6 +619,8 @@ public:
                         m_capped = true;
                 }
             }
+            if (!folder.network)
+                fillInvoke(folder, folder.canonical);
             folder.writable = folder.network || ::access(QFile::encodeName(folder.canonical).constData(), W_OK) == 0;
             // An unnamed folder with no model in it is a coincidence of folder names (a source tree's `model/` and `docs/`).
             if (folder.tool == QLatin1String("Model folder") && !folder.network && folder.models == 0 && !folder.countCapped)
@@ -662,19 +753,39 @@ private:
     QHash<QString, QHash<QString, QString>> m_typeDirs;
 };
 
+// The mount points of `fileSystems`. An autofs point that a real file system is mounted on (a systemd automount of /mnt/windows with
+// ntfs3 on top: a later line whose mount point is the same and whose parent is the autofs mount) is not one: it is there, its files
+// can be read without mounting anything, and only a network file system on top blocks it (that one is listed in its own right).
 QStringList mountsOf(const QByteArray &mountinfo, const QSet<QString> &fileSystems) {
-    QStringList mounts;
+    struct Mount {
+        QByteArray id, parent;
+        QString point, fs;
+    };
+    QList<Mount> all;
     for (const QByteArray &line : mountinfo.split('\n')) {
         const int dash = line.indexOf(" - ");
         if (dash < 0)
             continue;
         const QList<QByteArray> before = line.left(dash).split(' ');
         const QList<QByteArray> after = line.mid(dash + 3).split(' ');
-        if (before.size() < 5 || after.isEmpty() || !fileSystems.contains(QString::fromLatin1(after.first())))
+        if (before.size() < 5 || after.isEmpty())
             continue;
         QByteArray point = before.at(4);
         point.replace("\\040", " "); // the only escape that matters for a folder name
-        mounts << QDir::cleanPath(QFile::decodeName(point));
+        all.append({before.at(0), before.at(1), QDir::cleanPath(QFile::decodeName(point)), QString::fromLatin1(after.first())});
+    }
+    QStringList mounts;
+    for (const Mount &mount : std::as_const(all)) {
+        if (!fileSystems.contains(mount.fs))
+            continue;
+        if (mount.fs == QLatin1String("autofs")) {
+            const bool mountedOn = std::any_of(all.begin(), all.end(), [&mount](const Mount &other) {
+                return other.parent == mount.id && other.point == mount.point && other.fs != QLatin1String("autofs");
+            });
+            if (mountedOn)
+                continue;
+        }
+        mounts << mount.point;
     }
     return mounts;
 }
@@ -691,6 +802,8 @@ FinderTypes FinderTypes::from(const Registry &registry) {
         for (const QString &name : names)
             types.typeOfFolder.insert(name, id);
         types.extensions.insert(id, declared->extensions);
+        if (!declared->files.isEmpty())
+            types.typeOfFiles.insert(declared->files, id);
     }
     return types;
 }
@@ -760,8 +873,11 @@ QList<FinderLocation> finderLocations(const FinderEnv &env) {
             continue;
         if (env.touched)
             env.touched(real);
-        if (lexists(real))
-            list.append(location);
+        if (lexists(real)) {
+            FinderLocation placed = location;
+            placed.resolved = real; // kept beside the path as written: a scope is met by either
+            list.append(placed);
+        }
     }
     return list;
 }

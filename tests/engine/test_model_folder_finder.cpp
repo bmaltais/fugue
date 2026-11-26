@@ -350,6 +350,15 @@ private slots:
         QCOMPARE(result.folders.first().models, 0);
     }
 
+    // Two names of one kind (`Lora` and `LyCORIS`) are one kind: not a candidate on their own. The finder and kindOf() share the rule.
+    void twoNamesOfOneKindAreNotALayout() {
+        QDir().mkpath(m_home + "/stuff/Lora");
+        QDir().mkpath(m_home + "/stuff/LyCORIS");
+        touchFile(m_home + "/stuff/Lora/a.safetensors");
+        const FinderEnv e = env();
+        QVERIFY(find(e, all(e)).folders.isEmpty());
+    }
+
     void aFolderToSkipIsLeftOut() {
         comfy(m_home + "/ComfyUI");
         const FinderEnv e = env();
@@ -529,6 +538,66 @@ private slots:
         // finderResolve says the same for any path the window looks at before Search.
         QVERIFY(finderResolve(m_home + "/ComfyUI/models", e).isEmpty());
         QCOMPARE(finderResolve(m_home + "/invokeai/models", e), m_home + "/invokeai/models");
+    }
+
+    // A home that is itself behind a link (/home -> /var/home): the walk goes by resolved paths, so a place left off must be met as
+    // written and as resolved, in both directions.
+    void aHomeBehindALinkKeepsItsScopes() {
+        const QString realHome = m_dir.path() + "/real/home-u";
+        QDir().mkpath(realHome);
+        QVERIFY(QFile::link(realHome, m_dir.path() + "/homelink"));
+        const QString home = m_dir.path() + "/homelink";
+        comfy(realHome + "/ComfyUI");
+        a1111(realHome + "/stable-diffusion-webui");
+        FinderEnv e = env();
+        e.home = home;
+        FinderEnv quiet = e;
+        quiet.touched = nullptr;
+        const QList<FinderLocation> offered = finderLocations(quiet);
+        const auto pick = [&](const QStringList &ids) {
+            QList<FinderLocation> list;
+            for (const FinderLocation &l : offered)
+                if (ids.contains(l.id))
+                    list << l;
+            return list;
+        };
+        // 1. ~ ticked, the ComfyUI install left off: it is not listed, counted or stat'd, though the walk goes by /real/home-u.
+        m_touched.clear();
+        const FindResult one = findModelFolders(m_registry, pick({"home", "probe:" + home + "/stable-diffusion-webui/models"}), e, {}, {}, offered);
+        QStringList tools;
+        for (const FoundFolder &f : one.folders)
+            tools << f.tool;
+        QCOMPARE(tools, QStringList{"Automatic1111"});
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(realHome + "/ComfyUI"), qPrintable("touched " + path));
+        // 2. ~ left off, /mnt ticked, a link in /mnt into the home: it resolves past the link and is still not walked.
+        QVERIFY(QFile::link(realHome, m_mnt + "/gohome"));
+        m_touched.clear();
+        const FindResult two = findModelFolders(m_registry, pick({"drive:" + m_mnt}), e, {}, {}, offered);
+        QVERIFY(two.folders.isEmpty());
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(realHome + "/"), qPrintable("touched " + path));
+    }
+
+    // A systemd automount with a real file system mounted on it is searched; one with nothing on it is blocked.
+    void anAutomountWithAFileSystemOnItIsSearched() {
+        const QByteArray info =
+            "40 29 0:35 / /mnt/windows rw,relatime shared:1 - autofs systemd-1 rw,fd=45\n"
+            "41 40 8:3 / /mnt/windows rw,relatime shared:2 - ntfs3 /dev/sda3 rw\n"
+            "50 29 0:40 / /mnt/idle rw,relatime shared:3 - autofs systemd-1 rw,fd=47\n"
+            "60 29 0:50 / /mnt/nas rw - autofs systemd-1 rw\n"
+            "61 60 0:51 / /mnt/nas rw - nfs4 srv:/x rw\n";
+        const QStringList blocked = networkMountsFrom(info);
+        QVERIFY(!blocked.contains("/mnt/windows")); // ntfs3 is on it
+        QCOMPARE(autofsMountsFrom(info), QStringList{"/mnt/idle"}); // only the one with nothing mounted yet
+        QVERIFY(blocked.contains("/mnt/idle"));
+        QVERIFY(blocked.contains("/mnt/nas")); // nfs on top: the network file system blocks it
+        // And it is found: a ComfyUI layout on the mounted drive.
+        comfy(m_mnt + "/windows/models-root");
+        FinderEnv e = env();
+        e.networkMounts = {m_mnt + "/idle"};
+        const FindResult result = find(e, all(e));
+        QCOMPARE(result.folders.size(), 1);
     }
 
     void aWindowsDrivesInstallIsFoundFiveLevelsDown() {

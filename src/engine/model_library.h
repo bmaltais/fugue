@@ -84,6 +84,11 @@ public:
     static inline const QString kLayout = QStringLiteral("layout");
     // ComfyUI's list of model file extensions plus .gguf: what a type that names none takes.
     static const QStringList &defaultModelExtensions();
+    // What a folder holds, as kindOf() decides when nothing is set, from plain values (the finder's worker has no registry): the
+    // type folders' names -> type ids, and pack.json `files` -> type ids. kLayout, a type id, or empty. Reads a few headers.
+    static QString detectKind(const QString &root, const QHash<QString, QString> &typeOfFolder, const QHash<QString, QString> &typeOfFiles);
+    // Whether a folder with these type folders in it is ComfyUI's layout: the one rule, used by kindOf and by the finder.
+    static bool layoutFromFolders(const QHash<QString, QString> &typeOfFolder, const QStringList &presentNames);
 
     // The library of the settings in effect now (currentSettings()).
     static ModelLibrary current(const Registry *registry);

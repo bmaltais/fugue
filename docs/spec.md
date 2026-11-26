@@ -2303,9 +2303,10 @@ it as a module folder and run it with no code of its own in Fugue.
   `fugue/lora` `Lora` and `LyCORIS`; `fugue/vae` `VAE`; `fugue/text-encoder` `TextEncoders`; `fugue/diffusion-model`
   `DiffusionModels`; `fugue/upscale-model` `RealESRGAN`. They come after the type's own names, so Fugue's own folders are
   unchanged (#619). An Automatic1111, Forge, SwarmUI or Stability Matrix `models/` folder is therefore one layout root. These other
-  tools' names count for the layout (`ModelLibrary::kindOf`) when two kinds have one, or when the folder holds no model file of its
-  own, so an existing folder of LoRAs with a `Lora/` or `LyCORIS/` subfolder, or of checkpoints with a `VAE/`, stays a folder of
-  one kind; ComfyUI's names decide as they always did (one is enough).
+  tools' names make a layout (`ModelLibrary::layoutFromFolders`, used by `kindOf` and by the finder) only when two different kinds
+  have a folder (`Lora/` and `LyCORIS/` are one kind), so an existing folder of LoRAs with `LyCORIS/` and `SDXL/` inside, or of
+  checkpoints with `VAE/`, `SD15/` and `SDXL/`, stays a folder of one kind found by its files; ComfyUI's names decide as they always
+  did (one is enough).
 - **Finding the model folders a person already has** (#619; `engine/model_folder_finder.h`). Folder names and file sizes only: no
   model file is opened, read or hashed, and nothing is written. A folder is a candidate when at least two of the resource types'
   folder names are in it (the registry's, so a pack's count) and, for a tool that sorts models its own way, by what stands beside
@@ -2330,7 +2331,7 @@ it as a module folder and run it with no code of its own in Fugue.
   places left off before anything is stat'd or listed, so a link from a ticked place into an unticked one, at the top or nested,
   or from one install folder to another that was left off, is never followed; each type folder and each folder counted is
   resolved the same way, and one that leads onto a network drive is not entered. An autofs mount point (and anything under it)
-  counts as a network drive and is not even listed as a place: looking inside it would mount the share. The registry's folder
+  counts as a network drive and is not even listed as a place: looking inside it would mount the share. An autofs point with a real file system mounted on it (systemd's `x-systemd.automount` of an NTFS drive) is not one: it is searched like any drive, and only a network file system on top blocks it. The places left off are kept as written and as resolved, so a home behind a link (`/home` -> `/var/home`) keeps them. The registry's folder
   names and extensions are copied on the GUI thread (`FinderTypes`) and the worker reads only that copy. The worker is never
   waited for: it holds its own cancel flag, answers to the window through a weak pointer, and a stalled stat leaves it behind
   without holding the window or the quit. Time and cancellation are checked at every entry (listing and stat), counting all

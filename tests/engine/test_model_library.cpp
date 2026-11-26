@@ -381,10 +381,43 @@ private slots:
         QDir().mkpath(comfyOne.filePath("loras")); // one ComfyUI name is a layout, as it always was
         writeFile(comfyOne.filePath("stray.safetensors"));
         const ModelLibrary library({own.path(), a1111.path(), onlyLora.path(), comfy.path(), comfyOne.path()}, &registry);
-        QCOMPARE(library.kindOf(a1111.path()), ModelLibrary::kLayout);
-        QCOMPARE(library.kindOf(onlyLora.path()), ModelLibrary::kLayout);
+        QCOMPARE(library.kindOf(a1111.path()), ModelLibrary::kLayout); // two kinds: Lora and VAE
+        QVERIFY(library.kindOf(onlyLora.path()) != ModelLibrary::kLayout); // one other-tools name is not enough (found by files, here none)
         QCOMPARE(library.kindOf(comfy.path()), ModelLibrary::kLayout);
         QCOMPARE(library.kindOf(comfyOne.path()), ModelLibrary::kLayout);
+    }
+
+    // The folders of one kind that are not a layout today stay what they were, whatever subfolders they hold: no files of their own
+    // (`/data/loras` of `LyCORIS/` and `SDXL/`; a checkpoints root of `VAE/`, `SD15/` and `SDXL/`) is found by its files, as before.
+    void foldersOfOneKindWithOnlySubfoldersStayThatKind() {
+        QTemporaryDir own, loras, checkpoints, a1111;
+        Registry registry;
+        const auto withFiles = [&](const char *id, const QString &files, const QStringList &folders) {
+            DeclaredPortType declared;
+            declared.type = type(QString::fromLatin1(id));
+            declared.kind = PortKind::Resource;
+            declared.name = QStringLiteral("A model");
+            declared.extensions = {".safetensors"};
+            declared.folders = folders;
+            declared.files = files;
+            QVERIFY(registry.add(declared).isEmpty());
+        };
+        withFiles("fugue/lora", "lora", {"lora", "loras", "Lora", "LyCORIS"});
+        withFiles("fugue/vae", "vae", {"vae", "VAE"});
+        withFiles("fugue/model", "checkpoint", {"checkpoints", "Stable-diffusion"});
+        writeFile(loras.filePath("LyCORIS/a.safetensors"), safetensors(kLora));
+        writeFile(loras.filePath("SDXL/b.safetensors"), safetensors(kLora));
+        writeFile(checkpoints.filePath("VAE/v.safetensors"), safetensors(kVae));
+        writeFile(checkpoints.filePath("SD15/m.safetensors"), safetensors({"model.diffusion_model.input_blocks.0.0.weight"}));
+        writeFile(checkpoints.filePath("SDXL/m.safetensors"), safetensors({"model.diffusion_model.input_blocks.0.0.weight"}));
+        QDir().mkpath(a1111.filePath("Lora"));
+        QDir().mkpath(a1111.filePath("VAE"));
+        QDir().mkpath(a1111.filePath("Stable-diffusion"));
+        const ModelLibrary library({own.path(), loras.path(), checkpoints.path(), a1111.path()}, &registry);
+        QCOMPARE(library.kindOf(loras.path()), QStringLiteral("fugue/lora")); // not "layout": the SDXL LoRAs stay listed
+        QCOMPARE(library.list(type("fugue/lora")).size(), 2);
+        QVERIFY(library.kindOf(checkpoints.path()) != ModelLibrary::kLayout);
+        QCOMPARE(library.kindOf(a1111.path()), ModelLibrary::kLayout); // an A1111 root
     }
 
     void aKindSetInTheSettingsWinsOverTheFiles() {

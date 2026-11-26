@@ -36,6 +36,7 @@ class Registry;
 struct FinderTypes {
     QHash<QString, QString> typeOfFolder;   // a type folder's name -> its resource type id
     QHash<QString, QStringList> extensions; // type id -> its file extensions (empty: ComfyUI's list plus .gguf)
+    QHash<QString, QString> typeOfFiles;    // pack.json `files` (what a model's header says it is) -> type id
     static FinderTypes from(const Registry &registry);
     bool takes(const QString &typeId, const QString &fileName) const;
 };
@@ -72,6 +73,7 @@ struct FinderLocation {
     QString path;     // as it is on this machine, absolute
     QString display;  // with ~ for the home
     int depth = 0;    // how deep the walk goes (0: an exact folder)
+    QString resolved; // the place with its links resolved (finderLocations() fills it): scopes are kept as written and as resolved
     QString scope;    // what the place covers: the folder itself, or an install folder's parent (its siblings name the tool)
 };
 
@@ -87,6 +89,9 @@ struct FoundFolder {
     bool countCapped = false;// counting stopped at a cap: `models` and `size` are at least that
     bool network = false;    // on a network drive: listed, not counted
     bool layout = true;      // in ComfyUI's layout; false for InvokeAI (sorts its own way)
+    QString kind;            // what it holds as ModelLibrary::detectKind() says (kLayout, a type id, or empty): decided on the worker
+    QList<std::pair<QString, QString>> told; // InvokeAI: the folders under it that hold one kind, {path, type id}
+    int leftOut = 0;                          // InvokeAI: folders with models whose kind could not be told
     bool writable = true;    // Fugue can write in it (access(), asked on the worker; a network drive is not asked)
     QStringList typeDirs;    // canonical paths of its type folders (for telling a link from a copy)
 };

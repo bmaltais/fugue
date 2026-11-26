@@ -5,7 +5,8 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QJsonArray>
-#include <QPointer>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QStorageInfo>
 
 #include <algorithm>
@@ -108,7 +109,8 @@ QVariantList kindChoices() {
 
 } // namespace
 
-ModelSetup::ModelSetup(SettingsModel *settings) : QObject(settings), m_settings(settings) {
+ModelSetup::ModelSetup(SettingsModel *settings) : QObject(settings), m_settings(settings), m_receiver(std::make_shared<Receiver>()) {
+    m_receiver->target = this;
     // The default finder reads nothing of the window: the job carries the types, the mounts and the cancel flag as values.
     m_finder = [](const FinderJob &job, const std::function<void(const FoundFolder &)> &found) {
         FinderEnv env = job.env;
@@ -123,7 +125,11 @@ ModelSetup::ModelSetup(SettingsModel *settings) : QObject(settings), m_settings(
 
 // No wait: a worker stuck in a stat of a slow or hung drive must never hold the window or the quit. It holds the cancel flag
 // itself, answers to nobody when this is gone, and the process ends without it.
-ModelSetup::~ModelSetup() { *m_cancel = true; }
+ModelSetup::~ModelSetup() {
+    *m_cancel = true;
+    QMutexLocker lock(&m_receiver->mutex);
+    m_receiver->target = nullptr; // no worker posts to a freed object
+}
 
 void ModelSetup::setFinder(Finder finder, bool runInline) {
     m_finder = std::move(finder);
@@ -289,14 +295,19 @@ void ModelSetup::run(FinderJob job, bool search) {
             finished(generation, result.capped);
         return;
     }
-    QPointer<ModelSetup> self(this);
-    std::thread([self, finder, job = std::move(job), generation, search] {
-        const FindResult result = finder(job, [self, generation](const FoundFolder &folder) {
-            if (self)
-                QMetaObject::invokeMethod(self.data(), [self, generation, folder] { if (self) self->found(generation, folder); }, Qt::QueuedConnection);
+    // The worker posts to this object only through the receiver: ~ModelSetup clears it under the lock, so a post never meets a freed object.
+    const std::shared_ptr<Receiver> receiver = m_receiver;
+    std::thread([receiver, finder, job = std::move(job), generation, search] {
+        const auto post = [&receiver](const std::function<void(ModelSetup *)> &call) {
+            QMutexLocker lock(&receiver->mutex);
+            if (receiver->target)
+                QMetaObject::invokeMethod(receiver->target, [target = receiver->target, call] { call(target); }, Qt::QueuedConnection);
+        };
+        const FindResult result = finder(job, [&post, generation](const FoundFolder &folder) {
+            post([generation, folder](ModelSetup *self) { self->found(generation, folder); });
         });
-        if (search && self)
-            QMetaObject::invokeMethod(self.data(), [self, generation, result] { if (self) self->finished(generation, result.capped); }, Qt::QueuedConnection);
+        if (search)
+            post([generation, result](ModelSetup *self) { self->finished(generation, result.capped); });
     }).detach();
 }
 
@@ -305,7 +316,7 @@ ModelSetup::Row ModelSetup::makeRow(const FoundFolder &folder) const {
     row.path = folder.path;
     row.found = folder;
     row.writable = folder.writable;
-    row.kind = folder.layout ? ModelLibrary::kLayout : QString();
+    row.kind = folder.kind; // decided on the worker (a found candidate is a layout by kindOf()'s own rule)
     // Ticked: found with models; InvokeAI sorts its own way (off); an install with no models yet is off; a network drive is
     // listed but never ticked for the person.
     row.on = folder.tool != QLatin1String("InvokeAI") && folder.models > 0 && !folder.network;
@@ -319,22 +330,17 @@ void ModelSetup::found(int generation, const FoundFolder &folder) {
         if (row.path != folder.path)
             continue;
         if (row.busy) {
-            // The count of a row that was waiting (in use, or just picked).
+            // The count of a row that was waiting (in use, or just picked): what it holds was decided on the worker.
             row.busy = false;
             row.found = folder;
             row.writable = folder.writable;
             if (row.inUse) {
-                if (row.kind.isEmpty() && folder.layout)
-                    row.kind = ModelLibrary::kLayout;
+                if (row.kind.isEmpty())
+                    row.kind = folder.kind;
             } else {
-                // What a picked folder holds is ModelLibrary::kindOf()'s decision (a layout only when it is one: the other tools' folder
-                // names count for two kinds, or in a folder with no model file of its own), never a guess from one subfolder: a
-                // folder of LoRAs with a `Lora/` inside stays a folder of LoRAs. A network drive is not looked into: the person says.
-                row.kind.clear();
-                if (types() && !folder.network) {
-                    const ModelLibrary library({ownRoot(), row.path}, types(), {});
-                    row.kind = library.kindOf(row.path);
-                }
+                // A picked folder is a layout only when kindOf()'s rule says so (a folder of LoRAs with a `Lora/` inside stays one of LoRAs);
+                // a network drive is not looked into: the person says what it holds.
+                row.kind = folder.kind;
                 row.found.layout = row.kind == ModelLibrary::kLayout;
                 // The same folder by another path: the second is dropped.
                 for (const Row &other : std::as_const(m_rows))
@@ -348,6 +354,11 @@ void ModelSetup::found(int generation, const FoundFolder &folder) {
         }
         return;
     }
+    // A candidate the search found that is a folder already in use (the same one by its resolved path) is not listed twice.
+    if (!folder.canonical.isEmpty())
+        for (const Row &other : std::as_const(m_rows))
+            if (!other.busy && other.found.canonical == folder.canonical)
+                return;
     m_rows.append(makeRow(folder));
     emit changed();
 }
@@ -369,6 +380,8 @@ QString ModelSetup::addFolder(const QVariant &value) {
     if (path.startsWith(QLatin1String("file:")))
         path = QUrl(path).toLocalFile();
     path = QDir::cleanPath(expandHome(path.trimmed()));
+    if (!path.isEmpty() && QDir::isRelativePath(path))
+        path = QDir::cleanPath(QDir::homePath() + QLatin1Char('/') + path); // typed without a leading / or ~: from the home folder
     // The person's own pick, one stat, component by component: a network or automount (or a link into one) is taken as a folder
     // without a stat, and is listed, not counted.
     const FinderEnv now = env();
@@ -562,6 +575,13 @@ QVariantList ModelSetup::choices() const {
     std::stable_sort(picked.begin(), picked.end(), [](const Row *a, const Row *b) { return a->found.size > b->found.size; });
     for (const Row *row : std::as_const(picked))
         list.append(entry(row->path, tilde(row->path)));
+    // The download folder the person has (set in Settings or by the CLI) that is not one of these rows is kept, not replaced.
+    if (m_downloadChosen && m_download != own) {
+        const bool listed = std::any_of(list.begin(), list.end(), [this](const QVariant &c) { return c.toMap().value("value").toString() == m_download; });
+        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && !r.on; });
+        if (!listed && !leftOff) // its row is on but not a layout (a single-kind root), or it has none: still the person's choice
+            list.append(entry(m_download, tilde(m_download)));
+    }
     return list;
 }
 
@@ -641,26 +661,10 @@ QVariantList ModelSetup::foldersToWrite(int *left) const {
         if (row.inherited)
             continue;
         if (row.found.tool == QLatin1String("InvokeAI") && row.on && !row.inUse) {
-            const ModelLibrary library({ownRoot(), row.path}, types(), {});
-            auto addTold = [&](const QString &dir) {
-                const QString kind = library.kindOf(dir);
-                if (kind.isEmpty() || kind == ModelLibrary::kLayout)
-                    return false;
+            // Told apart on the worker: nothing is read here.
+            for (const auto &[dir, kind] : row.found.told)
                 list.append(QVariantMap{{"path", dir}, {"kind", kind}, {"on", true}});
-                return true;
-            };
-            for (const QFileInfo &level1 : QDir(row.path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-                if (!hasModelFile(level1.filePath()))
-                    continue;
-                if (addTold(level1.filePath()))
-                    continue;
-                bool any = false;
-                for (const QFileInfo &level2 : QDir(level1.filePath()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
-                    if (hasModelFile(level2.filePath()))
-                        any = addTold(level2.filePath()) || any;
-                if (!any)
-                    ++*left;
-            }
+            *left += row.found.leftOut;
             continue;
         }
         list.append(QVariantMap{{"path", row.path}, {"kind", row.kind}, {"on", row.on}});

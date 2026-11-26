@@ -457,6 +457,7 @@ private slots:
             auto folder = [](const QString &p, qint64 size, bool network) {
                 FoundFolder f;
                 f.tool = "ComfyUI";
+                f.kind = ModelLibrary::kLayout; // what the worker decides for a candidate
                 f.path = p;
                 f.canonical = p;
                 f.models = 3;
@@ -550,6 +551,58 @@ private slots:
         const SettingsFile file = readSettings(settingsPath());
         QCOMPARE(file.settings.newSeed, QStringLiteral("fixed"));
         QCOMPARE(file.settings.modelPaths.size(), 1);
+    }
+
+    // A relative path typed into Add a folder… is from the home folder, never from /.
+    void aRelativePathIsFromTheHomeFolder() {
+        QDir().mkpath(QDir::homePath() + "/Documents/my-models");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(true);
+        QCOMPARE(setup.addFolder("Documents/my-models"), QString());
+        QVERIFY(!rowOf(setup.rows(), QDir::homePath() + "/Documents/my-models").isEmpty());
+        QVERIFY(!setup.addFolder("nowhere/at/all").isEmpty());
+    }
+
+    // The download folder the person has, set from the CLI to a root that is no row of the sheet, is kept in the choice and the yes.
+    void aDownloadFolderThatIsNoRowIsKept() {
+        comfy(m_home + "/ComfyUI");
+        const QString mine = path("home/elsewhere"); // a single-kind root the sheet does not list as a layout
+        QDir().mkpath(mine);
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{mine}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "model_folder_kinds", QJsonObject{{mine, "fugue/lora"}}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "download_folder", mine).isEmpty());
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(false);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        setup.setRowOn(m_home + "/ComfyUI/models", true);
+        QCOMPARE(setup.download(), mine);
+        setup.apply();
+        QCOMPARE(readSettings(settingsPath()).settings.downloadFolder, mine);
+    }
+
+    // A found folder that is one already in use (the same by its resolved path) is listed once.
+    void aFoundFolderAlreadyInUseIsListedOnce() {
+        comfy(m_home + "/ComfyUI");
+        QVERIFY(QFile::link(m_home + "/ComfyUI/models", m_home + "/models-link"));
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{m_home + "/models-link"}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "model_folder_kinds", QJsonObject{{m_home + "/models-link", "layout"}}).isEmpty());
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        searchAll(setup);
+        setup.setRowOn("x", true);
+        int count = 0;
+        for (const QVariant &row : setup.rows())
+            count += row.toMap().value("path").toString().endsWith("models") || row.toMap().value("path").toString().endsWith("models-link") ? 1 : 0;
+        QCOMPARE(count, 1);
     }
 
     // InvokeAI is off by default; when ticked, the folders it can tell apart are added single-kind.
