@@ -275,6 +275,38 @@ private slots:
         QVERIFY(quiet.models.first().onHost.isEmpty() && quiet.problems.isEmpty());
     }
 
+    // The window asks again only when the key changes: not for the disk space the plan reads live, but for a model, a pin or a provider.
+    void theKeyChangesWithWhatTheVerdictDependsOnAndNotWithFreeSpace() {
+        const PairedPlacementRequest asked = request();
+        const QByteArray base = pairedPlacementKey(workflow(), missing(), asked.instances);
+        ReadinessPlan roomier = missing();
+        roomier.freeBytes = 123456789;
+        roomier.downloadBytes = 42;
+        QCOMPARE(pairedPlacementKey(workflow(), roomier, asked.instances), base);
+        QVERIFY(pairedPlacementKey(workflow(), ReadinessPlan(), asked.instances) != base);          // a model is no longer missing
+        QVERIFY(pairedPlacementKey(workflow("desk"), missing(), asked.instances) != base);          // a pin
+        QVERIFY(pairedPlacementKey(workflow({}, "desk"), missing(), asked.instances) != base);      // the workflow's pin
+        QList<ProviderInstance> more = asked.instances;
+        more << instance("gx11", "fugue-helper", "http://gx11.example:8787");
+        QVERIFY(pairedPlacementKey(workflow(), missing(), more) != base);                           // a helper added
+        more = asked.instances;
+        more.last().enabled = false;
+        QVERIFY(pairedPlacementKey(workflow(), missing(), more) != base);                           // or switched off
+        ReadinessPlan withProblem = missing();
+        withProblem.problems << makeError(QStringLiteral("model_missing"), QStringLiteral("no source"));
+        QVERIFY(pairedPlacementKey(workflow(), withProblem, asked.instances) != base);              // the gate's input
+    }
+
+    // The scheduler fails a pin to a name that is no provider (`unknown_provider`): the verdict does not call that node placed.
+    void aPinToAnUnknownProviderBlocksTheNode() {
+        FakeHosts hosts({{"gx10", {"text.encode"}}});
+        const PairedVerdict made = verdict(workflow("nowhere"), missing(), request(), hosts);
+        QCOMPARE(hosts.asked, 0);
+        QCOMPARE(made.blocked.size(), 1);
+        QVERIFY(made.blocked.first().message.contains("no provider is named nowhere"));
+        QVERIFY(!made.runsOn());
+    }
+
     void aKeptProbeAsksOncePerQuestionAndForgetsASilentHost() {
         FakeHosts hosts({{"gx10", {"text.encode"}}});
         PairedProbe kept = keptPairedProbe(hosts.probe(), std::chrono::minutes(1));

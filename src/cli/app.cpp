@@ -251,7 +251,10 @@ PairedVerdict pairedVerdict(const ReadinessPlan &plan, const Document &document,
     if (wait->verdict)
         return *wait->verdict;
     PairedVerdict none;
-    none.applies = true; // no word from the hosts in time: the same as silent, the run goes ahead
+    none.applies = true; // no word from the hosts in time: they are silent, the run goes ahead
+    for (const ProviderInstance &instance : request.instances)
+        if (instance.enabled && isPairedHelper(instance))
+            none.silent << instance.name;
     return none;
 }
 

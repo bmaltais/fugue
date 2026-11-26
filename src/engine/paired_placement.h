@@ -10,6 +10,7 @@
 // pins already block never waits for a 12 s probe. What a host last said only refuses a node for a host that does not answer. The probe is the seam: the live one calls
 // probePairedHelpers, a test gives a fake.
 
+#include <QByteArray>
 #include <QMap>
 #include <QStringList>
 
@@ -78,6 +79,11 @@ PairedProbe keptPairedProbe(PairedProbe inner, std::chrono::milliseconds ttl);
 // said decide (no probe), else when the probe answers.
 void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, const PairedPlacementRequest &request,
                            const PairedProbe &probe, std::function<void(const PairedVerdict &verdict)> done);
+
+// What the verdict depends on, as bytes: the gate's inputs (packs, problem codes), the missing models' hashes, the graph's nodes (type,
+// pin, inputs) and the workflow's pin, and the provider instances. Equal keys give the same verdict; the plan's free disk space, the
+// layout and the like are not in it, so a download or a run writing files does not ask again.
+QByteArray pairedPlacementKey(const Document &document, const ReadinessPlan &plan, const QList<ProviderInstance> &instances);
 
 // What the Needs panel lists for `plan` under `verdict`: every model row marked as the hosts' to have when the app runs on them (#493),
 // else the nodes no host can take, each with why, added as problems. A silent host changes nothing here: the rows stay. Only the paired

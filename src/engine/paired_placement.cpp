@@ -4,6 +4,7 @@
 #include <memory>
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QMap>
 #include <QSet>
 
@@ -159,6 +160,31 @@ QStringList PairedVerdict::hosts() const {
     return distinct;
 }
 
+QByteArray pairedPlacementKey(const Document &document, const ReadinessPlan &plan, const QList<ProviderInstance> &instances) {
+    QStringList parts;
+    parts << QStringLiteral("packs=%1").arg(plan.packs.size());
+    QStringList codes, hashes;
+    for (const Error &problem : plan.problems)
+        codes << problem.code;
+    for (const ReadinessModel &model : plan.models)
+        hashes << model.entry.value("hash").toString() + QLatin1Char(':') + model.name;
+    for (const QJsonObject &handle : plan.unobtainable)
+        hashes << handle.value("hash").toString() + QLatin1Char(':') + handle.value("name").toString();
+    codes.sort();
+    hashes.sort();
+    parts << codes.join(QLatin1Char(',')) << hashes.join(QLatin1Char(',')) << document.graph.provider;
+    for (auto node = document.graph.nodes.cbegin(); node != document.graph.nodes.cend(); ++node) {
+        QJsonObject inputs;
+        for (auto input = node->inputs.cbegin(); input != node->inputs.cend(); ++input)
+            inputs.insert(input.key(), input->toJson());
+        parts << node.key() + QLatin1Char('|') + node->type + QLatin1Char('|') + QString::number(node->version.major) + QLatin1Char('|')
+                     + node->provider + QLatin1Char('|') + QString::fromUtf8(QJsonDocument(inputs).toJson(QJsonDocument::Compact));
+    }
+    for (const ProviderInstance &instance : instances)
+        parts << QStringList{instance.name, instance.type, instance.address, instance.enabled ? "1" : "0"}.join(QLatin1Char('|'));
+    return parts.join(QLatin1Char('\n')).toUtf8();
+}
+
 ReadinessPlan planUnder(ReadinessPlan plan, const PairedVerdict &verdict) {
     if (verdict.runsOn()) {
         const QString hosts = verdict.hosts().join(QStringLiteral(", "));
@@ -248,6 +274,11 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
     for (const Need &need : needs) {
         Reach reach{need, {}, {}};
         const ProviderInstance *pinned = need.pin.isEmpty() ? nullptr : instanceNamed(need.pin);
+        if (!need.pin.isEmpty() && !pinned) {
+            verdict.blocked.append(modelMissing(need.node, QStringLiteral("Node %1 is pinned to %2, but no provider is named %2, and the model %3 it needs is not here.")
+                                                               .arg(need.node, need.pin, need.models)));
+            continue;
+        }
         if (pinned && !isPairedHelper(*pinned)) {
             verdict.blocked.append(modelMissing(need.node, QStringLiteral("Node %1 is pinned to %2, which runs on this machine, and the model %3 it needs is not here.")
                                                                .arg(need.node, need.pin, need.models)));

@@ -1,10 +1,11 @@
 #include "apps/app_window.h"
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <memory>
 
-#include <QJsonDocument>
+#include <QPointer>
 
 #include "apps/app_launcher.h"
 #include "apps/app_shelf.h"
@@ -63,24 +64,30 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     };
     const auto placement = std::make_shared<Placement>();
     const auto probe = keptPairedProbe(probeSource ? std::move(probeSource) : livePairedProbe(), std::chrono::seconds(30));
-    const auto decide = [&canvas, registry = view.registry(), needs, placement, probe,
+    const auto decide = [&canvas, registry = view.registry(), needs = QPointer<NeedsModel>(needs), placement, probe,
                          capabilityOf = std::move(capabilityOf)](const ReadinessPlan &plan) {
         const Document document = canvas.document();
-        const QByteArray key = QJsonDocument(plan.toJson()).toJson(QJsonDocument::Compact) + QJsonDocument(document.toJson()).toJson(QJsonDocument::Compact);
-        if (key == placement->key)
-            return;
-        placement->key = key;
-        placement->verdict = {};
         PairedPlacementRequest request;
         if (const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath()); instances)
             request.instances = instances.value();
+        // Asked again only when what the verdict depends on changed (not the disk space the plan reads live); the last verdict stays
+        // shown until the new one arrives.
+        const QByteArray key = pairedPlacementKey(document, plan, request.instances);
+        if (key == placement->key)
+            return;
+        placement->key = key;
         request.capabilityOf = capabilityOf;
         request.registry = registry;
         decidePairedPlacement(document, plan, request, probe, [placement, needs, key](const PairedVerdict &verdict) {
             if (placement->key != key)
                 return; // the plan or the document changed while the hosts were asked
+            const bool same = verdict.hostOf == placement->verdict.hostOf && verdict.silent == placement->verdict.silent
+                              && verdict.applies == placement->verdict.applies && verdict.blocked.size() == placement->verdict.blocked.size()
+                              && std::equal(verdict.blocked.cbegin(), verdict.blocked.cend(), placement->verdict.blocked.cbegin(),
+                                            [](const Error &a, const Error &b) { return a.node == b.node && a.message == b.message; });
             placement->verdict = verdict;
-            needs->refreshSoon(); // the answer may be "not there" or "not answering", which changes nothing the view signals
+            if (!same && needs)
+                needs->refreshSoon(); // the answer may be "not there" or "not answering", which changes nothing the view signals
         });
     };
     needs->setPlanSource([&view, &workflows, placement, decide] {
