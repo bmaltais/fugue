@@ -452,7 +452,7 @@ private slots:
         QVERIFY2(place.ok(), qPrintable(place.error().message));
         QVERIFY(!place.value().isEmpty() && !place.value().startsWith('#'));
         // every starter list resolves and gives a line, never its header
-        for (const QString &name : {"places", "eras", "weather", "time-of-day", "art-styles", "moods", "colour-palettes", "creatures"}) {
+        for (const QString name : {"places", "eras", "weather", "time-of-day", "art-styles", "moods", "colour-palettes", "creatures"}) {
             const Result<QString> r = dynprompt::generate("__" + name + "__", 7, options);
             QVERIFY2(r.ok() && !r.value().isEmpty() && !r.value().startsWith('#'), qPrintable(name));
         }
