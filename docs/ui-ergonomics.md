@@ -88,6 +88,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-26 Any area can switch its view, the Graph's too (#647; decided by the coordinator, medium-high)
+
+- Control: `src/workspace/AreaHeader.qml`, the view-type menu (`areaType-<id>`, the Graph's header in the one-area window too); the commands `area.view-graph` and `area.view-canvas`; `src/Main.qml` (the Graph hidden while no area shows it).
+- Old: the Graph's area could not switch away (Canvas and App greyed with the note "the Graph keeps an area"), and closing it gave the Graph to the area that took its place.
+- New: every view is choosable in every area. Choosing Graph or App where another area shows it still moves it (the two areas trade, note "moves here"). With a Canvas in the Graph's area the Graph is hidden but alive: its run toolbar, queue panel and context menu go with it, and the commands that act on it are off (node search, edit, node and view keys); Run, file and window commands stay. Closing the Graph's area just closes it; Ctrl+Alt+G or Graph in any area's menu brings it back there. In the default one-area window, App in the Graph's menu runs the App | Graph switch (`view.toggle-app`) rather than making an App area.
+- Why: Blender's editor-type menu lets any area switch to any editor, with no editor pinned to a place; a window one person wants as Canvas alone should be possible, and the greyed row with a note taught a rule the person had to read. The Graph as the one exception was the odd thing out.
+- Convention: Blender's editor-type menu (every area, every editor; Graph and App are one per window, as a Blender scene's editor of a single instance moves rather than copies).
+- Rules met: Floor (the menu's rows are the WidgetMenu's, unchanged), Destructive (nothing is lost: the Graph and its state stay alive, hidden, and the area's state per view is kept), Words (no new strings; the note "the Graph keeps an area" is gone), Right-to-left (the menu is unchanged).
+
 ### 2026-11-25 Add to the app launcher: its own glyph and a visible on-state; frosted chips show `current` (owner)
 
 - Old: the button used `pin`, the glyph of the shelf's pin-to-top, and looked the same when the app was listed (frosted chips ignored `current`). New: glyph `app-window`, a checkable toggle (`Accessible.checked` follows `listed`), lit glass when listed, no accent or ring (`KitFrost.on`, kit-wide: the shelf's pin `appBookmark-<id>` shows it too). Tips say "app launcher" (Omarchy's name, Super+Space); notices "Added to the app launcher" / "Taken out of the app launcher".

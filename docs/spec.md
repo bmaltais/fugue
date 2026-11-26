@@ -95,7 +95,7 @@ XDG variables are honored; the defaults are shown.
 | `~/.local/state/fugue/recovery/` | Recovery copies ([11.3](#113-recovery)). |
 | `~/.local/state/fugue/tabs.json` | The saved workflows open when the last session ended, for the next start ([12.10](#1210-several-workflows)). |
 | `~/.local/state/fugue/trust.json` | Which packs the user has allowed ([6.7](#67-trust)). |
-| `~/.local/state/fugue/workspaces.json` | The window's areas, once they are more than one Graph area ([12.16](#1216-areas-and-view-types-217)); a damaged one is kept as `workspaces.json.bad`. |
+| `~/.local/state/fugue/workspaces.json` | The window's areas, once they are more than the one Graph area ([12.16](#1216-areas-and-view-types-217)); a damaged one is kept as `workspaces.json.bad`. |
 | `~/.local/state/fugue/media.json` | What the media browser keeps ([12.14](#1214-side-panels)): the favorites, its mode, the workflows panel's view and the favorites filter. |
 | `~/.local/state/fugue/hashes.json` | Remembered file hashes, keyed by path, size and modification time. A project that inherits `models` also reads the Default's for files in the inherited model folders ([1.4.2](#142-projects)). |
 | `~/.cache/fugue/results/` | The result cache ([10](#10-result-cache)). |
@@ -3720,11 +3720,17 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   state its type has there, and it says what to keep (`areaStateEdited`) only on a change of its own. A type no row
   registers is drawn as a placeholder that names it and keeps it in the tree (`AreaPlaceholder.qml`, 160 x 120 px);
   the header's menu picks another view for it.
-- **The Graph always has exactly one area** (slice 1). It is one per window until a second Graph has its own pointer,
-  link drag and zoom requests (research 5.5, risk 2), and the run toolbar, node search, the context menu and the
-  window's dialogs hang from it, so it never leaves the window: the area showing it cannot switch to another view;
-  choosing Graph in another area **moves it there** (the two areas trade what they show, the other area's canvas
-  too); closing its area gives the Graph to the area that takes the place. A **split's new area** shows the view of
+- **Any area can show any view, the Graph's too** (#647; Blender's editor-type menu). The Graph and the App are one
+  per window until a second Graph has its own pointer, link drag and zoom requests (research 5.5, risk 2): choosing
+  Graph or App in another area **moves it there** (the two areas trade what they show, the other area's canvas too).
+  The Graph may have **no area** (`Workspace::graphArea()` is 0): it is then hidden but alive (`Main.qml`: the canvas is
+  not visible, so its run toolbar, queue panel and context menu go with it, and the areas' `views` map does not list it, so no
+  area places it); the commands that act on it are off (the `canvas` command context follows "the Graph is shown in an
+  area" while the window has areas: node search, the edit, node, group and view keys, the panels that hang from it), and
+  Run, the file and window commands stay (context `app`). Closing the Graph's area just closes it (Blender); Ctrl+Alt+G
+  or the area menu's Graph brings it back into the active area, where it re-places itself. A layout file with no Graph
+  is kept as it is (no Graph is forced into it); a second Graph in a file shows a Canvas. The active area and what a
+  command acts on fall back to the Graph's area, else the first area. A **split's new area** shows the view of
   the area split when that view may be shown twice, else the first registered view that may (so splitting the Graph
   gives a Canvas). A split is refused when the tree would not fit the body (`AreaTree::fits`), and the window starts
   no split from a body too small.
@@ -3736,8 +3742,8 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   down to one area, Reset layout) removes the file: the default window reads nothing and writes nothing. At start the
   file is read once; one that does not read (not JSON, larger than 1 MiB, not format 1, a tree that does not
   validate) gives the default window, is kept beside as **`workspaces.json.bad`** (replacing an older one), and the
-  window's notice line says so once. A layout without the Graph gets it in its first area; a second Graph area shows a
-  Canvas. The active area is not kept (the Graph's area is active at start), nor focus mode.
+  window's notice line says so once. A layout without the Graph stays without it (the Graph is hidden); a second Graph area shows a
+  Canvas. The active area is not kept (the Graph's area, else the first, is active at start), nor focus mode.
 - **Commands** (context `app`; in **View > Areas**, a submenu after Focus mode):
 
   | Id | Menu | Key | What it does |
@@ -3746,7 +3752,7 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   | `area.split-column` | Split top and bottom | `Ctrl+Alt+\` | the same, one over the other |
   | `area.close` | Close area | Ctrl+Alt+W | the area beside it takes its place; off with one area |
   | `area.view-graph` | Graph | Ctrl+Alt+G | the active area shows the Graph (it moves there); checked where it is |
-  | `area.view-canvas` | Canvas | Ctrl+Alt+C | the active area shows a Canvas; off in the Graph's area |
+  | `area.view-canvas` | Canvas | Ctrl+Alt+C | the active area shows a Canvas (the Graph's too: the Graph is then hidden) |
   | `view.reset-layout` | Reset layout | none | one area showing the Graph again; off with one area |
 
   The keys are free in every context and none is a text field's (12.4); a keymap file can rebind them (12.5).
@@ -3758,21 +3764,21 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   already made for the same area and type is **kept** and moved (a split or a close leaves the other views as they
   were). Views sit at z 0, border handles at 1, headers at 2. Tested offscreen with a split tree
   (`tests/workspace/test_area_node.cpp`).
-- **The window.** With one area (`Main.qml`: one `AreaNode`, `objectName: "areas"`), the canvas is where the window's
+- **The window.** With the one Graph area (`Main.qml`: one `AreaNode`, `objectName: "areas"`), the canvas is where the window's
   column puts it, with its `objectName`, its margins and everything hung from it, and there is no host: the window has
   the same items and item names as before areas (`tests/workspace/test_area_window.cpp` against
-  `tests/workspace/data/default-window.txt`) and writes no file. **On the first split** the column gets a host
+  `tests/workspace/data/default-window.txt`) and writes no file. **On the first split**, or when the one area shows another view (a Canvas, #647: the host is made for every layout but the default Graph leaf), the column gets a host
   (`AreaHost`, `objectName: "areaHost"`, a C++ item that sees each press in it before the item under the point does,
   without taking it, to make that area active) in the canvas's place with the canvas's margins, and the canvas moves
   into it as its area's view; what was placed from the canvas's `x`, `y` and height (the side strip, the side panel,
   the auto-hide menu bar's handle) is placed from the body (the host, or the canvas with one area), so it does not
   move. The run toolbar and queue panel, node search, the context menu and the dialogs stay hung from the canvas and
-  so stay inside the Graph's area. Back to one area, the canvas returns to the column, the host and what it held go,
+  so stay inside the Graph's area, and hide with it while no area shows it. Back to the default layout, the canvas returns to the column, the host and what it held go,
   and the window is item for item the default one again.
-- **Area header** (`workspace/AreaHeader.qml`, `areaHeader-<id>`, one per area, only while there are two or more; 7u =
+- **Area header** (`workspace/AreaHeader.qml`, `areaHeader-<id>`, one per area, only while there are two or more areas or the one area is not the Graph (the default window's Graph has the window's own header, #262); 7u =
   28 px tall, `popup` color, a hairline foot): the **view-type menu** at the start (`areaType-<id>`: the view's glyph,
-  its name, a chevron; a click opens the list of view types, the current one checked, Graph marked "moves here" in
-  another area and Canvas off in the Graph's area with "the Graph keeps an area"), and at the end **split side by
+  its name, a chevron; a click opens the list of view types, the current one checked, Graph (or the App) marked "moves here" in
+  another area; in the default one-area window App there runs `view.toggle-app`, the window's App | Graph switch, instead of making an App area), and at the end **split side by
   side** (`areaSplitRow-<id>`, the `columns-2` glyph), **split top and bottom** (`areaSplitColumn-<id>`, `rows-2`), a 2u gap, then **close**
   (`areaClose-<id>`, the `x` glyph, a danger tint and a red glyph on hover or keyboard focus), each 6u = 24 px square, with its key in the tooltip. A
   press in the header makes its area active; the active area's header is tinted a little more (no accent foot: it read as a drag line, owner 2026-11-25) and has its name and glyph in
@@ -3795,7 +3801,7 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
 - **Not built yet** (later slices of #217): workspaces and presets (named layouts, tabs), drag to split or swap from a
   corner, join from the header, maximize, the Queue, Results, History, Viewer, Mask editor and Properties views, the
   active area's own keys and undo (every key still belongs to the window: `canvas` stays active while a Canvas area
-  is), a view following the selection or pinned beyond the Canvas's region, a new window, and the Corner Handles and
+  is, and goes off only while no area shows the Graph), a view following the selection or pinned beyond the Canvas's region, a new window, and the Corner Handles and
   Border Width settings.
 
 ### 12.17 The App view (#385, epic #397)
@@ -3812,7 +3818,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   act on the App in its area and on the graph in the Graph's; the tab's own mode is kept for the one-area window. `view.toggle-app`,
   the App | Graph switch and the rail's Graph item ask the areas (`Workspace::toggleApp`): the active area shows the other view;
   an area showing the App takes the Graph (the two areas trade, 12.16); the Graph's area takes the App from the area that shows it,
-  or with none gives it to the next area; any other area shows the App. Asking for the App view (Apply and open, a chosen app)
+  or with none gives it to the next area; any other area (the active one when no area shows the Graph) shows the App. Asking for the App view (Apply and open, a chosen app)
   brings it to the active area unless one shows it (`requestApp`). Splitting from the one-area App view shows the graph and a
   Canvas (the App is one pick away in the new area's type menu). A window
   with no app tab has exactly the items it had (`tests/workspace/data/default-window.txt`). A block that does not read

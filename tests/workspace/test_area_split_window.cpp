@@ -219,10 +219,49 @@ private slots:
         QTRY_COMPARE(app.workspace.active(), 1);
         app.key(Qt::Key_G, Qt::ControlModifier | Qt::AltModifier);
         QTRY_COMPARE(app.workspace.graphArea(), 1);
-        // The Graph's area cannot show a Canvas: the key does nothing there.
-        QTRY_COMPARE(app.workspace.active(), 1);
-        app.key(Qt::Key_C, Qt::ControlModifier | Qt::AltModifier);
-        QCOMPARE(app.workspace.graphArea(), 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Any area can switch its view, the Graph's too (#647): with a Canvas in its place the Graph is hidden but alive, nothing
+    // that acts on it runs, and an area showing it again brings it back. A one-area window can show a Canvas as well.
+    void theGraphHidesWhenItsAreaShowsACanvasAndComesBack() {
+        App app(load(blank));
+        QVERIFY(app.open());
+        QTest::qWait(200);
+        const QString before = window_items::describe(app.window->contentItem());
+        QVERIFY(app.canvas->isVisible());
+        QVERIFY(app.commands.isEnabled("node.search"));
+        QVERIFY(app.commands.trigger("area.view-canvas")); // the window's one area
+        QTRY_VERIFY(host(app));
+        QTRY_VERIFY(find(app.window, "canvasArea"));
+        QCOMPARE(app.workspace.graphArea(), 0);
+        QVERIFY(find(app.window, "areaHeader-1"));
+        QTRY_VERIFY(!app.canvas->isVisible());
+        QVERIFY(!app.commands.isEnabled("node.search"));
+        QVERIFY(!app.commands.trigger("node.search"));
+        QVERIFY(app.commands.contextActive("app"));
+        // Another area; the Graph comes back in it by the key, and is placed there.
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QTRY_COMPARE(app.workspace.count(), 2);
+        QVERIFY(!app.canvas->isVisible());
+        app.key(Qt::Key_G, Qt::ControlModifier | Qt::AltModifier);
+        QTRY_COMPARE(app.workspace.graphArea(), 2);
+        QTRY_VERIFY(app.canvas->isVisible());
+        QVERIFY(app.commands.isEnabled("node.search"));
+        QTRY_VERIFY(app.canvas->width() > 50 && sceneRect(app.canvas).intersects(sceneRect(host(app))));
+        // Closing the Graph's area closes it; the Graph is hidden.
+        QVERIFY(app.commands.trigger("area.close"));
+        QTRY_COMPARE(app.workspace.count(), 1);
+        QCOMPARE(app.workspace.graphArea(), 0);
+        QTRY_VERIFY(!app.canvas->isVisible());
+        QVERIFY(!app.commands.isEnabled("node.search"));
+        // Back in the one area: the default window again, item for item.
+        QVERIFY(app.commands.trigger("area.view-graph"));
+        QTRY_VERIFY(!host(app));
+        QTRY_VERIFY(app.canvas->isVisible());
+        QVERIFY(app.commands.isEnabled("node.search"));
+        QTest::qWait(200);
+        QCOMPARE(window_items::describe(app.window->contentItem()), before);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

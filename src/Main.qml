@@ -212,7 +212,7 @@ ApplicationWindow {
             FugueCanvas {
                 id: fugueCanvas
                 objectName: "canvas"
-                visible: !win.appShown && !win.homeShown
+                visible: !win.appShown && !win.homeShown && !win.graphHidden
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // The side panel (#56) takes its width from the canvas, on the side it docks.
@@ -365,15 +365,27 @@ ApplicationWindow {
     // What the areas sit in: the canvas alone, or the host while there are several.
     property Item areaHost: null
     readonly property Item body: areaHost ?? fugueCanvas
+    // No area shows the Graph (Blender's editors: any area can switch its view): it stays alive, hidden, with its run toolbar and
+    // context menu, and the commands that act on it are off (the `canvas` context). It re-places itself when an area shows it again.
+    readonly property bool graphHidden: areaHost !== null && App.workspace !== null && App.workspace.graphArea === 0
+    function syncGraphContext() {
+        if (App.commands)
+            App.commands.setContextActive("canvas", !graphHidden)
+    }
+    onGraphHiddenChanged: syncGraphContext()
     function syncAreas() {
         const tree = App.workspace ? App.workspace.tree : AreaLayout.defaultTree()
-        const split = tree.root?.type === "branch"
+        // The host is for every layout but the default one: the Graph alone in the one area, drawn by the window's column.
+        const split = !(tree.root?.type === "leaf" && tree.root.view === "graph")
         if (split && !areaHost) {
             areaHost = areaHostComponent.createObject(mainLayout) as Item
             fugueCanvas.parent = areaHost
         }
+        // The Graph is listed only while an area shows it: with none, no area adopts it and nothing places it.
         const views = {}
-        views[String(App.workspace ? App.workspace.graphArea : 1)] = fugueCanvas
+        const graphArea = App.workspace ? App.workspace.graphArea : 1
+        if (graphArea > 0)
+            views[String(graphArea)] = fugueCanvas
         areas.views = views
         areas.host = split ? areaHost : null
         areas.node = tree.root
@@ -547,6 +559,7 @@ ApplicationWindow {
         syncRunBar()
         syncSidePanel()
         syncAreas()
+        syncGraphContext()
         syncApp()
         syncHome()
     }

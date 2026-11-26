@@ -2169,7 +2169,7 @@ Item {
         onWorkflowOpened: {
             if (root.hostCloses)
                 root.closeRequested()
-            else if (App.workspace)
+            else if (App.workspace && App.workspace.graphArea > 0)
                 App.workspace.active = App.workspace.graphArea
         }
     }

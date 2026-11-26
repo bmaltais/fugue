@@ -85,23 +85,28 @@ QString Workspace::newViewFor(int id) const {
 }
 
 void Workspace::keepGraph(AreaTree &tree) const {
-    const QList<int> ids = tree.areaIds();
+    // One Graph per window. A layout without one stays as it is: the Graph is then hidden, not forced into an area.
     bool seen = false;
-    for (const int id : ids) {
+    for (const int id : tree.areaIds()) {
         if (tree.area(id)->view != ViewRegistry::kGraph)
             continue;
         if (seen)
             tree.setView(id, ViewRegistry::kCanvas);
         seen = true;
     }
-    if (!seen)
-        tree.setView(ids.first(), ViewRegistry::kGraph);
+}
+
+int Workspace::fallbackArea() const {
+    if (const int graph = graphArea())
+        return graph;
+    const QList<int> ids = m_tree.areaIds();
+    return ids.isEmpty() ? 0 : ids.first();
 }
 
 void Workspace::commit(const AreaTree &next) {
     m_tree = next;
     if (!m_tree.area(m_active)) {
-        m_active = graphArea();
+        m_active = fallbackArea();
         emit activeChanged();
     }
     emit changed();
@@ -156,7 +161,7 @@ void Workspace::restore() {
     }
     keepGraph(read);
     m_tree = read;
-    m_active = graphArea();
+    m_active = fallbackArea();
     emit changed();
     emit activeChanged();
 }
@@ -191,22 +196,16 @@ bool Workspace::closeArea(int id) {
     if (!area || m_tree.count() < 2)
         return false;
     AreaTree next = m_tree;
-    const bool graph = area->view == ViewRegistry::kGraph;
     const int taker = next.close(id);
     if (!taker)
         return false;
-    if (graph)
-        next.setView(taker, ViewRegistry::kGraph);
     commit(next);
     setActive(taker);
     return true;
 }
 
 bool Workspace::canShow(int id, const QString &view) const {
-    const Area *area = m_tree.area(id);
-    if (!area || !m_views.contains(view))
-        return false;
-    return area->view != ViewRegistry::kGraph || view == ViewRegistry::kGraph;
+    return m_tree.area(id) && m_views.contains(view);
 }
 
 bool Workspace::showView(int id, const QString &view) {
@@ -260,7 +259,7 @@ int Workspace::areaOf(const QString &view) const {
 }
 
 bool Workspace::toggleApp() {
-    const int id = m_tree.area(m_active) ? m_active : graphArea();
+    const int id = m_tree.area(m_active) ? m_active : fallbackArea();
     const QString view = viewOf(id);
     if (view == ViewRegistry::kApp)
         return showView(id, ViewRegistry::kGraph);
@@ -275,7 +274,7 @@ bool Workspace::toggleApp() {
 }
 
 bool Workspace::requestApp(bool app) {
-    const int id = m_tree.area(m_active) ? m_active : graphArea();
+    const int id = m_tree.area(m_active) ? m_active : fallbackArea();
     if (!app)
         return viewOf(id) == ViewRegistry::kApp && showView(id, ViewRegistry::kGraph);
     if (areaOf(ViewRegistry::kApp))
@@ -359,8 +358,8 @@ void addAreaCommands(CommandRegistry &commands) {
 
 void Workspace::registerCommands(CommandRegistry &commands) {
     addAreaCommands(commands);
-    // Each acts on the active area, or the Graph's when none is (the window has not said yet).
-    const auto target = [this] { return m_tree.area(m_active) ? m_active : graphArea(); };
+    // Each acts on the active area, or the Graph's (else the first) when none is (the window has not said yet).
+    const auto target = [this] { return m_tree.area(m_active) ? m_active : fallbackArea(); };
     for (const auto &[id, axis] : {std::pair{"area.split-row", "row"}, std::pair{"area.split-column", "column"}}) {
         const QString along = QString::fromLatin1(axis);
         commands.setHandler(QString::fromLatin1(id), [this, target, along] { splitArea(target(), along); });

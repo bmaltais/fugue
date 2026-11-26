@@ -5,19 +5,18 @@
 // workspace/area_tree.h and workspace/view_registry.h, with no window: tests/workspace/test_workspace.cpp drives it
 // alone, and Main.qml draws `tree` (AreaNode.qml) and calls back here.
 //
-// The Graph always has an area, exactly one (it is one per window, and the run toolbar, node search and the
-// window's dialogs hang from it): an area showing it cannot be switched to another view, choosing Graph in another
-// area moves it there (the two areas trade what they show), and closing its area gives it to the area that takes
-// the place. A split's new area shows the view of the area split when that view may be shown twice, else the first
-// registered view that may (the Canvas).
+// Any area may show any registered view, the Graph's too (Blender's editor-type menu). The Graph and the App are one per
+// window: choosing one in another area moves it there (the two areas trade what they show). The Graph may have no area
+// (graphArea() is 0): it is then hidden but alive, its commands are off and the window's Main.qml draws it nowhere; closing
+// its area just closes it, and choosing Graph in any area (Ctrl+Alt+G) brings it back there. A split's new area shows the
+// view of the area split when that view may be shown twice, else the first registered view that may (the Canvas).
 //
 // Kept in `workspaces.json` in the root's state folder (engine/paths.h stateDir), format 1 of AreaTree::toJson,
 // written whole (engine/atomic_file.h) a moment after a change, so a drag is one write, and at quit. A layout of
 // one Graph area is the default window: it is never written, and reaching it again removes the file, so the
 // default window reads nothing and stays what it was. A file that does not read (not JSON, not format 1, a tree
 // that does not validate) gives the default layout, is kept beside as `workspaces.json.bad`, and the window's
-// notice line says so once. A layout without the Graph gets it in its first area; a second Graph area shows a
-// Canvas.
+// notice line says so once. A layout without the Graph stays without it; a second Graph area shows a Canvas.
 //
 // Commands (context `app`): area.split-row (Ctrl+\), area.split-column (Ctrl+Alt+\), area.close (Ctrl+Alt+W),
 // area.view-graph (Ctrl+Alt+G), area.view-canvas (Ctrl+Alt+C), each on the active area, and view.reset-layout.
@@ -49,7 +48,7 @@ class Workspace : public QObject {
     Q_PROPERTY(int count READ count NOTIFY changed)
     // The area the commands act on: the one last pressed or given the keyboard focus.
     Q_PROPERTY(int active READ active WRITE setActive NOTIFY activeChanged)
-    // The area showing the Graph.
+    // The area showing the Graph, or 0 when none does (the Graph is hidden).
     Q_PROPERTY(int graphArea READ graphArea NOTIFY changed)
     Q_PROPERTY(fugue::ViewRegistry *views READ views CONSTANT)
     // The size the window gives the areas, set by the window: a split that would not fit it is refused. Empty
@@ -91,7 +90,7 @@ public:
     // Area `id` shows `view` now (the Graph moves here from its area, which shows what this one did). False when
     // it cannot (canShow) or already does.
     Q_INVOKABLE bool showView(int id, const QString &view);
-    // True when area `id` may show `view`: a registered view, and the area does not hold the Graph (which stays).
+    // True when area `id` may show `view`: a registered view.
     Q_INVOKABLE bool canShow(int id, const QString &view) const;
     // The view-type menu of area `id`: one map per registered type, in registry order: id, name (translated),
     // glyph, current, enabled, moves (it is shown in another area and moves here).
@@ -133,6 +132,8 @@ private:
     QString newViewFor(int id) const;
     void commit(const AreaTree &next);
     void keepGraph(AreaTree &tree) const;
+    // The Graph's area, else the first area: what the active area falls back to.
+    int fallbackArea() const;
     void save();
 
     QString m_path;
