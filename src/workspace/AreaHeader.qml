@@ -58,6 +58,9 @@ Rectangle {
         const at = typeButton.mapToItem(Overlay.overlay, 0, typeButton.height)
         const menu = menuComponent.createObject(header, {wantX: at.x, wantY: at.y, width: Math.max(typeButton.width, 40 * u),
                                                          anchorHeight: typeButton.height, entries: entries}) as WidgetMenu
+        // Never narrower than its rows: at the button's width the note ("the Graph keeps an area") left no room for the view's
+        // name, so the menu read as that note twice (owner, 2026-11-26).
+        menu.width = Math.max(menu.width, menu.implicitWidth)
         menu.picked.connect(value => App.workspace.showView(header.areaId, value))
         menu.open()
     }
