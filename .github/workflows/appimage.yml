@@ -6,13 +6,12 @@ name: AppImage
 # gets its own CI run before it is merged. The build is on Ubuntu 22.04, the oldest glibc Qt 6.12 supports, so the
 # file runs on anything newer; Qt 6.12 (the app's minimum) is not in any distribution that old, so it comes from
 # aqtinstall, version pinned. The AppImage is then started in clean Ubuntu and Fedora containers.
+# A tag (the release), a pull request that changes how the AppImage is built, or by hand. Not every merge to main.
 on:
   push:
-    branches: [main, master]
-    paths: [packaging/appimage/**, share/**, CMakeLists.txt, .github/workflows/appimage.yml]
     tags: ['v*']
   pull_request:
-    paths: [packaging/appimage/**, .github/workflows/appimage.yml]
+    paths: ['packaging/appimage/**', '!packaging/appimage/**/*.md', .github/workflows/appimage.yml]
   workflow_dispatch:
 
 permissions:

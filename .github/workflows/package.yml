@@ -13,11 +13,13 @@ name: Package
 #
 # Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
+# A tag (the release), a pull request that changes the package recipe or this file (tested before the merge, not
+# after it), or by hand.
 on:
   push:
-    branches: [main, master]
-    paths: [packaging/**, share/**, bin/build, bin/build-helper, bin/package-helper, helper/**, CMakeLists.txt, .github/workflows/package.yml]
     tags: ['v*']
+  pull_request:
+    paths: [packaging/PKGBUILD, .github/workflows/package.yml]
   workflow_dispatch:
 
 permissions:

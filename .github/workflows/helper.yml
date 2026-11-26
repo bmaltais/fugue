@@ -2,12 +2,11 @@ name: Helper
 
 # stable-diffusion.cpp with Fugue's changes, from its fork (helper/). It takes long to build, so it runs
 # only when the helper or its packaging changes, and keeps ccache's folder between runs.
+# Only on a pull request that changes what it builds (docs excluded), or by hand: the merge itself is not rebuilt.
 on:
   pull_request:
-    paths: [helper/**, bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
-  push:
-    branches: [main, master]
-    paths: [helper/**, bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
+    paths: ['helper/**', '!helper/**/*.md', bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
+  workflow_dispatch:
 
 permissions:
   contents: read
