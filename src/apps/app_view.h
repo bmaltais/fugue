@@ -64,6 +64,9 @@
 
 namespace fugue {
 
+namespace app {
+struct AppInput; // engine/app_input.h
+}
 class AppModels;
 class ModelDownloads;
 class Registry;
@@ -124,9 +127,12 @@ class AppView : public QObject {
     Q_PROPERTY(bool repeatWaits READ repeatWaits NOTIFY liveChanged)
     // What the app still needs (a missing model or pack), listed while it is not ready (#469).
     Q_PROPERTY(fugue::NeedsModel *needs READ needs CONSTANT)
-    // The paired host the app runs on, when its models are not on this machine and that host answers (#395); empty when it runs here.
-    // The form says "Runs on <host>" near Run.
+    // The paired host(s) the app runs on, when its models are not on this machine and the paired verdict says so (#395, #581); empty when
+    // it runs here. The form says "Runs on <host>" near Run.
     Q_PROPERTY(QString runsOn READ runsOn NOTIFY runsOnChanged)
+    // The paired host that did not answer, where it is the only one that could take the app (#581): the form says "<host> is not
+    // answering" on the same line. Empty otherwise, and while a service off this machine is named.
+    Q_PROPERTY(QString silentHost READ silentHost NOTIFY runsOnChanged)
 
 public:
     using Start = std::function<QString(const RunRequest &)>;
@@ -251,17 +257,14 @@ public:
     NeedsModel *needs() const { return m_needs; }
     const Registry *registry() const { return m_registry; }
 
-    // Where the app runs (#395). `source` asks the paired helper whether it answers and calls back with its name (empty: it does not,
-    // or there is none; engine/providers.h probePairedHelper); the window gives it. askPlacement(true) is said by whoever knows the app's
-    // models are not here (the Needs plan has model rows): the source is asked once for the shown tab, and its answer is `runsOn`;
-    // askPlacement(false) clears it. A tab seen again asks again.
-    using PlacementSource = std::function<void(std::function<void(const QString &host)> done)>;
-    void setPlacementSource(PlacementSource source) { m_placement = std::move(source); }
-    void askPlacement(bool modelsAreElsewhere);
+    // Where the app runs (#395, #581): the window gives the paired verdict's hosts (comma separated) and the silent host, or none of
+    // them. A tab shown again clears them until the verdict is made again.
+    void setPairedHosts(const QString &runsOn, const QString &silentHost);
     // The service off this machine the shown app's nodes are routed to ("<service> (<host>)", 8.2, #404): said by whoever checks the
     // graph (CanvasRuns::runsOn). It takes the place of the paired host in `runsOn`, the same "Runs on" line.
     void setOffMachine(const QString &services);
     QString runsOn() const { return m_offMachine.isEmpty() ? m_runsOn : m_offMachine; }
+    QString silentHost() const { return m_offMachine.isEmpty() ? m_silentHost : QString(); }
 
     // Queues a run of the shown tab's workflow with the form's values in. Returns its id, empty when it cannot run
     // (`error` says why).
@@ -366,9 +369,11 @@ private:
     bool repeatVaries() const;
     void scheduleLive(const QString &tab);
     void syncTake(TabState &state);
-    void setRunsOn(const QString &host);
     void buildFields();
-    QVariantMap fieldFor(const InputBinding &input) const;
+    // The form's field for an input (a pure read of `state`); startValue first keeps what the form must hold for it.
+    QVariantMap fieldFor(const app::AppInput &described, const TabState &state) const;
+    static void startValue(const app::AppInput &described, TabState &state);
+    static QString seedModeOf(const app::AppInput &described, const TabState &state);
     // The key's input, in this form; null when none.
     const InputBinding *inputOf(const QString &key) const;
     QString kindOfField(const QString &key) const;
@@ -398,10 +403,9 @@ private:
     bool m_split = false;   // the window has several areas (setAreas)
     bool m_areaApp = false; // and the active one shows the App view
     QString m_problem;
-    PlacementSource m_placement;
     QString m_runsOn;
+    QString m_silentHost;
     QString m_offMachine;
-    QString m_placementTab; // the tab the source was asked for (or is being asked for); empty before any
     QVariantList m_fields;
     AppModels *m_models = nullptr;
     NeedsModel *m_needs = nullptr;

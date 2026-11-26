@@ -397,14 +397,16 @@ Rectangle {
                     color: page.look.label
                     font.pixelSize: page.look.labelSize
                 }
-                // Where the app runs, when not here (#395): a quiet line above Run, nothing for a local run.
+                // Where the app runs, when not here (#395): a quiet line above Run, nothing for a local run. A paired host that does not
+                // answer is said on the same line (#581): the model rows stay in the Needs panel.
                 Text {
                     objectName: "appRunsOn"
                     Layout.fillWidth: true
                     Layout.leftMargin: page.look.params.panelPad * page.u
                     Layout.rightMargin: page.look.params.panelPad * page.u
-                    visible: page.appView.runsOn !== ""
-                    text: qsTr("Runs on %1").arg(page.appView.runsOn)
+                    visible: page.appView.runsOn !== "" || page.appView.silentHost !== ""
+                    text: page.appView.silentHost !== "" ? qsTr("%1 is not answering").arg(page.appView.silentHost)
+                                                         : qsTr("Runs on %1").arg(page.appView.runsOn)
                     textFormat: Text.PlainText
                     elide: Text.ElideRight
                     color: page.look.label

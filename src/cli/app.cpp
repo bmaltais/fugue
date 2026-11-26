@@ -17,6 +17,7 @@
 #include <QPointer>
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -24,11 +25,12 @@
 #include "cli/compile_step.h"
 #include "cli/commands.h"
 #include "engine/app_binding.h"
+#include "engine/app_input.h"
 #include "engine/document.h"
 #include "engine/file_roots.h"
 #include "engine/providers.h"
 #include "engine/readiness.h"
-#include "engine/remote_placement.h"
+#include "engine/paired_placement.h"
 #include "engine/registry.h"
 #include "engine/share_package.h"
 #include "engine/templates.h"
@@ -126,68 +128,19 @@ Result<Loaded> loadApp(const QString &ref, Context &context) {
     return value;
 }
 
-// The spec of the first target, through a group instance to its inner input (spec 5.4).
-const InputSpec *specOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    return input.targets.isEmpty() ? nullptr : targetInputSpec(document, registry, input.targets.first());
-}
-
-bool isFileRole(const InputBinding &input) { return input.role == QLatin1String("image") || input.role == QLatin1String("mask"); }
-
-// What a form would offer: image and mask by role, else the target's port type (a resource is "model"), `choice` when it has words.
-QString typeOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (isFileRole(input))
-        return input.role;
-    const InputSpec *spec = specOf(input, document, registry);
-    if (input.choices || (spec && spec->choices))
-        return QStringLiteral("choice");
-    if (spec)
-        return registry.portKind(spec->type.type) == PortKind::Resource ? QStringLiteral("model") : spec->type.type.toString();
-    return input.role == QLatin1String("model") ? QStringLiteral("model") : QStringLiteral("any");
-}
-
-// What the input holds when nothing is given: the block's default, else the first target's own value in the workflow.
-QJsonValue defaultOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (!input.defaultValue.isUndefined())
-        return input.defaultValue;
-    if (input.optional && isFileRole(input))
-        return QJsonValue::Undefined; // left out means left out: the file the workflow holds is not a default (#484)
-    if (input.targets.isEmpty())
-        return QJsonValue::Undefined;
-    const PortRef &target = input.targets.first();
-    const auto node = document.graph.nodes.constFind(target.node);
-    if (node != document.graph.nodes.constEnd()) {
-        const InputValue held = node->inputs.value(target.port);
-        if (held.kind() == InputValue::Kind::Literal)
-            return held.literal();
-        if (held.kind() == InputValue::Kind::Auto) // a seed left to the engine: the workflow's own value is {"auto": "random"}
-            return held.toJson();
-    }
-    const InputSpec *spec = specOf(input, document, registry);
-    return spec ? spec->defaultValue : QJsonValue(QJsonValue::Undefined);
-}
-
-bool isBlank(const QJsonValue &value) { return value.isUndefined() || value.isNull() || (value.isString() && value.toString().trimmed().isEmpty()); }
-
-// An input a run cannot do without: a picture or a mask with none in the workflow, a prompt that is not optional with no fallback.
-bool isRequired(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (!isBlank(defaultOf(input, document, registry)))
-        return false;
-    if (isFileRole(input))
-        return !input.optional; // left out, an optional picture takes its branch out of the run (#484)
-    return input.role == QLatin1String("prompt") && !input.optional && input.fallback.isEmpty();
-}
-
+// One input as `fugue app info` lists it: the description of engine/app_input.h in the CLI's words.
 QJsonObject inputJson(const InputBinding &given, const Document &document, const Registry &registry) {
-    const InputBinding input = completedBy(given, specOf(given, document, registry));
+    const app::AppInput described = app::describeInput(given, document, &registry);
+    const InputBinding &input = described.binding;
     QJsonObject row{{"key", input.key()},
                     {"role", input.role},
                     {"label", input.label.isEmpty() ? input.key() : input.label},
-                    {"type", typeOf(input, document, registry)},
-                    {"required", isRequired(input, document, registry)},
+                    {"type", app::cliTypeOf(described)},
+                    {"required", described.required},
                     {"optional", input.optional},
-                    {"advanced", input.section.compare(QStringLiteral("Advanced"), Qt::CaseInsensitive) == 0}};
-    if (const QJsonValue value = defaultOf(input, document, registry); !value.isUndefined())
-        row.insert("default", value);
+                    {"advanced", described.advanced}};
+    if (!described.defaultValue.isUndefined())
+        row.insert("default", described.defaultValue);
     if (input.min)
         row.insert("min", *input.min);
     if (input.max)
@@ -213,85 +166,48 @@ ReadinessPlan planFor(const Loaded &loaded, const Document &document, Context &c
 
 bool isReady(const ReadinessPlan &plan) { return plan.empty() && plan.problems.isEmpty(); }
 
-// Only model files are missing here, and a helper on a paired host is configured: the run goes there and the host checks the
-// files (#395; a host that does not have them, or is gone, answers with an error of its own).
-// A model with no source to download from, or with one that cannot be used, is a `model_missing` or `download_failed` problem of the
-// plan: the host may have it all the same.
-bool onlyModelsMissing(const ReadinessPlan &plan) {
-    if (!plan.packs.isEmpty() || (plan.models.isEmpty() && plan.problems.isEmpty()))
-        return false;
-    return std::all_of(plan.problems.cbegin(), plan.problems.cend(), [](const Error &problem) {
-        return problem.code == QLatin1String("download_failed") || problem.code == QLatin1String("model_missing");
-    });
-}
-// Whether the paired helper can take the run: only models are missing and a helper is configured, and no node of the app is pinned to
-// a provider on this machine or needs what the helper does not offer (#491). `problems` says which node and why when the answer is
-// no because of that; it is empty when there is no helper, or something else than models is missing.
-bool mayRunOnHost(const ReadinessPlan &plan, const Document &document, Context &context, Errors &problems) {
-    if (!onlyModelsMissing(plan))
-        return false;
+// Where the app runs when its models are not here (#395, #491, #581): the one verdict of engine/paired_placement.h, waited for here.
+// The pins and what the hosts last said decide first; the hosts are asked (10 s at most each) only when those pass. `probe` keeps the
+// answers, so one command asks the hosts once whatever number of times it looks.
+PairedVerdict pairedVerdict(const ReadinessPlan &plan, const Document &document, Context &context, const PairedProbe &probe) {
     const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-    if (!instances || pairedHelperName(instances.value()).isEmpty())
-        return false;
-    RemotePlacement placement;
-    placement.instances = instances.value();
-    placement.capabilityOf = [&context](const QString &typeId) {
+    PairedPlacementRequest request;
+    request.instances = instances ? instances.value() : QList<ProviderInstance>();
+    request.registry = &context.registry;
+    request.capabilityOf = [&context](const QString &typeId) {
         const NodeType *type = context.registry.nodeType(typeId);
         const std::shared_ptr<ProviderKernel> kernel = type ? context.kernels.provider(*type) : nullptr;
         return kernel ? kernel->requirement(*type, {}).capability : QString();
     };
-    placement.registry = &context.registry;
-    // Pins decide without the host. Only when they pass is the host asked what it offers now (it may have gained a capability since it
-    // last answered: a refusal here never reaches the scheduler, which is what would update what is kept); what it last said stands
-    // in only for a host that does not answer.
-    problems = remoteRunProblems(document, plan, placement);
-    if (!problems.isEmpty())
-        return false;
-    QMap<QString, Description> answered;
-    {
-        // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared
-        // state, never in this frame, and quits no loop.
-        struct Wait {
-            QMap<QString, Description> answered;
-            bool finished = false;
-            QPointer<QEventLoop> loop;
-        };
-        const auto wait = std::make_shared<Wait>();
-        QEventLoop loop;
-        wait->loop = &loop;
-        QTimer limit;
-        limit.setSingleShot(true);
-        QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
-        probePairedHelpers(instances.value(), [wait](const QMap<QString, Description> &got) {
-            wait->answered = got;
-            wait->finished = true;
-            if (wait->loop)
-                wait->loop->quit();
-        });
-        limit.start(12000); // a describe on a paired host gives up after 10 s of silence
-        if (!wait->finished)
-            loop.exec();
-        wait->loop = nullptr;
-        if (wait->finished)
-            answered = wait->answered;
-    }
-    for (const ProviderInstance &instance : instances.value()) {
-        if (!instance.enabled || !isPairedHelper(instance))
-            continue;
-        std::optional<Description> offered;
-        if (answered.contains(instance.name))
-            offered = answered.value(instance.name);
-        else
-            offered = rememberedPairedHelper(instance);
-        if (!offered)
-            continue;
-        QStringList capabilities;
-        for (const CapabilityOffer &offer : offered->capabilities)
-            capabilities << offer.capability;
-        placement.hostCapabilities.insert(instance.name, capabilities);
-    }
-    problems = remoteRunProblems(document, plan, placement);
-    return problems.isEmpty();
+    // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared state, never
+    // in this frame, and quits no loop.
+    struct Wait {
+        std::optional<PairedVerdict> verdict;
+        QPointer<QEventLoop> loop;
+    };
+    const auto wait = std::make_shared<Wait>();
+    QEventLoop loop;
+    wait->loop = &loop;
+    QTimer limit;
+    limit.setSingleShot(true);
+    QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
+    decidePairedPlacement(document, plan, request, probe, [wait](const PairedVerdict &made) {
+        wait->verdict = made;
+        if (wait->loop)
+            wait->loop->quit();
+    });
+    limit.start(12000); // a describe on a paired host gives up after 10 s of silence
+    if (!wait->verdict)
+        loop.exec();
+    wait->loop = nullptr;
+    if (wait->verdict)
+        return *wait->verdict;
+    PairedVerdict none;
+    none.applies = true; // no word from the hosts in time: they are silent, the run goes ahead
+    for (const ProviderInstance &instance : request.instances)
+        if (instance.enabled && isPairedHelper(instance))
+            none.silent << instance.name;
+    return none;
 }
 
 // The paired hosts that ran a node of the run (run.json: the nodes a provider that does not share this machine's files served), once each.
@@ -318,11 +234,11 @@ Error notReady(const Loaded &loaded, const ReadinessPlan &plan) {
 }
 
 // Why a run is refused: the nodes the paired host cannot serve (each named, with the `prepare` hint of the app), else what is not ready.
-Errors refused(const Loaded &loaded, const ReadinessPlan &plan, const Errors &hostProblems) {
-    if (hostProblems.isEmpty())
+Errors refused(const Loaded &loaded, const ReadinessPlan &plan, const PairedVerdict &verdict) {
+    if (verdict.blocked.isEmpty())
         return {notReady(loaded, plan)};
     const QString hint = notReady(loaded, plan).hint;
-    Errors errors = hostProblems;
+    Errors errors = verdict.blocked;
     for (Error &error : errors)
         error.hint = QStringLiteral("%1 %2").arg(error.hint, hint);
     return errors;
@@ -339,23 +255,12 @@ Result<QString> textOf(const QString &path) {
     return text;
 }
 
-// The resource type a model input takes: the port's declared type.
-std::optional<PortType> resourceTypeOf(const InputBinding &input, const Document &document, const Registry &registry) {
-    if (const InputSpec *spec = specOf(input, document, registry); spec && registry.portKind(spec->type.type) == PortKind::Resource)
-        return spec->type.type;
-    return std::nullopt;
-}
-
-// One `--input` value as the input takes it: a picture or mask is a file (made absolute, which must exist); `@<file>` is the file's text;
-// a model is its file name (or a whole handle as JSON); a number, a choice word and text are as typed.
+// One `--input` value as the input takes it (engine/app_input.h): `@<file>` is the file's text (for a picture, the file itself); a model
+// may be given by its file name.
 Result<QJsonValue> valueOf(const InputBinding &input, const QString &raw, const Document &document, Context &context) {
-    const QString type = typeOf(input, document, context.registry);
-    if (isFileRole(input)) {
-        const QString path = QFileInfo(raw.startsWith(QLatin1Char('@')) ? raw.mid(1) : raw).absoluteFilePath();
-        if (!QFileInfo(path).isFile())
-            return Result<QJsonValue>(makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no file %1 for the input \"%2\".").arg(path, input.key())));
-        return QJsonValue(path);
-    }
+    const app::AppInput described = app::describeInput(input, document, &context.registry);
+    if (app::isPictureRole(input))
+        return described.fromText(raw.startsWith(QLatin1Char('@')) ? raw.mid(1) : raw);
     QString text = raw;
     if (raw.startsWith(QLatin1Char('@'))) {
         const Result<QString> read = textOf(raw.mid(1));
@@ -363,34 +268,7 @@ Result<QJsonValue> valueOf(const InputBinding &input, const QString &raw, const 
             return read.errors();
         text = *read;
     }
-    if (input.choices)
-        return QJsonValue(text);
-    if (type == QLatin1String("model")) {
-        const QJsonDocument parsed = QJsonDocument::fromJson(text.toUtf8());
-        if (parsed.isObject())
-            return QJsonValue(parsed.object());
-        const std::optional<PortType> resource = resourceTypeOf(input, document, context.registry);
-        if (!resource)
-            return Result<QJsonValue>(usageProblem(QStringLiteral("The input \"%1\" takes a whole resource handle as JSON.").arg(input.key())));
-        const Result<QJsonObject> handle = modelByName(*resource, text, context);
-        if (!handle)
-            return handle.errors();
-        return QJsonValue(*handle);
-    }
-    if (type == QLatin1String("number")) {
-        bool ok = false;
-        const double number = text.trimmed().toDouble(&ok);
-        if (!ok)
-            return Result<QJsonValue>(usageProblem(QStringLiteral("The input \"%1\" takes a number, not \"%2\".").arg(input.key(), text)));
-        return QJsonValue(number);
-    }
-    if (type == QLatin1String("bool")) {
-        const QString word = text.trimmed().toLower();
-        if (word != QLatin1String("true") && word != QLatin1String("false"))
-            return Result<QJsonValue>(usageProblem(QStringLiteral("The input \"%1\" takes true or false, not \"%2\".").arg(input.key(), text)));
-        return QJsonValue(word == QLatin1String("true"));
-    }
-    return QJsonValue(text);
+    return described.fromText(text, [&context](const PortType &type, const QString &word) { return modelByName(type, word, context); });
 }
 
 // `--input key=value` pairs, bound to the app's inputs: unknown keys, a key given twice, and inputs left out that a run cannot do without.
@@ -425,7 +303,7 @@ Result<QMap<QString, QJsonValue>> givenValues(const Command &command, const Load
     }
     Errors missing;
     for (const InputBinding &input : loaded.app.inputs)
-        if (!values.contains(input.key()) && isRequired(input, loaded.document, context.registry))
+        if (!values.contains(input.key()) && app::describeInput(input, loaded.document, &context.registry).required)
             missing << makeError(QStringLiteral("missing_input"),
                                  QStringLiteral("%1 needs the input \"%2\"%3.").arg(titleOf(loaded), input.key(),
                                                                                     input.label.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(input.label)),
@@ -538,7 +416,7 @@ Reply appInfo(const Command &command, Context &context) {
             facts << QStringLiteral("required");
         else if (row.value("optional").toBool())
             facts << QStringLiteral("optional");
-        if (row.contains("default") && !isBlank(row.value("default")))
+        if (row.contains("default") && !app::isBlank(row.value("default")))
             facts << QStringLiteral("default %1").arg(QString::fromUtf8(QJsonDocument(QJsonArray{row.value("default")}).toJson(QJsonDocument::Compact)).mid(1).chopped(1));
         if (row.contains("min") || row.contains("max"))
             facts << QStringLiteral("%1 to %2").arg(row.contains("min") ? QString::number(row.value("min").toDouble()) : QStringLiteral("..."),
@@ -563,20 +441,32 @@ Reply appInfo(const Command &command, Context &context) {
                      {"inputs", inputs},
                      {"outputs", outputsJson(*loaded)},
                      {"ready", ready}};
-    Errors hostProblems;
-    if (!ready && mayRunOnHost(plan, loaded->document, context, hostProblems)) {
-        // Not here, but the paired helper is configured: Run goes there and the host checks the files (#395).
-        const QString host = pairedHelperName(loadProviderInstances(providersPath()).value());
-        data.insert("runs_on", host);
-        lines << QStringLiteral("Runs on %1: its models are not on this machine.").arg(host);
+    PairedVerdict placement;
+    if (!ready)
+        placement = pairedVerdict(plan, loaded->document, context, livePairedProbe());
+    if (placement.runsOn()) {
+        // Not here, but the paired helpers take it: Run goes there and the host checks the files (#395).
+        const QString hosts = placement.hosts().join(QStringLiteral(", "));
+        QJsonObject nodes;
+        for (auto it = placement.hostOf.cbegin(); it != placement.hostOf.cend(); ++it)
+            nodes.insert(it.key(), it.value());
+        data.insert("runs_on", hosts);
+        data.insert("runs_on_nodes", nodes);
+        lines << QStringLiteral("Runs on %1: its models are not on this machine.").arg(hosts);
+    }
+    if (!placement.silent.isEmpty()) {
+        // The only host that could take it does not answer (#581): not named as the host. A run still starts (a cached re-run can work).
+        const QString hosts = placement.silent.join(QStringLiteral(", "));
+        data.insert("silent_host", hosts);
+        lines << QStringLiteral("%1 is not answering: its models are not on this machine.").arg(hosts);
     }
     if (!ready) {
         data.insert("needs", plan.toJson());
         lines << QStringLiteral("Not ready: %1").arg(notReady(*loaded, plan).message);
         // A paired helper is there, but it cannot take these nodes (#491): which node and why.
-        if (!hostProblems.isEmpty()) {
-            data.insert("host_problems", toJson(hostProblems));
-            for (const Error &problem : hostProblems)
+        if (!placement.blocked.isEmpty()) {
+            data.insert("host_problems", toJson(placement.blocked));
+            for (const Error &problem : placement.blocked)
                 lines << problem.message;
         }
     }
@@ -634,9 +524,10 @@ Reply appRun(const Command &command, Context &context) {
 
     // Ready before the block is checked: a missing pack leaves nodes the block names unknown.
     const ReadinessPlan plan = planFor(*loaded, loaded->document, context);
-    Errors hostProblems;
-    if (!isReady(plan) && !mayRunOnHost(plan, loaded->document, context, hostProblems))
-        return Reply::failure(refused(*loaded, plan, hostProblems));
+    const PairedProbe probe = keptPairedProbe(livePairedProbe(), std::chrono::minutes(1)); // one question to the hosts per command
+    if (!isReady(plan))
+        if (const PairedVerdict placement = pairedVerdict(plan, loaded->document, context, probe); !placement.allowsRun())
+            return Reply::failure(refused(*loaded, plan, placement));
     if (const Errors invalid = app::checkApp(loaded->app, loaded->document, context.registry); hasErrors(invalid))
         return Reply::failure(invalid);
 
@@ -645,8 +536,9 @@ Reply appRun(const Command &command, Context &context) {
         return Reply::failure(bound.errors());
     // A model picked with --input has to be here too.
     if (!values->isEmpty())
-        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen) && !mayRunOnHost(chosen, *bound, context, hostProblems))
-            return Reply::failure(refused(*loaded, chosen, hostProblems));
+        if (const ReadinessPlan chosen = planFor(*loaded, *bound, context); !isReady(chosen))
+            if (const PairedVerdict placement = pairedVerdict(chosen, *bound, context, probe); !placement.allowsRun())
+                return Reply::failure(refused(*loaded, chosen, placement));
     if (command.has("out")) {
         const QString dir = QDir(command.value("out")).absolutePath();
         // 13.6: judged before the folder is made, so a refused --out leaves nothing behind.

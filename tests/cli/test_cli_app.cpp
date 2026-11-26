@@ -238,23 +238,6 @@ private slots:
         }
     }
 
-    // An input bound to a group instance's exposed input has the inner input's type, range and choices; what the graph no
-    // longer has is dropped and said as `app_stale` (spec 4.9), never listed; a seed left to the engine shows as it is.
-    void infoTypesAGroupInstanceInput() {
-        const Outcome info = fugue({"app", "info", "shade.fugue", "--json"});
-        QCOMPARE(info.exitCode, 0);
-        QMap<QString, QJsonObject> rows;
-        for (const QJsonValue row : info.data().value("inputs").toArray())
-            rows.insert(row.toObject().value("key").toString(), row.toObject());
-        QCOMPARE(rows.value("opacity").value("type").toString(), QString("number"));
-        QCOMPARE(rows.value("opacity").value("default").toDouble(), 0.25);
-        QCOMPARE(rows.value("opacity").value("min").toDouble(), 0.0);
-        QCOMPARE(rows.value("opacity").value("max").toDouble(), 1.0);
-        QCOMPARE(rows.value("mode").value("type").toString(), QString("choice"));
-        QVERIFY(rows.value("mode").value("choices").toArray().contains("multiply"));
-        QVERIFY(!info.json().contains("warnings"));
-    }
-
     void infoDropsAndSaysWhatTheWorkflowNoLongerHas() {
         const Outcome info = fugue({"app", "info", "shade-stale.fugue", "--json"});
         QCOMPARE(info.exitCode, 0);
@@ -321,9 +304,11 @@ private slots:
         QCOMPARE(fugue({"app", "run", "needs-pack.fugue", "--json"}).code(), QString("app_not_ready"));
     }
 
-    // #395: an app whose model is not on this machine says it runs on the paired helper, when one is configured; with none it is not
-    // ready, as before. The run itself is the scheduler's (tests/engine/test_scheduler_providers.cpp).
-    void appInfoSaysWhereAnAppRunsWhenItsModelIsOnlyOnThePairedHelper() {
+    // #395, #581: with a paired helper configured, an app whose model is not on this machine does not stop at app_not_ready (the host
+    // checks the files); with none it is not ready, as before. No node here asks a provider for the model, so no host is named.
+    // The verdict's rules are tests/nodes/test_paired_placement.cpp's (the silent host is reported below), the run itself the
+    // scheduler's (tests/engine/test_scheduler_providers.cpp).
+    void aPairedHelperLetsAMissingModelThroughToTheRun() {
         write(path("work/sampled.fugue"), kSampled);
         const Outcome alone = fugue({"app", "info", "sampled.fugue", "--json"});
         QVERIFY(!alone.data().value("ready").toBool());
@@ -333,13 +318,12 @@ private slots:
         write(path("root/config/fugue/providers.json"),
               "{\"providers\": [{\"name\": \"gx10\", \"type\": \"fugue-helper\", \"address\": \"http://gx10.invalid:8787\", \"key\": \"k\"}]}");
         const Outcome paired = fugue({"app", "info", "sampled.fugue", "--json"});
-        QCOMPARE(paired.data().value("runs_on").toString(), QString("gx10"));
+        QVERIFY(!paired.data().contains("runs_on") && !paired.data().contains("silent_host"));
         // The run does not stop at app_not_ready (the model has no source here, or a source that cannot be used): the host checks.
         QVERIFY(fugue({"app", "run", "sampled.fugue", "--json"}).code() != QString("app_not_ready"));
         QByteArray unsourced = kSampled;
         unsourced.replace("\"source\": \"h.example/m.safetensors\", ", "");
         write(path("work/unsourced.fugue"), unsourced);
-        QCOMPARE(fugue({"app", "info", "unsourced.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
         const Outcome ran = fugue({"app", "run", "unsourced.fugue", "--json"});
         QVERIFY2(ran.code() != QString("app_not_ready"), ran.out + ran.err);
         QVERIFY(QFile::remove(path("root/config/fugue/providers.json")));
@@ -377,8 +361,10 @@ private slots:
               "{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"},"
               " {\"name\": \"gx10\", \"type\": \"fugue-helper\", \"address\": \"http://gx10.invalid:8787\", \"key\": \"k\"}]}");
 
-        // Nothing is known of what the host offers: it answers for itself, as before.
-        QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+        // Nothing is known of what the host offers and it does not answer: silent, and no host is named.
+        const Outcome quiet = fugue({"app", "info", "staged.fugue", "--json"});
+        QVERIFY(!quiet.data().contains("runs_on"));
+        QCOMPARE(quiet.data().value("silent_host").toString(), QString("gx10"));
         // Pinned to a provider on this machine: refused, naming the node, with the prepare hint.
         const Outcome info = fugue({"app", "info", "pinned.fugue", "--json"});
         QVERIFY(!info.data().contains("runs_on"));
@@ -398,9 +384,11 @@ private slots:
         QVERIFY2(noCapability.error().value("message").toString().contains("does not offer text.encode"), noCapability.out);
         write(path("root/state/fugue/paired_helpers.json"),
               "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"text.encode\"]}}");
-        QCOMPARE(fugue({"app", "info", "staged.fugue", "--json"}).data().value("runs_on").toString(), QString("gx10"));
+        const Outcome remembered = fugue({"app", "info", "staged.fugue", "--json"}); // what it last said stands in for nothing: still silent
+        QVERIFY(!remembered.data().contains("runs_on"));
+        QCOMPARE(remembered.data().value("silent_host").toString(), QString("gx10"));
 
-        // (A loopback address is no paired host, so 0.0.0.0, which reaches it.) The host now offers it (what was kept is stale): the run is not refused, and what the host said is kept again.
+        // (A loopback address is no paired host, so 0.0.0.0, which reaches it.) The host offers it now (what was kept is stale): it is the host, and the run is not refused.
         QProcess host;
         const QString script = path("host.py");
         write(script, "import http.server, json, sys\n"

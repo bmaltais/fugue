@@ -24,6 +24,7 @@
   "%1 is below %2": "%1 is below %2",
   "%1 is linked": "%1 is linked",
   "%1 is not a canvas input.": "%1 is not a canvas input.",
+  "%1 is not answering": "%1 is not answering",
   "%1 MB": "%1 MB",
   "%1 cannot be edited here.": "%1 cannot be edited here.",
   "%1 cannot be read (%2); using the default keys": "%1 cannot be read (%2); using the default keys",

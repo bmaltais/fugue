@@ -7,7 +7,7 @@
 //   - OwnHost: a paired host (an `omarchy` instance with an address, 8.7, the person's own omarchy hosts) or any other instance
 //     (a `fugue-helper` included: it has no pairing step) whose address is on the person's own network: a private (RFC 1918,
 //     unique local), link-local or CGNAT (Tailscale) address, or a `.local`, `.internal` or `.ts.net` name.
-//     The address is the one the provider really uses: a module's default when the instance has none. It is the same test http_provider.h isLocalHost() applies to what
+//     The address is the one the provider really uses: a module's default when the instance has none. It is the same test remote_request.h isLocalHost() applies to what
 //     a service may make Fugue fetch, so there is one idea of "local". The person typed that address in, so nothing is asked.
 //   - OffMachine: an instance of any other type whose address is none of those: a public name or address. An `omarchy`
 //     instance is never off-machine (it is a paired host by definition). A stdio provider module is a program that runs here:

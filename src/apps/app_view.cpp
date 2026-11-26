@@ -13,10 +13,10 @@
 #include <QRandomGenerator>
 
 #include <algorithm>
-#include <cmath>
 
 #include "apps/app_models.h"
 #include "apps/app_takes.h"
+#include "engine/app_input.h"
 #include "engine/error.h"
 #include "engine/file_roots.h"
 #include "engine/input_binding.h"
@@ -39,31 +39,6 @@ QString humanize(const QString &word) {
 }
 
 constexpr double maxSeed = 9007199254740991.0; // 2^53 - 1 (spec 2.1): what a number can hold exactly
-
-// What the workflow has in the input's first target: a literal, or a model's handle; Undefined for none or for a random seed.
-QJsonValue currentOf(const Document &document, const InputBinding &input) {
-    if (input.targets.isEmpty())
-        return QJsonValue::Undefined;
-    const PortRef &target = input.targets.first();
-    const auto node = document.graph.nodes.constFind(target.node);
-    if (node == document.graph.nodes.constEnd())
-        return QJsonValue::Undefined;
-    const InputValue value = node->inputs.value(target.port);
-    if (value.isEmpty())
-        return QJsonValue::Undefined;
-    if (value.kind() == InputValue::Kind::Resource)
-        return value.toJson();
-    return value.kind() == InputValue::Kind::Literal ? value.literal() : QJsonValue(QJsonValue::Undefined);
-}
-
-// The first target is a seed left to the engine ({"auto": "random"}).
-bool isRandom(const Document &document, const InputBinding &input) {
-    if (input.targets.isEmpty())
-        return false;
-    const PortRef &target = input.targets.first();
-    const auto node = document.graph.nodes.constFind(target.node);
-    return node != document.graph.nodes.constEnd() && node->inputs.value(target.port).kind() == InputValue::Kind::Auto;
-}
 
 // The resource type and capabilities of the node that takes a model input (a group's exposed input: its inner node's).
 struct ModelTarget {
@@ -108,27 +83,6 @@ double newSeed(const InputBinding &input) {
     return high <= low ? low : low + double(QRandomGenerator::global()->bounded(quint64(high - low) + 1));
 }
 
-// A seed's value is a number; a missing one, or the engine's own ({"auto": "random"}, which a block's default may be), is none.
-bool hasSeedNumber(const QVariant &value) {
-    bool ok = false;
-    return value.isValid() && value.typeId() != QMetaType::QVariantMap && !value.toString().isEmpty()
-           && (value.toDouble(&ok), ok);
-}
-
-QString kindOf(const InputBinding &input, const QJsonValue &current, const InputSpec *spec) {
-    if (input.role == QLatin1String("image") || input.role == QLatin1String("mask") || input.role == QLatin1String("model")
-        || input.role == QLatin1String("seed"))
-        return input.role;
-    if (input.choices && !input.choices->isEmpty())
-        return QStringLiteral("choice");
-    if (current.isBool() || (spec && spec->type.type.id == QLatin1String("bool") && !spec->type.list))
-        return QStringLiteral("toggle");
-    if (input.role == QLatin1String("strength") || input.min || input.max || current.isDouble()
-        || (spec && spec->type.type.id == QLatin1String("number") && !spec->type.list))
-        return QStringLiteral("number");
-    return QStringLiteral("text");
-}
-
 } // namespace
 
 AppView::AppView(Start start, Cancel cancel, const Registry *registry, QObject *parent)
@@ -154,46 +108,28 @@ void AppView::setDownloads(ModelDownloads *downloads) {
         m_models->setDownloads(downloads);
 }
 
-void AppView::askPlacement(bool modelsAreElsewhere) {
-    if (!modelsAreElsewhere || !m_app || !m_placement) {
-        m_placementTab.clear();
-        setRunsOn({});
+void AppView::setPairedHosts(const QString &runsOn, const QString &silentHost) {
+    if (runsOn == m_runsOn && silentHost == m_silentHost)
         return;
-    }
-    if (m_placementTab == m_tab)
-        return; // asked for this tab already
-    m_placementTab = m_tab;
-    const QString tab = m_tab;
-    const QPointer<AppView> self(this);
-    m_placement([self, tab](const QString &host) {
-        if (self && self->m_tab == tab && self->m_placementTab == tab)
-            self->setRunsOn(host);
-    });
-}
-
-void AppView::setRunsOn(const QString &host) {
-    if (host == m_runsOn)
-        return;
-    const QString before = runsOn();
-    m_runsOn = host;
-    if (runsOn() != before)
+    const QString before = this->runsOn(), silentBefore = this->silentHost();
+    m_runsOn = runsOn;
+    m_silentHost = silentHost;
+    if (this->runsOn() != before || this->silentHost() != silentBefore)
         emit runsOnChanged();
 }
 
 void AppView::setOffMachine(const QString &services) {
     if (services == m_offMachine)
         return;
-    const QString before = runsOn();
+    const QString before = runsOn(), silentBefore = silentHost();
     m_offMachine = services;
-    if (runsOn() != before)
+    if (runsOn() != before || silentHost() != silentBefore)
         emit runsOnChanged();
 }
 
 void AppView::show(const QString &tab, const Document &document, const QString &file, const QString &templateFolder) {
-    if (tab != m_tab) { // another tab: where it runs is asked again
-        m_placementTab.clear();
-        setRunsOn({});
-    }
+    if (tab != m_tab) // another tab: where it runs is decided again
+        setPairedHosts({}, {});
     m_tab = tab;
     m_file = file;
     m_takesKey = !file.isEmpty() ? file : templateFolder.isEmpty() ? QString() : QDir(templateFolder).filePath("workflow.fugue");
@@ -279,29 +215,45 @@ void AppView::buildFields() {
         keys << input.key();
     for (auto it = state.values.begin(); it != state.values.end();)
         it = keys.contains(it.key()) ? std::next(it) : state.values.erase(it);
-    for (const InputBinding &input : m_app->inputs)
-        m_fields << fieldFor(input);
+    for (const InputBinding &input : m_app->inputs) {
+        const app::AppInput described = app::describeInput(input, m_document, m_registry);
+        startValue(described, state);
+        m_fields << fieldFor(described, state);
+    }
 }
 
-QVariantMap AppView::fieldFor(const InputBinding &given) const {
-    // What the block leaves unsaid comes from the target's spec, through a group instance to its inner input (spec 5.4).
-    const InputSpec *spec = m_registry && !given.targets.isEmpty() ? targetInputSpec(m_document, *m_registry, given.targets.first()) : nullptr;
-    const InputBinding input = completedBy(given, spec);
-    // An optional picture or mask starts empty, whatever file its node holds: left empty it takes its branch out of the run (#484).
-    const bool optionalPicture = input.optional && (input.role == QLatin1String("image") || input.role == QLatin1String("mask"));
-    const QJsonValue current = optionalPicture ? QJsonValue(QJsonValue::Undefined) : currentOf(m_document, input);
-    const QString kind = kindOf(input, current, spec);
-    TabState &state = const_cast<AppView *>(this)->m_state[m_tab];
+// What the form keeps for an input it shows, so that what is shown is what every run binds: a choice with none in force takes
+// the first, a seed that is not Random takes a number (a new one in its range).
+void AppView::startValue(const app::AppInput &described, TabState &state) {
+    const QString key = described.binding.key();
+    if (described.kind == QLatin1String("choice")) {
+        const QJsonValue held = state.values.contains(key) ? state.values.value(key) : described.own;
+        if (!held.isString() || !described.binding.choices->contains(held.toString()))
+            state.values.insert(key, described.initial);
+    } else if (described.kind == QLatin1String("seed")) {
+        const QJsonValue held = state.values.contains(key) ? state.values.value(key) : described.initial;
+        if (!app::isNumber(held) && seedModeOf(described, state) != QLatin1String("random"))
+            state.values.insert(key, newSeed(described.binding));
+    }
+}
+
+QString AppView::seedModeOf(const app::AppInput &described, const TabState &state) {
+    return state.seedModes.value(described.binding.key(), described.randomSeed ? QStringLiteral("random") : QStringLiteral("fixed"));
+}
+
+QVariantMap AppView::fieldFor(const app::AppInput &described, const TabState &state) const {
+    const InputBinding &input = described.binding;
+    const QString &kind = described.kind;
     QVariantMap field{{"key", input.key()},
                       {"label", input.label.isEmpty() ? humanize(input.key()) : input.label},
                       {"kind", kind},
                       {"section", input.section},
-                      {"advanced", input.section == QLatin1String("Advanced")}};
+                      {"advanced", described.advanced}};
     if (input.min)
         field.insert("min", *input.min);
     if (input.max)
         field.insert("max", *input.max);
-    if (optionalPicture) {
+    if (described.optionalPicture) {
         field.insert("optional", true);
         field.insert("hint", tr("Optional"));
     }
@@ -309,17 +261,15 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
         // Every free text wraps and grows (the form's text area); a prompt starts three lines tall and takes newlines, any other
         // text starts one line tall and takes newlines only when its target's widget is `multiline` (#567).
         const bool prompt = input.role == QLatin1String("prompt") || input.role == QLatin1String("negative_prompt");
-        field.insert("multiline", prompt || (spec && spec->widget() == QLatin1String("multiline")));
+        field.insert("multiline", prompt || (described.spec && described.spec->widget() == QLatin1String("multiline")));
         field.insert("minLines", prompt ? 3 : 1);
     }
     if (kind == QLatin1String("seed"))
-        field.insert("mode", state.seedModes.value(input.key(), isRandom(m_document, input) ? QStringLiteral("random")
-                                                                                              : QStringLiteral("fixed")));
+        field.insert("mode", seedModeOf(described, state));
     if (kind == QLatin1String("image")) {
         // The template's own sample first: the block's default, else what the workflow holds, when it is a file there.
         QVariantList samples = samplesOf();
-        const QJsonValue own = !input.defaultValue.isUndefined() ? input.defaultValue : current;
-        const QString sample = own.isString() ? QFileInfo(resolvedPath(own.toString())).canonicalFilePath() : QString();
+        const QString sample = described.own.isString() ? QFileInfo(resolvedPath(described.own.toString())).canonicalFilePath() : QString();
         if (!sample.isEmpty()) {
             // The template's own sample leads the list, once.
             for (int i = 0; i < samples.size(); ++i)
@@ -334,42 +284,17 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
         field.insert("sample", sample);
     }
     if (kind == QLatin1String("model"))
-        field.insert("resource", modelTargetOf(m_document, input, m_registry).type);
-    QJsonValue value = state.values.contains(input.key()) ? state.values.value(input.key())
-                       : !input.defaultValue.isUndefined() ? input.defaultValue
-                                                           : current;
-    // The workflow holds no value (a group instance left at its inner input's default): show the spec's default.
-    if (value.isUndefined() && spec && !spec->defaultValue.isUndefined()
-        && (kind == QLatin1String("number") || kind == QLatin1String("text") || kind == QLatin1String("toggle")))
-        value = spec->defaultValue;
+        field.insert("resource", described.portType);
+    QJsonValue value = state.values.contains(input.key()) ? state.values.value(input.key()) : described.initial;
     if (kind == QLatin1String("choice")) {
         QVariantList choices;
-        if (input.choices) {
-            for (const QString &word : *input.choices)
-                choices << QVariantMap{{"value", word}, {"text", word}};
-            // A choice always has one in force: with no default and no value, the first, kept as the form's value so the
-            // run binds what the form shows.
-            // The target's own default is the one in force when the workflow holds none.
-            const QJsonValue first = spec && input.choices->contains(spec->defaultValue.toString()) ? spec->defaultValue
-                                                                                                    : QJsonValue(input.choices->value(0));
-            if (!choices.isEmpty() && (!value.isString() || !input.choices->contains(value.toString()))) {
-                value = first;
-                state.values.insert(input.key(), value);
-            }
-        }
+        for (const QString &word : *input.choices)
+            choices << QVariantMap{{"value", word}, {"text", word}};
         field.insert("choices", choices);
     } else if (kind == QLatin1String("toggle")) {
         value = QJsonValue(value.toBool());
-    }
-    if (kind == QLatin1String("seed")) {
-        // A seed shows a number, or none while it is Random. Fixed and Increment always have one (the workflow's, else a new
-        // one kept in the form), so what is shown is what every run uses.
-        if (!hasSeedNumber(value.toVariant()))
-            value = QJsonValue::Undefined;
-        if (value.isUndefined() && field.value("mode").toString() != QLatin1String("random")) {
-            value = newSeed(input);
-            state.values.insert(input.key(), value);
-        }
+    } else if (kind == QLatin1String("seed") && !app::isNumber(value)) {
+        value = QJsonValue::Undefined; // a seed shows a number, or none while it is Random
     }
     field.insert("value", value.isUndefined() ? QVariant() : value.toVariant());
     return field;
@@ -387,18 +312,13 @@ void AppView::setValue(const QString &key, const QVariant &value) {
         return;
     const QMap<QString, QJsonValue> before = state.values;
     const QMap<QString, QString> modesBefore = state.seedModes;
-    if (kind == QLatin1String("number") || kind == QLatin1String("seed")) {
-        bool ok = false;
-        const double number = value.toDouble(&ok);
-        if (!ok || std::isnan(number) || value.toString().trimmed().isEmpty())
-            state.values.remove(key);
-        else {
-            state.values.insert(key, number);
-            if (kind == QLatin1String("seed") && seedMode(key) == QLatin1String("random"))
-                state.seedModes.insert(key, QStringLiteral("fixed")); // a number typed is the number to use
-        }
+    const QJsonValue typed = app::describeInput(*inputOf(key), m_document, m_registry).fromTyped(value);
+    if (typed.isUndefined() && (kind == QLatin1String("number") || kind == QLatin1String("seed"))) {
+        state.values.remove(key); // no number: the input is left alone
     } else {
-        state.values.insert(key, QJsonValue::fromVariant(value));
+        state.values.insert(key, typed);
+        if (kind == QLatin1String("seed") && seedMode(key) == QLatin1String("random"))
+            state.seedModes.insert(key, QStringLiteral("fixed")); // a number typed is the number to use
     }
     if (state.values != before || state.seedModes != modesBefore)
         inputEdited();
@@ -437,7 +357,7 @@ QString AppView::seedMode(const QString &key) const {
     if (kindOfField(key) != QLatin1String("seed"))
         return {};
     const QString given = m_state.value(m_tab).seedModes.value(key);
-    return !given.isEmpty() ? given : isRandom(m_document, *inputOf(key)) ? QStringLiteral("random") : QStringLiteral("fixed");
+    return !given.isEmpty() ? given : seedModeOf(app::describeInput(*inputOf(key), m_document, m_registry), {});
 }
 
 void AppView::setSeedMode(const QString &key, const QString &mode) {
@@ -446,7 +366,7 @@ void AppView::setSeedMode(const QString &key, const QString &mode) {
     TabState &state = m_state[m_tab];
     state.seedModes.insert(key, mode);
     // A number that stays has to be one: the field shows it, the run binds it.
-    if (mode != QLatin1String("random") && !hasSeedNumber(valueOf(key)))
+    if (mode != QLatin1String("random") && !app::isNumber(QJsonValue::fromVariant(valueOf(key))))
         state.values.insert(key, newSeed(*inputOf(key)));
     emit valueChanged(key);
     inputEdited();
@@ -682,10 +602,7 @@ QRectF AppView::inputPlacement(int resultWidth, int resultHeight) const {
         const InputBinding *input = inputOf(key);
         if (!input)
             return {};
-        if (!input->defaultValue.isUndefined())
-            return input->defaultValue;
-        const InputSpec *spec = m_registry && !input->targets.isEmpty() ? targetInputSpec(m_document, *m_registry, input->targets.first()) : nullptr;
-        return currentOf(m_document, completedBy(*input, spec));
+        return app::describeInput(*input, m_document, m_registry).defaultValue;
     };
     const auto side = [&](const QString &key) { return key.isEmpty() ? 0.0 : qMax(0.0, valueIn(key).toDouble()); };
     const QUrl url = fileUrl(valueIn(place.input).toString());

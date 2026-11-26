@@ -3,7 +3,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -17,6 +16,7 @@
 
 #include "engine/http_provider.h"
 #include "engine/paths.h"
+#include "engine/remote_request.h"
 #include "engine/server_api.h"
 
 namespace fugue {
@@ -33,15 +33,14 @@ constexpr qint64 kJsonCap = 64LL << 20;
 constexpr qint64 kPictureCap = 512LL << 20;
 // Replicate's HTTP reference: data URLs are for files of 256 KB or less; a larger one goes through the files API.
 constexpr qint64 kDataUriMax = 256LL << 10;
-constexpr int kMaxHops = 3;
-constexpr int kMaxTransientPolls = 5;
-const char *const kCapped = "fugue-capped";
 
 const QString kImageResource = QStringLiteral("fugue/image-model");
 const QString kImageGenerate = QStringLiteral("image.generate");
 const QString kImageEdit = QStringLiteral("image.edit");
 
-int codeOf(QNetworkReply *reply) { return reply->property(kCapped).toBool() ? 0 : httpStatus(reply); }
+using remote::originOf;
+using remote::statusOf;
+using remote::wholeUrl;
 
 QString oneLine(QString text) {
     text = text.simplified();
@@ -80,25 +79,11 @@ QString saidBy(const QJsonObject &answer) {
     return serverMessage(answer);
 }
 
-bool wholeUrl(const QUrl &url) {
-    return (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) && !url.host().isEmpty();
-}
-
-QString originOf(const QUrl &url) {
-    return QStringLiteral("%1://%2:%3").arg(url.scheme(), url.host().toLower()).arg(url.port(url.scheme() == QLatin1String("https") ? 443 : 80));
-}
-
 QString trimmedAddress(QString address) {
     address = address.trimmed();
     while (address.endsWith(QLatin1Char('/')))
         address.chop(1);
     return address;
-}
-
-bool loopbackHost(const QString &host) {
-    QHostAddress address;
-    return host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
-           (address.setAddress(host) && address.isLoopback());
 }
 
 // The aspect ratio of `values` ("16:9") nearest to width/height, on a log scale.
@@ -257,25 +242,21 @@ bool ReplicateProvider::isApiUrl(const QUrl &url) const { return wholeUrl(url) &
 
 QNetworkReply *ReplicateProvider::send(const QUrl &url, const QByteArray &method, const QByteArray &body, const QByteArray &contentType, bool withKey,
                                        qint64 cap, const QList<QPair<QByteArray, QByteArray>> &headers, bool keyAnywhere) {
-    QNetworkRequest request(url);
-    request.setTransferTimeout(timeoutMs());
-    // No redirect is followed by Qt: a picture's is checked by download(), hop by hop, and an API call's is an error.
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     // The key goes to Replicate's API origin and nowhere else: a URL the service named is sent it only when it is that.
-    if (withKey && !m_instance.key.isEmpty() && (isApiUrl(url) || keyAnywhere))
-        request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
-    for (const auto &header : headers)
-        request.setRawHeader(header.first, header.second);
-    if (method != "GET")
-        request.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
-    QNetworkReply *reply = m_network.sendCustomRequest(request, method, body);
-    connect(reply, &QNetworkReply::downloadProgress, reply, [reply, cap](qint64 got, qint64) {
-        if (got > cap && !reply->property(kCapped).toBool()) {
-            reply->setProperty(kCapped, true);
-            reply->abort();
-        }
-    });
-    return reply;
+    remote::Session session;
+    session.scheme = "Bearer";
+    session.key = m_instance.key;
+    session.origins = {apiUrl({})};
+    session.transferTimeoutMs = timeoutMs();
+    remote::Call call;
+    call.method = method;
+    call.body = body;
+    call.contentType = contentType;
+    call.cap = cap;
+    call.withKey = withKey;
+    call.keyAnywhere = keyAnywhere;
+    call.headers = headers;
+    return remote::send(m_network, session, url, call);
 }
 
 QString ReplicateProvider::clean(const QString &text) const {
@@ -287,9 +268,9 @@ QString ReplicateProvider::clean(const QString &text) const {
 
 Error ReplicateProvider::failure(QNetworkReply *reply, const QJsonObject &answer, bool submitting) const {
     const QString who = m_instance.name;
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const QString said = clean(saidBy(answer));
-    if (reply->property(kCapped).toBool())
+    if (remote::wasCapped(reply))
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent more data than Fugue reads in one answer.").arg(who),
                          QStringLiteral("Check the address of %1: it should be Replicate's API, https://api.replicate.com.").arg(who));
     if (code == 0) {
@@ -389,7 +370,7 @@ Result<Description> ReplicateProvider::description() const {
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 has no usable address.").arg(m_instance.name),
                                              QStringLiteral("Remove the address of %1 in %2: Replicate needs none.").arg(m_instance.name, where())));
     // The key goes with every call: only to https, or to a loopback fake.
-    if (!m_instance.key.isEmpty() && api.scheme() != QLatin1String("https") && !loopbackHost(api.host()))
+    if (!m_instance.key.isEmpty() && !remote::keyTransportOk(api))
         return Result<Description>(makeError(QStringLiteral("provider_unreachable"),
                                              QStringLiteral("%1 would send its key over plain http to %2.").arg(m_instance.name, api.host()),
                                              QStringLiteral("Use https:// for the address of %1 in %2.").arg(m_instance.name, where())));
@@ -554,7 +535,7 @@ void ReplicateProvider::submit(const JobRequest &request, Reply<QString> reply) 
     job->status.stage = needsUpload ? QStringLiteral("uploading") : QStringLiteral("submitting");
     m_jobs.insert(id, job);
     // One deadline for the whole job, every phase: a transfer timeout restarts with each byte, so a trickle never trips it.
-    QTimer::singleShot(timeoutMs() * 6, this, [this, id] { giveUp(id); });
+    QTimer::singleShot(remote::jobDeadlineMs(timeoutMs()), this, [this, id] { giveUp(id); });
     reply(Result<QString>(id));
     uploadNext(id);
 }
@@ -575,7 +556,7 @@ void ReplicateProvider::uploadNext(const QString &id) {
                       upload.type.toUtf8() + "\r\n\r\n" + upload.bytes + "\r\n--" + boundary + "--\r\n";
     call(id, send(apiUrl(QStringLiteral("/v1/files")), "POST", body, "multipart/form-data; boundary=" + boundary, true, kJsonCap),
          [this, id, job](QNetworkReply *posted) {
-             const int code = codeOf(posted);
+             const int code = statusOf(posted);
              const QJsonObject answer = answerOf(posted);
              if (code != 200 && code != 201)
                  return fail(id, failure(posted, answer));
@@ -644,12 +625,12 @@ void ReplicateProvider::sendJob(const QString &id) {
     change(id, status);
     job->sent = bodyOf(*job);
     // The prediction is cancelled by Replicate at the job's own deadline, should Fugue go away: no bill for a job nobody waits for.
-    const int deadlineS = std::max(5, timeoutMs() * 6 / 1000);
+    const int deadlineS = std::max(5, remote::jobDeadlineMs(timeoutMs()) / 1000);
     const QList<QPair<QByteArray, QByteArray>> headers{Header{"Cancel-After", QByteArray::number(deadlineS) + "s"}};
     call(id, send(apiUrl(QStringLiteral("/v1/models/") + job->handle.value("name").toString() + QStringLiteral("/predictions")), "POST",
                   QJsonDocument(QJsonObject{{"input", job->sent}}).toJson(QJsonDocument::Compact), "application/json", true, kJsonCap, headers),
          [this, id, job](QNetworkReply *posted) {
-             const int code = codeOf(posted);
+             const int code = statusOf(posted);
              const QJsonObject answer = answerOf(posted);
              if (code != 200 && code != 201 && code != 202) {
                  if (!job->status.isTerminal())
@@ -698,7 +679,7 @@ void ReplicateProvider::giveUp(const QString &id) {
     const auto job = m_jobs.value(id);
     if (!job || job->status.isTerminal())
         return;
-    fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() * 6 / 1000),
+    fail(id, makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(remote::jobDeadlineMs(timeoutMs()) / 1000),
                        QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, where())));
     if (job->reply && job->phase != Phase::Submitting)
         job->reply->abort();
@@ -710,14 +691,12 @@ void ReplicateProvider::pollNow(const QString &id) {
     if (!job || job->status.isTerminal())
         return;
     call(id, send(QUrl(job->getUrl), "GET"), [this, id, job](QNetworkReply *reply) {
-        const int code = codeOf(reply);
+        const int code = statusOf(reply);
         // No answer, a rate limit or a gateway hiccup: try again a few times, waiting longer each time.
-        if (code == 0 || code == 429 || code == 500 || code == 502 || code == 503 || code == 504) {
-            if (++job->failures >= kMaxTransientPolls)
+        if (remote::transientStatus(code)) {
+            if (remote::pollsExhausted(job->failures))
                 return fail(id, failure(reply, answerOf(reply)));
-            bool seconds = false;
-            const int retryAfter = QString::fromLatin1(reply->rawHeader("Retry-After")).trimmed().toInt(&seconds);
-            return pollLater(id, seconds ? std::clamp(retryAfter, 0, 30) * 1000 : 0);
+            return pollLater(id, remote::retryAfterMs(reply));
         }
         job->failures = 0;
         if (code != 200)
@@ -768,15 +747,15 @@ void ReplicateProvider::download(const QString &id, const QUrl &url, bool withKe
     status.stage = QStringLiteral("downloading");
     change(id, status);
     call(id, send(url, "GET", {}, {}, withKey, kPictureCap, {}, withKey), [this, id, job, url, withKey](QNetworkReply *reply) {
-        const int code = codeOf(reply);
-        if (reply->property(kCapped).toBool())
+        const int code = statusOf(reply);
+        if (remote::wasCapped(reply))
             return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1's picture is larger than Fugue fetches.").arg(m_instance.name), QStringLiteral("Run the node again with a smaller size.")));
         // Replicate's own clients send the token to its delivery host: asked for once, after a refusal, under strict conditions.
         if ((code == 401 || code == 403) && !withKey && replicateMayKeyDelivery(m_instance, url, job->hops))
             return download(id, url, true);
-        if (code >= 300 && code < 400 && code != 304) {
-            const QUrl next = reply->url().resolved(QUrl(QString::fromLatin1(reply->rawHeader("Location"))));
-            if (++job->hops > kMaxHops)
+        if (remote::isRedirect(code)) {
+            const QUrl next = remote::redirectTarget(reply);
+            if (!remote::followHop(job->hops))
                 return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent the picture link on too many times.").arg(m_instance.name),
                                           QStringLiteral("Run the node again.")));
             return download(id, next);

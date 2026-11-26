@@ -43,5 +43,14 @@ fugue app export restyle restyle.fugueapp
 fugue --app restyle                  # its own window
 ```
 
+When an app's models are not on this machine and a paired helper is set up, `app info` says "Runs on gx10" if it answers, or "gx10 is
+not answering" if not (the window says the same above Run); a node no helper can take is named with why, before anything runs.
+
+`app info` and the form describe an input the same way (`src/engine/app_input.h`): the kind (picture, mask, model, seed, choice, toggle,
+number or text; `--json` says `image`, `mask`, `model`, `number` for a seed, `choice`, `boolean`, `number`, and the port's type or `any`
+for text), the default (the block's, else what the workflow holds, else the target's own), whether a run needs it, its range and its
+choices. `--input` takes a picture or mask as a file, a model as a file name or a handle as JSON, a number, `true` or `false`, a
+choice word or text; `@<file>` reads text from a file, and a seed also takes `auto` (or `random`), the engine's own.
+
 `app run` prints the files the app's output made, one per line (`--json` for the data). An id is a template's name or the path to a
 workflow file. See [spec 13](spec.md#13-cli-and-agent-interface) for every option.

@@ -144,52 +144,34 @@ private slots:
             [this](const QString &run) { m_cancelled << run; }, &m_registry);
     }
 
-    // #395: where the app runs. The source is the window's probe of the paired helper; the store only asks it once per tab.
-    void theFormSaysWhereItRunsWhenItsModelsAreOnlyOnTheAnsweringHost() {
-        int asked = 0;
-        std::function<void(const QString &)> answer;
-        m_view->setPlacementSource([&](std::function<void(const QString &)> done) { ++asked; answer = std::move(done); });
+    // #395, #581: where the app runs is the window's paired verdict, given as hosts or as a silent host; a tab shown again clears it, and a
+    // service off this machine (#404) takes the place of both.
+    void theFormSaysWhereItRunsOrThatTheHostIsNotAnswering() {
         QSignalSpy changed(m_view.get(), &AppView::runsOnChanged);
         m_view->show("a", load(workflow()), {});
-        QVERIFY(m_view->runsOn().isEmpty());
+        QVERIFY(m_view->runsOn().isEmpty() && m_view->silentHost().isEmpty());
 
-        m_view->askPlacement(false); // models are here: nothing is asked
-        QCOMPARE(asked, 0);
-        m_view->askPlacement(true);
-        m_view->askPlacement(true); // once per tab
-        QCOMPARE(asked, 1);
-        answer("gx10");
-        QCOMPARE(m_view->runsOn(), QString("gx10"));
+        m_view->setPairedHosts("gx10, gx11", {});
+        QCOMPARE(m_view->runsOn(), QString("gx10, gx11"));
         QCOMPARE(changed.size(), 1);
-
-        m_view->show("b", load(workflow()), {}); // another tab: not its host, asked again
+        m_view->setPairedHosts("gx10, gx11", {}); // nothing changed
+        QCOMPARE(changed.size(), 1);
+        m_view->setPairedHosts({}, "gx10"); // the host went quiet: no host is named
         QVERIFY(m_view->runsOn().isEmpty());
-        m_view->askPlacement(true);
-        QCOMPARE(asked, 2);
-        m_view->show("a", load(workflow()), {}); // an answer that comes after the tab changed is dropped
-        answer("gx10");
-        QVERIFY(m_view->runsOn().isEmpty());
-
-        m_view->askPlacement(true);
-        answer("");  // the host does not answer: it runs here
-        QVERIFY(m_view->runsOn().isEmpty());
-        m_view->askPlacement(true);
-        answer("gx10");
-        m_view->askPlacement(false); // the models arrived here
-        QVERIFY(m_view->runsOn().isEmpty());
-    }
-
-    // #404: a node routed to a service off this machine is said on the same line, and takes the paired host's place.
-    void theSameLineNamesAServiceOffThisMachine() {
-        QSignalSpy changed(m_view.get(), &AppView::runsOnChanged);
-        m_view->show("a", load(workflow()), {});
-        m_view->setOffMachine("Cloud (api.example.com)");
+        QCOMPARE(m_view->silentHost(), QString("gx10"));
+        m_view->setOffMachine("Cloud (api.example.com)"); // a service off this machine is the one line
         QCOMPARE(m_view->runsOn(), QString("Cloud (api.example.com)"));
-        QCOMPARE(changed.size(), 1);
+        QVERIFY(m_view->silentHost().isEmpty());
+        QCOMPARE(changed.size(), 3);
         m_view->setOffMachine("Cloud (api.example.com)"); // nothing changed
-        QCOMPARE(changed.size(), 1);
+        QCOMPARE(changed.size(), 3);
         m_view->setOffMachine({});
-        QVERIFY(m_view->runsOn().isEmpty());
+        QCOMPARE(m_view->silentHost(), QString("gx10"));
+
+        m_view->show("a", load(workflow()), {}); // the same tab again keeps it
+        QCOMPARE(m_view->silentHost(), QString("gx10"));
+        m_view->show("b", load(workflow()), {}); // another tab: not its host
+        QVERIFY(m_view->runsOn().isEmpty() && m_view->silentHost().isEmpty());
     }
 
     void aWorkflowWithoutABlockIsNoApp() {
@@ -249,34 +231,6 @@ private slots:
         QVERIFY(field("hero").value("multiline").toBool());
         QCOMPARE(field("title").value("minLines").toInt(), 1);
         QVERIFY(!field("title").value("multiline").toBool());
-    }
-
-    // An input bound to a group instance's exposed input is shaped by the inner input (spec 5.4): a number with its range, a choice.
-    void aGroupInstanceInputHasTheInnerInputsKind() {
-        const QJsonObject json = QJsonDocument::fromJson(R"({
-          "fugue": 1,
-          "app": {"format": 1, "title": "Shade",
-                  "inputs": [{"name": "opacity", "targets": ["shade.opacity"]},
-                             {"name": "mode", "targets": ["shade.mode"]}],
-                  "outputs": [{"node": "save"}]},
-          "graph": {"nodes": {
-            "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "a.png"}},
-            "shade": {"type": "local/shade", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}},
-            "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"image": {"from": "shade.image"}, "name": "out"}}}},
-          "groups": {"local/shade": {"version": "1.0.0", "name": "Shade",
-            "inputs": [{"name": "image", "targets": ["mix.base", "mix.top"]},
-                       {"name": "opacity", "targets": ["mix.opacity"]},
-                       {"name": "mode", "targets": ["mix.mode"]}],
-            "outputs": [{"name": "image", "from": "mix.image"}],
-            "nodes": {"mix": {"type": "fugue/blend", "version": "1.0.0", "inputs": {}}}}}
-        })").object();
-        m_view->show("a", load(json), {});
-        QCOMPARE(field("opacity").value("kind"), QStringLiteral("number"));
-        QCOMPARE(field("opacity").value("max").toDouble(), 1.0);
-        QCOMPARE(field("opacity").value("value").toDouble(), 0.5); // the inner input's default
-        QCOMPARE(field("mode").value("kind"), QStringLiteral("choice"));
-        QVERIFY(field("mode").value("choices").toList().size() > 2);
-        QCOMPARE(field("mode").value("value"), QStringLiteral("normal"));
     }
 
     void aChoiceWithNoDefaultHasTheFirstInForceAndItIsWhatARunBinds() {

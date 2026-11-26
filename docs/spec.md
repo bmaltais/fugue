@@ -2027,23 +2027,40 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   a machine that never had the files; with no paired helper configured at all nothing changes. A pin still wins. `describe` on a
   paired host gives up after 10 s (a black-holed address is "Operation timed out" in 10 s, a name that does not resolve at once),
   not after the 120 s transfer timeout. `run.json` records `"remote": true` on the node's provider entry; `fugue app run` says
-  "Ran on gx10." on stderr and has `"ran_on": ["gx10"]` in its JSON; `fugue app info` says "Runs on gx10" and has `"runs_on"` when
-  models are missing here and a paired helper is configured (the app is then runnable: `app run` does not stop at the missing models,
-  and the host answers `model_missing` itself when it does not have them either). Not the same as the omarchy hosts' models
+  "Ran on gx10." on stderr and has `"ran_on": ["gx10"]` in its JSON; `fugue app info` says "Runs on gx10" and has `"runs_on"` (and `"runs_on_nodes"`, node to host) when
+  models are missing here and the paired helpers that answered take every node that needs them; a helper that did not answer is
+  `"silent_host"` ("gx10 is not answering"), never the host (below, "One verdict"). The app is runnable either way: `app run` does not
+  stop at the missing models, and the host answers `model_missing` itself when it does not have them either. Not the same as the omarchy
+  hosts' models
   (8.7), which are chosen by the model's name.
-- **Refused up front, and served from the cache (#491, #492).**
-  - *A run that cannot succeed on the host is refused before any node runs* (`fugue app run`; the App view's Needs panel shows the same
-    lines). `remoteRunProblems` (`engine/remote_placement.*`) reads the document the way the scheduler decides, per node: a node needs the
-    model when one of its own Resource inputs holds the missing handle, or is linked to a node that holds it through a Resource output (a
-    picture decoded from it does not carry it); each provider node among them is refused with `model_missing`, naming the
-    node, when it is pinned (its own pin, else the workflow's) to an instance that runs on this machine ("Node enc is pinned to desk, which
-    runs on this machine, and the model m.safetensors it needs is not here"), or when every paired helper that could take it (the one it is pinned to, else all) is known not to offer the node's
-    capability ("... the paired host gx10 does not offer text.encode"). The hint says to get the model here (`prepare`, Get ready) or to
-    unpin the node. What a host offers is what it says now: `fugue app run`/`info` and the App view describe every paired helper (10 s at
-    most) and never refuse from what was kept when it answers; what it said the last time it answered, kept in `<state>/paired_helpers.json` by
-    instance name and address (the scheduler's describe and the probes write it, one change at a time), stands in only for a host that does not answer; with nothing kept the host answers for itself
-    at the run, as before. `fugue app info` has the lines as `host_problems` and does not say "Runs on". With no paired helper, nothing
-    changes.
+- **One verdict for the CLI and the window (#491, #581).**
+  - *Paired placement* (`engine/paired_placement.*`, `decidePairedPlacement`) reads the document the way the scheduler decides, per node,
+    and returns three outcomes. It applies only when only models are missing (no pack; the problems no more than `model_missing` or
+    `download_failed`) and a paired helper is enabled; otherwise nothing is placed. A node needs the model when one of its own Resource
+    inputs holds the missing handle, or is linked to a node that holds it through a Resource output (a picture decoded from it does not
+    carry it); only a provider node counts.
+  - **Blocked**: `model_missing` per node, naming it, when it is pinned (its own pin, else the workflow's) to an instance that runs on this
+    machine ("Node enc is pinned to desk, which runs on this machine, and the model m.safetensors it needs is not here") or disabled, or when
+    every paired helper that could take it (the one it is pinned to, else all) does not offer the node's capability ("... the paired host
+    gx10 does not offer text.encode"; what the host said live; for one that does not answer, what it last said, the scheduler's `neverOffered`). The hint says to get the
+    model here (`prepare`, Get ready) or to unpin the node.
+  - **RunsOn**: per node, the first helper in the user's order that answered live, offers the node's capability and respects the pin (the
+    scheduler's own choice). The line lists the distinct hosts. A host that answered without the capability is not the host.
+  - **Silent**: the only helper(s) that could take a node did not answer. A silent host is never named as the host. The window says
+    "<host> is not answering" and keeps the model rows; `app info` leaves out `runs_on` and has `silent_host`; `app run` goes ahead (a cached
+    re-run can still work; otherwise it fails with `provider_unreachable`).
+  - *Order:* the pins decide first and block without asking anyone, so an app that pins already block never waits for the probe. Every
+    helper that passes the pins is then asked (`describe`, 10 s at most, in parallel; each answer refreshes what is kept in
+    `<state>/paired_helpers.json`, by instance name and address). A helper that answered decides by its live answer. For one that did not,
+    what it last said only refuses (the scheduler's `neverOffered`): a node whose every candidate is live-without the capability or
+    silent and remembered without it is Blocked; a node with a silent candidate that has no memory, or remembered offering it, is Silent.
+    What was kept never places a node and never overrules a live answer, so a host that gained a capability is not refused for good.
+  - *Callers:* `fugue app run`/`info` wait for the probe (once per command: the answer is kept for the second look `--input` makes); the
+    App view makes the verdict again, asynchronously, whenever the plan or the document changes, reusing an answer of the last 30 s
+    (`keptPairedProbe`). The probe is the seam (`PairedProbe`): the live one is `probePairedHelpers`, a test gives a fake
+    (`tests/nodes/test_paired_placement.cpp`). `fugue app info` has the blocked lines as `host_problems`. With no paired helper,
+    nothing changes. The Needs panel uses this verdict (`planUnder`), never the "Runs on" line, which may be naming a service off this
+    machine (#404).
   - *The host down, and the node could never go there:* when the host does not answer but it never offered the node's capability (what it
     last said), selection fails at once with `model_missing` (the files are not here and the host did not offer it), not
     `provider_unreachable` and no local job is started to fail late; a host never heard from is still named.
@@ -3826,17 +3843,19 @@ store). Download all goes through the Get ready path: a plan of models only star
 a plan with a pack opens the sheet for the one yes, as does a pack row's button. One model downloads on the window's download line. The
 panel clears by itself when a refresh finds the app ready. Keys: Tab reaches Download all first, then each row's buttons.
 
-**Runs on a host (#395, epic #397).** When the app's models are not on this machine and the paired helper (8.7) answers, the form
-shows a quiet line above Run, "Runs on gx10" (`appRunsOn`; nothing for a local run), and the Needs panel marks the model rows as the host's to have (below). The helper is asked once for the shown tab (`probePairedHelper`, `describe`,
-10 s at most), again when another tab is shown; one that does not answer leaves the form as it was, with its Needs rows. The run goes
-where the scheduler puts it (8.7, "Where a node runs when its model is not here"): a host that has gone, with no copy of the models
-here, ends the run with the error "The model files are not on this machine, and the paired host gx10 is not answering." in the form's
-error line and Details, like any run error; with a copy here the run is local. Choosing a host or a mesh peer is #203's, not this.
+**Runs on a host (#395, #581, epic #397).** When the app's models are not on this machine and the paired verdict (8.7, "One verdict")
+says the helpers that answered take every node that needs them, the form shows a quiet line above Run, "Runs on gx10" (`appRunsOn`;
+several hosts are comma separated; nothing for a local run), and the Needs panel marks the model rows as the host's to have (below). The
+verdict is made again whenever the plan or the document changes, asynchronously, reusing a host answer less than 30 s old (`describe`, 10 s at
+most); a host that does not answer leaves the Needs rows as they were and the line says "gx10 is not answering" (the i18n string
+`%1 is not answering`). The run goes where the scheduler puts it (8.7, "Where a node runs when its model is not here"): a host that has gone,
+with no copy of the models here, ends the run with the error "The model files are not on this machine, and the paired host gx10 is not
+answering." in the form's error line and Details, like any run error; with a copy here the run is local. Choosing a host or a mesh peer is #203's, not this.
 The helper cannot say which models it has (`describe` lists no model of a helper that takes its files in the job, and the protocol has no
 other question for it), so the Needs panel keeps every model row and marks each "on gx10 if it has it" (the Download still works here); a
-host that does not have the model answers `model_missing` at the run (#493). When the host cannot take a node of the app (pinned to a
-provider on this machine, or it does not offer the node's capability, 8.7), the form does not say "Runs on", and the panel names the
-node and why as a line without an action (#491); the host is asked again when another tab is shown.
+host that does not have the model answers `model_missing` at the run (#493). When a node of the app cannot go anywhere (pinned to a
+provider on this machine, or no helper offers the node's capability, 8.7), the form does not say "Runs on", and the panel names the
+node and why as a line without an action (#491), pins first, even when no host answered.
 
 The same line says where an app runs when a node is routed to a service off this machine (#404, 8.2): "Runs on Cloud (api.example.com)"
 (several services are listed, comma separated), from the graph's check, and it takes the place of a paired host's name. Running such an
