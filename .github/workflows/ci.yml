@@ -1,0 +1,52 @@
+name: CI
+
+# The fast lane for pull requests from forks. The owner's and agents' pull requests come from this repository, and
+# the full local suite (bin/test) has already run on them, so they start no hosted build: fast-lane is skipped.
+# A fork's pull request has not been through that, so it runs the x86_64 build and tests (test.yml, no aarch64).
+# The first run of a contributor's pull request waits for the maintainer's approval (Settings > Actions > General).
+#
+# The check `ci-ok` is the one that branch protection requires, for both kinds of pull request: it passes when
+# fast-lane succeeds or is skipped, and fails when it fails or is cancelled.
+#
+# Plain pull_request, never pull_request_target: a fork's code runs with a read-only token and no secrets.
+# workflow_dispatch with force_fast_lane proves the lane from a branch of this repository.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      force_fast_lane:
+        description: Run the fast lane even though this is not a fork's pull request
+        type: boolean
+        default: false
+
+# A new push to a pull request cancels that pull request's older run; manual runs get their own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fast-lane:
+    name: Fast lane (x86_64)
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
+      || (github.event_name == 'workflow_dispatch' && inputs.force_fast_lane)
+    uses: ./.github/workflows/test.yml
+    with:
+      aarch64: false
+
+  ci-ok:
+    # Branch protection requires this check. Keep the name.
+    name: ci-ok
+    needs: [fast-lane]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if a needed job failed or was cancelled
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "needed job results: $RESULTS"
+          if grep -Eq 'failure|cancelled' <<<"$RESULTS"; then exit 1; fi

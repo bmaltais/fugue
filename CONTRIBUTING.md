@@ -84,8 +84,11 @@ Run `bin/test` once before you open the pull request.
 - A UI change needs screenshots, light and dark if the colors changed. `bin/look-shot` takes a picture without
   touching your desktop (see [docs/testing.md](docs/testing.md)).
 - If you delete a test, say why in the description.
-- CI runs on pull requests on Arch (x86_64 and aarch64). If it flags something, fix it; ask in the pull
-  request if you cannot reproduce it.
+- Run `bin/test` locally before you open the pull request; that is still expected. On a pull request from a
+  fork, CI then runs a fast lane on Arch: the x86_64 build and the full test suite, offscreen. The first run
+  waits until a maintainer approves it, and takes about 10 to 30 minutes. CUDA, AppImage and aarch64 builds run
+  only on releases. The check to watch is `ci-ok`. If it flags something, fix it; ask in the pull request if you
+  cannot reproduce it.
 
 ## Conduct
 

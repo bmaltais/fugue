@@ -8,6 +8,13 @@ on:
   pull_request:
     paths: [.github/workflows/test.yml, packaging/PKGBUILD]
   workflow_dispatch:
+  # ci.yml calls this for a pull request from a fork (the fast lane), with aarch64 off.
+  workflow_call:
+    inputs:
+      aarch64:
+        description: Also run the aarch64 job
+        type: boolean
+        default: true
   schedule:
     - cron: '17 6 * * 1'
   push:
@@ -15,8 +22,10 @@ on:
 
 # A new push to a pull request cancels that pull request's older run. Tags, the weekly runs and manual runs each get
 # their own group (run_id), so a release is never cancelled. (llama.cpp's expression; docs/ci-research in the workbench.)
+# When ci.yml calls this file, github.workflow is the caller's name, so the group gets a "fast-" prefix: it must differ
+# from the caller's own group, or the called run would cancel itself.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  group: test-${{ github.workflow != 'Test' && 'fast-' || '' }}${{ github.head_ref && github.ref || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -83,7 +92,8 @@ jobs:
         run: su tester -c bin/build
 
       - name: Save the compiler cache
-        if: always()
+        # Main, weekly, tag and manual runs save. A pull request (a fork's included) only restores.
+        if: always() && github.event_name != 'pull_request'
         uses: actions/cache/save@v6
         with:
           path: .ccache
@@ -103,6 +113,8 @@ jobs:
     # filesystem (the same pacman packages, the PKGBUILD's dependency lists, and a Qt the app needs:
     # 6.11 or newer, which Ubuntu 26.04 (6.10) and Debian 13 (6.8) lack). See docs/aarch64-ci.md.
     runs-on: ubuntu-24.04-arm
+    # Off when a caller passes aarch64: false. toJSON, because an unset input is null and null == false in an expression.
+    if: ${{ toJSON(inputs.aarch64) != 'false' }}
     env:
       # bin/build uses ccache when it is installed; its folder is kept between runs below.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -157,7 +169,7 @@ jobs:
         run: docker exec arch su tester -c bin/build
 
       - name: Save the compiler cache
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/cache/save@v6
         with:
           path: .ccache

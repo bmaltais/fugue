@@ -74,3 +74,22 @@ test's own temporary folder), because shards run at the same time.
    that moves a list's rows), and wait on state. ctest runs with `QV4_GC_TIMELIMIT=100000` (CMakeLists.txt): Qt's sliced
    GC under load made a Question read its theme as null in 1 run in 50 (the Question now reads `App.theme.look` directly, #320; the setting stays for other components).
 7. A change that adds more than about 2 s to the suite says so in its PR body.
+
+## CI
+
+The full suite runs locally (`bin/test`) before every merge by the owner and agents, so a hosted run repeats that
+only where it proves something new. Pull requests from forks have not been through the local suite, so they get a
+fast lane. One check, `ci-ok`, covers both kinds of pull request, and branch protection requires it.
+
+| Event | Workflow | What runs |
+|---|---|---|
+| Pull request from a fork | `ci.yml` | Fast lane: `test.yml` for x86_64 only (build and full suite). The first run waits for the maintainer's approval. |
+| Pull request from this repo | `ci.yml` | Nothing but `ci-ok`, which passes at once. |
+| Pull request that changes `test.yml` or `packaging/PKGBUILD` | `test.yml` | x86_64 and aarch64. |
+| Weekly cron on main | `test.yml` | x86_64 and aarch64; saves the compiler caches. |
+| Tag `v*` | `test.yml`, `package.yml`, `appimage.yml`, `helper-tarballs.yml` | The full release matrix, CUDA included. |
+| `workflow_dispatch` | any workflow | On demand on a branch. `ci.yml` has `force_fast_lane` to run the fast lane on a branch of this repo. |
+
+Only main, weekly, tag and manual runs save the compiler cache; a pull request restores it and never saves.
+A new push cancels that pull request's older run. `ci.yml` uses plain `pull_request`, with no secrets and a
+read-only token, so a fork's code never runs with the repo's permissions.
