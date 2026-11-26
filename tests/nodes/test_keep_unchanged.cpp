@@ -338,7 +338,7 @@ private slots:
         addBuiltinNodeTypes(registry);
         const NodeType *group = registry.nodeType("fugue/keep-unchanged");
         QVERIFY(group);
-        for (const auto &[knob, value] : {std::pair<const char *, int>{"margin", -5}, {"speck", 300}, {"close", -1}, {"blur", 0}, {"feather", 600}}) {
+        for (const auto &[knob, value] : {std::pair<const char *, int>{"margin", -5}, {"speck", -1}, {"close", -1}, {"blur", 0}, {"feather", 300}}) {
             Document doc;
             Node instance;
             instance.type = group->id;
