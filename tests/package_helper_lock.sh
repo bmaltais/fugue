@@ -30,6 +30,15 @@ wait
 (cd "$out" && sha256sum -c SHA256SUMS >/dev/null) || fail "a line does not match its archive"
 ls "$out"/SHA256SUMS.?????? >/dev/null 2>&1 && fail "a temporary SHA256SUMS was left"
 
+# two writers of the same backend share a PID (as containers do): their staging files must still differ
+stage_name() { mktemp "$out/.fugue-helper-same-x86_64-linux.tar.zst.XXXXXX"; }
+a="$(stage_name)"; b="$(stage_name)"
+[[ $a != "$b" ]] || fail "two staging files got the same name"
+# shellcheck disable=SC2016 # the script text is searched literally
+grep -qF 'mktemp "$out/.$name' "$script" || fail "bin/package-helper does not stage with mktemp"
+grep -F 'staged=' "$script" | grep -qF '$$' && fail "the staging name uses a PID"
+rm -f "$a" "$b"
+
 # downloads: several runs want the same pinned file
 src="$work/tool.tar"; head -c 300000 /dev/urandom >"$src"
 sum="$(sha256sum "$src" | cut -d' ' -f1)"

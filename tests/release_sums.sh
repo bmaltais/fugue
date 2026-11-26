@@ -46,4 +46,18 @@ d="$work/real"; mkdir "$d"
 for n in fugue-0.1.0_test6-1-x86_64.pkg.tar.zst fugue-0.1.0_test6-1-aarch64.pkg.tar.zst fugue-helper-cuda-aarch64-linux.tar.zst \
   Fugue-0.1.0-x86_64.AppImage fugue-helper-cuda-x86_64-linux.tar.zst fugue-helper-vulkan-x86_64-linux.tar.zst fugue-helper-cpu-x86_64-linux.tar.zst; do part "$d" "$n"; done
 "$script" "$d" --expect "$root/packaging/release-assets.txt" >/dev/null || fail "packaging/release-assets.txt does not match the asset names"
+
+# 7: a hand asset that no glob expects (the x86_64 CUDA pacman package) is included when its asset is there, and
+# is not waited for when it is not
+d="$work/hand"; mkdir "$d"
+for n in fugue-0.1.0_test6-1-x86_64.pkg.tar.zst fugue-0.1.0_test6-1-aarch64.pkg.tar.zst fugue-helper-cuda-aarch64-linux.tar.zst \
+  Fugue-0.1.0-x86_64.AppImage fugue-helper-cuda-x86_64-linux.tar.zst fugue-helper-vulkan-x86_64-linux.tar.zst fugue-helper-cpu-x86_64-linux.tar.zst; do part "$d" "$n"; done
+"$script" "$d" --expect "$root/packaging/release-assets.txt" >/dev/null || fail "a release without the hand asset must still be written"
+grep -q 'fugue-helper-cuda-0.1.0-1-x86_64.pkg.tar.zst' "$d/SHA256SUMS" && fail "the hand asset appeared before it was uploaded"
+hand=fugue-helper-cuda-0.1.0_test6-1-x86_64.pkg.tar.zst
+part "$d" "$hand"
+{ for f in "$d"/*.sha256; do f="${f##*/}"; echo "${f%.sha256}"; done; } >"$work/assets"
+"$script" "$d" --expect "$root/packaging/release-assets.txt" --assets "$work/assets" >/dev/null || fail "the rerun with the hand asset failed"
+grep -Eq "^[0-9a-f]{64}  $hand\$" "$d/SHA256SUMS" || fail "the hand asset is not in SHA256SUMS"
+[[ $(grep -c . "$d/SHA256SUMS") == 8 ]] || fail "the rerun lost a line"
 echo "release-sums: ok"

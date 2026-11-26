@@ -74,10 +74,16 @@ rm "$hd/fugue-helper-cuda" # marker stays: a repair must still reinstall
 install cuda
 need fugue-helper-cuda
 
-# no zstd: refuse before a single request
+# no zstd: refuse before any download (the release list is read to learn whether there is a tarball)
 rm -rf "$hd"; : >"$work/curl.log"
 if PATH="$fakebin:$tools" bash "$root/install.sh" --helper-only --helper cuda >"$work/out" 2>&1; then fail "installed without zstd"; fi
 grep -q 'zstd' "$work/out" || fail "the missing zstd is not named: $(cat "$work/out")"
-[[ ! -s $work/curl.log ]] || fail "something was requested before the zstd check: $(cat "$work/curl.log")"
+grep -q 'tar.zst' "$work/curl.log" && fail "a tarball was downloaded before the zstd check: $(cat "$work/curl.log")"
 [[ ! -e $hd ]] || fail "a helper folder was made without zstd"
+
+# no zstd and a release without the tarball: nothing to unpack, so no complaint
+rm -rf "$hd"; : >"$work/curl.log"
+printf '[{"tag_name": "%s", "assets": [{"browser_download_url": "https://example.test/bmaltais/fugue/releases/download/%s/SHA256SUMS"}]}]\n' "$tag" "$tag" >"$fix/release.json"
+PATH="$fakebin:$tools" bash "$root/install.sh" --helper-only --helper cuda >"$work/out" 2>&1 || fail "no tarball in the release must not need zstd: $(cat "$work/out")"
+grep -q 'zstd' "$work/out" && fail "zstd was asked for with no tarball to unpack"
 echo "install_helper: ok"

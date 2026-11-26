@@ -18,7 +18,7 @@ jobs:
     name: Write SHA256SUMS
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
-    timeout-minutes: 420
+    timeout-minutes: 350
     permissions:
       contents: write
     steps:
@@ -28,7 +28,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir work
-          for _ in $(seq 1 400); do
+          for _ in $(seq 1 320); do
             if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > work/assets 2>/dev/null; then
               rm -rf work/parts && mkdir work/parts
               gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir work/parts 2>/dev/null || true

@@ -242,8 +242,10 @@ fi
 
 # zstd -10: the CUDA libraries are mostly compressed machine code; a higher level costs minutes for a few percent.
 # Packed outside the output folder's lock (it takes minutes), then moved in with the SHA256SUMS line under it.
-staged="$out/.$name.tar.zst.$$"
+# mktemp, not $$: PIDs repeat across containers that share the output folder, and mktemp creates its file exclusively.
+staged=""
 trap 'rm -rf "$stage" "$staged"' EXIT
+staged="$(mktemp "$out/.$name.tar.zst.XXXXXX")"
 tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner --use-compress-program="zstd -T0 -10" -cf "$staged" "$name"
 locked "$out/.lock" publish "$staged"
 if [[ -n ${HOST_UID:-} && -n ${HOST_GID:-} && $(stat -c %u "$root") != 0 ]]; then

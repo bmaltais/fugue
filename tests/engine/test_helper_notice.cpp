@@ -2,6 +2,7 @@
 // the NVIDIA flag faked.
 
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -29,6 +30,8 @@ private slots:
         m_helper = qgetenv("FUGUE_HELPER");
         m_markSet = qEnvironmentVariableIsSet("FUGUE_HELPER_FROM_APPRUN");
         m_mark = qgetenv("FUGUE_HELPER_FROM_APPRUN");
+        qunsetenv("FUGUE_HELPER"); // each test starts with neither, whatever the environment brought in
+        qunsetenv("FUGUE_HELPER_FROM_APPRUN");
     }
     void cleanup() {
         if (m_helperSet) qputenv("FUGUE_HELPER", m_helper); else qunsetenv("FUGUE_HELPER");
@@ -73,6 +76,30 @@ private slots:
 
         qunsetenv("FUGUE_HELPER_FROM_APPRUN");
         QVERIFY(CudaHelperNotice::helperChosenByUser()); // empty, no mark: the person chose no helper
+    }
+
+    void aHelperAppRunFoundOutsideTheFoldersStillOffersCuda() {
+        // The AppImage ships no helper: AppRun's pick is in ~/.local/share/fugue/helper, which helperFolders() never holds.
+        QTemporaryDir state;
+        const QString vulkan = QStringLiteral("/home/u/.local/share/fugue/helper/fugue-helper-vulkan");
+        QVERIFY(CudaHelperNotice::dueForHelper(vulkan, true, state.path()));
+        QVERIFY(CudaHelperNotice::dueForHelper(QStringLiteral("/h/fugue-helper-cpu"), true, state.path()));
+        QVERIFY(!CudaHelperNotice::dueForHelper(QStringLiteral("/h/fugue-helper-cuda"), true, state.path())); // already CUDA
+        QVERIFY(!CudaHelperNotice::dueForHelper(vulkan, false, state.path()));                                // no NVIDIA card
+        QVERIFY(!CudaHelperNotice::dueForHelper(QString(), true, state.path()));                              // no helper
+        CudaHelperNotice::dismiss(state.path());
+        QVERIFY(!CudaHelperNotice::dueForHelper(vulkan, true, state.path()));
+    }
+
+    void dueUsesAppRunsPickEndToEnd() {
+        // Not a person's override: FUGUE_HELPER from AppRun must reach the file-name check, not stop at the env test.
+        if (!QFileInfo::exists(QStringLiteral("/proc/driver/nvidia/version")))
+            QSKIP("needs an NVIDIA driver for due() to ask the machine");
+        qputenv("FUGUE_HELPER", "/h/fugue-helper-vulkan");
+        qputenv("FUGUE_HELPER_FROM_APPRUN", "1");
+        QVERIFY(CudaHelperNotice::due());
+        qputenv("FUGUE_HELPER", "/h/fugue-helper-cuda");
+        QVERIFY(!CudaHelperNotice::due());
     }
 
     void dueFollowsTheOverrideOnThisMachine() {

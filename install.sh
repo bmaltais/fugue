@@ -102,10 +102,6 @@ if [[ $mode == appimage && $helper != none ]]; then
   else say "no NVIDIA driver and no Vulkan loader found: no generation helper installed (--helper cpu for the slow CPU one)"
   fi
 fi
-# A tarball is unpacked with zstd: find out before anything is downloaded (the CUDA one is about 590 MiB).
-if [[ -n $tarball ]]; then
-  command -v zstd >/dev/null || die "missing tool: zstd (install the zstd package; the helper tarball needs it to unpack). Nothing was downloaded or changed"
-fi
 if [[ $mode == appimage ]]; then
   what="no pacman: using the AppImage"; ((helper_only)) && what="helper only"
   say "system: $arch, $what, NVIDIA GPU: $([[ $have_nvidia == 1 ]] && echo yes || echo no), Vulkan loader: $([[ $have_vulkan == 1 ]] && echo yes || echo no), helper tarball: ${tarball:-none}"
@@ -148,6 +144,10 @@ if [[ -n $tarball ]]; then
     say "release $tag has no $tarball helper tarball for $arch: installing without it (docs/helper.md says how to build one)"
     ((helper_only)) && exit 0
     tarball=""
+  fi
+  # A tarball is unpacked with zstd: find out now, before anything is downloaded (the CUDA one is about 590 MiB).
+  if [[ -n $tarball_url ]]; then
+    command -v zstd >/dev/null || die "missing tool: zstd (install the zstd package: the helper tarball needs it to unpack; or pass --no-helper). Nothing was downloaded or changed"
   fi
 fi
 sums_url="$(printf '%s\n' "$urls" | grep '/SHA256SUMS$' | head -1)"
