@@ -7,7 +7,7 @@
       "title": "Real-ESRGAN x4plus",
       "description": "General photos and art, a safe first choice.",
       "file": "RealESRGAN_x4plus.safetensors",
-      "url": "https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/5fd49b7b278836f48af63ecd314d0f98ab336105/RealESRGAN_x4plus.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Real-ESRGAN/resolve/5fd49b7b278836f48af63ecd314d0f98ab336105/RealESRGAN_x4plus.safetensors",
       "size": 66857836,
       "sha256": "37f9a931c215f040aa6d50f711f2cb115f713c46df1d0d6469a8bd7bfe9a60bb",
       "scale": 4,
@@ -16,7 +16,7 @@
       "license_url": "https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE",
       "commercial": true,
       "author": "Xintao Wang et al.",
-      "source": "https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged",
+      "source": "https://huggingface.co/Comfy-Org/Real-ESRGAN",
       "tags": ["photo", "general"]
     },
     {
