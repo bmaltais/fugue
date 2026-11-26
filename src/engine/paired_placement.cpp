@@ -18,20 +18,6 @@ namespace fugue {
 
 namespace {
 
-// The hashes of the handles anywhere inside `value` (a derived handle nests its parts).
-void collectHashes(const QJsonValue &value, QSet<QString> &hashes) {
-    if (value.isArray()) {
-        for (const QJsonValue &item : value.toArray())
-            collectHashes(item, hashes);
-    } else if (value.isObject()) {
-        const QJsonObject object = value.toObject();
-        if (const QString hash = object.value("hash").toString(); !hash.isEmpty())
-            hashes.insert(hash);
-        for (auto it = object.begin(); it != object.end(); ++it)
-            collectHashes(it.value(), hashes);
-    }
-}
-
 void collectLinks(const InputValue &value, QList<PortRef> &nodes) {
     if (value.kind() == InputValue::Kind::Link) {
         nodes.append(value.from());

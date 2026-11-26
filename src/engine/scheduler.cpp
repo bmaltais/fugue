@@ -493,36 +493,44 @@ private:
             demand(m_nodes[dep]);
     }
 
-    // `reader` will not ask for `dep` (or never runs). When nothing else can, `dep` is skipped, and so on upstream.
-    void letGo(NodeRun &dep, const QString &reason) {
+    // A reader will not ask for `dep` (or never runs). When nothing else can, `dep` is skipped as not chosen, and so on upstream.
+    void letGo(NodeRun &dep) {
         if (--dep.potential > 0 || dep.demanded || dep.phase != Phase::Waiting)
             return;
-        skip(dep, reason);
+        skip(dep, QStringLiteral("not_chosen"));
         for (const QString &up : std::as_const(dep.dependencies))
-            letGo(m_nodes[up], reason);
+            letGo(m_nodes[up]);
     }
 
-    // The values of the inputs that are not lazy, as the kernel will see them, for NodeKernel::lazyInputs.
-    Values strictValues(NodeRun &n) {
+    // The values of the inputs that are not lazy, as the kernel will see them, for NodeKernel::lazyInputs. `unknown`: one is not
+    // known yet (validate: a node that has not run, a random seed). `empty`: a required one came back with nothing, so the node
+    // will not run (upstream_empty, or missing_input), and nothing is asked of its lazy inputs.
+    Values strictValues(NodeRun &n, bool &unknown, bool &empty) {
         Values values;
         for (const InputSpec &spec : n.type->inputs) {
-            const auto written = n.node->inputs.constFind(spec.name);
-            if (spec.lazy || (written != n.node->inputs.constEnd() && written->kind() == InputValue::Kind::Auto))
+            if (spec.lazy)
                 continue;
+            const auto written = n.node->inputs.constFind(spec.name);
+            if (written != n.node->inputs.constEnd() && written->kind() == InputValue::Kind::Auto) {
+                unknown = unknown || m_dry;
+                continue;
+            }
             Value value;
-            bool unknown = false;
             if (written != n.node->inputs.constEnd() && !written->isEmpty())
                 value = resolveValue(n, spec, *written, unknown);
             if (value.isEmpty() && !spec.defaultValue.isUndefined())
                 value = Value(spec.defaultValue);
             if (!value.isEmpty())
                 values.insert(spec.name, value);
+            else if (spec.required())
+                empty = true;
         }
         return values;
     }
 
     // Once the non-lazy inputs are in: asks the kernel which lazy inputs are needed, demands what feeds those, and
-    // lets go of the rest.
+    // lets go of the rest. Under validate the node's whole point is what it would take: the declined inputs stay out of
+    // its key when the answer is known (so the key is the one a run made), and what feeds every lazy input is still demanded.
     void askLazy(NodeRun &n) {
         n.lazyAsked = true;
         if (n.lazyOf.isEmpty())
@@ -532,20 +540,27 @@ private:
             if (spec.lazy)
                 all << spec.name;
         const bool broken = !brokenUpstream(n).isEmpty(); // the node will be skipped; nothing is asked of its lazy inputs
-        const QStringList wanted = broken ? QStringList()
-                                   : (m_dry || !n.kernel) ? all
-                                                          : n.kernel->lazyInputs(*n.type, strictValues(n));
+        bool unknown = false, empty = false;
+        const Values ready = broken || !n.kernel ? Values() : strictValues(n, unknown, empty);
+        QStringList wanted = all;
+        if (broken || empty)
+            wanted.clear();
+        else if (n.kernel && !(m_dry && unknown))
+            wanted = n.kernel->lazyInputs(*n.type, ready);
         for (const QString &name : all)
-            if (!wanted.contains(name))
+            if (!wanted.contains(name) && !(m_dry && (unknown || broken)))
                 n.declined << name;
+        const QStringList needed = m_dry ? all : wanted;
+        // Nodes let go only because their reader could not ask (it failed upstream, or its condition is empty) were not chosen:
+        // nothing upstream of them failed.
         for (auto it = n.lazyOf.constBegin(); it != n.lazyOf.constEnd(); ++it) {
-            const bool needed = std::any_of(it.value().cbegin(), it.value().cend(),
-                                            [&](const QString &name) { return wanted.contains(name); });
-            if (needed) {
+            const bool take = std::any_of(it.value().cbegin(), it.value().cend(),
+                                          [&](const QString &name) { return needed.contains(name); });
+            if (take) {
                 n.waitFor << it.key();
                 demand(m_nodes[it.key()]);
             } else {
-                letGo(m_nodes[it.key()], broken ? QStringLiteral("upstream_failed") : QStringLiteral("not_chosen"));
+                letGo(m_nodes[it.key()]);
             }
         }
         m_again = true;

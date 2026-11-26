@@ -184,6 +184,10 @@ private slots:
         check = checkGraph(graph, world.environment());
         QCOMPARE(check.states.value("t3"), NodeState::Cached);
         QCOMPARE(check.states.value("f3"), NodeState::Stale); // not run, so still to be made if the answer flips
+        // The condition is known by now, so the Switch's key is the one the run made (the side it declined is not in it): it and what
+        // reads it are cached, not stale after every run.
+        for (const char *node : {"flag", "sw", "out"})
+            QCOMPARE(check.states.value(node), NodeState::Cached);
     }
 
     // A condition that fails: the Switch is skipped, and so is everything that only it could have asked for.
@@ -197,7 +201,26 @@ private slots:
         for (const char *node : {"sw", "out", "t1", "f3"})
             QCOMPARE(ran.outcome.states.value(node), NodeState::Skipped);
         QCOMPARE(world.calls.count("t1") + world.calls.count("f1"), 0);
-        QCOMPARE(traceOf(ran.events, {"f3"}), QStringList{"node.skipped f3 upstream_failed"});
+        // Nothing upstream of a side failed: it is let go, not failed; the Switch and what reads it are the ones that could not go on.
+        QCOMPARE(traceOf(ran.events, {"f3", "t1"}), (QStringList{"node.skipped f3 not_chosen", "node.skipped t1 not_chosen"}));
+        QCOMPARE(traceOf(ran.events, {"sw", "out"}), (QStringList{"node.skipped sw upstream_failed", "node.skipped out upstream_failed"}));
+    }
+
+    // A condition that is linked but came back empty: nothing is asked of the Switch, so no side runs (it is skipped as upstream_empty).
+    void anEmptyConditionAsksForNoSide() {
+        World world;
+        addTypes(world);
+        world.type("fugue/noflag", "'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'flag', 'type': 'boolean', 'optional': true}]",
+                   [](const NodeContext &) -> Result<Values> { return Values{}; });
+        QByteArray graph = graphFor("yes");
+        graph.replace("'type': 'fugue/flag'", "'type': 'fugue/noflag'");
+        const Ran ran = world.run(world.graph(graph));
+        QCOMPARE(ran.outcome.states.value("sw"), NodeState::Skipped);
+        QCOMPARE(traceOf(ran.events, {"sw"}), QStringList{"node.skipped sw upstream_empty"});
+        for (const char *node : {"t1", "t3", "f1", "f3"}) {
+            QCOMPARE(world.calls.count(node), 0);
+            QCOMPARE(traceOf(ran.events, {node}), QStringList{QStringLiteral("node.skipped %1 not_chosen").arg(node)});
+        }
     }
 
     // A chosen side that is empty: the Switch gets no value, and its kernel says so.

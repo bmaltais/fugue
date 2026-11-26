@@ -17,6 +17,7 @@
 #include "engine/json.h"
 #include "engine/model_catalog.h"
 #include "engine/model_download.h"
+#include "engine/lazy_reach.h"
 #include "engine/model_library.h"
 #include "engine/model_recommend.h"
 #include "engine/model_speed.h"
@@ -1093,10 +1094,11 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
     QList<PortType> types;
-    for (const MissingModel &model : downloadable(document.models(), library))
+    const QJsonArray wanted = modelsToHave(document, *m_registry); // not a model only a Switch's lazy side holds (#557)
+    for (const MissingModel &model : downloadable(wanted, library))
         if (const std::optional<PortType> type = PortType::parse(model.handle.value(QStringLiteral("resource")).toString()))
             types << *type;
-    const QList<MissingModel> absent = library.missing(document, hashes); // with the fitted folders
+    const QList<MissingModel> absent = library.missing(wanted, hashes); // with the fitted folders
     QStringList models;
     for (const MissingModel &model : absent) {
         const QString name = model.handle.value(QStringLiteral("name")).toString();
@@ -1120,7 +1122,7 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
                                                 {"text", tr("Install %1…").arg(need.value("name").toString())}};
             }
         offer->text = offerText(absent);
-        offer->models = document.models();
+        offer->models = wanted;
         offer->root = library.downloadRoot();
         offer->roots.clear();
         if (!offer->text.isEmpty())

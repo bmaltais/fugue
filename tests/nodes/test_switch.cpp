@@ -75,6 +75,24 @@ private slots:
         QVERIFY(bad.error().message.contains("on_true"));
     }
 
+    // A Switch in a group whose sides come through exposed inputs has the type of what feeds those (the inner link an exposed input
+    // overrides does not count), so what reads the group's output compiles.
+    void aSwitchInAGroupTakesTheTypeOfItsExposedSides() {
+        const char *text = R"({"fugue": 1, "graph": {"nodes": {
+          "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "a.png"}},
+          "g": {"type": "local/pick", "version": "1.0.0", "inputs": {"a": {"from": "load.image"}, "b": {"from": "load.image"}}},
+          "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g.out"}}}}},
+          "groups": {"local/pick": {"version": "1.0.0", "name": "Pick",
+            "inputs": [{"name": "a", "targets": ["sw.on_true"]}, {"name": "b", "targets": ["sw.on_false"]}],
+            "outputs": [{"name": "out", "from": "sw.value"}],
+            "nodes": {"t": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "x"}},
+                      "sw": {"type": "fugue/switch", "version": "1.0.0", "inputs": {"condition": true, "on_true": {"from": "t.text"}}}}}}})";
+        const Result<Document> document = Document::fromJson(QJsonDocument::fromJson(text).object());
+        QVERIFY(document);
+        const Compilation made = compile(*document, m_registry);
+        QVERIFY2(made.ok(), qPrintable(made.errors().isEmpty() ? QString() : made.errors().first().message));
+    }
+
     // The output has the type of what feeds the sides: a text goes into a text input, not into a number input.
     void theOutputTakesTheTypeOfItsInputs() {
         const char *ok = R"({"t": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a"}},

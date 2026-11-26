@@ -503,14 +503,16 @@ std::optional<std::pair<QString, QString>> Compiler::exposedAt(const Scope *scop
 // An output of type "any" takes the type of the first of the inputs it follows that is linked. Inputs that
 // disagree, or none linked, are errors placed on the node that reads the output.
 Source Compiler::followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const {
-    const Node &node = *scope->nodes->constFind(ref.node);
+    // What the inputs hold as the node is run: an exposed input of the group around it replaces what is written inside, and its link
+    // resolves where it was written (as resolveItem does).
+    const QMap<QString, Bound> held = effective(scope, ref.node);
     std::optional<PortSpec> found;
     QString foundFrom;
     for (const QString &name : output.follows) {
-        const auto written = node.inputs.constFind(name);
-        if (written == node.inputs.constEnd() || written->kind() != InputValue::Kind::Link)
+        const auto bound = held.constFind(name);
+        if (bound == held.constEnd() || bound->value.kind() != InputValue::Kind::Link)
             continue;
-        const Source inner = resolve(scope, written->from());
+        const Source inner = resolve(bound->scope, bound->value.from());
         if (inner.status == Source::Status::Broken)
             return Source{};
         const auto fail = [&](const QString &message) {
