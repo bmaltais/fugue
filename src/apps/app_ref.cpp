@@ -70,10 +70,13 @@ std::optional<QString> appRefFromArgs(int argc, char **argv, const char *option)
     return std::nullopt;
 }
 
-bool openApp(Workflows &workflows, const AppRef &app) {
+bool openApp(Workflows &workflows, const AppRef &app, std::function<void()> opened) {
     if (app.templ)
-        return workflows.openTemplateWithFiles(*app.templ);
-    return workflows.openPath(app.file);
+        return workflows.openTemplateWithFiles(*app.templ, [opened](bool ok) { if (ok && opened) opened(); });
+    const bool ok = workflows.openPath(app.file);
+    if (ok && opened)
+        opened();
+    return ok;
 }
 
 } // namespace fugue

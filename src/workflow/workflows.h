@@ -168,7 +168,11 @@ public:
     // naming a file in it (a file the sender lacked, or one not an image) keeps only the bare name.
     bool openTemplate(const Template &chosen, bool fromPackage = false);
     // openTemplate, but a template that is ready only through the person's files opens with them (what a card click does); the launcher's --app too.
-    bool openTemplateWithFiles(const Template &chosen);
+    // `opened(ok)` runs when the tab exists: at once, or after the person's files were read (the caller then chooses the view it shows).
+    bool openTemplateWithFiles(const Template &chosen, std::function<void(bool)> opened = {});
+    // The template's own models, a tab at once (the canvas actions' workflows, which act on the tab): no files swapped in.
+    bool openTemplateAsIs(const QString &id);
+    bool openTemplateByIdThen(const QString &id, std::function<void(bool)> opened);
     // The suffix File > Export for sharing gives the shown workflow: `fugueapp` when it has an `app` block (an app bundle,
     // #394), else `fuguepack`.
     Q_INVOKABLE QString shareSuffix() const;
@@ -432,8 +436,8 @@ private:
     bool applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp);
     // The uses that make `chosen` ready and nothing else is missing (no pack to get): what a card click opens with. Empty otherwise.
     QList<OnDiskUse> coveringUses(const Template &chosen) const;
-    bool openWithUses(const Template &chosen, const QList<OnDiskUse> &uses);
-    void finishOpenWithUses(const Template &chosen, const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed);
+    bool openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened);
+    bool finishOpenWithUses(const Template &chosen, const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed);
     // Runs `what` now, or when the Get ready sheet has closed.
     void after(std::function<void()> what);
     // `replace`: a file at `path` may be replaced (the dialog asked, or it is the tab's own).
@@ -525,10 +529,16 @@ private:
     QSet<QString> m_hashing; // the targets whose chosen file is being read ("use:<tab> <hashes>", "open:<template>")
     Uses m_openUses; // the files a template opens with (openTemplateWithWhatYouHave)
     // The asks waiting on one read of files, by its target: a sheet's request ids, how many others asked, and whether nobody is left.
+    // One ask for a file to be used, with everything its completion needs, taken when it was asked: nothing is read again later.
+    struct UseAsk {
+        int token = 0;     // a sheet's request id, or 0
+        QString tab;       // the tab it is for
+        bool inApp = false; // the App view's state (true) or the graph's document (false)
+        QList<OnDiskUse> chosen;
+    };
     struct UseJob {
         QStringList wanted;
-        QList<int> tokens;
-        int plain = 0;
+        QList<UseAsk> asks;
         bool cancelled = false;
     };
     QHash<QString, UseJob> m_useJobs;

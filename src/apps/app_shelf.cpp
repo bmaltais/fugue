@@ -169,6 +169,11 @@ void AppShelf::refresh() {
 }
 
 bool AppShelf::choose(const QString &id) {
+    if (m_openThen)
+        return m_openThen(id, [this, id](bool ok) {
+            if (ok)
+                emit chosen(id);
+        });
     if (!m_open || !m_open(id))
         return false;
     emit chosen(id);

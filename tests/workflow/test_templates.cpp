@@ -18,6 +18,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "apps/app_ref.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
@@ -1619,6 +1620,90 @@ private slots:
         QTRY_VERIFY(!workflows.hashingUses());
         QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(),
                  QString("z_image_turbo_bf16.safetensors")); // and its result applied
+    }
+
+    // The view a caller asks for (--edit: the graph, --app: the App view) is chosen when the tab exists: a template that opens with the
+    // person's files does so after reading them, and its caller's callback runs then, never before; an ordinary template's at once.
+    void theCallersViewIsChosenWhenTheTabExists() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QJsonObject wanted{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'a')}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject recorded = wanted;
+        recorded.insert("source", "http://127.0.0.1:9/z");
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}}, workflow({{"models", node("fugue/load-models", {{"diffusion_model", wanted}})}}, {{"models", QJsonArray{recorded}}}));
+        makeTemplate(f.bundled.filePath("plain"), {{"title", "Plain"}});
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        int calls = 0;
+        bool tabThere = false;
+        const auto then = [&] { ++calls; tabThere = canvas.document().graph.nodes.contains("models"); };
+        AppRef zit;
+        zit.templ = f.library().find("zit");
+        QVERIFY(openApp(workflows, zit, then));
+        QCOMPARE(calls, 0); // the files are read first: the view is not chosen yet
+        QTRY_COMPARE(calls, 1);
+        QVERIFY(tabThere); // and then the tab is there, with the file in it
+        AppRef plain;
+        plain.templ = f.library().find("plain");
+        QVERIFY(openApp(workflows, plain, then));
+        QCOMPARE(calls, 2); // an ordinary template: at once
+    }
+
+    // A read cancelled in the graph and asked again in the App view applies to the App view: each ask keeps its own destination.
+    void aCancelledReadAskedAgainInTheAppViewIsTheAppViews() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hash = "sha256:" + QString(64, u'b');
+        const QJsonObject wanted{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject recorded = wanted;
+        recorded.insert("source", "http://127.0.0.1:9/z");
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}}, workflow({{"models", node("fugue/load-models", {{"diffusion_model", wanted}})}}, {{"models", QJsonArray{recorded}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateForDownload("zit"));
+        bool inApp = false;
+        int taken = 0;
+        workflows.setAppShown([&inApp](const QString &) { return inApp; });
+        workflows.setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
+            ++taken;
+            return true;
+        });
+        const int steps = canvas.undoStack()->count();
+        workflows.useOnDisk({hash}, 7); // the sheet's ask, in the graph
+        workflows.cancelUses(7);        // cancelled while the file is read
+        inApp = true;                   // the person goes to the App view and asks again
+        workflows.useOnDisk({hash}, 0);
+        QTRY_COMPARE(taken, 1);         // the App view's state took it
+        QCOMPARE(canvas.undoStack()->count(), steps); // the workflow itself was not edited
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(), hash);
     }
 
     // A mixed card's Download fetches only what its label counts: the model a file of the person's stands in for is not downloaded.
