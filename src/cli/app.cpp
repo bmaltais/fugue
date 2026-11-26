@@ -517,12 +517,15 @@ Reply appRun(const Command &command, Context &context) {
     Result<Loaded> read = loadApp(command.positionals.at(0), context);
     if (!read)
         return Reply::failure(read.errors());
-    // --use-on-disk (#605): a model that is not on disk, whose same weights are, is swapped for this run only; the app's file is not written.
-    if (command.has("use-on-disk"))
+    // A model that is not on disk, whose same weights are, is swapped for this run only (#605, by default #618); the app's file is not written.
+    if (const Errors conflict = onDiskFlagConflict(command); !conflict.isEmpty())
+        return Reply::failure(conflict);
+    const bool swaps = usesOnDisk(command);
+    if (swaps)
         read->document = useOnDisk(read->document, context);
     const Result<Loaded> &loaded = read;
     const auto failure = [&](Errors errors) {
-        if (!command.has("use-on-disk"))
+        if (!swaps)
             addOnDiskHints(errors, loaded->document, context);
         return Reply::failure(errors);
     };
@@ -544,7 +547,7 @@ Reply appRun(const Command &command, Context &context) {
         return Reply::failure(bound.errors());
     // A field's default may hold the missing model, and binding writes it over the file chosen above: put the file in again, saying
     // nothing twice, before the readiness check that follows.
-    if (command.has("use-on-disk")) {
+    if (swaps) {
         const auto log = std::exchange(context.log, nullptr);
         *bound = useOnDisk(*bound, context);
         context.log = log;

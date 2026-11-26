@@ -484,7 +484,9 @@ void Workflows::setHashing(const QString &key, bool on) {
         emit hashingUsesChanged();
 }
 
-void Workflows::useOnDisk(const QStringList &hashes, int token) {
+void Workflows::useOnDisk(const QStringList &hashes, int token) { startUses(hashes, token, false); }
+
+void Workflows::startUses(const QStringList &hashes, int token, bool automatic) {
     if (m_current < 0) {
         emit usesFinished({}, hashes, token);
         return;
@@ -510,7 +512,7 @@ void Workflows::useOnDisk(const QStringList &hashes, int token) {
     const bool running = m_hashing.contains(key);
     UseJob &job = m_useJobs[key];
     job.wanted = wanted;
-    job.asks.append({token, tab, m_appShown && m_appShown(tab), chosen});
+    job.asks.append({token, tab, m_appShown && m_appShown(tab), chosen, automatic});
     if (running) {
         if (job.cancelled) { // the read of a cancelled sheet is still going: it counts again, for this ask only
             job.cancelled = false;
@@ -539,7 +541,7 @@ void Workflows::useOnDisk(const QStringList &hashes, int token) {
                     chosenHashes << use.wanted.value(QStringLiteral("hash")).toString();
                 const QString where = ask.tab + QLatin1Char('|') + (ask.inApp ? QLatin1Char('a') : QLatin1Char('g')) + QLatin1Char('|') + chosenHashes.join(QLatin1Char(','));
                 if (!appliedTo.contains(where))
-                    appliedTo.insert(where, applyUses(ask.tab, ask.chosen, resolved, ask.inApp));
+                    appliedTo.insert(where, applyUses(ask.tab, ask.chosen, resolved, ask.inApp, ask.automatic));
                 const bool applied = appliedTo.value(where);
                 anyApplied |= applied;
                 anyDropped |= !applied && !resolved.isEmpty();
@@ -560,6 +562,9 @@ void Workflows::useOnDisk(const QStringList &hashes, int token) {
             }
             for (int i = 0; i < done.size(); ++i)
                 emit usesFinished(done.at(i).second, notRead.at(i).second, done.at(i).first);
+            // What waited for the files (the Get ready sheet of a tab just opened) opens now, for what is left.
+            if (std::any_of(finished.asks.begin(), finished.asks.end(), [](const UseAsk &ask) { return ask.automatic; }))
+                offerReadiness();
         },
         [this, key](const OnDiskUse &use, int percent) {
             const auto job = m_useJobs.constFind(key);
@@ -568,12 +573,13 @@ void Workflows::useOnDisk(const QStringList &hashes, int token) {
         });
 }
 
-bool Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp) {
+bool Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, bool announce) {
     if (resolved.isEmpty())
         return false; // no file could be read
     const bool open = std::any_of(m_tabs.begin(), m_tabs.end(), [&tab](const Tab &t) { return t.id == tab; });
     if (!open)
         return false; // the tab was closed meanwhile
+    Document before;
     if (inApp) {
         // The App view's own state, whichever view shows now; the workflow is never written.
         if (!m_useTaker)
@@ -583,11 +589,14 @@ bool Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, co
         if (m_current < 0 || m_tabs[size_t(m_current)].id != tab)
             return false; // another tab is shown: the document on the canvas is not this one's
         // The graph: the document itself, one undo step; the file is written only when the person saves it.
-        m_canvas->commitWhole(withUses(m_canvas->document(), resolved), tr("Use the files you have"));
+        before = m_canvas->document();
+        m_canvas->commitWhole(withUses(before, resolved), tr("Use the files you have"));
         m_onDiskKey.clear();
     }
     usesChanged();
     emit usesApplied();
+    if (announce)
+        announceUses(tab, chosen, resolved, inApp, before);
     return true;
 }
 
@@ -596,8 +605,30 @@ void Workflows::usesChanged() {
     refreshMissing(false);
 }
 
-QList<OnDiskUse> Workflows::coveringUses(const Template &chosen) const {
-    if (!chosen.neededPacks.isEmpty())
+bool Workflows::autoUseOn() const { return currentSettings().useOnDisk == QLatin1String("use"); }
+
+bool Workflows::autoUse() {
+    // Never under a sheet the person is deciding in, nor while a template is opening with its files, nor with nothing shown.
+    if (m_current < 0 || m_opening || m_readiness->isOpen() || !m_registry || !autoUseOn())
+        return false;
+    const QString tab = m_tabs[size_t(m_current)].id;
+    QStringList hashes;
+    for (const OnDiskUse &use : onDiskNow()) {
+        const QString hash = use.wanted.value(QStringLiteral("hash")).toString();
+        if (m_autoTried.contains(tab + QLatin1Char(' ') + hash))
+            continue;
+        hashes << hash;
+    }
+    if (hashes.isEmpty())
+        return false;
+    for (const QString &hash : std::as_const(hashes))
+        m_autoTried.insert(tab + QLatin1Char(' ') + hash);
+    startUses(hashes, 0, true);
+    return true;
+}
+
+QList<OnDiskUse> Workflows::coveringUses(const Template &chosen, bool partial) const {
+    if (!partial && !chosen.neededPacks.isEmpty())
         return {}; // the Get ready sheet has more to ask than the files
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
@@ -606,7 +637,7 @@ QList<OnDiskUse> Workflows::coveringUses(const Template &chosen) const {
         return {}; // nothing missing: an ordinary open
     const ModelSpeeds speeds;
     const QList<OnDiskUse> uses = onDiskUses(absent, library, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared());
-    return uses.size() == absent.size() ? uses : QList<OnDiskUse>();
+    return partial || uses.size() == absent.size() ? uses : QList<OnDiskUse>();
 }
 
 bool Workflows::openTemplateWithWhatYouHave(const QString &id) {
@@ -675,6 +706,28 @@ QJsonValue withValueAt(const QJsonValue &from, const QVariantList &path, const Q
 
 } // namespace
 
+void Workflows::announceUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, const Document &before) {
+    QStringList lines;
+    for (const OnDiskUse &use : chosen)
+        if (resolved.contains(use.wanted.value(QStringLiteral("hash")).toString()))
+            lines << tr("Used your file %1 in place of %2 (%3).")
+                         .arg(use.match.name, use.wanted.value(QStringLiteral("name")).toString(), use.sameModelText());
+    if (lines.isEmpty())
+        return;
+    setNotice(lines.join(QLatin1Char(' ')));
+    m_openedWith = {};
+    if (!inApp && m_current >= 0 && m_tabs[size_t(m_current)].id == tab) {
+        // Undo puts back exactly the inputs that were changed (the App view keeps its own list of what it uses, with its own Undo).
+        QList<InputChange> changes;
+        diffHandles(before.toJson(), m_canvas->document().toJson(), {}, changes);
+        OpenedWith opened{tab, m_canvas->undoStack()->index(), {}};
+        for (const InputChange &change : std::as_const(changes))
+            opened.changes.append({change.path, change.original, change.applied});
+        m_openedWith = opened;
+    }
+    emit noticeChanged();
+}
+
 bool Workflows::openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened) {
     const QString key = QStringLiteral("open:") + chosen.id;
     if (m_hashing.contains(key))
@@ -714,8 +767,13 @@ void Workflows::after(std::function<void()> what) {
 
 bool Workflows::finishOpenWithUses(const Template &chosen, const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed) {
     m_openUses = resolved;
+    m_opening = true; // a file that could not be read is said below, not tried again by the tab's own check
     const bool opened = openTemplate(chosen);
+    m_opening = false;
     m_openUses.clear();
+    if (opened && m_current >= 0)
+        for (const OnDiskUse &use : uses) // asked once: Undo is not undone by the next check, nor is a file that could not be read tried again
+            m_autoTried.insert(m_tabs[size_t(m_current)].id + QLatin1Char(' ') + use.wanted.value(QStringLiteral("hash")).toString());
     if (!failed.isEmpty())
         setNotice(tr("Opened without %1: the file could not be read.").arg(failed.join(QStringLiteral(", "))));
     if (!opened || resolved.isEmpty() || m_current < 0)
@@ -768,9 +826,16 @@ bool Workflows::openTemplateForDownload(const QString &id) {
     const std::optional<Template> chosen = TemplateLibrary(m_templateRoots, m_registry).find(id);
     if (!chosen)
         return false;
-    // The Get ready sheet opens by itself when something is missing; every model with a file of its own is set to Download.
-    if (!openTemplate(*chosen))
+    // The Get ready sheet opens by itself when something is missing; every model with a file of its own is set to Download. The person
+    // asked to download: "Use my file" leaves this tab alone (they can still choose their file on the sheet).
+    m_opening = true;
+    const bool opened = openTemplate(*chosen);
+    m_opening = false;
+    if (!opened)
         return false;
+    if (m_current >= 0)
+        for (const OnDiskUse &use : onDiskNow())
+            m_autoTried.insert(m_tabs[size_t(m_current)].id + QLatin1Char(' ') + use.wanted.value(QStringLiteral("hash")).toString());
     if (m_readiness->isOpen())
         m_readiness->chooseAll(false);
     return true;
@@ -902,6 +967,7 @@ void Workflows::setCurrent(int index) {
     refreshRegistry();
     emit tabsChanged();
     emit currentChanged(from, index);
+    autoUse(); // the tab shown now (restored with the session, or reached from another)
 }
 
 void Workflows::removeTab(int index) {
@@ -1396,7 +1462,8 @@ bool Workflows::openTemplateByIdThen(const QString &id, std::function<void(bool)
 
 bool Workflows::openTemplateWithFiles(const Template &chosen, std::function<void(bool)> opened) {
     // Ready only through the files the person has: it opens with them, no sheet (UI design 2026-11-26).
-    if (const QList<OnDiskUse> uses = coveringUses(chosen); !uses.isEmpty())
+    // "Use my file" (the setting, #618): whatever is covered is used, and Get ready opens for the rest. "Ask me": only when all of it is.
+    if (const QList<OnDiskUse> uses = coveringUses(chosen, autoUseOn()); !uses.isEmpty())
         return openWithUses(chosen, uses, std::move(opened));
     const bool done = openTemplate(chosen);
     if (opened)
@@ -1638,6 +1705,7 @@ void Workflows::refreshMissing(bool force) {
     if (force || shown)
         setNotice(missing);
     emit noticeChanged(); // the offer may differ with the same line
+    autoUse(); // a model that is missing and has a file on disk (a folder added, a download ended): "Use my file" uses it
 }
 
 QVariantList Workflows::packOffers() const {
@@ -1740,6 +1808,10 @@ void Workflows::setDownloadRoot(const QString &root) {
 }
 
 void Workflows::offerReadiness() {
+    // "Use my file" (#618): a model with a file of its own on disk is used first, and the sheet opens for what is really missing when the
+    // file has been read (the read runs off the window's thread; autoUse() offers again when it ends).
+    if (autoUse())
+        return;
     // Opened but not ready: the Get ready sheet opens by itself (one yes covers the packs, trust, environments and models).
     // Nothing happens before that yes; Cancel leaves the banner's Get ready… button to open it again.
     if (getReadyOffer())

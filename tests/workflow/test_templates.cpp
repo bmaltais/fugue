@@ -176,6 +176,16 @@ ListedModel servedBy(const QString &host, const QString &resource, const QByteAr
     return model;
 }
 
+// A Z-Image Turbo bf16 file (a header alone) in `models`' diffusion_models: the same weights as a missing INT8 file of that model.
+void writeZImageFile(const QTemporaryDir &models) {
+    const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                  "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+    QByteArray file;
+    for (int i = 0; i < 8; ++i)
+        file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+    writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+}
+
 // Under ctest a test's home stays between runs: no model, remembered hash or setting of an
 // earlier run.
 void forgetDownloads() {
@@ -1583,6 +1593,120 @@ private slots:
         QCOMPARE(handleOf("a").value("hash").toString(), hashX);
         QCOMPARE(handleOf("b").value("hash").toString(), hashY);
         QVERIFY(!workflows.noticeUndoable());
+    }
+
+    // #618, "Use my file" (the default): a template covered in part opens with the covered model in place of the missing one, said with an
+    // Undo, and Get ready opens only for the model with no file. With "Ask me" it is #620's: the document as the template wrote it, and
+    // the sheet lists both.
+    void aPartlyCoveredTemplateOpensWithTheFileAndGetReadyAsksOnlyForTheRest() {
+        for (const bool ask : {false, true}) {
+            forgetDownloads();
+            Fixture f;
+            QTemporaryDir models;
+            QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+            if (ask)
+                QVERIFY(changeSetting(settingsPath(), "use_on_disk", "ask").isEmpty());
+            writeZImageFile(models);
+            const QString covered = "sha256:" + QString(64, u'c'), absent = "sha256:" + QString(64, u'd');
+            const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", covered}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+            const QJsonObject w{{"resource", "fugue/vae"}, {"hash", absent}, {"name", "flux2-vae.safetensors"}};
+            QJsonObject xr = x, wr = w;
+            xr.insert("source", "http://127.0.0.1:9/x");
+            wr.insert("source", "http://127.0.0.1:9/w");
+            makeTemplate(f.bundled.filePath("part"), {{"title", "Part"}},
+                         workflow({{"models", node("fugue/load-models", {{"diffusion_model", x}, {"vae", w}})}}, {{"models", QJsonArray{xr, wr}}}));
+            CanvasModel canvas(&f.registry);
+            CommandRegistry commands;
+            QTemporaryDir state;
+            WorkflowLocations locations;
+            locations.recoveryDir = state.filePath("recovery");
+            locations.trustPath = state.filePath("trust.json");
+            locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+            Workflows workflows(&canvas, &f.registry, &commands, locations);
+            QVERIFY(workflows.openTemplateById("part"));
+            const auto handle = [&](const char *input) { return canvas.document().graph.nodes.value("models").inputs.value(input).handle(); };
+            if (ask) {
+                QVERIFY(canvas.document().graph.nodes.contains("models")); // at once: nothing is read
+                QCOMPARE(handle("diffusion_model").value("hash").toString(), covered);
+                QVERIFY(workflows.readiness()->isOpen());
+                QCOMPARE(workflows.readiness()->view().value("models").toList().size(), 2);
+                QVERIFY(!workflows.noticeUndoable());
+                continue;
+            }
+            QTRY_VERIFY(canvas.document().graph.nodes.contains("models"));
+            QCOMPARE(handle("diffusion_model").value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
+            QCOMPARE(handle("vae").value("hash").toString(), absent); // no file of the same weights: as the template wrote it
+            QVERIFY(workflows.readiness()->isOpen());
+            const QVariantList rows = workflows.readiness()->view().value("models").toList();
+            QCOMPARE(rows.size(), 1); // only what is really missing
+            QCOMPARE(rows.at(0).toMap().value("hash").toString(), absent);
+            QVERIFY2(workflows.notice().contains("z_image_turbo_bf16.safetensors"), qPrintable(workflows.notice()));
+            QVERIFY(workflows.noticeUndoable());
+            workflows.undoNotice();
+            QCOMPARE(handle("diffusion_model").value("hash").toString(), covered);
+            QVERIFY(!workflows.hashingUses()); // taken back is not applied again
+        }
+    }
+
+    // #618: a workflow file that names a missing model with a file of the same weights on disk is opened, then the file is read off the window's
+    // thread and used, said with an Undo; the Get ready sheet does not open for it; the workflow file is not written. "Ask me" leaves the
+    // document and opens the sheet. In the App view the app's own state takes the file and the document is not edited.
+    void anOpenedWorkflowUsesTheFileByItselfAndSaysSo() {
+        for (const QString &mode : {QString("use"), QString("ask"), QString("app")}) {
+            forgetDownloads();
+            Fixture f;
+            QTemporaryDir models;
+            QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+            if (mode == QLatin1String("ask"))
+                QVERIFY(changeSetting(settingsPath(), "use_on_disk", "ask").isEmpty());
+            writeZImageFile(models);
+            const QString hash = "sha256:" + QString(64, u'9');
+            const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+            QJsonObject xr = x;
+            xr.insert("source", "http://127.0.0.1:9/x");
+            QTemporaryDir work;
+            const QString path = work.filePath("w.fugue");
+            writeJson(path, workflow({{"models", node("fugue/load-models", {{"diffusion_model", x}})}}, {{"models", QJsonArray{xr}}}));
+            const QByteArray written = readFile(path);
+            CanvasModel canvas(&f.registry);
+            CommandRegistry commands;
+            QTemporaryDir state;
+            WorkflowLocations locations;
+            locations.recoveryDir = state.filePath("recovery");
+            locations.trustPath = state.filePath("trust.json");
+            locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+            Workflows workflows(&canvas, &f.registry, &commands, locations);
+            int taken = 0;
+            if (mode == QLatin1String("app")) {
+                workflows.setAppShown([](const QString &) { return true; });
+                workflows.setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
+                    ++taken;
+                    return true;
+                });
+            }
+            QVERIFY(workflows.openPath(path));
+            const auto handle = [&] { return canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle(); };
+            if (mode == QLatin1String("ask")) {
+                QVERIFY(workflows.readiness()->isOpen());
+                QCOMPARE(handle().value("hash").toString(), hash);
+                QVERIFY(!workflows.hashingUses());
+            } else {
+                QVERIFY(!workflows.readiness()->isOpen()); // not before the file is read, and not for a model that has one
+                if (mode == QLatin1String("app")) {
+                    QTRY_COMPARE(taken, 1); // the app's own state; the workflow is never written
+                    QCOMPARE(handle().value("hash").toString(), hash);
+                } else {
+                    QTRY_VERIFY(handle().value("name").toString() == QLatin1String("z_image_turbo_bf16.safetensors"));
+                    QVERIFY(workflows.noticeUndoable());
+                    workflows.undoNotice();
+                    QCOMPARE(handle().value("hash").toString(), hash);
+                }
+                QTRY_VERIFY(!workflows.hashingUses());
+                QVERIFY(!workflows.readiness()->isOpen()); // nothing really missing is left to ask
+                QVERIFY2(workflows.notice().contains("z_image_turbo_bf16.safetensors") || mode == QLatin1String("use"), qPrintable(workflows.notice()));
+            }
+            QCOMPARE(readFile(path), written); // the file is changed only when the person saves
+        }
     }
 
     // Cancelling the sheet while its files are read takes only the sheet's ask away: another surface's read of the same file goes on and applies.

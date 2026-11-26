@@ -57,6 +57,7 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QString embedWorkflow READ embedWorkflow NOTIFY changed)
     Q_PROPERTY(QString pictureMode READ pictureMode NOTIFY changed)
     Q_PROPERTY(QString stepPreview READ stepPreview NOTIFY changed)
+    Q_PROPERTY(QString useOnDisk READ useOnDisk NOTIFY changed)
     // The Corners slider takes Omarchy's window rounding as its base (look_corners_omarchy, #467; it replaced corner_radius).
     Q_PROPERTY(bool lookCornersOmarchy READ lookCornersOmarchy NOTIFY changed)
     // How frosted the kit's controls over a picture are, 0 (off) to 1 (docs/canvas-look.md "Drift kit"); the theme's look follows it live.
@@ -141,6 +142,7 @@ public:
     QString embedWorkflow() const { return m_effective.settings.embedWorkflow; }
     QString pictureMode() const { return m_effective.settings.pictureMode; } // smart, sinks or all (#263)
     QString stepPreview() const { return m_effective.settings.stepPreview; } // off, fast, tae or vae (#297)
+    QString useOnDisk() const { return m_effective.settings.useOnDisk; } // use or ask (#618)
     bool lookCornersOmarchy() const { return m_effective.settings.lookCornersOmarchy; }
     double frost() const { return m_effective.settings.frost; }
     double lookColour() const { return m_effective.settings.lookColour; }

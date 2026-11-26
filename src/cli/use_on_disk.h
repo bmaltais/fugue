@@ -11,6 +11,13 @@
 
 namespace fugue::cli {
 
+// Whether this command swaps a missing model for the file of the same weights: `--use-on-disk` says yes, `--no-use-on-disk` says no, and
+// with neither the setting `use_on_disk` decides ("use", the default: yes; "ask": no, the hint is all there is) (#618).
+bool usesOnDisk(const Command &command);
+
+// The error of passing both flags, or none.
+Errors onDiskFlagConflict(const Command &command);
+
 // The document with each missing model that has a file of the same weights on disk replaced by it; each substitution is printed
 // (`context.log`). `said` gets one line per substitution.
 Document useOnDisk(const Document &document, Context &context, QStringList *said = nullptr);
