@@ -318,6 +318,25 @@ private slots:
         QCOMPARE(status.error.code, QStringLiteral("node_timeout"));
     }
 
+    void anAnswerBeyondTheCapIsCutOff() {
+        Fixture fixture;
+        fixture.answer = HttpResponse{200, QByteArray(33 << 20, 'x')};
+        auto provider = fixture.provider();
+        const JobStatus status = run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}}));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+        QVERIFY(status.error.message.contains("more data"));
+    }
+
+    void theTokenGoesToTheApiOriginOnlyAndARedirectIsNotFollowed() {
+        Fixture fixture;
+        fixture.api.on("POST", runPath(kSchnell).toLatin1(), [&](const HttpRequest &) {
+            return HttpResponse{302, "", "text/plain", false, -1, {"Location: " + fixture.other.origin() + "/elsewhere"}};
+        });
+        auto provider = fixture.provider();
+        QCOMPARE(run(*provider, fixture.request("image.generate", kSchnell, {{"prompt", "x"}})).error.code, QStringLiteral("provider_unreachable"));
+        QVERIFY(fixture.other.requests().isEmpty());
+    }
+
     void theTokenIsNotSentOverPlainHttpToARemoteHost() {
         ProviderInstance instance;
         instance.name = QStringLiteral("Cloudflare Workers AI");

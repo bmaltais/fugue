@@ -54,7 +54,7 @@ struct Call {
     QByteArray body;
     QByteArray contentType;
     QHttpMultiPart *form = nullptr; // sent instead of `body`; the reply takes it over
-    qint64 cap = 64LL << 20;        // the answer is cut off past this many bytes
+    qint64 cap = 0; // the answer is cut off past this many bytes; every call sets its own (left at 0, any answer is cut off)
     bool withKey = false;           // the key goes along if the URL is at one of the session's origins
     bool keyAnywhere = false;       // ... or at any URL (the caller has judged it)
     QList<QPair<QByteArray, QByteArray>> headers;

@@ -34,6 +34,7 @@ QUrl at(const FakeHttpServer &server, const char *path) { return QUrl(QString::f
 remote::Call keyed() {
     remote::Call call;
     call.withKey = true;
+    call.cap = 1 << 20;
     return call;
 }
 
@@ -114,6 +115,9 @@ private slots:
         Sent fine(m_network, {}, at(m_own, "/ok"), call);
         QVERIFY(!remote::wasCapped(fine.reply));
         QCOMPARE(remote::statusOf(fine.reply), 200);
+        // A call that sets no cap gets no answer: a provider that forgets its cap fails its own tests.
+        Sent uncapped(m_network, {}, at(m_own, "/ok"), remote::Call{});
+        QVERIFY(remote::wasCapped(uncapped.reply));
     }
     void aTransferThatSaysNothingEndsAtTheTimeout() {
         m_own.on("GET", "/hold", [](const HttpRequest &) { return HttpResponse{200, {}, "text/plain", true}; });
