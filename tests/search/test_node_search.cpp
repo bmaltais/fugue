@@ -187,6 +187,30 @@ private slots:
         QCOMPARE(canvas->links()->rowCount(), links);
     }
 
+    // Dragging from a Switch: its value is whatever the linked side is (#591).
+    void searchFromASwitchFollowsItsSides() {
+        canvas->setDocument(load(R"({"fugue": 1, "graph": {"nodes": {
+            "a": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "x"}},
+            "n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}},
+            "sw": {"type": "fugue/switch", "version": "1.0.0", "inputs": {}}}},
+            "layout": {"nodes": {"a": {"pos": [0, 0]}, "n": {"pos": [0, 150]}, "sw": {"pos": [300, 0]}}}})"));
+        search->openFromLink({{"node", "sw"}, {"port", "value"}, {"output", true}}, 300, 300);
+        const int open = search->count();
+        QVERIFY(names(search->results()).contains("Brightness and Contrast")); // a wildcard: every node with an input
+        QVERIFY(canvas->connectPorts("a", "text", "sw", "on_true"));
+        search->openFromLink({{"node", "sw"}, {"port", "value"}, {"output", true}}, 300, 300);
+        const QStringList found = names(search->results());
+        QVERIFY(found.contains("Text Concat"));
+        QVERIFY(!found.contains("Brightness and Contrast"));
+        QVERIFY(search->count() < open);
+        QCOMPARE(search->filterChip(), QString("Takes text"));
+        // The free side: only nodes that give the linked side's type.
+        search->openFromLink({{"node", "sw"}, {"port", "on_false"}, {"output", false}}, 300, 300);
+        QCOMPARE(search->filterChip(), QString("Gives text"));
+        QVERIFY(names(search->results()).contains("Text"));
+        QVERIFY(!names(search->results()).contains("Number"));
+    }
+
     void aLinkFromAnInputKeepsNodesWithACompatibleOutput() {
         search->openFromLink({{"node", "save"}, {"port", "image"}, {"output", false}}, 300, 300);
         const QStringList found = names(search->results());
