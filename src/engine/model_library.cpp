@@ -24,9 +24,10 @@ namespace {
 
 // ComfyUI's supported_pt_extensions (folder_paths.py) and .gguf, which its GGUF loaders and
 // stable-diffusion.cpp read.
-const QStringList defaultExtensions{QStringLiteral(".safetensors"), QStringLiteral(".gguf"), QStringLiteral(".ckpt"),
-                                    QStringLiteral(".pt"),          QStringLiteral(".pt2"),  QStringLiteral(".pth"),
-                                    QStringLiteral(".bin"),         QStringLiteral(".sft"),  QStringLiteral(".pkl")};
+// Never destroyed: a thread still running at exit (the finder's) reads it.
+const QStringList &defaultExtensions = *new QStringList{QStringLiteral(".safetensors"), QStringLiteral(".gguf"), QStringLiteral(".ckpt"),
+                                                        QStringLiteral(".pt"),          QStringLiteral(".pt2"),  QStringLiteral(".pth"),
+                                                        QStringLiteral(".bin"),         QStringLiteral(".sft"),  QStringLiteral(".pkl")};
 
 // An extension matches the whole suffix after a dot: "pt" and ".pt" both match "x.pt", neither
 // "x.ckpt".
@@ -143,19 +144,29 @@ QStringList folderNames(const DeclaredPortType &declared) {
 constexpr int kFilesRead = 8;
 constexpr int kSampleDepth = 3;
 
-// Up to kFilesRead model files under `folder`, in name order, depth first.
-void sample(const QString &folder, int depth, QStringList &out) {
-    const QFileInfoList entries = QDir(folder).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QFileInfo &entry : entries) {
-        if (out.size() >= kFilesRead)
+// Up to kFilesRead model files under `folder`, in name order, depth first, listed by `lister` (the finder's guarded one, or QDir's).
+void sample(const ModelLibrary::DirLister &lister, const std::function<bool()> &stop, const QString &folder, int depth, QStringList &out) {
+    QList<ModelLibrary::DirEntry> entries;
+    if ((stop && stop()) || !lister(folder, entries))
+        return;
+    for (const ModelLibrary::DirEntry &entry : std::as_const(entries)) {
+        if (out.size() >= kFilesRead || (stop && stop()))
             return;
-        if (entry.isDir()) {
+        if (entry.isDir) {
             if (depth < kSampleDepth)
-                sample(entry.filePath(), depth + 1, out);
-        } else if (hasExtension(entry.fileName(), {QStringLiteral(".safetensors"), QStringLiteral(".gguf")})) {
-            out << entry.absoluteFilePath();
+                sample(lister, stop, entry.path, depth + 1, out);
+        } else if (hasExtension(entry.name, {QStringLiteral(".safetensors"), QStringLiteral(".gguf")})) {
+            out << entry.path;
         }
     }
+}
+
+// QDir's listing, the one a library of the settings uses (a folder the person set; the finder gives its own).
+bool listWithQDir(const QString &dir, QList<ModelLibrary::DirEntry> &out) {
+    const QFileInfoList entries = QDir(dir).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &entry : entries)
+        out.append({entry.fileName(), entry.isDir(), entry.absoluteFilePath()});
+    return true;
 }
 
 // What a folder's files say it holds, for the process: a library is made for each use, the
@@ -184,6 +195,69 @@ FoundKinds &foundKinds() {
 
 } // namespace
 
+const QStringList &ModelLibrary::defaultModelExtensions() { return defaultExtensions; }
+
+namespace {
+// The folder names other tools use for a kind (A1111, Forge, SwarmUI, Stability Matrix: pack.json lists them after ComfyUI's, #619).
+// A never-destroyed set, so a thread still running at exit never reads a freed one.
+const QSet<QString> &otherToolsNames() {
+    static const QSet<QString> &names = *new QSet<QString>{
+        QStringLiteral("Stable-diffusion"), QStringLiteral("Stable-Diffusion"), QStringLiteral("StableDiffusion"),
+        QStringLiteral("Lora"),             QStringLiteral("LyCORIS"),          QStringLiteral("VAE"),
+        QStringLiteral("TextEncoders"),     QStringLiteral("DiffusionModels"),  QStringLiteral("RealESRGAN")};
+    return names;
+}
+} // namespace
+
+// ComfyUI's names (the ones before #619) make a layout with one folder, as they always did. The other tools' names make one only
+// when two different kinds have a folder (`Lora/` with `LyCORIS/` is one kind, LoRAs): a folder of LoRAs with a `LyCORIS/` and an
+// `SDXL/` inside, or of checkpoints with a `VAE/` and an `SD15/`, is still the folder of one kind it was, found by its files.
+bool ModelLibrary::layoutFromFolders(const QHash<QString, QString> &typeOfFolder, const QStringList &present, bool topLevelHasModels) {
+    QSet<QString> otherKinds;
+    for (const QString &name : present) {
+        if (!typeOfFolder.contains(name))
+            continue;
+        if (!otherToolsNames().contains(name))
+            return true;
+        otherKinds.insert(typeOfFolder.value(name));
+    }
+    // And a folder with model files of its own at the top (a folder of one kind with a `VAE/` and a `Lora/` inside) keeps the kind
+    // it was: only ComfyUI's names make it a layout then.
+    return otherKinds.size() >= 2 && !topLevelHasModels;
+}
+
+QString ModelLibrary::detectKind(const QString &root, const QHash<QString, QString> &typeOfFolder,
+                                 const QHash<QString, QString> &typeOfFiles, const DirLister &listing, const std::function<bool()> &stop) {
+    const DirLister &lister = listing ? listing : DirLister(listWithQDir);
+    QList<DirEntry> top;
+    if (!lister(root, top))
+        return {};
+    QStringList present;
+    bool topModels = false;
+    for (const DirEntry &entry : std::as_const(top)) {
+        if (entry.isDir && typeOfFolder.contains(entry.name))
+            present << entry.name;
+        else if (!entry.isDir && hasExtension(entry.name, defaultExtensions))
+            topModels = true;
+    }
+    if (layoutFromFolders(typeOfFolder, present, topModels))
+        return kLayout;
+    // Else the type whose files most of a few of its files are (pack.json "files").
+    QStringList files;
+    sample(lister, stop, root, 0, files);
+    QHash<QString, int> votes;
+    for (const QString &file : std::as_const(files)) {
+        if (stop && stop())
+            return {};
+        if (const std::optional<ModelShape> shape = ModelShapes::shared().of(file); shape && shape->kind)
+            ++votes[modelKindName(*shape->kind)];
+    }
+    for (auto it = votes.begin(); it != votes.end(); ++it)
+        if (it.value() * 2 > files.size())
+            return typeOfFiles.value(it.key());
+    return {};
+}
+
 QString ModelLibrary::kindOf(const QString &root) const {
     if (const QString set = m_kinds.value(root); !set.isEmpty())
         return set;
@@ -194,32 +268,16 @@ QString ModelLibrary::kindOf(const QString &root) const {
     const qint64 modified = QFileInfo(root).lastModified().toMSecsSinceEpoch();
     if (const std::optional<QString> found = foundKinds().find(root, modified))
         return *found;
-    const QList<const DeclaredPortType *> types = m_registry->portTypes();
-    QString kind;
-    // ComfyUI's layout when any resource type's folder is there.
-    for (const DeclaredPortType *declared : types) {
+    QHash<QString, QString> typeOfFolder, typeOfFiles;
+    for (const DeclaredPortType *declared : m_registry->portTypes()) {
         if (declared->kind != PortKind::Resource)
             continue;
         for (const QString &name : folderNames(*declared))
-            if (QFileInfo(root + QLatin1Char('/') + name).isDir())
-                kind = kLayout;
-        if (!kind.isEmpty())
-            break;
+            typeOfFolder.insert(name, declared->type.toString());
+        if (!declared->files.isEmpty())
+            typeOfFiles.insert(declared->files, declared->type.toString());
     }
-    // Else the type whose files most of a few of its files are (pack.json "files").
-    if (kind.isEmpty()) {
-        QStringList files;
-        sample(root, 0, files);
-        QHash<QString, int> votes;
-        for (const QString &file : std::as_const(files))
-            if (const std::optional<ModelShape> shape = ModelShapes::shared().of(file); shape && shape->kind)
-                ++votes[modelKindName(*shape->kind)];
-        for (auto it = votes.begin(); it != votes.end() && kind.isEmpty(); ++it)
-            if (it.value() * 2 > files.size())
-                for (const DeclaredPortType *declared : types)
-                    if (declared->kind == PortKind::Resource && declared->files == it.key())
-                        kind = declared->type.toString();
-    }
+    const QString kind = detectKind(root, typeOfFolder, typeOfFiles);
     foundKinds().keep(root, modified, kind);
     return kind;
 }

@@ -22,6 +22,7 @@
 
 #include "engine/providers.h"
 #include "settings/cache_model.h"
+#include "settings/model_setup.h"
 #include "settings/packs_model.h"
 #include "engine/settings.h"
 
@@ -110,6 +111,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(fugue::PacksModel *packs READ packs CONSTANT)
     // The Cache page: sizes, Clear and the automatic cleaning (#141).
     Q_PROPERTY(fugue::CacheModel *cache READ cache CONSTANT)
+    // The first-run model folder setup, and Settings > Folders > Find model folders… (spec 8.9, #619).
+    Q_PROPERTY(fugue::ModelSetup *modelSetup READ modelSetup CONSTANT)
 
 public:
     // `settingsFile` and `providersFile` are settings.json and providers.json (the standard
@@ -178,6 +181,17 @@ public:
     QStringList providerTypes() const;
     PacksModel *packs() { return &m_packs; }
     CacheModel *cache() { return &m_cache; }
+    ModelSetup *modelSetup() { return &m_modelSetup; }
+    const Registry *types() const { return m_types; }
+    // "done" or "skipped" once the first-run offer was answered; empty before (this session's own file only).
+    QString modelsSetup() const { return m_file.settings.modelsSetup; }
+    // The first-run setup's one yes (#619): `folders` are {path, kind ("layout" or a type id), on}; each on one not yet a root is added
+    // (pinned to its kind), each off one that is an own root is removed; `download` is where new downloads go ("" or Fugue's own: the
+    // default). `markDone` also writes models_setup "done". One read and one atomic write of this session's own settings.json (a
+    // project's own file in a project). Returns {error, added, removed, vanished}: a folder that is gone or already a root is not added.
+    Q_INVOKABLE QVariantMap applyModelSetup(const QVariantList &folders, const QString &download, bool markDone, const QStringList &notLookedInto = {});
+    // Writes only models_setup ("done" or "skipped"). "" or why not.
+    Q_INVOKABLE QString markModelSetup(const QString &state);
 
     // Sets one setting (a settings.json key) and writes the file. For a folder, empty text
     // goes back to the default; a folder may be text or the folder picker's URL. Empty when done,
@@ -236,6 +250,7 @@ private:
 
     PacksModel m_packs;
     CacheModel m_cache;
+    ModelSetup m_modelSetup{this};
     QString m_path;
     QString m_providersPath;
     SettingsFile m_file;

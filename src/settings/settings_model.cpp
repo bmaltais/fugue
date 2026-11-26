@@ -403,6 +403,91 @@ QString SettingsModel::setModelFolderKind(const QString &path, const QString &ki
     return set(QStringLiteral("model_folder_kinds"), kinds.toVariantMap());
 }
 
+QString SettingsModel::markModelSetup(const QString &state) {
+    if (!m_file.writable)
+        return tr("Fix %1 first: it is not a JSON object.").arg(tilde(m_path));
+    if (const Errors errors = changeSettings(m_path, {{QStringLiteral("models_setup"), state}}); !errors.isEmpty())
+        return errors.first().message;
+    loadSettings();
+    emit changed();
+    return {};
+}
+
+QVariantMap SettingsModel::applyModelSetup(const QVariantList &folders, const QString &download, bool markDone, const QStringList &notLookedInto) {
+    auto failed = [](const QString &why) { return QVariantMap{{"error", why}, {"added", 0}, {"removed", 0}, {"vanished", 0}}; };
+    loadSettings(); // what the file holds now: a change made since the sheet opened (the CLI's, an editor's) is kept
+    if (!m_file.writable)
+        return failed(tr("Fix %1 first: it is not a JSON object.").arg(tilde(m_path)));
+    const QString own = ModelLibrary::roots(m_effective.settings).value(0);
+    QSet<QString> roots; // canonical, every root in effect (the Default's too): a folder is added once
+    QSet<QString> rootPaths; // as written: a folder that is one already needs no stat
+    for (const QString &root : ModelLibrary::roots(m_effective.settings)) {
+        rootPaths.insert(root);
+        if (notLookedInto.contains(root)) { // in a place the person left off: nothing is stat'd there
+            roots.insert(root);
+            continue;
+        }
+        roots.insert(QFileInfo(root).canonicalFilePath().isEmpty() ? root : QFileInfo(root).canonicalFilePath());
+    }
+    QStringList list = m_file.settings.modelPaths;
+    for (const QString &path : m_effective.settings.inheritedModelPaths)
+        list.removeAll(path); // the project's own entries only
+    QJsonObject kinds = m_file.document.value(QStringLiteral("model_folder_kinds")).toObject();
+    int added = 0, removed = 0, vanished = 0;
+    for (const QVariant &item : folders) {
+        const QVariantMap folder = item.toMap();
+        const QString path = QDir::cleanPath(expandHome(folder.value("path").toString()));
+        const QString value = folderValue(path);
+        if (!folder.value("on").toBool()) {
+            for (int i = list.size() - 1; i >= 0; --i)
+                if (QDir::cleanPath(expandHome(list.at(i))) == path) {
+                    kinds.remove(list.at(i));
+                    list.removeAt(i);
+                    ++removed;
+                }
+            continue;
+        }
+        if (rootPaths.contains(path))
+            continue; // already a model folder: the person's own entry stays as it is
+        const QFileInfo info(path);
+        if (!info.isDir()) {
+            ++vanished;
+            continue;
+        }
+        const QString canonical = info.canonicalFilePath();
+        if (roots.contains(canonical))
+            continue; // already a model folder: the person's own entry stays as it is
+        roots.insert(canonical);
+        list.append(value);
+        const QString kind = folder.value("kind").toString();
+        if (!kind.isEmpty())
+            kinds.insert(value, kind);
+        ++added;
+    }
+    QList<std::pair<QString, QJsonValue>> changes;
+    changes.append({QStringLiteral("model_paths"), QJsonArray::fromStringList(list)});
+    changes.append({QStringLiteral("model_folder_kinds"), kinds});
+    // The download folder: Fugue's own is the default (no key); any other must be a root now.
+    QString chosen = download.trimmed().isEmpty() ? QString() : QDir::cleanPath(expandHome(download.trimmed()));
+    if (!chosen.isEmpty() && chosen != own) {
+        QStringList now{own};
+        for (const QString &path : std::as_const(list))
+            now << QDir::cleanPath(expandHome(path));
+        if (!now.contains(chosen))
+            return failed(tr("%1 is not one of the model folders.").arg(download));
+    }
+    changes.append({QStringLiteral("download_folder"),
+                    chosen.isEmpty() || chosen == own ? QJsonValue(QJsonValue::Undefined) : QJsonValue(folderValue(chosen))});
+    if (markDone)
+        changes.append({QStringLiteral("models_setup"), QStringLiteral("done")});
+    if (const Errors errors = changeSettings(m_path, changes); !errors.isEmpty())
+        return failed(errors.first().message);
+    loadSettings();
+    pushLive();
+    emit changed();
+    return QVariantMap{{"error", QString()}, {"added", added}, {"removed", removed}, {"vanished", vanished}};
+}
+
 QString SettingsModel::modelFolderFound(const QString &path) const {
     const ModelLibrary library(ModelLibrary::roots(m_effective.settings), m_types);
     const QString kind = library.kindOf(QDir::cleanPath(expandHome(path)));

@@ -102,6 +102,11 @@ Popup {
             text: qsTr("Pick a folder…")
             onTriggered: destinationPicker.open()
         }
+        MenuItem {
+            objectName: "getReadyFindFolders"
+            text: qsTr("Find model folders…")
+            onTriggered: App.settings.modelSetup.show(false)
+        }
     }
 
     contentItem: KitPanel {

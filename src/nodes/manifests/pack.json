@@ -133,7 +133,10 @@
       "kind": "resource",
       "name": "Model",
       "folders": [
-        "checkpoints"
+        "checkpoints",
+        "Stable-diffusion",
+        "Stable-Diffusion",
+        "StableDiffusion"
       ],
       "files": "checkpoint"
     },
@@ -145,7 +148,8 @@
       "folders": [
         "diffusion-model",
         "diffusion_models",
-        "unet"
+        "unet",
+        "DiffusionModels"
       ],
       "files": "diffusion-model"
     },
@@ -157,7 +161,8 @@
       "folders": [
         "text-encoder",
         "text_encoders",
-        "clip"
+        "clip",
+        "TextEncoders"
       ],
       "files": "text-encoder"
     },
@@ -167,7 +172,8 @@
       "kind": "resource",
       "name": "VAE",
       "folders": [
-        "vae"
+        "vae",
+        "VAE"
       ],
       "files": "vae"
     },
@@ -178,7 +184,9 @@
       "name": "LoRA",
       "folders": [
         "lora",
-        "loras"
+        "loras",
+        "Lora",
+        "LyCORIS"
       ],
       "files": "lora"
     },
@@ -195,7 +203,8 @@
       "folders": [
         "upscale_models",
         "upscaler",
-        "ESRGAN"
+        "ESRGAN",
+        "RealESRGAN"
       ]
     },
     {

@@ -7,6 +7,7 @@
 // process), so an agent gets a full handle for every file (13.4).
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -20,6 +21,7 @@
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
+#include "engine/model_folder_finder.h"
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
 #include "engine/model_recommend.h"
@@ -167,6 +169,89 @@ Reply modelList(const Command &command, Context &context) {
     Reply reply = Reply::success(QJsonObject{{"models", models}, {"roots", roots}}, lines.join('\n'));
     reply.errors = warnings; // 13.2: a success with warnings
     return reply;
+}
+
+// `fugue model find-folders`: the model folders a person already has (8.9, #619), found by folder names and file sizes.
+// Read-only: no file is opened, hashed or written. `--only <place,...>` restricts it to those places (a path or one of the
+// ids `places` lists); a place that is not named is never touched.
+Reply modelFindFolders(const Command &command, Context &context) {
+    const FinderEnv env = FinderEnv::system();
+    // The places are a table (no I/O): `--only` narrows it first, and only the chosen ones are then looked at (an lstat each, links
+    // read component by component). A place that is not named is never stat'd, readlinked or opened.
+    const QList<FinderLocation> table = finderPlaces(env);
+    QList<FinderLocation> places = table;
+    QList<FinderLocation> chosen = table;
+    if (command.has("only")) {
+        chosen.clear();
+        for (const QString &wanted : command.value("only").split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            const QString clean = QDir::cleanPath(expandHome(wanted.trimmed()));
+            bool matched = false;
+            for (const FinderLocation &place : std::as_const(places))
+                if (place.id == wanted.trimmed() || place.path == clean) {
+                    chosen << place;
+                    matched = true;
+                }
+            if (!matched) {
+                Error error = makeError("usage", QStringLiteral("\"%1\" is not a place that can be searched.").arg(wanted),
+                                        "Use one of the places this lists, by its path or id.");
+                for (const FinderLocation &place : std::as_const(places))
+                    error.valid.append(place.path);
+                return Reply::failure(error);
+            }
+        }
+    }
+    const QList<FinderLocation> named = chosen;
+    chosen = finderLocations(env, chosen); // the existing ones among them, with their resolved paths
+    if (command.has("only"))
+        for (const FinderLocation &place : named)
+            if (std::none_of(chosen.begin(), chosen.end(), [&place](const FinderLocation &c) { return c.id == place.id; })) {
+                Error error = makeError("usage", QStringLiteral("%1 is not there (or leads onto a network drive), so it cannot be searched.").arg(place.path),
+                                        "Name a place that exists, by its path or id.");
+                for (const FinderLocation &candidate : std::as_const(table))
+                    error.valid.append(candidate.path);
+                return Reply::failure(error);
+            }
+    // What was left off is kept out of by its written path alone: reading its links would be touching it.
+    QList<FinderLocation> offered = chosen;
+    for (const FinderLocation &place : std::as_const(table))
+        if (std::none_of(chosen.begin(), chosen.end(), [&place](const FinderLocation &c) { return c.id == place.id; }))
+            offered << place;
+    QStringList skip;
+    for (const QString &root : ModelLibrary::roots(currentSettings()))
+        skip << root;
+    QElapsedTimer timer;
+    timer.start();
+    const FindResult result = findModelFolders(context.registry, chosen, env, skip, {}, offered);
+    QJsonArray found, searched;
+    QStringList lines;
+    for (const FinderLocation &place : std::as_const(chosen))
+        searched.append(QJsonObject{{"id", place.id}, {"path", place.path}, {"depth", place.depth}});
+    for (const FoundFolder &folder : result.folders) {
+        QJsonObject counts;
+        for (auto it = folder.counts.begin(); it != folder.counts.end(); ++it)
+            counts.insert(it.key(), it.value());
+        found.append(QJsonObject{{"tool", folder.tool},
+                                 {"path", folder.path},
+                                 {"alsoReached", QJsonArray::fromStringList(folder.alsoReached)},
+                                 {"models", folder.models},
+                                 {"size", folder.size},
+                                 {"counts", counts},
+                                 {"countCapped", folder.countCapped},
+                                 {"network", folder.network},
+                                 {"layout", folder.layout}});
+        lines << QStringLiteral("%1  %2  %3%4")
+                     .arg(folder.tool, folder.path,
+                          folder.network ? QStringLiteral("(network drive: not counted)")
+                                         : QStringLiteral("%1%2 models, %3").arg(folder.models).arg(folder.countCapped ? "+" : "", sizeText(folder.size)),
+                          folder.alsoReached.isEmpty() ? QString() : QStringLiteral("  also: %1").arg(folder.alsoReached.join(", ")));
+    }
+    if (lines.isEmpty())
+        lines << QStringLiteral("No model folders found.");
+    return Reply::success(QJsonObject{{"folders", found},
+                                      {"searched", searched},
+                                      {"capped", result.capped},
+                                      {"elapsedMs", double(timer.elapsed())}},
+                          lines.join('\n'));
 }
 
 Reply modelGet(const Command &command, Context &context) {

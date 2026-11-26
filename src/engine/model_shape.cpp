@@ -610,7 +610,7 @@ Fit loraFits(const ModelShape &diffusionModel, const ModelShape &lora, LayerMism
 }
 
 ModelShapes &ModelShapes::shared() {
-    static ModelShapes shapes;
+    static ModelShapes &shapes = *new ModelShapes; // never destroyed: a detached worker may still read it at exit
     return shapes;
 }
 

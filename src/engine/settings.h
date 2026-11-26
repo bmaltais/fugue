@@ -19,6 +19,9 @@
 // |                  | unnamed: found by its files (8.9, #86)    |                          |
 // | download_folder  | the model folder downloads go in, one of  | Fugue's own models folder|
 // |                  | the folders above (8.9, #89)              |                          |
+// | models_setup     | "done" or "skipped": the first-run offer   | absent: not asked yet    |
+// |                  | to find model folders was answered (8.9,  |                          |
+// |                  | #619); a root's own, never inherited      |                          |
 // | pack_paths       | extra pack search paths (6.5)            | []                       |
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
@@ -61,6 +64,7 @@
 
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QList>
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -77,6 +81,7 @@ struct Settings {
     QStringList modelPaths;
     QMap<QString, QString> modelFolderKinds; // by the path as written in modelPaths
     QString downloadFolder; // as written; empty: Fugue's own models folder
+    QString modelsSetup;    // "done" or "skipped" once the first-run model folder offer was answered; empty: not yet (#619)
     QStringList packPaths;
     QString newSeed = QStringLiteral("random");
     QString embedWorkflow = QStringLiteral("full");
@@ -158,6 +163,8 @@ QString checkSetting(const QString &key, const QJsonValue &value);
 // a bad value (nothing is written), the read error for a file that is not a JSON object
 // (never overwritten), or the write's error.
 Errors changeSetting(const QString &path, const QString &key, const QJsonValue &value);
+// Several keys in one read and one atomic write (nothing is written when any value is bad, or nothing changes).
+Errors changeSettings(const QString &path, const QList<std::pair<QString, QJsonValue>> &changes);
 
 // The settings of the Default project (the base config folder's settings.json); settingsPath() when the
 // session is the Default project.

@@ -32,6 +32,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <atomic>
+#include <functional>
 #include <optional>
 
 #include "engine/paths.h"
@@ -82,6 +84,22 @@ public:
     // type id; a root not named is found by its files.
     ModelLibrary(QStringList roots, const Registry *registry, QHash<QString, QString> kinds = {});
     static inline const QString kLayout = QStringLiteral("layout");
+    // ComfyUI's list of model file extensions plus .gguf: what a type that names none takes.
+    static const QStringList &defaultModelExtensions();
+    // What a folder holds, as kindOf() decides when nothing is set, from plain values (the finder's worker has no registry): the
+    // type folders' names -> type ids, and pack.json `files` -> type ids. kLayout, a type id, or empty. Reads a few headers.
+    // `listing` lists a folder (false: it may not be read); the finder gives one that never goes where a place was left off, never
+    // follows a link blindly and stops with its deadline. `stop` (cancel, a deadline) is asked between files.
+    struct DirEntry {
+        QString name;
+        bool isDir = false;
+        QString path; // where to go next (a link's resolved target)
+    };
+    using DirLister = std::function<bool(const QString &dir, QList<DirEntry> &out)>;
+    static QString detectKind(const QString &root, const QHash<QString, QString> &typeOfFolder, const QHash<QString, QString> &typeOfFiles,
+                              const DirLister &listing = {}, const std::function<bool()> &stop = {});
+    // Whether a folder with these type folders in it is ComfyUI's layout: the one rule, used by kindOf and by the finder.
+    static bool layoutFromFolders(const QHash<QString, QString> &typeOfFolder, const QStringList &presentNames, bool topLevelHasModels = false);
 
     // The library of the settings in effect now (currentSettings()).
     static ModelLibrary current(const Registry *registry);

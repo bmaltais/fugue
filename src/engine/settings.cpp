@@ -21,7 +21,7 @@ namespace {
 
 const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
-                        "download_folder", "pack_paths",    "new_seed",
+                        "download_folder", "models_setup", "pack_paths",    "new_seed",
                         "embed_workflow", "look_corners_omarchy",  "hover_magnifier",
                         "restore_tabs",   "picture_mode", "step_preview", "use_on_disk", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style"};
 
@@ -84,6 +84,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
             settings.modelFolderKinds.insert(it.key(), it.value().toString());
     } else if (key == QLatin1String("download_folder"))
         settings.downloadFolder = value.toString();
+    else if (key == QLatin1String("models_setup"))
+        settings.modelsSetup = value.toString();
     else if (key == QLatin1String("pack_paths"))
         settings.packPaths = strings(value);
     else if (key == QLatin1String("new_seed"))
@@ -283,6 +285,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
     if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder")
         || key == QLatin1String("download_folder"))
         return checkFolder(value, key);
+    if (key == QLatin1String("models_setup"))
+        return oneOf(value, {"done", "skipped"}, key);
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return checkFolders(value, key);
     if (key == QLatin1String("model_folder_kinds")) {
@@ -343,11 +347,13 @@ SettingsFile readSettings(const QString &path) {
     return file;
 }
 
-Errors changeSetting(const QString &path, const QString &key, const QJsonValue &value) {
-    if (!kKeys.contains(key))
-        return {makeError(QStringLiteral("usage"), checkSetting(key, value))};
-    if (const QString reason = value.isUndefined() ? QString() : checkSetting(key, value); !reason.isEmpty())
-        return {makeError(QStringLiteral("usage"), reason)};
+Errors changeSettings(const QString &path, const QList<std::pair<QString, QJsonValue>> &changes) {
+    for (const auto &[key, value] : changes) {
+        if (!kKeys.contains(key))
+            return {makeError(QStringLiteral("usage"), checkSetting(key, value))};
+        if (const QString reason = value.isUndefined() ? QString() : checkSetting(key, value); !reason.isEmpty())
+            return {makeError(QStringLiteral("usage"), reason)};
+    }
     QJsonObject document;
     if (QFileInfo::exists(path)) {
         const Result<QJsonObject> read = readJsonObject(path);
@@ -356,23 +362,30 @@ Errors changeSetting(const QString &path, const QString &key, const QJsonValue &
         document = read.value();
         migrateCornerRadius(document); // written back with this change: the old key goes
     }
-    // The default is not written, except where the Default project's value would otherwise show through:
-    // a project that sets a preference back to the built-in value must say so.
-    // The unset sentinel ("" for language) is the same: written only over an inherited value.
-    const bool unsetValue = !value.isUndefined() && value == settingUnsetValue(key);
-    const bool isDefault = value.isUndefined() || ((value == settingDefault(key) || unsetValue) && !shadowsInherited(path, key, value));
-    if (isDefault) {
-        if (!document.contains(key))
-            return {}; // already the default: nothing to write
-        document.remove(key);
-    } else if (document.value(key) == value) {
-        return {};
+    bool changed = false;
+    for (const auto &[key, value] : changes) {
+        // The default is not written, except where the Default project's value would otherwise show through:
+        // a project that sets a preference back to the built-in value must say so.
+        // The unset sentinel ("" for language) is the same: written only over an inherited value.
+        const bool unsetValue = !value.isUndefined() && value == settingUnsetValue(key);
+        const bool isDefault = value.isUndefined() || ((value == settingDefault(key) || unsetValue) && !shadowsInherited(path, key, value));
+        if (isDefault) {
+            if (document.contains(key)) {
+                document.remove(key);
+                changed = true;
+            }
+        } else if (document.value(key) != value) {
+            document.insert(key, value);
+            changed = true;
+        }
     }
-    if (isDefault)
-        document.remove(key);
-    else
-        document.insert(key, value);
+    if (!changed)
+        return {}; // nothing new: nothing to write
     return replaceFile(path, writeJson(document), path);
+}
+
+Errors changeSetting(const QString &path, const QString &key, const QJsonValue &value) {
+    return changeSettings(path, {{key, value}});
 }
 
 QString baseSettingsPath() { return baseConfigDir() + QStringLiteral("/settings.json"); }
@@ -456,6 +469,8 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
     }
     if (key == QLatin1String("download_folder"))
         return settings.downloadFolder.isEmpty() ? QJsonValue(QJsonValue::Undefined) : QJsonValue(settings.downloadFolder);
+    if (key == QLatin1String("models_setup"))
+        return settings.modelsSetup.isEmpty() ? QJsonValue(QJsonValue::Undefined) : QJsonValue(settings.modelsSetup);
     if (key == QLatin1String("pack_paths"))
         return QJsonArray::fromStringList(settings.packPaths);
     if (key == QLatin1String("new_seed"))
