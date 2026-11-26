@@ -27,8 +27,8 @@ if(NOT FUGUE_HELPER_BACKEND MATCHES "^(cuda|vulkan|cpu)$")
 endif()
 
 # The fork's tag fugue-2026-11-24c (upstream 3b12781f plus Fugue's commits).
-set(sdcpp_commit 6cf1fddfa4ee9dd1358af65fb22e7f18b6164504)
-set(sdcpp_sha256 23552ebf2ab42e8bb5f19309fc1e878fcf82b8e1a6a375aaa405e37d99e72de5)
+set(sdcpp_commit d4befb9a2cc309acdc811d338004f5c537cddb7b)
+set(sdcpp_sha256 d7a7f4d2a01bd27c9bb23b73e9a6e109d17cf4e62e36cbec1c325a484de44da4)
 set(ggml_commit eeda9ec48fc84a3df0bb9dcc19ae9053075a2539)
 set(ggml_sha256 8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2)
 set(cutlass_commit ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e)
