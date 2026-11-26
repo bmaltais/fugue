@@ -39,6 +39,7 @@ inline QJsonObject json(const QByteArray &text) {
 }
 
 using KernelFunction = std::function<Result<Values>(const NodeContext &)>;
+using LazyFunction = std::function<QStringList(const Values &ready)>;
 
 // Which nodes' kernels were called, in call order. Thread-safe.
 class Calls {
@@ -248,30 +249,35 @@ public:
     // Registers a fake node type; `fields` are the manifest's fields beyond
     // id, version, name and runtime. Each call of its kernel is logged and
     // moves the fake clock one second on.
-    void type(const QString &id, const QByteArray &fields, KernelFunction function) {
+    void type(const QString &id, const QByteArray &fields, KernelFunction function, LazyFunction lazy = nullptr) {
         must(registry.addManifest(json("{'manifest': 1, 'id': '" + id.toUtf8() +
                                        "', 'version': '1.0.0', 'name': 'Fake', 'runtime': {'kind': 'builtin'}," +
                                        fields + "}")));
         if (function)
-            kernel(id, std::move(function));
+            kernel(id, std::move(function), std::move(lazy));
     }
 
-    // Replaces the kernel of a node type.
-    void kernel(const QString &id, KernelFunction function) {
+    // Replaces the kernel of a node type; `lazy` answers NodeKernel::lazyInputs (all of them when unset).
+    void kernel(const QString &id, KernelFunction function, LazyFunction lazy = nullptr) {
         class Fake : public NodeKernel {
         public:
-            Fake(World *world, KernelFunction function) : m_world(world), m_function(std::move(function)) {}
+            Fake(World *world, KernelFunction function, LazyFunction lazy)
+                : m_world(world), m_function(std::move(function)), m_lazy(std::move(lazy)) {}
             Result<Values> run(const NodeContext &context) override {
                 m_world->calls.add(context.node);
                 m_world->clock.advance(1);
                 return m_function(context);
             }
+            QStringList lazyInputs(const NodeType &type, const Values &ready) const override {
+                return m_lazy ? m_lazy(ready) : NodeKernel::lazyInputs(type, ready);
+            }
 
         private:
             World *m_world;
             KernelFunction m_function;
+            LazyFunction m_lazy;
         };
-        kernels.add(id, std::make_shared<Fake>(this, std::move(function)));
+        kernels.add(id, std::make_shared<Fake>(this, std::move(function), std::move(lazy)));
     }
 
     // Adds a fake provider instance; an address makes it a remote one.

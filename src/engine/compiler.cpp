@@ -195,6 +195,7 @@ private:
     std::optional<std::pair<QString, QString>> exposedAt(const Scope *scope, const QString &id,
                                                          const QString &port) const;
     Source resolve(Scope *scope, const PortRef &ref) const;
+    Source followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const;
     std::optional<InputSpec> exposedSpec(Scope *child, const GroupInput &input) const;
     NodeType faceOf(Scope *child, const Node &instance) const;
     QStringList knownTypes() const;
@@ -499,6 +500,46 @@ std::optional<std::pair<QString, QString>> Compiler::exposedAt(const Scope *scop
     return std::nullopt;
 }
 
+// An output of type "any" takes the type of the first of the inputs it follows that is linked. Inputs that
+// disagree, or none linked, are errors placed on the node that reads the output.
+Source Compiler::followed(Scope *scope, const PortRef &ref, const OutputSpec &output, Source source) const {
+    const Node &node = *scope->nodes->constFind(ref.node);
+    std::optional<PortSpec> found;
+    QString foundFrom;
+    for (const QString &name : output.follows) {
+        const auto written = node.inputs.constFind(name);
+        if (written == node.inputs.constEnd() || written->kind() != InputValue::Kind::Link)
+            continue;
+        const Source inner = resolve(scope, written->from());
+        if (inner.status == Source::Status::Broken)
+            return Source{};
+        const auto fail = [&](const QString &message) {
+            Source bad;
+            bad.status = Source::Status::Error;
+            bad.error = makeError(QStringLiteral("type_mismatch"), message);
+            return bad;
+        };
+        if (inner.status == Source::Status::Error)
+            return fail(inner.error.message);
+        if (found && *found != inner.spec)
+            return fail(QStringLiteral("%1 takes the type of its inputs %2 and %3, which differ (%4 and %5).")
+                            .arg(source.path, foundFrom, name, found->toString(), inner.spec.toString()));
+        if (!found) {
+            found = inner.spec;
+            foundFrom = name;
+        }
+    }
+    if (!found) {
+        source.status = Source::Status::Error;
+        source.error = makeError(QStringLiteral("type_mismatch"),
+                                 QStringLiteral("the output %1 of %2 has no type yet: link one of %3.")
+                                     .arg(ref.port, source.path, output.follows.join(QStringLiteral(", "))));
+        return source;
+    }
+    source.spec = *found;
+    return source;
+}
+
 Source Compiler::resolve(Scope *scope, const PortRef &ref) const {
     Source source;
     const auto error = [&](const QString &code, const QString &message, const QStringList &valid,
@@ -536,6 +577,8 @@ Source Compiler::resolve(Scope *scope, const PortRef &ref) const {
         source.path = path;
         source.port = ref.port;
         source.spec = output->type;
+        if (output->type.type.isAny())
+            return followed(scope, ref, *output, std::move(source));
         return source;
     }
     case Status::Group: {
@@ -603,7 +646,7 @@ NodeType Compiler::faceOf(Scope *child, const Node &instance) const {
     for (const GroupOutput &output : child->definition->outputs) {
         const Source source = resolve(child, output.from);
         if (source.status == Source::Status::Ok)
-            face.outputs << OutputSpec{output.name, source.spec, {}, {}, false, {}, {}, {}}; // a group output carries nothing (#429)
+            face.outputs << OutputSpec{output.name, source.spec, {}, {}, false, {}, {}, {}, {}}; // a group output carries nothing (#429)
     }
     return face;
 }

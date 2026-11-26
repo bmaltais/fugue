@@ -59,6 +59,16 @@ struct NodeRun {
     const CompiledNode *node = nullptr;
     QStringList dependencies; // the path ids it reads from
     int readers = 0;          // nodes that read from it and have not finished
+    // Lazy inputs (9.9): `strictDeps` are read through an input that is not lazy; `lazyOf` maps a node read only
+    // through lazy inputs to the names of those inputs. A node is `demanded` once something that runs needs it; one
+    // that is not waits, and is skipped as not_chosen when every node that could demand it has let it go.
+    QStringList strictDeps;
+    QMap<QString, QStringList> lazyOf;
+    QStringList waitFor;  // the lazy dependencies the node asked for
+    QStringList declined; // the lazy inputs the node did not ask for: they stay out of its inputs and its key
+    bool demanded = false;
+    bool lazyAsked = false;
+    int potential = 0; // nodes that read from it and may still demand it
     bool settled = false;     // its finish has been counted for its dependencies
     const NodeType *type = nullptr;
     std::shared_ptr<NodeKernel> kernel;
@@ -300,9 +310,17 @@ public:
             needsProviders = needsProviders || n.providerKernel;
             m_nodes.insert(path, n);
         }
-        for (const NodeRun &n : std::as_const(m_nodes))
-            for (const QString &dep : n.dependencies)
+        for (NodeRun &n : m_nodes) {
+            classifyDependencies(n);
+            for (const QString &dep : std::as_const(n.dependencies)) {
                 ++m_nodes[dep].readers;
+                ++m_nodes[dep].potential;
+            }
+        }
+        // Sinks and the run's target are the roots; under validate the condition is unknown, so everything is.
+        for (NodeRun &n : m_nodes)
+            if (m_dry || n.readers == 0 || n.node->sink)
+                demand(n);
 
         if (!m_dry) {
             m_folder->writeCompiled(m_graph.toJson());
@@ -444,6 +462,122 @@ private:
                 m_providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
     }
 
+    // --- lazy inputs (9.9) ---
+
+    void classifyDependencies(NodeRun &n) {
+        QSet<QString> strict;
+        QMap<QString, QStringList> lazy;
+        for (const CompiledLink &link : n.node->links()) {
+            const InputSpec *spec = n.type ? n.type->input(link.input) : nullptr;
+            if (spec && spec->lazy) {
+                if (!lazy[link.from.node].contains(link.input))
+                    lazy[link.from.node] << link.input;
+            } else {
+                strict.insert(link.from.node);
+            }
+        }
+        for (const QString &dep : std::as_const(n.dependencies)) {
+            if (strict.contains(dep) || !lazy.contains(dep))
+                n.strictDeps << dep;
+            else
+                n.lazyOf.insert(dep, lazy.value(dep));
+        }
+    }
+
+    // A node something needs: so is everything it reads through a non-lazy input.
+    void demand(NodeRun &n) {
+        if (n.demanded)
+            return;
+        n.demanded = true;
+        for (const QString &dep : std::as_const(n.strictDeps))
+            demand(m_nodes[dep]);
+    }
+
+    // `reader` will not ask for `dep` (or never runs). When nothing else can, `dep` is skipped, and so on upstream.
+    void letGo(NodeRun &dep, const QString &reason) {
+        if (--dep.potential > 0 || dep.demanded || dep.phase != Phase::Waiting)
+            return;
+        skip(dep, reason);
+        for (const QString &up : std::as_const(dep.dependencies))
+            letGo(m_nodes[up], reason);
+    }
+
+    // The values of the inputs that are not lazy, as the kernel will see them, for NodeKernel::lazyInputs.
+    Values strictValues(NodeRun &n) {
+        Values values;
+        for (const InputSpec &spec : n.type->inputs) {
+            const auto written = n.node->inputs.constFind(spec.name);
+            if (spec.lazy || (written != n.node->inputs.constEnd() && written->kind() == InputValue::Kind::Auto))
+                continue;
+            Value value;
+            bool unknown = false;
+            if (written != n.node->inputs.constEnd() && !written->isEmpty())
+                value = resolveValue(n, spec, *written, unknown);
+            if (value.isEmpty() && !spec.defaultValue.isUndefined())
+                value = Value(spec.defaultValue);
+            if (!value.isEmpty())
+                values.insert(spec.name, value);
+        }
+        return values;
+    }
+
+    // Once the non-lazy inputs are in: asks the kernel which lazy inputs are needed, demands what feeds those, and
+    // lets go of the rest.
+    void askLazy(NodeRun &n) {
+        n.lazyAsked = true;
+        if (n.lazyOf.isEmpty())
+            return;
+        QStringList all;
+        for (const InputSpec &spec : n.type->inputs)
+            if (spec.lazy)
+                all << spec.name;
+        const bool broken = !brokenUpstream(n).isEmpty(); // the node will be skipped; nothing is asked of its lazy inputs
+        const QStringList wanted = broken ? QStringList()
+                                   : (m_dry || !n.kernel) ? all
+                                                          : n.kernel->lazyInputs(*n.type, strictValues(n));
+        for (const QString &name : all)
+            if (!wanted.contains(name))
+                n.declined << name;
+        for (auto it = n.lazyOf.constBegin(); it != n.lazyOf.constEnd(); ++it) {
+            const bool needed = std::any_of(it.value().cbegin(), it.value().cend(),
+                                            [&](const QString &name) { return wanted.contains(name); });
+            if (needed) {
+                n.waitFor << it.key();
+                demand(m_nodes[it.key()]);
+            } else {
+                letGo(m_nodes[it.key()], broken ? QStringLiteral("upstream_failed") : QStringLiteral("not_chosen"));
+            }
+        }
+        m_again = true;
+    }
+
+    // Why the node cannot run because of what it reads: a failed or cancelled node upstream. Empty when it can.
+    QString brokenUpstream(const NodeRun &n) const {
+        for (const QStringList &deps : {n.strictDeps, n.waitFor})
+            for (const QString &dep : deps) {
+                const NodeRun &d = *m_nodes.constFind(dep);
+                if (d.state == NodeState::Error ||
+                    (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
+                    return QStringLiteral("upstream_failed");
+                if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
+                    return QStringLiteral("cancelled");
+            }
+        return {};
+    }
+
+    // Nothing runs and nothing can ask for these any more: a node whose readers all failed before they asked.
+    void settleUndemanded() {
+        bool failed = false;
+        for (const NodeRun &n : std::as_const(m_nodes)) {
+            if (n.phase == Phase::Ready || n.phase == Phase::Running)
+                return;
+            failed = failed || n.state == NodeState::Error;
+        }
+        for (const QString &path : std::as_const(m_order))
+            if (NodeRun &n = m_nodes[path]; n.phase == Phase::Waiting && !n.demanded)
+                skip(n, failed ? QStringLiteral("upstream_failed") : QStringLiteral("not_chosen"));
+    }
+
     // --- the loop ---
 
     void advance() {
@@ -461,6 +595,7 @@ private:
             settle();
             startReady();
         } while (m_again);
+        settleUndemanded();
         m_advancing = false;
         releaseImages();
         for (const NodeRun &n : std::as_const(m_nodes)) {
@@ -500,10 +635,17 @@ private:
             }
             if (n.phase == Phase::Ready)
                 continue;
-            bool depsDone = true;
-            for (const QString &dep : std::as_const(n.dependencies))
-                depsDone = depsDone && m_nodes[dep].phase == Phase::Finished;
-            if (depsDone)
+            if (!n.demanded)
+                continue;
+            const auto done = [this](const QStringList &deps) {
+                return std::all_of(deps.cbegin(), deps.cend(),
+                                   [this](const QString &dep) { return m_nodes[dep].phase == Phase::Finished; });
+            };
+            if (!done(n.strictDeps))
+                continue;
+            if (!n.lazyAsked)
+                askLazy(n);
+            if (done(n.waitFor))
                 prepare(n);
         }
     }
@@ -526,14 +668,8 @@ private:
             m_outcome.errors.append(warning);
         }
 
-        for (const QString &dep : std::as_const(n.dependencies)) {
-            const NodeRun &d = m_nodes[dep];
-            if (d.state == NodeState::Error ||
-                (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
-                return skip(n, QStringLiteral("upstream_failed"));
-            if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
-                return skip(n, QStringLiteral("cancelled"));
-        }
+        if (const QString broken = brokenUpstream(n); !broken.isEmpty())
+            return skip(n, broken);
         if (!n.type) {
             Error error = nodeError(QStringLiteral("unknown_node_type"),
                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type));
@@ -866,6 +1002,8 @@ private:
         ResolvedInputs resolved;
         n.inputs.clear();
         for (const InputSpec &spec : n.type->inputs) {
+            if (n.declined.contains(spec.name))
+                continue; // a lazy input the node did not ask for is not read, so it is not in the key either
             const auto written = n.node->inputs.constFind(spec.name);
             Value value;
             bool linked = false;

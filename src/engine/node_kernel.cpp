@@ -4,6 +4,13 @@ namespace fugue {
 
 NodeKernel::~NodeKernel() = default;
 Errors NodeKernel::check(const NodeContext &) const { return {}; }
+QStringList NodeKernel::lazyInputs(const NodeType &type, const Values &) const {
+    QStringList all;
+    for (const InputSpec &input : type.inputs)
+        if (input.lazy)
+            all << input.name;
+    return all;
+}
 ProviderKernel::~ProviderKernel() = default;
 Result<std::optional<JobRequest>> ProviderKernel::next(const NodeContext &, const Selection &, const JobResult &) {
     return std::optional<JobRequest>();

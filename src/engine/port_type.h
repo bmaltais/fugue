@@ -47,6 +47,9 @@ struct PortSpec {
     bool list = false;
 
     QString toString() const; // "image", or "list of image"
+
+    bool operator==(const PortSpec &other) const { return type == other.type && list == other.list; }
+    bool operator!=(const PortSpec &other) const { return !(*this == other); }
 };
 
 enum class Compatibility {
