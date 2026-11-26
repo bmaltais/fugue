@@ -363,7 +363,11 @@ private slots:
 
     void aRunTheHostCannotTakeIsRefusedNamingTheNode() {
         QByteArray staged = kSampled;
-        staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"save\":");
+        // What Load Models also needs to compile, as a run would.
+        staged.replace("\"name\": \"m.safetensors\"}}},\n   \"save\"", "\"name\": \"m.safetensors\"},"
+                       " \"text_encoder\": {\"resource\": \"fugue/text-encoder\", \"hash\": \"sha256:8888888888888888888888888888888888888888888888888888888888888888\", \"name\": \"t.safetensors\"},"
+                       " \"vae\": {\"resource\": \"fugue/vae\", \"hash\": \"sha256:7777777777777777777777777777777777777777777777777777777777777777\", \"name\": \"v.safetensors\"}}},\n   \"save\"");
+        staged.replace("\"save\":", "\"enc\": {\"type\": \"fugue/text-encode\", \"version\": \"1.0.0\", \"inputs\": {\"model\": {\"from\": \"models.model\"}, \"prompt\": \"a cat\"}},\n   \"show\": {\"type\": \"fugue/preview\", \"version\": \"1.0.0\", \"inputs\": {\"value\": {\"from\": \"enc.conditioning\"}}},\n   \"save\":");
         write(path("work/staged.fugue"), staged);
         QByteArray pinned = staged;
         pinned.replace("\"version\": \"1.0.0\", \"inputs\": {\"model\"", "\"version\": \"1.0.0\", \"provider\": \"desk\", \"inputs\": {\"model\"");
@@ -392,7 +396,7 @@ private slots:
         QVERIFY(!fugue({"app", "info", "staged.fugue", "--json"}).data().contains("runs_on"));
         const Outcome noCapability = fugue({"app", "run", "staged.fugue", "--json"});
         QCOMPARE(noCapability.code(), QString("model_missing"));
-        QVERIFY2(noCapability.error().value("message").toString().contains("does not offer text.encode"), noCapability.out);
+        QVERIFY2(noCapability.error().value("message").toString().contains("did not offer text.encode when it last answered"), noCapability.out);
         write(path("root/state/fugue/paired_helpers.json"),
               "{\"gx10\": {\"address\": \"http://gx10.invalid:8787\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"text.encode\"]}}");
         const Outcome remembered = fugue({"app", "info", "staged.fugue", "--json"}); // what it last said stands in for nothing: still silent
@@ -429,7 +433,8 @@ private slots:
               QStringLiteral("{\"gx10\": {\"address\": \"http://0.0.0.0:%1\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}").arg(port).toUtf8());
         const Outcome freshInfo = fugue({"app", "info", "staged.fugue", "--json"});
         QCOMPARE(freshInfo.data().value("runs_on").toString(), QString("gx10"));
-        QVERIFY(fugue({"app", "run", "staged.fugue", "--json"}).code() != QString("model_missing"));
+        // The run is not refused up front. (It is not started: the staged graph is a real one now, and this fake host cannot serve a job.)
+        QVERIFY(!freshInfo.data().contains("host_problems"));
         host.kill();
         host.waitForFinished(2000);
 

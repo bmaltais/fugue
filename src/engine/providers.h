@@ -147,6 +147,16 @@ struct Selection {
 // model_missing, or a pinned instance's own describe error (provider_unreachable).
 Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement);
 
+// The paired helpers among `candidates` that are enabled and do not answer, for a node whose model files are not on this machine
+// (Requirement::modelsElsewhere): `couldServe` those that may still be able to serve `capability` (they never said they could not),
+// in the user's order, the first being the one selectProvider names as not answering; `neverOffered` those that did not offer it when
+// they last answered (#491), which are not why the node fails.
+struct SilentHelpers {
+    QList<const Candidate *> couldServe;
+    QStringList neverOffered;
+};
+SilentHelpers silentPairedHelpers(const QList<Candidate> &candidates, const QString &capability);
+
 // Whether an offered handle is the requested one: by hash when the request has one, else by
 // name (a model a provider serves by name has no hash, 2.5).
 bool sameModel(const QJsonObject &requested, const QJsonObject &offered);

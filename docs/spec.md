@@ -2035,7 +2035,13 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   (8.7), which are chosen by the model's name.
 - **One verdict for the CLI and the window (#491, #581).**
   - *Paired placement* (`engine/paired_placement.*`, `decidePairedPlacement`) reads the document the way the scheduler decides, per node,
-    and returns three outcomes. It applies only when only models are missing (no pack; the problems no more than `model_missing` or
+    and returns three outcomes. The nodes are the compiled graph's (`compile`): a node inside a group or a group instance is scanned under
+    its path id (`g7/inner3`) and takes the instance's pin, a muted node or one no output needs is not, and a document that does not
+    compile places nothing. Each node's requirement is the kernel's, read with the inputs the node holds (literals, handles, the spec's
+    defaults; what a link brings is not known before the run), so its capability and `properties` are the scheduler's. The host is chosen
+    by `selectProvider` itself on what the hosts answered (`modelsElsewhere` unless the node names its model), so only a host that does not
+    share this machine's filesystem takes a node, and a host whose model lacks the properties does not; `silentPairedHelpers` is the
+    scheduler's own list of the hosts that do not answer. It applies only when only models are missing (no pack; the problems no more than `model_missing` or
     `download_failed`) and a paired helper is enabled; otherwise nothing is placed. A node needs the model when one of its own Resource
     inputs holds the missing handle, or is linked to a node that holds it through a Resource output (a picture decoded from it does not
     carry it); only a provider node counts.

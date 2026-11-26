@@ -6,6 +6,12 @@
 // scheduler chooses, per node, and says for each node that needs a missing model: which host takes it (RunsOn), why it cannot go
 // anywhere (Blocked), or that the only host that could does not answer (Silent).
 //
+// The nodes are the ones the scheduler runs: the document compiled (compile), so those inside groups and group instances are
+// scanned under their path ids ("g7/inner3"), a muted node is not, and a node's pin is its own else the workflow's. A node's
+// requirement is read from the inputs it holds (literals, defaults; what a link brings is not known before the run), and one host is
+// chosen by selectProvider itself on the answers of the probe, so the capability, the requirement's properties and the rule that only a
+// host that does not share this machine's files takes a node are the scheduler's.
+//
 // Order: the pins decide first; the hosts are asked (the probe) only when they leave a node that could go somewhere, so an app that
 // pins already block never waits for a 12 s probe. What a host last said only refuses a node for a host that does not answer. The probe is the seam: the live one calls
 // probePairedHelpers, a test gives a fake.
@@ -20,9 +26,11 @@
 
 #include "engine/document.h"
 #include "engine/error.h"
+#include "engine/node_kernel.h"
 #include "engine/providers.h"
 #include "engine/readiness.h"
 #include "engine/registry.h"
+#include "engine/value.h"
 
 namespace fugue {
 
@@ -30,12 +38,18 @@ namespace fugue {
 // `download_failed`), which the host may have all the same (#395). Where this is false there is nothing to place.
 bool onlyModelsMissing(const ReadinessPlan &plan);
 
+// What a node of `type` holding `inputs` asks a provider for, as the scheduler reads it from the type's ProviderKernel; nothing for a type
+// that has none (not a provider node). The usual PairedPlacementRequest::requirementOf.
+std::optional<Requirement> kernelRequirement(const Kernels &kernels, const NodeType &type, const Values &inputs);
+
+using PairedRequirementOf = std::function<std::optional<Requirement>(const NodeType &type, const Values &inputs)>;
+
 struct PairedPlacementRequest {
     // The configured provider instances (providers.json): the paired helpers in the user's order, and the pins to read.
     QList<ProviderInstance> instances;
-    // The capability a node type asks a provider for, or empty for a type that is no provider node. Without it nothing is known about
-    // the nodes and nothing is placed or refused.
-    std::function<QString(const QString &typeId)> capabilityOf;
+    // What a node of `type` asks a provider for, given the inputs it holds (the ProviderKernel's requirement, as the scheduler reads it),
+    // or nothing for a type that is no provider node. Without it nothing is known about the nodes and nothing is placed or refused.
+    PairedRequirementOf requirementOf;
     // To read each node's own inputs: a model reaches a node only through its Resource ports, as the scheduler decides per node (8.7).
     const Registry *registry = nullptr;
     // What a host said the last time it answered (rememberedPairedHelper when empty): it refuses a node only for a host that does not answer now (a live answer overrules it), and
@@ -81,7 +95,7 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
                            const PairedProbe &probe, std::function<void(const PairedVerdict &verdict)> done);
 
 // What the verdict depends on, as bytes: the gate's inputs (packs, problem codes), the missing models' hashes, the graph's nodes (type,
-// pin, inputs) and the workflow's pin, and the provider instances. Equal keys give the same verdict; the plan's free disk space, the
+// pin, inputs, groups) and the workflow's pin, and the provider instances. Equal keys give the same verdict; the plan's free disk space, the
 // layout and the like are not in it, so a download or a run writing files does not ask again.
 QByteArray pairedPlacementKey(const Document &document, const ReadinessPlan &plan, const QList<ProviderInstance> &instances);
 

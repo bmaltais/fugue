@@ -174,11 +174,7 @@ PairedVerdict pairedVerdict(const ReadinessPlan &plan, const Document &document,
     PairedPlacementRequest request;
     request.instances = instances ? instances.value() : QList<ProviderInstance>();
     request.registry = &context.registry;
-    request.capabilityOf = [&context](const QString &typeId) {
-        const NodeType *type = context.registry.nodeType(typeId);
-        const std::shared_ptr<ProviderKernel> kernel = type ? context.kernels.provider(*type) : nullptr;
-        return kernel ? kernel->requirement(*type, {}).capability : QString();
-    };
+    request.requirementOf = [&context](const NodeType &type, const Values &inputs) { return kernelRequirement(context.kernels, type, inputs); };
     // The answer may come after the limit (the 10 s is Qt's transfer timeout, silence only): it then lands in this shared state, never
     // in this frame, and quits no loop.
     struct Wait {
