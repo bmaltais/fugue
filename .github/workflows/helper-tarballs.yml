@@ -55,7 +55,7 @@ jobs:
           cat dist/SHA256SUMS
           tar --zstd -tvf dist/fugue-helper-${{ matrix.backend }}-x86_64-linux.tar.zst
 
-      - name: Start it in a clean Ubuntu 22.04 (no GPU: the helper's own HTTP checks, which need no model)
+      - name: "Start it in a clean Ubuntu 22.04 (no GPU: the helper's own HTTP checks, which need no model)"
         # The CUDA helper needs the host's driver (libcuda.so.1) to start; its link check is in bin/package-helper.
         if: matrix.backend != 'cuda'
         run: |
