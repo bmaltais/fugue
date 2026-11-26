@@ -74,9 +74,9 @@ jobs:
         run: |
           cd dist
           ls -l
-          sha256sum *.pkg.tar.zst | tee SHA256SUMS
+          sha256sum -- *.pkg.tar.zst | tee SHA256SUMS
           for pkg in *.pkg.tar.zst; do pacman -Qip "$pkg" | grep -E '^(Name|Version|Depends On)'; done
-          pacman -Qlp *.pkg.tar.zst | grep -E 'bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper' | head
+          pacman -Qlp -- *.pkg.tar.zst | grep -E 'bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper' | head
 
       - name: Compiler cache use
         if: always()
@@ -191,9 +191,9 @@ jobs:
             set -euo pipefail
             cd dist
             ls -l
-            sha256sum *.pkg.tar.zst | tee SHA256SUMS
+            sha256sum -- *.pkg.tar.zst | tee SHA256SUMS
             for pkg in *.pkg.tar.zst; do pacman -Qip "$pkg" | grep -E "^(Name|Version|Architecture|Depends On)"; done
-            pacman -Qlp *.pkg.tar.zst | grep -E "bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper" | head'
+            pacman -Qlp -- *.pkg.tar.zst | grep -E "bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper" | head'
 
       - name: Check the ELF segment alignment (Asahi Linux uses 16 KB pages)
         # A binary whose LOAD segments are aligned to less than 0x4000 does not start on a 16 KB-page kernel.

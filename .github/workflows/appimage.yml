@@ -141,10 +141,10 @@ jobs:
         # one is added to the list above in one go. It is information, not a gate.
         run: |
           q=qt/$QT_VERSION/gcc_64
-          for f in $q/plugins/multimedia/*.so $q/lib/libQt6Multimedia.so*; do
+          for f in "$q"/plugins/multimedia/*.so "$q"/lib/libQt6Multimedia.so*; do
             echo "== $f"; LD_LIBRARY_PATH=$q/lib ldd "$f" | grep 'not found' || true
           done
-          ls "$q/plugins/platforms" "$q/plugins" | head -60
+          find "$q/plugins/platforms" "$q/plugins" -maxdepth 1 | sort | head -60
 
       - name: Build the AppImage
         env:
@@ -208,7 +208,8 @@ jobs:
           chmod +x smoke-test.sh
           # Every library the binary and the Qt plugins want and the system lacks, listed at once (they are host libraries
           # on purpose: docs/appimage.md), so one run shows them all.
-          APPIMAGE_EXTRACT_AND_RUN=1 ./*-x86_64.AppImage --appimage-extract >/dev/null
+          app=(./*-x86_64.AppImage)
+          APPIMAGE_EXTRACT_AND_RUN=1 "${app[0]}" --appimage-extract >/dev/null
           for f in squashfs-root/usr/bin/fugue $(find squashfs-root/usr/plugins -name '*.so'); do
             LD_LIBRARY_PATH=squashfs-root/usr/lib ldd "$f" 2>/dev/null | grep 'not found' | sed "s|^|$f: |" || true
           done | sort -u

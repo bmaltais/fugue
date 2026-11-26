@@ -74,3 +74,10 @@ test's own temporary folder), because shards run at the same time.
    that moves a list's rows), and wait on state. ctest runs with `QV4_GC_TIMELIMIT=100000` (CMakeLists.txt): Qt's sliced
    GC under load made a Question read its theme as null in 1 run in 50 (the Question now reads `App.theme.look` directly, #320; the setting stays for other components).
 7. A change that adds more than about 2 s to the suite says so in its PR body.
+
+## Workflow lint
+
+`workflows_lint` (tests/workflows_lint.sh) runs actionlint, and the shellcheck it applies to every `run:` block, over
+`.github/workflows`. A workflow error otherwise shows only when GitHub runs it, and for the release jobs that is only on a
+tag. It uses `actionlint` from PATH, else the pinned `rhysd/actionlint` image if podman already has it, and is skipped
+otherwise (`podman pull docker.io/rhysd/actionlint:1.7.7` once to enable it).
