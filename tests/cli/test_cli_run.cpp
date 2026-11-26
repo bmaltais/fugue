@@ -345,6 +345,7 @@ private slots:
             env.insert("XDG_STATE_HOME", path("state"));
             env.insert("XDG_CONFIG_HOME", path("config"));
             env.insert("XDG_RUNTIME_DIR", path("runtime"));
+            env.remove("FUGUE_BASE_XDG_RUNTIME_DIR"); // else the real session's GPU lock
             env.insert("HOME", path("home"));
             env.insert("FUGUE_NODE_MANIFESTS", path("manifests"));
             env.insert("FUGUE_TEST_GATE", gate());
@@ -360,12 +361,26 @@ private slots:
             held.release();
             QVERIFY(process.waitForFinished(60000));
             QCOMPARE(process.exitCode(), 0);
+            seen += json ? process.readAllStandardOutput() : process.readAllStandardError(); // what came after the release too
             // Said once, and a run that did not wait says nothing: the same run again, lock free.
             QCOMPARE(seen.count(json ? "\"waiting\"" : "Waiting for"), 1);
             const Outcome again = fugue({"run", path("flow.fugue"), "--wait"});
             QCOMPARE(again.exitCode, 0);
             QVERIFY(!again.err.contains("Waiting for"));
         }
+    }
+
+    // The holder is found on any file system (btrfs subvolumes and /proc/locks name different devices): a file under the
+    // build folder, not the tmpfs the other tests use.
+    void theHolderOfALockFileIsFoundOutsideTmpfs() {
+        QTemporaryDir here(QStringLiteral(QT_TESTCASE_BUILDDIR "/holder-XXXXXX"));
+        QVERIFY(here.isValid());
+        const QString file = here.filePath("some.lock");
+        QCOMPARE(Lock::holderPid(file), qint64(0));
+        Held held(file);
+        QVERIFY(held.fd >= 0);
+        QCOMPARE(Lock::holderPid(file), qint64(::getpid()));
+        QCOMPARE(Lock::holderPid(file, qint64(::getpid())), qint64(0)); // asked to leave this one out
     }
 
     void cancelStopsARunningRun() {
