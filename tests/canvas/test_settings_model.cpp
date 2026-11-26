@@ -219,6 +219,17 @@ private slots:
         QVERIFY(!model.set("canvas_show_new_results", true).isEmpty()); // no longer a setting
     }
 
+    // #618: a missing model's file on disk is used by itself unless the person asks to be asked; the default leaves the file.
+    void useOnDiskIsUseByDefaultAndAskPersists() {
+        SettingsModel model(settingsFile());
+        QCOMPARE(model.useOnDisk(), QString("use"));
+        QCOMPARE(model.set("use_on_disk", "ask"), QString());
+        QCOMPARE(SettingsModel(settingsFile()).useOnDisk(), QString("ask"));
+        QVERIFY(!model.set("use_on_disk", "always").isEmpty());
+        QCOMPARE(model.set("use_on_disk", "use"), QString());
+        QVERIFY(!readJsonObject(settingsFile()).value().contains("use_on_disk"));
+    }
+
     // The Sampler's step picture (#297): fast by default, a preference; the default leaves the file.
     void theStepPreviewIsFastAndPersists() {
         SettingsModel model(settingsFile());

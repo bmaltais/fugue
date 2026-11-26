@@ -74,6 +74,9 @@ Read it first at [install.sh](install.sh); `bash -s -- --dry-run` shows what it 
 <p align="center"><img src="docs/images/inpaint-result.png" alt="Inpaint: the picture with an armchair painted over, the result and the difference" width="720"></p>
 
 - **Providers as modules.** A provider is a folder with a `provider.json` in `~/.local/share/fugue/providers/<id>/`, speaking a small JSON protocol over HTTP or stdio (spec 8.8); no change to Fugue is needed to add one.
+- **Use what you have.** A model a template names that is not on disk, whose same weights are in another file of your model folders
+  (another quantization, or the same one from another publisher), is used for you, and the banner says which file, with Undo; the
+  setting "When a model is missing but the same model is on disk" (Settings > General) can ask first instead. `fugue run` does the same, with `--no-use-on-disk` to opt out.
 - **Local and paired-host runs.** The `omarchy` provider serves models from this machine and
   from every host paired through omarchy-local-ai, so one graph can use a model on another
   machine. Heavy generation runs in a separate helper process (stable-diffusion.cpp).

@@ -15,6 +15,8 @@
 // A file of the same name and quantization as the one wanted that is not the same bytes (the same Qwen3 Q8_0 from another
 // publisher) is offered too, marked `otherSource`, with a note that it is not verified to be identical: the weights are the same
 // model and the same quantization, which is what the template needs.
+// When several files qualify and one has the quantization the workflow names (the same Q8_0), that one stands in before a better-ranked
+// other quantization (#624); among the rest, the Recommended one.
 
 #include <QJsonArray>
 #include <QJsonObject>

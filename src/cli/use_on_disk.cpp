@@ -4,6 +4,7 @@
 #include "engine/lazy_reach.h"
 #include "engine/model_library.h"
 #include "engine/model_use.h"
+#include "engine/settings.h"
 
 namespace fugue::cli {
 
@@ -47,6 +48,18 @@ QList<OnDiskUse> usesFor(const Document &document, Context &context) {
 }
 
 } // namespace
+
+bool usesOnDisk(const Command &command) {
+    if (command.has("no-use-on-disk"))
+        return false;
+    return command.has("use-on-disk") || currentSettings().useOnDisk == QLatin1String("use");
+}
+
+Errors onDiskFlagConflict(const Command &command) {
+    if (command.has("use-on-disk") && command.has("no-use-on-disk"))
+        return {makeError("usage", QStringLiteral("--use-on-disk and --no-use-on-disk cannot be used together."), QStringLiteral("Pass one of them."))};
+    return {};
+}
 
 Document useOnDisk(const Document &document, Context &context, QStringList *said) {
     const QList<OnDiskUse> uses = usesFor(document, context);

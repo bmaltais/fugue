@@ -75,6 +75,18 @@ std::optional<OnDiskMatch> findOnDisk(const QJsonObject &handle, const ModelLibr
     }
     if (same.isEmpty())
         return std::nullopt;
+    // The quantization the workflow pins, from another source, is what it needs (#624): it stands in before a better-ranked other
+    // quantization (an INT8 file the picker marks Recommended beside the owner's Q8_0 from another publisher). Several of them: the rest below.
+    const QString wantedTier = quantLabel(wanted);
+    if (!wantedTier.isEmpty()) {
+        QList<ModelFile> sameTier;
+        for (const ModelFile &file : std::as_const(same))
+            if (quantLabel(file.name) == wantedTier
+                && fitsMemory(file.size, context.otherModelsMb, context.device.backend == QLatin1String("cpu") ? 0 : context.device.memoryMb))
+                sameTier << file; // one that does not fit the device does not take precedence (Recommended's own rule)
+        if (!sameTier.isEmpty())
+            same = sameTier;
+    }
     const ModelFile *chosen = nullptr;
     bool recommended = false;
     if (same.size() > 1) {
