@@ -63,10 +63,15 @@ Registry registry() {
         " 'inputs': [{'name': 'image', 'type': 'image'}, {'name': 'name', 'type': 'text', 'default': 'out'}],"
         " 'outputs': []}",
 
-        "{'manifest': 1, 'id': 'fugue/compare', 'version': '1.0.0', 'name': 'Compare', 'sink': true,"
+        "{'manifest': 1, 'id': 'fugue/compare', 'version': '1.0.0', 'name': 'Compare', 'sink': true, 'view_only': true,"
         " 'runtime': {'kind': 'builtin'},"
         " 'inputs': [{'name': 'a', 'type': 'image'}, {'name': 'b', 'type': 'image'}],"
         " 'outputs': [{'name': 'difference', 'type': 'image'}]}",
+
+        "{'manifest': 1, 'id': 'fugue/save-keep', 'version': '1.0.0', 'name': 'Save keep', 'sink': true,"
+        " 'runtime': {'kind': 'builtin'},"
+        " 'inputs': [{'name': 'image', 'type': 'image'}],"
+        " 'outputs': [{'name': 'file', 'type': 'image'}]}",
 
         "{'manifest': 1, 'id': 'fugue/merge', 'version': '1.0.0', 'name': 'Merge',"
         " 'runtime': {'kind': 'builtin'},"
@@ -191,6 +196,7 @@ private slots:
     void nodesNoSinkNeedsAreSkippedWithAWarning();
     void sinksInsideGroupsAreDropped();
     void aSinkInsideAGroupStaysWhenANodeReadsItsOutput();
+    void aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied();
     void runToHereKeepsOnlyWhatTheTargetNeeds();
     void unknownTargetIsAUsageError();
     void providerPinsAreResolvedAndChecked();
@@ -304,7 +310,7 @@ void TestCompiler::unknownTypesAreReportedWithoutFollowOnErrors() {
     QCOMPARE(top.hint, QString("Did you mean \"fugue/generate-image\"?"));
     // Every known type, in full: the registry's and the workflow's groups.
     QCOMPARE(top.valid, (QJsonArray{"fugue/batch", "fugue/compare", "fugue/generate-image", "fugue/merge", "fugue/save-image",
-                                    "fugue/text", "io.example.tools/shrink", "local/box"}));
+                                    "fugue/save-keep", "fugue/text", "io.example.tools/shrink", "local/box"}));
 }
 
 void TestCompiler::invalidLinksAreAllReported() {
@@ -805,6 +811,33 @@ void TestCompiler::aSinkInsideAGroupStaysWhenANodeReadsItsOutput() {
     QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
     QVERIFY(!result->nodes.contains("g/cmp"));
     QVERIFY(!result->nodes.contains("g/shrink"));
+    // A view sink nothing needed reads says nothing: only the node that is really unused is warned of.
+    const Document gen = document(withGroups(
+        "'g': {'type': 'local/cmp', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+        QByteArray(groups).replace("%1", "'gen.image'").constData()));
+    const Compilation genResult = compile(gen, registry());
+    for (const Error &problem : genResult.problems())
+        QVERIFY2(problem.node != "g/cmp", qPrintable(dump(problem.node)));
+}
+
+// A sink that writes (Save Image, whose `file` output is read) must not run from inside a group (5.5).
+void TestCompiler::aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied() {
+    const Document doc = document(withGroups(
+        "'g': {'type': 'local/keep', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+        "'local/keep': {'version': '1.0.0', 'name': 'Keep', 'inputs': [], 'outputs': [{'name': 'image', 'from': 'shrink.image'}],"
+        " 'nodes': {'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'x'}},"
+        "           'out': {'type': 'fugue/save-keep', 'version': '1.0.0', 'inputs': {'image': {'from': 'gen.image'}}},"
+        "           'shrink': {'type': 'io.example.tools/shrink', 'version': '1.2.0',"
+        "                      'inputs': {'image': {'from': 'out.file'}}}}}"));
+    const Compilation result = compile(doc, registry());
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY(!result->nodes.contains("g/out"));
+    QCOMPARE(result->skipped.value("g/shrink"), QString("upstream_empty"));
+    for (auto it = result->nodes.cbegin(); it != result->nodes.cend(); ++it)
+        for (const CompiledLink &link : it->links())
+            QVERIFY2(result->nodes.contains(link.from.node), qPrintable(it.key() + " reads missing " + link.from.node));
 }
 
 void TestCompiler::runToHereKeepsOnlyWhatTheTargetNeeds() {
