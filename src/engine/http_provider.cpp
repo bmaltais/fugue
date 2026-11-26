@@ -5,7 +5,6 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QHostAddress>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
@@ -16,6 +15,7 @@
 #include <cmath>
 
 #include "engine/paths.h"
+#include "engine/remote_request.h"
 
 namespace fugue {
 
@@ -38,12 +38,8 @@ const QString kTextGenerate = QStringLiteral("text.generate");
 // job, whose result holds one), far less for anything else.
 constexpr qint64 kJsonCap = 64LL << 20;
 constexpr qint64 kPictureCap = 512LL << 20;
-const char *const kCapped = "fugue-capped";
-constexpr int kMaxHops = 3;
-constexpr int kMaxTransientPolls = 5;
 
-// The status of a reply: 0 when it was cut off for its size, as if nothing had answered.
-int codeOf(QNetworkReply *reply) { return reply->property(kCapped).toBool() ? 0 : httpStatus(reply); }
+using remote::statusOf;
 
 QString oneLine(QString text) {
     text = text.simplified();
@@ -56,23 +52,6 @@ QByteArray mimeOf(const QJsonValue &image) {
 }
 
 } // namespace
-
-bool isLocalHost(const QString &host) {
-    if (host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || host.endsWith(QLatin1String(".localhost"), Qt::CaseInsensitive) ||
-        host.endsWith(QLatin1String(".local"), Qt::CaseInsensitive) || host.endsWith(QLatin1String(".internal"), Qt::CaseInsensitive))
-        return true;
-    QHostAddress address;
-    if (!address.setAddress(host))
-        return false;
-    return address.isLoopback() || address.isLinkLocal() || address.isPrivateUse() || address.isInSubnet(QHostAddress(QStringLiteral("fc00::")), 7) || address.isNull() ||
-           address == QHostAddress::Any || address == QHostAddress::AnyIPv4 || address.isInSubnet(QHostAddress(QStringLiteral("100.64.0.0")), 10);
-}
-
-bool downloadUrlAllowed(const QUrl &url, const QString &instanceHost) {
-    if ((url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https")) || url.host().isEmpty())
-        return false;
-    return !isLocalHost(url.host()) || isLocalHost(instanceHost);
-}
 
 bool looksLikeImageModel(const QString &id) {
     static const QRegularExpression image(
@@ -147,24 +126,20 @@ QUrl HttpProvider::nativeUrl(const QString &path) const { return QUrl(baseOf(m_i
 
 QNetworkReply *HttpProvider::send(const QUrl &url, const QByteArray &method, const QByteArray &body,
                                   const QByteArray &contentType, bool withKey, qint64 cap) {
-    QNetworkRequest request(url);
-    request.setTransferTimeout(timeoutMs());
     // The key goes to the address it was given for and nowhere else: never to a redirect, never
     // to a file the service names by URL.
-    // A redirect is never followed by Qt: a picture's is checked by finishImage, hop by hop.
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    if (withKey && !m_instance.key.isEmpty())
-        request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
-    if (method != "GET")
-        request.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
-    QNetworkReply *reply = m_network.sendCustomRequest(request, method, body);
-    connect(reply, &QNetworkReply::downloadProgress, reply, [reply, cap](qint64 got, qint64) {
-        if (got > cap && !reply->property(kCapped).toBool()) {
-            reply->setProperty(kCapped, true);
-            reply->abort();
-        }
-    });
-    return reply;
+    remote::Session session;
+    session.scheme = "Bearer";
+    session.key = m_instance.key;
+    session.origins = {QUrl(m_instance.address)};
+    session.transferTimeoutMs = timeoutMs();
+    remote::Call call;
+    call.method = method;
+    call.body = body;
+    call.contentType = contentType;
+    call.cap = cap;
+    call.withKey = withKey;
+    return remote::send(m_network, session, url, call);
 }
 
 QString HttpProvider::clean(const QString &text) const {
@@ -182,11 +157,11 @@ Error HttpProvider::badJson() const {
 
 Error HttpProvider::failure(QNetworkReply *reply, const QJsonObject &answer, bool text) const {
     const QString who = m_instance.name;
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const QString said = clean(serverMessage(answer));
     const QString errorCode = answer.value("error").toObject().value("code").toString();
     const QString address = clean(m_instance.address);
-    if (reply->property(kCapped).toBool())
+    if (remote::wasCapped(reply))
         return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent more data than Fugue reads in one answer.").arg(who),
                          QStringLiteral("Check the address of %1: it should be the API root, not a file or a page.").arg(who));
     if (code == 0) {
@@ -278,7 +253,7 @@ void HttpProvider::discover(std::function<void(const Result<Found> &)> done) {
     QNetworkReply *reply = send(nativeUrl(QStringLiteral("/sdcpp/v1/capabilities")), "GET");
     connect(reply, &QNetworkReply::finished, this, [this, reply, api, done] {
         reply->deleteLater();
-        const int code = codeOf(reply);
+        const int code = statusOf(reply);
         const QJsonObject body = jsonBody(reply);
         if (code == 200 && !body.isEmpty())
             return discoverNative(body, done);
@@ -323,7 +298,7 @@ void HttpProvider::discoverOpenAI(std::function<void(const Result<Found> &)> don
     QNetworkReply *reply = send(openaiUrl(QStringLiteral("/models")), "GET");
     connect(reply, &QNetworkReply::finished, this, [this, reply, done] {
         reply->deleteLater();
-        const int code = codeOf(reply);
+        const int code = statusOf(reply);
         const QJsonObject body = jsonBody(reply);
         QStringList listed;
         for (const QJsonValue &entry : body.value("data").toArray())
@@ -473,14 +448,14 @@ void HttpProvider::submitNative(const Found &, const JobRequest &request, const 
         posted->deleteLater();
         if (!self)
             return;
-        const int code = codeOf(posted);
+        const int code = statusOf(posted);
         const QJsonObject answer = jsonBody(posted);
         const QString serverId = answer.value("id").toString();
         if ((code == 202 || code == 200) && !serverId.isEmpty()) {
             QString id;
             const auto job = self->newJob(request, model, &id);
             job->serverId = serverId;
-            job->deadline = QDateTime::currentMSecsSinceEpoch() + qint64(self->timeoutMs()) * 6;
+            job->deadline = QDateTime::currentMSecsSinceEpoch() + qint64(remote::jobDeadlineMs(self->timeoutMs()));
             job->status.state = QStringLiteral("queued");
             job->status.stage.clear();
             if (!self->m_poll.isActive())
@@ -562,13 +537,13 @@ void HttpProvider::finishImage(const QString &id) {
     reply->deleteLater();
     if (job->status.isTerminal())
         return; // cancelled
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const QString who = m_instance.name;
     // The second step: the picture a service named by URL, from its own file server (no key).
     if (job->downloading) {
-        if (code >= 300 && code < 400 && code != 304) {
-            const QUrl next = reply->url().resolved(QUrl(QString::fromLatin1(reply->rawHeader("Location"))));
-            if (++job->hops > kMaxHops || !downloadUrlAllowed(next, host()))
+        if (remote::isRedirect(code)) {
+            const QUrl next = remote::redirectTarget(reply);
+            if (!remote::followHop(job->hops) || !downloadUrlAllowed(next, host()))
                 return fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("%1 sent the picture link on to a place Fugue does not fetch.").arg(who),
                                           QStringLiteral("Only http and https links, and no local address of another machine, are fetched.")));
             job->reply = send(next, "GET", {}, {}, false, kPictureCap);
@@ -665,7 +640,7 @@ void HttpProvider::readChat(const QString &id, bool atEnd) {
     if (!job || !job->reply || job->status.isTerminal())
         return;
     const QByteArray type = job->reply->header(QNetworkRequest::ContentTypeHeader).toByteArray();
-    if (!type.contains("event-stream") || codeOf(job->reply) >= 400)
+    if (!type.contains("event-stream") || statusOf(job->reply) >= 400)
         return; // a whole JSON answer, read when it is over
     const bool fine = job->reader.feed(job->reply->readAll(), atEnd);
     JobStatus status = job->status;
@@ -694,7 +669,7 @@ void HttpProvider::finishChat(const QString &id) {
     readChat(id, true);
     if (job->status.isTerminal())
         return;
-    const int code = codeOf(reply);
+    const int code = statusOf(reply);
     const bool streamed = reply->header(QNetworkRequest::ContentTypeHeader).toByteArray().contains("event-stream");
     if (code == 0 || code >= 300)
         return fail(id, failure(reply, QJsonDocument::fromJson(reply->readAll()).object(), true));
@@ -732,7 +707,7 @@ void HttpProvider::poll() {
             // The job is asked to stop (best effort) and given up on: a poll that never ends would hold the lane.
             connect(send(nativeUrl(QStringLiteral("/sdcpp/v1/jobs/%1/cancel").arg(it.value()->serverId)), "POST"), &QNetworkReply::finished,
                     this, [this] { sender()->deleteLater(); });
-            fail(it.key(), makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(timeoutMs() * 6 / 1000),
+            fail(it.key(), makeError(QStringLiteral("node_timeout"), QStringLiteral("%1 did not finish the job in %2 seconds.").arg(m_instance.name).arg(remote::jobDeadlineMs(timeoutMs()) / 1000),
                                      QStringLiteral("Raise timeout_s for %1 in %2 if the job is only slow.").arg(m_instance.name, providersFilePath())));
             continue;
         }
@@ -752,10 +727,10 @@ void HttpProvider::pollJob(const QString &id) {
         job->asking = false;
         if (job->status.isTerminal())
             return;
-        const int code = codeOf(reply);
+        const int code = statusOf(reply);
         // No answer, a rate limit or a gateway hiccup: try again a few times, waiting longer each time.
-        if (code == 0 || code == 429 || code == 502 || code == 503 || code == 504) {
-            if (++job->failures >= kMaxTransientPolls)
+        if (remote::transientStatus(code, false)) {
+            if (remote::pollsExhausted(job->failures))
                 fail(id, code == 0 || code >= 500
                              ? makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 stopped answering during the job.").arg(m_instance.name),
                                          QStringLiteral("Check that the service is running, then run the node again."))
@@ -832,7 +807,7 @@ void HttpProvider::cancel(const QString &job, Reply<QString> reply) {
     QNetworkReply *posted = send(nativeUrl(QStringLiteral("/sdcpp/v1/jobs/%1/cancel").arg(found->serverId)), "POST");
     connect(posted, &QNetworkReply::finished, this, [this, posted, job, found, reply] {
         posted->deleteLater();
-        const int code = codeOf(posted);
+        const int code = statusOf(posted);
         if (code == 0)
             return reply(Result<QString>(failure(posted, {})));
         const QJsonObject answer = jsonBody(posted);

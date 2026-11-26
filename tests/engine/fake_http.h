@@ -59,6 +59,7 @@ public:
     }
 
     const QList<HttpRequest> &requests() const { return m_requests; }
+    void clearRequests() { m_requests.clear(); }
     QList<HttpRequest> requestsTo(const QByteArray &method, const QByteArray &path) const {
         QList<HttpRequest> found;
         for (const HttpRequest &request : m_requests)
