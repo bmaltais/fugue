@@ -56,6 +56,14 @@ public:
     ReadinessPlan currentPlan() const;
     // Builds the list and opens the sheet; with nothing to do it says so.
     Q_INVOKABLE void show();
+    // Use what you have (#605): `source` says, for a missing model's hash, the file on disk of the same weights as {text, file, tier, ...}
+    // (empty for none); a row with one offers "Use what you have: <file> (same model, <tier>)" beside its download.
+    using UseSource = std::function<QVariantMap(const QString &hash)>;
+    void setUseSource(UseSource source) { m_useSource = std::move(source); }
+    // The person chose the file for the model of this hash (`useRequested`): the window sets it and asks refresh() for the list again.
+    Q_INVOKABLE void useOnDisk(const QString &hash);
+    // The list again after something outside changed what is missing (a file chosen in place of a model); only while reviewing.
+    void refresh();
     // The person's one yes: runs every row, then ends. Ignored unless reviewing.
     Q_INVOKABLE void start();
     // Stops a run (the rows not done stay undone); closes a review.
@@ -79,6 +87,8 @@ signals:
     void packsModified();
     // A run ended (ok: every row done).
     void finished(bool ok);
+    // The person chose, in the list, the file they have for the model of this hash (#605).
+    void useRequested(const QString &hash);
     // The sheet was opened (show()).
     void shown();
     // A run ended with everything ready: the sheet has closed itself.
@@ -101,6 +111,7 @@ private:
     const Registry *m_registry;
     QString m_trustPath;
     Request m_request;
+    UseSource m_useSource;
     ReadinessPlan m_plan;
     bool m_open = false;
     QString m_phase = QStringLiteral("review");

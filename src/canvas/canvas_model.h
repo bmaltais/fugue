@@ -269,6 +269,10 @@ public:
     // The whole workflow, with the canvas's positions and viewport in its layout: what is
     // saved and run. While a group is entered, the level on screen is in its definition.
     fugue::Document document() const;
+    // Commits a change of the whole workflow (document() with an edit made to it: a face edit, which instances elsewhere follow, the
+    // app block, a model swapped wherever it sits) as one undo step, whatever level is shown. commit() takes the level on screen
+    // instead, and inside a group would put the top level into the group's definition.
+    void commitWhole(const fugue::Document &whole, const QString &text);
     // The level on screen (spec 5.2), with its positions: the whole workflow at the top; inside
     // a group, a document whose graph.nodes are the group's inner nodes and whose layout is the
     // group's layout.groups entry, with every definition in `groups`. Every edit starts from
@@ -841,8 +845,6 @@ private:
     // Shows a level: the rows and links made again from it (setDocument without the undo), at
     // `view` (else the level's saved view, else none).
     void loadLevel(const fugue::Document &level, const QVariantMap *view = nullptr);
-    // Commits a change of the whole workflow (a face edit, which instances elsewhere follow).
-    void commitWhole(const fugue::Document &whole, const QString &text);
     // An instance of `group` may go in the level shown: false when it would hold itself (5.2).
     bool canHoldGroup(const fugue::Document &document, const QString &group) const;
     // Makes the document this one: only nodes that differ are touched, and their links.

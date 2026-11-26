@@ -20,11 +20,13 @@
 #include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/model_offers.h"
+#include "engine/model_use.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/templates.h"
 #include "workflow/image_inputs.h"
 #include "workflow/model_downloads.h"
+#include "workflow/model_picker.h"
 #include "workflow/readiness_sheet.h"
 #include "workflow/recovery_store.h"
 #include "engine/trust_store.h"
@@ -34,6 +36,7 @@
 #include <QTemporaryDir>
 #include <QUndoStack>
 #include <QUrl>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QHash>
 #include <QVariantList>
@@ -77,6 +80,8 @@ class Workflows : public QObject {
     Q_PROPERTY(QVariantList pendingTrust READ pendingTrust NOTIFY pendingTrustChanged)
     // A line for the banner: what failed to open, or what the workflow lacks. Empty for none.
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
+    // A file chosen in place of a missing model is being read (#605): its button waits, and a second click does nothing.
+    Q_PROPERTY(bool hashingUses READ hashingUses NOTIFY hashingUsesChanged)
     // Where the file picker starts: ~/Documents/Fugue as a file URL.
     Q_PROPERTY(QUrl suggestedFolder READ suggestedFolder CONSTANT)
     // The models being downloaded (#89).
@@ -296,6 +301,33 @@ public:
     QVariantMap missingModels(const QJsonArray &models) const;
     // Downloads those of them that have a source, as a template's Download does; `what` names who asked ("action:<id>").
     void downloadModels(const QJsonArray &models, const QString &what) { startDownloads(models, what); }
+    // --- use what you have (#605, spec 2.5, 8.9) ---
+    // When the shown workflow names a model that is not on disk but the same weights are, in another file, every place that offers a
+    // download offers that file too. engine/model_use.h decides (findOnDisk); this applies it, so they never disagree.
+    //
+    // The file chosen is applied where the shown workflow is edited: in the graph, to the document as one undo step (the file is
+    // saved only when the person saves); in the App view, to the app's own state (`setUseTaker`: AppView keeps it with the form's
+    // values and the app's workflow is never written). `setUsesProvider` gives back what the App view keeps, so the Get ready plan,
+    // the banner and the Needs panel leave those models out.
+    using UsesProvider = std::function<Uses(const QString &tab)>;
+    using UseTaker = std::function<bool(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved)>;
+    void setUsesProvider(UsesProvider provider) { m_usesProvider = std::move(provider); }
+    void setUseTaker(UseTaker taker) { m_useTaker = std::move(taker); }
+    // Whether the App view of `tab` is what shows: asked when a file is chosen, so that choice goes where it was made.
+    using AppShown = std::function<bool(const QString &tab)>;
+    void setAppShown(AppShown shown) { m_appShown = std::move(shown); }
+    // For a missing model of the shown workflow (by its hash): {text ("Use what you have: ..."), file, path, tier, size, otherSource,
+    // recommended}; empty when no file of the same weights is here.
+    Q_INVOKABLE QVariantMap onDiskOffer(const QString &hash) const;
+    // Uses the files on disk for the missing models with these hashes (all of the shown workflow's that have one when empty): the
+    // files' hashes are read first (a worker thread, once), then the choice is applied. `usesApplied` follows.
+    Q_INVOKABLE void useOnDisk(const QStringList &hashes);
+    // Opens the template with its missing models set to the files on disk (the template itself is unchanged); the files' hashes are
+    // read first. False when there is no such template or nothing to use.
+    Q_INVOKABLE bool openTemplateWithWhatYouHave(const QString &id);
+    bool hashingUses() const { return !m_hashing.isEmpty(); }
+    // What the App view keeps changed: the banner, the Get ready list and the Needs panel look again.
+    void usesChanged();
     // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
     // download_folder.
     Q_INVOKABLE void setDownloadRoot(const QString &root);
@@ -326,6 +358,9 @@ signals:
     void recoverableChanged();
     void pendingTrustChanged();
     void noticeChanged();
+    // A file on disk was chosen in place of a missing model and applied (#605).
+    void usesApplied();
+    void hashingUsesChanged();
     void openDialogRequested();
     void saveAsRequested();
     void exportShareRequested();
@@ -368,6 +403,13 @@ private:
                bool replacePristine, const QString &id = {});
     void removeTab(int index);
     Document documentOf(int index) const;
+    // The shown tab's document with the App view's chosen files in place of its missing models: what the banner, the plan and the
+    // Needs panel judge.
+    Document shownDocument() const;
+    // The missing models of the shown workflow that have a file of the same weights on disk, kept for a moment (the Needs panel and
+    // the Get ready sheet ask for each row).
+    const QList<OnDiskUse> &onDiskNow() const;
+    void applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp);
     // `replace`: a file at `path` may be replaced (the dialog asked, or it is the tab's own).
     bool saveTab(int index, const QString &path, bool replace = true);
     void snapshotCurrent();
@@ -376,6 +418,10 @@ private:
     bool isPristine(int index) const;
     QString untitledName() const;
     void setNotice(const QString &text);
+    // Reads the hash of each file of `uses` in turn on the worker; `done` gets the handles resolved and the names of the files that
+    // could not be read.
+    void hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done);
+    void setHashing(const QString &key, bool on);
     void analyze(const Document &document, const QString &title);
     // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
     void offerReadiness();
@@ -439,6 +485,15 @@ private:
     DownloadOffer m_offer; // what goes with m_missingNotice
     Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;
+    ModelWorkers m_work; // reads the hash of a file chosen in place of a missing model (#605)
+    UsesProvider m_usesProvider;
+    UseTaker m_useTaker;
+    AppShown m_appShown;
+    mutable QList<OnDiskUse> m_onDisk; // onDiskNow()'s answer
+    mutable QByteArray m_onDiskKey;
+    mutable QElapsedTimer m_onDiskAge;
+    QSet<QString> m_hashing; // the targets whose chosen file is being read ("use:<tab> <hashes>", "open:<template>")
+    Uses m_openUses; // the files a template opens with (openTemplateWithWhatYouHave)
     ReadinessSheet *m_readiness;
     QString m_readyTabId; // the tab the Get ready sheet was opened for
     ModelSource m_source; // empty: listOfferedModels

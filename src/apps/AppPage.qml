@@ -271,6 +271,41 @@ Rectangle {
                     maxHeight: 0.38 * panel.height
                 }
 
+                // The files the person chose in place of models that are not on disk (#605), each with its Undo (back to the app's own file).
+                Column {
+                    objectName: "appUses"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: page.look.params.panelPad * page.u
+                    Layout.rightMargin: page.look.params.panelPad * page.u
+                    visible: page.appView.uses.length > 0
+                    Repeater {
+                        model: page.appView.uses
+                        delegate: Row {
+                            id: useRow
+                            required property var modelData
+                            width: parent.width
+                            spacing: page.u
+                            Text {
+                                width: parent.width - undoUse.width - page.u
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: useRow.modelData.text
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                                color: page.look.label
+                                font.pixelSize: page.look.labelSize
+                            }
+                            KitChip {
+                                id: undoUse
+                                objectName: "appUseUndo-" + useRow.modelData.hash
+                                look: page.look
+                                text: qsTr("Undo")
+                                anchors.verticalCenter: parent.verticalCenter
+                                onTapped: page.appView.undoUse(useRow.modelData.hash)
+                            }
+                        }
+                    }
+                }
+
                 ScrollView {
                     id: scroll
                     objectName: "appForm"

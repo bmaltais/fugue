@@ -11,6 +11,7 @@
 #include "engine/model_family.h"
 #include "engine/model_library.h"
 #include "engine/model_speed.h"
+#include "engine/model_use.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
 
@@ -947,6 +948,35 @@ QString WidgetEdit::setDiskModel(const QString &node, const QString &input, cons
     ++m_hashRevision;
     emit hashingChanged();
     return {};
+}
+
+QVariantList WidgetEdit::onDiskOffers(const QString &node) {
+    QVariantList offers;
+    const Document level = m_canvas->scopeDocument();
+    const auto found = level.graph.nodes.constFind(node);
+    if (found == level.graph.nodes.constEnd())
+        return offers;
+    const ModelLibrary models = library();
+    const ModelSpeeds speeds;
+    for (auto input = found->inputs.cbegin(); input != found->inputs.cend(); ++input) {
+        if (input->kind() != InputValue::Kind::Resource || target(node, input.key()).widget != QLatin1String("model"))
+            continue;
+        const QJsonObject handle = input->handle();
+        if (handle.value(QStringLiteral("hash")).toString().isEmpty() ||
+            models.resolve(handle, hashes(), ModelLibrary::Hashing::RememberedOnly))
+            continue; // here, or a model a provider serves
+        const std::optional<OnDiskMatch> match = findOnDisk(handle, models, RecommendContext{localComputeDevice(), 0, &speeds}, *m_shapes);
+        if (!match)
+            continue;
+        const OnDiskUse use{handle, *match};
+        offers.append(QVariantMap{{"input", input.key()},
+                                  {"file", match->name},
+                                  {"path", match->path},
+                                  {"tier", match->tier},
+                                  {"otherSource", match->otherSource},
+                                  {"text", use.offerText()}});
+    }
+    return offers;
 }
 
 void WidgetEdit::setDownloads(ModelDownloads *downloads) {

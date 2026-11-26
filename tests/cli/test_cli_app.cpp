@@ -124,6 +124,28 @@ const char *kDraws = R"({"fugue": 1,
    "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a cat"}},
    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}, "name": "app"}}}}})";
 
+// #605: an app whose model (the INT8 file of Z-Image Turbo) is not on disk, with no source to get it from.
+const char *kWantsInt8 = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Wants INT8", "inputs": [{"role": "image", "targets": ["load.file"]}], "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": ""}},
+   "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "z_image_turbo_int8_convrot.safetensors"},
+     "text_encoder": {"resource": "fugue/text-encoder", "hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "name": "t.safetensors"},
+     "vae": {"resource": "fugue/vae", "hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "name": "v.safetensors"}}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "name": "app"}}}}})";
+
+// The same app, its model also a field of the app whose default holds the model the file names (binding writes that default back).
+const char *kWantsInt8Field = R"({"fugue": 1,
+ "app": {"format": 1, "title": "Wants INT8 field", "inputs": [{"role": "image", "targets": ["load.file"]},
+   {"name": "unet", "targets": ["models.diffusion_model"], "default": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "z_image_turbo_int8_convrot.safetensors"}}],
+   "outputs": [{"node": "save"}]},
+ "graph": {"nodes": {
+   "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": ""}},
+   "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "name": "z_image_turbo_int8_convrot.safetensors"},
+     "text_encoder": {"resource": "fugue/text-encoder", "hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "name": "t.safetensors"},
+     "vae": {"resource": "fugue/vae", "hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "name": "v.safetensors"}}},
+   "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "name": "app"}}}}})";
+
 const char *kPlain = R"({"fugue": 1, "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 1}}}}})";
 
 } // namespace
@@ -174,6 +196,18 @@ class TestCliApp : public QObject {
         write(path("templates/" + id + "/workflow.fugue"), workflow);
     }
 
+    // A Z-Image Turbo file (a header alone: Lumina 2's text projection and 16-channel patch embedding) in the model folder of the home.
+    void zImage(const QString &name) const {
+        const auto tensor = [](const char *shape) {
+            return QByteArray("{\"dtype\": \"F16\", \"shape\": ") + shape + ", \"data_offsets\": [0, 0]}";
+        };
+        const QByteArray json = "{\"cap_embedder.1.weight\": " + tensor("[3840, 2560]") + ", \"x_embedder.weight\": " + tensor("[3840, 64]") + "}";
+        QByteArray out;
+        for (int i = 0; i < 8; ++i)
+            out.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+        write(path("root/data/fugue/models/diffusion_models/" + name), out + json);
+    }
+
     // Under the home folder: the one place a run may read from besides its own (13.6).
     QString picture() const { return path("home/pictures/in.png"); }
 
@@ -192,6 +226,63 @@ private slots:
         write(path("work/optional.fugue"), kOptionalMask);
         write(path("work/shade.fugue"), kShade);
         write(path("work/shade-stale.fugue"), kShadeStale);
+    }
+
+    // #605: the model is not on disk but the same weights are, in another quantization. Every message says where, and what to do; with
+    // --use-on-disk the command goes on with that file, for this run only, saying which; the workflow file is not written.
+    void aMissingModelWhoseSameWeightsAreOnDiskSaysSoAndUsesThemOnRequest() {
+        write(path("work/wants-int8.fugue"), kWantsInt8);
+        const QByteArray before = kWantsInt8;
+        // No such file yet: nothing to suggest.
+        QVERIFY(!fugue({"app", "run", "wants-int8.fugue", "--input", "image=" + picture(), "--json"}).error().value("hint").toString().contains("--use-on-disk"));
+        // The other two models are here by name (a check reads no file); only the diffusion model is the missing one.
+        write(path("root/data/fugue/models/text_encoders/t.safetensors"), "abc");
+        write(path("root/data/fugue/models/vae/v.safetensors"), "abc");
+        zImage("z_image_turbo_bf16.safetensors");
+        zImage("z_image_turbo_fp8_e4m3fn.safetensors");
+        const QString file = path("root/data/fugue/models/diffusion_models/z_image_turbo_bf16.safetensors");
+
+        const Outcome refused = fugue({"app", "run", "wants-int8.fugue", "--input", "image=" + picture(), "--json"});
+        QCOMPARE(refused.code(), QString("app_not_ready"));
+        QVERIFY2(refused.error().value("hint").toString().contains(file), refused.out);
+        QVERIFY(refused.error().value("hint").toString().contains("--use-on-disk"));
+
+        // validate: the node's own warning (a missing model is a warning there) carries the same words.
+        // The bundled Z-Image Turbo template is a graph that reaches the model; its files are not here, but the INT8 one has same weights.
+        QVERIFY(QFile::copy(QString(FUGUE_SOURCE_DIR) + "/templates/z-image-turbo/workflow.fugue", path("work/zit.fugue")));
+        const Outcome checked = fugue({"validate", "zit.fugue", "--json"});
+        QCOMPARE(checked.exitCode, 0);
+        QStringList hints;
+        for (const QJsonValue warning : checked.json().value("warnings").toArray())
+            hints << warning.toObject().value("hint").toString();
+        QVERIFY2(hints.join('\n').contains("set models.diffusion_model to it, or pass --use-on-disk"), checked.out);
+
+        // --use-on-disk: the app is ready with the file, which the command prints; the workflow file is as it was.
+        const Outcome ran = fugue({"app", "run", "wants-int8.fugue", "--use-on-disk", "--input", "image=" + picture(), "--json"});
+        QVERIFY2(ran.code() != QString("app_not_ready"), ran.out + ran.err);
+        QVERIFY2(ran.err.contains("--use-on-disk: z_image_turbo_int8_convrot.safetensors -> " + file.toUtf8()), ran.err);
+        QVERIFY(ran.err.contains("same model, bf16"));
+        QFile again(path("work/wants-int8.fugue"));
+        QVERIFY(again.open(QIODevice::ReadOnly));
+        QCOMPARE(again.readAll(), before);
+        const Outcome valid = fugue({"validate", "zit.fugue", "--use-on-disk", "--json"});
+        QCOMPARE(valid.exitCode, 0);
+        for (const QJsonValue warning : valid.json().value("warnings").toArray())
+            QVERIFY2(warning.toObject().value("input").toString() != "diffusion_model", valid.out);
+    }
+
+    // The binding writes a field's default over the node; the file chosen for --use-on-disk has to be put in after it, or the command says
+    // it chose the file and runs with the missing model.
+    void useOnDiskSurvivesAFieldWhoseDefaultIsTheMissingModel() {
+        write(path("work/wants-field.fugue"), kWantsInt8Field);
+        write(path("root/data/fugue/models/text_encoders/t.safetensors"), "abc");
+        write(path("root/data/fugue/models/vae/v.safetensors"), "abc");
+        zImage("z_image_turbo_bf16.safetensors");
+        const Outcome ran = fugue({"app", "run", "wants-field.fugue", "--use-on-disk", "--input", "image=" + picture(), "--json"});
+        QVERIFY2(ran.err.contains("--use-on-disk: z_image_turbo_int8_convrot.safetensors -> "), ran.err);
+        QVERIFY2(ran.code() != QString("app_not_ready") && ran.code() != QString("model_missing"), ran.out + ran.err);
+        const Outcome bare = fugue({"app", "run", "wants-field.fugue", "--use-on-disk", "--json"});
+        QVERIFY2(bare.code() != QString("app_not_ready") && bare.code() != QString("model_missing"), bare.out + bare.err);
     }
 
     void listShowsTheAppsAndNotThePlainTemplates() {

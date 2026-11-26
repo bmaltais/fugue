@@ -81,7 +81,7 @@ fail with `permission_denied`.
 
 | Command | Does |
 | --- | --- |
-| `fugue run <file>` | Start a run (`--wait`, `--first`, `--to`, `--provider`, `--set`, `--allow-remote <instance>` for this run only when a node would send pictures or prompts to a service off this machine) |
+| `fugue run <file>` | Start a run (`--wait`, `--first`, `--to`, `--provider`, `--set`, `--allow-remote <instance>` for this run only when a node would send pictures or prompts to a service off this machine; `--use-on-disk` swaps each missing model for the file of the same weights on disk, for this run only; `validate` takes it too, and `app run`) |
 | `fugue validate <file>` | Compile and report errors and warnings; runs nothing |
 | `fugue compile <file>` | Print the compiled graph |
 | `fugue workflow new <file>` | Write an empty workflow, or a template's (`--template <id>`) |

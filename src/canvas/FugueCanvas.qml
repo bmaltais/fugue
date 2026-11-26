@@ -1574,6 +1574,8 @@ FocusScope {
         warningsPinned = pin
         warningsNode = nodeId
         warningsTip.text = warnings.join("\n")
+        // A model that is not on disk but whose same weights are (#605): the card kept up offers the file, one click, one undo step.
+        warningsTip.offers = pin ? model.widgets.onDiskOffers(nodeId) : []
         const at = badge.mapToItem(canvas, badge.width, badge.height)
         warningsTip.x = Math.max(8, Math.min(at.x - warningsTip.width, canvas.width - warningsTip.width - 8))
         warningsTip.y = Math.min(at.y + canvas.look.unit, canvas.height - warningsTip.height - 8)
@@ -1597,8 +1599,10 @@ FocusScope {
         property alias text: warningsText.text
         visible: canvas.warningsNode !== ""
         z: 10
-        width: Math.min(warningsText.implicitWidth, 360) + 3.5 * canvas.look.unit + 14 + 2
-        height: warningsText.height + 2.5 * canvas.look.unit + 2
+        property var offers: []
+        readonly property Item offerItem: offersLoader.item as Item
+        width: Math.max(Math.min(warningsText.implicitWidth, 360), offerItem ? offerItem.implicitWidth : 0) + 3.5 * canvas.look.unit + 14 + 2
+        height: warningsText.height + (offerItem ? offerItem.height + canvas.look.unit : 0) + 2.5 * canvas.look.unit + 2
         Shadow {
             target: warningsBox
             level: 3
@@ -1631,6 +1635,42 @@ FocusScope {
                 selectionColor: canvas.look.accent
                 selectedTextColor: canvas.look.accentForeground
                 font.pixelSize: canvas.look.labelSize
+            }
+            // The files of the same model that are here: what the missing one can be swapped for (#605). Made only when there are some.
+            Loader {
+                id: offersLoader
+                active: warningsTip.offers.length > 0
+                x: warningsText.x
+                y: warningsText.y + warningsText.height + canvas.look.unit
+                sourceComponent: Column {
+                    objectName: "warningsOffers"
+                    spacing: canvas.look.unit
+                    Repeater {
+                        model: warningsTip.offers
+                        delegate: Row {
+                            id: offer
+                            required property var modelData
+                            spacing: canvas.look.unit
+                            ThemedButton {
+                                objectName: "useOnDisk-" + offer.modelData.input
+                                text: qsTr("Use it")
+                                Accessible.name: offer.modelData.text
+                                onClicked: {
+                                    canvas.model.widgets.setDiskModel(canvas.warningsNode, offer.modelData.input, offer.modelData.path)
+                                    canvas.closeWarnings()
+                                }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(implicitWidth, 300)
+                                text: offer.modelData.text
+                                elide: Text.ElideMiddle
+                                color: canvas.look.text
+                                font.pixelSize: canvas.look.labelSize
+                            }
+                        }
+                    }
+                }
             }
         }
     }

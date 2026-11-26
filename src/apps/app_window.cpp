@@ -107,6 +107,18 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     // A node routed to a service off this machine (#404) is said on the same "Runs on" line.
     QObject::connect(&runs, &CanvasRuns::runsOnChanged, &view, [&view, &runs] { view.setOffMachine(runs.runsOn()); });
     needs->setLocator([&canvas](const QVariantMap &item) { return NeedsModel::nodeFor(canvas.document(), item); });
+    // Use what you have (#605): a missing model whose same weights are on disk offers that file beside its download. In the App view the
+    // choice is the app's own (kept with its form's values, never written to its workflow); in the graph it edits the document.
+    needs->setUseSource([&workflows](const QString &hash) { return workflows.onDiskOffer(hash); });
+    QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QString &hash) { workflows.useOnDisk({hash}); });
+    workflows.setUsesProvider([&view](const QString &tab) { return view.usesInForce(tab); });
+    workflows.setAppShown([&view](const QString &tab) { return view.shown() && view.tab() == tab; });
+    workflows.setUseTaker([&view](const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
+        view.takeUses(tab, chosen, resolved);
+        return true;
+    });
+    QObject::connect(&view, &AppView::usesChanged, &workflows, &Workflows::usesChanged);
+    QObject::connect(&workflows, &Workflows::usesApplied, needs, &NeedsModel::refreshSoon);
     QObject::connect(&workflows, &Workflows::noticeChanged, needs, &NeedsModel::refreshSoon);
     QObject::connect(needs, &NeedsModel::getReadyRequested, &workflows, [&workflows](bool startNow) {
         ReadinessSheet *sheet = workflows.readiness();

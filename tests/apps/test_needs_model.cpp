@@ -60,6 +60,28 @@ class TestNeedsModel : public QObject {
     Q_OBJECT
 
 private slots:
+
+    // #605: a model whose same weights are on disk carries the offer; choosing it only asks the window, and the model is not offered
+    // as a download once the plan no longer lists it.
+    void aModelWithAFileOfTheSameWeightsOffersToUseIt() {
+        NeedsModel needs;
+        ReadinessPlan plan = modelsPlan();
+        needs.setUseSource([](const QString &hash) {
+            return hash == hashA ? QVariantMap{{"text", "Use what you have: klein-q8.gguf (same model, Q8_0)"}} : QVariantMap();
+        });
+        needs.setPlan(plan);
+        QVERIFY(needs.items().at(0).toMap().value("use").toMap().contains("text"));
+        QVERIFY(needs.items().at(1).toMap().value("use").toMap().isEmpty());
+        QSignalSpy asked(&needs, &NeedsModel::useRequested);
+        needs.useOnDisk(1); // no offer on this row: nothing asked
+        QCOMPARE(asked.size(), 0);
+        needs.useOnDisk(0);
+        QCOMPARE(asked.size(), 1);
+        QCOMPARE(asked.first().first().toString(), hashA);
+        plan.models.removeFirst(); // the window applied it: the plan has one model less
+        needs.setPlan(plan);
+        QCOMPARE(needs.items().size(), 1);
+    }
     void aPlanBecomesRowsWithSizeAndLicence() {
         NeedsModel needs;
         QVERIFY(needs.ready());

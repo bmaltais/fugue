@@ -248,6 +248,8 @@ Popup {
                                 failed: modelData.state === "failed"
                                 error: failed ? modelData.detail : ""
                                 onToggled: sheet.toggle(key)
+                                useText: modelData.use && modelData.use.text ? modelData.use.text : ""
+                                onUseRequested: sheet.sheetModel.useOnDisk(modelData.hash)
                             }
                         }
                     }

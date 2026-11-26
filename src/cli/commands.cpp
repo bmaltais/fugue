@@ -1,4 +1,5 @@
 #include "cli/commands.h"
+#include "cli/use_on_disk.h"
 
 #include <QDir>
 #include <QFile>
@@ -135,7 +136,11 @@ Reply validateWorkflow(const Command &command, Context &context) {
     const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
         return loadFailed(document.errors());
-    const Validation validation = validateDocument(*document, context, command.positionals.at(0));
+    // A model that is not on disk, whose same weights are: used for this check when asked, else said (#605).
+    const Document checked = command.has("use-on-disk") ? useOnDisk(*document, context) : *document;
+    Validation validation = validateDocument(checked, context, command.positionals.at(0));
+    if (!command.has("use-on-disk"))
+        addOnDiskHints(validation.errors, *document, context);
     if (hasErrors(validation.errors))
         return Reply::failure(validation.errors);
     // The state of every node (10.3), for people too.

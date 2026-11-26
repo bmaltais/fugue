@@ -21,6 +21,7 @@
 #include "engine/model_library.h"
 #include "engine/model_recommend.h"
 #include "engine/model_speed.h"
+#include "engine/model_use.h"
 #include "engine/model_places.h"
 #include "engine/template_search.h"
 #include "engine/fugue_home.h"
@@ -200,12 +201,16 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     m_readiness = new ReadinessSheet(m_registry, locations.trustPath,
                                      [this] {
                                          return m_current < 0 ? ReadinessRequest()
-                                                              : requestFor(documentOf(m_current), *m_registry, m_tabs[size_t(m_current)].carried,
+                                                              : requestFor(shownDocument(), *m_registry, m_tabs[size_t(m_current)].carried,
                                                                         m_tabs[size_t(m_current)].path.isEmpty() ? QString() : QFileInfo(m_tabs[size_t(m_current)].path).absolutePath());
                                      },
                                      this);
     // What was installed, trusted or downloaded changes what the banner lacks (the registry reload does the same for packs).
     connect(m_readiness, &ReadinessSheet::finished, this, [this] { refreshMissing(false); });
+    // Use what you have (#605): a row of the sheet offers the file on disk beside its download.
+    m_readiness->setUseSource([this](const QString &hash) { return onDiskOffer(hash); });
+    connect(m_readiness, &ReadinessSheet::useRequested, this, [this](const QString &hash) { useOnDisk({hash}); });
+    connect(this, &Workflows::usesApplied, m_readiness, &ReadinessSheet::refresh);
     // One click: the sheet is for the tab that was shown when it opened; once everything is ready it has closed itself and that
     // tab is the one shown, ready to run, whichever tab the person went to meanwhile.
     connect(m_readiness, &ReadinessSheet::shown, this, [this] { m_readyTabId = m_current < 0 ? QString() : m_tabs[size_t(m_current)].id; });
@@ -339,6 +344,169 @@ QString Workflows::untitledName() const {
 
 Document Workflows::documentOf(int index) const {
     return index == m_current ? m_canvas->document() : m_tabs[size_t(index)].document;
+}
+
+Document Workflows::shownDocument() const {
+    if (m_current < 0)
+        return {};
+    const Document document = documentOf(m_current);
+    return m_usesProvider ? withUses(document, m_usesProvider(m_tabs[size_t(m_current)].id)) : document;
+}
+
+const QList<OnDiskUse> &Workflows::onDiskNow() const {
+    if (m_current < 0 || !m_registry) {
+        m_onDisk.clear();
+        return m_onDisk;
+    }
+    const QJsonArray wanted = modelsToHave(shownDocument(), *m_registry);
+    const QByteArray key = m_tabs[size_t(m_current)].id.toUtf8() + QJsonDocument(wanted).toJson(QJsonDocument::Compact);
+    if (key == m_onDiskKey && m_onDiskAge.isValid() && m_onDiskAge.elapsed() < 2000)
+        return m_onDisk;
+    FileHashes hashes(FileHashes::defaultPath());
+    const ModelLibrary library = ModelLibrary::current(m_registry);
+    const ModelSpeeds speeds;
+    m_onDisk = onDiskUses(library.missing(wanted, hashes), library, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared());
+    m_onDiskKey = key;
+    m_onDiskAge.restart();
+    return m_onDisk;
+}
+
+QVariantMap Workflows::onDiskOffer(const QString &hash) const {
+    for (const OnDiskUse &use : onDiskNow())
+        if (use.wanted.value(QStringLiteral("hash")).toString() == hash)
+            return {{"text", use.offerText()},
+                    {"file", use.match.name},
+                    {"path", use.match.path},
+                    {"tier", use.match.tier},
+                    {"size", double(use.match.size)},
+                    {"otherSource", use.match.otherSource},
+                    {"recommended", use.match.recommended}};
+    return {};
+}
+
+void Workflows::hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done) {
+    // A file's hash is read once and remembered (a file the pickers hashed before is known): on the worker, never the window's thread.
+    struct Chain {
+        Uses resolved;
+        QStringList failed;
+        std::function<void(int)> step;
+    };
+    const auto chain = std::make_shared<Chain>();
+    // The step holds the chain weakly: the pending read holds it, so a finished chain frees itself (no cycle).
+    chain->step = [this, uses, done = std::move(done), weak = std::weak_ptr<Chain>(chain)](int index) {
+        const std::shared_ptr<Chain> self = weak.lock();
+        if (!self)
+            return;
+        if (index >= uses.size()) {
+            const Uses resolved = self->resolved;
+            const QStringList failed = self->failed;
+            done(resolved, failed);
+            return;
+        }
+        const OnDiskUse use = uses.at(index);
+        m_work.hash(this, use.match.path, nullptr, [use, self, index](const QString &hash) {
+            if (hash.isEmpty())
+                self->failed << use.match.name;
+            else
+                self->resolved.insert(use.wanted.value(QStringLiteral("hash")).toString(), useHandle(use, hash));
+            self->step(index + 1);
+        });
+    };
+    chain->step(0);
+}
+
+void Workflows::setHashing(const QString &key, bool on) {
+    const bool was = hashingUses();
+    if (on)
+        m_hashing.insert(key);
+    else
+        m_hashing.remove(key);
+    if (was != hashingUses())
+        emit hashingUsesChanged();
+}
+
+void Workflows::useOnDisk(const QStringList &hashes) {
+    if (m_current < 0)
+        return;
+    QList<OnDiskUse> chosen;
+    QStringList wanted;
+    for (const OnDiskUse &use : onDiskNow()) {
+        const QString hash = use.wanted.value(QStringLiteral("hash")).toString();
+        if (hashes.isEmpty() || hashes.contains(hash)) {
+            chosen << use;
+            wanted << hash;
+        }
+    }
+    if (chosen.isEmpty())
+        return;
+    const QString tab = m_tabs[size_t(m_current)].id;
+    wanted.sort();
+    const QString key = QStringLiteral("use:") + tab + QLatin1Char(' ') + wanted.join(QLatin1Char(' '));
+    if (m_hashing.contains(key))
+        return; // a second click for the same target while its file is being read
+    setHashing(key, true);
+    // Where the choice goes is decided now, by what the person is looking at: a switch of views while the file is read changes nothing.
+    const bool inApp = m_appShown && m_appShown(tab);
+    hashUses(chosen, [this, tab, chosen, key, inApp](const Uses &resolved, const QStringList &failed) {
+        setHashing(key, false);
+        applyUses(tab, chosen, resolved, inApp);
+        if (!failed.isEmpty())
+            setNotice(tr("Could not read %1, so it is not used.").arg(failed.join(QStringLiteral(", "))));
+    });
+}
+
+void Workflows::applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp) {
+    if (resolved.isEmpty())
+        return; // no file could be read
+    const bool open = std::any_of(m_tabs.begin(), m_tabs.end(), [&tab](const Tab &t) { return t.id == tab; });
+    if (!open)
+        return; // the tab was closed meanwhile
+    if (inApp) {
+        // The App view's own state, whichever view shows now; the workflow is never written.
+        if (!m_useTaker)
+            return;
+        m_useTaker(tab, chosen, resolved);
+    } else {
+        if (m_current < 0 || m_tabs[size_t(m_current)].id != tab)
+            return; // another tab is shown: the document on the canvas is not this one's
+        // The graph: the document itself, one undo step; the file is written only when the person saves.
+        m_canvas->commitWhole(withUses(m_canvas->document(), resolved), tr("Use the files you have"));
+        m_onDiskKey.clear();
+    }
+    usesChanged();
+    emit usesApplied();
+}
+
+void Workflows::usesChanged() {
+    m_onDiskKey.clear();
+    refreshMissing(false);
+}
+
+bool Workflows::openTemplateWithWhatYouHave(const QString &id) {
+    const std::optional<Template> chosen = TemplateLibrary(m_templateRoots, m_registry).find(id);
+    if (!chosen)
+        return false;
+    FileHashes hashes(FileHashes::defaultPath());
+    const ModelLibrary library = ModelLibrary::current(m_registry);
+    const ModelSpeeds speeds;
+    const QList<OnDiskUse> uses = onDiskUses(library.missing(chosen->models, hashes), library, RecommendContext{localComputeDevice(), 0, &speeds},
+                                             ModelShapes::shared());
+    if (uses.isEmpty())
+        return false;
+    const QString key = QStringLiteral("open:") + id;
+    if (m_hashing.contains(key))
+        return true; // a second click while the files are being read opens no second tab
+    // The files' hashes are read first (once, on the worker); the template opens when they are known.
+    setHashing(key, true);
+    hashUses(uses, [this, chosen = *chosen, key](const Uses &resolved, const QStringList &failed) {
+        setHashing(key, false);
+        m_openUses = resolved;
+        openTemplate(chosen);
+        m_openUses.clear();
+        if (!failed.isEmpty())
+            setNotice(tr("Opened without %1: the file could not be read.").arg(failed.join(QStringLiteral(", "))));
+    });
+    return true;
 }
 
 void Workflows::snapshotCurrent() {
@@ -712,6 +880,9 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     Errors errors = document ? Errors() : document.errors();
     if (document) {
         makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
+        // Opened with the files the person has in place of the models it names that are not on disk (#605): this tab's copy only.
+        if (!m_openUses.isEmpty())
+            document.value() = withUses(document.value(), m_openUses);
         // Every file a template ships is taken in, not only its pictures: a song, a clip or a LUT left in the template's
         // folder is named by a full path that an AppImage mounts somewhere else at each start, so a saved copy would lose it.
         // Template inputs are small (fugue-workflows' bin/check caps them) and stored once by hash.
@@ -783,20 +954,34 @@ QVariantList Workflows::templates() const {
         ModelLibrary library = models;
         downloadable(t.models, library); // the folders they would go in
         const QList<MissingModel> absent = library.missing(t.models, hashes);
-        for (const MissingModel &model : absent)
+        // The same model is on disk in another file (#370, #605): per missing model, the file; `covered` are the hashes it would replace.
+        QVariantList onDisk;
+        QSet<QString> covered;
+        const RecommendContext context{localComputeDevice(), 0, &speeds};
+        for (const MissingModel &model : absent) {
+            const std::optional<OnDiskMatch> match = findOnDisk(model.handle, library, context, ModelShapes::shared());
             missing.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
                                        {"source", model.source},
                                        {"folder", model.folder},
-                                       // Another quantization of it that is here, the Recommended one (#370).
-                                       {"suggest", suggestOnDisk(model.handle, library, RecommendContext{localComputeDevice(), 0, &speeds},
-                                                                 ModelShapes::shared())}});
+                                       {"suggest", match ? match->name : QString()}});
+            if (!match)
+                continue;
+            const OnDiskUse use{model.handle, *match};
+            covered.insert(model.handle.value(QStringLiteral("hash")).toString());
+            onDisk.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
+                                      {"file", match->name},
+                                      {"tier", match->tier},
+                                      {"otherSource", match->otherSource},
+                                      {"text", use.offerText()}});
+        }
         // Where each model is: on disk (not among `absent`), or served (#164).
         QList<ModelPlaces> placed;
         for (const QJsonValue &value : t.models) {
             const QJsonObject handle = value.toObject();
             const bool absentHere = std::any_of(absent.cbegin(), absent.cend(), [&](const MissingModel &m) {
                 return m.handle.value(QStringLiteral("name")) == handle.value(QStringLiteral("name"))
-                       && m.handle.value(QStringLiteral("resource")) == handle.value(QStringLiteral("resource"));
+                       && m.handle.value(QStringLiteral("resource")) == handle.value(QStringLiteral("resource"))
+                       && !covered.contains(m.handle.value(QStringLiteral("hash")).toString()); // a file of the same model is here
             });
             placed.append(placesOf(handle, !absentHere, m_served));
         }
@@ -808,8 +993,11 @@ QVariantList Workflows::templates() const {
                 if (!places.clouds.contains(cloud))
                     places.clouds << cloud;
         QStringList status;
-        if (!missing.isEmpty())
-            status << tr("Models missing: %1 of %2").arg(missing.size()).arg(t.models.size());
+        const qsizetype stillMissing = missing.size() - covered.size();
+        if (stillMissing > 0)
+            status << tr("Models missing: %1 of %2").arg(stillMissing).arg(t.models.size());
+        if (!covered.isEmpty() && places.ready)
+            status << tr("Uses another file of the same model"); // ready to run, with what you have (#605)
         // A pack the template carries is installed from it, after a question (#118).
         QStringList carried, elsewhere;
         for (const QString &pack : t.neededPacks) {
@@ -854,6 +1042,8 @@ QVariantList Workflows::templates() const {
                                {"own", t.own},
                                {"inherited", t.inherited},
                                {"missingModels", missing},
+                               {"onDisk", onDisk},
+                               {"usesOnDisk", !covered.isEmpty() && places.ready},
                                {"ready", places.ready},
                                {"local", places.local},
                                {"hosts", places.hosts},
@@ -1135,7 +1325,7 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
 void Workflows::refreshMissing(bool force) {
     if (m_current < 0)
         return;
-    const QString missing = missingNotice(documentOf(m_current), m_tabs[size_t(m_current)].title, &m_offer);
+    const QString missing = missingNotice(shownDocument(), m_tabs[size_t(m_current)].title, &m_offer);
     const bool shown = m_notice == m_missingNotice;
     m_missingNotice = missing;
     if (force || shown)
@@ -1533,7 +1723,7 @@ bool Workflows::isTrusted(const QString &packId, const QString &version) const {
 void Workflows::refreshNodeTypes() {
     if (m_current < 0)
         return;
-    const Document shown = documentOf(m_current);
+    const Document shown = shownDocument();
     // The banner follows the shown workflow's missing nodes (a pack removed adds some, one
     // installed takes them away), unless it shows another line; a line dismissed comes back
     // only when what is missing changed.

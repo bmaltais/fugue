@@ -206,6 +206,11 @@ public:
     // folders: its handle now when its hash is remembered, else once hashed (see the top).
     // Returns why not, or empty.
     Q_INVOKABLE QString setDiskModel(const QString &node, const QString &input, const QString &path);
+    // For a node whose model inputs name a file that is not on disk (its yellow warning, #600): per such input, the file of the
+    // same weights that is (engine/model_use.h), as [{input, file, path, tier, text, otherSource}]. `text` is "Use what you have: ..."
+    // as the other surfaces say it; the node's card offers "Use it", which is setDiskModel(node, input, path): one undo step.
+    // Reads the model folders and headers: asked when the card is kept up, not on each hover.
+    Q_INVOKABLE QVariantList onDiskOffers(const QString &node);
     // A picked file being hashed for the input: {progress: 0 to 1, name}; {error} when it could
     // not be read; empty otherwise.
     Q_INVOKABLE QVariantMap hashState(const QString &node, const QString &input) const;

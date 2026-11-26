@@ -1370,6 +1370,15 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rules met: Primary (the sheet's Install is still the one accent), Gaps and Keys unchanged (the sheet's own rows). Nothing new to lay out: a control left out.
 - Not checked by a person: a real window (offscreen picture only); a MOSS model that is only on a paired host does not show its tokenizer in Get ready (its header is read here).
 
+### 2026-11-26 Use what you have: a missing model's same weights on disk (#605)
+
+- Control: the node warnings card (`warningsOffers`, `useOnDisk-<input>` in `src/canvas/FugueCanvas.qml`), the Get ready row (`getReadyUse` in `GetReadyRow.qml`), the Needs panel (`appNeedUse-<key>`), the App view's `appUses` line with `appUseUndo-<hash>`, and the template card (`templateUseOnDisk-<id>` in `TemplatesDialog.qml`).
+- Old: a missing model offered only a download (6 to 20 GB), or on a template card a tooltip saying another quantization was here.
+- New: wherever a download is offered for a model whose same weights are on disk, a button offers the file: "Use it" on the node card (one undo step), "Use what you have: <file> (same model, <tier>)" beside the download in Get ready, "Use what you have" in Needs, "Open with what you have" on the card, which then counts as Ready to run with "Uses another file of the same model". In the App view the choice shows as "Using <file> in place of <name> (...)" with Undo.
+- Why: people with a ComfyUI models folder should not be pushed into a download of what they have; the owner's issue.
+- Rules met: Primary (each is a secondary or flat button next to the download, never the accent), Words (the file named, the tier said), Undo (the node and graph edits are undo steps; the App view has its own Undo).
+- Not checked by a person: a real window (offscreen only); the card's button needs the card kept up with a click.
+
 ### 2026-11-26 CUDA helper notice: wording for a host without pacman, and shown in an AppImage (#334)
 
 - Control: `helperNotice`, `helperNoticeCopy` and `helperNoticeDismiss` in `src/Main.qml`, unchanged in place, size and order.

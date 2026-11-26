@@ -7,6 +7,7 @@
 
 #include "engine/model_family.h"
 #include "engine/model_library.h"
+#include "engine/model_use.h"
 #include "engine/registry.h"
 #include "engine/model_weights.h"
 
@@ -180,29 +181,8 @@ QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<Ma
 }
 
 QString suggestOnDisk(const QJsonObject &handle, const ModelLibrary &library, const RecommendContext &context, ModelShapes &shapes) {
-    const QString resource = handle.value(QStringLiteral("resource")).toString();
-    const QString wanted = handle.value(QStringLiteral("name")).toString();
-    const std::optional<PortType> type = PortType::parse(resource);
-    if (!type || modelFamily(familyKindOf(resource), wanted).isEmpty())
-        return {};
-    const QString family = modelFamily(familyKindOf(resource), wanted);
-    const QString stem = modelStem(wanted);
-    QList<ModelFile> same;
-    for (const ModelFile &file : library.list(*type))
-        if (modelFamily(familyKindOf(resource), file.name) == family && modelStem(file.name) == stem)
-            same << file;
-    if (same.isEmpty())
-        return {};
-    if (same.size() > 1) {
-        QList<MarkedFile> files;
-        for (const ModelFile &file : std::as_const(same))
-            files.append({file.path, file.size});
-        const QHash<QString, ModelMark> marks = markModels(resource, files, context, shapes);
-        for (const ModelFile &file : std::as_const(same))
-            if (marks.value(file.path).recommended)
-                return file.name;
-    }
-    return same.first().name;
+    const std::optional<OnDiskMatch> match = findOnDisk(handle, library, context, shapes);
+    return match ? match->name : QString();
 }
 
 } // namespace fugue

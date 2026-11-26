@@ -17,6 +17,7 @@
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/group_library.h"
+#include "engine/model_use.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
@@ -98,6 +99,43 @@ class TestCanvasGroups : public QObject {
 
 private slots:
     void initTestCase() { nodes::addBuiltinNodeTypes(m_registry); }
+
+    // Use what you have (#605) inside a group: the swap is an edit of the whole workflow, one undo step; the group's definition keeps its
+    // nodes (the top level is not written into it), with the handle swapped where it sits.
+    void aWholeWorkflowEditInsideAGroupSwapsTheHandleAndUndoesInOneStep() {
+        const QString before = QStringLiteral("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        const QString after = QStringLiteral("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model":
+              {"resource": "fugue/diffusion-model", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "a.safetensors"}}},
+            "prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a red fox"}}}},
+            "layout": {"nodes": {"models": {"pos": [0, 0]}, "prompt": {"pos": [300, 0]}}}})"));
+        canvas.select({"models"});
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(canvas.groups()->problem()));
+        QVERIFY(canvas.groups()->enterGroup(instance));
+        const Document whole = canvas.document();
+        const QString group = whole.graph.nodes.value(instance).type;
+        const int steps = canvas.undoStack()->count();
+
+        OnDiskUse use{{{"resource", "fugue/diffusion-model"}, {"hash", before}, {"name", "a.safetensors"}}, {}};
+        use.match.name = QStringLiteral("b.safetensors");
+        use.match.resource = QStringLiteral("fugue/diffusion-model");
+        canvas.commitWhole(withUses(whole, Uses{{before, useHandle(use, after)}}), QStringLiteral("Use the files you have"));
+
+        QCOMPARE(canvas.undoStack()->count(), steps + 1);
+        QVERIFY(canvas.inGroup());
+        const Document swapped = canvas.document();
+        QCOMPARE(swapped.graph.nodes.keys(), whole.graph.nodes.keys());
+        QCOMPARE(swapped.groups.value(group).nodes.keys(), QStringList{"models"});
+        QCOMPARE(swapped.models().first().toObject().value("hash").toString(), after);
+        QCOMPARE(swapped.groups.value(group).nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(),
+                 QStringLiteral("b.safetensors"));
+        canvas.undoStack()->undo();
+        QCOMPARE(canvas.document().groups.value(group).nodes.keys(), QStringList{"models"});
+        QCOMPARE(canvas.document().models().first().toObject().value("hash").toString(), before);
+    }
 
     void enteringShowsTheInsideAndEditsChangeTheDefinition() {
         CanvasModel canvas(&m_registry);

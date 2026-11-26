@@ -231,7 +231,7 @@ bool AppBuilder::writeBlock(bool remove, bool openAppView) {
         app::clearApp(document);
     else
         app::setApp(document, m_draft);
-    m_canvas->commit(document, remove ? tr("Remove app") : m_editing ? tr("Edit app") : tr("Make app"));
+    m_canvas->commitWhole(document, remove ? tr("Remove app") : m_editing ? tr("Edit app") : tr("Make app"));
     m_open = false;
     m_picking = false;
     say({});

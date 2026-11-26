@@ -120,6 +120,18 @@ void ReadinessSheet::rebuild() {
     m_fractions = QList<double>(m_plan.rowCount(), 0.0);
 }
 
+void ReadinessSheet::useOnDisk(const QString &hash) {
+    if (m_phase == QLatin1String("review") && m_open)
+        emit useRequested(hash);
+}
+
+void ReadinessSheet::refresh() {
+    if (!m_open || m_thread || m_phase != QLatin1String("review"))
+        return;
+    rebuild();
+    publish();
+}
+
 void ReadinessSheet::show() {
     if (m_thread)
         return;
@@ -374,7 +386,10 @@ void ReadinessSheet::publish() {
     for (int i = 0; i < m_plan.models.size(); ++i) {
         const ReadinessModel &m = m_plan.models.at(i);
         const int row = int(m_plan.packs.size()) + i;
-        models << QVariantMap{{"name", m.name}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")},
+        const QString hash = m.entry.value(QStringLiteral("hash")).toString();
+        models << QVariantMap{{"hash", hash},
+                              {"use", m_useSource && !hash.isEmpty() ? m_useSource(hash) : QVariantMap()},
+                              {"name", m.name}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")},
                               {"host", m.host}, {"license", m.license}, {"licenseUrl", m.licenseUrl},
                               {"folder", m.deferred ? tr("its folder, once the pack is installed") : m.folder},
                               {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},

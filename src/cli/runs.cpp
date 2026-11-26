@@ -1,4 +1,5 @@
 #include "cli/runs.h"
+#include "cli/use_on_disk.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -115,8 +116,11 @@ namespace {
 // already is a compiled graph (4.8). `document` is the workflow as compiled (after
 // `--set`), empty for a compiled graph.
 struct Plan {
+    Plan(Compilation compiled, QJsonObject workflow, Errors warnings = {})
+        : compilation(std::move(compiled)), document(std::move(workflow)), notes(std::move(warnings)) {}
     Compilation compilation;
     QJsonObject document;
+    Errors notes; // warnings: a missing model whose same weights are on disk (#605)
 };
 
 Plan graphToRun(const Command &command, Context &context) {
@@ -124,7 +128,7 @@ Plan graphToRun(const Command &command, Context &context) {
     const Result<QJsonObject> json = readJsonObject(file);
     if (json && json->contains("fugue-compiled")) {
         // Nothing is compiled, so what changes a compile has nothing to act on.
-        for (const char *option : {"set", "to", "provider"})
+        for (const char *option : {"set", "to", "provider", "use-on-disk"})
             if (command.has(option))
                 return {makeError("usage", QStringLiteral("--%1 cannot be used with a compiled graph.").arg(option),
                                   "Run the workflow file itself with this option."), {}};
@@ -143,8 +147,14 @@ Plan graphToRun(const Command &command, Context &context) {
     const Errors setErrors = applyOverrides(*document, command.options.value("set"));
     if (!setErrors.isEmpty())
         return {Compilation(setErrors), {}};
+    // The files on disk of the models it names that are not (#605): used for this run when asked, else said.
+    Errors notes;
+    if (command.has("use-on-disk"))
+        *document = useOnDisk(*document, context);
+    else
+        notes = onDiskNotes(*document, context);
     return {compileDocument(*document, context.registry, {command.value("to"), command.value("provider")}),
-            document->toJson()};
+            document->toJson(), notes};
 }
 
 } // namespace
@@ -212,12 +222,16 @@ Reply startRun(const Command &command, Context &context) {
         return Reply::failure(folder.errors());
 
     if (command.has("wait")) {
+        for (const Error &note : plan.notes)
+            context.log(note.message + QLatin1Char(' ') + note.hint);
         Reply reply;
         reply.streamed = true;
         reply.exitCode = streamEvents(*folder, context) == RunStatus::Ok ? 0 : 1;
         return reply;
     }
-    return Reply::success(QJsonObject{{"run", folder->id()}, {"status", runStatusName(RunStatus::Queued)}}, folder->id());
+    Reply reply = Reply::success(QJsonObject{{"run", folder->id()}, {"status", runStatusName(RunStatus::Queued)}}, folder->id());
+    reply.errors = plan.notes; // warnings only
+    return reply;
 }
 
 Reply cancelRun(const Command &command, Context &context) {
