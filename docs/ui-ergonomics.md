@@ -107,6 +107,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - New: `PlaceBadge` kind `cloud` (Lucide `cloud`), tooltip "Runs on <instance names>" ("Runs on fal.ai or Replicate"). One glyph means one place: `monitor` this machine, `server` a paired host, `cloud` a service off this machine; the same on app cards, Templates cards and model menu rows.
 - Rule: shown when an enabled provider instance whose `placementOf` is `OffMachine` offers the model (`ListedModel::cloud`); nothing configured, nothing shown. No network call.
 
+### 2026-11-26 App | Graph: the App segment reads "Make app…" on a plain graph (owner report; confidence high)
+
+- Control: `src/apps/AppViewSwitch.qml` (`appViewSwitchApp`); `plainGraph` as before (MenuBar.qml).
+- Old: "App | Graph" in every state; on a plain graph App opened the app builder, said only by a tooltip, so it looked like a view switch that did something else ("in Graph mode, if I click App it offers to create an app instead of opening the App view").
+- New: on a plain graph with nodes the segment reads **Make app…** (the ellipsis: it opens a dialog), its tip "This workflow is not an app yet: pick its inputs and outputs (Ctrl+Alt+M)". An app, the shelf and the empty graph of Start blank keep "App". The segments share the widest label's width, so the switch is a little wider on a plain graph.
+- Rejected (owner's idea, talked through): an App icon in the left bar that turns into a Graph icon in the App view. It duplicates the switch, sits next to Apps (the catalog) with a near-same name, and an icon that flips between "where you are" and "where you go" is ambiguous; the segmented switch shows both.
+
 ### 2026-11-25 App | Graph switch always shown; App's action per state (owner report; UI consult: confidence high, App opening the builder medium-high)
 
 - Control: `src/apps/AppViewSwitch.qml` (`appViewSwitch`, `appViewSwitchApp`, `appViewSwitchGraph`), made by `src/menu/MenuBar.qml` (`appSwitchWanted` is only `appSwitchAllowed` and a bar at least 56u wide); `view.toggle-app` (Ctrl+Alt+A), whose handler is chosen by the tab's state (`bindAppView`, `bindViewSwitch` in `src/apps/app_window.cpp`); `AppShelf.showAgain()` and `AppShelf.landing`.

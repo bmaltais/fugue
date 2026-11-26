@@ -585,6 +585,7 @@ private slots:
         QTRY_VERIFY(find(app.window, "appsHome"));
         QTRY_VERIFY(find(app.window, "appViewSwitch"));
         QVERIFY(chosen());
+        QCOMPARE(find(app.window, "appViewSwitchApp")->property("modelData").toString(), QString("App"));
         QVERIFY(app.commands.entry("view.toggle-app").value("checked").toBool());
         QVERIFY(!app.commands.isEnabled("view.toggle-app-inputs")); // the App view's panel: nothing to show on the shelf
         tap(app.window, "appViewSwitchApp");
@@ -613,6 +614,8 @@ private slots:
         QVERIFY(!app.model.addNode("fugue/text-encode", 0, 0).isEmpty());
         QTRY_VERIFY(!rig.shelf.landing());
         QVERIFY(!chosen());
+        // It says so before the click: "Make app…", not "App", which reads as a view to switch to (owner, 2026-11-26).
+        QTRY_COMPARE(find(app.window, "appViewSwitchApp")->property("modelData").toString(), QString("Make app…"));
         tap(app.window, "appViewSwitchGraph");
         QVERIFY(!app.model.appBuilder()->isOpen());
         tap(app.window, "appViewSwitchApp");
