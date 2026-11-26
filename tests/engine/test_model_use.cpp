@@ -111,6 +111,20 @@ private slots:
         QVERIFY(use.sameModelText().contains("from another source"));
     }
 
+    // #624: the owner's Qwen3-8B Q8_0 from another publisher sits beside a better-ranked other quantization (an INT8 file the picker
+    // marks Recommended). The file of the quantization the workflow pins is the one it needs, so it wins and says "from another source".
+    void theSameQuantizationFromAnotherSourceBeatsARecommendedOtherQuantization() {
+        const QString folder = root("q") + "/diffusion_models/";
+        writeZImage(folder + "z_image_turbo_bf16.safetensors");
+        writeZImage(folder + "other/z_image_turbo_fp8_e4m3fn.safetensors");
+        const std::optional<OnDiskMatch> match =
+            findOnDisk(wanted("zimage/z_image_turbo_fp8_e4m3fn.safetensors"), library("q"), context(), m_shapes);
+        QVERIFY(match);
+        QCOMPARE(match->name, QStringLiteral("other/z_image_turbo_fp8_e4m3fn.safetensors"));
+        QVERIFY(match->otherSource);
+        QVERIFY(!match->recommended);
+    }
+
     // Another model of the family (the base, a different stem) is never offered, nor a file of another kind.
     void anotherModelIsNeverOffered() {
         const QString folder = root("c") + "/diffusion_models/";
