@@ -6,8 +6,8 @@
 // scheduler chooses, per node, and says for each node that needs a missing model: which host takes it (RunsOn), why it cannot go
 // anywhere (Blocked), or that the only host that could does not answer (Silent).
 //
-// Order: the pins and what each host last said (a file read) decide first; the hosts are asked (the probe) only when those leave a node
-// that could go somewhere, so an app that pins already block never waits for a 12 s probe. The probe is the seam: the live one calls
+// Order: the pins decide first; the hosts are asked (the probe) only when they leave a node that could go somewhere, so an app that
+// pins already block never waits for a 12 s probe. What a host last said only refuses a node for a host that does not answer. The probe is the seam: the live one calls
 // probePairedHelpers, a test gives a fake.
 
 #include <QMap>
@@ -37,7 +37,7 @@ struct PairedPlacementRequest {
     std::function<QString(const QString &typeId)> capabilityOf;
     // To read each node's own inputs: a model reaches a node only through its Resource ports, as the scheduler decides per node (8.7).
     const Registry *registry = nullptr;
-    // What a host said the last time it answered (rememberedPairedHelper when empty): it refuses a node the host never offered, and
+    // What a host said the last time it answered (rememberedPairedHelper when empty): it refuses a node only for a host that does not answer now (a live answer overrules it), and
     // is never what runs one.
     std::function<std::optional<Description>(const ProviderInstance &)> remembered;
 };

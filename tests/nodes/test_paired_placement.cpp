@@ -160,21 +160,31 @@ private slots:
         QVERIFY(made.hostOf.isEmpty() && made.silent.isEmpty());
     }
 
-    // What a host last said refuses without a probe (the scheduler's `neverOffered`); it never places a node.
-    void aRememberedRefusalBlocksWithoutAsking() {
-        PairedPlacementRequest asked = request();
-        asked.remembered = [](const ProviderInstance &) { return std::optional<Description>(offering({"image.generate"})); };
-        FakeHosts hosts({{"gx10", {"text.encode"}}});
-        const PairedVerdict made = verdict(workflow(), missing(), asked, hosts);
-        QCOMPARE(hosts.asked, 0);
-        QCOMPARE(made.blocked.size(), 1);
-        QVERIFY(made.blocked.first().message.contains("gx10 does not offer text.encode"));
+    // What a host last said never places a node and never overrules a live answer; it refuses only for a host that does not answer.
+    void aRememberedAnswerOnlyRefusesForAHostThatIsSilent() {
+        PairedPlacementRequest lacking = request();
+        lacking.remembered = [](const ProviderInstance &) { return std::optional<Description>(offering({"image.generate"})); };
+        FakeHosts gained({{"gx10", {"text.encode"}}}); // (a) it offers it now: the stale refusal is overturned
+        const PairedVerdict now = verdict(workflow(), missing(), lacking, gained);
+        QCOMPARE(gained.asked, 1);
+        QCOMPARE(now.hostOf.value("enc"), QStringLiteral("gx10"));
+        QVERIFY(now.blocked.isEmpty());
 
-        asked.remembered = [](const ProviderInstance &) { return std::optional<Description>(offering({"text.encode"})); };
-        FakeHosts silent; // remembered as offering, but not answering now: silent, not placed
-        const PairedVerdict quiet = verdict(workflow(), missing(), asked, silent);
-        QCOMPARE(quiet.silent, QStringList{"gx10"});
-        QVERIFY(quiet.hostOf.isEmpty() && quiet.blocked.isEmpty());
+        FakeHosts silent; // (b) silent, and it never offered it: blocked
+        const PairedVerdict refused = verdict(workflow(), missing(), lacking, silent);
+        QCOMPARE(silent.asked, 1);
+        QCOMPARE(refused.blocked.size(), 1);
+        QVERIFY(refused.blocked.first().message.contains("gx10 does not offer text.encode"));
+        QVERIFY(refused.silent.isEmpty());
+
+        FakeHosts quiet; // (c) silent, nothing remembered (or it offered it): silent, never the host
+        const PairedVerdict none = verdict(workflow(), missing(), request(), quiet);
+        QCOMPARE(none.silent, QStringList{"gx10"});
+        QVERIFY(none.hostOf.isEmpty() && none.blocked.isEmpty());
+        PairedPlacementRequest offered = request();
+        offered.remembered = [](const ProviderInstance &) { return std::optional<Description>(offering({"text.encode"})); };
+        FakeHosts quiet2;
+        QCOMPARE(verdict(workflow(), missing(), offered, quiet2).silent, QStringList{"gx10"});
     }
 
     // The scheduler's own choice per node: the first helper in the user's order that answered, offers the capability and respects a pin.

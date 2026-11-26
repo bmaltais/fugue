@@ -405,7 +405,7 @@ private slots:
         QVERIFY(!remembered.data().contains("runs_on"));
         QCOMPARE(remembered.data().value("silent_host").toString(), QString("gx10"));
 
-        // (A loopback address is no paired host, so 0.0.0.0, which reaches it.) The host answers now and offers it: it is the host.
+        // (A loopback address is no paired host, so 0.0.0.0, which reaches it.) The host offers it now (what was kept is stale): it is the host, and the run is not refused.
         QProcess host;
         const QString script = path("host.py");
         write(script, "import http.server, json, sys\n"
@@ -431,7 +431,8 @@ private slots:
         write(path("root/config/fugue/providers.json"),
               QStringLiteral("{\"providers\": [{\"name\": \"desk\", \"type\": \"omarchy\"}, {\"name\": \"gx10\", \"type\": \"fugue-helper\", "
                              "\"address\": \"http://0.0.0.0:%1\", \"key\": \"k\"}]}").arg(port).toUtf8());
-        QVERIFY(QFile::remove(path("root/state/fugue/paired_helpers.json")));
+        write(path("root/state/fugue/paired_helpers.json"),
+              QStringLiteral("{\"gx10\": {\"address\": \"http://0.0.0.0:%1\", \"engine\": \"sdcpp@gx10\", \"capabilities\": [\"image.generate\"]}}").arg(port).toUtf8());
         const Outcome freshInfo = fugue({"app", "info", "staged.fugue", "--json"});
         QCOMPARE(freshInfo.data().value("runs_on").toString(), QString("gx10"));
         QVERIFY(fugue({"app", "run", "staged.fugue", "--json"}).code() != QString("model_missing"));

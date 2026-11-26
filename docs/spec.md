@@ -2042,18 +2042,19 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   - **Blocked**: `model_missing` per node, naming it, when it is pinned (its own pin, else the workflow's) to an instance that runs on this
     machine ("Node enc is pinned to desk, which runs on this machine, and the model m.safetensors it needs is not here") or disabled, or when
     every paired helper that could take it (the one it is pinned to, else all) does not offer the node's capability ("... the paired host
-    gx10 does not offer text.encode"; what the host said live, else what it last said, the scheduler's `neverOffered`). The hint says to get the
+    gx10 does not offer text.encode"; what the host said live; for one that does not answer, what it last said, the scheduler's `neverOffered`). The hint says to get the
     model here (`prepare`, Get ready) or to unpin the node.
   - **RunsOn**: per node, the first helper in the user's order that answered live, offers the node's capability and respects the pin (the
     scheduler's own choice). The line lists the distinct hosts. A host that answered without the capability is not the host.
   - **Silent**: the only helper(s) that could take a node did not answer. A silent host is never named as the host. The window says
     "<host> is not answering" and keeps the model rows; `app info` leaves out `runs_on` and has `silent_host`; `app run` goes ahead (a cached
     re-run can still work; otherwise it fails with `provider_unreachable`).
-  - *Order:* the pins and what each host last said (`<state>/paired_helpers.json` by instance name and address, a file read) decide first and
-    block without asking anyone, so an app that pins already block never waits for the probe. Only when they leave a node that could go
-    somewhere are the helpers asked (`describe`, 10 s at most, in parallel), and what they say now decides. What a host last said only
-    refuses; it never places a node. A refusal from what was kept is refreshed by the next run that reaches the scheduler (which describes
-    the hosts), not by the verdict. With nothing kept a host answers for itself at the run.
+  - *Order:* the pins decide first and block without asking anyone, so an app that pins already block never waits for the probe. Every
+    helper that passes the pins is then asked (`describe`, 10 s at most, in parallel; each answer refreshes what is kept in
+    `<state>/paired_helpers.json`, by instance name and address). A helper that answered decides by its live answer. For one that did not,
+    what it last said only refuses (the scheduler's `neverOffered`): a node whose every candidate is live-without the capability or
+    silent and remembered without it is Blocked; a node with a silent candidate that has no memory, or remembered offering it, is Silent.
+    What was kept never places a node and never overrules a live answer, so a host that gained a capability is not refused for good.
   - *Callers:* `fugue app run`/`info` wait for the probe (once per command: the answer is kept for the second look `--input` makes); the
     App view makes the verdict again, asynchronously, whenever the plan or the document changes, reusing an answer of the last 30 s
     (`keptPairedProbe`). The probe is the seam (`PairedProbe`): the live one is `probePairedHelpers`, a test gives a fake

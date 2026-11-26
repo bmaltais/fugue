@@ -137,7 +137,7 @@ QString capabilityWhy(const Need &need, const QStringList &hosts) {
 struct Reach {
     Need need;
     QStringList candidates; // the helpers its pin allows, in the user's order
-    QStringList open;       // of them, those not known to lack the capability
+    QStringList open;       // of them, those asked
 };
 
 } // namespace
@@ -242,7 +242,8 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
     for (const ProviderInstance &helper : std::as_const(helpers))
         remembered.insert(helper.name, request.remembered ? request.remembered(helper) : rememberedPairedHelper(helper));
 
-    // First, what needs no host: the pins and what each host last said.
+    // First, what needs no host: the pins. What a host last said is not used here: the probe refreshes it, so a host that gained a
+    // capability is not refused for good.
     QList<Reach> reaches;
     for (const Need &need : needs) {
         Reach reach{need, {}, {}};
@@ -260,11 +261,7 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
         for (const ProviderInstance &helper : std::as_const(helpers))
             if (!pinned || helper.name == pinned->name)
                 reach.candidates << helper.name;
-        for (const QString &name : std::as_const(reach.candidates)) {
-            const std::optional<Description> &said = remembered.value(name);
-            if (!said || said->offer(need.capability))
-                reach.open << name; // never heard from, or it offered this once
-        }
+        reach.open = reach.candidates;
         if (reach.open.isEmpty())
             verdict.blocked.append(modelMissing(need.node, capabilityWhy(need, reach.candidates)));
         else
@@ -281,12 +278,14 @@ void decidePairedPlacement(const Document &document, const ReadinessPlan &plan, 
     for (const ProviderInstance &helper : std::as_const(helpers))
         if (std::any_of(reaches.cbegin(), reaches.cend(), [&helper](const Reach &reach) { return reach.open.contains(helper.name); }))
             toAsk.append(helper);
-    probe(toAsk, [verdict, reaches, done = std::move(done)](const QMap<QString, Description> &answered) mutable {
+    probe(toAsk, [verdict, reaches, remembered, done = std::move(done)](const QMap<QString, Description> &answered) mutable {
         for (const Reach &reach : std::as_const(reaches)) {
             QString host, silent;
             for (const QString &name : reach.open) {
                 if (!answered.contains(name)) {
-                    if (silent.isEmpty())
+                    // Silent: what it last said only refuses (the scheduler's `neverOffered`); it never places a node.
+                    const std::optional<Description> &said = remembered.value(name);
+                    if (silent.isEmpty() && (!said || said->offer(reach.need.capability)))
                         silent = name;
                 } else if (host.isEmpty() && answered.value(name).offer(reach.need.capability)) {
                     host = name;
