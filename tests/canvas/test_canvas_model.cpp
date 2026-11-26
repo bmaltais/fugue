@@ -38,6 +38,18 @@ const char *threeNodes = R"({
              "comments": [{"id": "c1", "text": "keep me", "pos": [0, 0], "size": [10, 10]}]}
 })";
 
+// A Switch whose sides take the text "a" and, when `both`, the number "n" (#591). `sw` has no sides linked.
+const char *switchDoc = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "a": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "x"}},
+    "n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 3}},
+    "sw": {"type": "fugue/switch", "version": "1.0.0", "inputs": {}},
+    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {}}
+  }},
+  "layout": {"nodes": {"a": {"pos": [0, 0]}, "n": {"pos": [0, 200]}, "sw": {"pos": [300, 100]}, "save": {"pos": [640, 100]}}}
+})";
+
 QVariantMap row(QAbstractItemModel *model, int index) {
     QVariantMap values;
     const QHash<int, QByteArray> roles = model->roleNames();
@@ -263,6 +275,46 @@ private slots:
         QVERIFY(!port(gen, "inputs", "image").value("wired").toBool());
         QVERIFY(port(gen, "outputs", "image").value("wired").toBool());
         QCOMPARE(port(node(canvas, "save"), "inputs", "name").value("value").toString(), QString("fugue"));
+    }
+
+    // The type a Switch's value takes from its sides decides what it may feed, and a side takes the other side's (#591).
+    void aSwitchOutputIsAWildcardUntilASideIsLinked() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(switchDoc));
+        QCOMPARE(canvas.portType("sw", "value", true)->toString(), QString("any"));
+        QCOMPARE(canvas.linkProblem("sw", "value", "save", "image"), QString());
+        QCOMPARE(canvas.linkProblem("sw", "value", "save", "name"), QString());
+        QVERIFY(canvas.connectPorts("a", "text", "sw", "on_true"));
+        QCOMPARE(canvas.portType("sw", "value", true)->toString(), QString("text"));
+        QCOMPARE(canvas.linkProblem("sw", "value", "save", "name"), QString());
+        const QString problem = canvas.linkProblem("sw", "value", "save", "image");
+        QVERIFY2(problem.contains("text") && problem.contains("image"), qPrintable(problem));
+        QCOMPARE(link(canvas, "sw.on_true").value("color").toString(), QString("text"));
+    }
+
+    void aSwitchSideTakesOnlyTheOtherSidesType() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(switchDoc));
+        QCOMPARE(canvas.linkProblem("n", "value", "sw", "on_false"), QString());
+        QVERIFY(canvas.connectPorts("a", "text", "sw", "on_true"));
+        QCOMPARE(canvas.portType("sw", "on_false", false)->toString(), QString("text"));
+        QVERIFY(!canvas.linkProblem("n", "value", "sw", "on_false").isEmpty());
+        QVERIFY(!canvas.connectPorts("n", "value", "sw", "on_false"));
+        // The linked side itself is open to what the other side allows: the same type replaces it.
+        QCOMPARE(canvas.linkProblem("a", "text", "sw", "on_true"), QString());
+    }
+
+    void aLinkThatNoLongerFitsStaysForTheCompilerToReport() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(switchDoc));
+        QVERIFY(canvas.connectPorts("a", "text", "sw", "on_true"));
+        QVERIFY(canvas.connectPorts("sw", "value", "save", "name"));
+        // Relink the side to a number: the link into Save stays (nothing deletes it silently).
+        QVERIFY(canvas.disconnectInput("sw", "on_true"));
+        QVERIFY(canvas.connectPorts("n", "value", "sw", "on_false"));
+        QCOMPARE(canvas.portType("sw", "value", true)->toString(), QString("number"));
+        QVERIFY(!link(canvas, "save.name").isEmpty());
+        QVERIFY(!canvas.linkProblem("sw", "value", "save", "name").isEmpty()); // a new link of it would be refused
     }
 
     void linkProblemsSayWhy() {
