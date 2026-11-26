@@ -1240,6 +1240,98 @@ private slots:
         QVERIFY(own.readAll().contains("z_image_turbo_int8_convrot.safetensors"));
     }
 
+    // #616: the Get ready row's "Use what you have" on a tab shown as a graph, the file's hash not known yet (the owner's case): the
+    // file is read, then the document holds it and the sheet's row is gone.
+    void theGetReadyRowUsesTheFileOnDiskAndLeavesThePlan() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        const QString weights = models.filePath("diffusion_models/z_image_turbo_bf16.safetensors");
+        writeFile(weights, file + header);
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'7');
+        const QJsonObject wanted{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject recorded = wanted;
+        recorded.insert("source", "http://127.0.0.1:9/z.safetensors");
+        recorded.insert("size", 5000000000.0);
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", wanted}})}}, {{"models", QJsonArray{recorded}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("zit"));
+        ReadinessSheet *sheet = workflows.readiness();
+        sheet->show();
+        QVERIFY(sheet->isOpen());
+        QCOMPARE(sheet->view().value("models").toList().size(), 1);
+        const QVariantMap before = sheet->view().value("models").toList().at(0).toMap();
+        QCOMPARE(before.value("hash").toString(), hash);
+        QVERIFY(before.value("use").toMap().value("file").toString().contains("z_image_turbo_bf16"));
+        QVERIFY(FileHashes(FileHashes::defaultPath()).known(weights).isEmpty()); // not read yet
+
+        sheet->useOnDisk(hash);
+        QVERIFY(workflows.hashingUses());
+        QTRY_VERIFY(!workflows.hashingUses());
+        const QJsonObject handle = canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle();
+        QCOMPARE(handle.value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
+        QCOMPARE(sheet->currentPlan().models.size(), 0);
+        QVERIFY2(sheet->view().value("models").toList().isEmpty(), "the row is still listed");
+    }
+
+    // #616: a file that cannot be read says so in the sheet (a notice would be hidden behind it), and the button is busy while it is read.
+    void aFileThatCannotBeReadIsSaidInTheGetReadySheet() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        const QString weights = models.filePath("diffusion_models/z_image_turbo_fp8.safetensors");
+        writeFile(weights, file + header);
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'8');
+        const QJsonObject wanted{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject recorded = wanted;
+        recorded.insert("source", "http://127.0.0.1:9/z.safetensors");
+        recorded.insert("size", 5000000000.0);
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", wanted}})}}, {{"models", QJsonArray{recorded}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("zit"));
+        ReadinessSheet *sheet = workflows.readiness();
+        sheet->show();
+        QCOMPARE(sheet->view().value("models").toList().size(), 1); // the header is read and remembered here
+        QVERIFY(QFile::setPermissions(weights, QFileDevice::Permissions()));
+        sheet->useOnDisk(hash);
+        QVERIFY(workflows.hashingUses());
+        sheet->useOnDisk(hash); // a second click while it is read: nothing more
+        QTRY_VERIFY(!workflows.hashingUses());
+        QVERIFY2(sheet->view().value("message").toString().contains("z_image_turbo_fp8.safetensors"), qPrintable(sheet->view().value("message").toString()));
+        QVERIFY(!sheet->view().value("ok").toBool());
+        QVERIFY(!workflows.notice().contains("could not be read") && !workflows.notice().contains("Could not read")); // said in the sheet, not behind it
+        QCOMPARE(sheet->view().value("models").toList().size(), 1); // the row stays: the file is not used
+        QVERIFY(QFile::setPermissions(weights, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    }
+
     // A file chosen in the App view is the app's own: switching to the graph while its hash is read must not edit the workflow.
     void aChoiceMadeInTheAppViewStaysThereWhenTheViewSwitchesWhileItsFileIsRead() {
         forgetDownloads();

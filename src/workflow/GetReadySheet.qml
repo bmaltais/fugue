@@ -249,6 +249,7 @@ Popup {
                                 error: failed ? modelData.detail : ""
                                 onToggled: sheet.toggle(key)
                                 useText: modelData.use && modelData.use.text ? modelData.use.text : ""
+                                useBusy: App.workflows.hashingUses
                                 onUseRequested: sheet.sheetModel.useOnDisk(modelData.hash)
                             }
                         }

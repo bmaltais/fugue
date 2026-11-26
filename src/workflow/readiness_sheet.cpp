@@ -121,8 +121,21 @@ void ReadinessSheet::rebuild() {
 }
 
 void ReadinessSheet::useOnDisk(const QString &hash) {
-    if (m_phase == QLatin1String("review") && m_open)
-        emit useRequested(hash);
+    if (m_phase != QLatin1String("review") || !m_open)
+        return;
+    if (!m_message.isEmpty()) { // a failure said for an earlier try
+        m_message.clear();
+        publish();
+    }
+    emit useRequested(hash);
+}
+
+void ReadinessSheet::say(const QString &message) {
+    if (!m_open || m_thread || m_phase != QLatin1String("review"))
+        return;
+    m_message = message;
+    m_ok = false;
+    publish();
 }
 
 void ReadinessSheet::refresh() {

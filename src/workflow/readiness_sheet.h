@@ -64,6 +64,8 @@ public:
     Q_INVOKABLE void useOnDisk(const QString &hash);
     // The list again after something outside changed what is missing (a file chosen in place of a model); only while reviewing.
     void refresh();
+    // A line in the sheet's message place while it is open for review (the use of a file failed): shown with the rows, not behind them.
+    void say(const QString &message);
     // The person's one yes: runs every row, then ends. Ignored unless reviewing.
     Q_INVOKABLE void start();
     // Stops a run (the rows not done stay undone); closes a review.

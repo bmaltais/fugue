@@ -32,6 +32,8 @@ Rectangle {
     signal toggled
     // Use what you have (#605): the offer beside the download, "Use what you have: <file> (same model, <tier>)"; empty for none.
     property string useText
+    // The chosen file is being read (its hash, once): the button says so and takes no second click.
+    property bool useBusy: false
     signal useRequested
 
     readonly property bool expandable: more !== ""
@@ -133,8 +135,9 @@ Rectangle {
             visible: row.useText !== "" && !row.running
             Layout.leftMargin: 6 * row.u
             Layout.maximumWidth: parent.width - 11 * row.u
-            text: row.useText
-            Accessible.name: row.useText
+            text: row.useBusy ? qsTr("Reading your file...") : row.useText
+            enabled: !row.useBusy
+            Accessible.name: text
             onClicked: row.useRequested()
         }
         ProgressBar {

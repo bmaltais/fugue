@@ -450,8 +450,14 @@ void Workflows::useOnDisk(const QStringList &hashes) {
     hashUses(chosen, [this, tab, chosen, key, inApp](const Uses &resolved, const QStringList &failed) {
         setHashing(key, false);
         applyUses(tab, chosen, resolved, inApp);
-        if (!failed.isEmpty())
-            setNotice(tr("Could not read %1, so it is not used.").arg(failed.join(QStringLiteral(", "))));
+        if (failed.isEmpty())
+            return;
+        // The sheet covers the window's notice: while it is open for review the failure is said in the sheet itself.
+        const QString said = tr("Could not read %1, so it is not used.").arg(failed.join(QStringLiteral(", ")));
+        if (m_readiness->isOpen() && m_readiness->phase() == QLatin1String("review"))
+            m_readiness->say(said);
+        else
+            setNotice(said);
     });
 }
 
