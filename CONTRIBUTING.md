@@ -89,7 +89,7 @@ Run `bin/test` once before you open the pull request.
   waits until a maintainer approves it, and takes about 10 to 30 minutes. The heavier builds (CUDA helper
   tarballs, the AppImage, aarch64) do not run for ordinary changes: they run on a release, once a week on main,
   and on a pull request that changes how they are built (a workflow file, `packaging/`, the PKGBUILD), each waiting
-  for approval the same way. The table in [docs/testing.md](docs/testing.md) lists which. The check to watch is `ci-ok`. If it flags something, fix it; ask in the pull request if you
+  for approval the same way. A pull request that changes `.github/` is reviewed by hand before its runs are approved. The table in [docs/testing.md](docs/testing.md) lists which. The check to watch is `ci-ok`. If it flags something, fix it; ask in the pull request if you
   cannot reproduce it.
 
 ## Conduct

@@ -10,6 +10,11 @@ name: CI
 #
 # Plain pull_request, never pull_request_target: a fork's code runs with a read-only token and no secrets.
 # workflow_dispatch with force_fast_lane proves the lane from a branch of this repository.
+
+# Trust: a pull_request run uses the workflow files of the pull request itself, so a fork that edits this file can make
+# ci-ok pass whatever its code does. No setting closes that on a public repo; the gate is the owner, who approves every
+# external contributor's run (repo setting, "all external contributors") after reading the diff. A fork's pull request
+# that touches .github/ is reviewed by hand and its ci-ok is not trusted (docs/testing.md, CI).
 on:
   pull_request:
   workflow_dispatch:

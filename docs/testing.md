@@ -92,7 +92,9 @@ fast lane. One check, `ci-ok`, covers both kinds of pull request, and branch pro
 
 Only main, weekly, tag and manual runs save the compiler cache; a pull request restores it and never saves.
 A new push cancels that pull request's older run. `ci.yml` uses plain `pull_request`, with no secrets and a
-read-only token, so a fork's code never runs with the repo's permissions.
+read-only token, so a fork's code never runs with the repo's permissions. That run uses the pull request's own workflow
+files, so a fork that edits `.github/` can make `ci-ok` pass: the maintainer approves every external contributor's run
+after reading the diff, and a fork's pull request that touches `.github/` is reviewed by hand, its `ci-ok` not trusted.
 
 ## Workflow lint
 
