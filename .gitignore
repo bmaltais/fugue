@@ -1,6 +1,7 @@
 /build/
 __pycache__/
 /build-helper-*/
+/build-package-*/
 /dist/
 # makepkg's work in packaging/ (sources it fetches, its build folders, the packages it makes)
 /packaging/*.tar.gz

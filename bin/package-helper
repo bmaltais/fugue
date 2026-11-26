@@ -9,10 +9,12 @@
 #   aarch64: the CUDA helper for a DGX Spark (Ubuntu aarch64, CUDA 13, sm_121), built on that host, which links
 #           the host's CUDA runtime and cuBLAS dynamically.
 #
-# Writes <outdir>/fugue-helper-<backend>-<arch>-linux.tar.zst (default outdir: dist/) and adds its line to
+# Writes <outdir>/fugue-helper-<backend>-<arch>-linux.tar.zst (default outdir: ~/.cache/fugue-package-helper/dist) and adds its line to
 # <outdir>/SHA256SUMS, keeping the other lines. Upload both with `gh release upload <tag>`. helper/README.md
 # ("Portable tarballs") says what is inside and why. Environment: FUGUE_JOBS (compiles in parallel, default: all cores),
-# CCACHE_DIR (the compiler cache, default: .ccache in the checkout), FUGUE_CONTAINER_ENGINE (podman or docker).
+# CCACHE_DIR (the compiler cache and the downloaded tools, default: ~/.cache/fugue-package-helper/ccache, outside the
+# checkout so removing a worktree keeps them), FUGUE_CONTAINER_ENGINE (podman or docker). The build folder is
+# build-package-<backend>/ in the checkout, never the build-helper-<backend>/ of the native bin/build-helper.
 #
 # The tarball holds one folder, fugue-helper-<backend>-<arch>-linux/ (the binary, fugue-helper.service, and for
 # CUDA lib/ and licenses/). Unpack it with the folder name stripped into the folder AppRun searches:
@@ -47,7 +49,8 @@ for a in "$@"; do
 done
 arch="$(uname -m)"
 backend="${backend:-cuda}"
-out="$(realpath -m "${out:-$root/dist}")"
+cache_home="${XDG_CACHE_HOME:-$HOME/.cache}/fugue-package-helper"
+out="$(realpath -m "${out:-$cache_home/dist}")"
 jobs="${FUGUE_JOBS:-$(nproc)}"
 name="fugue-helper-$backend-$arch-linux"
 
@@ -68,7 +71,7 @@ if ((container)); then
   engine="${FUGUE_CONTAINER_ENGINE:-$(command -v podman || command -v docker || true)}"
   [[ -n $engine ]] || die "--container needs podman or docker"
   if [[ $backend == cuda ]]; then image=$cuda_image; else image=$ubuntu_image; fi
-  ccache_dir="$(realpath -m "${CCACHE_DIR:-$root/.ccache}")"
+  ccache_dir="$(realpath -m "${CCACHE_DIR:-$cache_home/ccache}")"
   mkdir -p "$out" "$ccache_dir"
   # The checkout is mounted at /src and the output at /out, the same paths on every machine, so ccache hits
   # across runs (bin/build-helper sets CCACHE_BASEDIR from the checkout's parent). Under docker the container's
@@ -165,12 +168,14 @@ case $arch:${FUGUE_PACKAGE_IN_CONTAINER:-0} in
   *) die "no portable helper for $arch" ;;
 esac
 
+# Its own build folder: build-helper-<backend>/ is the native build that local GPU runs use.
+export FUGUE_HELPER_BUILD_DIR="$root/build-package-$backend"
 start=$SECONDS
 FUGUE_HELPER_PORTABLE=1 "$root/bin/build-helper" "$backend" "${cmake_args[@]}"
 echo "package-helper: built in $((SECONDS - start)) s"
 command -v ccache >/dev/null && ccache -s | head -8
 
-bin="$root/build-helper-$backend/fugue-helper-$backend"
+bin="$FUGUE_HELPER_BUILD_DIR/fugue-helper-$backend"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 dir="$stage/$name"
@@ -211,7 +216,7 @@ tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner --use-compress-p
 write_sums
 if [[ -n ${HOST_UID:-} && -n ${HOST_GID:-} && $(stat -c %u "$root") != 0 ]]; then
   # Docker: the container's root wrote these; give them back. (Rootless podman maps root to the caller.)
-  chown -R "$HOST_UID:$HOST_GID" "$out" "$root/build-helper-$backend" "${CCACHE_DIR:-/ccache}" 2>/dev/null || true
+  chown -R "$HOST_UID:$HOST_GID" "$out" "$FUGUE_HELPER_BUILD_DIR" "${CCACHE_DIR:-/ccache}" 2>/dev/null || true
 fi
 echo "package-helper: $(du -h "$out/$name.tar.zst" | cut -f1) $out/$name.tar.zst"
 echo "$out/$name.tar.zst"
