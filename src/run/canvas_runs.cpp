@@ -245,6 +245,7 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     ++runs.epoch;
     // A new run starts without the last one's errors.
     runs.errors.clear();
+    runs.checkErrors.clear(); // and without the last check's: the next check lists what is still wrong
     for (auto it = runs.nodes.begin(); it != runs.nodes.end(); ++it) {
         if (!it->error.isEmpty() || it->state == QLatin1String("error")) {
             it->clearError(); // a check's error too: the run's own, if it fails, is not the check's to erase

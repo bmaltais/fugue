@@ -597,7 +597,12 @@ private:
                     dropReason = n.node->lazyDropped.value(name);
                     break;
                 }
-        const QStringList needed = m_dry ? all : (dropReason.isEmpty() ? wanted : QStringList());
+        // A valid frozen result is served whatever the inputs are (10.4), so a dropped input does not skip the node.
+        const bool frozenServes = !dropReason.isEmpty() && !m_dry && !n.node->frozen.isEmpty() &&
+                                  m_env.cache->peek(n.node->frozen, *m_env.hashes).has_value();
+        if (frozenServes)
+            dropReason.clear();
+        const QStringList needed = m_dry ? all : (dropReason.isEmpty() && !frozenServes ? wanted : QStringList());
         // Nodes let go only because their reader could not ask (it failed upstream, or its condition is empty) were not chosen:
         // nothing upstream of them failed.
         for (auto it = n.lazyOf.constBegin(); it != n.lazyOf.constEnd(); ++it) {
@@ -742,11 +747,13 @@ private:
             return skip(n, broken);
         // A Switch skipped because its chosen side is muted: what reads it is muted too, as a compile-time mute does (3.5), also
         // through an optional input, which would otherwise run without it.
-        for (const QString &dep : std::as_const(n.strictDeps)) {
-            const NodeRun &d = *m_nodes.constFind(dep);
-            if (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_muted"))
-                return skip(n, QStringLiteral("upstream_muted"));
-        }
+        // The chosen lazy sources (waitFor) count with the strict ones; the declined were let go and are not looked at.
+        for (const QStringList &deps : {n.strictDeps, n.waitFor})
+            for (const QString &dep : deps) {
+                const NodeRun &d = *m_nodes.constFind(dep);
+                if (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_muted"))
+                    return skip(n, QStringLiteral("upstream_muted"));
+            }
         if (!n.type) {
             Error error = nodeError(QStringLiteral("unknown_node_type"),
                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type));
@@ -1097,7 +1104,8 @@ private:
                 resolved.unknown = true;
                 continue;
             }
-            const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked);
+            // A linked empty list is an absent value, except on an input that takes a list as it is (a Switch side): there it is the value.
+            const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked && !spec.type.takesList);
             if (empty && !spec.defaultValue.isUndefined()) {
                 value = Value(spec.defaultValue);
             } else if (empty && spec.required()) {

@@ -75,6 +75,14 @@ class TestLut : public QObject {
 private slots:
     void initTestCase() { nodes::addBuiltinKernels(m_kernels); }
 
+    // #600 review: a header-only parse (the check) does not reserve the table the size asks for (192 MiB at 256^3).
+    void aHeaderOnlyParseReservesNoTable() {
+        const Result<Lut> lut = nodes::parseCube("LUT_3D_SIZE 256\n0 0 0\n", true);
+        QVERIFY(lut.ok());
+        QCOMPARE(lut.value().table.capacity(), size_t(0));
+        QCOMPARE(lut.value().size, 256);
+    }
+
     void a1dTableInvertsAndInterpolates() {
         const Result<Lut> lut = nodes::parseCube("TITLE \"invert\"\n# a comment\nLUT_1D_SIZE 2\n1 1 1\n0 0 0\n");
         QVERIFY(lut.ok());

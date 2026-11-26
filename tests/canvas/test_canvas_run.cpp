@@ -1167,6 +1167,36 @@ private slots:
         QCOMPARE(r.role("load", NodeList::Error).toString(), ran);
     }
 
+    // #600 review: a check's finding (the file is not there) does not outlive a run that starts after the file is put there:
+    // the run's start clears the saved findings, so the pill does not list the missing file after a run that succeeded.
+    void aRunClearsTheLastChecksFindings() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString file = folder.filePath("x.png");
+        RunApp r(QByteArray(R"({
+          "fugue": 1,
+          "graph": {"nodes": {
+            "load": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": %1}},
+            "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "load.image"}}}
+          }},
+          "layout": {"nodes": {"load": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}}
+        })").replace("%1", '"' + file.toUtf8() + '"'));
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("load"), QStringLiteral("error"));
+        QCOMPARE(r.runs->errors().size(), 1);
+        QImage image(4, 4, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file));
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QVERIFY(!r.runs->start().isEmpty());
+        QCOMPARE(r.runs->errors().size(), 0); // at once, before the run is over
+        QTRY_VERIFY(finished.size() >= 1);
+        QCOMPARE(r.runs->errors().size(), 0);
+    }
+
     // #600: the pill lists what shows on a node. A dry-run failure of the check itself (a relative file in a workflow
     // that is not saved has no folder to start from) is not a kernel's finding, and never joined the list.
     void aDryRunFailureIsNotCountedAsAKernelFinding() {
