@@ -5,6 +5,9 @@
 // whose jobs move only when the test moves them, and the ResidentModels of
 // the environment.
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QSemaphore>
 #include <QtTest>
 
@@ -73,6 +76,13 @@ public:
         ++m_checked;
         if (context.input("prompt").text() == QLatin1String("bad"))
             return {makeInputError(QStringLiteral("input_invalid"), QStringLiteral("prompt"), QStringLiteral("A bad prompt."))};
+        if (context.input("prompt").text() == QLatin1String("soft")) { // a finding a run may never meet: the kernel says warning
+            Error warning = makeInputError(QStringLiteral("input_invalid"), QStringLiteral("prompt"), QStringLiteral("A soft prompt."));
+            warning.severity = Error::Severity::Warning;
+            return {warning};
+        }
+        if (context.input("prompt").text() == QLatin1String("gone"))
+            return {makeError(QStringLiteral("model_missing"), QStringLiteral("The model is not here."))};
         return {};
     }
     mutable std::atomic<int> m_checked{0};
@@ -796,6 +806,61 @@ private slots:
         QVERIFY(check.checkErrors.isEmpty());
         QCOMPARE(kernel->m_checked.load(), 2);
         QVERIFY(provider->jobs().isEmpty());
+    }
+
+    // A kernel that says warning keeps it: a warning on the node, not a check error (the Dynamic Prompt's choice-dependent findings).
+    // A model_missing is a warning wherever the node sits, wired or not.
+    void checkKeepsAWarningTheKernelSetAndSplitsModelMissingTheSameForUnwiredNodes() {
+        World world;
+        world.kernels.add("fugue/generate", std::make_shared<CheckingKernel>());
+        for (const bool wired : {true, false}) {
+            for (const QString &prompt : {QStringLiteral("soft"), QStringLiteral("gone")}) {
+                QJsonObject nodes = generateGraph(prompt);
+                if (!wired)
+                    nodes.remove("s");
+                const GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+                const QString what = prompt + (wired ? " wired" : " unwired");
+                QVERIFY2(check.checkErrors.isEmpty(), qPrintable(what));
+                QStringList warnings;
+                for (const Error &warning : check.warnings)
+                    if (warning.severity == Error::Severity::Warning)
+                        warnings << warning.code + ":" + warning.node;
+                QVERIFY2(warnings.contains((prompt == "soft" ? "input_invalid" : "model_missing") + QString(":g")), qPrintable(what + ": " + warnings.join(",")));
+            }
+        }
+    }
+
+    // An unwired node's file literal is read as a run reads it: a relative one from the saved workflow's folder, "~" as the
+    // home folder. A file that is not there is still the node's error.
+    void checkReadsAnUnwiredNodesFileTheWayARunDoes() {
+        World world;
+        class FileKernel : public NodeKernel {
+        public:
+            Result<Values> run(const NodeContext &) override { return Values{}; }
+            Errors check(const NodeContext &context) const override {
+                const QString path = context.input("path").text();
+                if (path.isEmpty() || QFileInfo::exists(path)) // not known: not judged
+                    return {};
+                return {makeInputError(QStringLiteral("file_not_found"), QStringLiteral("path"), QStringLiteral("No file at %1").arg(path))};
+            }
+        };
+        world.kernels.add("fugue/load", std::make_shared<FileKernel>());
+        QDir folder(world.dir.path());
+        QVERIFY(folder.mkpath("flow/inputs"));
+        QFile file(folder.filePath("flow/inputs/x.png"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+        RunOptions options;
+        options.workflow = folder.filePath("flow/w.fugue");
+        const auto check = [&](const QString &path) {
+            return checkGraph(world.graph(QJsonObject{{"l", node("fugue/load", {{"path", path}})}}), world.environment(), options);
+        };
+        QVERIFY2(check("inputs/x.png").checkErrors.isEmpty(), "a relative file is the workflow folder's");
+        QCOMPARE(check("inputs/y.png").checkErrors.size(), 1);
+        QVERIFY(check("inputs/y.png").checkErrors.first().message.contains(folder.filePath("flow/inputs/y.png")));
+        // An unsaved workflow has no folder: the run's own answer is the error, not a second one here.
+        options.workflow.clear();
+        QVERIFY(check("inputs/x.png").checkErrors.isEmpty());
     }
 
     void checkReportsAMissingModelAsAWarning() {

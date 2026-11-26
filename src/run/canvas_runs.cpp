@@ -132,6 +132,7 @@ CanvasRuns::~CanvasRuns() = default;
 
 void CanvasRuns::setError(NodeView &view, const Error &error, const QString &path, bool inner) const {
     const QString prefix = inner ? path + QStringLiteral(": ") : QString();
+    view.fromCheck = false; // a run's error; onChecked marks the ones a check made
     view.error = prefix + shownMessage(error);
     view.errorDetail.clear();
     view.pack.clear();
@@ -246,7 +247,7 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     runs.errors.clear();
     for (auto it = runs.nodes.begin(); it != runs.nodes.end(); ++it) {
         if (!it->error.isEmpty() || it->state == QLatin1String("error")) {
-            it->error.clear();
+            it->clearError(); // a check's error too: the run's own, if it fails, is not the check's to erase
             if (it->state == QLatin1String("error"))
                 it->state = QStringLiteral("stale");
             for (auto inner = it->inner.begin(); inner != it->inner.end(); ++inner)
@@ -741,7 +742,7 @@ void CanvasRuns::checkNow() {
     m_service->check(request, ticket);
 }
 
-void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems) {
+void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors) {
     if (ticket != m_ticket || m_asked.tab.isEmpty())
         return;
     const Ticket asked = std::exchange(m_asked, {});
@@ -814,9 +815,9 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
     // with the next check that does not find it. A node a run failed on keeps the run's words.
     runs.checkErrors.clear();
     if (!nodes.isEmpty()) {
-        for (const QJsonValue &value : problems) {
+        for (const QJsonValue &value : checkErrors) {
             const Error error = Error::fromJson(value.toObject());
-            if (error.severity == Error::Severity::Warning || error.node.isEmpty())
+            if (error.node.isEmpty())
                 continue;
             runs.checkErrors << QVariantMap{{"node", error.node}, {"shown", topOf(error.node)}, {"message", error.message},
                                             {"code", error.code}, {"hint", error.hint}, {"input", error.input}};

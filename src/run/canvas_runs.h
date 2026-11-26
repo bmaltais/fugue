@@ -205,7 +205,7 @@ private:
     QString startOne(const QString &tab, const QString &target, bool first);
     QString currentTab() const;
     void onEvent(const QString &run, const QJsonObject &event);
-    void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
+    void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors);
     void scheduleCheck(bool edit);
     void showTab();
     void show(const QString &tab, const QString &node);
