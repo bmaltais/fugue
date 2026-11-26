@@ -441,6 +441,37 @@ private slots:
         QCOMPARE(set(one("{3$$1::a|1::b|1::c|0::d}").split(", ")), set({"a", "b", "c"}));
         QVERIFY(failure("{40000$$" + QString("a|").repeated(40000) + "}").contains("steps"));
     }
+    void builtinCollectionIsSearchedLastAndNeedsNoCanonicalPath() {
+        QTemporaryDir user;
+        const QString builtin = dynprompt::builtinWildcardFolder();
+        QCOMPARE(dynprompt::wildcardFolders().last(), builtin);
+        QVERIFY2(QFileInfo(builtin + "/places.txt").isFile(), "share/wildcards is not compiled in");
+        dynprompt::Options options;
+        options.folders = {user.path(), builtin}; // an empty user folder
+        const Result<QString> place = dynprompt::generate("__places__", 3, options);
+        QVERIFY2(place.ok(), qPrintable(place.error().message));
+        QVERIFY(!place.value().isEmpty() && !place.value().startsWith('#'));
+        // every starter list resolves and gives a line, never its header
+        for (const QString &name : {"places", "eras", "weather", "time-of-day", "art-styles", "moods", "colour-palettes", "creatures"}) {
+            const Result<QString> r = dynprompt::generate("__" + name + "__", 7, options);
+            QVERIFY2(r.ok() && !r.value().isEmpty() && !r.value().startsWith('#'), qPrintable(name));
+        }
+        // a user's file of the same name wins, also over a glob
+        write(user.path() + "/places.txt", "only here\n");
+        QCOMPARE(dynprompt::generate("__places__", 3, options).value(), QString("only here"));
+        // globs see the built-in lists; the file listing and the cache signature too
+        const Result<QString> glob = dynprompt::generate("__colo*__", 3, options);
+        QVERIFY2(glob.ok(), qPrintable(glob.error().message));
+        QVERIFY(dynprompt::generate("__art-*__", 3, options).ok());
+        write(user.path() + "/x.txt", "x\n");
+        QVERIFY(dynprompt::wildcardSignature({builtin}) != dynprompt::wildcardSignature({user.path()}));
+        QVERIFY(!dynprompt::wildcardSignature({builtin}).isEmpty());
+        // another ":/" folder is not trusted: no canonical path, so it is not read
+        dynprompt::Options other;
+        other.folders = {QStringLiteral(":/fugue/looks")};
+        QVERIFY(!dynprompt::generate("__anything__", 1, other).ok());
+        QVERIFY(!dynprompt::generate("__../places__", 1, options).ok());
+    }
     void cyclicAndRandomPartsBeforeChoicesAreDrawnAtEveryPrompt() {
         QCOMPARE(dynprompt::expandAll("{@x|y} {a|b|c}", m_options, 100)->prompts, QStringList({"x a", "y b", "x c"}));
         const QStringList shapes = dynprompt::expandAll("{~square|circle|star|ring|dot} {red|green|blue|pink|tan|grey|teal|lime}", m_options, 100)->prompts;

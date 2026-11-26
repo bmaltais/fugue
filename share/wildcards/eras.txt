@@ -1,0 +1,33 @@
+# Eras: times and periods a picture can belong to.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+the 1890s
+the Belle Epoque
+the roaring 1920s
+the 1930s
+the 1940s
+the 1950s
+the early 1960s
+the late 1960s
+the 1970s
+the 1980s
+the 1990s
+the Edwardian age
+the age of sail
+the golden age of steam trains
+the Art Deco era
+the dawn of aviation
+a medieval summer
+the Renaissance
+the Baroque age
+the Victorian era
+the Meiji era
+the Edo period
+the Silk Road era
+the days of the grand ocean liners
+the first age of the motor car
+a far future
+a retro-futurist tomorrow imagined in 1962
+the space age of the 1960s
+an alternate 1900 of brass and clockwork
+the Bronze Age
+the age of the first explorers

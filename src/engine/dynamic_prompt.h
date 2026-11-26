@@ -31,8 +31,12 @@ struct Options {
 };
 
 // The folders wildcards are read from, in order: the session's own `wildcards/` in the data folder,
-// the Default's (a project that inherits `prompts`, spec 1.4.2), then every pack's `wildcards/`.
+// the Default's (a project that inherits `prompts`, spec 1.4.2), then every pack's `wildcards/`, then
+// the built-in collection (share/wildcards, compiled in) so any file of the same name above wins.
 QStringList wildcardFolders();
+
+// The built-in collection's root in the Qt resources, the one folder read without the canonical-path check.
+QString builtinWildcardFolder();
 
 // A text that changes when a wildcard file is added, removed or edited under `folders`
 // (path, size, modification time): the Dynamic Prompt node's part of the cache key.

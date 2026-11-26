@@ -268,7 +268,7 @@ ColumnLayout {
                 detail: page.model.wildcardsFolder
                 where: page.model.wildcardsFolder
                 status: qsTr("Default")
-                Note { text: qsTr("Where Dynamic Prompt looks for __name__ files: .txt (one value per line), .yaml and .json, in folders as they come from a collection. A pack's own wildcards folder is searched too, and a project that inherits prompts also reads the Default's.") }
+                Note { text: qsTr("Where Dynamic Prompt looks for __name__ files: .txt (one value per line), .yaml and .json, in folders as they come from a collection. A pack's own wildcards folder is searched too, and a project that inherits prompts also reads the Default's. Fugue's own starter lists (places, eras, weather, art-styles and more) come last, so a file of yours with the same name replaces one.") }
             }
         }
     }

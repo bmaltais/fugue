@@ -1,0 +1,32 @@
+# Weather: skies and conditions, short enough to drop into any scene.
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+bright sunshine
+a clear blue sky
+soft overcast light
+a light drizzle
+heavy rain
+a thunderstorm on the horizon
+rolling sea fog
+thick morning mist
+falling snow
+a blizzard
+a frosty morning
+a heatwave haze
+a warm summer breeze
+golden autumn wind with falling leaves
+a rainbow after a shower
+dramatic storm clouds with a break of sunlight
+high cirrus clouds
+puffy cumulus clouds
+a double rainbow
+a dusting of snow on the ground
+a quiet still day with no wind
+drifting cherry blossom petals
+a dust storm in the distance
+a sky full of stars
+aurora lights in the sky
+dew on the grass at dawn
+a hail shower
+a gentle snowfall at dusk
+low hanging cloud on the hills
+a warm rain on a summer evening

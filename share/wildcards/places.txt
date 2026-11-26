@@ -1,0 +1,42 @@
+# Places: evocative real and imaginary settings, each starts with "the" so it reads after "Greetings from".
+# Built into Fugue; a file of the same name in your wildcards folder replaces it.
+the lighthouse on a basalt cliff
+the floating markets of a canal city
+the terraced tea plantation above the clouds
+the salt flat that mirrors the whole sky
+the monastery carved into a red sandstone gorge
+the harbour town of crooked pastel houses
+the night train station in a snowed-in mountain pass
+the rooftop garden above a lantern-lit old town
+the fishing village built on stilts over a lagoon
+the bamboo forest path after rain
+the desert caravanserai at an oasis
+the glacier lake with turquoise water
+the hillside vineyard town in the south of France
+the cable car crossing a fjord
+the ruined amphitheatre overgrown with wild flowers
+the clifftop windmill on a windy island
+the hot spring village in a snowy valley
+the spice bazaar under striped awnings
+the seaside promenade with a faded grand hotel
+the cliffside city of white domes and blue doors
+the treehouse town in an ancient redwood forest
+the observatory on a mountain peak above the clouds
+the river delta village of boats and reed huts
+the clock tower square in a medieval market town
+the sky harbour where airships dock to a stone tower
+the coral atoll with a single palm tree
+the library built inside a hollow giant tree
+the lavender field leading down to a stone farmhouse
+the tram line climbing a steep hillside city
+the moonlit castle on a loch island
+the village inside the crater of a sleeping volcano
+the cave temple lit by a thousand candles
+the crystal canyon where the walls glow faintly
+the lighthouse island with a ring of tiny boats
+the boardwalk pier at the end of a quiet beach
+the underwater glass city among kelp forests
+the mountain hut above a sea of fog
+the rice paddy valley at the foot of misty hills
+the cobbled alley of tiny bookshops and cafes
+the floating garden city drifting over a calm ocean
