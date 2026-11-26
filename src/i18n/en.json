@@ -284,9 +284,6 @@
   "Unpin: let it take its place again": "Unpin: let it take its place again",
   "Use the active canvas": "Use the active canvas",
   "Use the files you have": "Use the files you have",
-  "Use what you have": "Use what you have",
-  "Use what you have: %1 (%2)": "Use what you have: %1 (%2)",
-  "Uses another file of the same model": "Uses another file of the same model",
   "Using %1 in place of %2 (%3).": "Using %1 in place of %2 (%3).",
   "[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask layers alone": "[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask layers alone",
   "A canvas belongs to the Default or the project it was made in.": "A canvas belongs to the Default or the project it was made in.",
@@ -1306,7 +1303,6 @@
   "Make a canvas from a picture file": "Make a canvas from a picture file",
   "Not in this root": "Not in this root",
   "Use for region": "Use for region",
-  "Use it": "Use it",
   "%1 reads %2: %3 × %4 at %5, %6": "%1 reads %2: %3 × %4 at %5, %6",
   "Add a Canvas Region": "Add a Canvas Region",
   "Add a Canvas Region node": "Add a Canvas Region node",
@@ -1879,7 +1875,6 @@
   "One picture pixel to one screen pixel (1)": "One picture pixel to one screen pixel (1)",
   "Open the workflow this file was made with, as a new tab": "Open the workflow this file was made with, as a new tab",
   "Open the workflow this file was made with, as it was, and run it": "Open the workflow this file was made with, as it was, and run it",
-  "Open with what you have": "Open with what you have",
   "Open workflow": "Open workflow",
   "Pin this picture, then choose a second one to compare with (C)": "Pin this picture, then choose a second one to compare with (C)",
   "Put %1 into the selected Load Image node.": "Put %1 into the selected Load Image node.",
@@ -2168,6 +2163,49 @@
   "A single %1 cannot feed this side: the other side is a list.": "A single %1 cannot feed this side: the other side is a list.",
   "Could not read %1, so it is not used.": "Could not read %1, so it is not used.",
   "Opened without %1: the file could not be read.": "Opened without %1: the file could not be read.",
-  "Reading your files...": "Reading your files...",
-  "Reading your file...": "Reading your file..."
+  "Use my file": "Use my file",
+  "on disk": "on disk",
+  "Reading your file…": "Reading your file…",
+  "You have %1 (%2).": "You have %1 (%2).",
+  "Use my file or download: %1": "Use my file or download: %1",
+  "use %n files you already have": {
+    "one": "use %n file you already have",
+    "other": "use %n files you already have"
+  },
+  "Nothing to download: Fugue will use %n files you already have.": {
+    "one": "Nothing to download: Fugue will use the file you already have.",
+    "other": "Nothing to download: Fugue will use %n files you already have."
+  },
+  "Use my %n files": {
+    "one": "Use my file",
+    "other": "Use my %n files"
+  },
+  "Ready · uses your %1 file": "Ready · uses your %1 file",
+  "Ready · uses a file you have": "Ready · uses a file you have",
+  "you have %n of them": {
+    "one": "you have %n of them",
+    "other": "you have %n of them"
+  },
+  "You already have %n of them in another file; Get ready… can use it with no download.": {
+    "one": "You already have %n of them in another file; Get ready… can use it with no download.",
+    "other": "You already have %n of them in another file; Get ready… can use it with no download."
+  },
+  "Opened with your file %1 in place of %2 (%3).": "Opened with your file %1 in place of %2 (%3).",
+  "Use my file: %1 (%2). Click the warning to keep this card up.": "Use my file: %1 (%2). Click the warning to keep this card up.",
+  "Back to %1, which needs a download (%2)": "Back to %1, which needs a download (%2)",
+  "Back to %1, which needs a download": "Back to %1, which needs a download",
+  "Download %1…": "Download %1…",
+  "This app needs %n models, and you have them on disk.": {
+    "one": "This app needs %n model, and you have it on disk.",
+    "other": "This app needs %n models, and you have them on disk."
+  },
+  "You have %n on disk.": {
+    "one": "You have %n on disk.",
+    "other": "You have %n on disk."
+  },
+  "Reading your file... %1%": "Reading your file... %1%",
+  "Warnings: %1": "Warnings: %1",
+  "Back to the template's models": "Back to the template's models",
+  "Use my file: %1 (%2)": "Use my file: %1 (%2)",
+  "Your file could not be read. Download is chosen for it now.": "Your file could not be read. Download is chosen for it now."
 }

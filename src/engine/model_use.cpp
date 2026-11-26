@@ -36,10 +36,6 @@ QString OnDiskUse::sameModelText() const {
     return parts.join(QStringLiteral(", "));
 }
 
-QString OnDiskUse::offerText() const {
-    return QCoreApplication::translate("ModelUse", "Use what you have: %1 (%2)").arg(match.name, sameModelText());
-}
-
 QString OnDiskUse::cliHint(const QString &input) const {
     return QStringLiteral("the same model is on disk as %1; set %2 to it, or pass --use-on-disk")
         .arg(match.path, input.isEmpty() ? QStringLiteral("the input") : input);
@@ -119,7 +115,7 @@ QList<OnDiskUse> onDiskUses(const QList<MissingModel> &missing, const ModelLibra
     QList<OnDiskUse> out;
     for (const MissingModel &model : missing)
         if (const std::optional<OnDiskMatch> match = findOnDisk(model.handle, library, context, shapes))
-            out.append({model.handle, *match});
+            out.append({model.handle, *match, model.size});
     return out;
 }
 

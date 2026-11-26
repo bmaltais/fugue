@@ -188,7 +188,8 @@ private slots:
         const auto model = [](const QString &name, const QString &size, const QString &license, const QString &typeFrom) {
             return QVariantMap{{"name", name}, {"size", size}, {"host", "huggingface.co"}, {"license", license}, {"licenseUrl", ""},
                                {"folder", typeFrom.isEmpty() ? "~/.local/share/fugue/models/diffusion_models" : "its folder, once the pack is installed"},
-                               {"typeFrom", typeFrom}, {"state", ""}, {"detail", ""}, {"fraction", 0.0}};
+                               {"typeFrom", typeFrom}, {"state", ""}, {"detail", ""}, {"fraction", 0.0}, {"hash", name}, {"use", QVariantMap()},
+                               {"choice", ""}, {"sizeKnown", true}, {"error", ""}};
         };
         QVariantMap view{
             {"headline", "Fugue will install and trust 1 pack, set up 1 environment and download 4 models, 19.7 GB."},
@@ -202,7 +203,8 @@ private slots:
                                     model("ae.safetensors", "335 MB", "", "type from Segment Nodes: Segment by Points (needs a mask)"),
                                     model("sam2_hiera_large.pt", "898 MB", "Apache-2.0", "type from Segment Nodes")}},
             {"destination", "/home/me/.local/share/fugue/models"}, {"destinationTitle", "Fugue's models folder"},
-            {"destinations", QVariantList{}}, {"hasModels", true}, {"freeText", "343.2 GB free"}, {"sizeText", "19.7 GB"},
+            {"destinations", QVariantList{}}, {"hasModels", true}, {"hasDownloads", true}, {"busy", false}, {"primary", "Install"}, {"usesCount", 0},
+            {"freeText", "343.2 GB free"}, {"sizeText", "19.7 GB"},
             {"lowSpace", false}, {"problems", QStringList{}}, {"question", QVariantMap{}}, {"message", ""}, {"ok", false},
             {"retry", QStringList{}}, {"empty", false}};
         auto *map = QQmlPropertyMap::create(sheet);

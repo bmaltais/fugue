@@ -14,9 +14,12 @@ import "../kit"
 //
 // In the Drift kit (docs/canvas-look.md 20): a Moss KitPanel (Get ready and downloads), a KitHero with the one-line headline, the
 // packs, environments and models as KitGroups of rows, where the models go as a row of its own, Install the one primary pill (a
-// KitChip primary) and Cancel a raised chip. Keys: opening focuses Install (Cancel when there is nothing to install), Tab and
-// Shift+Tab walk the rows (those with more to show), Change model folder and the buttons, Enter installs (a focused row or button
-// takes its own Enter first), Escape cancels (stops a run), and the focus goes back to what had it before.
+// KitChip primary) and Cancel a raised chip. A model with a file of the same weights on disk has a segmented choice, "Use my file |
+// Download <size>", on "Use my file" at first; the headline, the totals and the Destination follow the choices, and nothing happens
+// before the yes. The primary reads Install while anything installs or downloads, and "Use my file" when only the person's files are left.
+// Keys: opening focuses the primary (Cancel when there is nothing to do), Tab and Shift+Tab walk the rows (those with more to show),
+// each choice (one stop; Left and Right choose), Change model folder and the buttons, Enter runs the primary (also from a choice; a
+// focused row or button takes its own Enter first), Escape cancels (stops a run), and the focus goes back to what had it before.
 Popup {
     id: sheet
     objectName: "getReadySheet"
@@ -233,24 +236,27 @@ Popup {
                                 readonly property string key: "model:" + modelData.name
                                 objectName: "getReadyModel-" + modelData.name
                                 look: sheet.look
-                                glyph: "download"
+                                glyph: modelData.choice === "disk" ? "check" : "download"
                                 title: modelData.name
-                                trailing: modelData.size
+                                trailing: modelData.choice === "disk" ? qsTr("on disk") : modelData.size
                                 subtitle: [modelData.license, modelData.typeFrom].filter(t => t !== "").join(" · ")
                                 more: qsTr("From: %1").arg(modelData.host) + "\n"
                                       + (modelData.license !== "" ? qsTr("Licence: %1").arg(modelData.license) + "\n" : "")
                                       + qsTr("Into: %1").arg(modelData.folder)
                                 open: sheet.expanded[key] === true
-                                running: modelData.state === "running"
+                                running: modelData.state === "running" || modelData.state === "reading"
                                 fraction: modelData.fraction
-                                stateText: modelData.state === "running" && modelData.fraction >= 0 ? Math.round(modelData.fraction * 100) + "%"
+                                stateText: modelData.state === "reading" ? qsTr("Reading your file…") + (modelData.fraction >= 0 ? " " + Math.round(modelData.fraction * 100) + "%" : "")
+                                           : modelData.state === "running" && modelData.fraction >= 0 ? Math.round(modelData.fraction * 100) + "%"
                                            : sheet.stateText(modelData.state)
-                                failed: modelData.state === "failed"
+                                failed: modelData.state === "failed" || modelData.error !== ""
                                 error: failed ? modelData.detail : ""
                                 onToggled: sheet.toggle(key)
-                                useText: modelData.use && modelData.use.text ? modelData.use.text : ""
-                                useBusy: App.workflows.hashingUses
-                                onUseRequested: sheet.sheetModel.useOnDisk(modelData.hash)
+                                choice: modelData.choice
+                                useLine: modelData.use && modelData.use.file ? qsTr("You have %1 (%2).").arg(modelData.use.file).arg(modelData.use.same) : ""
+                                downloadText: modelData.sizeKnown ? qsTr("Download %1").arg(modelData.size) : qsTr("Download")
+                                choiceLocked: sheet.view.busy === true
+                                onChoiceMoved: useDisk => sheet.sheetModel.setChoice(modelData.hash, useDisk)
                             }
                         }
                     }
@@ -263,15 +269,15 @@ Popup {
                 Layout.fillWidth: true
                 Layout.leftMargin: 4 * sheet.look.unit
                 Layout.rightMargin: 4 * sheet.look.unit
-                visible: sheet.view.hasModels
+                visible: sheet.view.hasDownloads
             KitSection {
                 look: sheet.look
-                visible: sheet.view.hasModels
+                visible: sheet.view.hasDownloads
                 text: qsTr("Destination")
             }
             KitGroup {
                 look: sheet.look
-                visible: sheet.view.hasModels
+                visible: sheet.view.hasDownloads
                 KitRow {
                     id: destination
                     objectName: "getReadyDestination"
@@ -304,7 +310,7 @@ Popup {
                 spacing: 2 * sheet.look.unit
                 Text {
                     objectName: "getReadyLowSpace"
-                    visible: sheet.view.hasModels && sheet.view.lowSpace
+                    visible: sheet.view.hasDownloads && sheet.view.lowSpace
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     color: sheet.look.error
@@ -433,7 +439,7 @@ Popup {
                     primary: true
                     visible: sheet.phase === "review" && !sheet.view.empty
                     enabled: !sheet.view.lowSpace
-                    text: qsTr("Install")
+                    text: sheet.view.primary ?? qsTr("Install")
                     onTapped: sheet.sheetModel.start()
                 }
             }

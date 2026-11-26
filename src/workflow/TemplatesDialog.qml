@@ -183,14 +183,16 @@ Popup {
             close()
     }
 
-    // A card's Open with what you have: the template opens with its missing models set to the files on disk (#605).
-    function openWithWhatYouHave(id) {
-        if (App.workflows.openTemplateWithWhatYouHave(id))
+    // A card's click, Enter and the details' Open: a template that is ready only through the files the person has opens with them, with
+    // no sheet (Workflows::openTemplateById), and says so in the banner with Undo.
+    function openTemplate(id) {
+        if (App.workflows.openTemplateById(id))
             close()
     }
 
-    function openTemplate(id) {
-        if (App.workflows.openTemplateById(id))
+    // The details' Download <size>…: the template as it is, and Get ready with Download chosen for the models the person has a file for.
+    function openForDownload(id) {
+        if (App.workflows.openTemplateForDownload(id))
             close()
     }
 
@@ -542,43 +544,45 @@ Popup {
                                     Layout.topMargin: dialog.u
                                     visible: cell.modelData.status !== "" || downloading || failed
                                     spacing: 0
-                                    Text {
-                                        objectName: "templateStatus-" + cell.modelData.id
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        text: statusRow.downloading
-                                              ? [statusRow.downloads.label, statusRow.downloads.progressText].filter(t => t !== "").join(" · ")
-                                              : statusRow.failed ? statusRow.downloads.failure : cell.modelData.status
-                                        wrapMode: Text.Wrap
-                                        maximumLineCount: 2
-                                        elide: Text.ElideRight
-                                        color: statusRow.downloading || cell.modelData.usesOnDisk ? dialog.look.label : dialog.look.error
-                                        font.pixelSize: dialog.look.labelSize
-                                        // Which files and where each goes, or the whole failure, on hover.
-                                        ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
-                                        ToolTip.delay: App.theme.look.tooltipDelay
-                                        ToolTip.text: statusRow.failed ? statusRow.downloads.failure
-                                                      : cell.modelData.missingModels.map(m => m.suggest !== ""
-                                                          ? qsTr("%1, into %2. You have %3, the same model.").arg(m.name, m.folder, m.suggest)
-                                                          : qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
-                                        HoverHandler { id: statusHover }
-                                    }
-                                    // The same model is on disk in another file (#605): the template opens with it, unchanged on disk.
-                                    ThemedButton {
-                                        objectName: "templateUseOnDisk-" + cell.modelData.id
-                                        Layout.topMargin: dialog.u
-                                        Layout.alignment: Qt.AlignLeft
-                                        visible: cell.modelData.onDisk.length > 0 && !statusRow.downloading
-                                        enabled: !App.workflows.hashingUses
-                                        text: App.workflows.hashingUses ? qsTr("Reading your files...") : qsTr("Open with what you have")
-                                        Accessible.name: text
-                                        tip: cell.modelData.onDisk.map(m => m.text).join("\n")
-                                        onClicked: dialog.openWithWhatYouHave(cell.modelData.id)
+                                        spacing: dialog.u
+                                        Glyph {
+                                            objectName: "templateReadyGlyph-" + cell.modelData.id
+                                            look: dialog.look
+                                            name: "check"
+                                            visible: cell.modelData.opensWithFiles === true && !statusRow.downloading && !statusRow.failed
+                                            color: dialog.look.label
+                                            Layout.alignment: Qt.AlignTop
+                                        }
+                                        Text {
+                                            objectName: "templateStatus-" + cell.modelData.id
+                                            Layout.fillWidth: true
+                                            text: statusRow.downloading
+                                                  ? [statusRow.downloads.label, statusRow.downloads.progressText].filter(t => t !== "").join(" · ")
+                                                  : statusRow.failed ? statusRow.downloads.failure : cell.modelData.status
+                                            wrapMode: Text.Wrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                            color: statusRow.downloading || (cell.modelData.usesOnDisk && cell.modelData.opensWithFiles) ? dialog.look.label : dialog.look.error
+                                            font.pixelSize: dialog.look.labelSize
+                                            // Which files and where each goes, or the whole failure, on hover.
+                                            ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
+                                            ToolTip.delay: App.theme.look.tooltipDelay
+                                            ToolTip.text: statusRow.failed ? statusRow.downloads.failure
+                                                          : cell.modelData.missingModels.map(m => m.suggest !== ""
+                                                              ? qsTr("%1, into %2. You have %3, the same model.").arg(m.name, m.folder, m.suggest)
+                                                              : qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
+                                            HoverHandler { id: statusHover }
+                                        }
                                     }
                                     // Its own press target: a click here does not open the template.
-                                    ThemedButton {
+                                    KitChip {
                                         objectName: "templateDownload-" + cell.modelData.id
+                                        look: dialog.look
                                         Layout.topMargin: dialog.u
                                         Layout.alignment: Qt.AlignLeft
+                                        bordered: true
                                         visible: statusRow.downloading || (cell.modelData.download !== "" && !statusRow.downloads.busy)
                                         danger: statusRow.downloading
                                         text: statusRow.downloading ? qsTr("Cancel")
@@ -586,8 +590,8 @@ Popup {
                                               : qsTr("Download")
                                         Accessible.name: statusRow.downloading ? qsTr("Cancel the download") : cell.modelData.download
                                         tip: statusRow.downloading ? "" : cell.modelData.download
-                                        onClicked: statusRow.downloading ? statusRow.downloads.cancel()
-                                                                         : dialog.downloadTemplate(cell.modelData.id)
+                                        onTapped: statusRow.downloading ? statusRow.downloads.cancel()
+                                                                        : dialog.downloadTemplate(cell.modelData.id)
                                     }
                                 }
                             }
@@ -616,6 +620,7 @@ Popup {
             visible: dialog.detail !== null
             template: dialog.detail ?? dialog.noDetail
             onOpen: dialog.openTemplate(dialog.detailId)
+            onDownloadOwn: dialog.openForDownload(dialog.detailId)
             onCancel: dialog.closeDetails()
         }
     }

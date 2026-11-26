@@ -38,6 +38,7 @@
 #include "translator.h"
 #include "workflow/workflows.h"
 #include "../engine/fake_http.h"
+#include "../window_grab.h"
 
 using namespace fugue;
 
@@ -1190,8 +1191,9 @@ private slots:
         forgetDownloads();
     }
 
-    // #605: a template whose model is not on disk but whose same weights are in another file is ready to run with it, says so, and
-    // "Open with what you have" opens a tab with the file in place, the template's own file untouched.
+    // #605: a template whose model is not on disk but whose same weights are in another file is ready to run with it, says so, and a
+    // click on its card (openTemplateById) opens a tab with the file in place and no sheet, the template's own file untouched; the banner
+    // names the file and its Undo puts the template's own model back (UI design 2026-11-26).
     void aTemplateWithTheSameWeightsOnDiskIsReadyAndOpensWithThem() {
         forgetDownloads();
         Fixture f;
@@ -1219,14 +1221,21 @@ private slots:
         QVERIFY(card.value("ready").toBool());
         QVERIFY(card.value("usesOnDisk").toBool());
         QCOMPARE(card.value("onDisk").toList().size(), 1);
-        QVERIFY(card.value("onDisk").toList().at(0).toMap().value("text").toString().contains("z_image_turbo_bf16.safetensors (same model, bf16)"));
-        QCOMPARE(card.value("status").toString(), QString("Uses another file of the same model"));
+        QCOMPARE(card.value("onDisk").toList().at(0).toMap().value("file").toString(), QString("z_image_turbo_bf16.safetensors"));
+        QCOMPARE(card.value("onDisk").toList().at(0).toMap().value("same").toString(), QString("same model, bf16"));
+        QCOMPARE(card.value("status").toString(), QString("Ready · uses your bf16 file"));
+        QVERIFY(card.value("opensWithFiles").toBool());
+        QCOMPARE(card.value("downloadSize").toString(), QString()); // the model the file stands in for is not a download of this card
+        QVERIFY(card.value("download").toString().isEmpty());
 
-        QVERIFY(workflows.openTemplateWithWhatYouHave("zit")); // the hash is read on a worker: the tab comes when it is known
+        QVERIFY(workflows.openTemplateById("zit")); // the hash is read on a worker: the tab comes when it is known
         QVERIFY(workflows.hashingUses());
-        QVERIFY(workflows.openTemplateWithWhatYouHave("zit")); // a second click while it is read opens nothing more
+        QVERIFY(workflows.reading().contains(hash)); // this model's own reading, not a global one
+        QVERIFY(workflows.openTemplateById("zit")); // a second click while it is read opens nothing more
         QTRY_VERIFY(canvas.document().graph.nodes.contains("models"));
         QTRY_VERIFY(!workflows.hashingUses());
+        QVERIFY(workflows.reading().isEmpty());
+        QVERIFY(!workflows.readiness()->isOpen()); // no sheet: the card was ready through the person's file
         int opened_ = 0;
         for (const QVariant &tab : workflows.tabs())
             opened_ += tab.toMap().value("title").toString() == QLatin1String("Z");
@@ -1238,11 +1247,19 @@ private slots:
         QFile own(f.bundled.filePath("zit/workflow.fugue")); // the template itself is as it was
         QVERIFY(own.open(QIODevice::ReadOnly));
         QVERIFY(own.readAll().contains("z_image_turbo_int8_convrot.safetensors"));
+        QVERIFY2(workflows.notice().contains("Opened with your file z_image_turbo_bf16.safetensors in place of z_image_turbo_int8_convrot.safetensors"),
+                 qPrintable(workflows.notice()));
+        QVERIFY(workflows.noticeUndoable());
+        workflows.undoNotice(); // back to the template's own model, which needs a download
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(), hash);
+        QVERIFY(!workflows.noticeUndoable());
+        QVERIFY(workflows.missingSomething());
     }
 
-    // #616: the Get ready row's "Use what you have" on a tab shown as a graph, the file's hash not known yet (the owner's case): the
-    // file is read, then the document holds it and the sheet's row is gone.
-    void theGetReadyRowUsesTheFileOnDiskAndLeavesThePlan() {
+    // #616, the end state the owner wants: every missing model has a file of the same weights, the file's hash is not known yet, and one
+    // yes on the sheet (Use my file, its default) reads the file, sets it in the document (one undo step), closes the sheet and starts no
+    // download: the person is on the tab, ready to run.
+    void theYesOnTheGetReadySheetWithEveryModelCoveredUsesTheFilesAndStartsNoDownload() {
         forgetDownloads();
         Fixture f;
         QTemporaryDir models;
@@ -1268,27 +1285,140 @@ private slots:
         locations.recoveryDir = state.filePath("recovery");
         locations.trustPath = state.filePath("trust.json");
         locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Translator translator(state.filePath("language")); // the plural forms of the catalog, as in the app
+        QCoreApplication::installTranslator(&translator);
         Workflows workflows(&canvas, &f.registry, &commands, locations);
-        QVERIFY(workflows.openTemplateById("zit"));
+        QVERIFY(workflows.openTemplateForDownload("zit")); // as it is, with the sheet on Download (what the details' button does)
         ReadinessSheet *sheet = workflows.readiness();
-        sheet->show();
         QVERIFY(sheet->isOpen());
+        QCOMPARE(sheet->view().value("models").toList().at(0).toMap().value("choice").toString(), QString("download"));
+        const int tab = workflows.current();
+        sheet->show(); // opened again from the banner: the defaults, Use my file for the model that has one
         QCOMPARE(sheet->view().value("models").toList().size(), 1);
         const QVariantMap before = sheet->view().value("models").toList().at(0).toMap();
         QCOMPARE(before.value("hash").toString(), hash);
+        QCOMPARE(before.value("choice").toString(), QString("disk"));
         QVERIFY(before.value("use").toMap().value("file").toString().contains("z_image_turbo_bf16"));
+        QCOMPARE(sheet->view().value("primary").toString(), QString("Use my file"));
         QVERIFY(FileHashes(FileHashes::defaultPath()).known(weights).isEmpty()); // not read yet
+        const int steps = canvas.undoStack()->count();
 
-        sheet->useOnDisk(hash);
+        QList<int> percents; // what the row is told as the file is hashed: unknown first, then the real percent
+        connect(&workflows, &Workflows::readingChanged, this, [&] { if (workflows.reading().contains(hash)) percents << workflows.reading().value(hash).toInt(); });
+        sheet->start();
         QVERIFY(workflows.hashingUses());
-        QTRY_VERIFY(!workflows.hashingUses());
+        QVERIFY(workflows.reading().contains(hash)); // the row's own busy state
+        QCOMPARE(sheet->view().value("models").toList().at(0).toMap().value("state").toString(), QString("reading"));
+        QTRY_VERIFY(!sheet->isOpen()); // closed by itself
+        QVERIFY(!workflows.hashingUses());
+        QVERIFY(workflows.reading().isEmpty());
+        QCOMPARE(percents.first(), -1);
+        QVERIFY2(percents.contains(100), "the hash's progress reaches the row"); // the worker tells its percent (ModelWorkers::hash)
         const QJsonObject handle = canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle();
-        QCOMPARE(handle.value("name").toString(), QString("z_image_turbo_bf16.safetensors"));
-        QCOMPARE(sheet->currentPlan().models.size(), 0);
-        QVERIFY2(sheet->view().value("models").toList().isEmpty(), "the row is still listed");
+        QCOMPARE(handle.value("name").toString(), QString("z_image_turbo_bf16.safetensors")); // the document holds the file on disk
+        QVERIFY(handle.value("hash").toString() != hash);
+        QCOMPARE(canvas.undoStack()->count(), steps + 1);
+        QCOMPARE(workflows.current(), tab); // the person is on the tab, ready to run
+        QVERIFY(!workflows.downloads()->busy()); // no download was started
+        QCOMPARE(sheet->phase(), QString("review"));
+        QVERIFY(!workflows.missingSomething());
     }
 
-    // #616: a file that cannot be read says so in the sheet (a notice would be hidden behind it), and the button is busy while it is read.
+    // Check 4: Cancel after choosing leaves the document and the undo stack as they were, also while the file is being read.
+    void cancelLeavesTheDocumentAndTheUndoStackAsTheyWere() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'9');
+        const QJsonObject wanted{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject recorded = wanted;
+        recorded.insert("source", "http://127.0.0.1:9/z.safetensors");
+        recorded.insert("size", 5000000000.0);
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", wanted}})}}, {{"models", QJsonArray{recorded}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateForDownload("zit"));
+        ReadinessSheet *sheet = workflows.readiness();
+        const int steps = canvas.undoStack()->count();
+        sheet->setChoice(hash, true);
+        sheet->cancel(); // the choice is discarded with the sheet
+        QVERIFY(!sheet->isOpen());
+        QCOMPARE(canvas.undoStack()->count(), steps);
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(), hash);
+        // Cancel while the file is read: the read ends and nothing is applied.
+        sheet->show();
+        sheet->start();
+        QVERIFY(workflows.hashingUses());
+        sheet->cancel();
+        QVERIFY(workflows.reading().isEmpty());
+        QTRY_VERIFY(!workflows.hashingUses());
+        QCOMPARE(canvas.undoStack()->count(), steps);
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(), hash);
+    }
+
+    // Check 5: a card whose models are all covered has no download to offer (the size is of the models a download would fetch); a mixed
+    // card counts only the model without a file of its own and says how many the person has.
+    void aCardCountsOnlyTheModelsAFileDoesNotStandInFor() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QJsonObject covered{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'c')}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        const QJsonObject other{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'd')}, {"name", "other-model.gguf"}};
+        QJsonObject coveredRecord = covered, otherRecord = other;
+        coveredRecord.insert("source", "http://127.0.0.1:9/z.safetensors");
+        coveredRecord.insert("size", 8700000000.0);
+        otherRecord.insert("source", "http://127.0.0.1:9/o.gguf");
+        otherRecord.insert("size", 5900000000.0);
+        makeTemplate(f.bundled.filePath("all"), {{"title", "All"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", covered}})}}, {{"models", QJsonArray{coveredRecord}}}));
+        makeTemplate(f.bundled.filePath("mix"), {{"title", "Mix"}},
+                     workflow({{"a", node("fugue/load-models", {{"diffusion_model", covered}})}, {"b", node("fugue/load-models", {{"diffusion_model", other}})}},
+                              {{"models", QJsonArray{coveredRecord, otherRecord}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Translator translator(state.filePath("language"));
+        QCoreApplication::installTranslator(&translator);
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVariantMap all, mix;
+        for (const QVariant &card : workflows.templates())
+            (card.toMap().value("id").toString() == "all" ? all : mix) = card.toMap();
+        QCOMPARE(all.value("downloadSize").toString(), QString());
+        QCOMPARE(all.value("ownDownloadSize").toString(), QString("8.7 GB")); // the details' Download <size>…
+        QVERIFY(all.value("opensWithFiles").toBool());
+        QCOMPARE(mix.value("downloadSize").toString(), QString("5.9 GB"));
+        QVERIFY(!mix.value("opensWithFiles").toBool()); // a click opens Get ready with its defaults
+        QVERIFY2(mix.value("status").toString().contains("Models missing: 1 of 2 · you have 1 of them"), qPrintable(mix.value("status").toString()));
+        QCoreApplication::removeTranslator(&translator);
+    }
+
+    // #616: a file that cannot be read says so in the sheet (a notice would be hidden behind it), the row is busy while it is read, and
+    // it is offered again with Download chosen; the stale message goes when the choice changes.
     void aFileThatCannotBeReadIsSaidInTheGetReadySheet() {
         forgetDownloads();
         Fixture f;
@@ -1316,19 +1446,23 @@ private slots:
         locations.trustPath = state.filePath("trust.json");
         locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
         Workflows workflows(&canvas, &f.registry, &commands, locations);
-        QVERIFY(workflows.openTemplateById("zit"));
+        QVERIFY(workflows.openTemplateForDownload("zit"));
         ReadinessSheet *sheet = workflows.readiness();
         sheet->show();
         QCOMPARE(sheet->view().value("models").toList().size(), 1); // the header is read and remembered here
         QVERIFY(QFile::setPermissions(weights, QFileDevice::Permissions()));
-        sheet->useOnDisk(hash);
+        sheet->start();
         QVERIFY(workflows.hashingUses());
-        sheet->useOnDisk(hash); // a second click while it is read: nothing more
+        sheet->start(); // a second press while it is read: nothing more
         QTRY_VERIFY(!workflows.hashingUses());
         QVERIFY2(sheet->view().value("message").toString().contains("z_image_turbo_fp8.safetensors"), qPrintable(sheet->view().value("message").toString()));
         QVERIFY(!sheet->view().value("ok").toBool());
         QVERIFY(!workflows.notice().contains("could not be read") && !workflows.notice().contains("Could not read")); // said in the sheet, not behind it
         QCOMPARE(sheet->view().value("models").toList().size(), 1); // the row stays: the file is not used
+        QCOMPARE(sheet->view().value("models").toList().at(0).toMap().value("choice").toString(), QString("download"));
+        QVERIFY(sheet->isOpen());
+        sheet->setChoice(hash, true); // the person tries again: the old message would be stale
+        QCOMPARE(sheet->view().value("message").toString(), QString());
         QVERIFY(QFile::setPermissions(weights, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
     }
 
@@ -1356,7 +1490,7 @@ private slots:
         locations.trustPath = state.filePath("trust.json");
         locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
         Workflows workflows(&canvas, &f.registry, &commands, locations);
-        QVERIFY(workflows.openTemplateById("zit"));
+        QVERIFY(workflows.openTemplateForDownload("zit"));
         bool appShown = true;
         int taken = 0;
         workflows.setAppShown([&appShown](const QString &) { return appShown; });
@@ -1403,6 +1537,142 @@ private slots:
         QVERIFY2(workflows.notice().contains("z_image_turbo_fp8.safetensors"), qPrintable(workflows.notice()));
         QVERIFY(!workflows.hashingUses());
         QVERIFY(QFile::setPermissions(weights, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    }
+
+    // The window side of "Use my file" (UI design 2026-11-26, #616): in the Templates dialog a card that is ready only through the person's
+    // file says so with a check, Enter on it opens the template with the file and no sheet, a banner names the file and has Undo, the
+    // details offer the template's own download as a secondary, and a card with a model that has no file shows the one download. With
+    // FUGUE_SHOT_DIR it also draws the pictures of the card and of the Get ready sheet (Use my file, Download chosen, mixed).
+    void theDialogOpensAReadyThroughYourFileCardWithItAndSaysSo() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        QJsonObject covered{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'1')}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject other{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'2')}, {"name", "flux-2-klein-9b-Q4_K_M.gguf"}};
+        const QJsonObject coveredHandle = covered, otherHandle = other;
+        covered.insert("source", "http://127.0.0.1:9/z.safetensors");
+        covered.insert("size", 8700000000.0);
+        other.insert("source", "http://127.0.0.1:9/k.gguf");
+        other.insert("size", 5900000000.0);
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z-Image Turbo"}, {"description", "Text to image, 8 steps, from a prompt."}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", coveredHandle}})}}, {{"models", QJsonArray{covered}}}));
+        makeTemplate(f.bundled.filePath("mix"), {{"title", "Z-Image and Klein"}, {"description", "Two models, one of them in your folders."}},
+                     workflow({{"a", node("fugue/load-models", {{"diffusion_model", coveredHandle}})}, {"b", node("fugue/load-models", {{"diffusion_model", otherHandle}})}},
+                              {{"models", QJsonArray{covered, other}}}));
+        QTemporaryDir dir;
+        QFile shell(dir.filePath("shell.toml"));
+        QVERIFY(shell.open(QIODevice::WriteOnly));
+        shell.write("[font]\nbase-size = 12\n");
+        shell.close();
+        Translator translator(dir.path() + "/language");
+        QCoreApplication::installTranslator(&translator); // the English plural forms, as main() does
+        Theme theme(dir.path());
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        registerDefaultCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = dir.filePath("recovery");
+        locations.trustPath = dir.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        registerMenuCommands(commands);
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        registerFileCommands(commands, workflows);
+        QQmlApplicationEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &error : errors)
+                warnings << error.toString();
+        });
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvas, &workflows});
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        const QString shots = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        const auto shoot = [&](const QString &name) {
+            if (shots.isEmpty())
+                return;
+            QDir().mkpath(shots);
+            window->resize(900, 700);
+            QTest::qWait(500);
+            QVERIFY(test_support::grab(window).save(shots + "/" + name + ".png"));
+        };
+
+        QVERIFY(commands.run("file.templates"));
+        QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "templateCard-zit") && item(window->contentItem(), "templateCard-mix"));
+        QCOMPARE(item(window->contentItem(), "templateStatus-zit")->property("text").toString(), QString("Ready · uses your bf16 file"));
+        QVERIFY(item(window->contentItem(), "templateReadyGlyph-zit")->isVisible());
+        QVERIFY(!item(window->contentItem(), "templateDownload-zit")->isVisible()); // nothing a download would fetch
+        QCOMPARE(item(window->contentItem(), "templateStatus-mix")->property("text").toString(), QString("Models missing: 1 of 2 · you have 1 of them"));
+        QVERIFY(!item(window->contentItem(), "templateReadyGlyph-mix")->isVisible());
+        QCOMPARE(item(window->contentItem(), "templateDownload-mix")->property("text").toString(), QString("Download 5.9 GB")); // the uncovered one only
+        shoot("template-card-ready-through-your-file");
+
+        // The details: the template's own download is the secondary, left of Open.
+        QObject *dialog = window->findChild<QObject *>("templatesDialog");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "zit"), Q_ARG(QVariant, QVariant())));
+        QQuickItem *own = nullptr;
+        QTRY_VERIFY((own = item(window->contentItem(), "templateDetailsDownload")) && own->isVisible());
+        QCOMPARE(own->property("text").toString(), QString("Download 8.7 GB…"));
+        shoot("template-details-download");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "closeDetails"));
+
+        // Enter on the card: opens with the file, no sheet, the banner says so, Undo puts the template's own model back.
+        QTRY_VERIFY(item(window->contentItem(), "templatesGrid"));
+        item(window->contentItem(), "templatesGrid")->forceActiveFocus();
+        int at = 0;
+        for (const QVariant &card : dialog->property("shown").toList())
+            if (card.toMap().value("id").toString() == "zit")
+                break;
+            else
+                ++at;
+        item(window->contentItem(), "templatesGrid")->setProperty("currentIndex", at);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(canvas.document().graph.nodes.contains("models"));
+        QCOMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(),
+                 QString("z_image_turbo_bf16.safetensors"));
+        QVERIFY(!workflows.readiness()->isOpen());
+        QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        QQuickItem *undo = nullptr;
+        QTRY_VERIFY((undo = item(window->contentItem(), "noticeUndo")) && undo->isVisible());
+        QVERIFY(workflows.notice().contains("Opened with your file z_image_turbo_bf16.safetensors"));
+        shoot("notice-opened-with-your-file");
+        QMetaObject::invokeMethod(undo, "clicked");
+        QTRY_COMPARE(canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("hash").toString(),
+                     coveredHandle.value("hash").toString());
+
+        // Get ready, by the real plan: the covered model on Use my file, then on Download, then the mixed plan.
+        ReadinessSheet *sheet = workflows.readiness();
+        QVERIFY(workflows.openTemplateForDownload("zit"));
+        sheet->show();
+        QObject *sheetItem = nullptr;
+        QTRY_VERIFY((sheetItem = window->findChild<QObject *>("getReadySheet")) && sheetItem->property("visible").toBool());
+        QQuickItem *choice = nullptr;
+        QTRY_VERIFY((choice = item(window->contentItem(), "getReadyChoice-z_image_turbo_int8_convrot.safetensors")) && choice->isVisible());
+        QCOMPARE(item(window->contentItem(), "getReadyAll")->property("text").toString(), QString("Use my file"));
+        QVERIFY(!item(window->contentItem(), "getReadyDestination")->isVisible());
+        shoot("get-ready-use-my-file");
+        sheet->setChoice(coveredHandle.value("hash").toString(), false);
+        QTRY_COMPARE(item(window->contentItem(), "getReadyAll")->property("text").toString(), QString("Install"));
+        QTRY_VERIFY(item(window->contentItem(), "getReadyDestination")->isVisible());
+        shoot("get-ready-download-chosen");
+        sheet->cancel();
+        QTRY_VERIFY(!sheetItem->property("visible").toBool());
+        QVERIFY(workflows.openTemplateForDownload("mix"));
+        sheet->show();
+        QTRY_VERIFY(sheetItem->property("visible").toBool() && item(window->contentItem(), "getReadyDestination")->isVisible());
+        QCOMPARE(item(window->contentItem(), "getReadyAll")->property("text").toString(), QString("Install"));
+        QTRY_VERIFY(sheet->view().value("headline").toString().contains("download 1 model, 5.9 GB and use 1 file you already have"));
+        shoot("get-ready-mixed");
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
     }
 
     // #164: a card says where its models are: on this machine, on a paired host, both, or

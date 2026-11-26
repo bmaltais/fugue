@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
 // A template's details, a sheet over the Templates dialog's grid (docs/ui-ergonomics.md, 2026-11-24): a banner cropped
 // from its preview, the title and the whole description, where it comes from, the models it uses and whether
@@ -16,6 +17,7 @@ Rectangle {
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     signal open()
+    signal downloadOwn()
     signal cancel()
 
     color: look.popup
@@ -222,6 +224,15 @@ Rectangle {
             Layout.margins: 4 * sheet.u
             spacing: 2 * sheet.u
             Item { Layout.fillWidth: true }
+            // The template's own models, for anyone who wants them in place of their files (opens Get ready with Download chosen).
+            KitChip {
+                objectName: "templateDetailsDownload"
+                look: sheet.look
+                bordered: true
+                visible: sheet.template.opensWithFiles === true && sheet.template.ownDownloadSize !== ""
+                text: qsTr("Download %1…").arg(sheet.template.ownDownloadSize)
+                onTapped: sheet.downloadOwn()
+            }
             ThemedButton {
                 objectName: "templateDetailsCancel"
                 text: qsTr("Cancel")

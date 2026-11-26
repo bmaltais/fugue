@@ -95,7 +95,7 @@ private slots:
         QVERIFY(match->recommended);
         QVERIFY(!match->otherSource); // another quantization, not another source
         const OnDiskUse use{wanted("z_image_turbo_int8_convrot.safetensors"), *match};
-        QCOMPARE(use.offerText(), QStringLiteral("Use what you have: z_image_turbo_bf16.safetensors (same model, bf16)"));
+        QCOMPARE(use.sameModelText(), QStringLiteral("same model, bf16"));
         QVERIFY(use.cliHint("models.diffusion_model").contains("--use-on-disk"));
         QVERIFY(use.cliHint("models.diffusion_model").contains(match->path));
     }
@@ -108,7 +108,7 @@ private slots:
         QVERIFY(match);
         QVERIFY(match->otherSource);
         const OnDiskUse use{wanted("x"), *match};
-        QVERIFY(use.offerText().contains("from another source"));
+        QVERIFY(use.sameModelText().contains("from another source"));
     }
 
     // Another model of the family (the base, a different stem) is never offered, nor a file of another kind.

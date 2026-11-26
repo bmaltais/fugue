@@ -122,7 +122,7 @@ class TestAppAreaWindow : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
-    // #616: the Get ready row's "Use what you have" in the App view: the file is read, the app keeps it, the row leaves the sheet.
+    // #616: the sheet's yes with Use my file in the App view: the file is read, the app keeps it, the sheet closes by itself.
     void theGetReadyRowUsesAFileInTheAppViewAndLeavesThePlan() {
         QTemporaryDir models;
         QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
@@ -136,11 +136,14 @@ private slots:
         sheet->show();
         QCOMPARE(sheet->view().value("models").toList().size(), 1);
         const QString hash = sheet->view().value("models").toList().at(0).toMap().value("hash").toString();
-        sheet->useOnDisk(hash);
+        QCOMPARE(sheet->view().value("models").toList().at(0).toMap().value("choice").toString(), QString("disk"));
+        sheet->start();
         QVERIFY(app.workflows.hashingUses());
-        QTRY_VERIFY(!app.workflows.hashingUses());
+        QTRY_VERIFY(!sheet->isOpen()); // nothing else to get: it closes
+        QVERIFY(!app.workflows.hashingUses());
         QCOMPARE(rig.view.usesList().size(), 1); // the app's own state: its workflow is not written
         QVERIFY(sheet->view().value("models").toList().isEmpty());
+        QVERIFY(!app.workflows.downloads()->busy());
         qDeleteAll(app.engine.rootObjects());
     }
 

@@ -19,7 +19,9 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/document.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/settings.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "theme.h"
@@ -721,6 +723,80 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, on);
         QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(150, 450));
         QTRY_VERIFY(!tip->isVisible());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #616 (UI design 2026-11-26): a node whose model is not on disk but whose same weights are: the badge takes the keyboard (Enter keeps the
+    // card up with the focus on Use my file), Enter on the button reads the file and sets it in one undo step, and Escape closes the card.
+    void aWarningsCardPinnedFromTheKeysHasUseMyFileInFocus() {
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray bytes;
+        for (int i = 0; i < 8; ++i)
+            bytes.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        QDir().mkpath(models.filePath("diffusion_models"));
+        QFile weights(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"));
+        QVERIFY(weights.open(QIODevice::WriteOnly));
+        weights.write(bytes + header);
+        weights.close();
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'3');
+        const QJsonObject handle{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        const QJsonObject loader{{"type", "fugue/load-models"}, {"version", "1.2.0"}, {"inputs", QJsonObject{{"diffusion_model", handle}}}};
+        const QByteArray text = QJsonDocument(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", QJsonObject{{"models", loader}}}}}}).toJson();
+        App app(load(text));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.model.setRunState("models", {{"state", "cached"}, {"warnings", QStringList{"z_image_turbo_int8_convrot.safetensors is not in the model folders."}}});
+        QQuickItem *badge = nullptr;
+        QTRY_VERIFY((badge = item(app.window->contentItem(), "warningsBadge")) && badge->isVisible());
+        QQuickItem *tip = item(app.window->contentItem(), "warningsTip");
+        QVERIFY(tip);
+        const QString shots = qEnvironmentVariable("FUGUE_SHOT_DIR"); // FUGUE_SHOT_DIR=<dir>: pictures of the card
+        if (!shots.isEmpty()) {
+            QDir().mkpath(shots);
+            app.window->resize(900, 700);
+        }
+        QTest::qWait(300);
+        badge->forceActiveFocus();
+        QTRY_VERIFY(badge->hasActiveFocus());
+        const int steps = app.model.undoStack()->count();
+        QTest::keyClick(app.window, Qt::Key_Return); // Enter keeps the card up
+        QTRY_VERIFY(tip->isVisible());
+        QQuickItem *use = nullptr;
+        QTRY_VERIFY((use = item(tip, "useOnDisk-diffusion_model")) && use->isVisible());
+        QTRY_VERIFY(use->hasActiveFocus()); // the focus is on the first button
+        QCOMPARE(use->property("text").toString(), QString("Use my file"));
+        if (!shots.isEmpty()) {
+            QTest::qWait(500);
+            QVERIFY(test_support::grab(app.window).save(shots + "/node-card-use-my-file.png"));
+        }
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!tip->isVisible()); // Escape closes it and gives the focus back
+        QCOMPARE(app.model.undoStack()->count(), steps);
+        // Hovered, the card says there is a file and how to keep the card up; it has no button yet.
+        const QPoint on = badge->mapToScene(QPointF(badge->width() / 2, badge->height() / 2)).toPoint();
+        QTest::mouseMove(app.window, on);
+        QTRY_VERIFY(tip->isVisible());
+        QQuickItem *offers = nullptr;
+        QTRY_VERIFY((offers = item(tip, "warningsOffers")) != nullptr);
+        QVERIFY(!item(tip, "useOnDisk-diffusion_model")->isVisible());
+        if (!shots.isEmpty()) {
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(app.window).save(shots + "/node-card-hover.png"));
+        }
+        QTest::mouseMove(app.window, app.screen(150, 450));
+        QTRY_VERIFY(!tip->isVisible());
+        badge->forceActiveFocus();
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY((use = item(tip, "useOnDisk-diffusion_model")) && use->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_Return); // Enter presses it: the file is read, then set, one undo step
+        QTRY_VERIFY(!tip->isVisible());
+        QCOMPARE(app.model.undoStack()->count(), steps + 1);
+        QCOMPARE(app.model.document().graph.nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(),
+                 QString("z_image_turbo_bf16.safetensors"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

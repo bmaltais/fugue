@@ -30,11 +30,14 @@ Rectangle {
     // Why a row failed, in the error color.
     property string error
     signal toggled
-    // Use what you have (#605): the offer beside the download, "Use what you have: <file> (same model, <tier>)"; empty for none.
-    property string useText
-    // The chosen file is being read (its hash, once): the button says so and takes no second click.
-    property bool useBusy: false
-    signal useRequested
+    // Use what you have (#605, UI design 2026-11-26): a model with a file of the same weights on disk has two answers, "Use my file" and
+    // "Download <size>", as a segmented choice under the row. `choice` is "" (none), "disk" or "download"; `useLine` says which file
+    // ("You have <file> (same model, INT8)."); `choiceLocked` while the files are read. Nothing happens until the sheet's yes.
+    property string choice
+    property string useLine
+    property string downloadText
+    property bool choiceLocked: false
+    signal choiceMoved(bool useDisk)
 
     readonly property bool expandable: more !== ""
     readonly property real u: look.unit
@@ -53,9 +56,10 @@ Rectangle {
     Accessible.description: subtitle
     Accessible.checkable: expandable
     Accessible.checked: open
-    Keys.onReturnPressed: if (expandable) row.toggled()
-    Keys.onEnterPressed: if (expandable) row.toggled()
-    Keys.onSpacePressed: if (expandable) row.toggled()
+    // Only the row's own focus opens it: Enter on the choice inside goes up to the sheet's primary.
+    Keys.onReturnPressed: event => { if (expandable && row.activeFocus) row.toggled(); else event.accepted = false }
+    Keys.onEnterPressed: event => { if (expandable && row.activeFocus) row.toggled(); else event.accepted = false }
+    Keys.onSpacePressed: event => { if (expandable && row.activeFocus) row.toggled(); else event.accepted = false }
 
     KitSeparator {
         look: row.look
@@ -129,16 +133,33 @@ Rectangle {
             color: row.look.label
             font.pixelSize: row.look.labelSize
         }
-        // Choosing it takes the model out of what is to be downloaded.
-        ThemedButton {
-            objectName: "getReadyUse"
-            visible: row.useText !== "" && !row.running
+        // Which file the person has, and the choice (one tab stop; Left and Right choose; Enter goes to the sheet's primary).
+        Text {
+            objectName: "getReadyUseLine"
+            visible: row.choice !== ""
+            Layout.fillWidth: true
             Layout.leftMargin: 6 * row.u
-            Layout.maximumWidth: parent.width - 11 * row.u
-            text: row.useBusy ? qsTr("Reading your file...") : row.useText
-            enabled: !row.useBusy
-            Accessible.name: text
-            onClicked: row.useRequested()
+            Layout.rightMargin: 5 * row.u
+            text: row.useLine
+            textFormat: Text.PlainText
+            elide: Text.ElideMiddle
+            color: row.look.label
+            font.pixelSize: row.look.labelSize
+        }
+        KitSegmented {
+            id: choiceBox
+            objectName: "getReadyChoice-" + row.title
+            visible: row.choice !== "" && !row.running
+            Layout.leftMargin: 6 * row.u
+            Layout.topMargin: 0.5 * row.u
+            look: row.look
+            options: [qsTr("Use my file"), row.downloadText]
+            optionNames: ["getReadyChoiceUse-" + row.title, "getReadyChoiceDownload-" + row.title]
+            currentIndex: row.choice === "disk" ? 0 : 1
+            enabled: !row.choiceLocked
+            keepsEnter: false
+            text: qsTr("Use my file or download: %1").arg(row.title)
+            onMoved: index => row.choiceMoved(index === 0)
         }
         ProgressBar {
             visible: row.running

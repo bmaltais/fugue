@@ -877,6 +877,68 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // The Needs panel's Use my file (UI design 2026-11-26): a model with a file of the same weights on disk has Use my file after Download
+    // (never the primary), says which file, and reads its own file while it is read; the headline counts only the downloads; with every
+    // model covered the header chip is Use my file and uses them all at once (no sheet), with some covered it is Get ready…. With
+    // FUGUE_SHOT_DIR it draws the panel in both states.
+    void theNeedsPanelOffersUseMyFileAndTheHeaderChipFollows() {
+        App app(load(mediaWithModel()));
+        Rig rig(app);
+        NeedsModel *needs = rig.view.needs();
+        needs->setPlanSource([] { return ReadinessPlan(); });
+        QObject::disconnect(needs, nullptr, &app.workflows, nullptr);
+        QVERIFY(app.open());
+        const QString shots = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        const auto shoot = [&](const QString &name) {
+            if (shots.isEmpty())
+                return;
+            QDir().mkpath(shots);
+            app.window->resize(900, 700);
+            QTest::qWait(500);
+            QVERIFY(test_support::grab(app.window).save(shots + "/" + name + ".png"));
+        };
+        const QVariantMap mine{{"file", "qwen_3_8b_int8_convrot.safetensors"}, {"same", "same model, INT8"}};
+        QSignalSpy used(needs, &NeedsModel::useRequested);
+        QSignalSpy sheet(needs, &NeedsModel::getReadyRequested);
+        // Mixed: the first has a file of its own, the second has none.
+        needs->setUseSource([&](const QString &hash) { return hash == upscaleHash ? mine : QVariantMap(); });
+        needs->setPlan(needsPlan());
+        QQuickItem *panel = nullptr;
+        QTRY_VERIFY((panel = find(app.window, "appNeeds")));
+        QQuickItem *header = find(app.window, "appNeedsAll");
+        QCOMPARE(header->property("text").toString(), QString("Get ready…"));
+        QVERIFY(find(app.window, "appNeedsHeadline")->property("text").toString().contains("You have 1 on disk."));
+        QQuickItem *use = find(app.window, "appNeedUse-model:x.pth");
+        QVERIFY(use && use->property("toned").toBool() && !use->property("primary").toBool());
+        QCOMPARE(use->property("text").toString(), QString("Use my file"));
+        QVERIFY(!find(app.window, "appNeedUse-model:flux-2-klein-9b-Q4_K_M.gguf")); // no file of its own: only Download
+        QVERIFY(find(app.window, "appNeedGet-model:flux-2-klein-9b-Q4_K_M.gguf"));
+        shoot("needs-panel-mixed");
+        QTest::qWait(100); // the panel lays out once more after its first rows
+        tap(app.window, find(app.window, "appNeedsAll"));
+        QCOMPARE(used.size(), 0); // the sheet decides for a mix
+        QCOMPARE(sheet.size(), 1);
+        QCOMPARE(sheet.first().first().toBool(), false);
+        // Its own row reads the file, and the other rows stay pressable.
+        needs->setReading({{upscaleHash, 42}});
+        QTRY_COMPARE(find(app.window, "appNeedUse-model:x.pth")->property("text").toString(), QString("Reading your file… 42%"));
+        QVERIFY(!find(app.window, "appNeedUse-model:x.pth")->isEnabled());
+        QVERIFY(find(app.window, "appNeedGet-model:flux-2-klein-9b-Q4_K_M.gguf")->isEnabled());
+        shoot("needs-panel-reading");
+        needs->setReading({});
+        // Every model covered: the header chip uses the files at once.
+        needs->setUseSource([&](const QString &) { return mine; });
+        needs->setPlan(needsPlan());
+        QTRY_COMPARE(find(app.window, "appNeedsAll")->property("text").toString(), QString("Use my 2 files"));
+        QVERIFY(find(app.window, "appNeedsHeadline")->property("text").toString().contains("you have them on disk"));
+        shoot("needs-panel-all-covered");
+        tap(app.window, find(app.window, "appNeedsAll"));
+        QCOMPARE(used.size(), 1);
+        QCOMPARE(used.first().first().toStringList(), (QStringList{upscaleHash, otherHash}));
+        QCOMPARE(sheet.size(), 1); // no second sheet
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // The per-type controls are in the form and one key flips a switch (the values are test_app_view's).
     void everyKindOfInputHasItsControlAndASwitchTakesTheKeyboard() {
         App app(load(mediaApp));

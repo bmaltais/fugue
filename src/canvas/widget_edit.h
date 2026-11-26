@@ -53,6 +53,7 @@
 #include <QColor>
 #include <QHash>
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QObject>
 #include <QSet>
 #include <QString>
@@ -368,6 +369,9 @@ private:
     QList<Pick> m_picks;
     QSet<QString> m_hashing; // paths on the worker thread
     int m_hashRevision = 0;
+    QVariantList m_offers; // onDiskOffers()'s last answer, for the node and document it was asked for
+    QByteArray m_offersKey;
+    QElapsedTimer m_offersAge;
     fugue::ModelWorkers m_work; // the hash store and the hash and header threads (workflow/model_picker.h, #452)
     // Which listed files fit the node's diffusion model (#85), by node and input (fitsKey): by
     // path, read from the files' headers on m_work's header thread (not behind a long hash). `asked` is the

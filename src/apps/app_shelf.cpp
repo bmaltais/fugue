@@ -17,7 +17,9 @@ namespace {
 
 // What the sheet will ask for, in few words: "Needs 2.1 GB and 1 pack". The size says the models when it is known.
 QString needsText(const QVariantMap &templ) {
-    const int models = int(templ.value("missingModels").toList().size());
+    int models = 0; // the models a download would fetch: not those the person's own files stand in for
+    for (const QVariant &model : templ.value("missingModels").toList())
+        models += !model.toMap().value("covered").toBool();
     const int packs = int(templ.value("neededPacks").toStringList().size());
     const QString size = templ.value("downloadSize").toString();
     const QString modelPart = models == 0 ? QString() : !size.isEmpty() ? size : AppShelf::tr("%n models", nullptr, models);
