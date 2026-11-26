@@ -292,6 +292,20 @@ private slots:
         QCOMPARE(link(canvas, "sw.on_true").value("color").toString(), QString("text"));
     }
 
+    // #597 review: a wire edited in (not loaded) takes the Switch's resolved type too, and follows a side linked after it.
+    void aSwitchWireIsColoredByWhatFeedsTheSwitchWhenEdited() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(switchDoc));
+        QVERIFY(canvas.connectPorts("sw", "value", "save", "name"));
+        QCOMPARE(link(canvas, "save.name").value("color").toString(), QString("any"));
+        QVERIFY(canvas.connectPorts("a", "text", "sw", "on_true"));
+        QCOMPARE(link(canvas, "save.name").value("color").toString(), QString("text"));
+        // Linked in a second time, after the side is there: the same color as when the document is loaded.
+        QVERIFY(canvas.disconnectInput("save", "name"));
+        QVERIFY(canvas.connectPorts("sw", "value", "save", "name"));
+        QCOMPARE(link(canvas, "save.name").value("color").toString(), QString("text"));
+    }
+
     void aSwitchSideTakesOnlyTheOtherSidesType() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(switchDoc));

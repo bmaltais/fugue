@@ -245,6 +245,7 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     ++runs.epoch;
     // A new run starts without the last one's errors.
     runs.errors.clear();
+    runs.checkErrors.clear(); // and without the last check's: the next check lists what is still wrong
     for (auto it = runs.nodes.begin(); it != runs.nodes.end(); ++it) {
         if (!it->error.isEmpty() || it->state == QLatin1String("error")) {
             it->clearError(); // a check's error too: the run's own, if it fails, is not the check's to erase
@@ -544,6 +545,9 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             updateRunning();
         }
         emit finished(run, status);
+        // What a run did not reach (a run to a node, an early failure) was cleared at its start: the check lists it again, and keeps
+        // the run's own errors (it is not from an edit).
+        scheduleCheck(false);
         return;
     }
     if (path.isEmpty())

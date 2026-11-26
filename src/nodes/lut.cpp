@@ -101,7 +101,8 @@ Result<Lut> parseCube(const QString &text, bool headerOnly) {
             lut.size = size;
             haveSize = true;
             wanted = (is3d ? size_t(size) * size * size : size_t(size)) * 3;
-            lut.table.reserve(wanted);
+            if (!headerOnly)
+                lut.table.reserve(wanted);
             continue;
         }
         if (word == QLatin1String("DOMAIN_MIN") || word == QLatin1String("DOMAIN_MAX")) {

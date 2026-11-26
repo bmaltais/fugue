@@ -327,6 +327,19 @@ private slots:
         QCOMPARE(dynprompt::check("{a|__x__", m_options).first().severity, Error::Severity::Error);
     }
 
+    // #600 review: the strongest severity across a wildcard's occurrences stands, whichever comes first.
+    void checkKeepsTheStrongestSeverityOfARepeatedWildcard() {
+        const Errors inThenOut = dynprompt::check("{cat|__missing__} __missing__", m_options);
+        QCOMPARE(inThenOut.size(), 1);
+        QCOMPARE(inThenOut.first().severity, Error::Severity::Error);
+        const Errors outThenIn = dynprompt::check("__missing__ {cat|__missing__}", m_options);
+        QCOMPARE(outThenIn.size(), 1);
+        QCOMPARE(outThenIn.first().severity, Error::Severity::Error);
+        const Errors bothIn = dynprompt::check("{cat|__missing__} {dog|__missing__}", m_options);
+        QCOMPARE(bothIn.size(), 1);
+        QCOMPARE(bothIn.first().severity, Error::Severity::Warning);
+    }
+
     // ---- every combination
     void expandAllListsEveryCombination() {
         const Result<dynprompt::Expansion> r = dynprompt::expandAll("A {red|green|blue} {square|circle}", m_options, 100);
