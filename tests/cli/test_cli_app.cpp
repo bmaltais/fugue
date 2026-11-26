@@ -78,6 +78,8 @@ const char *kShadeStale = R"({"fugue": 1,
  "app": {"format": 1, "title": "Shade",
          "inputs": [{"role": "image", "targets": ["load.file"]},
                     {"name": "old", "targets": ["shade.gone"]},
+                    {"name": "opacity", "targets": ["shade.opacity"]},
+                    {"name": "mode", "targets": ["shade.mode"]},
                     {"role": "seed", "targets": ["sample.seed"]}],
          "outputs": [{"node": "save"}, {"node": "gone", "label": "Lost"}]},
  "graph": {"nodes": {
@@ -242,10 +244,19 @@ private slots:
         const Outcome info = fugue({"app", "info", "shade-stale.fugue", "--json"});
         QCOMPARE(info.exitCode, 0);
         QStringList keys;
-        for (const QJsonValue row : info.data().value("inputs").toArray())
+        QMap<QString, QJsonObject> rows;
+        for (const QJsonValue row : info.data().value("inputs").toArray()) {
             keys << row.toObject().value("key").toString();
-        QCOMPARE(keys, (QStringList{"image", "seed"})); // `old` is dropped, not listed
-        QCOMPARE(info.data().value("inputs").toArray().at(1).toObject().value("default").toObject(), (QJsonObject{{"auto", "random"}}));
+            rows.insert(keys.last(), row.toObject());
+        }
+        QCOMPARE(keys, (QStringList{"image", "opacity", "mode", "seed"})); // `old` is dropped, not listed
+        QCOMPARE(rows.value("seed").value("default").toObject(), (QJsonObject{{"auto", "random"}}));
+        // A group instance's exposed inputs take the inner inputs' type, range and choices, and the instance's own literal as the default.
+        QCOMPARE(rows.value("opacity").value("type").toString(), QString("number"));
+        QCOMPARE(rows.value("opacity").value("default").toDouble(), 0.25);
+        QCOMPARE(rows.value("opacity").value("max").toDouble(), 1.0);
+        QCOMPARE(rows.value("mode").value("type").toString(), QString("choice"));
+        QVERIFY(rows.value("mode").value("choices").toArray().contains("multiply"));
         QCOMPARE(info.data().value("outputs").toArray().size(), 1); // `gone` is dropped, not listed
         QStringList codes, said;
         for (const QJsonValue w : info.json().value("warnings").toArray()) {
