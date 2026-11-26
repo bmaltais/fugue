@@ -1,0 +1,31 @@
+{
+  "manifest": 1,
+  "id": "fugue/image-grid",
+  "version": "1.0.0",
+  "name": "Image Grid",
+  "description": "Lay many pictures out as one sheet, in the order they are linked, with optional labels under each picture, above the columns and left of the rows. Pictures of different sizes are fitted into the largest size (never cropped) and centered. At most 64 pictures; a sheet over 16384 pixels on a side is an error.",
+  "category": "Image/Adjust",
+  "keywords": ["grid", "contact sheet", "xy plot", "collage", "montage", "compare", "sheet"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "images", "type": "image", "label": "Images", "list": true, "min_items": 1, "max_items": 64,
+     "description": "The pictures, left to right and top to bottom in the order of their links."},
+    {"name": "columns", "type": "number", "label": "Columns", "default": 0, "min": 0, "max": 64, "step": 1, "integer": true,
+     "description": "0 picks about a square (the square root of the count, rounded up)."},
+    {"name": "labels", "type": "text", "label": "Labels", "default": "", "widget": "multiline",
+     "description": "One line per picture, in order, written under it. Empty: no labels."},
+    {"name": "column_labels", "type": "text", "label": "Column labels", "default": "", "widget": "multiline", "advanced": true,
+     "description": "One line per column, written above it."},
+    {"name": "row_labels", "type": "text", "label": "Row labels", "default": "", "widget": "multiline", "advanced": true,
+     "description": "One line per row, written left of it."},
+    {"name": "gap", "type": "number", "label": "Gap", "default": 8, "min": 0, "max": 1000, "step": 1, "integer": true,
+     "description": "Pixels between pictures and around the sheet."},
+    {"name": "background", "type": "text", "label": "Background", "default": "#1e1e1e", "widget": "color",
+     "description": "The sheet's color. The labels are light on a dark one and dark on a light one."},
+    {"name": "label_size", "type": "number", "label": "Label size", "default": 0, "min": 0, "max": 1000, "step": 1, "integer": true,
+     "advanced": true, "description": "The height of a label line in pixels. 0 is 3% of the picture height, at least 10."}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"}
+  ]
+}

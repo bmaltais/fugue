@@ -40,6 +40,7 @@
     "generate-song",
     "generate-video",
     "grow-mask",
+    "image-grid",
     "image-size",
     "image-to-mask",
     "inpaint-crop-stitch",
