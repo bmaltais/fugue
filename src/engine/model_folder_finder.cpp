@@ -93,6 +93,51 @@ QString toolOf(const QString &modelsDir, const std::function<bool(const QString 
     return QStringLiteral("Model folder");
 }
 
+// `path` with every link in it resolved by reading the link texts (readlink), component by component from the root: what a link
+// leads to is never stat'd, and each step is offered to `blocked` (and to `touch`, after it passed) before anything touches it.
+// Empty when a step is blocked or the links loop. Nothing here follows a link: each readlink is on a path with no link in it.
+QString resolveLinks(const QString &path, const std::function<bool(const QString &)> &blocked,
+                     const std::function<void(const QString &)> &touch) {
+    QStringList pending = QDir::cleanPath(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QString current;
+    int hops = 0;
+    while (!pending.isEmpty()) {
+        const QString part = pending.takeFirst();
+        if (part == QLatin1String("."))
+            continue;
+        if (part == QLatin1String("..")) {
+            current = current.left(std::max(0, int(current.lastIndexOf(QLatin1Char('/')))));
+            continue;
+        }
+        const QString next = current + QLatin1Char('/') + part;
+        if (blocked(next))
+            return {};
+        if (touch)
+            touch(next);
+        char buffer[4096];
+        const ssize_t n = ::readlink(QFile::encodeName(next).constData(), buffer, sizeof buffer);
+        if (n >= 0) {
+            if (++hops > kMaxLinkHops)
+                return {};
+            const QString target = QFile::decodeName(QByteArray(buffer, int(n)));
+            if (target.startsWith(QLatin1Char('/')))
+                current.clear();
+            pending = target.split(QLatin1Char('/'), Qt::SkipEmptyParts) + pending;
+            continue;
+        }
+        current = next;
+    }
+    return current.isEmpty() ? QStringLiteral("/") : current;
+}
+
+// A network or autofs mount, by the mount lists of `env`.
+bool inMount(const QString &path, const QStringList &mounts) {
+    for (const QString &mount : mounts)
+        if (under(path, mount))
+            return true;
+    return false;
+}
+
 struct Entry {
     QString name;
     bool isDir = false;
@@ -181,38 +226,10 @@ public:
         return best >= 0 && !bestTicked;
     }
 
-    // `path` with every link in it resolved by reading the link texts (readlink): what a link leads to is never stat'd, and every
-    // step is checked against blocked() before anything touches it. Empty when a step is blocked or the links loop.
+    // resolveLinks() with this finder's blocks: the network, and the places left off.
     QString resolve(const QString &path) const {
-        QStringList pending = QDir::cleanPath(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-        QString current;
-        int hops = 0;
-        while (!pending.isEmpty()) {
-            const QString part = pending.takeFirst();
-            if (part == QLatin1String("."))
-                continue;
-            if (part == QLatin1String("..")) {
-                current = current.left(std::max(0, int(current.lastIndexOf(QLatin1Char('/')))));
-                continue;
-            }
-            const QString next = current + QLatin1Char('/') + part;
-            if (blocked(next, true))
-                return {};
-            touch(next);
-            char buffer[4096];
-            const ssize_t n = ::readlink(QFile::encodeName(next).constData(), buffer, sizeof buffer);
-            if (n >= 0) {
-                if (++hops > kMaxLinkHops)
-                    return {};
-                const QString target = QFile::decodeName(QByteArray(buffer, int(n)));
-                if (target.startsWith(QLatin1Char('/')))
-                    current.clear();
-                pending = target.split(QLatin1Char('/'), Qt::SkipEmptyParts) + pending;
-                continue;
-            }
-            current = next;
-        }
-        return current.isEmpty() ? QStringLiteral("/") : current;
+        return resolveLinks(path, [this](const QString &next) { return blocked(next, true); },
+                            [this](const QString &next) { touch(next); });
     }
 
     bool lstatHas(const QString &path) const {
@@ -464,8 +481,12 @@ public:
         }
         const QString real = resolve(folder.path);
         folder.canonical = real;
-        if (real.isEmpty())
+        if (real.isEmpty()) {
+            // Not resolvable without going through a network or automount: listed, not looked into.
+            folder.network = true;
+            folder.tool = QStringLiteral("Model folder");
             return folder;
+        }
         QHash<QString, QString> typeDirs;
         QList<Entry> entries;
         if (list(real, m_env.countCapEntries, entries, nullptr, true))
@@ -715,19 +736,31 @@ QStringList networkMountsFrom(const QByteArray &mountinfo) {
 
 QStringList autofsMountsFrom(const QByteArray &mountinfo) { return mountsOf(mountinfo, {QStringLiteral("autofs")}); }
 
+QString finderResolve(const QString &path, const FinderEnv &env) {
+    return resolveLinks(path, [&env](const QString &next) { return inMount(next, env.networkMounts); }, env.touched);
+}
+
 QList<FinderLocation> finderLocations(const FinderEnv &env) {
     QList<FinderLocation> list;
     for (const FinderLocation &location : allLocations(env)) {
-        // An automount is not even listed: looking at what is inside it would mount it. Only lstat: a link is not followed.
-        bool autofs = false;
-        for (const QString &mount : env.autofsMounts)
-            if (under(location.path, mount))
-                autofs = true;
-        if (autofs)
+        // Built component by component from the root, each link read and checked first: a place that leads (even by a link in its
+        // parent) onto a network or automount is left out, and nothing past that link is stat'd. A network drive's exact install
+        // folder is still listed (by lstat of the place itself), an automount never is.
+        if (inMount(location.path, env.autofsMounts))
+            continue;
+        if (inMount(location.path, env.networkMounts)) {
+            if (env.touched)
+                env.touched(location.path);
+            if (lexists(location.path))
+                list.append(location);
+            continue;
+        }
+        const QString real = finderResolve(location.path, env);
+        if (real.isEmpty())
             continue;
         if (env.touched)
-            env.touched(location.path);
-        if (lexists(location.path))
+            env.touched(real);
+        if (lexists(real))
             list.append(location);
     }
     return list;

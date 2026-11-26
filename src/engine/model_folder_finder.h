@@ -96,7 +96,12 @@ struct FindResult {
     bool capped = false;        // a cap (3 s for finding, or the total for counting) stopped the search: folders may be missing
 };
 
-// The locations to offer, in order. Existing ones only (one stat each; nothing below them is listed).
+// `path` with its links resolved by reading them one component at a time, never stat'ing past a link that leads into a network or
+// autofs mount (empty then). The component-safe way to look at a path before the person has said yes.
+QString finderResolve(const QString &path, const FinderEnv &env);
+
+// The locations to offer, in order. Existing ones only (an lstat each, built component by component with finderResolve(), so a
+// place behind a link into a network or autofs mount is left out untouched; nothing below them is listed).
 QList<FinderLocation> finderLocations(const FinderEnv &env);
 
 // Looks in the ticked `locations` (those of finderLocations()). `found` is called for each folder as soon as it

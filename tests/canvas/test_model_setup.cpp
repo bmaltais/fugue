@@ -576,6 +576,30 @@ private slots:
         QCOMPARE(file.settings.modelFolderKinds.value(m_home + "/invokeai/models/sdxl/lora"), QStringLiteral("fugue/lora"));
     }
 
+    // A LoRA folder picked by hand with its LoRAs at the top and a `Lora/` or `LyCORIS/` subfolder is a folder of LoRAs, not ComfyUI's
+    // layout: its top-level LoRAs must not vanish.
+    void aPickedFolderOfLorasWithAnotherToolsSubfolderIsNotPinnedAsALayout() {
+        const QStringList lora{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", "diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight"};
+        const QString folder = path("home/my-loras");
+        touchFile(folder + "/top-one.safetensors", 0, safetensors(lora));
+        touchFile(folder + "/top-two.safetensors", 0, safetensors(lora));
+        QDir().mkpath(folder + "/Lora");
+        QDir().mkpath(folder + "/LyCORIS");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(true);
+        QCOMPARE(setup.addFolder(folder), QString());
+        QTRY_VERIFY(!rowOf(setup.rows(), "my-loras").value("busy").toBool());
+        QCOMPARE(rowOf(setup.rows(), "my-loras").value("kind").toString(), QStringLiteral("fugue/lora"));
+        QVERIFY(setup.primaryEnabled());
+        setup.apply();
+        const SettingsFile file = readSettings(settingsPath());
+        QCOMPARE(file.settings.modelFolderKinds.value(folder), QStringLiteral("fugue/lora")); // never "layout"
+        QCOMPARE(ModelLibrary::current(&m_registry).list(*PortType::parse("fugue/lora")).size(), 2);
+    }
+
     // A folder in use is listed first, on, and turning it off removes it at the yes.
     void aFolderInUseCanBeTurnedOff() {
         comfy(m_home + "/ComfyUI");

@@ -2209,7 +2209,6 @@
   "Your file is not used. Download is chosen for it now.": "Your file is not used. Download is chosen for it now.",
   "The files were read, but the tab changed, so they were not used. Choose again.": "The files were read, but the tab changed, so they were not used. Choose again.",
   "Reading your file… %1%": "Reading your file… %1%",
-  "Reading your files...": "Reading your files...",
   "Your model folders": "Your model folders",
   "Fugue can use the models you already have. Nothing is moved or copied.": "Fugue can use the models you already have. Nothing is moved or copied.",
   "Fugue can look for model folders you already have (ComfyUI, Forge, A1111, InvokeAI, SwarmUI, Stability Matrix) so templates use your models instead of downloading them again. It only reads folder names and file sizes; nothing is opened, changed or sent anywhere.": "Fugue can look for model folders you already have (ComfyUI, Forge, A1111, InvokeAI, SwarmUI, Stability Matrix) so templates use your models instead of downloading them again. It only reads folder names and file sizes; nothing is opened, changed or sent anywhere.",

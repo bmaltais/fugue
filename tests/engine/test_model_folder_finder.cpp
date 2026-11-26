@@ -223,7 +223,7 @@ private slots:
         touchFile(m_mnt + "/c/Users/me/Documents/ComfyUI/models/loras/b.safetensors", 100000);
         const QString hashes = m_home + "/.local/share/fugue/hashes.json";
         touchFile(hashes);
-        const QByteArray hashesBefore = [&] { QFile f(hashes); f.open(QIODevice::ReadOnly); return f.readAll(); }();
+        const QByteArray hashesBefore = [&] { QFile f(hashes); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }();
         const auto before = snapshot(m_dir.path());
         const FinderEnv e = env();
         const FindResult result = find(e, all(e));
@@ -502,6 +502,33 @@ private slots:
             QVERIFY2(!path.startsWith(m_home + "/secret"), qPrintable(path));
             QVERIFY2(path != m_home + "/python_embeded" && path != m_home + "/ComfyUI_windows_portable", qPrintable(path));
         }
+    }
+
+    // A link in the home into an autofs share is not stat'd past: finderLocations() builds each place component by component, reads
+    // each link and checks the target before it goes further. The place is left out, and the probe never sees the share.
+    void aPlaceBehindALinkIntoAnAutomountIsNotListedNorTouched() {
+        const QByteArray info = "50 29 0:40 / " + m_mnt.toUtf8() + "/nas rw,relatime shared:1 - autofs systemd-1 rw,fd=30\n";
+        FinderEnv e = env();
+        e.networkMounts = networkMountsFrom(info);
+        e.autofsMounts = autofsMountsFrom(info);
+        QDir().mkpath(m_mnt + "/nas");
+        QVERIFY(QFile::link(m_mnt + "/nas/ComfyUI", m_home + "/ComfyUI")); // an absolute link into the share
+        QDir().mkpath(m_home + "/stable-diffusion-webui-real");
+        QDir().mkpath(m_home + "/Swarm-real");
+        QVERIFY(QFile::link("../mnt/nas/SwarmUI", m_home + "/SwarmUI")); // a relative one
+        QDir().mkpath(m_home + "/invokeai"); // an ordinary place is still listed
+        QDir().mkpath(m_home + "/invokeai/models");
+        m_touched.clear();
+        QStringList listed;
+        for (const FinderLocation &location : finderLocations(e))
+            listed << location.display;
+        QVERIFY2(!listed.contains("~/ComfyUI/models") && !listed.contains("~/SwarmUI/Models"), qPrintable(listed.join(",")));
+        QVERIFY(listed.contains("~/invokeai/models"));
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(m_mnt + "/nas"), qPrintable("touched " + path));
+        // finderResolve says the same for any path the window looks at before Search.
+        QVERIFY(finderResolve(m_home + "/ComfyUI/models", e).isEmpty());
+        QCOMPARE(finderResolve(m_home + "/invokeai/models", e), m_home + "/invokeai/models");
     }
 
     void aWindowsDrivesInstallIsFoundFiveLevelsDown() {

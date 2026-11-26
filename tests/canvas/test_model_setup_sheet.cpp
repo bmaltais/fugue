@@ -174,7 +174,7 @@ private slots:
         QTRY_VERIFY(!setup.isOpen());
         QCOMPARE(fugue::readSettings(app.settings.path()).settings.modelPaths.size(), 2);
         // Escape on a rerun skips and writes nothing more.
-        const QByteArray before = [&] { QFile f(app.settings.path()); f.open(QIODevice::ReadOnly); return f.readAll(); }();
+        const QByteArray before = [&] { QFile f(app.settings.path()); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }();
         setup.show(false);
         QTRY_VERIFY(popup->property("visible").toBool());
         QTest::keyClick(app.window, Qt::Key_Escape);
@@ -188,9 +188,9 @@ private slots:
     // list and in a long list of results.
     void theFocusedSwitchScrollsIntoView() {
         // Every usual install folder exists: a long consent list.
-        for (const QString &name : {"ComfyUI/models", "ComfyUI-Shared", "ComfyUI-Installs", "StabilityMatrix/Data/Models", "StabilityMatrix/Models",
+        for (const char *name : {"ComfyUI/models", "ComfyUI-Shared", "ComfyUI-Installs", "StabilityMatrix/Data/Models", "StabilityMatrix/Models",
                                     "stable-diffusion-webui/models", "stable-diffusion-webui-forge/models", "SwarmUI/Models", "invokeai/models"})
-            QDir().mkpath(QDir::homePath() + "/" + name);
+            QDir().mkpath(QDir::homePath() + "/" + QString::fromLatin1(name));
         App app(load(emptyDoc));
         fugue::ModelSetup &setup = *app.settings.modelSetup();
         setup.setEnv(env());
@@ -246,7 +246,7 @@ private slots:
             QSKIP("set FUGUE_SHOT_DIR to take the pictures");
         QDir().mkpath(shotDir());
         for (const int width : {1000, 528}) {
-            for (const QString &which : {"consent", "found", "nothing", "slow"}) {
+            for (const QString which : {"consent", "found", "nothing", "slow"}) {
                 init();
                 if (which != "nothing") {
                     comfy(QDir::homePath() + "/ComfyUI");

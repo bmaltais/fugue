@@ -35,8 +35,12 @@ QString tilde(const QString &path) {
 }
 
 // Free bytes where a folder is, or would be made: the nearest existing parent's disk. -1 when unknown.
-qint64 freeBytesAt(const QString &path) {
-    QString dir = path;
+qint64 freeBytesAt(const QString &path, const FinderEnv &env) {
+    // Never a network or automount (a statfs there can mount it or hang the window), nor a path that leads into one by a link.
+    const QString safe = finderResolve(path, env);
+    if (safe.isEmpty())
+        return -1;
+    QString dir = safe;
     while (!dir.isEmpty() && !QFileInfo(dir).isDir()) {
         const QString parent = QFileInfo(dir).absolutePath();
         if (parent == dir)
@@ -139,7 +143,8 @@ bool ModelSetup::shouldOffer() const {
         return false;
     if (!currentSettings().modelPaths.isEmpty())
         return false;
-    return !hasModelFile(dataDir() + QStringLiteral("/models"));
+    const QString own = finderResolve(dataDir() + QStringLiteral("/models"), env()); // empty: it leads into a network mount: not looked at
+    return own.isEmpty() || !hasModelFile(own);
 }
 
 bool ModelSetup::maybeOffer() {
@@ -322,14 +327,15 @@ void ModelSetup::found(int generation, const FoundFolder &folder) {
                 if (row.kind.isEmpty() && folder.layout)
                     row.kind = ModelLibrary::kLayout;
             } else {
-                row.kind = folder.layout ? ModelLibrary::kLayout : QString();
-                if (!folder.layout && types()) {
-                    // A folder of one kind: told by a few of its files' headers (a pick, so one folder).
+                // What a picked folder holds is ModelLibrary::kindOf()'s decision (a layout only when it is one: the other tools' folder
+                // names count for two kinds, or in a folder with no model file of its own), never a guess from one subfolder: a
+                // folder of LoRAs with a `Lora/` inside stays a folder of LoRAs. A network drive is not looked into: the person says.
+                row.kind.clear();
+                if (types() && !folder.network) {
                     const ModelLibrary library({ownRoot(), row.path}, types(), {});
                     row.kind = library.kindOf(row.path);
-                    if (row.kind == ModelLibrary::kLayout)
-                        row.found.layout = true;
                 }
+                row.found.layout = row.kind == ModelLibrary::kLayout;
                 // The same folder by another path: the second is dropped.
                 for (const Row &other : std::as_const(m_rows))
                     if (&other != &row && !other.busy && !folder.canonical.isEmpty() && other.found.canonical == folder.canonical) {
@@ -363,7 +369,14 @@ QString ModelSetup::addFolder(const QVariant &value) {
     if (path.startsWith(QLatin1String("file:")))
         path = QUrl(path).toLocalFile();
     path = QDir::cleanPath(expandHome(path.trimmed()));
-    if (path.isEmpty() || !QFileInfo(path).isDir()) // the person's own pick, one stat
+    // The person's own pick, one stat, component by component: a network or automount (or a link into one) is taken as a folder
+    // without a stat, and is listed, not counted.
+    const FinderEnv now = env();
+    bool network = false;
+    for (const QString &mount : now.networkMounts)
+        network = network || path == mount || path.startsWith(mount + QLatin1Char('/'));
+    const QString real = network ? path : finderResolve(path, now); // empty: a link leads into a network or automount
+    if (path.isEmpty() || (!network && !real.isEmpty() && !QFileInfo(real).isDir()))
         return tr("%1 is not a folder.").arg(tilde(path));
     for (const Row &row : std::as_const(m_rows))
         if (row.path == path)
@@ -531,7 +544,7 @@ bool ModelSetup::slowToWriteTo(const Row &row) const {
 QVariantList ModelSetup::choices() const {
     QVariantList list;
     auto entry = [this](const QString &path, const QString &title) {
-        const qint64 free = m_free ? m_free(path) : freeBytesAt(path);
+        const qint64 free = m_free ? m_free(path) : freeBytesAt(path, m_envNow);
         const QString freeText = free >= 0 ? QCoreApplication::translate("fugue::ModelSetup", "%1 free").arg(sizeText(free)) : QString();
         return QVariantMap{{"value", path},
                            {"title", title},
