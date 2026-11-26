@@ -89,6 +89,10 @@ public:
     Q_INVOKABLE void refresh();
     // Where a project of this name goes when no folder is chosen, ~ for the home folder.
     Q_INVOKABLE QString defaultLocation(const QString &name) const;
+    // The folder a new project of this name gets inside `parentFolder` (a path or a folder picker's URL; empty:
+    // the default place): <parent>/<slug>, with -2, -3 added while that exists. Nothing is made; create() makes
+    // it, with its parents. ~ for the home folder.
+    Q_INVOKABLE QString projectPath(const QString &name, const QVariant &parentFolder) const;
     // Makes and registers a project. `folder` is its root (a path or a folder picker's URL), empty for the
     // default place; `inherits` the words it takes from the Default. {error, root}: error is empty when done.
     Q_INVOKABLE QVariantMap create(const QString &name, const QVariant &folder, const QStringList &inherits);
