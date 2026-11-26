@@ -2,6 +2,8 @@
 
 Node-based workflows for local AI on Omarchy, in C++ and Qt Quick.
 
+*Made by AI for humans.* Over 99% of the code is written by AI agents (Claude). I design it, decide, review and test it.
+
 Wire steps together (a prompt, an image, an edit, a clip, a song) and run the graph on the
 models [omarchy-local-ai](https://github.com/omacom/omarchy-local-ai) serves, on this machine
 or on a paired host. Add your own nodes as a folder with a `node.json` and a program, in any
