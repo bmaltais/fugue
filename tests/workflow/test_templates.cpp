@@ -5,6 +5,7 @@
 // node types; Workflows::openTemplate for the window.
 
 #include <QDir>
+#include <memory>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -193,6 +194,49 @@ void forgetDownloads() {
     QFile::remove(FileHashes::defaultPath());
     QFile::remove(settingsPath());
 }
+
+// A window's workflows with the person's Z-Image file on disk and workflow files whose model it covers (the "Use my file" tests).
+struct UseRig {
+    Fixture f;
+    QTemporaryDir models, work, state;
+    QString hash = "sha256:" + QString(64, u'5');
+    WorkflowLocations locations;
+    CanvasModel canvas;
+    CommandRegistry commands;
+    std::unique_ptr<Workflows> workflows;
+    UseRig() : canvas(&f.registry) {
+        forgetDownloads();
+        changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()});
+        changeSetting(settingsPath(), "use_on_disk", "use");
+        writeZImageFile(models);
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        workflows = std::make_unique<Workflows>(&canvas, &f.registry, &commands, locations);
+    }
+    // A workflow file whose model has the person's file; `missing` adds a model nobody has (Get ready has something to ask for).
+    QString write(const QString &name, bool missing = false) {
+        const QJsonObject x{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        const QJsonObject w{{"resource", "fugue/vae"}, {"hash", "sha256:" + QString(64, u'6')}, {"name", "flux2-vae.safetensors"}};
+        QJsonObject xr = x, wr = w;
+        xr.insert("source", "http://127.0.0.1:9/x");
+        wr.insert("source", "http://127.0.0.1:9/w");
+        QJsonObject inputs{{"diffusion_model", x}};
+        QJsonArray recorded{xr};
+        if (missing) {
+            inputs.insert("vae", w);
+            recorded.append(wr);
+        }
+        writeJson(work.filePath(name), workflow({{"models", node("fugue/load-models", inputs)}}, {{"models", recorded}}));
+        return work.filePath(name);
+    }
+    QString plain(const QString &name) {
+        writeJson(work.filePath(name), workflow({{"n", node("fugue/load-models", {})}}));
+        return work.filePath(name);
+    }
+    QJsonObject handle() const { return canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle(); }
+    bool swapped() const { return handle().value("hash").toString() != hash; }
+};
 
 } // namespace
 
@@ -1832,6 +1876,106 @@ private slots:
         QVERIFY(changeSetting(settingsPath(), "use_on_disk", "use").isEmpty());
         workflows.refreshNodeTypes();
         QTRY_VERIFY(handle().value("hash").toString() != hash);
+    }
+
+    // #633 (1): a Get ready the person opened during an automatic read keeps their choice: closing it swaps nothing.
+    void aGetReadyChoiceDuringTheAutomaticReadIsNotOverriddenWhenTheSheetCloses() {
+        UseRig rig;
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue", true)));
+        QVERIFY(rig.workflows->hashingUses());
+        ReadinessSheet *sheet = rig.workflows->readiness();
+        sheet->show(); // opened from Needs while the file is read
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QVERIFY(sheet->isOpen());
+        sheet->chooseAll(false); // Download
+        sheet->cancel();         // closed
+        emit sheet->finished(false); // and what it was doing ends: the window looks at the tab again
+        QTest::qWait(300);
+        QVERIFY(!rig.workflows->hashingUses());
+        QVERIFY(!rig.swapped());
+    }
+
+    // #633 (2): the sheet opens by itself only for a tab just opened: a tab switch and a setting change swap quietly.
+    void getReadyDoesNotOpenAfterABackgroundSwap() {
+        UseRig rig;
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue", true))); // the opened tab: the sheet may come
+        QTRY_VERIFY(rig.workflows->readiness()->isOpen());
+        QVERIFY(rig.swapped());
+        rig.workflows->readiness()->cancel();
+        // The setting: Ask me, then Use my file.
+        QVERIFY(changeSetting(settingsPath(), "use_on_disk", "ask").isEmpty());
+        QVERIFY(rig.workflows->openPath(rig.write("c.fugue", true)));
+        QTRY_VERIFY(rig.workflows->readiness()->isOpen());
+        QVERIFY(!rig.swapped());
+        rig.workflows->readiness()->cancel();
+        QVERIFY(changeSetting(settingsPath(), "use_on_disk", "use").isEmpty());
+        rig.workflows->refreshNodeTypes();
+        QTRY_VERIFY(rig.swapped());
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QTest::qWait(200);
+        QVERIFY(!rig.workflows->readiness()->isOpen());
+    }
+
+    // #633 (2), the switch: a tab whose read was dropped for not being shown swaps on the switch back without opening the sheet.
+    void aTabSwitchSwapsWithoutOpeningGetReady() {
+        UseRig rig;
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue", true)));
+        const int a = rig.workflows->current();
+        QVERIFY(rig.workflows->openPath(rig.plain("b.fugue"))); // a's read ends with b shown
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QVERIFY(!rig.workflows->readiness()->isOpen());
+        rig.workflows->setCurrent(a);
+        QTRY_VERIFY(rig.swapped());
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QTest::qWait(200);
+        QVERIFY(!rig.workflows->readiness()->isOpen());
+    }
+
+    // #633 (3): the "Reading your file" line belongs to the tab shown.
+    void theReadingBannerShowsOnlyForTheTabShown() {
+        UseRig rig;
+        QStringList notices;
+        connect(rig.workflows.get(), &Workflows::noticeChanged, this, [&] { notices << rig.workflows->notice(); });
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
+        QVERIFY(rig.workflows->openPath(rig.plain("b.fugue"))); // a is read while b is shown
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        for (const QString &notice : std::as_const(notices))
+            QVERIFY2(!notice.contains("Reading your file"), qPrintable(notice));
+    }
+
+    // #633 (4): the App view's swap does not mark the graph's: both views take the file.
+    void anAppViewSwapDoesNotBlockTheGraphsSwap() {
+        UseRig rig;
+        bool inApp = true;
+        int taken = 0;
+        rig.workflows->setAppShown([&inApp](const QString &) { return inApp; });
+        rig.workflows->setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
+            ++taken;
+            return true;
+        });
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
+        QTRY_COMPARE(taken, 1);
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QVERIFY(!rig.swapped());
+        rig.workflows->readiness()->cancel(); // (the fake taker keeps nothing: the model is still missing, so Get ready asked)
+        inApp = false;
+        rig.workflows->refreshNodeTypes();
+        QTRY_VERIFY(rig.swapped());
+    }
+
+    // #633 (5): A, B, A, B during one read: the idle mark from the second visit to A does not hide the file when A is shown again.
+    void aStaleIdleMarkDoesNotSkipTheCheckAfterADroppedRead() {
+        UseRig rig;
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
+        const int a = rig.workflows->current();
+        QVERIFY(rig.workflows->openPath(rig.plain("b.fugue")));
+        const int b = rig.workflows->current();
+        rig.workflows->setCurrent(a); // asked already: found idle
+        rig.workflows->setCurrent(b); // the read ends with b shown: dropped
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QVERIFY(!rig.swapped() || rig.workflows->current() == b);
+        rig.workflows->setCurrent(a);
+        QTRY_VERIFY(rig.swapped());
     }
 
     // Cancelling the sheet while its files are read takes only the sheet's ask away: another surface's read of the same file goes on and applies.

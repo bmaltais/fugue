@@ -441,10 +441,11 @@ private:
     bool autoUseOn() const;
     // Uses the files for the shown tab's missing models that have one, once per tab and model (a file that could not be read is not
     // asked again, nor one the person took back with Undo). True when a read was started: the Get ready sheet waits for its result.
-    bool autoUse(bool cheap = false);
+    bool autoUse(bool cheap = false, bool offer = false);
+    static QString autoKey(const QString &tab, bool inApp, const QString &hash);
     // An automatic read for the shown tab is going on: the Get ready sheet waits for it.
     bool autoPending() const;
-    void startUses(const QStringList &hashes, int token, bool automatic);
+    void startUses(const QStringList &hashes, int token, bool automatic, bool offer = false);
     // The notice naming each file used in place of a model, with Undo for the graph's document (`before` is the document as it was).
     void announceUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, const Document &before);
     bool openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened);
@@ -547,6 +548,7 @@ private:
         bool inApp = false; // the App view's state (true) or the graph's document (false)
         QList<OnDiskUse> chosen;
         bool automatic = false; // the setting's "Use my file" asked, not a person: the result is announced, with Undo (#618)
+        bool offer = false;     // an automatic read started by opening a tab: its end may open Get ready (offerReadiness)
     };
     struct UseJob {
         QStringList wanted;
@@ -567,7 +569,7 @@ private:
     };
     OpenedWith m_openedWith;
     QHash<QString, QByteArray> m_autoIdle; // tab -> its models when autoUse() found nothing to do
-    QSet<QString> m_autoTried; // "<tab> <hash>" of every model autoUse() asked for
+    QSet<QString> m_autoTried; // "<tab> <a|g> <hash>" (the App view or the graph) of every model autoUse() asked for
     bool m_opening = false;    // a template is opening with its files: autoUse() leaves it alone
     QList<std::function<void()>> m_afterSheet;
     ReadinessSheet *m_readiness;
