@@ -74,6 +74,7 @@ struct FinderLocation {
     QString display;  // with ~ for the home
     int depth = 0;    // how deep the walk goes (0: an exact folder)
     QString resolved; // the place with its links resolved (finderLocations() fills it): scopes are kept as written and as resolved
+    QString resolvedScope; // its scope with links resolved
     QString scope;    // what the place covers: the folder itself, or an install folder's parent (its siblings name the tool)
 };
 
@@ -90,6 +91,8 @@ struct FoundFolder {
     bool network = false;    // on a network drive: listed, not counted
     bool layout = true;      // in ComfyUI's layout; false for InvokeAI (sorts its own way)
     QString kind;            // what it holds as ModelLibrary::detectKind() says (kLayout, a type id, or empty): decided on the worker
+    bool toldReady = false;                   // `told` was asked for (the row was ticked) and is filled
+    bool leftOff = false;                     // it is in a place left off (or behind a link into one): listed, not looked into
     QList<std::pair<QString, QString>> told; // InvokeAI: the folders under it that hold one kind, {path, type id}
     int leftOut = 0;                          // InvokeAI: folders with models whose kind could not be told
     bool writable = true;    // Fugue can write in it (access(), asked on the worker; a network drive is not asked)
@@ -108,6 +111,10 @@ QString finderResolve(const QString &path, const FinderEnv &env);
 // The locations to offer, in order. Existing ones only (an lstat each, built component by component with finderResolve(), so a
 // place behind a link into a network or autofs mount is left out untouched; nothing below them is listed).
 QList<FinderLocation> finderLocations(const FinderEnv &env);
+// Only the candidates given (from finderPlaces(), narrowed without any I/O): nothing else is read or stat'd.
+QList<FinderLocation> finderLocations(const FinderEnv &env, const QList<FinderLocation> &candidates);
+// Every place that could be offered, with no I/O at all.
+QList<FinderLocation> finderPlaces(const FinderEnv &env);
 
 // Looks in the ticked `locations` (those of finderLocations()). `found` is called for each folder as soon as it
 // is counted. Reads no file. Fugue's own models folder and any folder in `skip` (canonical or plain paths) are left out.
@@ -121,7 +128,13 @@ FindResult findModelFolders(const Registry &registry, const QList<FinderLocation
                             const QList<FinderLocation> &offered = {});
 
 // A folder the person chose, counted the same way (a layout folder by its type folders, any other by all its model files).
-FoundFolder describeModelFolder(const FinderTypes &types, const QString &path, const FinderEnv &env);
+// `readHeaders`: a folder the person chose is told by a few headers; one in use only by its folder names (searching opens no model
+// file). `ticked` and `offered` are the places as the search has them: a folder inside one left off is listed, not looked into.
+FoundFolder describeModelFolder(const FinderTypes &types, const QString &path, const FinderEnv &env, bool readHeaders = true,
+                                const QList<FinderLocation> &ticked = {}, const QList<FinderLocation> &offered = {});
+// The folders under an InvokeAI folder told by a few headers each: the job of a row the person ticked, never run while searching.
+FoundFolder tellInvokeFolders(const FinderTypes &types, const QString &path, const FinderEnv &env, const QList<FinderLocation> &ticked = {},
+                              const QList<FinderLocation> &offered = {});
 FoundFolder describeModelFolder(const Registry &registry, const QString &path, const FinderEnv &env);
 
 // The tool of a models folder, from what stands beside it; "Model folder" for none. Reads the parent's listing.

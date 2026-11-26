@@ -374,7 +374,6 @@ private slots:
         declare(registry, "fugue/vae", {".safetensors"}, {"vae", "VAE"});
         QDir().mkpath(a1111.filePath("Lora"));
         QDir().mkpath(a1111.filePath("VAE"));
-        writeFile(a1111.filePath("stray.safetensors"));
         QDir().mkpath(onlyLora.filePath("Lora"));
         QDir().mkpath(comfy.filePath("loras"));
         QDir().mkpath(comfy.filePath("vae"));
@@ -418,6 +417,30 @@ private slots:
         QCOMPARE(library.list(type("fugue/lora")).size(), 2);
         QVERIFY(library.kindOf(checkpoints.path()) != ModelLibrary::kLayout);
         QCOMPARE(library.kindOf(a1111.path()), ModelLibrary::kLayout); // an A1111 root
+    }
+
+    // A folder of one kind with model files at its top keeps that kind even with a `VAE/` and a `Lora/` inside (two kinds of the other
+    // tools' names, but the top-level files say what it is).
+    void aFolderWithItsOwnFilesAndTwoOtherToolsSubfoldersKeepsItsKind() {
+        QTemporaryDir own, loras;
+        Registry registry;
+        const auto withFiles = [&](const char *id, const QString &files, const QStringList &folders) {
+            DeclaredPortType declared;
+            declared.type = type(QString::fromLatin1(id));
+            declared.kind = PortKind::Resource;
+            declared.name = QStringLiteral("A model");
+            declared.extensions = {".safetensors"};
+            declared.folders = folders;
+            declared.files = files;
+            QVERIFY(registry.add(declared).isEmpty());
+        };
+        withFiles("fugue/lora", "lora", {"lora", "loras", "Lora"});
+        withFiles("fugue/vae", "vae", {"vae", "VAE"});
+        writeFile(loras.filePath("top.safetensors"), safetensors(kLora));
+        QDir().mkpath(loras.filePath("VAE"));
+        QDir().mkpath(loras.filePath("Lora"));
+        const ModelLibrary library({own.path(), loras.path()}, &registry);
+        QCOMPARE(library.kindOf(loras.path()), QStringLiteral("fugue/lora"));
     }
 
     void aKindSetInTheSettingsWinsOverTheFiles() {

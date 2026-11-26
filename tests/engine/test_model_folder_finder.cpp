@@ -17,6 +17,7 @@
 
 #include "engine/model_folder_finder.h"
 #include "engine/model_library.h"
+#include "engine/model_shape.h"
 #include "engine/registry.h"
 
 using namespace fugue;
@@ -31,6 +32,23 @@ void touchFile(const QString &path, qint64 size = 4) {
     if (size > 3)
         file.resize(size); // sparse
 }
+
+
+// A safetensors file whose header names these tensors: what a header read would vote on.
+void writeSafetensors(const QString &path, const QStringList &tensors) {
+    QJsonObject header;
+    for (const QString &name : tensors)
+        header.insert(name, QJsonObject{{"dtype", "F16"}, {"shape", QJsonArray{4, 4}}, {"data_offsets", QJsonArray{0, 0}}});
+    const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+    QByteArray out;
+    for (int i = 0; i < 8; ++i)
+        out.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(out + json);
+}
+const QStringList kLoraTensors{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", "diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight"};
 
 // path -> (mtime, size) of every file below `root`.
 std::map<QString, std::pair<qint64, qint64>> snapshot(const QString &root) {
@@ -100,6 +118,7 @@ private slots:
             declared.type = *PortType::parse(object.value("id").toString());
             declared.kind = PortKind::Resource;
             declared.name = object.value("name").toString();
+            declared.files = object.value("files").toString();
             for (const QJsonValue &folder : object.value("folders").toArray())
                 declared.folders << folder.toString();
             for (const QJsonValue &ext : object.value("extensions").toArray())
@@ -598,6 +617,82 @@ private slots:
         e.networkMounts = {m_mnt + "/idle"};
         const FindResult result = find(e, all(e));
         QCOMPARE(result.folders.size(), 1);
+    }
+
+    // Searching opens no model file: an InvokeAI row is off by default and its folders are told (a few headers each) only in a job of
+    // its own, started when it is ticked.
+    void searchingOpensNoHeaderAndTheTickedInvokeAiRowIsToldByItsOwnJob() {
+        touchFile(m_home + "/invokeai/invokeai.yaml");
+        writeSafetensors(m_home + "/invokeai/models/sdxl/lora/one.safetensors", kLoraTensors);
+        const FinderEnv e = env();
+        const FindResult result = find(e, all(e));
+        QCOMPARE(result.folders.size(), 1);
+        QVERIFY(result.folders.first().told.isEmpty() && !result.folders.first().toldReady);
+        std::optional<ModelShape> shape;
+        QVERIFY2(!ModelShapes::shared().known(m_home + "/invokeai/models/sdxl/lora/one.safetensors", &shape), "a header was read while searching");
+        // Ticked: the job reads them.
+        const FoundFolder told = tellInvokeFolders(FinderTypes::from(m_registry), result.folders.first().path, e, all(e), all(e));
+        QVERIFY(told.toldReady);
+        QCOMPARE(told.told.size(), 1);
+        QCOMPARE(told.told.first().second, QStringLiteral("fugue/lora"));
+    }
+
+    // Under a ticked InvokeAI row, a link into a place left off is never followed: not listed, not opened.
+    void aLinkUnderInvokeAiIntoAPlaceLeftOffIsNeverFollowed() {
+        touchFile(m_home + "/invokeai/invokeai.yaml");
+        writeSafetensors(m_mnt + "/windows/loras/far.safetensors", kLoraTensors);
+        QDir().mkpath(m_home + "/invokeai/models/sdxl");
+        QVERIFY(QFile::link(m_mnt + "/windows/loras", m_home + "/invokeai/models/sdxl/lora"));
+        const FinderEnv e = env();
+        FinderEnv quiet = e;
+        quiet.touched = nullptr;
+        const QList<FinderLocation> offered = finderLocations(quiet);
+        QList<FinderLocation> ticked;
+        for (const FinderLocation &l : offered)
+            if (l.id != "drive:" + m_mnt)
+                ticked << l;
+        m_touched.clear();
+        const FoundFolder told = tellInvokeFolders(FinderTypes::from(m_registry), m_home + "/invokeai/models", e, ticked, offered);
+        QVERIFY(told.told.isEmpty());
+        std::optional<ModelShape> shape;
+        QVERIFY(!ModelShapes::shared().known(m_mnt + "/windows/loras/far.safetensors", &shape));
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(m_mnt + "/"), qPrintable("touched " + path));
+    }
+
+    // A folder in use inside a place left off is described without a stat: listed, "not counted".
+    void aFolderInUseInAPlaceLeftOffIsNotLookedInto() {
+        touchFile(m_mnt + "/d/models/checkpoints/a.safetensors");
+        const FinderEnv e = env();
+        FinderEnv quiet = e;
+        quiet.touched = nullptr;
+        const QList<FinderLocation> offered = finderLocations(quiet);
+        QList<FinderLocation> ticked;
+        for (const FinderLocation &l : offered)
+            if (l.id != "drive:" + m_mnt)
+                ticked << l;
+        m_touched.clear();
+        const FoundFolder folder = describeModelFolder(FinderTypes::from(m_registry), m_mnt + "/d/models", e, false, ticked, offered);
+        QVERIFY(folder.leftOff);
+        QCOMPARE(folder.models, 0);
+        QVERIFY(m_touched.isEmpty());
+    }
+
+    // --only narrows the table without any I/O: only the places chosen are looked at.
+    void onlyTheChosenPlacesAreLookedAt() {
+        comfy(m_home + "/ComfyUI");
+        const FinderEnv e = env();
+        const QList<FinderLocation> table = finderPlaces(e);
+        QVERIFY(m_touched.isEmpty()); // building the table touched nothing
+        QList<FinderLocation> chosen;
+        for (const FinderLocation &l : table)
+            if (l.id == "home")
+                chosen << l;
+        m_touched.clear();
+        const QList<FinderLocation> places = finderLocations(e, chosen);
+        QCOMPARE(places.size(), 1);
+        for (const QString &path : std::as_const(m_touched))
+            QVERIFY2(!path.startsWith(m_mnt) && !path.contains("ComfyUI"), qPrintable("touched " + path));
     }
 
     void aWindowsDrivesInstallIsFoundFiveLevelsDown() {

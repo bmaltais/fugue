@@ -65,7 +65,9 @@ public:
         QList<FinderLocation> locations;      // the ticked places
         QList<FinderLocation> offered;        // every place shown: the ones not ticked are never touched
         QStringList skip;                     // folders already listed
-        QStringList describe;                 // folders to count first (in use, or just picked)
+        QStringList describe;                 // folders in use, counted by their names where the places allow
+        QStringList pick;                     // folders the person picked: counted and told by a few headers
+        QStringList tell;                     // ticked InvokeAI folders: the folders under them told by headers
         FinderEnv env;
         FinderTypes types;
         std::shared_ptr<std::atomic<bool>> cancel;
@@ -77,7 +79,7 @@ public:
     // The world the finder reads (the tests' scratch home); default FinderEnv::system().
     void setEnv(const FinderEnv &env) { m_env = env; m_envSet = true; }
     // Free bytes of the disk a folder is on (QStorageInfo's by default); the tests give a made-up one.
-    void setFreeSpace(std::function<qint64(const QString &)> free) { m_free = std::move(free); }
+    void setFreeSpace(std::function<qint64(const QString &)> free) { m_free = std::move(free); m_freeCache.clear(); }
 
     bool isOpen() const { return m_open; }
     bool firstRun() const { return m_firstRun; }
@@ -153,6 +155,8 @@ private:
     const Registry *types() const;
     FinderEnv env() const;
     FinderJob makeJob() const;
+    QList<FinderLocation> tickedLocations() const;
+    qint64 freeSpace(const QString &path) const;
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
@@ -161,6 +165,7 @@ private:
     FinderEnv m_env;
     bool m_envSet = false;
     std::function<qint64(const QString &)> m_free;
+    mutable QHash<QString, qint64> m_freeCache;
     bool m_open = false;
     bool m_firstRun = false;
     QString m_phase = QStringLiteral("consent");

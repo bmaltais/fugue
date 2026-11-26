@@ -2348,7 +2348,8 @@ it as a module folder and run it with no code of its own in Fugue.
   20 GB) and **Use N folders**. Nothing is written before the yes; the yes is one write of this session's own settings.json:
   `model_paths` and `model_folder_kinds` (`layout`, pinned so a guess never flips), `download_folder` and `models_setup: "done"`
   (`SettingsModel::applyModelSetup`). InvokeAI, when ticked, adds the folders under its `models/` (2 levels) whose files' headers
-  agree on one kind, as single-kind roots; the others are left out and the notice counts them. A folder that is gone, or already a
+  agree on one kind, as single-kind roots (told by a job of its own that starts when the row is ticked; searching opens no model file,
+  and a folder in use is counted by its folder names, only where the places allow); the others are left out and the notice counts them. A folder that is gone, or already a
   root, is not added. Skip, Escape or closing writes `models_setup: "skipped"` and nothing else; Done with nothing found writes
   `done`. **Settings > Folders > Extra model folders > Find model folders…** and the Get ready "Change model folder…" menu run it
   again (the consent screen first); a rerun writes no `models_setup`, and in a project writes only the project's own file, with the

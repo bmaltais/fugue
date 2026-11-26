@@ -2301,5 +2301,6 @@
   "%1 is not one of the model folders.": "%1 is not one of the model folders.",
   "Counting its models": "Counting its models",
   "The search stopped early to stay quick, so some folders may be missing. Switch off big places and search again, or add a folder.": "The search stopped early to stay quick, so some folders may be missing. Switch off big places and search again, or add a folder.",
-  "Search again": "Search again"
+  "Search again": "Search again",
+  "Not counted: it is in a place you left off": "Not counted: it is in a place you left off"
 }

@@ -153,11 +153,11 @@ QList<FinderLocation> allLocations(const FinderEnv &env) {
         // An install folder's neighbours name its tool, so the place is the install folder (its models/'s parent).
         const QString name = QFileInfo(path).fileName();
         const QString scope = name == kShared || name == kInstalls ? path : QFileInfo(path).absolutePath();
-        list.append({QStringLiteral("probe:") + path, path, tilde(path, env.home), 0, {}, scope});
+        list.append({QStringLiteral("probe:") + path, path, tilde(path, env.home), 0, {}, {}, scope});
     }
-    list.append({QStringLiteral("home"), env.home, QStringLiteral("~"), kHomeDepth, {}, env.home});
+    list.append({QStringLiteral("home"), env.home, QStringLiteral("~"), kHomeDepth, {}, {}, env.home});
     for (const QString &parent : env.driveParents)
-        list.append({QStringLiteral("drive:") + parent, parent, parent, kDriveDepth, {}, parent});
+        list.append({QStringLiteral("drive:") + parent, parent, parent, kDriveDepth, {}, {}, parent});
     return list;
 }
 
@@ -174,12 +174,10 @@ public:
         // link from elsewhere into it must meet the same scope.
         const auto addScope = [this](const FinderLocation &location, bool isTicked) {
             m_scopes.append({location.scope, isTicked});
-            if (!location.resolved.isEmpty()) {
-                m_scopes.append({location.resolved, isTicked});
-                const QString parent = QFileInfo(location.resolved).absolutePath();
-                if (location.scope != location.path)
-                    m_scopes.append({parent, isTicked}); // an install folder: the resolved models folder's parent
-            }
+            if (!location.resolved.isEmpty())
+                m_scopes.append({location.resolved, isTicked}); // the place's own resolved folder, never its parent (a whole drive)
+            if (!location.resolvedScope.isEmpty())
+                m_scopes.append({location.resolvedScope, isTicked}); // an install folder as resolved by its own links
         };
         for (const FinderLocation &location : ticked) {
             tickedIds.insert(location.id);
@@ -259,6 +257,8 @@ public:
             *tooMany = false;
         if (blocked(dir))
             return false;
+        if (deadline < 0)
+            deadline = m_listDeadline;
         touch(dir);
         DIR *handle = opendir(QFile::encodeName(dir).constData());
         if (!handle)
@@ -283,6 +283,10 @@ public:
             const QString path = dir + QLatin1Char('/') + entry.name;
             unsigned char type = item->d_type;
             if (type == DT_UNKNOWN) {
+                // A file system that gives no type: asked with an lstat, but only where the finder may stat, and the probe sees it.
+                if (blocked(path))
+                    continue;
+                touch(path);
                 struct stat info;
                 if (::lstat(QFile::encodeName(path).constData(), &info) == 0)
                     type = S_ISLNK(info.st_mode) ? DT_LNK : S_ISDIR(info.st_mode) ? DT_DIR : DT_REG;
@@ -313,26 +317,44 @@ public:
 
     // How many different kinds the type folders named are (`Lora/` and `LyCORIS/` are one): a folder needs two, and then it is a
     // layout by the same rule kindOf() uses (ModelLibrary::layoutFromFolders), so the finder and the library never disagree.
-    bool isLayoutBy(const QStringList &names) const {
+    bool isLayoutBy(const QStringList &names, bool topLevelHasModels) const {
         QSet<QString> kinds;
         for (const QString &name : names)
             if (m_types.typeOfFolder.contains(name))
                 kinds.insert(m_types.typeOfFolder.value(name));
-        return kinds.size() >= 2 && ModelLibrary::layoutFromFolders(m_types.typeOfFolder, names);
+        return kinds.size() >= 2 && ModelLibrary::layoutFromFolders(m_types.typeOfFolder, names, topLevelHasModels);
+    }
+    bool holdsModels(const QList<Entry> &entries) const {
+        return std::any_of(entries.begin(), entries.end(), [this](const Entry &e) { return !e.isDir && m_types.takes(QStringLiteral("fugue/model"), e.name); });
+    }
+    // The listing detectKind() and the InvokeAI sampling go by: the finder's own, so no place left off and no link is followed blindly,
+    // and it stops at `deadline`.
+    ModelLibrary::DirLister lister(qint64 deadline) const {
+        return [this, deadline](const QString &dir, QList<ModelLibrary::DirEntry> &out) {
+            QList<Entry> entries;
+            if (cancelled() || !list(dir, m_env.tooManyEntries, entries, nullptr, true, deadline))
+                return false;
+            for (const Entry &entry : std::as_const(entries)) {
+                if (entry.name.startsWith(QLatin1Char('.')) || (entry.isLink && entry.resolved.isEmpty()))
+                    continue;
+                out.append({entry.name, entry.isDir, childPath(dir, entry)});
+            }
+            return true;
+        };
     }
 
     // What `dir` is, when it is a model folder: its type folders' names and the tool. A tool needs two type folders (InvokeAI,
     // which sorts models its own way, is told by invokeai.yaml beside its models/ instead).
     bool evaluate(const QString &dir, FoundFolder &folder, QHash<QString, QString> &typeDirs) {
         QList<Entry> entries;
-        if (!list(dir, m_env.tooManyEntries, entries))
+        if (!list(dir, m_env.tooManyEntries, entries, nullptr, false, m_deadline))
             return false;
         for (const Entry &entry : std::as_const(entries))
             if (entry.isDir && m_types.typeOfFolder.contains(entry.name))
                 typeDirs.insert(entry.name, m_types.typeOfFolder.value(entry.name));
         const QString parent = QFileInfo(dir).absolutePath();
         const bool invoke = QFileInfo(dir).fileName() == QLatin1String("models") && lstatHas(parent + QStringLiteral("/invokeai.yaml"));
-        const bool layout = isLayoutBy(typeDirs.keys());
+        const bool layout = isLayoutBy(typeDirs.keys(), holdsModels(entries));
         if (!layout && !invoke)
             return false;
         folder = FoundFolder();
@@ -408,7 +430,7 @@ public:
             if (!entry.isDir && entry.name == QLatin1String("model_index.json"))
                 return; // a diffusers repo: its folders are not a model library
         }
-        if (isLayoutBy(names)) {
+        if (isLayoutBy(names, holdsModels(entries))) {
             consider(dir, dir);
             return; // nothing below a candidate
         }
@@ -506,80 +528,111 @@ public:
         }
         return false;
     }
-    // InvokeAI sorts models its own way: the folders under its models/ (2 levels) whose files agree on one kind are told, on the
-    // worker, so the yes has nothing to read; the others with models are counted as left out.
-    void fillInvoke(FoundFolder &folder, const QString &real) {
+    // InvokeAI sorts models its own way: the folders under its models/ (2 levels) whose files agree on one kind are told, by the
+    // headers of a few of their files. Only for a row the person ticked (a job of its own), never while searching.
+    void fillInvoke(FoundFolder &folder, const QString &real, qint64 deadline) {
         if (folder.tool != QLatin1String("InvokeAI") || folder.network || real.isEmpty())
             return;
-        const auto kindOf = [this](const QString &dir) {
-            if (blocked(dir))
+        m_listDeadline = deadline;
+        const ModelLibrary::DirLister listing = lister(deadline);
+        const auto kindOf = [&](const QString &dir) {
+            if (blocked(dir) || cancelled())
                 return QString();
-            const QString kind = ModelLibrary::detectKind(dir, m_types.typeOfFolder, m_types.typeOfFiles);
+            const QString kind = ModelLibrary::detectKind(dir, m_types.typeOfFolder, m_types.typeOfFiles, listing, m_env.cancel);
             return kind == ModelLibrary::kLayout ? QString() : kind;
         };
         QList<Entry> level1;
-        if (!list(real, m_env.tooManyEntries, level1))
-            return;
-        for (const Entry &one : std::as_const(level1)) {
-            if (cancelled())
-                return;
-            if (!one.isDir || one.name.startsWith(QLatin1Char('.')) || (one.isLink && one.resolved.isEmpty()))
-                continue;
-            const QString dir = childPath(real, one);
-            if (!hasModelBelow(dir, 3))
-                continue;
-            if (const QString kind = kindOf(dir); !kind.isEmpty()) {
-                folder.told.append({dir, kind});
-                continue;
-            }
-            bool any = false;
-            QList<Entry> level2;
-            if (list(dir, m_env.tooManyEntries, level2))
-                for (const Entry &two : std::as_const(level2)) {
-                    if (!two.isDir || two.name.startsWith(QLatin1Char('.')) || (two.isLink && two.resolved.isEmpty()))
-                        continue;
-                    const QString sub = childPath(dir, two);
-                    if (!hasModelBelow(sub, 2))
-                        continue;
-                    if (const QString kind = kindOf(sub); !kind.isEmpty()) {
-                        folder.told.append({sub, kind});
-                        any = true;
-                    } else {
-                        ++folder.leftOut;
-                    }
+        if (list(real, m_env.tooManyEntries, level1)) {
+            for (const Entry &one : std::as_const(level1)) {
+                if (cancelled())
+                    break;
+                if (!one.isDir || one.name.startsWith(QLatin1Char('.')) || (one.isLink && one.resolved.isEmpty()))
+                    continue;
+                const QString dir = childPath(real, one);
+                if (!hasModelBelow(dir, 3))
+                    continue;
+                if (const QString kind = kindOf(dir); !kind.isEmpty()) {
+                    folder.told.append({dir, kind});
+                    continue;
                 }
-            if (!any && folder.leftOut == 0)
-                ++folder.leftOut;
+                bool any = false;
+                QList<Entry> level2;
+                if (list(dir, m_env.tooManyEntries, level2))
+                    for (const Entry &two : std::as_const(level2)) {
+                        if (!two.isDir || two.name.startsWith(QLatin1Char('.')) || (two.isLink && two.resolved.isEmpty()))
+                            continue;
+                        const QString sub = childPath(dir, two);
+                        if (!hasModelBelow(sub, 2))
+                            continue;
+                        if (const QString kind = kindOf(sub); !kind.isEmpty()) {
+                            folder.told.append({sub, kind});
+                            any = true;
+                        } else {
+                            ++folder.leftOut;
+                        }
+                    }
+                if (!any && folder.leftOut == 0)
+                    ++folder.leftOut;
+            }
         }
+        m_listDeadline = -1;
     }
 
-    // A folder the person chose: what it is and what it holds, with no need for two type folders.
-    FoundFolder describe(const QString &dir) {
+    // The folders under an InvokeAI folder, told (the job of a row the person ticked).
+    FoundFolder tell(const QString &dir) {
         FoundFolder folder;
         folder.path = QDir::cleanPath(dir);
+        folder.tool = QStringLiteral("InvokeAI");
+        folder.toldReady = true;
+        if (isNetwork(folder.path) || blocked(folder.path))
+            return folder;
+        const QString real = resolve(folder.path);
+        folder.canonical = real;
+        fillInvoke(folder, real, m_env.now() + m_env.countCapMs);
+        return folder;
+    }
+
+    // A folder in use, or one the person chose: what it is and what it holds, with no need for two type folders. `readHeaders`: a
+    // chosen folder's kind is told by a few headers (what the person asked for); a folder in use is told by its folder names only, so
+    // searching opens no model file. A folder inside a place left off, or behind a link into one, is listed, not looked into.
+    FoundFolder describe(const QString &dir, bool readHeaders) {
+        const qint64 deadline = m_env.now() + m_env.countCapMs; // the budget starts before the first listing
+        m_listDeadline = deadline;
+        struct Reset {
+            const Finder *finder;
+            ~Reset() { finder->m_listDeadline = -1; }
+        } reset{this};
+        FoundFolder folder;
+        folder.path = QDir::cleanPath(dir);
+        folder.tool = QStringLiteral("Model folder");
         if (isNetwork(folder.path)) {
             folder.canonical = folder.path;
             folder.network = true;
-            folder.tool = QStringLiteral("Model folder");
+            return folder;
+        }
+        if (blocked(folder.path)) {
+            folder.canonical = folder.path;
+            folder.leftOff = true; // no stat at all
             return folder;
         }
         const QString real = resolve(folder.path);
         folder.canonical = real;
         if (real.isEmpty()) {
-            // Not resolvable without going through a network or automount: listed, not looked into.
-            folder.network = true;
-            folder.tool = QStringLiteral("Model folder");
+            folder.leftOff = true; // by a link, it leads where it may not go
             return folder;
         }
         QHash<QString, QString> typeDirs;
         QList<Entry> entries;
-        if (list(real, m_env.countCapEntries, entries, nullptr, true))
+        if (list(real, m_env.countCapEntries, entries, nullptr, true, deadline))
             for (const Entry &entry : std::as_const(entries))
                 if (entry.isDir && m_types.typeOfFolder.contains(entry.name))
                     typeDirs.insert(entry.name, m_types.typeOfFolder.value(entry.name));
         folder.tool = toolName(real);
         // What it holds is kindOf()'s decision, made here on the worker from plain values; a folder of one kind keeps its top-level files.
-        folder.kind = ModelLibrary::detectKind(real, m_types.typeOfFolder, m_types.typeOfFiles);
+        if (readHeaders)
+            folder.kind = ModelLibrary::detectKind(real, m_types.typeOfFolder, m_types.typeOfFiles, lister(deadline), m_env.cancel);
+        else
+            folder.kind = ModelLibrary::layoutFromFolders(m_types.typeOfFolder, typeDirs.keys(), holdsModels(entries)) ? ModelLibrary::kLayout : QString();
         folder.layout = folder.kind == ModelLibrary::kLayout;
         if (!folder.layout)
             typeDirs.clear(); // counted as a whole folder, below
@@ -589,8 +642,11 @@ public:
                 folder.typeDirs << typeReal;
         }
         m_typeDirs.insert(real, typeDirs);
-        count(folder, real, m_env.now() + m_env.countCapMs);
-        fillInvoke(folder, real);
+        count(folder, real, deadline);
+        if (readHeaders) {
+            fillInvoke(folder, real, deadline);
+            folder.toldReady = folder.tool == QLatin1String("InvokeAI");
+        }
         folder.writable = ::access(QFile::encodeName(real).constData(), W_OK) == 0;
         return folder;
     }
@@ -619,8 +675,6 @@ public:
                         m_capped = true;
                 }
             }
-            if (!folder.network)
-                fillInvoke(folder, folder.canonical);
             folder.writable = folder.network || ::access(QFile::encodeName(folder.canonical).constData(), W_OK) == 0;
             // An unnamed folder with no model in it is a coincidence of folder names (a source tree's `model/` and `docs/`).
             if (folder.tool == QLatin1String("Model folder") && !folder.network && folder.models == 0 && !folder.countCapped)
@@ -741,6 +795,7 @@ private:
     FinderTypes m_types;
     qint64 m_deadline;
     qint64 m_totalDeadline;
+    mutable qint64 m_listDeadline = -1; // a listing started in describe()/tell() stops here too
     bool m_capped = false;
     QList<std::pair<QString, bool>> m_scopes; // every place's scope and whether it is ticked
     QSet<QString> m_skipped;
@@ -853,9 +908,13 @@ QString finderResolve(const QString &path, const FinderEnv &env) {
     return resolveLinks(path, [&env](const QString &next) { return inMount(next, env.networkMounts); }, env.touched);
 }
 
-QList<FinderLocation> finderLocations(const FinderEnv &env) {
+QList<FinderLocation> finderPlaces(const FinderEnv &env) { return allLocations(env); }
+
+QList<FinderLocation> finderLocations(const FinderEnv &env) { return finderLocations(env, allLocations(env)); }
+
+QList<FinderLocation> finderLocations(const FinderEnv &env, const QList<FinderLocation> &candidates) {
     QList<FinderLocation> list;
-    for (const FinderLocation &location : allLocations(env)) {
+    for (const FinderLocation &location : candidates) {
         // Built component by component from the root, each link read and checked first: a place that leads (even by a link in its
         // parent) onto a network or automount is left out, and nothing past that link is stat'd. A network drive's exact install
         // folder is still listed (by lstat of the place itself), an automount never is.
@@ -876,6 +935,7 @@ QList<FinderLocation> finderLocations(const FinderEnv &env) {
         if (lexists(real)) {
             FinderLocation placed = location;
             placed.resolved = real; // kept beside the path as written: a scope is met by either
+            placed.resolvedScope = location.scope == location.path ? real : finderResolve(location.scope, env);
             list.append(placed);
         }
     }
@@ -890,13 +950,20 @@ QString finderToolName(const QString &modelsDir, const FinderEnv &env) {
     });
 }
 
-FoundFolder describeModelFolder(const FinderTypes &types, const QString &path, const FinderEnv &env) {
-    Finder finder(types, env, {}, allLocations(env), {}); // no place is left off: the person chose this folder
-    return finder.describe(path);
+FoundFolder describeModelFolder(const FinderTypes &types, const QString &path, const FinderEnv &env, bool readHeaders,
+                                const QList<FinderLocation> &ticked, const QList<FinderLocation> &offered) {
+    Finder finder(types, env, {}, ticked, offered);
+    return finder.describe(path, readHeaders);
 }
 
 FoundFolder describeModelFolder(const Registry &registry, const QString &path, const FinderEnv &env) {
     return describeModelFolder(FinderTypes::from(registry), path, env);
+}
+
+FoundFolder tellInvokeFolders(const FinderTypes &types, const QString &path, const FinderEnv &env, const QList<FinderLocation> &ticked,
+                              const QList<FinderLocation> &offered) {
+    Finder finder(types, env, {}, ticked, offered);
+    return finder.tell(path);
 }
 
 FindResult findModelFolders(const FinderTypes &types, const QList<FinderLocation> &locations, const FinderEnv &env,

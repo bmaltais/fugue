@@ -17,6 +17,7 @@
 #include "engine/file_hashes.h"
 #include "engine/fugue_home.h"
 #include "engine/json.h"
+#include "engine/model_shape.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
 #include "engine/project.h"
@@ -605,6 +606,49 @@ private slots:
         QCOMPARE(count, 1);
     }
 
+    // A folder in use inside a place left off is listed and not counted, with nothing stat'd there.
+    void aFolderInUseInAPlaceLeftOffIsNotCounted() {
+        touchFile(m_mnt + "/d/models/checkpoints/a.safetensors", 1000);
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{m_mnt + "/d/models"}).isEmpty());
+        QVERIFY(changeSetting(settingsPath(), "model_folder_kinds", QJsonObject{{m_mnt + "/d/models", "layout"}}).isEmpty());
+        settings.reload();
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(false);
+        setup.setLocationChecked("drive:" + m_mnt, false);
+        m_touched.clear();
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        const QVariantMap row = rowOf(setup.rows(), "d/models");
+        QVERIFY(row.value("hint2").toString().contains("Not counted"));
+        for (const QString &touched : std::as_const(m_touched))
+            QVERIFY2(!touched.startsWith(m_mnt), qPrintable("touched " + touched));
+    }
+
+    // A found folder is "slow to write to" by where it really is, not only by the path it was found as.
+    void aRemovableFolderBehindALinkIsNeverTheDefaultDownload() {
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.setFinder([this](const ModelSetup::FinderJob &, const std::function<void(const FoundFolder &)> &found) {
+            FoundFolder f;
+            f.tool = "ComfyUI";
+            f.kind = ModelLibrary::kLayout;
+            f.path = m_home + "/models-link";
+            f.canonical = "/run/media/me/usb/models";
+            f.models = 3;
+            f.size = 5000;
+            found(f);
+            return FindResult();
+        }, true);
+        setup.show(true);
+        setup.search();
+        QCOMPARE(setup.download(), dataDir() + "/models");
+    }
+
     // InvokeAI is off by default; when ticked, the folders it can tell apart are added single-kind.
     void invokeAiIsOffAndWhenTickedIsAddedByTheFoldersItCanTell() {
         touchFile(m_home + "/invokeai/invokeai.yaml");
@@ -619,7 +663,12 @@ private slots:
         const QVariantMap row = rowOf(setup.rows(), "invokeai/models");
         QVERIFY(!row.isEmpty());
         QVERIFY(!row.value("on").toBool());
+        // Nothing of it was read while searching; ticking starts the job that tells the folders under it, the row is busy until then.
+        std::optional<ModelShape> shape;
+        QVERIFY(!ModelShapes::shared().known(m_home + "/invokeai/models/sdxl/lora/one.safetensors", &shape));
         setup.setRowOn(row.value("path").toString(), true);
+        QVERIFY(!setup.primaryEnabled());
+        QTRY_VERIFY(setup.primaryEnabled());
         QSignalSpy applied(&setup, &ModelSetup::applied);
         setup.apply();
         QCOMPARE(applied.size(), 1);

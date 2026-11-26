@@ -144,19 +144,29 @@ QStringList folderNames(const DeclaredPortType &declared) {
 constexpr int kFilesRead = 8;
 constexpr int kSampleDepth = 3;
 
-// Up to kFilesRead model files under `folder`, in name order, depth first.
-void sample(const QString &folder, int depth, QStringList &out) {
-    const QFileInfoList entries = QDir(folder).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QFileInfo &entry : entries) {
-        if (out.size() >= kFilesRead)
+// Up to kFilesRead model files under `folder`, in name order, depth first, listed by `lister` (the finder's guarded one, or QDir's).
+void sample(const ModelLibrary::DirLister &lister, const std::atomic<bool> *cancel, const QString &folder, int depth, QStringList &out) {
+    QList<ModelLibrary::DirEntry> entries;
+    if ((cancel && cancel->load()) || !lister(folder, entries))
+        return;
+    for (const ModelLibrary::DirEntry &entry : std::as_const(entries)) {
+        if (out.size() >= kFilesRead || (cancel && cancel->load()))
             return;
-        if (entry.isDir()) {
+        if (entry.isDir) {
             if (depth < kSampleDepth)
-                sample(entry.filePath(), depth + 1, out);
-        } else if (hasExtension(entry.fileName(), {QStringLiteral(".safetensors"), QStringLiteral(".gguf")})) {
-            out << entry.absoluteFilePath();
+                sample(lister, cancel, entry.path, depth + 1, out);
+        } else if (hasExtension(entry.name, {QStringLiteral(".safetensors"), QStringLiteral(".gguf")})) {
+            out << entry.path;
         }
     }
+}
+
+// QDir's listing, the one a library of the settings uses (a folder the person set; the finder gives its own).
+bool listWithQDir(const QString &dir, QList<ModelLibrary::DirEntry> &out) {
+    const QFileInfoList entries = QDir(dir).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &entry : entries)
+        out.append({entry.fileName(), entry.isDir(), entry.absoluteFilePath()});
+    return true;
 }
 
 // What a folder's files say it holds, for the process: a library is made for each use, the
@@ -202,7 +212,7 @@ const QSet<QString> &otherToolsNames() {
 // ComfyUI's names (the ones before #619) make a layout with one folder, as they always did. The other tools' names make one only
 // when two different kinds have a folder (`Lora/` with `LyCORIS/` is one kind, LoRAs): a folder of LoRAs with a `LyCORIS/` and an
 // `SDXL/` inside, or of checkpoints with a `VAE/` and an `SD15/`, is still the folder of one kind it was, found by its files.
-bool ModelLibrary::layoutFromFolders(const QHash<QString, QString> &typeOfFolder, const QStringList &present) {
+bool ModelLibrary::layoutFromFolders(const QHash<QString, QString> &typeOfFolder, const QStringList &present, bool topLevelHasModels) {
     QSet<QString> otherKinds;
     for (const QString &name : present) {
         if (!typeOfFolder.contains(name))
@@ -211,24 +221,37 @@ bool ModelLibrary::layoutFromFolders(const QHash<QString, QString> &typeOfFolder
             return true;
         otherKinds.insert(typeOfFolder.value(name));
     }
-    return otherKinds.size() >= 2;
+    // And a folder with model files of its own at the top (a folder of one kind with a `VAE/` and a `Lora/` inside) keeps the kind
+    // it was: only ComfyUI's names make it a layout then.
+    return otherKinds.size() >= 2 && !topLevelHasModels;
 }
 
 QString ModelLibrary::detectKind(const QString &root, const QHash<QString, QString> &typeOfFolder,
-                                 const QHash<QString, QString> &typeOfFiles) {
+                                 const QHash<QString, QString> &typeOfFiles, const DirLister &listing, const std::atomic<bool> *cancel) {
+    const DirLister &lister = listing ? listing : DirLister(listWithQDir);
+    QList<DirEntry> top;
+    if (!lister(root, top))
+        return {};
     QStringList present;
-    for (auto it = typeOfFolder.constBegin(); it != typeOfFolder.constEnd(); ++it)
-        if (QFileInfo(root + QLatin1Char('/') + it.key()).isDir())
-            present << it.key();
-    if (layoutFromFolders(typeOfFolder, present))
+    bool topModels = false;
+    for (const DirEntry &entry : std::as_const(top)) {
+        if (entry.isDir && typeOfFolder.contains(entry.name))
+            present << entry.name;
+        else if (!entry.isDir && hasExtension(entry.name, defaultExtensions))
+            topModels = true;
+    }
+    if (layoutFromFolders(typeOfFolder, present, topModels))
         return kLayout;
     // Else the type whose files most of a few of its files are (pack.json "files").
     QStringList files;
-    sample(root, 0, files);
+    sample(lister, cancel, root, 0, files);
     QHash<QString, int> votes;
-    for (const QString &file : std::as_const(files))
+    for (const QString &file : std::as_const(files)) {
+        if (cancel && cancel->load())
+            return {};
         if (const std::optional<ModelShape> shape = ModelShapes::shared().of(file); shape && shape->kind)
             ++votes[modelKindName(*shape->kind)];
+    }
     for (auto it = votes.begin(); it != votes.end(); ++it)
         if (it.value() * 2 > files.size())
             return typeOfFiles.value(it.key());

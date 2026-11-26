@@ -176,8 +176,11 @@ Reply modelList(const Command &command, Context &context) {
 // ids `places` lists); a place that is not named is never touched.
 Reply modelFindFolders(const Command &command, Context &context) {
     const FinderEnv env = FinderEnv::system();
-    QList<FinderLocation> places = finderLocations(env);
-    QList<FinderLocation> chosen = places;
+    // The places are a table (no I/O): `--only` narrows it first, and only the chosen ones are then looked at (an lstat each, links
+    // read component by component). A place that is not named is never stat'd, readlinked or opened.
+    const QList<FinderLocation> table = finderPlaces(env);
+    QList<FinderLocation> places = table;
+    QList<FinderLocation> chosen = table;
     if (command.has("only")) {
         chosen.clear();
         for (const QString &wanted : command.value("only").split(QLatin1Char(','), Qt::SkipEmptyParts)) {
@@ -197,12 +200,18 @@ Reply modelFindFolders(const Command &command, Context &context) {
             }
         }
     }
+    chosen = finderLocations(env, chosen); // the existing ones among them, with their resolved paths
+    // What was left off is kept out of by its written path alone: reading its links would be touching it.
+    QList<FinderLocation> offered = chosen;
+    for (const FinderLocation &place : std::as_const(table))
+        if (std::none_of(chosen.begin(), chosen.end(), [&place](const FinderLocation &c) { return c.id == place.id; }))
+            offered << place;
     QStringList skip;
     for (const QString &root : ModelLibrary::roots(currentSettings()))
         skip << root;
     QElapsedTimer timer;
     timer.start();
-    const FindResult result = findModelFolders(context.registry, chosen, env, skip, {}, places);
+    const FindResult result = findModelFolders(context.registry, chosen, env, skip, {}, offered);
     QJsonArray found, searched;
     QStringList lines;
     for (const FinderLocation &place : std::as_const(chosen))

@@ -115,8 +115,13 @@ ModelSetup::ModelSetup(SettingsModel *settings) : QObject(settings), m_settings(
     m_finder = [](const FinderJob &job, const std::function<void(const FoundFolder &)> &found) {
         FinderEnv env = job.env;
         env.cancel = job.cancel.get();
+        // A folder in use is counted by its names alone and only where the places allow; one the person picked or ticked may be read.
         for (const QString &path : job.describe)
-            found(describeModelFolder(job.types, path, env));
+            found(describeModelFolder(job.types, path, env, false, job.locations, job.offered));
+        for (const QString &path : job.pick)
+            found(describeModelFolder(job.types, path, env, true));
+        for (const QString &path : job.tell)
+            found(tellInvokeFolders(job.types, path, env, job.locations, job.offered));
         if (job.locations.isEmpty())
             return FindResult();
         return findModelFolders(job.types, job.locations, env, job.skip, found, job.offered);
@@ -181,6 +186,7 @@ void ModelSetup::show(bool firstRun) {
     m_downloadChosen = !settings.downloadFolder.isEmpty();
     m_download = m_settings->downloadFolder();
     m_envNow = env();
+    m_freeCache.clear();
     m_locations = finderLocations(m_envNow); // an lstat each; nothing below them is listed, no link followed
     emit changed();
 }
@@ -242,13 +248,18 @@ ModelSetup::FinderJob ModelSetup::makeJob() const {
     return job;
 }
 
+QList<FinderLocation> ModelSetup::tickedLocations() const {
+    QList<FinderLocation> ticked;
+    for (const FinderLocation &location : m_locations)
+        if (!m_unticked.contains(location.id))
+            ticked << location;
+    return ticked;
+}
+
 void ModelSetup::search() {
     if (m_phase != QLatin1String("consent"))
         return;
-    QList<FinderLocation> ticked;
-    for (const FinderLocation &location : std::as_const(m_locations))
-        if (!m_unticked.contains(location.id))
-            ticked << location;
+    const QList<FinderLocation> ticked = tickedLocations();
     m_rows.clear();
     addInUse();
     m_phase = QStringLiteral("looking");
@@ -329,6 +340,15 @@ void ModelSetup::found(int generation, const FoundFolder &folder) {
     for (Row &row : m_rows) {
         if (row.path != folder.path)
             continue;
+        if (folder.toldReady && row.found.tool == QLatin1String("InvokeAI") && row.busy) {
+            // The folders under a ticked InvokeAI row, told on the worker: only that is taken in.
+            row.found.told = folder.told;
+            row.found.leftOut = folder.leftOut;
+            row.found.toldReady = true;
+            row.busy = false;
+            emit changed();
+            return;
+        }
         if (row.busy) {
             // The count of a row that was waiting (in use, or just picked): what it holds was decided on the worker.
             row.busy = false;
@@ -402,6 +422,7 @@ QString ModelSetup::addFolder(const QVariant &value) {
         m_phase = QStringLiteral("results");
         m_capped = false;
         FinderJob inUse = makeJob();
+        inUse.locations = tickedLocations();
         for (const Row &row : std::as_const(m_rows))
             inUse.describe << row.path;
         if (!inUse.describe.isEmpty())
@@ -416,16 +437,27 @@ QString ModelSetup::addFolder(const QVariant &value) {
     row.busy = true;
     m_rows.append(row);
     FinderJob job = makeJob();
-    job.describe << path;
+    job.offered.clear(); // the person chose this folder: no place is left off for it
+    job.pick << path;
     run(std::move(job), false);
     emit changed();
     return {};
 }
 
 void ModelSetup::setRowOn(const QString &path, bool on) {
-    for (Row &row : m_rows)
-        if (row.path == path && !row.inherited)
-            row.on = on;
+    for (Row &row : m_rows) {
+        if (row.path != path || row.inherited)
+            continue;
+        row.on = on;
+        // InvokeAI sorts its own way: the folders under it are told (a few headers each) only now that it is ticked, on the worker.
+        if (on && row.found.tool == QLatin1String("InvokeAI") && !row.inUse && !row.found.toldReady && !row.busy && !row.found.network) {
+            row.busy = true;
+            FinderJob job = makeJob();
+            job.locations = tickedLocations();
+            job.tell << row.path;
+            run(std::move(job), false);
+        }
+    }
     emit changed();
 }
 
@@ -466,6 +498,8 @@ QVariantList ModelSetup::rows() const {
         QString counted;
         if (row.busy) {
             counted = tr("Counting its models");
+        } else if (f.leftOff) {
+            counted = tr("Not counted: it is in a place you left off");
         } else if (f.network) {
             counted = tr("On a network drive: not counted");
         } else if (f.models == 0 && !row.inUse) {
@@ -545,19 +579,31 @@ QString ModelSetup::defaultDownload() const {
 bool ModelSetup::slowToWriteTo(const Row &row) const {
     if (row.found.network)
         return true;
-    for (const QString &prefix : {QStringLiteral("/run/media/"), QStringLiteral("/media/")})
-        if (row.path.startsWith(prefix))
-            return true;
-    for (const QString &mount : m_envNow.networkMounts)
-        if (row.path == mount || row.path.startsWith(mount + QLatin1Char('/')))
-            return true;
+    for (const QString &where : {row.path, row.found.canonical}) {
+        for (const QString &prefix : {QStringLiteral("/run/media/"), QStringLiteral("/media/")})
+            if (where.startsWith(prefix))
+                return true;
+        for (const QString &mount : m_envNow.networkMounts)
+            if (!where.isEmpty() && (where == mount || where.startsWith(mount + QLatin1Char('/'))))
+                return true;
+    }
     return false;
+}
+
+// Free bytes where a folder is, asked once for each folder (a statfs is not asked again every time the sheet changes).
+qint64 ModelSetup::freeSpace(const QString &path) const {
+    const auto it = m_freeCache.constFind(path);
+    if (it != m_freeCache.constEnd())
+        return it.value();
+    const qint64 free = m_free ? m_free(path) : freeBytesAt(path, m_envNow);
+    m_freeCache.insert(path, free);
+    return free;
 }
 
 QVariantList ModelSetup::choices() const {
     QVariantList list;
     auto entry = [this](const QString &path, const QString &title) {
-        const qint64 free = m_free ? m_free(path) : freeBytesAt(path, m_envNow);
+        const qint64 free = freeSpace(path);
         const QString freeText = free >= 0 ? QCoreApplication::translate("fugue::ModelSetup", "%1 free").arg(sizeText(free)) : QString();
         return QVariantMap{{"value", path},
                            {"title", title},
