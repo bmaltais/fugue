@@ -109,6 +109,13 @@ bool CudaHelperNotice::due(const QStringList &folders, bool nvidia, const QStrin
     return QFileInfo(helperProgram(folders, true)).fileName() == QLatin1String("fugue-helper-vulkan");
 }
 
+bool CudaHelperNotice::dueForHelper(const QString &helperPath, bool nvidia, const QString &stateFolder) {
+    if (!nvidia || QFileInfo::exists(noticeMarker(stateFolder)))
+        return false;
+    const QString name = QFileInfo(helperPath).fileName();
+    return name == QLatin1String("fugue-helper-vulkan") || name == QLatin1String("fugue-helper-cpu");
+}
+
 void CudaHelperNotice::dismiss(const QString &stateFolder) {
     QDir().mkpath(stateFolder);
     QFile marker(noticeMarker(stateFolder));
@@ -116,8 +123,17 @@ void CudaHelperNotice::dismiss(const QString &stateFolder) {
         marker.close();
 }
 
+bool CudaHelperNotice::helperChosenByUser() {
+    return qEnvironmentVariableIsSet("FUGUE_HELPER") && !qEnvironmentVariableIsSet("FUGUE_HELPER_FROM_APPRUN");
+}
+
 bool CudaHelperNotice::due() {
-    return !qEnvironmentVariableIsSet("FUGUE_HELPER") && due(helperFolders(), hasNvidiaGpu(), stateDir());
+    if (helperChosenByUser())
+        return false;
+    // AppRun's pick (the AppImage's helper lives in the user's data folder, not in helperFolders()).
+    if (qEnvironmentVariableIsSet("FUGUE_HELPER_FROM_APPRUN") && qEnvironmentVariableIsSet("FUGUE_HELPER"))
+        return dueForHelper(qEnvironmentVariable("FUGUE_HELPER"), hasNvidiaGpu(), stateDir());
+    return due(helperFolders(), hasNvidiaGpu(), stateDir());
 }
 
 void CudaHelperNotice::dismiss() { dismiss(stateDir()); }

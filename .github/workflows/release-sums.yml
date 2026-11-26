@@ -1,0 +1,44 @@
+name: Release checksums
+
+# The one writer of a release's SHA256SUMS (the file install.sh verifies against). package.yml, appimage.yml and
+# helper-tarballs.yml each upload their assets and a <asset>.sha256 beside each; none touches SHA256SUMS, so no job
+# can overwrite another's line. This waits until every asset listed in packaging/release-assets.txt has its checksum
+# file and its asset on the release, then builds SHA256SUMS from them once (packaging/release-sums.sh). On a timeout
+# it fails and lists what is missing. Rerun it by hand (workflow_dispatch, on the tag) after fixing a failed job.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sums:
+    name: Write SHA256SUMS
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Wait for every asset, then write SHA256SUMS once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir work
+          for _ in $(seq 1 320); do
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > work/assets 2>/dev/null; then
+              rm -rf work/parts && mkdir work/parts
+              gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir work/parts 2>/dev/null || true
+              if packaging/release-sums.sh work/parts --expect packaging/release-assets.txt --assets work/assets; then
+                cat work/parts/SHA256SUMS
+                gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber work/parts/SHA256SUMS
+                exit 0
+              fi
+            fi
+            sleep 60
+          done
+          echo "the release never held every asset (see the list above); fix the failed job and rerun this one"
+          exit 1

@@ -3,7 +3,7 @@
 `.github/workflows/package.yml` has a third arm job, `package-aarch64`: it makes the same container, runs
 `makepkg` as user `builder` (like the x86 job, `FUGUE_SKIP_CUDA=1`), prints the checksums, runs
 `scripts/check-elf-align` and uploads the `package-aarch64` artifact. A `v*` tag puts its
-`fugue-*-aarch64.pkg.tar.zst` and its `SHA256SUMS` lines in the release beside the x86 package (the file names
+`fugue-*-aarch64.pkg.tar.zst` and its `.sha256` file in the release beside the x86 package, and `release-sums.yml` lists it in `SHA256SUMS` (docs/release.md; the file names
 carry the arch). Its ccache key is `package-aarch64-ccache-`.
 
 `.github/workflows/test.yml` has two jobs: `test` (x86_64, Arch container) and `test-aarch64`
