@@ -305,8 +305,13 @@ QVariantMap AppView::fieldFor(const InputBinding &given) const {
         field.insert("optional", true);
         field.insert("hint", tr("Optional"));
     }
-    if (kind == QLatin1String("text"))
-        field.insert("multiline", input.role == QLatin1String("prompt") || input.role == QLatin1String("negative_prompt"));
+    if (kind == QLatin1String("text")) {
+        // Every free text wraps and grows (the form's text area); a prompt starts three lines tall and takes newlines, any other
+        // text starts one line tall and takes newlines only when its target's widget is `multiline` (#567).
+        const bool prompt = input.role == QLatin1String("prompt") || input.role == QLatin1String("negative_prompt");
+        field.insert("multiline", prompt || (spec && spec->widget() == QLatin1String("multiline")));
+        field.insert("minLines", prompt ? 3 : 1);
+    }
     if (kind == QLatin1String("seed"))
         field.insert("mode", state.seedModes.value(input.key(), isRandom(m_document, input) ? QStringLiteral("random")
                                                                                               : QStringLiteral("fixed")));

@@ -498,7 +498,7 @@ private slots:
         QVERIFY(app.open());
 
         QQuickItem *prompt = find(app.window, "appInput-prompt-edit");
-        QQuickItem *title = find(app.window, "appInput-title");
+        QQuickItem *title = find(app.window, "appInput-title-edit");
         QVERIFY(prompt && title);
         prompt->forceActiveFocus();
         QTRY_VERIFY(prompt->hasActiveFocus());
@@ -513,8 +513,19 @@ private slots:
         QCOMPARE(prompt->property("text").toString(), QStringLiteral("old words")); // no tab typed
         title->forceActiveFocus();
         QTRY_VERIFY(title->hasActiveFocus());
+        // A one-line text still wraps and grows (#567); a line break pasted into it is a space, Enter types none.
+        QQuickItem *titleBox = find(app.window, "appInput-title");
+        const qreal oneLine = titleBox->height();
+        title->setProperty("text", QString("word ").repeated(80) + "end\nmore");
+        QTRY_VERIFY(titleBox->height() > oneLine);
+        QVERIFY(!title->property("text").toString().contains('\n'));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QVERIFY(!title->property("text").toString().contains('\n'));
         QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(started.size(), 2);
+        // The paste did not cut the field from its value: a value set later still shows.
+        titleBox->setProperty("text", QStringLiteral("set later"));
+        QTRY_COMPARE(title->property("text").toString(), QStringLiteral("set later"));
         qDeleteAll(app.engine.rootObjects());
     }
 

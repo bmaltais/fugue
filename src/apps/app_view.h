@@ -26,7 +26,8 @@
 //
 // Fields (`fields`): one map per input in the form's order: {key, label, kind, value, min?, max?, choices?, section, advanced}
 // and what its kind adds. The kind is the control (#386, AppInput.qml draws one per kind):
-//   "text"    a prompt or a plain text; `multiline` for the prompt roles
+//   "text"    a prompt or a plain text, always a wrapping box that grows to 8 lines; `multiline` when it takes newlines (the prompt
+//             roles, a target with the multiline widget), `minLines` its first height (3 for a prompt, else 1)
 //   "number"  a strength, a steps, a number value; a drag field with `min` and `max`, else a text field; "" is the workflow's own
 //   "toggle"  a switch (a boolean in the workflow)
 //   "choice"  `choices` [{value, text}]: a block's choices

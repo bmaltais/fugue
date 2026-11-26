@@ -225,6 +225,32 @@ private slots:
         QCOMPARE(field("quality").value("choices").toList().size(), 2);
     }
 
+    // Every free text is a wrapping box (#567): a prompt starts three lines tall; another text one line tall; newlines only
+    // where the target's widget is multiline (a prompt role, a Text Template slot), never in a line widget.
+    void aTextFieldWrapsAndTakesNewlinesOnlyWhereItsTargetDoes() {
+        const QJsonObject json = QJsonDocument::fromJson(R"({
+          "fugue": 1,
+          "app": {"format": 1, "title": "Text",
+                  "inputs": [{"role": "prompt", "targets": ["encode.prompt"]},
+                             {"name": "hero", "targets": ["tpl.a"]},
+                             {"name": "title", "targets": ["save.name"]}],
+                  "outputs": [{"node": "save"}]},
+          "graph": {"nodes": {
+            "encode": {"type": "fugue/text-encode", "version": "1.0.0", "inputs": {"prompt": "p"}},
+            "tpl": {"type": "fugue/text-template", "version": "1.0.0", "inputs": {"a": "a long hero"}},
+            "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}
+          }}
+        })").object();
+        m_view->show("a", load(json), {});
+        QVERIFY(m_view->shown());
+        QCOMPARE(field("prompt").value("minLines").toInt(), 3);
+        QVERIFY(field("prompt").value("multiline").toBool());
+        QCOMPARE(field("hero").value("minLines").toInt(), 1);
+        QVERIFY(field("hero").value("multiline").toBool());
+        QCOMPARE(field("title").value("minLines").toInt(), 1);
+        QVERIFY(!field("title").value("multiline").toBool());
+    }
+
     // An input bound to a group instance's exposed input is shaped by the inner input (spec 5.4): a number with its range, a choice.
     void aGroupInstanceInputHasTheInnerInputsKind() {
         const QJsonObject json = QJsonDocument::fromJson(R"({
