@@ -149,6 +149,11 @@ private slots:
         QVERIFY(found.contains("Preview")); // takes any
         QVERIFY(!found.contains("Brightness and Contrast")); // image and numbers only
         QVERIFY(search->filterText().contains("text"));
+        // Nothing typed: the ends (Preview, Save) come after every node that carries the work on.
+        const QStringList all = names(search->results());
+        QVERIFY(all.first() != QStringLiteral("Preview"));
+        QVERIFY(all.indexOf("Preview") > all.indexOf("Text Concat"));
+        QVERIFY(all.indexOf("Preview") > all.indexOf("Generate Image"));
         // Typing narrows within the filter.
         search->setQuery("preview");
         QCOMPARE(names(search->results()), QStringList{"Preview"});
