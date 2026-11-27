@@ -18,6 +18,10 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 pin knows) or `{"path", "error"}` (unreadable). It is the fork's `sd_fugue_inspect_model` (`src/api/fugue_inspect.cpp`): the
 header only (`ModelLoader`, the detection a generation does), no backend and no GPU, so it answers in milliseconds. Over
 `--serve` and `--serve-http` nothing changes. The call needs the fork commit that adds it; the pin moves with it.
+Fugue runs it on the local helper (`engine/model_inspect.*`, spec 2.5): one process for a batch of up to 40 files, a minute at most,
+off the window's thread, the answers kept by path, size and modification time in `<cache>/model-inspect.json` and dropped when the
+helper binary changes. Only diffusion models and checkpoints are asked about: a CLIP-L text encoder is named as a diffusion version.
+
 
 ## Failures say why (#542)
 

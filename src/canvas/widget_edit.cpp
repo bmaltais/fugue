@@ -9,6 +9,7 @@
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
 #include "engine/model_family.h"
+#include "engine/model_inspect.h"
 #include "engine/model_library.h"
 #include "engine/model_speed.h"
 #include "engine/model_use.h"
@@ -893,7 +894,8 @@ void WidgetEdit::requestMarks(const QString &node, const QString &input) {
     const qint64 others = otherModelsMb(node, input);
     m_work.read(this, [this, shapes, key, asked, type, files, others]() -> std::function<void()> {
         const ModelSpeeds speeds;
-        const QHash<QString, ModelMark> found = markModels(type, files, RecommendContext{localComputeDevice(), others, &speeds}, *shapes);
+        const QHash<QString, ModelMark> found = markModels(type, files, RecommendContext{localComputeDevice(), others, &speeds}, *shapes,
+                                                                  &ModelInspector::shared());
         return [this, key, asked, found] {
             if (m_marks.value(key).asked != asked)
                 return;

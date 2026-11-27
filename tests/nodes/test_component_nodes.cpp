@@ -539,6 +539,26 @@ private slots:
         QCOMPARE(warning.value("input").toString(), QStringLiteral("vae"));
     }
 
+    // #703: a diffusion model the engine does not recognise is a warning on Load Models' diffusion_model (a paired host may run
+    // another engine), asked of the helper once and kept; with no helper nothing changes.
+    void aModelTheEngineDoesNotRecogniseIsAWarning() {
+        Bench bench;
+        const QString script = bench.dir.filePath("inspect.sh");
+        writeFile(script, "#!/bin/sh\nshift\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\"; done\n");
+        QVERIFY(QFile::setPermissions(script, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        const Values inputs{{"diffusion_model", Value(bench.model("fugue/diffusion-model", "diffusion_models/odd.safetensors"))}};
+        const auto check = [&] { return bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs)); };
+        QVERIFY(check().isEmpty()); // no local helper (the suite sets none)
+        const QByteArray before = qgetenv("FUGUE_HELPER");
+        qputenv("FUGUE_HELPER", script.toUtf8());
+        const auto restore = qScopeGuard([&] { qputenv("FUGUE_HELPER", before); });
+        const Errors errors = check();
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().severity, Error::Severity::Warning);
+        QCOMPARE(errors.first().input, QStringLiteral("diffusion_model"));
+        QVERIFY2(errors.first().message.contains("does not recognise odd.safetensors"), qPrintable(errors.first().message));
+    }
+
     void aCheckpointIsOneFile() {
         Bench bench;
         const QJsonObject checkpoint = bench.model("fugue/model", "checkpoints/sd15.safetensors");
