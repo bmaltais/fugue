@@ -1,6 +1,8 @@
 // A node's size (#49): auto-size from its content, a manual resize that pins it in the layout,
 // the grip's hit test, undo, and what follows (wires, hit tests). docs/canvas-look.md 4.1.
 
+#include <cmath>
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -135,7 +137,16 @@ private slots:
     // #74: a multiline field keeps its label as a caption line above its text, so a filled one
     // still says what it is: its row is one line taller than its text.
     void aMultilineRowHasACaptionLineAboveItsText() {
-        QCOMPARE(node_size::multilineHeight(3, 12), 4 * 16 + 2 * 6.0);
+        QCOMPARE(node_size::multilineHeight(3, 12), 4 * 16 + 2 * 6.0 + 2 * 2.0);
+        // The text box is the row less the well's inset (0.5u each side), the caption line (1.5u + 16) and 1.5u under the text
+        // (InputWidget.qml): n lines of text show n lines, not n - 1 (#715).
+        for (int textSize : {12, 13, 14})
+            for (int lines = 1; lines <= 8; ++lines) {
+                const qreal u = textSize / 3.0;
+                const qreal box = node_size::multilineHeight(lines, textSize) - 2 * std::round(0.5 * u)
+                                  - (std::round(1.5 * u) + 16) - std::round(1.5 * u);
+                QVERIFY2(box >= lines * 16, qPrintable(QString("%1 lines at %2: box %3").arg(lines).arg(textSize).arg(box)));
+            }
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(workflow(placed, "one\ntwo\nthree\nfour")));
         const QVariantMap text = port(node(canvas, "prompt"), "inputs", "text");

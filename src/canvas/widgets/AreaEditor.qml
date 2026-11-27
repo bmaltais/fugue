@@ -14,6 +14,9 @@ Rectangle {
     z: 2
     property bool closing: false
     property bool ready: false
+    // Where the press was in the well (host coordinates), or -1: the caret goes there; with none (Tab into the field) it goes to the end.
+    property real caretX: -1
+    property real caretY: -1
     readonly property real lineHeight: Math.round(host.look.textSize * 4 / 3)
 
     height: Math.max(rowHeight, Math.min(Math.max(5, edit.lineCount + 1), 12) * lineHeight + 8 + 16) // + the caption
@@ -84,7 +87,8 @@ Rectangle {
         sessionEdits = host.edits
         host.edits.begin(host.nodeId, host.name)
         edit.text = host.startText()
-        edit.selectAll()
+        edit.cursorPosition = caretX < 0 ? edit.length
+                              : edit.positionAt(caretX - flick.anchors.leftMargin, caretY - flick.anchors.topMargin + flick.contentY)
         ready = true
         edit.forceActiveFocus()
     }

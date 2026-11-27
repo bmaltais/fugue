@@ -1495,7 +1495,7 @@ Item {
             ToolButton { toolName: "hand"; command: "canvas-view.tool-hand"; glyph: "hand"; name: qsTr("Hand: drag to pan; Space held does it with any tool") }
             ToolButton { toolName: "zoom"; command: "canvas-view.tool-zoom"; glyph: "zoom-in"; name: qsTr("Zoom: click to zoom in, Alt+click to zoom out") }
             Item { width: 1; height: 2 * root.u }
-            ToolButton { toolName: "move"; command: "canvas-view.tool-move"; glyph: "maximize-2"; name: qsTr("Move: drag the current layer; the arrow keys nudge it") }
+            ToolButton { toolName: "move"; command: "canvas-view.tool-move"; glyph: "move"; name: qsTr("Move: drag the current layer; the arrow keys nudge it") }
             Item { width: 1; height: 2 * root.u }
             ToolButton { toolName: "region"; command: "canvas-view.tool-region"; glyph: "square-dashed"; name: qsTr("Rectangle region: drag the area a run redraws") }
             Item { width: 1; height: 2 * root.u }

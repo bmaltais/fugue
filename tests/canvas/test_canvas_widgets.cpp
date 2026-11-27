@@ -4,6 +4,7 @@
 // source, Tab between fields, and the text-field focus rules that keep typed keys away from
 // the commands.
 
+#include <QFontMetricsF>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QQuickStyle>
@@ -42,12 +43,13 @@ const char *fixture = R"({
 })";
 
 struct WidgetApp : App {
-    int quits = 0, fits = 0, searches = 0;
+    int quits = 0, fits = 0, searches = 0, runs = 0;
     explicit WidgetApp(const char *graph = fixture) : App(load(graph), widget_test::addWidgetType) {
         // Commands whose keys a field must keep: count them instead of acting.
         commands.setHandler("app.quit", [this] { ++quits; });
         commands.setHandler("view.fit", [this] { ++fits; });
         commands.setHandler("node.search", [this] { ++searches; });
+        commands.setHandler("run.start", [this] { ++runs; });
         // The fixture's node type is a command node: allow its pack, as the trust question would.
         workflows.allowPendingTrust();
     }
@@ -313,6 +315,69 @@ private slots:
         QTRY_VERIFY(!app.typing());
         QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox\nin snow!"));
         QCOMPARE(app.steps(), 2);
+    }
+
+    // #715: a click puts the caret where it landed, so fixing one word does not replace the whole prompt.
+    void aClickInAMultilineFieldPutsTheCaretWhereItLanded() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.type("hello world");
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.typing());
+        QQuickItem *label = canvas_test::item(app.widget("all", "notes"), "widgetValue");
+        QVERIFY(label);
+        // Where "world" starts on the resting label.
+        const qreal start = QFontMetricsF(label->property("font").value<QFont>()).horizontalAdvance("hello ");
+        app.click(label->mapToScene(QPointF(start + 1, 8)).toPoint());
+        QTRY_VERIFY(app.typing());
+        app.type("X");
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("hello Xworld")); // nothing was selected
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.typing());
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("hello Xworld"));
+        QCOMPARE(app.steps(), 2); // one step per visit, as before
+        // Tab into the field: the caret is at the end.
+        app.click(app.in("all", "name"));
+        QTRY_VERIFY(app.typing());
+        app.key(Qt::Key_Tab);
+        QTRY_COMPARE(app.focused()->objectName(), QString("widgetArea"));
+        app.type("!");
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("hello Xworld!"));
+    }
+
+    // #715 finding 8: Ctrl+Enter is Run from inside an open multiline field, not a new line.
+    void controlEnterInAnOpenMultilineFieldRuns() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.type("a fox");
+        app.key(Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(app.runs, 1);
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox")); // no new line
+        QVERIFY(app.typing()); // the field stays open, as the form's does
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715): a multiline field open on a long prompt, caret in the middle. Picture only.
+    void anOpenMultilineEditorLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        WidgetApp app;
+        QVERIFY(app.open());
+        app.window->resize(900, 640);
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.type("a red fox in the snow at dawn,");
+        app.key(Qt::Key_Return);
+        app.type("soft light, detailed fur, shallow depth of field,");
+        app.key(Qt::Key_Return);
+        app.type("35mm photo");
+        QTest::qWait(150);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-editor-open.png"));
     }
 
     void aToggleFlipsOnAClick() {

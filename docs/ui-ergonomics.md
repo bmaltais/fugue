@@ -1640,3 +1640,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Old: one play button, Run to here.
 - New: two buttons so the direction is one click: `arrow-right-to-line` (to here) and `arrow-right-from-line` (from here), a matched arrow pair (Lucide has no play-with-bar glyph), each with its command label as tooltip and accessible name. Run from here also holds the seeds upstream of the node (spec 3.4).
 - Rules met: Floor (28px), Gaps (within the run chunk, 1u as before), Learned place (Run to here keeps the first place and its key), Primary (neither is accent: the toolbar's run buttons are plain).
+
+### 2026-11-27 Multiline text: caret at the click, every line shown, Run from inside the field (#715, slice 0)
+
+- Control: `src/canvas/widgets/AreaEditor.qml` (the open multiline field, `widgetArea`), `InputWidget.qml` (`clicked(x, y)`, `openEditor`), `src/canvas/node_size.cpp` (`multilineHeight`).
+- Old: a click on a multiline well selected the whole text, so the first key typed replaced the prompt; a well showed one line fewer than its row was sized for ("compositi…" on a prompt that fitted); Ctrl+Enter inside the open field was not covered by a test.
+- New: the caret goes where the press landed (`positionAt`), and a Tab into the field puts it at the end (a prompt is added to more often than replaced); the row adds the 0.5u the card leaves round the well, so n lines show n lines; Ctrl+Enter is Run from inside the field (tested: Qt's `TextEdit` leaves it to the window, so no handler was needed). Still one undo step per field visit, and Escape keeps the text.
+- Why: every text control in the references puts the caret at the click; the well's text box was 16n - 4 px for n lines.
+- Rules met: Floor (the well is unchanged in width, taller by 4 px), Keys (no key added or moved), Learned place (nothing moved).

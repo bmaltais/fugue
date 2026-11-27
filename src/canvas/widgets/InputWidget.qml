@@ -286,7 +286,7 @@ Rectangle {
                 root.edits.finish()
                 return
             }
-            root.clicked(event.x)
+            root.clicked(event.x, event.y)
         }
         onCanceled: {
             if (dragging)
@@ -295,7 +295,8 @@ Rectangle {
         }
     }
 
-    function clicked(x) {
+    // x, y: where the press was in the well; a multiline field puts its caret there (a Tab into it has none: the caret goes to the end).
+    function clicked(x, y) {
         const buttons = pasteable ? pasteWidth + pad : 0
         const atEnd = x > width - glyphZone - buttons && x <= width - buttons
         switch (kind) {
@@ -327,20 +328,21 @@ Rectangle {
                 return openMenu(inputEntries())
             return atEnd ? openDialog() : openEditor()
         default:
-            return openEditor()
+            return openEditor(x, y)
         }
     }
 
     // --- typing ---
 
-    function openEditor() {
+    function openEditor(atX, atY) {
         if (editor)
             return
         error = ""
         // The multiline editor opens over the rows below: lift this row above them.
         if (row)
             row.z = 2
-        editor = make(kind === "multiline" ? "AreaEditor.qml" : "FieldEditor.qml")
+        editor = kind !== "multiline" ? make("FieldEditor.qml")
+               : make("AreaEditor.qml", atX === undefined || atY === undefined ? {} : { caretX: atX, caretY: atY })
     }
     function closeEditor() {
         error = ""

@@ -160,7 +160,7 @@ in `text`, Medium, elided.
 | `spin` | value; ‹ › chevrons at the ends on hover; drag to scrub |
 | `slider` | a fill from the left at `accent` 22% for the value's share of its range |
 | `line` | value, elided at the right |
-| `multiline` | 16u row (64); its label as a caption on the first line, filled or not (#74), then the text, at 16 px line height, `text`; scrolls when focused |
+| `multiline` | 16u row (64); its label as a caption on the first line, filled or not (#74), then the text, at 16 px line height, `text`; scrolls when focused. The row is `node_size::multilineHeight` (the lines plus the caption, the 1.5u above the caption and below the text, and the 0.5u the card leaves round the well), so n lines of text show n lines (#715: it showed n - 1) |
 | `toggle` | a 22 × 12 switch at the right: `accent` track, `accentForeground` knob; off is `hairline-strong` |
 | `choice` | value and a chevron-down glyph |
 | `file`, `folder` | the path elided in the middle, a folder glyph |
