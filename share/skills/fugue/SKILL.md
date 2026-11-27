@@ -159,7 +159,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
   `pack_update_available`, `workflow_not_embedded`, `node_bad_preview`. A model warning becomes an
   error when a run reaches that node.
 - Trust: `pack_untrusted`, `needs_confirmation`
-- Packs: `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`
+- Packs: `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`, `pack_busy`
 - Groups: `group_invalid`
 - Inputs: `input_invalid` (a value the node cannot use, for example a canvas revision not named in full)
 - Providers: `capability_unavailable`, `model_not_running`, `provider_unreachable`, `consent_needed` (a node would send
