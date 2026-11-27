@@ -1018,6 +1018,8 @@ Item {
                             color: node.look.label
                         }
                         Glyph {
+                            id: stateMark
+                            objectName: "nodeStateGlyph"
                             visible: face.stateGlyph !== ""
                             anchors.verticalCenter: parent.verticalCenter
                             name: face.stateGlyph
@@ -1025,6 +1027,8 @@ Item {
                             color: face.failed || node.missing ? node.look.error : face.frozen ? node.look.text : node.look.label
                             RotationAnimator on rotation {
                                 running: face.running && face.full
+                                // A stopped animator leaves the angle it reached: the mark that follows (a check, a warning) would stay tilted.
+                                onRunningChanged: if (!running) stateMark.rotation = 0
                                 loops: Animation.Infinite
                                 from: 0
                                 to: 360
