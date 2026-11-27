@@ -36,6 +36,7 @@
 #include "nodes/builtin.h"
 #include "nodes/denoise_cut.h"
 #include "nodes/kernels.h"
+#include "nodes/model_step.h"
 #include "../engine/fake_http.h"
 #include "../engine/provider_support.h"
 
@@ -1470,6 +1471,77 @@ private slots:
             kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
         QVERIFY(out);
         QCOMPARE(out->value("latent").json().toObject().value("meta").toObject().value("width").toInt(), 336);
+    }
+
+    // --- the size step follows the model's alignment (#711): the engine rounds a picture to 64 on a UNet ---
+
+    static QByteArray unetHeader() {
+        return safetensors({{"model.diffusion_model.input_blocks.0.0.weight", QJsonArray{320, 4, 3, 3}}});
+    }
+
+    void sizeStepIs64ForAUnetAnd16ForTheOthersAndWhenUnknown() {
+        Bench bench;
+        const QJsonObject sdxl = bench.model("fugue/diffusion-model", "diffusion_models/sdxl.safetensors", unetHeader());
+        const QJsonObject flux = bench.model("fugue/diffusion-model", "diffusion_models/z.safetensors",
+                                             safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}},
+                                                          {"x_embedder.weight", QJsonArray{3840, 64}}}));
+        const QJsonObject gguf = bench.model("fugue/diffusion-model", "diffusion_models/x.gguf"); // no header to read
+        const NodeContext context = bench.context(kVaeEncode, {});
+        QCOMPARE(nodes::modelSizeStep(context, sdxl), 64);
+        QCOMPARE(nodes::modelSizeStep(context, QJsonObject{{"base", sdxl}}), 64);
+        QCOMPARE(nodes::modelSizeStep(context, QJsonObject{{"derived", QJsonObject{{"base", sdxl}}}}), 64);
+        QCOMPARE(nodes::modelSizeStep(context, flux), 16);
+        QCOMPARE(nodes::modelSizeStep(context, gguf), 16);
+        QCOMPARE(nodes::modelSizeStep(context, QJsonObject{}), 16);
+        QJsonObject missing = sdxl; // a file this machine has not
+        missing.insert("hash", "sha256:" + QString(64, QLatin1Char('0')));
+        QCOMPARE(nodes::modelSizeStep(context, missing), 16);
+    }
+
+    void vaeEncodeAndCropToMaskSizeAUnetsPicturesIn64s() {
+        Bench bench;
+        initVips();
+        const QString png = bench.dir.filePath("start.png");
+        (vips::VImage::black(784, 800, vips::VImage::option()->set("bands", 3)) + 90)
+            .cast(VIPS_FORMAT_UCHAR)
+            .write_to_file(png.toUtf8().constData());
+        const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, png, bench.hashes);
+        QVERIFY(image);
+        const QJsonObject unet = bench.model("fugue/diffusion-model", "diffusion_models/sdxl.safetensors", unetHeader());
+        const QJsonObject checkpoint = bench.model("fugue/model", "checkpoints/sdxl.safetensors", unetHeader());
+        // 784 x 800 is what a step of 16 makes of a crop; the engine decodes 768 x 832 (the nearest multiples of 64).
+        const Result<JobRequest> request = bench.request(kVaeEncode, {{"model", Value(checkpoint)}, {"image", Value(image.value())}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("width").toInt(), 768);
+        QCOMPARE(request->params.value("height").toInt(), 832);
+
+        // Crop to Mask: the same picture and a mask over its middle, at about a megapixel.
+        const QString maskFile = bench.dir.filePath("mask.png");
+        (vips::VImage::black(784, 800) + 0).insert(vips::VImage::black(200, 300) + 255, 300, 250)
+            .cast(VIPS_FORMAT_UCHAR).write_to_file(maskFile.toUtf8().constData());
+        const Result<MediaHandle> mask = MediaHandle::probe(MediaType::Image, maskFile, bench.hashes);
+        QVERIFY(mask);
+        const auto crop = [&](const Values &extra) {
+            Values inputs{{"image", Value(image.value())}, {"mask", Value(mask.value())}, {"padding", Value(8)}};
+            for (auto it = extra.begin(); it != extra.end(); ++it)
+                inputs.insert(it.key(), it.value());
+            const Result<Values> out = bench.run("fugue/crop-to-mask", inputs);
+            if (!out)
+                qFatal("Crop to Mask failed: %s", qPrintable(out.error().message));
+            return QSize(int(out->value("width").number()), int(out->value("height").number()));
+        };
+        const QSize plain = crop({});
+        QCOMPARE(plain.width() % 16, 0);
+        QVERIFY2(plain.width() % 64 != 0 || plain.height() % 64 != 0, "the test's box must not already sit on 64s");
+        const QSize stepped = crop({{"model", Value(unet)}});
+        QCOMPARE(stepped.width() % 64, 0);
+        QCOMPARE(stepped.height() % 64, 0);
+        // A multiple of 100 is kept with the model's 64: their common multiple.
+        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(100)}}).width() % 1600, 0);
+        // A model of another family keeps the multiple as asked.
+        const QJsonObject z = bench.model("fugue/diffusion-model", "diffusion_models/z.safetensors",
+                                          safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}}}));
+        QCOMPARE(crop({{"model", Value(z)}}), plain);
     }
 
     // --- a mask (#173, spec 14.4): VAE Encode keeps it on the latent, the Sampler sends it ---

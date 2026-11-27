@@ -12,6 +12,7 @@
           "label": "Model",
           "name": "model",
           "targets": [
+            "crop.model",
             "encode.model",
             "vae_encode.model",
             "sample.model"
@@ -96,7 +97,7 @@
         "crop": {
           "inputs": {},
           "type": "fugue/crop-to-mask",
-          "version": "1.0.0"
+          "version": "1.1.0"
         },
         "decode": {
           "inputs": {
@@ -162,7 +163,7 @@
           "name": "image"
         }
       ],
-      "version": "1.0.0"
+      "version": "1.1.0"
     }
   },
   "layout": {

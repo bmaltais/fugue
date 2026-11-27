@@ -13,10 +13,12 @@
 #include <QString>
 
 #include <algorithm>
+#include <numeric>
 #include <optional>
 
 #include "engine/file_hashes.h"
 #include "nodes/crop_stitch_ops.h"
+#include "nodes/model_step.h"
 #include "nodes/pixel_io.h"
 #include "nodes/stitch_handle.h"
 
@@ -65,7 +67,13 @@ public:
                                                    .arg(fitted.width).arg(fitted.height).arg(image->width).arg(image->height)));
             fitted = maskResized(fitted, image->width, image->height);
         }
-        std::optional<Cropped> crop = cropToMask(image.value(), fitted, padding, megapixels, multiple);
+        // The step the model aligns to (#711): the engine rounds a picture's sides to it, so a crop at another multiple
+        // comes back from the redraw in another shape. A `multiple` that is not one of its multiples keeps both: their common multiple.
+        const int modelStep = context.inputs.contains(QStringLiteral("model"))
+                                  ? modelSizeStep(context, context.input("model").json().toObject())
+                                  : kDefaultSizeStep;
+        const int stepped = modelStep > kDefaultSizeStep && multiple % modelStep != 0 ? std::lcm(multiple, modelStep) : multiple;
+        std::optional<Cropped> crop = cropToMask(image.value(), fitted, padding, megapixels, stepped);
         if (!crop)
             return makeInputError(QStringLiteral("mask_empty"), QStringLiteral("mask"),
                                   QStringLiteral("Nothing is painted in the mask."),
