@@ -174,7 +174,6 @@ int main(int argc, char *argv[]) {
     // mode and the file that remembers it are its.
     fugue::ChromeVisibility chrome(fugue::stateDir() + "/chrome.json");
     fugue::RunBar runBar(&runs, fugue::stateDir() + "/run-bar.json", &chrome);
-    runBar.registerCommands(commands);
     fugue::RunQueue runQueue({}, &runService);
     // The Canvas view's task bar (#231): the bundled actions, queued through the same runs.
     fugue::CanvasActions canvasActions(&runService, &registry, &workflows);

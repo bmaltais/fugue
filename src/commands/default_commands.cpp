@@ -64,7 +64,7 @@ QList<Row> defaultRows() {
         {"view.toggle-links", QT_TRANSLATE_NOOP("Command", "Hide or show links"), {"L"}, {}, "canvas", same},
         {"panel.nodes", QT_TRANSLATE_NOOP("Command", "Toggle the node library"), {"N"}, {}, "app", same},
         {"panel.workflows", QT_TRANSLATE_NOOP("Command", "Toggle the workflows panel"), {"W"}, {}, "app", same},
-        {"panel.queue", QT_TRANSLATE_NOOP("Command", "Toggle the run queue"), {"Alt+Q"}, {}, "canvas", "added"},
+        {"panel.queue", QT_TRANSLATE_NOOP("Command", "Toggle the run queue"), {"Alt+Q"}, {}, "app", "added"},
         // The Canvas view's layers panel (#226): its keys while the pointer is over it (Blender's hover rule).
         {"canvas-layers.visible", QT_TRANSLATE_NOOP("Command", "Hide or show the selected layers"), {"H"}, {"Click the eye", "Alt+click the eye: that layer alone"}, "canvas-layers", "added"},
         {"canvas-layers.lock", QT_TRANSLATE_NOOP("Command", "Lock or unlock the selected layers"), {"Ctrl+/"}, {"Click the lock"}, "canvas-layers", "added"},

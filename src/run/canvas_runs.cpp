@@ -182,14 +182,6 @@ QString CanvasRuns::startRun(const QString &target, bool first) {
     return firstId;
 }
 
-void CanvasRuns::setYieldKeys(bool yield) {
-    if (yield == m_yieldKeys)
-        return;
-    m_yieldKeys = yield;
-    setContext();
-    emit yieldKeysChanged();
-}
-
 void CanvasRuns::setBatch(int batch) {
     batch = std::clamp(batch, 1, maxBatch);
     if (batch == m_batch)
@@ -273,7 +265,7 @@ void CanvasRuns::cancel() {
 
 void CanvasRuns::setContext() {
     if (m_commands)
-        m_commands->setContextActive(QStringLiteral("run"), busy() && !m_yieldKeys);
+        m_commands->setContextActive(QStringLiteral("run"), busy());
 }
 
 QString CanvasRuns::aggregate(const NodeView &view) {

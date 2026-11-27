@@ -551,11 +551,10 @@ ApplicationWindow {
         SettingsPanel { model: win.appSettingsModel }
     }
 
-    // The run toolbar and the queue panel (#60), floating over the canvas. Each is made when it is
-    // shown and dropped when it is not, and neither at all in a window without runs: the window
-    // keeps few items (#5), and not even a Loader is left standing for them.
+    // The run toolbar (#60), floating over the canvas. It is made when it is shown and dropped when it
+    // is not, and not at all in a window without runs: the window keeps few items (#5), and not even a
+    // Loader is left standing for it. The run queue is an area view (#648, workspace/QueueArea.qml).
     property Item runToolbarItem: null
-    property Item runQueueItem: null
     readonly property bool runBarWanted: App.runBar !== null && App.runs !== null && App.runQueue !== null
     function syncRunBar() {
         const toolbar = runBarWanted && App.runBar.visible
@@ -564,15 +563,6 @@ ApplicationWindow {
         else if (!toolbar && runToolbarItem) {
             runToolbarItem.destroy()
             runToolbarItem = null
-        }
-        const panel = toolbar && App.runBar.queueOpen
-        if (panel && !runQueueItem) {
-            runQueueItem = runQueueComponent.createObject(fugueCanvas) as Item
-            App.runQueue.watching = true
-        } else if (!panel && runQueueItem) {
-            runQueueItem.destroy()
-            runQueueItem = null
-            App.runQueue.watching = false
         }
     }
     Component.onCompleted: {
@@ -586,8 +576,6 @@ ApplicationWindow {
     Connections {
         target: App.runBar
         function onVisibleChanged() { win.syncRunBar() }
-        function onQueueOpenChanged() { win.syncRunBar() }
-        function onQueueFocusRequested() { (win.runQueueItem as RunQueuePanel)?.focusFirst() }
     }
     Component {
         id: runToolbarComponent
@@ -600,42 +588,19 @@ ApplicationWindow {
             batch: App.runs.batch
             maxBatch: 99
             place: App.runBar.place
-            queueOpen: App.runBar.queueOpen
+            queueOpen: App.workspace !== null && App.workspace.queueArea > 0
             onMenuAboutToOpen: menuItems = App.commands.menu("run")
             onRunRequested: App.commands.trigger("run.start")
             onCancelRequested: App.commands.trigger("run.cancel")
             onBatchRequested: value => App.runs.batch = value
-            onQueueToggled: App.runBar.queueOpen = !App.runBar.queueOpen
+            onQueueToggled: App.commands.trigger("panel.queue")
             onPlaceRequested: place => App.runBar.place = place
         }
     }
-    Component {
-        id: runQueueComponent
-        RunQueuePanel {
-            id: runQueuePanel
-            look: App.theme.look
-            entries: App.runQueue.entries
-            history: App.runQueue.history
-            // It hangs from the bar on the side with room (src/engine/float_place.h), centered on it.
-            readonly property Item bar: (win.runToolbarItem as RunToolbar)?.surface ?? null
-            readonly property rect barRect: bar ? Qt.rect(bar.x, bar.y, bar.width, bar.height) : Qt.rect(0, 0, 0, 0)
-            readonly property size area: Qt.size(fugueCanvas.width, fugueCanvas.height)
-            maxHeight: Math.max(12 * look.unit, FloatPlace.roomOnSide(barRect, wantedHeight, area, 2 * look.unit))
-            x: FloatPlace.panelPlace(barRect, Qt.size(width, height), area, 2 * look.unit, wantedHeight).x
-            y: FloatPlace.panelPlace(barRect, Qt.size(width, height), area, 2 * look.unit, wantedHeight).y
-            onCancelRequested: run => App.runQueue.cancel(run)
-            onFrontRequested: run => App.runQueue.moveToFront(run)
-            onFolderRequested: run => App.runQueue.openFolder(run)
-            onCloseRequested: App.runBar.queueOpen = false
-            thumbOf: path => App.mediaLibrary.thumbSource(path, 64)
-            onResultsRequested: run => win.showRunResults(run)
-            // Escape closes it while it has the focus, so the run's cancel keys sleep then.
-            Binding {
-                target: App.runs
-                property: "yieldKeys"
-                value: runQueuePanel.activeFocus
-            }
-        }
+    // What a finished row of the Queue area asks for (#133): its results, shown by showRunResults.
+    Connections {
+        target: App.runQueue
+        function onResultsRequested(run) { win.showRunResults(run) }
     }
 
     // The side panels (#56): the node library (N) and the workflows panel (W), one open at a time

@@ -1,5 +1,7 @@
 #include "workspace/workspace.h"
 
+#include <algorithm>
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
@@ -282,6 +284,30 @@ bool Workspace::requestApp(bool app) {
     return toggleApp();
 }
 
+bool Workspace::toggleQueue() {
+    if (const int queue = queueArea())
+        return m_tree.count() > 1 ? closeArea(queue) : showView(queue, ViewRegistry::kGraph);
+    const int id = m_tree.area(m_active) ? m_active : fallbackArea();
+    if (!m_tree.area(id))
+        return false;
+    // The Queue's share of the area's height: kQueueShare, more when that would leave it under its minimum.
+    double share = kQueueShare;
+    if (!m_bodySize.isEmpty()) {
+        for (const AreaTree::Placed &placed : m_tree.layout(QRectF(QPointF(), m_bodySize), minimum(), false))
+            if (placed.area == id && placed.rect.height() > 0)
+                share = std::max(share, m_views.minimumSize(ViewRegistry::kQueue).height() / placed.rect.height());
+    }
+    AreaTree next = m_tree;
+    const int made = next.split(id, AreaAxis::Column, ViewRegistry::kQueue, std::min(share, 0.95));
+    if (!made || (!m_bodySize.isEmpty() && !next.fits(m_bodySize, minimum()))) {
+        emit message(QCoreApplication::translate("Workspace", "There is no room for the Queue under this area. Make the window bigger or close an area."));
+        return false;
+    }
+    commit(next);
+    setActive(made);
+    return true;
+}
+
 bool Workspace::resizeBorder(const QVariantList &path, int border, double delta, double length) {
     AreaTree next = m_tree;
     if (!next.resize(toPath(path), border, delta, length, minimum()))
@@ -373,6 +399,9 @@ void Workspace::registerCommands(CommandRegistry &commands) {
         commands.setEnabledWhen(id, [this, target, view] { return canShow(target(), view); });
         commands.setCheckedWhen(id, [this, target, view] { return viewOf(target()) == view; });
     }
+    // panel.queue's spec is the defaults' (commands/default_commands.cpp): its menu row is in Bars and panels.
+    commands.setHandler("panel.queue", [this] { toggleQueue(); });
+    commands.setCheckedWhen("panel.queue", [this] { return queueArea() > 0; });
     commands.setHandler("view.reset-layout", [this] { reset(); });
     commands.setEnabledWhen("view.reset-layout", [this] { return !isDefault(m_tree); });
 }

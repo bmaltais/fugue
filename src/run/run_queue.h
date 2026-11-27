@@ -11,7 +11,7 @@
 // It knows nothing of the canvas or of what a run started from; QML reads it as App.runQueue.
 //
 // What it holds is kept current without polling at idle: a watch on the queue folder, and the
-// run events of this window. Only while `watching` (the queue panel is open) does it also read
+// run events of this window. Only while `watching` (a Queue area is shown) does it also read
 // the going run's events each second for its node and progress, and list the history.
 //
 // A row of `entries` (queue order, the active run first) is
@@ -55,7 +55,7 @@ class RunQueue : public QObject {
     Q_PROPERTY(QVariantList history READ history NOTIFY changed)
     // Runs going and waiting, of any process.
     Q_PROPERTY(int count READ count NOTIFY changed)
-    // True while the panel that shows the rows is open: progress and the history are kept current.
+    // True while the Queue area that shows the rows is made: progress and the history are kept current.
     Q_PROPERTY(bool watching READ watching WRITE setWatching NOTIFY watchingChanged)
 
 public:
@@ -77,6 +77,8 @@ public:
     Q_INVOKABLE bool moveToFront(const QString &run);
     // The run's folder, in the file manager.
     Q_INVOKABLE void openFolder(const QString &run);
+    // A finished run's results were asked for (a click on its row in the Queue area): the window shows them (`resultsRequested`).
+    Q_INVOKABLE void showResults(const QString &run) { emit resultsRequested(run); }
     // The workflow file a run started from (empty for an unsaved one), the same as in its rows.
     Q_INVOKABLE QString workflowOf(const QString &run) const;
     // Reads the queue and the folders now (tests, and the one place that wants it at once).
@@ -85,6 +87,7 @@ public:
 signals:
     void changed();
     void watchingChanged();
+    void resultsRequested(const QString &run);
 
 private:
     void schedule() { m_later.start(); }

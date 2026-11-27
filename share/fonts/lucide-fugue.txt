@@ -77,3 +77,4 @@ chevrons-up-down e211
 cloud e08c
 copy e0a2
 app-window e42b
+list-ordered e1d1
