@@ -706,6 +706,7 @@ private slots:
         // The inputs hidden: the slim strip with the way back and Run (appStripRun), on KitRaise.under.
         for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
             app.window->resize(size);
+            QTest::qWait(400);
             tap(app.window, find(app.window, "appHideInputs"));
             QTRY_VERIFY(find(app.window, "appStripRun"));
             QTest::qWait(400);
