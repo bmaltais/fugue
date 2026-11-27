@@ -356,7 +356,7 @@ private slots:
         // snapshot was made and is not in it was deleted upstream.
         write(bundled.path() + "/fresh/template.json", category("Fresh", "a"));
         write(bundled.path() + "/fresh/workflow.fugue", flow());
-        write(online.path() + "/bundled-ids.json", R"({"bundled": ["alpha", "beta", "gone"]})");
+        write(online.path() + "/.bundled-ids.json", R"({"bundled": ["alpha", "beta", "gone"]})");
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);
         const TemplateLibrary library({TemplateRoot{online.path(), false, false, true}, {bundled.path(), false}}, &registry);

@@ -391,7 +391,7 @@ void TemplateFeed::finish() {
             if (QFileInfo(entry.absoluteFilePath() + QStringLiteral("/template.json")).isFile()
                 || QFileInfo(entry.absoluteFilePath() + QStringLiteral("/workflow.fugue")).isFile())
                 bundledIds.append(entry.fileName());
-    QFile idsFile(m_staging + QStringLiteral("/bundled-ids.json"));
+    QFile idsFile(m_staging + QStringLiteral("/.bundled-ids.json"));
     if (!idsFile.open(QIODevice::WriteOnly | QIODevice::NewOnly) || idsFile.write(QJsonDocument(QJsonObject{{"bundled", bundledIds}}).toJson()) < 0)
         return fail(QStringLiteral("Fugue could not write the template record."));
     idsFile.close();
@@ -399,7 +399,7 @@ void TemplateFeed::finish() {
     // Never remove a live folder in place: other Fugues may be reading it. It is renamed aside, then removed.
     QString aside;
     if (QFileInfo::exists(target)) {
-        aside = target + QStringLiteral(".old-") + QString::number(::getpid());
+        aside = storeDir() + QStringLiteral("/.staging-old-") + m_sha + QLatin1Char('-') + QString::number(::getpid()); // the staging sweep removes it if this process dies
         QDir(aside).removeRecursively();
         if (!QDir().rename(target, aside))
             return fail(QStringLiteral("Fugue could not replace %1.").arg(target));

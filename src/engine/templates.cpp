@@ -365,12 +365,12 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
     };
     Categories shared;
     bool onlineInUse = false;
-    QSet<QString> snapshotBundled; // the bundled ids the snapshot was made beside (bundled-ids.json); none known: nothing is hidden
+    QSet<QString> snapshotBundled; // the bundled ids the snapshot was made beside (.bundled-ids.json, a dot name: never part of a fetched tree); none known: nothing is hidden
     for (const TemplateRoot &root : m_roots) {
         const QString path = pathOf(root);
         if (root.online && !path.isEmpty() && QFileInfo(path).isDir()) {
             onlineInUse = true;
-            if (const Result<QJsonObject> record = readObject(QDir(path).filePath(QStringLiteral("bundled-ids.json"))); record)
+            if (const Result<QJsonObject> record = readObject(QDir(path).filePath(QStringLiteral(".bundled-ids.json"))); record)
                 for (const QJsonValue id : record->value(QStringLiteral("bundled")).toArray())
                     snapshotBundled.insert(id.toString());
         }
