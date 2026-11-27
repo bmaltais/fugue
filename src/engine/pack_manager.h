@@ -81,6 +81,10 @@ struct PackAdded {
     bool setupSkipped = false; // the pack has a setup and the person declined it
 };
 
+// Whether the setup `command` has run to its end in this installed pack folder: a marker (`.fugue-setup.json`) the
+// install or `setUpPack` writes when it succeeds. A pack installed before the marker existed has none.
+bool packSetupDone(const QString &packFolder, const QStringList &command);
+
 // The installed pack folders' record of where each came from, or an empty source.
 PackSource readPackSource(const QString &packFolder);
 
@@ -134,6 +138,10 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
 // Also forgets its trust.
 Result<PackSummary> removePack(const QString &id, const QString &packsDir, TrustStore &trust,
                                const PackPrompts &prompts);
+
+// Runs the setup of an installed pack (folder name `id`, as `trustPack` takes) after asking, and records that it ran.
+// `setup_declined` when the answer is no, `setup_failed` when it fails. A pack with no setup is returned as it is.
+Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const PackPrompts &prompts);
 
 // `fugue pack trust`: asks, then records trust for the installed version.
 Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustStore &trust,

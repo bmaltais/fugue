@@ -25,6 +25,7 @@ namespace fugue {
 namespace {
 
 const QString sourceFile = QStringLiteral(".fugue-source.json");
+const QString setupMarkerFile = QStringLiteral(".fugue-setup.json");
 
 Error fail(const QString &code, const QString &message, const QString &hint = {}) {
     return makeError(code, message, hint);
@@ -413,6 +414,16 @@ QString displayCommand(const QStringList &command) {
     return parts.join(QLatin1Char(' '));
 }
 
+bool packSetupDone(const QString &packFolder, const QStringList &command) {
+    const Result<QJsonObject> read = readJsonObject(packFolder + QLatin1Char('/') + setupMarkerFile);
+    if (!read)
+        return false;
+    QStringList done;
+    for (const QJsonValue &part : read->value("command").toArray())
+        done << part.toString();
+    return !command.isEmpty() && done == command;
+}
+
 PackSource readPackSource(const QString &packFolder) {
     PackSource source;
     const Result<QJsonObject> read = readJsonObject(packFolder + QLatin1Char('/') + sourceFile);
@@ -499,8 +510,15 @@ Error warningOf(Error error, const QString &prefix = {}) {
     return error;
 }
 
+// Records that the setup command ran to its end in the pack's folder (best effort: without it Get ready offers the setup again).
+void markSetupDone(const QString &packFolder, const QStringList &command) {
+    writeJsonFile(packFolder + QLatin1Char('/') + setupMarkerFile,
+                  QJsonObject{{"command", QJsonArray::fromStringList(command)}, {"ran", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
+}
+
 // Installs a staged pack into packsDir, replacing the installed folder when `replacing`. The
-// setup question comes before anything changes; a setup that fails puts everything back.
+// setup question comes before anything changes (declining it on an update keeps the old pack); a setup that fails
+// puts everything back.
 Result<PackAdded> install(const Staged &staged, PackSummary summary, const QString &packsDir, const QString &target,
                           const PackPrompts &prompts, bool replacing, TrustStore &trust) {
     summary.source = staged.source;
@@ -515,6 +533,14 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
             return yes.errors();
         runSetup = *yes;
         added.setupSkipped = !*yes;
+        // An update swaps in a fresh copy, which has no environment (a .venv, downloads): without its setup the
+        // pack would stop working and the old environment would be deleted with the old folder. So the old pack
+        // stays as it was (#521).
+        if (replacing && !*yes)
+            return fail(QStringLiteral("setup_declined"),
+                        QStringLiteral("%1 was not updated: the new version needs its setup run to work, and you declined it.")
+                            .arg(summary.id),
+                        QStringLiteral("The installed version and its environment are unchanged. Update again and accept the setup."));
     }
     const Errors written = writeSource(staged.folder, staged.source);
     if (hasErrors(written))
@@ -542,6 +568,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
                         done.output.trimmed());
         }
         added.setupRan = true;
+        markSetupDone(target, command);
     }
     if (replacing)
         QDir(backup).removeRecursively();
@@ -844,9 +871,32 @@ Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustS
         return yes.error();
     if (!*yes)
         return fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not trusted."));
-    const Errors errors = trust.trust(summary->id, summary->version);
+    const Errors errors = trust.trust(summary->id, summary->version, packSecretsDigestOfFolder(folder));
     if (hasErrors(errors))
         return errors;
+    return *summary;
+}
+
+Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const PackPrompts &prompts) {
+    if (!validPackId(parsePackRef(id).id) || !QFileInfo(packsDir + QLatin1Char('/') + id).isDir())
+        return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
+    const QString folder = packsDir + QLatin1Char('/') + id;
+    const Result<PackSummary> summary = summarizePack(folder);
+    if (!summary)
+        return summary.errors();
+    if (summary->setupCommand.isEmpty())
+        return *summary;
+    const Result<bool> yes = ask(prompts.runSetup, *summary, QStringLiteral("Running a pack's setup"));
+    if (!yes)
+        return yes.error();
+    if (!*yes)
+        return fail(QStringLiteral("setup_declined"), QStringLiteral("The setup of %1 was not run.").arg(summary->id));
+    const QStringList &command = summary->setupCommand;
+    const ProcessResult done = runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled);
+    if (!done.ok)
+        return fail(QStringLiteral("setup_failed"), QStringLiteral("The setup of %1 failed (%2).").arg(summary->id, displayCommand(command)),
+                    done.output.trimmed());
+    markSetupDone(folder, command);
     return *summary;
 }
 

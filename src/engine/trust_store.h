@@ -47,7 +47,12 @@ public:
     bool isTrustedByDefault(const QString &packId, const QString &version) const;
     // The Default project's trust.json (read-only here).
     static QString defaultProjectPath();
-    Errors trust(const QString &packId, const QString &version);
+    // `secretsDigest`: packSecretsDigest of the pack being trusted, when the caller has just read its folder; else the one
+    // the loader parsed (a pack not loaded has none, and then none is kept).
+    Errors trust(const QString &packId, const QString &version, const QString &secretsDigest = {});
+    // Trust on first sight: a version trusted before digests were kept gets `digest` now (nothing for a version that is not
+    // trusted here or already has one), so a later edit of its secrets asks again.
+    Errors adoptSecretsDigest(const QString &packId, const QString &version, const QString &digest);
     // Drops every version of a pack (it was removed). No effect for a pack that was never trusted. Only this
     // session's own file is changed.
     Errors forget(const QString &packId);

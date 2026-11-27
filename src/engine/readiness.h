@@ -64,10 +64,13 @@ ReadinessRequest requestFor(const Document &document, const Registry &registry, 
                             const QString &baseFolder = {});
 
 struct ReadinessPack {
-    enum class Action { Install, Trust }; // Trust: installed here already, not trusted yet
+    // Trust: installed here already, not trusted yet. Setup: installed and trusted, its setup command never ran to its end
+    // here (no marker, 6.6): a pack installed before the marker existed is offered it too.
+    enum class Action { Install, Trust, Setup };
     Action action = Action::Install;
     PackSummary pack;   // what is shown and approved: for an install as it was previewed
-    QString folderName; // Trust: the installed folder's name, which `trustPack` takes
+    QString folderName; // Trust, Setup: the installed folder's name, which `trustPack` and `setUpPack` take
+    bool setupNeeded = false; // Trust, Setup: the pack has a setup command and no marker; the same yes runs it before it is trusted
     // A git pack: before the yes nothing is fetched, so `pack` holds only what the workflow records (id, version, name, source)
     // and the row says its details come after the download. After the yes it is cloned (https only, size capped), checked
     // against that record, and installed from that clone.
@@ -76,7 +79,7 @@ struct ReadinessPack {
     std::shared_ptr<PreparedPack> prepared;
 
     bool installs() const { return action == Action::Install; }
-    bool hasEnvironment() const { return installs() && !pending && !pack.setupCommand.isEmpty(); }
+    bool hasEnvironment() const { return (installs() || setupNeeded) && !pending && !pack.setupCommand.isEmpty(); }
 };
 
 struct ReadinessModel {

@@ -131,6 +131,16 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(reloaded.count(), 1, 5000);
         QVERIFY(TrustStore(trustFile).trust("io.example.tools", "1.1.0").isEmpty()); // replaced by a rename
         QTRY_COMPARE_WITH_TIMEOUT(reloaded.count(), 2, 5000);
+        // An old-format trust file (a version trusted before digests were kept) is a change of trust: one reload.
+        QVERIFY(writeFile(trustFile, R"({"packs": {"io.example.tools": ["2.0.0"]}})"));
+        QTRY_COMPARE_WITH_TIMEOUT(reloaded.count(), 3, 5000);
+        // The digest written back for it when the pack loads (#497) changes no trust: no reload, so a run reading the packs is
+        // not disturbed.
+        QVERIFY(TrustStore(trustFile).adoptSecretsDigest("io.example.tools", "2.0.0", "sha256:abc").isEmpty());
+        QFile written(trustFile);
+        QVERIFY(written.open(QIODevice::ReadOnly) && written.readAll().contains("sha256:abc"));
+        QTest::qWait(400);
+        QCOMPARE(reloaded.count(), 3);
     }
 };
 

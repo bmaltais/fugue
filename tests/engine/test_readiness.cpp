@@ -374,6 +374,46 @@ private slots:
         QVERIFY(m_trust->isTrusted("io.test.segment", "1.0.0"));
     }
 
+    // #521: a pack whose setup never ran to its end here (no marker; one installed before the marker existed is the same) is
+    // offered the setup by Get ready, trusted or not, and the one yes runs it.
+    void anInstalledPackWithASetupAndNoMarkerIsOfferedTheSetup() {
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch environment.ok"));
+        PackPrompts yes;
+        yes.install = yes.trust = yes.runSetup = [](const PackSummary &) { return Answer::Yes; };
+        QVERIFY(addPack(folder, {}, packs(), *m_trust, yes).ok());
+        QVERIFY(trustPack("io.test.segment", packs(), *m_trust, yes).ok());
+        const QString installed = packs() + "/io.test.segment";
+        QVERIFY(QFileInfo(installed + "/environment.ok").isFile());
+        Registry loaded;
+        loadPacks(loaded, {packs()});
+        ReadinessEnv e = env();
+        e.registry = &loaded;
+        ReadinessRequest r = request(folder, {});
+        r.packs.first().needsInstall = false;
+        QVERIFY(buildReadinessPlan(r, e).packs.isEmpty()); // set up, trusted: nothing to do
+
+        // The environment is gone and so is the marker (what a pack installed before markers looks like).
+        QVERIFY(QFile::remove(installed + "/environment.ok"));
+        QVERIFY(QFile::remove(installed + "/.fugue-setup.json"));
+        const ReadinessPlan plan = buildReadinessPlan(r, e);
+        QCOMPARE(plan.packs.size(), 1);
+        QCOMPARE(plan.packs.first().action, ReadinessPack::Action::Setup);
+        QCOMPARE(plan.trustOnlyCount(), 0);
+        QCOMPARE(plan.environmentCount(), 1);
+        QVERIFY(plan.headline().contains("set up 1 environment"));
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.cancelled = nullptr;
+        const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY(outcome.ok);
+        QVERIFY(QFileInfo(installed + "/environment.ok").isFile());
+        QVERIFY(buildReadinessPlan(r, e).packs.isEmpty()); // the marker is back
+
+        // A setup that fails leaves no marker, so it is offered again.
+        QVERIFY(QFile::remove(installed + "/.fugue-setup.json"));
+        QVERIFY(QFile::remove(installed + "/environment.ok"));
+        QCOMPARE(buildReadinessPlan(r, e).packs.size(), 1);
+    }
+
     // Spec 8.9: a file with the handle's name and no remembered hash is taken to be the one, as `fugue validate` and the canvas
     // check take it, also in an extra model folder in ComfyUI's layout. The plan reads no model file to tell.
     void aFileWithTheNameAndNoRememberedHashIsNotDownloaded() {

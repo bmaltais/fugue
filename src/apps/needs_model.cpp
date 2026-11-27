@@ -78,7 +78,7 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
     for (const ReadinessPack &row : plan.packs) {
         const PackSummary &p = row.pack;
         const QString name = p.name.isEmpty() ? p.id : p.name;
-        QStringList parts{row.installs() ? tr("Install and trust") : tr("Trust")};
+        QStringList parts{row.installs() ? tr("Install and trust") : row.action == ReadinessPack::Action::Setup ? tr("Set up") : tr("Trust")};
         if (row.hasEnvironment())
             parts << tr("sets up an environment");
         add({{"kind", "pack"}, {"key", "pack:" + p.id}, {"name", p.version.isEmpty() ? name : name + QLatin1Char(' ') + p.version},

@@ -2,7 +2,10 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "engine/fugue_home.h"
 #include "engine/pack_loader.h"
@@ -39,9 +42,17 @@ void RegistryReloader::setTrustFile(const QString &path) {
     watch();
 }
 
+// What the trust file says about which packs are trusted, as text: only a change of that reloads. The `secrets` digests are
+// written back when a pack loads (a pack trusted before they were kept, #497), and that write must not reload the packs again,
+// nor disturb a run that is reading them.
 QString RegistryReloader::trustStamp() const {
-    const QFileInfo info(m_trustFile);
-    return info.exists() ? QStringLiteral("%1 %2").arg(info.lastModified().toMSecsSinceEpoch()).arg(info.size()) : QString();
+    QFile file(m_trustFile);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject())
+        return QStringLiteral("unreadable %1").arg(QFileInfo(m_trustFile).lastModified().toMSecsSinceEpoch());
+    return QString::fromUtf8(QJsonDocument(document.object().value(QStringLiteral("packs")).toObject()).toJson(QJsonDocument::Compact));
 }
 
 void RegistryReloader::onDirectory(const QString &path) {
