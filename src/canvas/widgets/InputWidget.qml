@@ -97,6 +97,11 @@ Rectangle {
             return qsTr("Reading model… %1%").arg(Math.floor(hashing.progress * 100))
         if (kind === "model" && (port.value === undefined || port.value === ""))
             return port.grows === true ? "" : port.required ? qsTr("Choose a model") : emptyModelText
+        // A multiline well shows all its lines (the card sizes the row for them; the port's `value` is only the first, for a one-line face).
+        if (tall && typeof literal === "string")
+            return literal
+        if (tall && literal === undefined && typeof edits.spec(nodeId, name)["default"] === "string")
+            return edits.spec(nodeId, name)["default"]
         return port.value !== undefined ? port.value : ""
     }
     // The glyph after the value (a Lucide name): what a click at the right end opens.
@@ -180,6 +185,17 @@ Rectangle {
         font.italic: root.linked
         font.features: { "tnum": 1 }
     }
+    // "+N lines" at the right of the caption line while a multiline well cuts its text (#715): MoreLines.qml, made the first time
+    // the well is cut (a resting card, and a well that fits, cost nothing more).
+    property bool moreMade: false
+    readonly property bool cutShort: tall && valueLabel.truncated && !editingText
+    onCutShortChanged: makeMore()
+    function makeMore() {
+        if (cutShort && !moreMade) {
+            moreMade = true
+            make("MoreLines.qml", { label: valueLabel })
+        }
+    }
     Glyph {
         id: glyphMark
         visible: root.glyph !== "" && !root.editingText
@@ -236,6 +252,7 @@ Rectangle {
             make("ToggleSwitch.qml")
         else if (kind === "color")
             make("ColorSwatch.qml")
+        makeMore()
     }
     property bool chevronsMade: false
 
@@ -286,7 +303,7 @@ Rectangle {
                 root.edits.finish()
                 return
             }
-            root.clicked(event.x)
+            root.clicked(event.x, event.y)
         }
         onCanceled: {
             if (dragging)
@@ -295,7 +312,8 @@ Rectangle {
         }
     }
 
-    function clicked(x) {
+    // x, y: where the press was in the well; a multiline field puts its caret there (a Tab into it has none: the caret goes to the end).
+    function clicked(x, y) {
         const buttons = pasteable ? pasteWidth + pad : 0
         const atEnd = x > width - glyphZone - buttons && x <= width - buttons
         switch (kind) {
@@ -327,20 +345,21 @@ Rectangle {
                 return openMenu(inputEntries())
             return atEnd ? openDialog() : openEditor()
         default:
-            return openEditor()
+            return openEditor(x, y)
         }
     }
 
     // --- typing ---
 
-    function openEditor() {
+    function openEditor(atX, atY) {
         if (editor)
             return
         error = ""
         // The multiline editor opens over the rows below: lift this row above them.
         if (row)
             row.z = 2
-        editor = make(kind === "multiline" ? "AreaEditor.qml" : "FieldEditor.qml")
+        editor = kind !== "multiline" ? make("FieldEditor.qml")
+               : make("AreaEditor.qml", atX === undefined || atY === undefined ? {} : { caretX: atX, caretY: atY })
     }
     function closeEditor() {
         error = ""

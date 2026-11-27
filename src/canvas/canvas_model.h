@@ -936,6 +936,7 @@ private:
     qreal m_headerHeight = 28;  // 7u, rounded
     qreal m_rowHeight = 24;     // 6u
     qreal m_tallRowHeight = 64; // 16u: an unlinked multiline input
+    qreal m_emptyTallRowHeight = 44; // 11u: one that is empty (the caption and a line)
     qreal m_padTop = 4;         // 1u
     qreal m_padBottom = 8;      // 2u
     qreal m_defaultWidth = 240; // 60u

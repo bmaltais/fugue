@@ -1640,3 +1640,20 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Old: one play button, Run to here.
 - New: two buttons so the direction is one click: `arrow-right-to-line` (to here) and `arrow-right-from-line` (from here), a matched arrow pair (Lucide has no play-with-bar glyph), each with its command label as tooltip and accessible name. Run from here also holds the seeds upstream of the node (spec 3.4).
 - Rules met: Floor (28px), Gaps (within the run chunk, 1u as before), Learned place (Run to here keeps the first place and its key), Primary (neither is accent: the toolbar's run buttons are plain).
+
+### 2026-11-27 Multiline text: caret at the click, every line shown, Run from inside the field (#715, slice 0)
+
+- Control: `src/canvas/widgets/AreaEditor.qml` (the open multiline field, `widgetArea`), `InputWidget.qml` (`clicked(x, y)`, `openEditor`), `src/canvas/node_size.cpp` (`multilineHeight`).
+- Old: a click on a multiline well selected the whole text, so the first key typed replaced the prompt; a well showed one line fewer than its row was sized for ("compositi…" on a prompt that fitted); Ctrl+Enter inside the open field was not covered by a test.
+- New: the caret goes where the press landed (`positionAt`), and a Tab into the field puts it at the end (a prompt is added to more often than replaced); the row adds the 0.5u the card leaves round the well, so n lines show n lines; Ctrl+Enter is Run from inside the field (tested: Qt's `TextEdit` leaves it to the window, so no handler was needed). Still one undo step per field visit, and Escape keeps the text.
+- Why: every text control in the references puts the caret at the click; the well's text box was 16n - 4 px for n lines.
+- Rules met: Floor (the well is unchanged in width, taller by 4 px), Keys (no key added or moved), Learned place (nothing moved).
+
+### 2026-11-27 Multiline text at rest: "+N lines", empty at 11u, a 12-line tooltip, Move gets its own glyph (#715, slice 1)
+
+- Control: `src/canvas/widgets/InputWidget.qml` (`widgetMoreLines`, `valueText`), `src/canvas/CanvasNode.qml` (`cutTip`, the row's tooltip), `src/canvas/canvas_model.cpp` (`layOut`: an empty multiline row), `src/canvas/CanvasView.qml` (the Move tool button `canvasViewTool-move`), `share/fonts/lucide-fugue.*` (the `move` glyph).
+- Old: a long prompt ended in "…" with no sign of how much was hidden, and a text with line breaks showed only its first line; an empty multiline input took 16u (Text Template's empty C to F, 4 x 64 px); the tooltip of a cut value ran to the whole text on one folded line; the Move tool and the picture's large view both drew `maximize-2`.
+- New: while a well cuts its text its caption line ends with `+N lines` (`label`, caption size, no control, no target); an empty well rests at 11u (caption and one line) and grows with its first text; the tooltip shows 12 lines of the value, then "…" and "+N lines", with its line breaks kept; the Move tool draws Lucide `move` (added to the subset with the recipe in `lucide-fugue.txt`), so `maximize-2` means "large view" alone.
+- Why: the number tells whether it is worth opening the editor (#715 review); a glyph means one thing (checklist); the wells' look as a field is kept by the well, not its height.
+- Rules met: Floor (the caption words are not a control), Gaps and Learned place (nothing moved but the rows below an empty well, which come up 20 px each), Keys (none).
+- Not done on purpose: the hover expand button (`maximize-2`, 24 px, "Open in the text panel (Alt+E)"). It opens the text panel, which is slice 3; until then the button would be a control that does nothing, so it is left out and slice 3 adds it with the panel. The "+N lines" and its place are ready for it (the button's place is the well's top-right corner, over the words).

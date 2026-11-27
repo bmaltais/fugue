@@ -407,6 +407,11 @@
     "one": "%n error",
     "other": "%n errors"
   },
+  "+%1 lines": "+%1 lines",
+  "+%n lines": {
+    "one": "+%n line",
+    "other": "+%n lines"
+  },
   "%n nodes": {
     "one": "%n node",
     "other": "%n nodes"

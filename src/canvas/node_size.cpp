@@ -56,8 +56,9 @@ int wrappedLines(const QString &text, qreal width, int textSize, int maxLines) {
 }
 
 qreal multilineHeight(int lines, int textSize) {
-    // One line more than the text: the field's label as a caption above it (#74).
-    return (lines + 1) * 16 + 2 * std::round(1.5 * textSize / 3.0);
+    // One line more than the text: the field's label as a caption above it (#74). Plus the 0.5u the card leaves above and
+    // below the well (CanvasNode.qml's widget loader), or the well shows one line less than the row was sized for (#715).
+    return (lines + 1) * 16 + 2 * std::round(1.5 * textSize / 3.0) + 2 * std::round(0.5 * textSize / 3.0);
 }
 
 } // namespace fugue::node_size

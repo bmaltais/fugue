@@ -160,7 +160,7 @@ in `text`, Medium, elided.
 | `spin` | value; ‹ › chevrons at the ends on hover; drag to scrub |
 | `slider` | a fill from the left at `accent` 22% for the value's share of its range |
 | `line` | value, elided at the right |
-| `multiline` | 16u row (64); its label as a caption on the first line, filled or not (#74), then the text, at 16 px line height, `text`; scrolls when focused |
+| `multiline` | 16u row (64), 11u (44) while empty (the caption and one line); its label as a caption on the first line, filled or not (#74), then the text, at 16 px line height, `text`; scrolls when focused. The row is `node_size::multilineHeight` (the lines plus the caption, the 1.5u above the caption and below the text, and the 0.5u the card leaves round the well), so n lines of text show n lines (#715: it showed n - 1); every line of the value is drawn (it drew the first only). While the text is cut, the caption line ends with `+N lines` in `label` at the caption size (`widgetMoreLines`: the lines a hidden copy of the text counts beyond the well's, made only while cut; `N+` past 20,000 characters) |
 | `toggle` | a 22 × 12 switch at the right: `accent` track, `accentForeground` knob; off is `hairline-strong` |
 | `choice` | value and a chevron-down glyph |
 | `file`, `folder` | the path elided in the middle, a folder glyph |
@@ -168,7 +168,7 @@ in `text`, Medium, elided.
 | `seed` | value and a dice glyph (click: randomize, increment, fixed menu) |
 | Model picker (resource inputs) | a model glyph, the model's name elided in the middle (its quantization and extension kept), a chevron |
 
-A value cut short shows whole in its row's tooltip. The list a widget opens is sized for its entries, not for the field, and drawn at screen scale at any zoom (`WidgetMenu`; docs/ui-ergonomics.md, 2026-11-27).
+A value cut short shows whole in its row's tooltip; a long text shows 12 lines of it (about 45 characters each), then `…` and `+N lines` (`CanvasNode.cutTip`). The list a widget opens is sized for its entries, not for the field, and drawn at screen scale at any zoom (`WidgetMenu`; docs/ui-ergonomics.md, 2026-11-27).
 
 ### 4.5 Output values (spec 12.7)
 
@@ -687,7 +687,7 @@ same information. Nothing animates when no run is in progress (spec 12.1: no CPU
 A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoader`, drawn with
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
-chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the
+chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the Move tool (#715: `maximize-2` means large view only) move, and for the
 selection toolbar (#74) arrow-right-to-line, arrow-right-from-line (#701), trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for its Templates action (#192) layout-template and its Settings action settings, and for where a model lives (#164) monitor and server, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye, and for the area header (#217, #228) columns-2 and rows-2 (split) and waypoints (the Graph view, apart from the Workflows tab's workflow), and for the Canvas view's tool strip (#230) hand, zoom-in and circle-dashed (Quick Mask); the full list with code points in
 `share/fonts/lucide-fugue.txt`. About 60 glyphs, about 22 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.

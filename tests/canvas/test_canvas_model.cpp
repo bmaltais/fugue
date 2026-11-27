@@ -169,14 +169,14 @@ private slots:
             QCOMPARE(outputs[i].toMap().value("y").toDouble(), 44.0 + 24 * i);
             QCOMPARE(outputs[i].toMap().value("rowTop").toDouble(), 32.0 + 24 * i);
         }
-        // prompt is linked: a plain 24 px row. negative_prompt is an unlinked multiline: a 64 px
-        // row (16u), its port level with the middle of a normal row.
+        // prompt is linked: a plain 24 px row. negative_prompt is an unlinked, empty multiline: a 44 px
+        // row (11u, #715), its port level with the middle of a normal row.
         QCOMPARE(port(gen, "inputs", "prompt").value("y").toDouble(), 164.0);
         QCOMPARE(port(gen, "inputs", "prompt").value("rowHeight").toDouble(), 24.0);
         QCOMPARE(port(gen, "inputs", "negative_prompt").value("rowTop").toDouble(), 176.0);
-        QCOMPARE(port(gen, "inputs", "negative_prompt").value("rowHeight").toDouble(), 64.0);
+        QCOMPARE(port(gen, "inputs", "negative_prompt").value("rowHeight").toDouble(), 44.0);
         QCOMPARE(port(gen, "inputs", "negative_prompt").value("y").toDouble(), 188.0);
-        QCOMPARE(port(gen, "inputs", "model").value("rowTop").toDouble(), 240.0);
+        QCOMPARE(port(gen, "inputs", "model").value("rowTop").toDouble(), 220.0);
         // Text: header, padding, its output, its unlinked multiline input, 8 px under the last row.
         QCOMPARE(node(canvas, "prompt").value("nodeHeight").toDouble(), 28.0 + 4 + 24 + 64 + 8);
     }
@@ -205,11 +205,11 @@ private slots:
     void aLinkIntoAMultilineInputShrinksItsRow() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));
-        QCOMPARE(port(node(canvas, "gen"), "inputs", "negative_prompt").value("rowHeight").toDouble(), 64.0);
+        QCOMPARE(port(node(canvas, "gen"), "inputs", "negative_prompt").value("rowHeight").toDouble(), 44.0);
         const qreal before = node(canvas, "gen").value("nodeHeight").toDouble();
         QVERIFY(canvas.connectPorts("prompt", "text", "gen", "negative_prompt"));
         QCOMPARE(port(node(canvas, "gen"), "inputs", "negative_prompt").value("rowHeight").toDouble(), 24.0);
-        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), before - 40);
+        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), before - 20);
         // The wires into the rows below follow.
         QCOMPARE(link(canvas, "gen.negative_prompt").value("y2").toDouble(), 80.0 + 188);
     }
