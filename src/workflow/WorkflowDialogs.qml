@@ -178,12 +178,13 @@ Item {
                         onClicked: App.workflows.undoNotice()
                     }
                 }
-                ToolButton {
-                    // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
-                    contentItem: Glyph { look: App.theme.look; name: "x"; color: App.theme.look.label; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    focusPolicy: Qt.NoFocus
-                    Accessible.name: qsTr("Dismiss")
-                    onClicked: App.workflows.dismissNotice()
+                ViewButton {
+                    objectName: "workflowNoticeDismiss"
+                    look: root.look
+                    glyph: "x" // the Lucide x every other close and dismiss draws (canvas-look 16)
+                    flat: true
+                    tip: qsTr("Dismiss")
+                    onTapped: App.workflows.dismissNotice()
                 }
             }
             Loader {
@@ -198,12 +199,14 @@ Item {
                         elide: Text.ElideMiddle
                         Layout.maximumWidth: noticeColumn.width / 2
                     }
-                    ProgressBar {
+                    KitProgress {
+                        objectName: "downloadProgressBar"
+                        look: root.look
                         Layout.fillWidth: true
-                        from: 0
-                        to: 1
+                        Layout.alignment: Qt.AlignVCenter
                         indeterminate: notice.downloads.fraction < 0
                         value: Math.max(0, notice.downloads.fraction)
+                        text: qsTr("Download progress")
                     }
                     Label {
                         color: root.look.label

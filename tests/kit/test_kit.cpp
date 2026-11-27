@@ -89,6 +89,10 @@ Window {
                     onMoved: v => window.level = v
                 }
             }
+            KitRow {
+                label: "Progress"
+                KitProgress { objectName: "progress"; value: window.level; from: 2; to: 8; text: "Progress" }
+            }
         }
     }
 }
@@ -208,6 +212,13 @@ private slots:
         auto *chip = window->findChild<QQuickItem *>("chip");
         auto *row = window->findChild<QQuickItem *>("toggleRow");
         QVERIFY(slider && toggle && chip && row);
+
+        // The progress bar shows what it is given and is not a control: no focus, a progress bar to assistive tools.
+        auto *progress = window->findChild<QQuickItem *>("progress");
+        QVERIFY(progress);
+        QCOMPARE(progress->property("fraction").toDouble(), 0.5);
+        QVERIFY(!progress->activeFocusOnTab());
+        QVERIFY(!progress->property("indeterminate").toBool());
 
         // The slider: keys move it by a step, the ends are Home and End, it never leaves its range, and it asks (`moved`)
         // rather than sets: the window's binding is what changes `value`.

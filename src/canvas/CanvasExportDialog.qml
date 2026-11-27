@@ -83,12 +83,14 @@ Question {
                     Accessible.name: qsTr("Preview of the picture to write")
                     fillMode: Image.PreserveAspectFit
                 }
-                BusyIndicator {
+                KitProgress {
+                    objectName: "canvasExportBusy"
+                    look: root.look
                     anchors.centerIn: parent
-                    running: backend.busy
-                    visible: running
-                    width: 6 * root.look.unit
-                    height: width
+                    visible: backend.busy
+                    indeterminate: true
+                    width: 14 * root.look.unit
+                    text: qsTr("Preparing the preview")
                 }
             }
 

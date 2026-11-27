@@ -181,13 +181,13 @@ ApplicationWindow {
                             text: helperNotice.pacman ? qsTr("Copy %1").arg(helperNotice.command) : qsTr("Copy the install command")
                             onClicked: helperNotice.copy()
                         }
-                        ToolButton {
+                        ViewButton {
                             objectName: "helperNoticeDismiss"
-                            // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
-                            contentItem: Glyph { look: App.theme.look; name: "x"; color: App.theme.look.label; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                            focusPolicy: Qt.NoFocus
-                            Accessible.name: qsTr("Dismiss")
-                            onClicked: helperNotice.dismiss()
+                            look: App.theme.look
+                            glyph: "x" // the Lucide x every other close and dismiss draws (canvas-look 16)
+                            flat: true
+                            tip: qsTr("Dismiss")
+                            onTapped: helperNotice.dismiss()
                         }
                     }
                 }

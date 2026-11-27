@@ -1479,3 +1479,10 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Control: none visible; `src/kit/KitFocusKeep.qml` in About, the shortcuts help, Apps, node search, Projects, Settings and Templates.
 - Old: Escape on About, then F1 within the fade (~150 ms): when About's exit ended Qt gave the focus back to the window, so the help's Escape did nothing.
 - New: the help keeps the keys; the closing popup restores only when no other popup has them.
+
+### 2026-11-27 Dismiss buttons and progress bars in the Fugue kit (#509, batches 2 and 3)
+
+- Control: the dismiss buttons `helperNoticeDismiss` (`src/Main.qml`), `workflowNoticeDismiss` (`src/workflow/WorkflowDialogs.qml`) and `keymapNoticeDismiss` (`src/commands/CommandUi.qml`); the progress bars `canvasBatchProgress` (`CanvasBatchDialog.qml`), `downloadProgressBar` (`WorkflowDialogs.qml`), `getReadyProgress-<title>` (`GetReadyRow.qml`) and the busy bar `canvasExportBusy` (`CanvasExportDialog.qml`); the new `src/kit/KitProgress.qml`.
+- Old: the dismiss buttons were stock `ToolButton`s with a Glyph (no ring, hover or tooltip of the kit); the bars were stock `ProgressBar`s and a spinning `BusyIndicator`, in the style's colors.
+- New: the dismiss buttons are the flat `ViewButton` with the Lucide `x` and the tip "Dismiss" (7u, a Tab stop, the same as `appNoticeDismiss`). `KitProgress` is the slider's recessed rail with a tone fill; indeterminate it glides a third of the rail back and forth, slowly, and rests still under reduced motion. The export preview's busy mark is that indeterminate bar, 14u wide, centred.
+- Rules met: Floor (the dismiss buttons 7u; a bar is not a control), Learned place (every button stays where it was, same order), Gaps (unchanged), Reduced motion (the bar does not move).

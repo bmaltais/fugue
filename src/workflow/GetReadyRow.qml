@@ -164,16 +164,16 @@ Rectangle {
             text: row.choiceName
             onMoved: index => row.choiceMoved(index === 0)
         }
-        ProgressBar {
+        KitProgress {
+            objectName: "getReadyProgress-" + row.title
+            look: row.look
             visible: row.running
             Layout.fillWidth: true
             Layout.leftMargin: 6 * row.u
             Layout.rightMargin: 5 * row.u
-            Layout.preferredHeight: 0.75 * row.u
-            from: 0
-            to: 1
             indeterminate: row.fraction < 0
             value: Math.max(0, row.fraction)
+            text: qsTr("Download progress")
         }
         Text {
             visible: row.open && row.more !== ""

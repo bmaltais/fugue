@@ -155,13 +155,15 @@ Question {
         }
 
         // The pictures and how each went.
-        ProgressBar {
+        KitProgress {
+            objectName: "canvasBatchProgress"
+            look: root.look
             visible: root.showsResults
             Layout.fillWidth: true
             from: 0
             to: Math.max(1, root.batch ? root.batch.total : 1)
             value: root.batch ? root.batch.done + (root.batch.progress > 0 ? root.batch.progress : 0) : 0
-            Accessible.name: qsTr("Batch progress")
+            text: qsTr("Batch progress")
         }
         Label {
             objectName: "canvasBatchSummary"
