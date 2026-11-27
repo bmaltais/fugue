@@ -22,6 +22,7 @@
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
 #include "engine/model_folder_finder.h"
+#include "engine/place_policy.h"
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
 #include "engine/model_recommend.h"
@@ -212,10 +213,7 @@ Reply modelFindFolders(const Command &command, Context &context) {
                 return Reply::failure(error);
             }
     // What was left off is kept out of by its written path alone: reading its links would be touching it.
-    QList<FinderLocation> offered = chosen;
-    for (const FinderLocation &place : std::as_const(table))
-        if (std::none_of(chosen.begin(), chosen.end(), [&place](const FinderLocation &c) { return c.id == place.id; }))
-            offered << place;
+    const QList<FinderLocation> offered = offeredPlaces(chosen, table);
     QStringList skip;
     for (const QString &root : ModelLibrary::roots(currentSettings()))
         skip << root;

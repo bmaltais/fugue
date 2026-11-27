@@ -91,6 +91,14 @@ _Avoid_: model path, models dir
 An ask to use a file already on disk in place of a missing model, spec 2.5. One module, `workflow/model_choice.h`, owns the ask with its destination (a tab, and the graph or the App view) fixed when it is made, one hash read per target shared by the asks, one automatic swap per model, the tried marks, cancel by token, the result per ask, the Undo record and the "Reading your file" line, and the open asked for last. The graph and the App view are its two destinations (`ChoiceDestination`).
 _Avoid_: use-on-disk state, swap
 
+**Place left off**:
+A place the first-run model-folder search offered (an install folder, the home, a drive folder) that the person did not tick. Nothing in it is touched: no stat, no listing, no walk, no free-space ask. The longest offered place that covers a path decides whether it is ticked, so a ticked install folder inside an unticked home is searched. A folder behind a link into one is left off too.
+_Avoid_: excluded place, skipped folder
+
+**Place policy**:
+The one rule (`PlacePolicy`, `engine/place_policy.h`) that answers what may be touched: the places left off, network and automounts, and link resolution that never steps into a blocked place. Fugue's own models folder is always allowed. The finder, the first-run sheet, the yes and the CLI all ask it; none re-checks.
+_Avoid_: scope check, blocklist
+
 **Part**:
 A download not finished yet, `<file>.part` beside where the model goes; it becomes the model only once its hash is the handle's.
 _Avoid_: temp file, partial

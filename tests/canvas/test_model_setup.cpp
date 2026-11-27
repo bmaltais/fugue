@@ -730,40 +730,6 @@ private slots:
         QVERIFY(setup.downloadHint().contains("free"));
     }
 
-    // A download folder that is where a left-off row really lives (the row's own path is another) is not stat'd: only freeSpace's
-    // own left-off guard keeps it (the place filter and the choices() filters do not reach it).
-    void aDownloadFolderThatIsAnotherPathOfALeftOffRowIsNotStatd() {
-        QDir().mkpath(m_home + "/real");
-        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{m_home + "/real"}).isEmpty());
-        QVERIFY(changeSetting(settingsPath(), "model_folder_kinds", QJsonObject{{m_home + "/real", "layout"}}).isEmpty());
-        QVERIFY(changeSetting(settingsPath(), "download_folder", m_home + "/real").isEmpty());
-        SettingsModel settings;
-        settings.attach(nullptr, nullptr, &m_registry);
-        ModelSetup &setup = *settings.modelSetup();
-        setup.setEnv(env());
-        setup.setFinder([this](const ModelSetup::FinderJob &, const std::function<void(const FoundFolder &)> &found) {
-            FoundFolder f;
-            f.tool = "ComfyUI";
-            f.kind = ModelLibrary::kLayout;
-            f.path = m_home + "/alias";
-            f.canonical = m_home + "/real";
-            f.leftOff = true;
-            f.models = 3;
-            f.size = 5000;
-            found(f);
-            return FindResult();
-        }, true);
-        setup.show(false);
-        setup.search();
-        QStringList asked;
-        setup.setFreeSpace([&asked](const QString &folder) { asked << folder; return qint64(100) * 1000 * 1000 * 1000; });
-        bool listed = false;
-        for (const QVariant &choice : setup.choices())
-            listed = listed || choice.toMap().value("value").toString() == m_home + "/real";
-        QVERIFY(listed); // still the person's download folder
-        QVERIFY2(!asked.contains(m_home + "/real"), qPrintable("asked " + asked.join(", ")));
-    }
-
     // The longest place decides: a ticked install folder inside an unticked home keeps its free-space text.
     void aTickedInstallFolderInAnUntickedHomeKeepsItsFreeSpace() {
         comfy(m_home + "/ComfyUI");

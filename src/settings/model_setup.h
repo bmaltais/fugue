@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "engine/model_folder_finder.h"
+#include "engine/place_policy.h"
 
 namespace fugue {
 
@@ -157,7 +158,7 @@ private:
     FinderJob makeJob() const;
     QList<FinderLocation> tickedLocations() const;
     qint64 freeSpace(const QString &path) const;
-    bool inLeftOffPlace(const QString &path) const;
+    void refreshPolicy();
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
@@ -187,6 +188,7 @@ private:
         ModelSetup *target = nullptr;
     };
     std::shared_ptr<Receiver> m_receiver;
+    PlacePolicy m_policy; // what may be touched: rebuilt when a tick or the phase changes
     FinderEnv m_envNow;   // the mounts as they were when the sheet opened, for what the window checks
 };
 

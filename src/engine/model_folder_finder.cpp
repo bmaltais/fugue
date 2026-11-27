@@ -14,6 +14,7 @@
 
 #include "engine/model_library.h"
 #include "engine/paths.h"
+#include "engine/place_policy.h"
 #include "engine/registry.h"
 
 namespace fugue {
@@ -43,16 +44,11 @@ const QSet<QString> &kSkipNames = *new QSet<QString>{QStringLiteral("node_module
 
 constexpr int kHomeDepth = 4;
 constexpr int kDriveDepth = 5;
-constexpr int kMaxLinkHops = 40;
 
 QString tilde(const QString &path, const QString &home) {
     if (!home.isEmpty() && (path == home || path.startsWith(home + QLatin1Char('/'))))
         return QStringLiteral("~") + path.mid(home.size());
     return path;
-}
-
-bool under(const QString &path, const QString &folder) {
-    return path == folder || path.startsWith(folder + QLatin1Char('/'));
 }
 
 // lstat: whether the entry is there, a link counted as it is, never what it leads to.
@@ -93,51 +89,6 @@ QString toolOf(const QString &modelsDir, const std::function<bool(const QString 
     return QStringLiteral("Model folder");
 }
 
-// `path` with every link in it resolved by reading the link texts (readlink), component by component from the root: what a link
-// leads to is never stat'd, and each step is offered to `blocked` (and to `touch`, after it passed) before anything touches it.
-// Empty when a step is blocked or the links loop. Nothing here follows a link: each readlink is on a path with no link in it.
-QString resolveLinks(const QString &path, const std::function<bool(const QString &)> &blocked,
-                     const std::function<void(const QString &)> &touch) {
-    QStringList pending = QDir::cleanPath(path).split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    QString current;
-    int hops = 0;
-    while (!pending.isEmpty()) {
-        const QString part = pending.takeFirst();
-        if (part == QLatin1String("."))
-            continue;
-        if (part == QLatin1String("..")) {
-            current = current.left(std::max(0, int(current.lastIndexOf(QLatin1Char('/')))));
-            continue;
-        }
-        const QString next = current + QLatin1Char('/') + part;
-        if (blocked(next))
-            return {};
-        if (touch)
-            touch(next);
-        char buffer[4096];
-        const ssize_t n = ::readlink(QFile::encodeName(next).constData(), buffer, sizeof buffer);
-        if (n >= 0) {
-            if (++hops > kMaxLinkHops)
-                return {};
-            const QString target = QFile::decodeName(QByteArray(buffer, int(n)));
-            if (target.startsWith(QLatin1Char('/')))
-                current.clear();
-            pending = target.split(QLatin1Char('/'), Qt::SkipEmptyParts) + pending;
-            continue;
-        }
-        current = next;
-    }
-    return current.isEmpty() ? QStringLiteral("/") : current;
-}
-
-// A network or autofs mount, by the mount lists of `env`.
-bool inMount(const QString &path, const QStringList &mounts) {
-    for (const QString &mount : mounts)
-        if (under(path, mount))
-            return true;
-    return false;
-}
-
 struct Entry {
     QString name;
     bool isDir = false;
@@ -165,27 +116,9 @@ class Finder {
 public:
     Finder(const FinderTypes &types, const FinderEnv &env, const QStringList &skip, const QList<FinderLocation> &ticked,
            const QList<FinderLocation> &offered)
-        : m_env(env), m_types(types), m_deadline(env.now() + env.findCapMs), m_totalDeadline(env.now() + env.totalCountCapMs) {
+        : m_env(env), m_policy(ticked, offered, env), m_types(types), m_deadline(env.now() + env.findCapMs), m_totalDeadline(env.now() + env.totalCountCapMs) {
         for (const QString &path : skip)
             m_skipped.insert(path);
-        // Only a place that was offered and left off is a place to keep out of; one that was never listed (it does not exist) is not.
-        QSet<QString> tickedIds;
-        // A place is kept as written and as resolved: the walk goes by resolved paths, and a home behind a link (/home -> /var/home) or a
-        // link from elsewhere into it must meet the same scope.
-        const auto addScope = [this](const FinderLocation &location, bool isTicked) {
-            m_scopes.append({location.scope, isTicked});
-            if (!location.resolved.isEmpty())
-                m_scopes.append({location.resolved, isTicked}); // the place's own resolved folder, never its parent (a whole drive)
-            if (!location.resolvedScope.isEmpty())
-                m_scopes.append({location.resolvedScope, isTicked}); // an install folder as resolved by its own links
-        };
-        for (const FinderLocation &location : ticked) {
-            tickedIds.insert(location.id);
-            addScope(location, true);
-        }
-        for (const FinderLocation &location : offered)
-            if (!tickedIds.contains(location.id))
-                addScope(location, false);
     }
 
     bool cancelled() const { return m_env.cancel && m_env.cancel->load(); }
@@ -203,46 +136,8 @@ public:
         if (m_env.touched)
             m_env.touched(path);
     }
-    bool isNetwork(const QString &path) const {
-        for (const QString &mount : m_env.networkMounts)
-            if (under(path, mount))
-                return true;
-        return false;
-    }
-    bool isAutofs(const QString &path) const {
-        for (const QString &mount : m_env.autofsMounts)
-            if (under(path, mount))
-                return true;
-        return false;
-    }
-    // A path the finder may not stat into: a network or automount, or a place the person left off (the longest place that covers it
-    // decides: an unticked place with a ticked one inside it is blocked except for the ticked one).
-    // With `traversal` a folder that only leads to a ticked place (its ancestor) may be passed by name.
-    bool blocked(const QString &path, bool traversal = false) const {
-        if (isNetwork(path))
-            return true;
-        if (traversal)
-            for (const auto &[scope, ticked] : m_scopes)
-                if (ticked && scope.startsWith(path + QLatin1Char('/')))
-                    return false;
-        int best = -1;
-        bool bestTicked = true;
-        for (const auto &[scope, ticked] : m_scopes)
-            if (under(path, scope) && int(scope.size()) > best) {
-                best = int(scope.size());
-                bestTicked = ticked;
-            }
-        return best >= 0 && !bestTicked;
-    }
-
-    // resolveLinks() with this finder's blocks: the network, and the places left off.
-    QString resolve(const QString &path) const {
-        return resolveLinks(path, [this](const QString &next) { return blocked(next, true); },
-                            [this](const QString &next) { touch(next); });
-    }
-
     bool lstatHas(const QString &path) const {
-        if (blocked(path))
+        if (!m_policy.mayTouch(path))
             return false;
         touch(path);
         return lexists(path);
@@ -255,7 +150,7 @@ public:
               qint64 deadline = -1) const {
         if (tooMany)
             *tooMany = false;
-        if (blocked(dir))
+        if (!m_policy.mayTouch(dir))
             return false;
         if (deadline < 0)
             deadline = m_listDeadline;
@@ -289,7 +184,7 @@ public:
             unsigned char type = item->d_type;
             if (type == DT_UNKNOWN) {
                 // A file system that gives no type: asked with an lstat, but only where the finder may stat, and the probe sees it.
-                if (blocked(path))
+                if (!m_policy.mayTouch(path))
                     continue;
                 touch(path);
                 struct stat info;
@@ -300,7 +195,7 @@ public:
                 entry.isDir = true;
             } else if (type == DT_LNK) {
                 entry.isLink = true;
-                entry.resolved = resolve(path); // empty when the target is in a place that may not be touched
+                entry.resolved = m_policy.resolve(path); // empty when the target is in a place that may not be touched
                 if (!entry.resolved.isEmpty()) {
                     touch(entry.resolved);
                     struct stat info;
@@ -393,7 +288,7 @@ public:
         folder.canonical = resolved;
         // The type folders may be links: where they lead, by text, and none to a place that may not be touched.
         for (auto it = typeDirs.begin(); it != typeDirs.end(); ++it) {
-            const QString real = resolve(resolved + QLatin1Char('/') + it.key());
+            const QString real = m_policy.resolve(resolved + QLatin1Char('/') + it.key());
             if (!real.isEmpty())
                 folder.typeDirs << real;
         }
@@ -479,13 +374,13 @@ public:
             return;
         if (location.id.startsWith(QLatin1String("probe:"))) {
             const QString base = location.path;
-            if (isAutofs(base))
+            if (m_policy.isAutofs(base))
                 return;
-            if (isNetwork(base)) {
+            if (m_policy.isNetwork(base)) {
                 considerNetwork(base);
                 return;
             }
-            const QString real = resolve(base);
+            const QString real = m_policy.resolve(base);
             if (real.isEmpty())
                 return;
             if (QFileInfo(base).fileName() == kInstalls) {
@@ -493,7 +388,7 @@ public:
                 if (list(real, m_env.tooManyEntries, children))
                     for (const Entry &child : std::as_const(children))
                         if (child.isDir && !stop() && !(child.isLink && child.resolved.isEmpty())) {
-                            const QString models = resolve(childPath(real, child) + QStringLiteral("/models"));
+                            const QString models = m_policy.resolve(childPath(real, child) + QStringLiteral("/models"));
                             consider(models, models);
                         }
                 return;
@@ -501,19 +396,19 @@ public:
             consider(base, real);
             // ComfyUI-Shared may hold its models/ inside.
             if (QFileInfo(base).fileName() == kShared && !m_index.contains(real)) {
-                const QString models = resolve(real + QStringLiteral("/models"));
+                const QString models = m_policy.resolve(real + QStringLiteral("/models"));
                 consider(models, models);
             }
             return;
         }
         if (location.id == QLatin1String("home")) {
-            walk(resolve(location.path), kHomeDepth);
+            walk(m_policy.resolve(location.path), kHomeDepth);
             return;
         }
         // A folder of drives: each is a root of its own.
-        const QString parent = resolve(location.path);
+        const QString parent = m_policy.resolve(location.path);
         QList<Entry> drives;
-        if (parent.isEmpty() || isAutofs(parent) || !list(parent, m_env.tooManyEntries, drives))
+        if (parent.isEmpty() || m_policy.isAutofs(parent) || !list(parent, m_env.tooManyEntries, drives))
             return;
         for (const Entry &drive : std::as_const(drives)) {
             if (!drive.isDir || drive.name.startsWith(QLatin1Char('.')) || stop() || (drive.isLink && drive.resolved.isEmpty()))
@@ -544,7 +439,7 @@ public:
         m_listDeadline = deadline;
         const ModelLibrary::DirLister listing = lister(deadline);
         const auto kindOf = [&](const QString &dir) {
-            if (blocked(dir) || cancelled() || m_env.now() > deadline)
+            if (!m_policy.mayTouch(dir) || cancelled() || m_env.now() > deadline)
                 return QString();
             const QString kind = ModelLibrary::detectKind(dir, m_types.typeOfFolder, m_types.typeOfFiles, listing, stopAt(deadline));
             return kind == ModelLibrary::kLayout ? QString() : kind;
@@ -592,9 +487,9 @@ public:
         folder.path = QDir::cleanPath(dir);
         folder.tool = QStringLiteral("InvokeAI");
         folder.toldReady = true;
-        if (isNetwork(folder.path) || blocked(folder.path))
+        if (m_policy.isNetwork(folder.path) || !m_policy.mayTouch(folder.path))
             return folder;
-        const QString real = resolve(folder.path);
+        const QString real = m_policy.resolve(folder.path);
         folder.canonical = real;
         fillInvoke(folder, real, m_env.now() + m_env.countCapMs);
         return folder;
@@ -613,17 +508,17 @@ public:
         FoundFolder folder;
         folder.path = QDir::cleanPath(dir);
         folder.tool = QStringLiteral("Model folder");
-        if (isNetwork(folder.path)) {
+        if (m_policy.isNetwork(folder.path)) {
             folder.canonical = folder.path;
             folder.network = true;
             return folder;
         }
-        if (blocked(folder.path)) {
+        if (!m_policy.mayTouch(folder.path)) {
             folder.canonical = folder.path;
             folder.leftOff = true; // no stat at all
             return folder;
         }
-        const QString real = resolve(folder.path);
+        const QString real = m_policy.resolve(folder.path);
         folder.canonical = real;
         if (real.isEmpty()) {
             folder.leftOff = true; // by a link, it leads where it may not go
@@ -645,7 +540,7 @@ public:
         if (!folder.layout)
             typeDirs.clear(); // counted as a whole folder, below
         for (auto it = typeDirs.begin(); it != typeDirs.end(); ++it) {
-            const QString typeReal = resolve(real + QLatin1Char('/') + it.key());
+            const QString typeReal = m_policy.resolve(real + QLatin1Char('/') + it.key());
             if (!typeReal.isEmpty())
                 folder.typeDirs << typeReal;
         }
@@ -739,7 +634,7 @@ private:
             QStringList names = typeDirs.keys();
             std::sort(names.begin(), names.end());
             for (const QString &name : std::as_const(names)) {
-                const QString typeReal = resolve(real + QLatin1Char('/') + name);
+                const QString typeReal = m_policy.resolve(real + QLatin1Char('/') + name);
                 if (!typeReal.isEmpty())
                     stack.append({typeReal, typeDirs.value(name)});
             }
@@ -800,12 +695,12 @@ private:
     }
 
     FinderEnv m_env;
+    PlacePolicy m_policy;
     FinderTypes m_types;
     qint64 m_deadline;
     qint64 m_totalDeadline;
     mutable qint64 m_listDeadline = -1; // a listing started in describe()/tell() stops here too
     bool m_capped = false;
-    QList<std::pair<QString, bool>> m_scopes; // every place's scope and whether it is ticked
     QSet<QString> m_skipped;
     QSet<QString> m_visited;
     QSet<QString> m_walked;
@@ -912,9 +807,6 @@ QStringList networkMountsFrom(const QByteArray &mountinfo) {
 
 QStringList autofsMountsFrom(const QByteArray &mountinfo) { return mountsOf(mountinfo, {QStringLiteral("autofs")}); }
 
-QString finderResolve(const QString &path, const FinderEnv &env) {
-    return resolveLinks(path, [&env](const QString &next) { return inMount(next, env.networkMounts); }, env.touched);
-}
 
 QList<FinderLocation> finderPlaces(const FinderEnv &env) { return allLocations(env); }
 
@@ -922,13 +814,14 @@ QList<FinderLocation> finderLocations(const FinderEnv &env) { return finderLocat
 
 QList<FinderLocation> finderLocations(const FinderEnv &env, const QList<FinderLocation> &candidates) {
     QList<FinderLocation> list;
+    const PlacePolicy policy(env);
     for (const FinderLocation &location : candidates) {
         // Built component by component from the root, each link read and checked first: a place that leads (even by a link in its
         // parent) onto a network or automount is left out, and nothing past that link is stat'd. A network drive's exact install
         // folder is still listed (by lstat of the place itself), an automount never is.
-        if (inMount(location.path, env.autofsMounts))
+        if (policy.isAutofs(location.path))
             continue;
-        if (inMount(location.path, env.networkMounts)) {
+        if (policy.isNetwork(location.path)) {
             if (env.touched)
                 env.touched(location.path);
             if (lexists(location.path))

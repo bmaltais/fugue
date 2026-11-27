@@ -7,7 +7,6 @@
 #include <QJsonArray>
 #include <QMutex>
 #include <QMutexLocker>
-#include <QStorageInfo>
 
 #include <algorithm>
 #include <thread>
@@ -16,6 +15,7 @@
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
+#include "engine/place_policy.h"
 #include "engine/project.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
@@ -33,23 +33,6 @@ QString tilde(const QString &path) {
     if (path == home)
         return QStringLiteral("~");
     return path.startsWith(home + QLatin1Char('/')) ? QLatin1Char('~') + path.mid(home.size()) : path;
-}
-
-// Free bytes where a folder is, or would be made: the nearest existing parent's disk. -1 when unknown.
-qint64 freeBytesAt(const QString &path, const FinderEnv &env) {
-    // Never a network or automount (a statfs there can mount it or hang the window), nor a path that leads into one by a link.
-    const QString safe = finderResolve(path, env);
-    if (safe.isEmpty())
-        return -1;
-    QString dir = safe;
-    while (!dir.isEmpty() && !QFileInfo(dir).isDir()) {
-        const QString parent = QFileInfo(dir).absolutePath();
-        if (parent == dir)
-            break;
-        dir = parent;
-    }
-    const QStorageInfo info(dir);
-    return info.isValid() && info.isReady() ? info.bytesAvailable() : -1;
 }
 
 bool hasModelFile(const QString &dir) {
@@ -190,6 +173,7 @@ void ModelSetup::show(bool firstRun) {
     m_envNow = env();
     m_freeCache.clear();
     m_locations = finderLocations(m_envNow); // an lstat each; nothing below them is listed, no link followed
+    refreshPolicy();
     emit changed();
 }
 
@@ -198,6 +182,7 @@ void ModelSetup::setLocationChecked(const QString &id, bool checked) {
         m_unticked.removeAll(id);
     else if (!m_unticked.contains(id))
         m_unticked << id;
+    refreshPolicy();
     emit changed();
 }
 
@@ -250,6 +235,13 @@ ModelSetup::FinderJob ModelSetup::makeJob() const {
     return job;
 }
 
+// The one rule for what the sheet may touch, rebuilt whenever a tick or the phase changes. Until the places are confirmed (the search),
+// the sheet reads its hints as it opens with every place still ticked: only Fugue's own folder may be touched then.
+void ModelSetup::refreshPolicy() {
+    m_policy = m_phase == QLatin1String("consent") ? PlacePolicy::unconfirmed(m_envNow, m_ownRoot)
+                                                    : PlacePolicy::fromUnticked(m_locations, m_unticked, m_envNow, m_ownRoot);
+}
+
 QList<FinderLocation> ModelSetup::tickedLocations() const {
     QList<FinderLocation> ticked;
     for (const FinderLocation &location : m_locations)
@@ -265,6 +257,7 @@ void ModelSetup::search() {
     m_rows.clear();
     addInUse();
     m_phase = QStringLiteral("looking");
+    refreshPolicy();
     m_looking = true;
     m_capped = false;
     begin(ticked);
@@ -280,6 +273,7 @@ void ModelSetup::searchAgain() {
     m_looking = false;
     m_capped = false;
     m_phase = QStringLiteral("consent");
+    refreshPolicy();
     m_rows.clear();
     m_message.clear();
     emit changed();
@@ -407,10 +401,8 @@ QString ModelSetup::addFolder(const QVariant &value) {
     // The person's own pick, one stat, component by component: a network or automount (or a link into one) is taken as a folder
     // without a stat, and is listed, not counted.
     const FinderEnv now = env();
-    bool network = false;
-    for (const QString &mount : now.networkMounts)
-        network = network || path == mount || path.startsWith(mount + QLatin1Char('/'));
-    const QString real = network ? path : finderResolve(path, now); // empty: a link leads into a network or automount
+    const bool network = m_policy.isNetwork(path);
+    const QString real = network ? path : m_policy.resolve(path); // empty: a link leads into a network or automount, or a place left off
     if (path.isEmpty() || (!network && !real.isEmpty() && !QFileInfo(real).isDir()))
         return tr("%1 is not a folder.").arg(tilde(path));
     for (const Row &row : std::as_const(m_rows))
@@ -422,6 +414,7 @@ QString ModelSetup::addFolder(const QVariant &value) {
         m_rows.clear();
         addInUse();
         m_phase = QStringLiteral("results");
+        refreshPolicy();
         m_capped = false;
         FinderJob inUse = makeJob();
         inUse.locations = tickedLocations();
@@ -565,7 +558,7 @@ QString ModelSetup::defaultDownload() const {
     QString best = ownRoot();
     qint64 biggest = -1;
     for (const Row &row : m_rows) {
-        if (row.inherited || !row.on || row.busy || row.found.leftOff || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
+        if (row.inherited || !row.on || row.busy || !m_policy.mayBeDownloadChoice(row.path) || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
             continue;
         if (slowToWriteTo(row))
             continue; // a network or removable drive is a choice the person makes, never the default
@@ -592,41 +585,15 @@ bool ModelSetup::slowToWriteTo(const Row &row) const {
     return false;
 }
 
-// Free bytes where a folder is, asked once for each folder (a statfs is not asked again every time the sheet changes).
-// Whether `path` is in a place the person left off (as written or as resolved): nothing is asked of it, not even a statfs.
-bool ModelSetup::inLeftOffPlace(const QString &path) const {
-    if (path == ownRoot() || path.startsWith(ownRoot() + QLatin1Char('/')))
-        return false; // Fugue's own folder is never a place to keep out of
-    // The longest place that covers the path decides, as the finder's own rule does: a ticked install folder inside an unticked home is
-    // fine, an unticked one inside a ticked home is not.
-    int best = -1;
-    bool bestTicked = true;
-    for (const FinderLocation &place : m_locations) {
-        const bool ticked = !m_unticked.contains(place.id);
-        for (const QString &where : {place.path, place.resolved, place.scope, place.resolvedScope})
-            if (!where.isEmpty() && (path == where || path.startsWith(where + QLatin1Char('/'))) && int(where.size()) > best) {
-                best = int(where.size());
-                bestTicked = ticked;
-            }
-    }
-    return best >= 0 && !bestTicked;
-}
-
+// Free bytes where a folder is, asked once for each folder (a statfs is not asked again every time the sheet changes). The policy
+// answers -1 (unknown, no I/O) for a network, a place left off, a link into one, and everything but Fugue's own folder until the search.
 qint64 ModelSetup::freeSpace(const QString &path) const {
-    // The sheet reads the hint as it opens, while every place is still ticked and a folder may lead into one the person is about to leave
-    // off: nothing but Fugue's own folder is asked until the places are confirmed (the search).
-    if (m_phase == QLatin1String("consent") && path != ownRoot())
+    if (!m_policy.mayTouch(path))
         return -1;
-    if (inLeftOffPlace(path))
-        return -1; // unknown, no I/O
-    // A folder the search found to lead into a place left off (a link) is never asked about either, whatever its path says.
-    for (const Row &row : m_rows)
-        if (row.found.leftOff && (row.path == path || row.found.canonical == path))
-            return -1;
     const auto it = m_freeCache.constFind(path);
     if (it != m_freeCache.constEnd())
         return it.value();
-    const qint64 free = m_free ? m_free(path) : freeBytesAt(path, m_envNow);
+    const qint64 free = m_policy.freeBytes(path, m_free);
     m_freeCache.insert(path, free);
     return free;
 }
@@ -647,7 +614,7 @@ QVariantList ModelSetup::choices() const {
     list.append(entry(own, ReadinessSheet::rootTitle(own, own)));
     QList<const Row *> picked;
     for (const Row &row : m_rows)
-        if (!row.inherited && row.on && !row.found.leftOff && row.writable && row.kind == ModelLibrary::kLayout && row.found.tool != QLatin1String("InvokeAI"))
+        if (!row.inherited && row.on && m_policy.mayBeDownloadChoice(row.path) && row.writable && row.kind == ModelLibrary::kLayout && row.found.tool != QLatin1String("InvokeAI"))
             picked << &row;
     std::stable_sort(picked.begin(), picked.end(), [](const Row *a, const Row *b) { return a->found.size > b->found.size; });
     for (const Row *row : std::as_const(picked))
@@ -655,7 +622,7 @@ QVariantList ModelSetup::choices() const {
     // The download folder the person has (set in Settings or by the CLI) that is not one of these rows is kept, not replaced.
     if (m_downloadChosen && m_download != own) {
         const bool listed = std::any_of(list.begin(), list.end(), [this](const QVariant &c) { return c.toMap().value("value").toString() == m_download; });
-        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && (!r.on || r.found.leftOff); });
+        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && (!r.on || !m_policy.mayBeDownloadChoice(r.path)); });
         if (!listed && !leftOff) // its row is on but not a layout (a single-kind root), or it has none: still the person's choice
             list.append(entry(m_download, tilde(m_download)));
     }
@@ -778,11 +745,7 @@ void ModelSetup::apply() {
     int left = 0;
     const QVariantList folders = foldersToWrite(&left);
     const QString chosen = download();
-    QStringList leftOff; // roots in a place left off: the yes stats nothing there
-    for (const Row &row : std::as_const(m_rows))
-        if (row.found.leftOff)
-            leftOff << row.path;
-    const QVariantMap result = m_settings->applyModelSetup(folders, chosen, m_firstRun, leftOff);
+    const QVariantMap result = m_settings->applyModelSetup(folders, chosen, m_firstRun, m_policy);
     if (!result.value("error").toString().isEmpty()) {
         m_message = result.value("error").toString();
         emit changed();
