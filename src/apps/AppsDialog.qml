@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../kit"
 
 // File > Apps… (#388, #463): the same shelf as the home page (AppShelfView), as a dialog over whatever is open, for the person who
 // has tabs and wants an app. A kit panel with a level 3 shadow; the focus opens on the search field, Escape clears it and then
@@ -33,6 +34,7 @@ Popup {
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: dialog.look.params.durColor * 0.9; easing.type: Easing.OutCubic }
     }
+    KitFocusKeep { popup: dialog }
     // Read each time it opens: models and folders change outside Fugue.
     onAboutToShow: {
         App.workflows.loadHostModels()

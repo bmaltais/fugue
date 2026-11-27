@@ -73,6 +73,7 @@ Popup {
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: dialog.look.params.durColor * 0.9; easing.type: Easing.OutCubic }
     }
+    KitFocusKeep { popup: dialog }
     onAboutToShow: {
         // The paired hosts' models arrive later (templatesChanged), or at once when already known.
         App.workflows.loadHostModels()
