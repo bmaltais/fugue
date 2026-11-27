@@ -32,7 +32,7 @@ Item {
         objectName: "widgetMoreLines"
         x: more.host.pad
         y: Math.round(1.5 * more.host.look.unit)
-        width: more.width - 2 * more.host.pad
+        width: more.width - 2 * more.host.pad - more.host.expandRoom
         height: 16
         horizontalAlignment: Text.AlignRight
         verticalAlignment: Text.AlignVCenter

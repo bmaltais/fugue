@@ -1136,7 +1136,7 @@ Widgets come from a fixed set. No pack ships UI code in v0.1, so every node look
 | `widget` | For | Notes |
 | --- | --- | --- |
 | `spin` (default for number), `slider` | number | |
-| `line` (default for text), `multiline` | text | A multiline well shows as many lines as its row was sized for (the row's lines plus the caption, #715), every line of the value is drawn, and while it is cut the caption line says `+N lines`; empty, the well rests at the caption and one line (11u). A click in a field puts the caret where it landed; Tab into one puts it at the end (#715). |
+| `line` (default for text), `multiline` | text | A multiline well shows as many lines as its row was sized for (the row's lines plus the caption, #715), every line of the value is drawn, and while it is cut the caption line says `+N lines`; empty, the well rests at the caption and one line (11u). A click in a field puts the caret where it landed; Tab into one puts it at the end (#715). While the pointer is over a multiline well an expand button (Lucide `maximize-2`, 24 px, at the well's top right, with `+N lines` clear of it) opens the **text window** on it: a larger, movable, resizable, non-modal window for reading and editing the text at 14 px with a line height of 1.5 about 72 characters wide, at any canvas zoom (12.4's Alt+T and the node menu's Edit text… open it too, on the node's first multiline input; Tab and Shift+Tab move to the node's other text inputs, `line` ones included). It writes the input as it is typed, one undo step per input visited; Escape or the close button ends it and keeps the text, Enter is a new line and Ctrl+Enter runs the workflow without closing it; its footer counts characters, words and lines and shows what the check says. An input that is linked shows the text its source made in its last run (read-only, with a Go to source button that selects the source and brings it into view; a plain line says so when the source has not run) (#715). |
 | `toggle` | boolean | |
 | `choice` | text with `choices` | Default when `choices` is present. |
 | `file`, `folder` | text | Opens the portal picker (`FilePicker`; Qt's own dialog when there is no portal). The value is a path. |
@@ -3416,6 +3416,7 @@ and the `?` overlay marks each one.
 | `node.bypass` | Bypass | Ctrl+B | same |
 | `node.mute` | Mute | Ctrl+M | same |
 | `node.collapse` | Collapse | Alt+C | same |
+| `node.edit-text` | Edit text… (the text window on the node's first multiline input; one entry, Tab moves on to its other text inputs) | Alt+T, the expand button on a multiline field | added (Alt+E is the window bar's Edit menu) |
 | `node.pin` | Pin in place | P | same |
 | `node.search` | Add a node by search | double-click empty graph, Tab, Shift+A | keys added |
 | `frame.make` | Frame the selection | Ctrl+G | same |

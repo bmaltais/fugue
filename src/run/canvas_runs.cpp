@@ -92,6 +92,9 @@ QString chipText(const QJsonValue &value) {
     return {};
 }
 
+// The longest text kept whole per output (the text window shows it; the card's slot keeps its own, shorter excerpt).
+constexpr int maxResultText = 200000;
+
 } // namespace
 
 CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *service, const Registry *registry,
@@ -399,7 +402,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         return;
     const NodeView view = m_tabs.value(tab).nodes.value(node);
     QVariantMap state{{"state", aggregate(view)}, {"progress", progressOf(view)}, {"seconds", view.seconds},
-                      {"error", view.error},      {"warnings", view.warnings}, {"values", view.values},
+                      {"error", view.error},      {"warnings", view.warnings}, {"values", view.values}, {"texts", view.texts},
                       {"notice", view.notice},    {"errorDetail", view.errorDetail}, {"errorPack", view.pack}, {"runsOn", view.runsOn}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
         const QString size = sizeText(width, height);
@@ -677,6 +680,11 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                 for (auto it = outputs.begin(); it != outputs.end(); ++it)
                     if (const QString text = chipText(it.value()); !text.isEmpty())
                         view.values.insert(it.key(), text);
+                // The whole text of each text output, for the text window's view of a linked input (#715); a huge one is cut.
+                view.texts.clear();
+                for (auto it = outputs.begin(); it != outputs.end(); ++it)
+                    if (it.value().isString())
+                        view.texts.insert(it.key(), it.value().toString().left(maxResultText));
             }
             const QJsonObject thumbnails = event.value("thumbnails").toObject();
             if (!inner && m_nodeInfo.value(top).compares) {
@@ -931,14 +939,7 @@ QVariantList CanvasRuns::runningWires() const {
     return wires;
 }
 
-void CanvasRuns::showError(const QString &node) {
-    if (node.isEmpty())
-        return;
-    m_canvas->select({node});
-    // Its header in the middle of the view, at the zoom the view has.
-    const QPointF at = m_canvas->position(node) + QPointF(30 * m_canvas->unit(), 10 * m_canvas->unit());
-    m_canvas->moveView(at.x(), at.y(), m_canvas->view().value("zoom", 1).toReal());
-}
+void CanvasRuns::showError(const QString &node) { m_canvas->reveal(node); }
 
 // What each node of the shown workflow is, for its slot: a node made to show a result
 // (Preview, Save Image) and the image file a file input names (Load Image).

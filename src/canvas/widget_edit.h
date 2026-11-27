@@ -153,6 +153,19 @@ public:
     // True while the session writes its own value (not another edit).
     bool writing() const { return m_writing; }
 
+    // --- the text window (#715): a larger editor for a node's text inputs ---
+    // The node's text inputs in the order its card shows them: [{name, label, widget ("multiline" or "line"), linked}].
+    Q_INVOKABLE QVariantList textInputs(const QString &node) const;
+    // One typed change from a window that stays open beside the canvas: it writes `text` to the input inside a session of its own
+    // (begun here when this input has none open, so another edit that ended it, or a field that took its place, never gets the
+    // text), one undo step for the visit. Returns why not, as preview() does.
+    Q_INVOKABLE QString typeInto(const QString &node, const QString &input, const QString &text);
+    // Ends the session when it is this input's.
+    Q_INVOKABLE void finishInto(const QString &node, const QString &input);
+    // What a linked input gets: {linked, source (the node), sourceTitle, output (its label), has (the source ran and made text),
+    // text (that run's, whole)}; {linked: false} for an input with a value.
+    Q_INVOKABLE QVariantMap linkedText(const QString &node, const QString &input) const;
+
     // --- numbers (spin, slider, seed) ---
     // `from` moved by `steps` of the input's step (1 for a whole number, else 0.1 when it has
     // none), held inside min and max and rounded to the step.

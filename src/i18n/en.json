@@ -2392,5 +2392,25 @@
   "Not checked yet.": "Not checked yet.",
   "Last check %1 failed: %2": "Last check %1 failed: %2",
   "Last checked %1.": "Last checked %1.",
-  "Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1": "Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1"
+  "Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1": "Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1",
+  "%1 · %2 has not made any text yet: run the workflow and it shows here.": "%1 · %2 has not made any text yet: run the workflow and it shows here.",
+  "%1 · %2 · %3": "%1 · %2 · %3",
+  "Edit in a larger window (Alt+T)": "Edit in a larger window (Alt+T)",
+  "Edit text…": "Edit text…",
+  "Edit the node's text in a larger window": "Edit the node's text in a larger window",
+  "From %1 · %2, as it made it in its last run. Take the link out to type here.": "From %1 · %2, as it made it in its last run. Take the link out to type here.",
+  "Go to source": "Go to source",
+  "Select %1 on the canvas and bring it into view": "Select %1 on the canvas and bring it into view",
+  "%n characters": {
+    "one": "%n character",
+    "other": "%n characters"
+  },
+  "%n words": {
+    "one": "%n word",
+    "other": "%n words"
+  },
+  "%n lines": {
+    "one": "%n line",
+    "other": "%n lines"
+  }
 }

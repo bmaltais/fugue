@@ -248,6 +248,10 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
         registry.setEnabledWhen(QString::fromLatin1(id), [model] { return model->selectedIds().size() >= 2; });
     for (const char *id : {"node.distribute-horizontal", "node.distribute-vertical"})
         registry.setEnabledWhen(QString::fromLatin1(id), [model] { return model->selectedIds().size() >= 3; });
+    // Edit text…: a node with a text input (#715).
+    registry.setEnabledWhen("node.edit-text", [model, &registry] {
+        return !model->textEditNode(registry.target().value("node").toString()).isEmpty();
+    });
     // Rename: one node (#55), or a group's port the menu was opened on (#72).
     registry.setEnabledWhen("edit.rename", [model, &registry] {
         const QVariantMap target = registry.target();

@@ -518,6 +518,47 @@ void WidgetEdit::finish() {
         m_canvas->endEdit(text);
 }
 
+QVariantList WidgetEdit::textInputs(const QString &node) const {
+    QVariantList found;
+    const int row = m_canvas->rowOf(node);
+    if (row < 0)
+        return found;
+    for (const CanvasModel::Port &port : m_canvas->m_rows[size_t(row)].inputs) {
+        if (port.widgetType != QLatin1String("multiline") && port.widgetType != QLatin1String("line"))
+            continue;
+        const bool linked = m_canvas->m_document.graph.nodes.value(node).inputs.value(port.name).kind() == InputValue::Kind::Link;
+        found.append(QVariantMap{{"name", port.name}, {"label", port.label}, {"widget", port.widgetType}, {"linked", linked}});
+    }
+    return found;
+}
+
+QString WidgetEdit::typeInto(const QString &node, const QString &input, const QString &text) {
+    if (m_session.node != node || m_session.input != input)
+        begin(node, input);
+    return preview(text);
+}
+
+void WidgetEdit::finishInto(const QString &node, const QString &input) {
+    if (m_session.node == node && m_session.input == input)
+        finish();
+}
+
+QVariantMap WidgetEdit::linkedText(const QString &node, const QString &input) const {
+    const QString from = m_canvas->linkedFrom(node, input);
+    if (from.isEmpty())
+        return {{"linked", false}};
+    const InputValue value = m_canvas->m_document.graph.nodes.value(node).inputs.value(input);
+    const CanvasModel::Port *port = m_canvas->findPort(from, value.from().port, true);
+    const QVariantMap texts = m_canvas->runTexts(from);
+    const bool has = texts.contains(value.from().port);
+    return {{"linked", true},
+            {"source", from},
+            {"sourceTitle", m_canvas->nodeTitle(from)},
+            {"output", port ? port->label : value.from().port},
+            {"has", has},
+            {"text", has ? texts.value(value.from().port).toString() : QString()}};
+}
+
 void WidgetEdit::endSession() {
     if (!editing())
         return;

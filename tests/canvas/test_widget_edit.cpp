@@ -719,6 +719,77 @@ private slots:
         QVERIFY(byName.value("model").value("widget").toBool());
         QVERIFY(!byName.value("image").value("widget").toBool());
     }
+
+    // #715: the text window lists a node's text inputs and types into the input through a session of its own.
+    void theTextWindowListsTheTextInputsOfANode() {
+        Fixture f;
+        QStringList names;
+        for (const QVariant &input : f.edits.textInputs("all"))
+            names << input.toMap().value("name").toString() + ":" + input.toMap().value("widget").toString();
+        QCOMPARE(names, (QStringList{"name:line", "notes:multiline"}));
+        QVERIFY(f.edits.textInputs("gone").isEmpty()); // a placeholder has no widgets
+        QVERIFY(f.canvas.textEditNode("").isEmpty()); // nothing selected
+        f.canvas.select({"prompt"});
+        QCOMPARE(f.canvas.textEditNode(""), QString("prompt"));
+        QCOMPARE(f.canvas.textEditNode("all"), QString("all")); // the node a menu was opened on wins
+        QVERIFY(f.canvas.textEditNode("gone").isEmpty());
+    }
+
+    void aVisitToTheTextWindowIsOneStepAndAnInterruptedOneBeginsAnother() {
+        Fixture f;
+        QCOMPARE(f.edits.typeInto("all", "notes", "a"), QString());
+        QCOMPARE(f.edits.typeInto("all", "notes", "a fox"), QString());
+        QCOMPARE(f.edits.typeInto("all", "notes", "a fox\nin snow"), QString());
+        QVERIFY(f.edits.editing());
+        f.edits.finishInto("all", "name"); // not this input's session: it stays open
+        QVERIFY(f.edits.editing());
+        f.edits.finishInto("all", "notes");
+        QVERIFY(!f.edits.editing());
+        QCOMPARE(f.stored("all", "notes"), QJsonValue("a fox\nin snow"));
+        QCOMPARE(f.steps(), 1);
+        // Another field takes the session while the window is open (a drag on the canvas, a run advancing a seed): the next key
+        // is a step of its own, written to the notes and never to the field that has the session.
+        f.edits.typeInto("all", "notes", "a fox\nin snow!");
+        f.edits.begin("all", "count");
+        QCOMPARE(f.edits.typeInto("all", "notes", "a fox\nin snow!!"), QString());
+        QCOMPARE(f.stored("all", "notes"), QJsonValue("a fox\nin snow!!"));
+        QCOMPARE(f.stored("all", "count"), QJsonValue(7));
+        f.edits.finishInto("all", "notes");
+        QCOMPARE(f.steps(), 3);
+        f.canvas.undo();
+        QCOMPARE(f.stored("all", "notes"), QJsonValue("a fox\nin snow!"));
+        // The window's text is checked as the inline field's: a linked input takes none.
+        QVERIFY(!f.edits.typeInto("join", "a", "x").isEmpty());
+    }
+
+    void aLinkedInputShowsTheTextItsSourceMadeInItsLastRun() {
+        Fixture f;
+        QVERIFY(!f.edits.linkedText("prompt", "text").value("linked").toBool());
+        QVariantMap before = f.edits.linkedText("join", "a");
+        QVERIFY(before.value("linked").toBool());
+        QCOMPARE(before.value("source").toString(), QString("prompt"));
+        QCOMPARE(before.value("sourceTitle").toString(), QString("Prompt"));
+        QVERIFY(!before.value("has").toBool()); // it has not run
+        f.canvas.setRunState("prompt", {{"state", "cached"}, {"texts", QVariantMap{{"text", "a red fox\nin the snow"}}}});
+        const QVariantMap after = f.edits.linkedText("join", "a");
+        QVERIFY(after.value("has").toBool());
+        QCOMPARE(after.value("text").toString(), QString("a red fox\nin the snow"));
+        QVERIFY(!after.value("output").toString().isEmpty());
+        f.canvas.setRunState("prompt", {{"state", "error"}, {"error", "boom"}});
+        QCOMPARE(f.canvas.runError("prompt"), QString("boom"));
+        QVERIFY(!f.edits.linkedText("join", "a").value("has").toBool());
+    }
+
+    void revealSelectsTheNodeAndBringsItIntoView() {
+        Fixture f;
+        QSignalSpy moved(&f.canvas, &CanvasModel::viewMoveRequested);
+        f.canvas.reveal("prompt");
+        QCOMPARE(f.canvas.selectedIds(), QStringList{"prompt"});
+        QCOMPARE(moved.count(), 1);
+        f.canvas.reveal("nowhere"); // nothing changes
+        QCOMPARE(moved.count(), 1);
+        QCOMPARE(f.canvas.selectedIds(), QStringList{"prompt"});
+    }
 };
 
 QTEST_MAIN(TestWidgetEdit)

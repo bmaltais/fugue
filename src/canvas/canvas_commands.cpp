@@ -74,6 +74,11 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
         if (model->selectedIds().size() == 1)
             emit model->nodeRenameRequested(model->selectedIds().first());
     });
+    // Edit text… (#715): the text window on the node the menu was opened on, else the selected one.
+    commands.setHandler("node.edit-text", [model, &commands] {
+        if (const QString node = model->textEditNode(commands.target().value("node").toString()); !node.isEmpty())
+            emit model->textEditRequested(node);
+    });
     commands.setHandler("node.pin", [model] { model->togglePinned(); });
     commands.setHandler("node.picture-show", [model] { model->setPictureOverride(QStringLiteral("show")); });
     commands.setHandler("node.picture-hide", [model] { model->setPictureOverride(QStringLiteral("hide")); });

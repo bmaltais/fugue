@@ -130,7 +130,7 @@ QVariantList graph() {
         submenu(QT_TRANSLATE_NOOP("Menu", "&Select"), {command("edit.select-all")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Add"), {command("node.search"), command("edit.paste-connected")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
-                {command("edit.rename"), colors(), command("edit.clone"), command("edit.delete"), separator(),
+                {command("edit.rename"), ifOn("node.edit-text"), colors(), command("edit.clone"), command("edit.delete"), separator(),
                  command("node.bypass"), command("node.mute"), command("node.collapse"), command("node.pin"), ifOn("node.picture-show"),
                  ifOn("node.picture-hide"), ifOn("node.picture-default"), align(false),
                  distribute(false), separator(), command("node.open-image"), command("node.copy-image"),
@@ -216,7 +216,7 @@ QVariantList canvas() {
 
 // Right-click on a node: it is selected first, so each command acts on the selection.
 QVariantList node() {
-    return {ifOn("group.expose"), ifOn("group.unexpose"), command("edit.rename"), separator(), command("node.bypass"),
+    return {ifOn("group.expose"), ifOn("group.unexpose"), command("edit.rename"), ifOn("node.edit-text"), separator(), command("node.bypass"),
             command("node.mute"), command("node.collapse"), command("node.pin"), ifOn("node.picture-show"), ifOn("node.picture-hide"),
             ifOn("node.picture-default"), colors(), align(true), distribute(true), separator(),
             ifOn("node.open-image"), ifOn("node.copy-image"), ifOn("node.save-image"), ifOn("compare.copy-a"), ifOn("compare.copy-b"),
