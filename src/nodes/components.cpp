@@ -261,7 +261,8 @@ std::optional<Error> addTokenizer(QJsonObject &context, const QJsonObject &deriv
         return std::nullopt;
     const Result<QString> found = library.resolve(handle, hashes);
     if (!found) {
-        const CatalogModel *entry = ModelCatalog::load().find(QStringLiteral("qwen3.5-tokenizer"));
+        const ModelCatalog catalog = ModelCatalog::load(); // kept: `entry` points into it
+        const CatalogModel *entry = catalog.find(QStringLiteral("qwen3.5-tokenizer"));
         if (entry && entry->file == handle.value(QStringLiteral("name")).toString())
             return makeError(QStringLiteral("model_missing"),
                              QStringLiteral("The MOSS Image model from Load Models reads the official Qwen3.5 tokenizer (%1, %2), and it is not in your tokenizers folder.")

@@ -178,7 +178,8 @@ private slots:
         QVERIFY(catalog.find("only"));
         QCOMPARE(catalog.find("frompack")->file, QString("u.onnx"));
         QVERIFY(catalog.find("realesrgan-x4plus")); // Fugue's own still there
-        QVERIFY(!ModelCatalog::load(user.path()).find("only")); // no pack paths: none read
+        const ModelCatalog withoutPacks = ModelCatalog::load(user.path());
+        QVERIFY(!withoutPacks.find("only")); // no pack paths: none read
     }
 
     void theExamplePacksCatalogsAreValidAndNameTheirLicences() {
