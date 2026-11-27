@@ -58,7 +58,7 @@ KitDropdown {
             }
             if (m.path !== undefined) {
                 rows.push({ text: m.title, detail: (m.recommended === true ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
-                            note: m.recommended === true ? m.recommendedWhy : "", value: { disk: m.path }, place: "local",
+                            note: m.engineNote ? m.engineNote : (m.recommended === true ? m.recommendedWhy : ""), value: { disk: m.path }, place: "local",
                             checked: m.name === name })
             } else {
                 const status = m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("not running")

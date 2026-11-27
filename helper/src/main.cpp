@@ -3,6 +3,10 @@
 //
 //   fugue-helper <request.json>     one operation, then exit
 //   fugue-helper --serve            the provider protocol over stdio (8.8), for HelperProvider
+//   fugue-helper --inspect FILE...  what each model file is, read from its header alone: one JSON line per file,
+//                                   {"path", "recognised", and if so "version", "id", "is_dit", "video", "inpaint",
+//                                   "latent_channels", "vae_kind"} or {"path", "error"}; exit 0. No backend, no GPU,
+//                                   no weights (the fork's sd_fugue_inspect_model); the library's log goes to stderr
 //   fugue-helper --serve-http --listen ADDR --port N --key-file FILE --models DIR[:DIR...]
 //                                   the same operations over HTTP, for a paired host (README.md)
 //
@@ -2176,13 +2180,32 @@ int serveHttp(int argc, char **argv) {
     return server.serveHttp(address, port, key);
 }
 
+// --inspect FILE...: one JSON line per file, from the header alone (no backend is made).
+static int inspectFiles(int argc, char **argv) {
+    for (int i = 2; i < argc; ++i) {
+        char *text = sd_fugue_inspect_model(argv[i]);
+        json line = text ? json::parse(text, nullptr, false) : json();
+        sd_fugue_string_free(text);
+        if (!line.is_object())
+            line = {{"error", "no answer from the engine"}};
+        line["path"] = argv[i];
+        std::printf("%s\n", line.dump().c_str());
+    }
+    std::fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--inspect") {
+        sd_set_log_callback(logToStderr, nullptr);
+        return inspectFiles(argc, argv);
+    }
     if (argc >= 2 && std::string(argv[1]) == "--serve-http") {
         sd_set_log_callback(logToStderr, nullptr);
         return serveHttp(argc, argv);
     }
     if (argc != 2) {
-        std::fprintf(stderr, "usage: fugue-helper <request.json> | --serve | --serve-http --listen ADDR --port N --key-file FILE --models DIR[:DIR...]\n");
+        std::fprintf(stderr, "usage: fugue-helper <request.json> | --inspect FILE... | --serve | --serve-http --listen ADDR --port N --key-file FILE --models DIR[:DIR...]\n");
         return 2;
     }
     sd_set_log_callback(logToStderr, nullptr);

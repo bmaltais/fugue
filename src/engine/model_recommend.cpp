@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "engine/model_family.h"
+#include "engine/model_inspect.h"
 #include "engine/model_library.h"
 #include "engine/model_use.h"
 #include "engine/registry.h"
@@ -161,15 +162,28 @@ QString familyKindOf(const QString &resourceType) {
 }
 
 QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<MarkedFile> &files, const RecommendContext &context,
-                                     ModelShapes &shapes) {
+                                     ModelShapes &shapes, ModelInspector *inspector) {
     QHash<QString, ModelMark> marks;
     QList<RecommendCandidate> candidates;
     const QString kind = familyKindOf(resourceType);
+    QHash<QString, EngineModel> engine;
+    if (inspector && engineDetectsKind(resourceType)) {
+        QStringList paths;
+        for (const MarkedFile &file : files)
+            paths << file.path;
+        engine = inspector->inspect(paths);
+    }
     for (const MarkedFile &file : files) {
         const QString family = modelFamily(kind, QFileInfo(file.path).fileName());
-        if (family.isEmpty())
+        const auto asked = engine.constFind(file.path);
+        const bool notRecognised = asked != engine.constEnd() && !asked->recognised;
+        if (family.isEmpty()) {
+            // No family of Fugue's own: the engine's name for it, when it gave one, and no Recommended mark (no shape rules).
+            if (asked != engine.constEnd())
+                marks.insert(file.path, ModelMark{asked->recognised ? asked->version : QString(), false, {}, notRecognised});
             continue;
-        marks.insert(file.path, ModelMark{family, false, {}});
+        }
+        marks.insert(file.path, ModelMark{family, false, {}, notRecognised});
         candidates.append({file.path, file.size, shapes.of(file.path)});
     }
     const QHash<QString, Recommendation> picked = recommend(candidates, context);

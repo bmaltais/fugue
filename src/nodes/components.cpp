@@ -50,6 +50,7 @@
 #include "engine/media.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
+#include "engine/model_inspect.h"
 #include "engine/model_shape.h"
 #include "engine/vips.h"
 #include "nodes/denoise_cut.h"
@@ -698,6 +699,35 @@ public:
     // the node says so before a run (#85). Reads no file to find them: one with the handle's
     // name is taken to be it, as any check does (8.9).
     Errors check(const NodeContext &context) const override {
+        Errors errors = checkParts(context);
+        if (const std::optional<Error> warning = notRecognisedWarning(context))
+            errors.append(*warning);
+        return errors;
+    }
+
+    // A diffusion model the engine does not load (#703): a warning, since a paired host may run another engine. The answer is the
+    // helper's (engine/model_inspect.h), kept by the file's size and time, so only the first check of a file asks; none without a local helper.
+    static std::optional<Error> notRecognisedWarning(const NodeContext &context) {
+        std::optional<ModelLibrary> own;
+        const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));
+        const QJsonObject handle = context.input(QStringLiteral("diffusion_model")).json().toObject();
+        const Result<QString> found = library.resolve(handle, *context.hashes, ModelLibrary::Hashing::RememberedOnly);
+        if (!found)
+            return std::nullopt;
+        const auto answer = ModelInspector::shared().inspect({found.value()});
+        const auto it = answer.constFind(found.value());
+        if (it == answer.constEnd() || it->recognised)
+            return std::nullopt;
+        Error warning = makeError(QStringLiteral("model_unsupported"),
+                                  QStringLiteral("stable-diffusion.cpp does not recognise %1, so Fugue's helper may not load it.")
+                                      .arg(handle.value(QStringLiteral("name")).toString()),
+                                  QStringLiteral("Pick another model, or run it on a host with an engine that knows it."));
+        warning.severity = Error::Severity::Warning;
+        warning.input = QStringLiteral("diffusion_model");
+        return warning;
+    }
+
+    Errors checkParts(const NodeContext &context) const {
         std::optional<ModelLibrary> own; // none is given outside a check pass
         const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));
         const auto path = [&](const char *input) {

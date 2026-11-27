@@ -25,6 +25,7 @@
 #include "engine/place_policy.h"
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
+#include "engine/model_inspect.h"
 #include "engine/model_recommend.h"
 #include "engine/model_speed.h"
 #include "engine/paths.h"
@@ -97,7 +98,7 @@ Reply modelList(const Command &command, Context &context) {
         for (const ListedModel &model : disk)
             files.append({model.path, model.size});
         const QHash<QString, ModelMark> marks =
-            markModels(declared->type.toString(), files, RecommendContext{device, 0, &speeds}, ModelShapes::shared());
+            markModels(declared->type.toString(), files, RecommendContext{device, 0, &speeds}, ModelShapes::shared(), &ModelInspector::shared());
         for (ListedModel model : disk) {
             const ModelMark mark = marks.value(model.path);
             if (!wantedFamily.isEmpty() && squashed(mark.family) != wantedFamily)
@@ -132,6 +133,11 @@ Reply modelList(const Command &command, Context &context) {
                               {"hashed", hashed},
                               {"origin", fromDefault ? settingOriginName(SettingOrigin::Default) : settingOriginName(SettingOrigin::Own)}};
             entry.insert("family", mark.family.isEmpty() ? QJsonValue() : QJsonValue(mark.family));
+            // What the engine says it is (#703), for a diffusion model or checkpoint a local helper was asked about.
+            if (const std::optional<EngineModel> engine = engineDetectsKind(declared->type.toString())
+                                                              ? ModelInspector::shared().cached(model.path)
+                                                              : std::nullopt)
+                entry.insert("engine", engine->toJson());
             entry.insert("recommended", mark.recommended);
             if (mark.recommended)
                 entry.insert("reason", mark.reason);

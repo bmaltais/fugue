@@ -485,7 +485,7 @@ Rectangle {
                 state.currentMarked = true
             entries.push({ text: m.title, detail: (recommended ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
                            value: { disk: m.path }, dim: m.fits === false,
-                           place: "local", note: m.fitNote ? m.fitNote : (recommended ? m.recommendedWhy : ""),
+                           place: "local", note: m.fitNote ? m.fitNote : (m.engineNote ? m.engineNote : (recommended ? m.recommendedWhy : "")),
                            checked: isCurrent })
             return
         }

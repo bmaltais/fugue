@@ -10,6 +10,8 @@
 
 namespace fugue {
 
+QString notRecognisedNote() { return QObject::tr("stable-diffusion.cpp does not recognise this model"); }
+
 QVariantMap modelRow(const ListedModel &model, const QString &type, const QHash<QString, ModelMark> &marks) {
     QVariantMap row{{"name", model.name},
                     {"title", model.title.isEmpty() ? model.name : model.title},
@@ -24,11 +26,18 @@ QVariantMap modelRow(const ListedModel &model, const QString &type, const QHash<
         row.insert("path", model.path);
         row.insert("folder", model.folder);
         row.insert("size", model.size);
-        row.insert("family", modelFamily(familyKindOf(type), QFileInfo(model.path).fileName()));
-        if (const auto mark = marks.constFind(model.path); mark != marks.constEnd() && mark->recommended) {
+        // The table's family, else the engine's name for the file (#703), which the mark carries.
+        QString family = modelFamily(familyKindOf(type), QFileInfo(model.path).fileName());
+        const auto mark = marks.constFind(model.path);
+        if (family.isEmpty() && mark != marks.constEnd())
+            family = mark->family;
+        row.insert("family", family);
+        if (mark != marks.constEnd() && mark->recommended) {
             row.insert("recommended", true);
             row.insert("recommendedWhy", mark->reason);
         }
+        if (mark != marks.constEnd() && mark->notRecognised)
+            row.insert("engineNote", notRecognisedNote());
     }
     return row;
 }

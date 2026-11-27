@@ -28,6 +28,7 @@
 
 #include <optional>
 
+#include "engine/model_inspect.h"
 #include "engine/model_shape.h"
 #include "engine/model_speed.h"
 
@@ -74,6 +75,9 @@ struct ModelMark {
     QString family;
     bool recommended = false;
     QString reason;
+    // The engine's answer (#703), for a diffusion model or checkpoint, when a local helper gave one: `family` is its version name when
+    // the table has none, and a file it does not recognise is marked.
+    bool notRecognised = false;
 };
 
 struct MarkedFile {
@@ -84,8 +88,11 @@ struct MarkedFile {
 // The marks of `files` of the resource type `resourceType` ("fugue/diffusion-model"), by path. Reads the
 // header of the files of a known family only (ModelShapes keeps what it read). A type with no families
 // (a LoRA) gets none.
+// With `inspector` (blocking: call it on a worker thread) the engine is asked about the files of a diffusion model or
+// checkpoint type (engine/model_inspect.h): the table's family wins, else the engine's version name is the family, and a file
+// it does not recognise has `notRecognised`. Such a file is never a Recommended candidate unless the table names a family.
 QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<MarkedFile> &files, const RecommendContext &context,
-                                     ModelShapes &shapes);
+                                     ModelShapes &shapes, ModelInspector *inspector = nullptr);
 
 class ModelLibrary;
 

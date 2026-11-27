@@ -66,6 +66,15 @@ The D numbers are the audit's decisions of 2026-11-22. D4 (one button: `ViewButt
 - Why: sharing is a choice with a real consequence (the history is bigger and shows every step), so it is asked once, at the moment of the share, with the smaller, more private answer as the default (Hick: two answers). A canvas never replaces another on opening, so the person has nothing to confirm there, only to be told.
 - Rules met: Floor (answer buttons 28px), Primary (As it is now… the one accent fill, highlighted and focused, as D8 does for the safe answer), Destructive (nothing is removed; the package never overwrites a file), D9 (the primary answer last, at the right), Words (Share…, With history…, As it is now…, never "head" or a hash), Right-to-left (the row mirrors).
 
+### 2026-11-27 Model picker: a file the engine does not recognise, and the engine's family (#703)
+
+- Control: the model menu of a model input (`src/canvas/widgets/InputWidget.qml`) and of the App view (`src/apps/AppModelInput.qml`); the row's `engineNote` and `family` come from `modelRow` (`src/workflow/model_picker.cpp`).
+- Old: a diffusion model or checkpoint of a family Fugue's table does not know sat under its folder name with no word on it, whether or not the engine would load it.
+- New: with a local helper, such a file is grouped under the engine's family name ("Qwen Image"), and one the engine does not recognise has the second line "stable-diffusion.cpp does not recognise this model" (the row's note, where a fit note or the Recommended reason goes: the fit note wins, then this line, then the reason). No new control, chip or colour.
+- Why: the second line is where a row already says why it is not the obvious pick; a label on the row keeps the file pickable (a paired host may run another engine), so it warns and never blocks. The answer arrives after the list opens (it is asked on the header worker), as the Recommended mark does.
+- Rules met: Floor (no new control), Primary (no new accent: the line is plain note text), Learned place (the row's note).
+- Not checked by a person: the line in a window (a model test proves the row).
+
 ### Port loses to the resize corner
 
 - File: `src/canvas/FugueCanvas.qml` (`cornerAt` runs before `portUnder`)

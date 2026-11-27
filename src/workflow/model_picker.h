@@ -33,8 +33,11 @@ class QObject;
 
 namespace fugue {
 
+// The line a picker shows under a diffusion model or checkpoint the engine does not recognise (#703); also what Load Models' check says.
+QString notRecognisedNote();
 // One listed model as a picker row: {title, name, note, status, provider, host, hostOffline, handle}, and for a file on disk
-// also path, folder, size, family and, for the Recommended one of a model, recommended and recommendedWhy (`marks` by path).
+// also path, folder, size, family and, for the Recommended one of a model, recommended and recommendedWhy (`marks` by path); `family` is the engine's name for a file the family table has none for, and a file
+// the engine does not recognise has `engineNote`.
 QVariantMap modelRow(const ListedModel &model, const QString &type, const QHash<QString, ModelMark> &marks);
 // A catalog model not on disk: {catalog: true, id, title, detail, size, keywords, note}.
 QVariantMap catalogRow(const CatalogModel &model);

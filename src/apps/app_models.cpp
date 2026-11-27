@@ -6,6 +6,7 @@
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
 #include "engine/model_family.h"
+#include "engine/model_inspect.h"
 #include "engine/model_speed.h"
 #include "engine/port_type.h"
 #include "engine/registry.h"
@@ -51,7 +52,7 @@ void AppModels::request(const QString &type, const QStringList &capabilities) {
         m_work.read(this, [key, type, files, asked, this]() -> std::function<void()> {
             const ModelSpeeds speeds;
             const QHash<QString, ModelMark> found =
-                markModels(type, files, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared());
+                markModels(type, files, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared(), &ModelInspector::shared());
             return [this, key, found, asked] {
                 if (m_asked != asked || !m_entries.contains(key))
                     return;

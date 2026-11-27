@@ -11,6 +11,18 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
 
+## Inspect (`--inspect`, #703)
+
+`fugue-helper --inspect FILE...` prints one JSON line per file and exits 0: `{"path", "recognised": true, "version",
+"id", "is_dit", "video", "inpaint", "latent_channels", "vae_kind"}`, `{"path", "recognised": false}` (read, but no family the
+pin knows) or `{"path", "error"}` (unreadable). It is the fork's `sd_fugue_inspect_model` (`src/api/fugue_inspect.cpp`): the
+header only (`ModelLoader`, the detection a generation does), no backend and no GPU, so it answers in milliseconds. Over
+`--serve` and `--serve-http` nothing changes. The call needs the fork commit that adds it; the pin moves with it.
+Fugue runs it on the local helper (`engine/model_inspect.*`, spec 2.5): one process for a batch of up to 40 files, a minute at most,
+off the window's thread, the answers kept by path, size and modification time in `<cache>/model-inspect.json` and dropped when the
+helper binary changes. Only diffusion models and checkpoints are asked about: a CLIP-L text encoder is named as a diffusion version.
+
+
 ## Failures say why (#542)
 
 The engine reports a component that cannot be built as "cannot load component from '<file>'" and logs the reason (a
