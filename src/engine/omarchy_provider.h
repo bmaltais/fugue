@@ -78,6 +78,11 @@ public:
     // unset. For tests.
     void setClock(std::function<qint64()> msecs) { m_clock = std::move(msecs); }
 
+    // How a remote host's stale network.json is refreshed: runs the tailnet survey and calls back
+    // with whether it succeeded. Unset, `omarchy-local-ai network --write` runs (only on the real
+    // state folder). For tests.
+    void setSurveyRunner(std::function<void(std::function<void(bool)>)> runner) { m_surveyRunner = std::move(runner); }
+
 private:
     // One model server: where it is and how to reach it.
     struct Server {
@@ -95,6 +100,8 @@ private:
     struct Job;
 
     void discover(std::function<void(const Result<Discovery> &)> done);
+    bool surveyDue() const;
+    void runSurvey(std::function<void(bool)> finished);
     // `timeoutMs`: how long the transfer may go silent; 0 keeps the network's 15 seconds.
     QNetworkReply *send(const Server &server, const QByteArray &method, const QString &path,
                         const QByteArray &body = {}, int timeoutMs = 0,
@@ -128,6 +135,10 @@ private:
     // ended when nobody takes one (forgetOldJobs).
     QHash<QString, std::shared_ptr<Job>> m_jobs;
     std::function<qint64()> m_clock;
+    std::function<void(std::function<void(bool)>)> m_surveyRunner;
+    bool m_surveying = false;
+    qint64 m_surveyedMs = 0; // when the last survey was started
+    QList<std::function<void()>> m_surveyWaiters;
     int m_chats = 0; // chat jobs so far, for their ids
 };
 

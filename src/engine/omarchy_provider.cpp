@@ -15,6 +15,7 @@
 #include <QNetworkRequest>
 #include <QFileInfo>
 #include <QPointer>
+#include <QProcess>
 #include <QUrl>
 
 #include <algorithm>
@@ -50,6 +51,13 @@ const QString kMusicEngine = QStringLiteral("acestep");
 // (and an image) is read first, and a thinking model reasons before it answers. Silence this
 // long ends the job; a server that streams nothing at all (stream ignored) answers in one go.
 constexpr int kChatTransferTimeoutMs = 300 * 1000;
+
+// A remote host's models come from network.json, which only a tailnet survey writes, and a survey
+// lists the models running at that moment (a unit that is restarting is missing). A listing finding
+// the file older than this runs the survey itself, at most once per window.
+constexpr qint64 kSurveyFreshMs = 2 * 60 * 1000;
+// `omarchy-local-ai network --write` asks every online host over the tailnet; it takes seconds.
+constexpr int kSurveyTimeoutMs = 10 * 1000;
 
 
 QByteArray readKey(const QString &path) {
@@ -279,7 +287,66 @@ QNetworkReply *OmarchyProvider::send(const Server &server, const QByteArray &met
     return m_network.sendCustomRequest(request, method, body);
 }
 
+void OmarchyProvider::runSurvey(std::function<void(bool)> finished) {
+    if (m_surveyRunner)
+        return m_surveyRunner(std::move(finished));
+    auto *process = new QProcess(this);
+    auto *timer = new QTimer(process);
+    timer->setSingleShot(true);
+    // finished fires once: a timeout kills the process, which then reports through the same signal.
+    auto done = std::make_shared<std::function<void(bool)>>(std::move(finished));
+    const auto report = [process, done](bool ok) {
+        if (*done)
+            std::exchange(*done, nullptr)(ok);
+        process->deleteLater();
+    };
+    connect(process, &QProcess::finished, this, [process, report](int code, QProcess::ExitStatus status) {
+        report(status == QProcess::NormalExit && code == 0);
+    });
+    connect(process, &QProcess::errorOccurred, this, [report](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart)
+            report(false);
+    });
+    connect(timer, &QTimer::timeout, process, [process] { process->kill(); });
+    process->start(QStringLiteral("omarchy-local-ai"), {QStringLiteral("network"), QStringLiteral("--write")});
+    timer->start(kSurveyTimeoutMs);
+}
+
+// True when a remote listing should run the survey before it reads network.json.
+bool OmarchyProvider::surveyDue() const {
+    if (m_instance.address.isEmpty())
+        return false;
+    // The real command writes the real state: only for the real state folder, or an injected runner.
+    if (!m_surveyRunner && m_paths.stateDir != OmarchyPaths::standard().stateDir)
+        return false;
+    const Result<QJsonObject> network = readJsonObject(QDir(m_paths.stateDir).filePath("network.json"));
+    if (!network) // none means no paired host: today's message; unreadable is said by discover()
+        return false;
+    const qint64 at = now();
+    if (m_surveyedMs && at - m_surveyedMs < kSurveyFreshMs)
+        return false;
+    return at - qint64(network->value("updated_ms").toDouble()) > kSurveyFreshMs;
+}
+
 void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> done) {
+    if (m_surveying) {
+        // A survey is running: this listing waits for it, so none reads the old file meanwhile.
+        m_surveyWaiters.append([this, done = std::move(done)]() mutable { discover(std::move(done)); });
+        return;
+    }
+    if (surveyDue()) {
+        m_surveying = true;
+        m_surveyedMs = now(); // a failure counts too: one try per window
+        runSurvey([this, done = std::move(done)](bool) mutable {
+            // On failure the file as it is serves, as it did before the survey was asked for.
+            m_surveying = false;
+            discover(std::move(done));
+            const auto waiters = std::exchange(m_surveyWaiters, {});
+            for (const auto &waiter : waiters)
+                waiter();
+        });
+        return;
+    }
     const QDir state(m_paths.stateDir);
     const QDir config(m_paths.configDir);
     const bool remote = !m_instance.address.isEmpty();
