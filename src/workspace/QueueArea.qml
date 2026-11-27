@@ -3,7 +3,6 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
-import "../kit"
 import "../media"
 
 // The run queue as an area's view (#648, spec 12.16, as ComfyUI's queue sidebar; Blender's Timeline and Info editors are areas

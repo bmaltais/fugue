@@ -29,7 +29,7 @@ QtObject {
     property Connections follow: Connections {
         target: keep.popup.parent ? keep.popup.parent.Window.window : null
         function onActiveFocusItemChanged() {
-            const item = target.activeFocusItem
+            const item = (target as Window).activeFocusItem
             const held = item ? keep.holder(item) : null
             if (held && held !== keep.popup.contentItem.parent)
                 keep.taken = item
