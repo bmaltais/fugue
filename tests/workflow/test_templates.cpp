@@ -1318,6 +1318,54 @@ private slots:
         QVERIFY(workflows.missingSomething());
     }
 
+    // Owner report, 2026-11-27: "When I try to open a template, the wrong template opens in a tab." A template whose matching file is read
+    // first (Use my file) opened only when the read ended, so one opened meanwhile was followed by a tab of the first one popping up.
+    // The open asked for last wins; the read is still remembered, so the first template opens at once later.
+    void aTemplateOpenedWhileAnotherOnesFilesAreReadIsTheOneThatOpens() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'6');
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z"}},
+                     workflow({{"models", node("fugue/load-models", {{"diffusion_model", QJsonObject{{"resource", "fugue/diffusion-model"}, {"hash", hash},
+                                                                                              {"name", "z_image_turbo_int8_convrot.safetensors"}}}})}}));
+        makeTemplate(f.bundled.filePath("plain"), {{"title", "Plain"}}, workflow({{"text", node("fugue/text", {{"text", "hi"}})}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        const auto titles = [&workflows] {
+            QStringList out;
+            for (const QVariant &tab : workflows.tabs())
+                out << tab.toMap().value("title").toString();
+            return out;
+        };
+        bool zitOpened = true;
+        QVERIFY(workflows.openTemplateByIdThen("zit", [&zitOpened](bool ok) { zitOpened = ok; })); // its file is read first
+        QVERIFY(workflows.hashingUses());
+        QVERIFY(workflows.openTemplateById("plain")); // the person moves on: it opens at once
+        QCOMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Plain"));
+        QTRY_VERIFY(!workflows.hashingUses());
+        QVERIFY(!zitOpened);                  // the read ended, and Z did not pop up over Plain
+        QVERIFY(!titles().contains("Z"));
+        QCOMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Plain"));
+        QVERIFY2(!workflows.notice().contains("Reading your file"), qPrintable(workflows.notice()));
+        QVERIFY(workflows.openTemplateById("zit")); // asked again: the hash is known now, so it opens
+        QTRY_VERIFY(titles().contains("Z"));
+        QCOMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Z"));
+    }
+
     // #616, the end state the owner wants: every missing model has a file of the same weights, the file's hash is not known yet, and one
     // yes on the sheet (Use my file, its default) reads the file, sets it in the document (one undo step), closes the sheet and starts no
     // download: the person is on the tab, ready to run.
