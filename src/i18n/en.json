@@ -1780,6 +1780,8 @@
   "Action": "Action",
   "Batch": "Batch",
   "Batch progress": "Batch progress",
+  "Download progress": "Download progress",
+  "Preparing the preview": "Preparing the preview",
   "Batch…": "Batch…",
   "Cancel batch": "Cancel batch",
   "Cancelled.": "Cancelled.",

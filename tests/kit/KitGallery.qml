@@ -148,6 +148,14 @@ Item {
                             onMoved: v => gallery.blobs = v
                         }
                     }
+                    KitRow {
+                        label: "Download"
+                        KitProgress { objectName: "progress"; value: 0.4; text: "Download" }
+                    }
+                    KitRow {
+                        label: "Waiting"
+                        KitProgress { objectName: "progressWaiting"; indeterminate: true; text: "Waiting" }
+                    }
                     Item { // a picture with a field over it: smoked glass
                         width: parent.width
                         height: 11 * App.theme.look.unit

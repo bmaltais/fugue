@@ -14,8 +14,9 @@
 # Copy buttons for error messages (owner, 2026-11-25): the workflow notice holds a Loader for its KitCopyButton (made only while a notice shows) and so do the group banner and the task bar's error line: two items more.
 # #524: the Seed and Run again choosers' thumb is named (kitSegmentedThumb) so a test can find it: no new item, one more name.
 # #605: the node warnings card holds its "Use it" offers in a Loader, made only while there are some: one item more.
+# #509 (2026-11-27): the notices' dismiss buttons (keymapNoticeDismiss, workflowNoticeDismiss) are the kit's ViewButton in place of a stock ToolButton with a Glyph: three items more each, and two more names. (The Batch and Export dialogs' KitProgress are not in the default window.)
 # #616 (UI design 2026-11-26): the workflow notice holds a Loader for Undo (a template opened with the person's files), made only while that line shows: one item more.
-items 274
+items 280
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 appViewSwitch 1
@@ -53,6 +54,7 @@ graphMenuTitle-Select 1
 graphMenuTitle-View 1
 groupNotice 1
 keymapNotice 1
+keymapNoticeDismiss 1
 kitSegmentedThumb 1
 lens 1
 lensWorld 1
@@ -83,6 +85,7 @@ warningsTip 1
 windowDropArea 1
 wires 1
 workflowNotice 1
+workflowNoticeDismiss 1
 workflowTabs 1
 world 1
 zoomPill 1
