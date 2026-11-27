@@ -45,8 +45,15 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
       m_look(new CanvasLook(this)) {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
-    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
-    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_debounce.start(); });
+    // The first change of a burst arms the timer and later ones leave it running: the watched parents (the temporary
+    // folder, ~/.config) change all the time, and a timer restarted by each of those never fired (2026-11-27: with a
+    // file made in /tmp every 20 ms the test never saw shell.toml). A change after the reload starts a new round.
+    const auto armed = [this] {
+        if (!m_debounce.isActive())
+            m_debounce.start();
+    };
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, armed);
+    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, armed);
     connect(&m_debounce, &QTimer::timeout, this, &Theme::reload);
 
     // Corners follow Hyprland's effective rounding, which themes and personal
