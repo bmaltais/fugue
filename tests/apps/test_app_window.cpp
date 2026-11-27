@@ -20,6 +20,7 @@
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
+#include "engine/providers.h"
 #include "../test_shard.h"
 #include "../window_grab.h"
 
@@ -150,7 +151,7 @@ struct Rig {
         out.collectGarbage = false;
         return out;
     }
-    explicit Rig(App &app)
+    explicit Rig(App &app, PairedRequirementOf requirementOf = {}, PairedProbe probe = {})
         : setup(setupIn(app.dir.path())), service(setup), runs(&app.model, &app.workflows, &service, &app.registry),
           view([this](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
                [](const QString &) {}, &app.registry),
@@ -158,7 +159,7 @@ struct Rig {
         app.appShelf = &shelf;
         runs.registerCommands(app.commands);
         app.runs = &runs;
-        bindAppView(view, app.workflows, app.model, service, app.commands, runs);
+        bindAppView(view, app.workflows, app.model, service, app.commands, runs, std::move(requirementOf), std::move(probe));
         app.appView = &view;
     }
 };
@@ -815,6 +816,64 @@ private slots:
         QTRY_VERIFY((grid = find(app.window, "appShelfGrid")) && grid->hasActiveFocus());
         QTest::keyClick(app.window, Qt::Key_Return);
         QTRY_COMPARE(app.workflows.count(), 2);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // #501: where the app runs is asked again when the workflow changes while the tab stays the same (a node pinned to a provider on
+    // this machine, in the graph, and back to the App view): "Runs on" and the Needs panel follow the new answer, not the first one.
+    void thePairedHostIsAskedAgainWhenAPinChanges() {
+        const QString modelHash = "sha256:" + QString(64, QLatin1Char('a'));
+        const auto workflow = [&](const QString &pin) {
+            return QStringLiteral(R"({"fugue": 1,
+              "app": {"format": 1, "title": "Pinned", "defaultView": "app", "inputs": [{"role": "prompt", "targets": ["enc.prompt"]}], "outputs": [{"node": "show"}]},
+              "graph": {"nodes": {
+                "models": {"type": "fugue/load-models", "version": "1.0.0", "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "hash": "%1", "name": "m.safetensors"},
+                  "text_encoder": {"resource": "fugue/text-encoder", "hash": "sha256:%2", "name": "t.safetensors"}, "vae": {"resource": "fugue/vae", "hash": "sha256:%3", "name": "v.safetensors"}}},
+                "enc": {"type": "fugue/text-encode", "version": "1.0.0" %4, "inputs": {"model": {"from": "models.model"}, "prompt": "a cat"}},
+                "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "enc.conditioning"}}}}}})")
+                .arg(modelHash, QString(64, QLatin1Char('b')), QString(64, QLatin1Char('c')),
+                     pin.isEmpty() ? QString() : QStringLiteral(", \"provider\": \"%1\"").arg(pin))
+                .toUtf8();
+        };
+        // The owner's providers.json is not read: the test's own home has this one (tests/test_environment.cpp).
+        QFile providers(providersPath());
+        QVERIFY(QDir().mkpath(QFileInfo(providers).absolutePath()));
+        QVERIFY(providers.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        providers.write(R"({"providers": [{"name": "desk", "type": "omarchy"}, {"name": "gx10", "type": "fugue-helper", "address": ")" // moc: no // before a quote in a raw string
+                        "http:" "//gx10.example.ts.net:8787\"}]}");
+        providers.close();
+        const auto requirementOf = [](const NodeType &type, const Values &) -> std::optional<Requirement> {
+            if (type.id != QLatin1String("fugue/text-encode"))
+                return std::nullopt;
+            Requirement requirement;
+            requirement.capability = QStringLiteral("text.encode");
+            return requirement;
+        };
+        const PairedProbe probe = [](const QList<ProviderInstance> &helpers, std::function<void(const QMap<QString, Description> &)> done) {
+            QMap<QString, Description> answered;
+            for (const ProviderInstance &helper : helpers) {
+                OfferedModel model;
+                model.status = ModelStatus::Ready;
+                Description description;
+                description.sharesFilesystem = false; // a paired host takes its model files in the job
+                description.capabilities << CapabilityOffer{QStringLiteral("text.encode"), {model}};
+                answered.insert(helper.name, description);
+            }
+            done(answered);
+        };
+        App app(load(workflow({})));
+        Rig rig(app, requirementOf, probe);
+        QVERIFY(app.open());
+        QTRY_COMPARE(rig.view.runsOn(), QStringLiteral("gx10"));
+        rig.view.openInGraph();
+        app.model.setDocument(load(workflow("desk"))); // pinned to the provider on this machine: the host cannot take the node
+        rig.view.showApp();
+        QTRY_VERIFY(rig.view.runsOn().isEmpty());
+        QTRY_VERIFY(find(app.window, "appNeeds"));
+        rig.view.needs()->setPlanSource([] { return ReadinessPlan(); }); // the panel is gone before the window is
+        rig.view.needs()->setPlan(ReadinessPlan());
+        QTRY_VERIFY(!find(app.window, "appNeeds"));
+        QFile::remove(providersPath());
         qDeleteAll(app.engine.rootObjects());
     }
 
