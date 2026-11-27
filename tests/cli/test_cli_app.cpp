@@ -5,6 +5,7 @@
 // refuses with, and the files it prints.
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -270,6 +271,41 @@ private slots:
         QCOMPARE(valid.exitCode, 0);
         for (const QJsonValue warning : valid.json().value("warnings").toArray())
             QVERIFY2(warning.toObject().value("input").toString() != "diffusion_model", valid.out);
+    }
+
+    // #625: validate waited silently when another Fugue held the hash store's lock (the default swaps in the file on disk and saves its
+    // hash). It now says who it waits for after a second, as a line, or as an event on stderr with --json (stdout stays the envelope),
+    // and goes on when the holder lets go (the 10 s deadline of FileHashes::save ends it with a warning; read from the code, not run here).
+    void validateSaysWhoHoldsTheHashStoreInsteadOfWaitingSilently() {
+        write(path("root/data/fugue/models/text_encoders/t.safetensors"), "abc");
+        write(path("root/data/fugue/models/vae/v.safetensors"), "abc");
+        zImage("z_image_turbo_bf16.safetensors");
+        QVERIFY(QFile::copy(fugueSourceDir() + "/templates/z-image-turbo/workflow.fugue", path("work/zit-wait.fugue")));
+        const QString lock = path("root/state/fugue/hashes.json.lock");
+        for (const bool json : {false, true}) {
+            QFile::remove(lock);
+            // A live process that is not Fugue, named in the lock as QLockFile writes it; it ends, and the lock is stale, after 2 s.
+            QProcess holder;
+            holder.start("sleep", {"2"});
+            QVERIFY(holder.waitForStarted());
+            write(lock, QStringLiteral("%1\nsleep\n%2\n%3\n%4\n")
+                            .arg(holder.processId()).arg(QSysInfo::machineHostName(), QString::fromUtf8(QSysInfo::machineUniqueId()),
+                                                         QString::fromUtf8(QSysInfo::bootUniqueId())).toUtf8());
+            QElapsedTimer timer;
+            timer.start();
+            const Outcome checked = fugue(json ? QStringList{"validate", "zit-wait.fugue", "--json"} : QStringList{"validate", "zit-wait.fugue"});
+            QVERIFY2(checked.exitCode == 0, checked.out + checked.err);
+            QVERIFY2(timer.elapsed() >= 1000 && timer.elapsed() < 8000, qPrintable(QString::number(timer.elapsed())));
+            const QByteArray said = json ? QByteArray("\"event\":\"waiting\"") : "Waiting for another Fugue (pid " + QByteArray::number(holder.processId()) +
+                                                                                    ") to finish reading model hashes";
+            QVERIFY2(checked.err.contains(said), checked.err);
+            if (json) {
+                QVERIFY(checked.err.contains("\"for\":\"model_hash_cache\""));
+                QVERIFY(!checked.json().isEmpty()); // stdout is still the one envelope
+            }
+            holder.kill();
+            holder.waitForFinished();
+        }
     }
 
     // #618: the file is used by default (the setting use_on_disk is "use"), with no flag; --no-use-on-disk opts out, and "ask" is #605's

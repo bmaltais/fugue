@@ -135,10 +135,13 @@ QJsonObject useHandle(const OnDiskUse &use, const QString &hash) {
     return QJsonObject{{"resource", use.match.resource}, {"hash", hash}, {"name", use.match.name}};
 }
 
-Uses resolveUses(const QList<OnDiskUse> &uses, FileHashes &hashes) {
+Uses resolveUses(const QList<OnDiskUse> &uses, FileHashes &hashes, const UseProgress &progress) {
     Uses out;
     for (const OnDiskUse &use : uses) {
-        const QString hash = hashes.hash(use.match.path);
+        const QString hash = progress ? hashes.hash(use.match.path, [&](qint64 done, qint64 total) {
+            progress(use.match.path, done, total);
+            return true;
+        }) : hashes.hash(use.match.path);
         if (!hash.isEmpty())
             out.insert(use.wanted.value(QStringLiteral("hash")).toString(), useHandle(use, hash));
     }

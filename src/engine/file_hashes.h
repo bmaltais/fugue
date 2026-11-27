@@ -23,6 +23,8 @@
 #include <QMutex>
 #include <QString>
 
+#include <functional>
+
 #include "engine/hash.h"
 
 namespace fugue {
@@ -73,8 +75,12 @@ public:
     // the result cache's store (a rename keeps size and modification time).
     void remember(const QString &path, const QString &hash);
 
-    // Writes the store. Entries whose file is gone or has changed are dropped.
-    bool save();
+    // Writes the store. Entries whose file is gone or has changed are dropped. Another process
+    // may hold the store's lock for a moment (it is writing): after one second `waiting` is told
+    // who (its pid, 0 when not known), and after `timeoutMs` in all it gives up, false and nothing
+    // written (a deadline, never forever: #205, #625).
+    using LockWait = std::function<void(qint64 holderPid)>;
+    bool save(const LockWait &waiting = {}, int timeoutMs = 10000);
 
 private:
     struct Entry {

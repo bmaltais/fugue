@@ -2,6 +2,7 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <optional>
 
 #include <QDir>
@@ -199,14 +200,25 @@ void FileHashes::remember(const QString &path, const QString &hash) {
     m_entries.insert(key(path), Entry{stat->size, stat->mtimeNs, hash});
 }
 
-bool FileHashes::save() {
+bool FileHashes::save(const LockWait &waiting, int timeoutMs) {
     QDir().mkpath(QFileInfo(m_storePath).absolutePath());
     QLockFile lockFile(m_storePath + QStringLiteral(".lock"));
     lockFile.setStaleLockTime(30000);
-    // A deadline, never forever: a holder that is alive but stuck must not hang every other process (#205).
-    if (!lockFile.tryLock(10000)) {
-        qWarning("FileHashes: %s is held by another process; not saved", qPrintable(m_storePath + QStringLiteral(".lock")));
-        return false;
+    // A deadline, never forever: a holder that is alive but stuck must not hang every other process (#205). The first
+    // second is silent (the usual holder is writing); then whoever waits is told who it waits for (#625).
+    constexpr int quietMs = 1000;
+    if (!lockFile.tryLock(std::min(quietMs, timeoutMs))) {
+        qint64 holder = 0;
+        QString host;
+        QString app;
+        lockFile.getLockInfo(&holder, &host, &app);
+        if (waiting)
+            waiting(holder);
+        if (!lockFile.tryLock(std::max(0, timeoutMs - quietMs))) {
+            qWarning("FileHashes: %s is held by another process (pid %lld); not saved", qPrintable(m_storePath + QStringLiteral(".lock")),
+                     static_cast<long long>(holder));
+            return false;
+        }
     }
 
     // What other processes saved, then ours on top, then only what is still true. The files
