@@ -118,7 +118,7 @@ Item {
                     focus: true
                     onOpened: { renameField.forceActiveFocus(); renameField.selectAll() }
                     background: PopupSurface { look: root.look }
-                    contentItem: TextField {
+                    contentItem: ThemedTextField {
                         id: renameField
                         objectName: "tabRenameField-" + tabButton.index
                         implicitWidth: 40 * root.look.unit
