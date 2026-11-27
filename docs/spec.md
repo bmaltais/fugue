@@ -1193,6 +1193,28 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   came from (and the commit a ref resolved to), so `update` can fetch it again. The `.git`
   folder is not kept. A pack is checked in a staging folder first and put in place only when
   it loads and the person agreed; a refusal or a failure leaves no half-installed pack.
+  The setup itself runs in the installed folder, not in staging: an environment it makes (a virtual environment) holds absolute
+  paths and would break if moved. A setup (not git) runs in its own process group, so a stop kills what it started too; a second
+  Ctrl-C kills the group from the signal handler. A stop (the window's Stop; in the CLI Ctrl-C or TERM, which also answer a `[y/N]`
+  question with no, a typed-ahead answer being read first) kills the setup and is reported as `cancelled`, not `setup_failed`, in a
+  clone too (`fetch_failed` is for a real failure). A new pack's half-made folder is removed; an update moves the old pack back
+  (the half-made one is first moved aside, and the old pack's folder is never deleted before it is back; if the move back fails
+  the error names the folder, kept as `.rescue-*`). Setting up an already installed pack is the exception: a stop can leave its
+  environment half made (no marker, so Get ready offers the setup again). A stop at the trust step keeps the finished install,
+  untrusted. Only a model's resumable `.part` stays (#418). A pack is put in place, replaced, removed or set up under a lock on
+  the packs folder (`.packs.lock`, released when its holder dies), so the sheet, Settings > Packs and the CLI never change a pack
+  at once; one that cannot get it within 2 s fails with `pack_busy` and the holder's pid. What was asked is looked at again under
+  the lock (the folder, and for a setup the pack itself). The new version's trust is forgotten before the new code is in place,
+  so a trusted pack never runs other code during a setup; the old version's goes once the update worked, and a failed update of
+  the same version puts its trust back when the old pack is back and its secrets are unchanged. A crash leaves it forgotten.
+  Folders a command makes in the packs folder are named `.staging-<pid>-<time>-<random>` and
+  `.old-<pid>-<time>-<random>-<folder>` (the pack an update set aside). A later command, under the lock, removes a `.staging-` only
+  when its process is gone (a pid handed out again, by its start time, counts as gone), keeps a live owner's `.old-` whatever its
+  age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole (no setup, or its marker
+  `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped), deleting the others only
+  then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
+  at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` as "partial,
+  will resume".
 - A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
   offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by
   this same question and trusted by the same one ([6.7](#67-trust)), never silently, and what
@@ -4256,7 +4278,7 @@ Codes in v0.1:
 | Graph | `unknown_node_type`, `node_version_mismatch`, `node_newer_major` (a warning), `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
 | Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder, VAE or LoRA that does not fit its diffusion model, by the files' headers, #85, #86; an error when a run reaches a stage), `model_unsupported` (a model file in a format the helper cannot load, such as ComfyUI's mixed quantization; likewise), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation`, `consent_needed` (a run would send data to an off-machine provider instance the person has not allowed, 8.2, #404; `fugue run --allow-remote <instance>` allows it for that run) |
-| Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
+| Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`, `pack_busy` (another command holds the packs folder's lock, #418) |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Canvas (#208) | `canvas_not_found` (no such canvas, revision or stored tree; or a canvas with no revision asked for its head), `canvas_ambiguous` (a revision prefix that starts more than one), `canvas_corrupt` (a stored object is not the content it is named for, or is not well formed); #210: `canvas_not_candidate` (accept or drop of a revision that is in the head's history or already accepted), `canvas_conflict` (a candidate made from an older revision that changed more than it added layers cannot be placed on the head), `canvas_head_moved` as an error of `fugue canvas accept` (the head moved while it ran; nothing changed); #226: `canvas_head_moved` also for a layer edit, `undo` or `redo` whose head moved, `canvas_no_step` (`undo` of the first revision, `redo` with nothing undone) ([14.5](#145-the-canvas-revision-store-206-208)) |

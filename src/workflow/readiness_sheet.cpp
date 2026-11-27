@@ -1,6 +1,7 @@
 #include "workflow/readiness_sheet.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QMetaObject>
 #include <QPointer>
@@ -129,9 +130,18 @@ ReadinessPlan ReadinessSheet::buildPlan(bool withChoices) const {
 
 ReadinessPlan ReadinessSheet::currentPlan() const { return buildPlan(false); }
 
+// The models that have a `.part` kept by an earlier stop: looked at when rows change, not on every progress tick.
+void ReadinessSheet::refreshPartial() {
+    m_partial.clear();
+    for (const ReadinessModel &m : std::as_const(m_plan.models))
+        if (!m.deferred && QFileInfo(m.target.path + QStringLiteral(".part")).size() > 0)
+            m_partial.insert(m.target.path);
+}
+
 void ReadinessSheet::rebuild() {
     m_ownRoot = library().roots().value(0);
     m_plan = buildPlan();
+    refreshPartial();
     m_states = QList<RowState>(m_plan.rowCount(), RowState::Waiting);
     m_details = QStringList(m_plan.rowCount());
     m_fractions = QList<double>(m_plan.rowCount(), 0.0);
@@ -479,6 +489,8 @@ void ReadinessSheet::setRow(int row, RowState state, const QString &detail) {
     m_details[row] = detail;
     if (state == RowState::Done)
         m_fractions[row] = 1;
+    if (state != RowState::Running)
+        refreshPartial(); // a failed or stopped download has left its `.part`
     publish();
 }
 
@@ -493,7 +505,7 @@ void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
     else if (!outcome.cancelled && outcome.failedRow < 0)
         m_message = tr("Some rows were skipped, so it is not everything: they are listed below.");
     else if (outcome.cancelled)
-        m_message = tr("Stopped. Nothing half-done is left: what is not done yet is listed below.");
+        m_message = tr("Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.");
     else {
         QStringList lines;
         for (const Error &error : outcome.errors)
@@ -599,6 +611,8 @@ void ReadinessSheet::publish() {
                               {"host", m.host}, {"license", m.license}, {"licenseUrl", m.licenseUrl},
                               {"folder", m.deferred ? tr("its folder, once the pack is installed") : m.folder},
                               {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},
+                              // A download that stopped keeps its `.part`, and the next one resumes it (#418).
+                              {"partial", !m.deferred && !disk && state != QLatin1String("running") && state != QLatin1String("done") && m_partial.contains(m.target.path)},
                               {"state", state}, {"detail", m_rowErrors.value(hash, m_details.value(row))},
                               {"error", m_rowErrors.value(hash)},
                               {"fraction", fraction}};

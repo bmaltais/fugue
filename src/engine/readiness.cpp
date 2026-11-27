@@ -588,6 +588,13 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             if (refused)
                 errors.prepend(makeError(QStringLiteral("pack_invalid"),
                                          QStringLiteral("The pack %1 is not what the list showed, so it was not trusted.").arg(row.pack.id)));
+            if (report.stopped() && !refused) {
+                // A stop at the trust step: the install, with its setup, is finished and stays, untrusted. Running it again asks for the trust.
+                stopAt(i, Errors{makeError(QStringLiteral("cancelled"), QStringLiteral("Stopped: the pack %1 is installed but not trusted.").arg(row.pack.id),
+                                           QStringLiteral("Get ready again to trust it."))}, true);
+                outcome.packsChanged = true;
+                break;
+            }
             if (row.installs()) {
                 // Installed but not trusted is a half state: undo the install, and say so.
                 PackPrompts removing;

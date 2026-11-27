@@ -22,6 +22,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 
@@ -53,8 +54,13 @@ struct PackSummary {
     qint64 setupSize = -1;    // bytes its setup downloads, when pack.json's setup says (`size`); -1 when it does not
     PackSource source;        // empty location when installed by copying into the folder by hand
     QString oldVersion;       // for an update: the version being replaced (empty when it did not load)
+    bool oldTrusted = false;  // for an update: the version being replaced was trusted (what a failed update puts back)
     bool updating = false;    // the pack replaces an installed one
 };
+
+// The process group of the setup that is running now, 0 when none. A setup runs in a group of its own, so the terminal's Ctrl-C
+// does not reach it: a command that was asked twice to stop (the CLI's signal handler) kills that group itself (#418).
+std::atomic<qint64> &runningSetupGroup();
 
 enum class Answer { Yes, No, NoHuman };
 
@@ -70,6 +76,8 @@ struct PackPrompts {
     std::function<bool()> cancelled;
     // A git clone above this many bytes is refused (0: no limit). A pack is a few files.
     qint64 maxCloneBytes = 0;
+    // How long a change waits for the packs folder's lock, held by another command (#418); then `pack_busy`.
+    int lockWaitMs = 2000;
     // Brings a git source into `workFolder` (an empty folder) and returns the commit it is at; null runs git. For tests, so
     // nothing reaches a network.
     std::function<Result<QString>(const PackSource &, const QString &workFolder)> fetch;

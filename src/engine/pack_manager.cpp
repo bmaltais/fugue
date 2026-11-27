@@ -11,16 +11,29 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QCoreApplication>
 #include <QJsonArray>
+#include <QLockFile>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QSysInfo>
 #include <QSet>
 #include <QUuid>
 
+#include <unistd.h>
+
+#include <csignal>
+#include <cerrno>
+#include <algorithm>
 #include <optional>
 
 namespace fugue {
+
+std::atomic<qint64> &runningSetupGroup() {
+    static std::atomic<qint64> group{0};
+    return group;
+}
 
 namespace {
 
@@ -84,14 +97,207 @@ bool looksLikeCommit(const QString &ref) {
     return hex.match(ref).hasMatch();
 }
 
-// Leftovers of an install that was interrupted (Ctrl-C at a prompt): old enough that no other
-// running command can still be using them.
-void removeStale(const QString &packsDir) {
-    for (const QFileInfo &entry : QDir(packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden)) {
+// Names of the folders a command makes in the packs folder. Each carries the owner's pid and the time it was made, so a later
+// command can tell whether the owner still works (#418), which a modification time cannot: a slow clone writes nothing for
+// minutes, and a rename keeps a folder's time. A pid that was handed out again after the owner died is told by its start time.
+//   .staging-<pid>-<epoch s>-<random>                scratch space
+//   .old-<pid>-<epoch s>-<random>-<folder name>      an installed pack set aside by an update: the name says where it goes back
+//   .rescue-<random>-<folder name>                   an old pack that could not be put back; nothing sweeps it
+QString randomPart() { return QUuid::createUuid().toString(QUuid::Id128).left(12); }
+
+QString stagingName() {
+    return QStringLiteral(".staging-%1-%2-%3").arg(QCoreApplication::applicationPid()).arg(QDateTime::currentSecsSinceEpoch()).arg(randomPart());
+}
+
+QString backupName(const QString &folderName) {
+    return QStringLiteral(".old-%1-%2-%3-%4").arg(QCoreApplication::applicationPid()).arg(QDateTime::currentSecsSinceEpoch()).arg(randomPart(), folderName);
+}
+
+// When process `pid` started (epoch s), or -1 when /proc cannot say.
+qint64 processStartEpoch(qint64 pid) {
+    QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!stat.open(QIODevice::ReadOnly))
+        return -1;
+    const QByteArray line = stat.readAll();
+    const QList<QByteArray> fields = line.mid(line.lastIndexOf(')') + 2).split(' '); // after "pid (comm) ": field 3 on
+    if (fields.size() < 20)
+        return -1;
+    const qint64 ticks = fields.at(19).toLongLong(); // field 22: start time in clock ticks after boot
+    QFile uptime(QStringLiteral("/proc/uptime"));
+    if (ticks <= 0 || !uptime.open(QIODevice::ReadOnly))
+        return -1;
+    const double up = uptime.readAll().split(' ').value(0).toDouble();
+    const long hz = sysconf(_SC_CLK_TCK);
+    return hz > 0 ? QDateTime::currentSecsSinceEpoch() - qint64(up) + ticks / hz : -1;
+}
+
+// Whether the process that made a folder (`pid`, at `madeAt`) is still running: not when the pid belongs to a process that
+// started after the folder was made.
+bool ownerRunning(qint64 pid, qint64 madeAt) {
+    if (pid <= 0 || (::kill(pid_t(pid), 0) != 0 && errno != EPERM)) // EPERM: it exists, and is another user's
+        return false;
+    const qint64 started = processStartEpoch(pid);
+    return started < 0 || started <= madeAt + 5; // 5 s: the two clocks are read apart
+}
+
+bool processAlive(qint64 pid) { return pid > 0 && (::kill(pid_t(pid), 0) == 0 || errno == EPERM); }
+
+// Removes a folder tree. A link at the top is refused, never followed: it points where this command may not delete.
+bool removeTree(const QString &path) {
+    if (QFileInfo(path).isSymLink())
+        return false;
+    return QDir(path).removeRecursively();
+}
+
+// Removes what is at `path`: a link as a link, a folder as a tree.
+bool removeEntry(const QString &path) {
+    return QFileInfo(path).isSymLink() ? QFile::remove(path) : removeTree(path);
+}
+
+// Whether the pack in `folder` is whole: it has no setup, or its setup ran to its end (the marker names the command).
+bool packComplete(const QString &folder) {
+    const Result<QJsonObject> json = readJsonObject(folder + QStringLiteral("/pack.json"));
+    if (!json)
+        return false;
+    QStringList command;
+    for (const QJsonValue &part : json->value("setup").toObject().value("command").toArray())
+        command << part.toString();
+    return command.isEmpty() || packSetupDone(folder, command);
+}
+
+// Renames an old pack that cannot be put back to a `.rescue-` name (nothing sweeps it). Returns where it is.
+QString rescueBackup(const QString &packsDir, const QString &folderName, const QString &backup) {
+    const QString rescue = packsDir + QLatin1Char('/') + QStringLiteral(".rescue-%1-%2").arg(randomPart(), folderName);
+    return QDir().rename(backup, rescue) ? rescue : backup;
+}
+
+// Puts the pack set aside at `backup` back at `target`, as it was. What is at `target` (the half-made folder, or a link someone
+// made there) is moved aside first, never deleted before the old pack is back, and both moves are checked. Returns an error text,
+// empty on success; on a failure the backup is renamed to a `.rescue-` name and the text says where it is.
+QString restoreBackup(const QString &packsDir, const QString &target, const QString &backup) {
+    const QString name = QFileInfo(target).fileName();
+    const auto kept = [&] { return QStringLiteral("The old version could not be put back; it is kept in %1").arg(rescueBackup(packsDir, name, backup)); };
+    QString aside;
+    if (QFileInfo(target).isSymLink() || QFileInfo::exists(target)) {
+        aside = packsDir + QLatin1Char('/') + stagingName();
+        if (!QDir().rename(target, aside))
+            return kept();
+    }
+    if (!QDir().rename(backup, target)) {
+        if (!aside.isEmpty())
+            QDir().rename(aside, target); // as it was
+        return kept();
+    }
+    if (!aside.isEmpty())
+        removeEntry(aside); // best effort: a leftover is a staging folder, swept once this command is gone
+    return {};
+}
+
+// The packs folder's lock (#418): held while a pack is put in place, replaced, removed or set up, so the Get ready sheet,
+// Settings > Packs and the CLI, in this process or another, never change one pack at once. Like the hash store's lock
+// (FileHashes::save) it is a QLockFile, so a holder that died releases it. There is no age limit: a setup may run for minutes.
+class PacksLock {
+public:
+    explicit PacksLock(const QString &packsDir, int timeoutMs = 2000) : m_path(packsDir + QStringLiteral("/.packs.lock")), m_file(m_path) {
+        QDir().mkpath(packsDir);
+        m_file.setStaleLockTime(0);
+        m_held = m_file.tryLock(timeoutMs);
+    }
+    bool held() const { return m_held; }
+    Error busy() const {
+        qint64 holder = 0;
+        QString host, app;
+        m_file.getLockInfo(&holder, &host, &app);
+        if (m_file.error() == QLockFile::PermissionError)
+            return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot write the lock file %1.").arg(m_path),
+                        QStringLiteral("Check that you may write in the packs folder."));
+        if (m_file.error() == QLockFile::UnknownError)
+            return fail(QStringLiteral("internal"), QStringLiteral("Cannot take the lock file %1.").arg(m_path));
+        if (!host.isEmpty() && host != QSysInfo::machineHostName())
+            return fail(QStringLiteral("pack_busy"), QStringLiteral("The packs folder is locked from another computer (%1).").arg(host),
+                        QStringLiteral("Wait for it to finish. If it is gone, remove %1.").arg(m_path));
+        if (holder > 0 && !processAlive(holder))
+            return fail(QStringLiteral("pack_busy"), QStringLiteral("The packs folder is locked by pid %1, which is gone.").arg(holder),
+                        QStringLiteral("Remove %1, then try again.").arg(m_path));
+        return fail(QStringLiteral("pack_busy"),
+                    holder > 0 ? QStringLiteral("Another Fugue command (pid %1) is changing packs.").arg(holder)
+                               : QStringLiteral("Another Fugue command is changing packs."),
+                    QStringLiteral("Wait for it to finish, then try again."));
+    }
+
+private:
+    QString m_path;
+    QLockFile m_file;
+    bool m_held = false;
+};
+
+// The `.old-` folders of dead owners for one pack folder name, oldest first: [{path, epoch}].
+struct DeadBackup {
+    QString path;
+    qint64 epoch = 0;
+};
+
+QList<DeadBackup> deadBackupsOf(const QString &packsDir, const QString &folderName) {
+    static const QRegularExpression pattern(QStringLiteral("^\\.old-([0-9]{1,10})-([0-9]{1,12})-[0-9a-f]{12}-(.+)$"));
+    QList<DeadBackup> found;
+    for (const QFileInfo &entry : QDir(packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::NoSymLinks)) {
+        const QRegularExpressionMatch match = pattern.match(entry.fileName());
+        if (match.hasMatch() && match.captured(3) == folderName
+            && !ownerRunning(match.captured(1).toLongLong(), match.captured(2).toLongLong()))
+            found.append({entry.filePath(), match.captured(2).toLongLong()});
+    }
+    std::sort(found.begin(), found.end(), [](const DeadBackup &x, const DeadBackup &y) { return x.epoch < y.epoch; });
+    return found;
+}
+
+// Leftovers of a command that did not finish (Ctrl-C at a prompt, a crash, a kill): a folder whose owner process is gone. Run
+// under the packs lock, so no update is in the middle of its swap. One whose owner still runs is another command's work and is
+// never touched; a `.old-` of a live owner is kept whatever its age (its mtime is its pack's, kept across the rename). A
+// dead owner's `.old-` is an installed pack an update set aside: the oldest of a folder's is put back unless the new copy is
+// whole, the others are deleted only when it is whole, and what cannot be settled is kept as `.rescue-` and said through `log`.
+// A link at the target is never followed, nor deleted through. Names from before pids stay as they are, except a `.staging-`
+// one that is old. A trust the update forgot stays forgotten (#418).
+void removeStale(const QString &packsDir, const std::function<void(const QString &)> &log) {
+    static const QRegularExpression stagingPattern(QStringLiteral("^\\.staging-([0-9]{1,10})-([0-9]{1,12})-[0-9a-f]{12}$"));
+    static const QRegularExpression oldPattern(QStringLiteral("^\\.old-[0-9]{1,10}-[0-9]{1,12}-[0-9a-f]{12}-(.+)$"));
+    const PacksLock lock(packsDir, 0);
+    if (!lock.held())
+        return; // someone is changing packs now: the next command sweeps
+    const auto say = [&](const QString &text) {
+        if (log)
+            log(text);
+    };
+    QSet<QString> folders;
+    for (const QFileInfo &entry : QDir(packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::NoSymLinks)) {
         const QString name = entry.fileName();
-        if ((name.startsWith(QLatin1String(".staging-")) || name.startsWith(QLatin1String(".old-")))
-            && entry.lastModified().secsTo(QDateTime::currentDateTime()) > 600)
-            QDir(entry.filePath()).removeRecursively();
+        if (name.startsWith(QLatin1String(".staging-"))) {
+            const QRegularExpressionMatch match = stagingPattern.match(name);
+            const bool stale = match.hasMatch() ? !ownerRunning(match.captured(1).toLongLong(), match.captured(2).toLongLong())
+                                                : entry.lastModified().secsTo(QDateTime::currentDateTime()) > 600;
+            if (stale)
+                removeTree(entry.filePath());
+        } else if (const QRegularExpressionMatch match = oldPattern.match(name); match.hasMatch() && validPackId(match.captured(1))) {
+            folders.insert(match.captured(1));
+        }
+    }
+    for (const QString &folderName : std::as_const(folders)) {
+        const QString target = packsDir + QLatin1Char('/') + folderName;
+        const QList<DeadBackup> backups = deadBackupsOf(packsDir, folderName);
+        bool restored = false; // the oldest backup is back: later ones are not put over it
+        for (const DeadBackup &backup : backups) {
+            if (QFileInfo(target).isSymLink()) { // someone's link: never followed
+                say(QStringLiteral("%1 is a link, so the old version of the pack was kept in %2").arg(target, rescueBackup(packsDir, folderName, backup.path)));
+            } else if (QFileInfo::exists(target) && packComplete(target)) {
+                removeTree(backup.path); // the update finished; only its cleanup did not
+            } else if (!restored) {
+                const QString lost = restoreBackup(packsDir, target, backup.path); // the update did not finish: the old pack comes back
+                restored = lost.isEmpty();
+                if (!restored)
+                    say(lost);
+            } else {
+                say(QStringLiteral("Another old version of %1 was kept in %2").arg(folderName, rescueBackup(packsDir, folderName, backup.path)));
+            }
+        }
     }
 }
 
@@ -104,7 +310,7 @@ struct ProcessResult {
 // Runs a program (never a shell) and passes its output on line by line.
 ProcessResult runProgram(const QString &program, const QStringList &arguments, const QString &workDir,
                          const std::function<void(const QString &)> &log, bool quiet = false,
-                         const std::function<bool()> &cancelled = {}) {
+                         const std::function<bool()> &cancelled = {}, bool ownGroup = false) {
     ProcessResult result;
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
@@ -137,13 +343,25 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
         pending += process.readAll();
         flush(false);
     });
+    // A setup gets its own process group, so a stop ends what it started too (sh -c, uv's children), not only the program. Git is
+    // left in ours: ssh asks for a passphrase on the terminal, which a background group may not read.
+    if (ownGroup)
+        process.setChildProcessModifier([] { ::setpgid(0, 0); });
     process.start(program, arguments);
     if (!process.waitForStarted(10000))
         return result;
+    if (ownGroup)
+        runningSetupGroup().store(process.processId()); // a second Ctrl-C ends it from the signal handler
+    struct Unpublish {
+        bool on;
+        ~Unpublish() { if (on) runningSetupGroup().store(0); }
+    } unpublish{ownGroup};
     process.closeWriteChannel();
     // A cancel kills the program: git or a setup may take minutes, and the person can stop it.
     while (process.state() != QProcess::NotRunning && !process.waitForFinished(100)) {
         if (cancelled && cancelled()) {
+            if (const qint64 pid = process.processId(); ownGroup && pid > 1)
+                ::kill(pid_t(-pid), SIGKILL);
             process.kill();
             process.waitForFinished(3000);
             break;
@@ -181,7 +399,7 @@ QString realPath(const QString &path) {
 // A fresh folder in packsDir for staging; the leading dot keeps the loader away from it.
 QString makeStaging(const QString &packsDir) {
     QDir().mkpath(packsDir);
-    const QString staging = packsDir + QStringLiteral("/.staging-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
+    const QString staging = packsDir + QLatin1Char('/') + stagingName();
     return QDir().mkpath(staging) ? staging : QString();
 }
 
@@ -298,12 +516,12 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
     if (prompts.cancelled && prompts.cancelled())
         return fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled."));
     Staged staged;
-    removeStale(packsDir);
+    removeStale(packsDir, log);
     staged.staging = makeStaging(packsDir);
     if (staged.staging.isEmpty())
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot create a folder in %1.").arg(packsDir));
     const auto cleanFail = [&](const Error &error) -> Result<Staged> {
-        QDir(staged.staging).removeRecursively();
+        removeTree(staged.staging);
         return error;
     };
     staged.source = wanted;
@@ -338,6 +556,8 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
         clone << QStringLiteral("clone") << QStringLiteral("--quiet") << QStringLiteral("--no-checkout") << QStringLiteral("--")
               << wanted.location << work;
         const ProcessResult cloned = runProgram(QStringLiteral("git"), clone, {}, log, false, prompts.cancelled);
+        if (!cloned.ok && prompts.cancelled && prompts.cancelled())
+            return cleanFail(fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled.")));
         if (!cloned.ok)
             return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("git could not clone %1.").arg(wanted.location),
                                   cloned.output.trimmed().isEmpty() ? QStringLiteral("Is git installed, and is the address right?") : cloned.output.trimmed()));
@@ -354,12 +574,14 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
             {QStringLiteral("-c"), QStringLiteral("advice.detachedHead=false"), QStringLiteral("checkout"), QStringLiteral("--quiet"),
              QStringLiteral("--detach"), isTag ? QStringLiteral("refs/tags/%1").arg(wanted.ref) : wanted.ref + QStringLiteral("^{commit}"),
              QStringLiteral("--")}, work, log, false, prompts.cancelled);
+        if (!checkedOut.ok && prompts.cancelled && prompts.cancelled())
+            return cleanFail(fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled.")));
         if (!checkedOut.ok)
             return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("%1 has no commit \"%2\".").arg(wanted.location, wanted.ref),
                                   QStringLiteral("Pin the pack to a tag or a commit that exists.")));
         const ProcessResult head = runProgram(QStringLiteral("git"), {QStringLiteral("rev-parse"), QStringLiteral("HEAD")}, work, nullptr, true);
         staged.source.commit = head.output.trimmed();
-        QDir(work + QStringLiteral("/.git")).removeRecursively();
+        removeTree(work + QStringLiteral("/.git"));
     }
     if (wanted.kind == PackSource::Kind::Git) {
         if (prompts.maxCloneBytes > 0 && treeBytes(work) > prompts.maxCloneBytes)
@@ -368,6 +590,8 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
             return cleanFail(fail(QStringLiteral("pack_invalid"), QStringLiteral("The pack holds a symbolic link (%1).").arg(link),
                                   QStringLiteral("A pack holds no links: they could lead out of it.")));
     }
+    // The setup marker is written by Fugue after a setup that ran here: one that came in with the files proves nothing.
+    QFile::remove(work + QLatin1Char('/') + setupMarkerFile);
     restoreCommandEntries(work);
     // The pack is `work`, to be named after its id.
     const Result<QJsonObject> json = readPackJson(work);
@@ -403,7 +627,7 @@ bool samePack(const PackSummary &shown, const PackSummary &now) {
 
 PreparedPack::~PreparedPack() {
     if (!staging.isEmpty())
-        QDir(staging).removeRecursively();
+        removeTree(staging);
 }
 
 QString displayCommand(const QStringList &command) {
@@ -545,38 +769,81 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     const Errors written = writeSource(staged.folder, staged.source);
     if (hasErrors(written))
         return written;
+    // From here the packs folder changes: one command at a time. What was asked about before the lock may have moved
+    // meanwhile, so the folder is looked at again under it.
+    const PacksLock lock(packsDir, prompts.lockWaitMs);
+    if (!lock.held())
+        return lock.busy();
+    if (replacing != QFileInfo(target).isDir())
+        return fail(replacing ? QStringLiteral("unknown_pack") : QStringLiteral("pack_exists"),
+                    replacing ? QStringLiteral("%1 is no longer installed, so it was not updated.").arg(summary.id)
+                              : QStringLiteral("The pack %1 was installed meanwhile, so it was not installed again.").arg(summary.id),
+                    QStringLiteral("Get ready again to see what is installed now."));
+    // A stop between the last answer and the first move installs nothing.
+    if (prompts.cancelled && prompts.cancelled())
+        return fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled; %1 was not %2.").arg(summary.id, replacing ? QStringLiteral("updated") : QStringLiteral("installed")));
     QString backup;
+    const QString folderName = QFileInfo(target).fileName();
+    // A pack that was removed after a crash must not come back: the sweep would put its old copy over the new install.
+    if (!replacing)
+        for (const DeadBackup &dead : deadBackupsOf(packsDir, folderName))
+            removeTree(dead.path);
+    // Trust is per version, and a new version, a new commit or a re-install is new code: it asks again. The new version's trust
+    // is forgotten BEFORE the new code is in place: the same id and version, trusted, must never run other code for the length
+    // of a setup. The old version's, and the id's other versions', go only once the update has worked, so a failed one leaves
+    // what it did not change. A failed update of the same version puts the trust back, only if the old pack is back as it was.
+    const int foldersNow = int(foldersOfPack(summary.id, {packsDir}).size());
+    const bool beside = replacing ? foldersNow > 1 : foldersNow > 0;
+    const bool wasTrusted = replacing && !summary.oldVersion.isEmpty() && summary.oldVersion == summary.version && summary.oldTrusted;
+    const QString trustedDigest = wasTrusted ? packSecretsDigestOfFolder(target) : QString();
+    Errors warnings = trust.forget(summary.id, summary.version);
+    // The old pack comes back (or says where it is): the text for the error, empty when it is back.
+    const auto putBack = [&]() -> QString {
+        const QString lost = restoreBackup(packsDir, target, backup);
+        if (lost.isEmpty() && wasTrusted && packSecretsDigestOfFolder(target) == trustedDigest)
+            trust.trust(summary.id, summary.version, trustedDigest);
+        return lost;
+    };
     if (replacing) {
-        backup = packsDir + QStringLiteral("/.old-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
+        backup = packsDir + QLatin1Char('/') + backupName(folderName);
         if (!QDir().rename(target, backup))
             return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot replace %1.").arg(target));
     }
     if (!QDir().rename(staged.folder, target)) {
-        if (replacing)
-            QDir().rename(backup, target);
-        return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot move the pack into %1.").arg(packsDir));
+        const QString lost = replacing ? putBack() : QString();
+        return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot move the pack into %1.").arg(packsDir),
+                    lost.isEmpty() ? QString() : lost);
     }
     if (runSetup) {
         const QStringList &command = summary.setupCommand;
-        const ProcessResult done = runProgram(command.first(), command.mid(1), target, prompts.log, false, prompts.cancelled);
+        const ProcessResult done = runProgram(command.first(), command.mid(1), target, prompts.log, false, prompts.cancelled, true);
         if (!done.ok) {
-            QDir(target).removeRecursively();
-            if (replacing)
-                QDir().rename(backup, target); // the old pack is back as it was
+            const bool stopped = prompts.cancelled && prompts.cancelled(); // a stop kills the setup, so it ends like a failure (#418)
+            QString lost;
+            if (replacing) {
+                lost = putBack(); // the old pack is back as it was, or says where it is
+            } else {
+                const QString aside = packsDir + QLatin1Char('/') + stagingName();
+                if (QDir().rename(target, aside))
+                    removeTree(aside);
+                else
+                    removeTree(target);
+            }
+            const QString outcome = !lost.isEmpty() ? lost : replacing ? QStringLiteral("the old version was put back") : QStringLiteral("the pack was not installed");
+            if (stopped)
+                return fail(QStringLiteral("cancelled"), QStringLiteral("The setup of %1 was stopped; %2.").arg(summary.id, outcome));
             return fail(QStringLiteral("setup_failed"),
-                        QStringLiteral("The setup of %1 failed (%2); the pack was not installed.").arg(summary.id, displayCommand(command)),
+                        QStringLiteral("The setup of %1 failed (%2); %3.").arg(summary.id, displayCommand(command), outcome),
                         done.output.trimmed());
         }
         added.setupRan = true;
         markSetupDone(target, command);
     }
     if (replacing)
-        QDir(backup).removeRecursively();
-    // Trust is per version, and a new version, a new commit or a re-install is new code: it asks again.
-    // Another major of the pack stays trusted: only this version (and the one replaced) is forgotten.
-    const bool beside = foldersOfPack(summary.id, {packsDir}).size() > 1;
-    Errors warnings = beside ? trust.forget(summary.id, summary.version) : trust.forget(summary.id);
-    if (beside && !summary.oldVersion.isEmpty())
+        removeTree(backup);
+    if (!beside)
+        warnings += trust.forget(summary.id);
+    else if (!summary.oldVersion.isEmpty())
         warnings += trust.forget(summary.id, summary.oldVersion);
     for (Error &warning : warnings)
         warning = warningOf(warning);
@@ -709,16 +976,19 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
     Errors warnings;
     // One pack's trouble stops an update of one pack, but not the others in an update of all.
     const auto problem = [&](const QString &name, const Errors &errors) -> std::optional<Errors> {
-        if (id.isEmpty()) {
+        if (id.isEmpty() && !(prompts.cancelled && prompts.cancelled())) { // a stop ends the whole update, it is no one pack's trouble
             for (const Error &error : errors)
                 warnings << warningOf(error, name);
             return std::nullopt;
         }
-        return errors;
+        Errors reported = errors; // a stop ends the whole update: say what was done before it
+        if (prompts.cancelled && prompts.cancelled() && !changed.isEmpty() && !reported.isEmpty())
+            reported.first().message += QStringLiteral(" %1 pack(s) were updated before it.").arg(changed.size());
+        return reported;
     };
     for (const QString &name : ids) {
         if (prompts.cancelled && prompts.cancelled())
-            return Result<QList<PackAdded>>(changed, warnings + Errors{warningOf(fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled before the other packs.")))});
+            return fail(QStringLiteral("cancelled"), QStringLiteral("Stopped; %1 pack(s) were updated before it, the others were left as they are.").arg(changed.size()));
         const QString folder = packsDir + QLatin1Char('/') + name;
         if (QFileInfo(folder).isSymLink()) {
             if (const auto stop = problem(name, {fail(QStringLiteral("usage"), QStringLiteral("%1 is a link, not an installed pack folder.").arg(folder))}))
@@ -752,13 +1022,15 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue;
         }
         const Result<PackSummary> current = summarizePack(folder);
+        // Asked before the new copy is read: reading it records its secrets in the process, and the old one would look changed.
+        const bool oldTrusted = current && trust.isTrusted(current->id, current->version);
         Result<Staged> staged = stage(source, packsDir, prompts);
         if (!staged) {
             if (const auto stop = problem(name, staged.errors()))
                 return *stop;
             continue;
         }
-        const auto cleanup = [&] { QDir(staged->staging).removeRecursively(); };
+        const auto cleanup = [&] { removeTree(staged->staging); };
         Result<PackSummary> next = summarizePack(staged->folder);
         Errors why;
         if (!next)
@@ -783,6 +1055,7 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue; // the same commit under the same pin
         }
         next->oldVersion = current ? current->version : QString();
+        next->oldTrusted = oldTrusted;
         next->updating = true;
         const Result<bool> yes = ask(prompts.install, *next, QStringLiteral("Updating a pack"));
         if (!yes) {
@@ -829,8 +1102,15 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
         return yes.error();
     if (!*yes)
         return fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not removed."));
-    if (!QDir(folder).removeRecursively())
+    const PacksLock lock(packsDir, prompts.lockWaitMs);
+    if (!lock.held())
+        return lock.busy();
+    if (!QFileInfo(folder).isDir() || QFileInfo(folder).isSymLink())
+        return fail(QStringLiteral("unknown_pack"), QStringLiteral("The pack %1 is gone already.").arg(id));
+    if (!removeTree(folder))
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot remove %1 completely.").arg(folder));
+    for (const DeadBackup &dead : deadBackupsOf(packsDir, id)) // an old copy a crash left would come back on the next sweep
+        removeTree(dead.path);
     // Another major of the pack stays trusted.
     const QString packId = parsePackRef(id).id;
     const bool beside = !foldersOfPack(packId, {packsDir}).isEmpty();
@@ -871,6 +1151,8 @@ Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustS
         return yes.error();
     if (!*yes)
         return fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not trusted."));
+    if (prompts.cancelled && prompts.cancelled())
+        return fail(QStringLiteral("cancelled"), QStringLiteral("Stopped; the pack was not trusted."));
     const Errors errors = trust.trust(summary->id, summary->version, packSecretsDigestOfFolder(folder));
     if (hasErrors(errors))
         return errors;
@@ -891,8 +1173,23 @@ Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const 
         return yes.error();
     if (!*yes)
         return fail(QStringLiteral("setup_declined"), QStringLiteral("The setup of %1 was not run.").arg(summary->id));
+    const PacksLock lock(packsDir, prompts.lockWaitMs);
+    if (!lock.held())
+        return lock.busy();
+    // What was asked about is looked at again under the lock: the pack may have been replaced meanwhile.
+    if (!QFileInfo(folder).isDir() || QFileInfo(folder).isSymLink())
+        return fail(QStringLiteral("unknown_pack"), QStringLiteral("The pack %1 is gone already.").arg(id));
+    const Result<PackSummary> now = summarizePack(folder);
+    if (!now || !samePack(*summary, *now))
+        return fail(QStringLiteral("pack_invalid"), QStringLiteral("The pack %1 changed while it was waiting, so its setup was not run.").arg(id),
+                    QStringLiteral("Get ready again to see the pack as it is now."));
+    if (prompts.cancelled && prompts.cancelled())
+        return fail(QStringLiteral("cancelled"), QStringLiteral("Stopped before the setup of %1.").arg(summary->id));
     const QStringList &command = summary->setupCommand;
-    const ProcessResult done = runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled);
+    const ProcessResult done = runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled, true);
+    if (!done.ok && prompts.cancelled && prompts.cancelled())
+        return fail(QStringLiteral("cancelled"), QStringLiteral("The setup of %1 was stopped; its environment may be half made.").arg(summary->id),
+                    QStringLiteral("Run the setup again from Get ready."));
     if (!done.ok)
         return fail(QStringLiteral("setup_failed"), QStringLiteral("The setup of %1 failed (%2).").arg(summary->id, displayCommand(command)),
                     done.output.trimmed());
