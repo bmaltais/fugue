@@ -6,29 +6,28 @@ import "../canvas"
 import "../kit"
 import "../media"
 
-// The run queue panel (#60, as ComfyUI's queue sidebar): the runs going and waiting, then the last few
-// that ended. It knows nothing of where the runs come from (this window, a `fugue run` from a
-// terminal) or what they do: the caller gives the rows (`entries`, `history`, the shapes of
-// run/run_queue.h) and listens to what a person asked of one run. Made when it is first opened,
-// so the window keeps few items.
+// The run queue as an area's view (#648, spec 12.16, as ComfyUI's queue sidebar; Blender's Timeline and Info editors are areas
+// too): the runs going and waiting, then the last few that ended. It was the floating queue panel of the run toolbar (#60).
+// The rows are App.runQueue's (the runs of this window and of a `fugue run` from a terminal; the shapes of run/run_queue.h);
+// what a person asks of a run goes back to it. One per window: panel.queue (Alt+Q) splits it off the bottom of the active
+// area and closes it again. The queue reads the going run's events and the history only while this view is made.
 //
 //   going and waiting: status, name, the node going and its progress, time since it began or was
 //     queued, "move to front" (waiting runs but the first) and "cancel"
 //   history: how it ended, a thumbnail of the first thing it made (a glyph for a video or a sound),
 //     what to call it (its prompt, else the first output's file name, else the workflow's name), how
 //     it ended, how long it took, when and the workflow's name, "show results" (a click on the row
-//     too: the caller opens the media browser on that run) and "open the run folder"
-//
-// A press on the panel stays on it: it never reaches what lies under it.
-Item {
+//     too: the media browser opens on that run) and "open the run folder"
+AreaView {
     id: panel
-    objectName: "runQueuePanel"
-    required property CanvasLook look
-    property var entries: []
-    property var history: []
-    property real maxHeight: 80 * look.unit
+    objectName: "queueArea"
+    readonly property CanvasLook look: App.theme.look
+    readonly property var entries: App.runQueue ? App.runQueue.entries : []
+    readonly property var history: App.runQueue ? App.runQueue.history : []
     // The image:// source of a thumbnail of a file (the media library's); "" shows no picture.
-    property var thumbOf: path => ""
+    function thumbOf(path) {
+        return App.mediaLibrary ? App.mediaLibrary.thumbSource(path, 64) : ""
+    }
     // What a finished row's thumbnail shows, as the media browser's items do.
     function leadOf(row) {
         if (!row.lead)
@@ -51,11 +50,16 @@ Item {
     // Milliseconds since the epoch, read each second while the panel is shown.
     property real now: Date.now()
 
-    signal cancelRequested(string run)
-    signal frontRequested(string run)
-    signal resultsRequested(string run)
-    signal folderRequested(string run)
-    signal closeRequested
+    Component.onCompleted: {
+        // The change handlers above only hear later changes: the rows it is made with are taken here.
+        entryIds = same(entryIds, entries)
+        historyIds = same(historyIds, history)
+    }
+    // The first control that can be pressed, for a Queue opened from the keys (the window's `watching` follows the layout, Main.qml).
+    function focusFirst() {
+        forceActiveFocus()
+        step(true)
+    }
 
     function clock(seconds) {
         const s = Math.max(0, Math.floor(seconds))
@@ -74,11 +78,6 @@ Item {
         return h < 24 ? qsTr("%1 h ago").arg(h) : qsTr("%n days ago", "", Math.floor(h / 24))
     }
 
-    width: 104 * u
-    // The height it wants with room enough, for a caller that picks the side it hangs on.
-    readonly property real wantedHeight: Math.min(80 * u, column.implicitHeight + 2 * u)
-    height: Math.min(maxHeight, column.implicitHeight + 2 * u)
-    Keys.onEscapePressed: panel.closeRequested()
     // Up and Down move along the buttons (Tab is the window's own key).
     Keys.onUpPressed: event => step(false)
     Keys.onDownPressed: event => step(true)
@@ -92,11 +91,6 @@ Item {
                 return
             }
     }
-    // The first control that can be pressed, for a panel opened from the keys.
-    function focusFirst() {
-        forceActiveFocus()
-        step(true)
-    }
     Timer {
         interval: 1000
         repeat: true
@@ -104,28 +98,15 @@ Item {
         onTriggered: panel.now = Date.now()
     }
 
-    Shadow {
-        target: surface
-        level: 3
-        look: panel.look
-    }
-    // A calm card of the kit (docs/canvas-look.md 20.21), its tint the window's tone.
-    KitPanel {
-        id: surface
-        look: panel.look
+    // The area's own ground, the Canvas area's (nothing else draws behind an area).
+    Rectangle {
         anchors.fill: parent
-        calm: true
-        // Nothing under the panel hears a press or the wheel that lands on it.
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-            onWheel: wheel => wheel.accepted = true
-        }
+        color: panel.look.popup
     }
     Flickable {
         id: flick
         anchors.fill: parent
-        anchors.margins: panel.u
+        anchors.margins: 2 * panel.u
         contentWidth: width
         contentHeight: column.implicitHeight
         clip: true
@@ -259,7 +240,7 @@ Item {
                             tip: qsTr("Move to the front of the queue")
                             visible: !entry.running
                             enabled: entry.row.position > 1
-                            onTapped: panel.frontRequested(entry.modelData)
+                            onTapped: App.runQueue.moveToFront(entry.modelData)
                         }
                         ViewButton {
                             objectName: "queueCancel-" + entry.modelData
@@ -267,7 +248,7 @@ Item {
                             danger: true
                             glyph: "x"
                             tip: entry.running ? qsTr("Cancel this run") : qsTr("Take this run out of the queue")
-                            onTapped: panel.cancelRequested(entry.modelData)
+                            onTapped: App.runQueue.cancel(entry.modelData)
                         }
                     }
                     Rectangle {
@@ -325,7 +306,7 @@ Item {
                     }
                     HoverHandler { id: hoverDone }
                     // A click on the row shows what the run made.
-                    TapHandler { onTapped: panel.resultsRequested(done.modelData) }
+                    TapHandler { onTapped: App.runQueue.showResults(done.modelData) }
                     Glyph {
                         id: outcome
                         x: panel.u + (5 * panel.u - width) / 2
@@ -386,14 +367,14 @@ Item {
                             look: panel.look
                             glyph: "image"
                             tip: qsTr("Show its results")
-                            onTapped: panel.resultsRequested(done.modelData)
+                            onTapped: App.runQueue.showResults(done.modelData)
                         }
                         ViewButton {
                             objectName: "historyFolder-" + done.modelData
                             look: panel.look
                             glyph: "folder"
                             tip: qsTr("Open its run folder")
-                            onTapped: panel.folderRequested(done.modelData)
+                            onTapped: App.runQueue.openFolder(done.modelData)
                         }
                     }
                 }

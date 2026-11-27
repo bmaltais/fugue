@@ -363,9 +363,9 @@ private slots:
         QCOMPARE(read.toJson(), AreaTree().toJson());
     }
 
-    void theRegistryKnowsTheGraphTheCanvasAndTheApp() {
+    void theRegistryKnowsTheGraphTheCanvasTheAppAndTheQueue() {
         ViewRegistry views;
-        QCOMPARE(views.ids(), QStringList({"graph", "canvas", "app"}));
+        QCOMPARE(views.ids(), QStringList({"graph", "canvas", "app", "queue"}));
         QVERIFY(views.contains(ViewRegistry::kGraph));
         QCOMPARE(views.name("graph"), QString("Graph"));
         QCOMPARE(views.minimumSize("graph"), QSizeF(160, 120));
@@ -396,9 +396,9 @@ private slots:
 
     void aRowAddsAViewOrReplacesTheOneOfItsId() {
         ViewRegistry views;
-        views.add({"queue", "Queue", "layers", QUrl("qrc:/x.qml"), QSizeF(200, 100), ViewRegistry::Multiplicity::Many});
+        views.add({"results", "Results", "layers", QUrl("qrc:/x.qml"), QSizeF(200, 100), ViewRegistry::Multiplicity::Many});
         views.add({"graph", "Graph", "workflow", QUrl("qrc:/y.qml"), QSizeF(300, 200), ViewRegistry::Multiplicity::OnePerTarget});
-        QCOMPARE(views.ids(), QStringList({"graph", "canvas", "app", "queue"}));
+        QCOMPARE(views.ids(), QStringList({"graph", "canvas", "app", "queue", "results"}));
         QCOMPARE(views.minimumSize("graph"), QSizeF(300, 200));
         QCOMPARE(views.multiplicity("graph"), QString("one-per-target"));
     }

@@ -19,6 +19,9 @@
 #include "../canvas/canvas_app.h"
 #include "../window_grab.h"
 #include "engine/canvas_store.h"
+#include "engine/queue.h"
+#include "engine/run_folder.h"
+#include "run/run_queue.h"
 #include "engine/templates.h"
 #include "window_items.h"
 #include "../test_shard.h"
@@ -56,6 +59,12 @@ int countNamed(QQuickItem *from, const QString &name) {
 }
 
 QPoint centerOf(QQuickItem *item) { return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint(); }
+bool isInside(QQuickItem *item, QQuickItem *ancestor) {
+    for (; item; item = item->parentItem())
+        if (item == ancestor)
+            return true;
+    return false;
+}
 QRectF sceneRect(QQuickItem *item) { return QRectF(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height())); }
 
 const char *blank = R"({"fugue": 1, "graph": {"nodes": {}}})";
@@ -265,6 +274,71 @@ private slots:
         QVERIFY(app.commands.isEnabled("node.search"));
         QVERIFY(!app.commands.isEnabled("view.reset-layout"));
         QTRY_COMPARE(window_items::describe(app.window->contentItem()), window_items::expected());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Alt+Q (#648): a Queue area splits off the bottom of the active area and lists the queue's rows; Alt+Q again closes it and
+    // the default window is back item for item. With the Graph hidden (an area switched to a Canvas) it works the same.
+    void altQMakesAQueueAreaAtTheBottomAndAgainClosesIt() {
+        const QString runs = m_dir.filePath("queue-runs");
+        const fugue::Queue queue(m_dir.filePath("queue-dir"));
+        QDir().mkpath(m_dir.filePath("queue-dir"));
+        const auto enqueue = [&](const QString &id) {
+            const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::create(runs, id);
+            QVERIFY(folder.ok());
+            QVERIFY(folder->queued("/w/cli.fugue"));
+            QVERIFY(queue.enqueue(id, "/w/cli.fugue", false));
+        };
+        enqueue("cli-waiting");
+        fugue::RunQueue runQueue({runs, m_dir.filePath("queue-dir"), m_dir.filePath("queue.lock")});
+        App app(load(blank));
+        app.runQueue = &runQueue;
+        QVERIFY(app.open());
+        QTRY_COMPARE(window_items::describe(app.window->contentItem()), window_items::expected());
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(host(app) && find(app.window, "queueArea"));
+        QCOMPARE(app.workspace.viewOf(2), QString("queue"));
+        QTRY_VERIFY(find(app.window, "queueEntry-cli-waiting"));
+        QVERIFY(runQueue.watching());
+        // From the Graph's area the keyboard goes to the Queue (its first control), which is the active area.
+        QCOMPARE(app.workspace.active(), 2);
+        QTRY_VERIFY(isInside(app.window->activeFocusItem(), find(app.window, "queueArea")));
+        // The Queue moving to another area (the two trade) keeps the queue read: the new view is made before the old one goes.
+        QVERIFY(app.workspace.showView(1, "queue"));
+        QTRY_COMPARE(app.workspace.queueArea(), 1);
+        QTRY_VERIFY(find(app.window, "queueEntry-cli-waiting"));
+        settle();
+        QVERIFY(runQueue.watching());
+        QVERIFY(app.workspace.showView(2, "queue")); // and back
+        QTRY_COMPARE(app.workspace.queueArea(), 2);
+        settle();
+        QVERIFY(runQueue.watching());
+        settle();
+        // Below the Graph, about 30% of the body, and its header says Queue.
+        const QRectF body = sceneRect(host(app));
+        const QRectF queueRect = sceneRect(find(app.window, "queueArea"));
+        QVERIFY(queueRect.top() >= sceneRect(app.canvas).bottom());
+        QCOMPARE(queueRect.bottom(), body.bottom());
+        QVERIFY2(qAbs((queueRect.height() + find(app.window, "areaHeader-2")->height()) / body.height() - 0.3) < 0.05,
+                 qPrintable(QString::number(queueRect.height() / body.height())));
+        QVERIFY(app.commands.entry("panel.queue").value("checked").toBool());
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(!host(app));
+        QCOMPARE(app.workspace.count(), 1);
+        QVERIFY(!runQueue.watching());
+        QTest::qWait(200); // the host and the views it held are destroyed later
+        QCOMPARE(window_items::describe(app.window->contentItem()), window_items::expected());
+        QVERIFY(!QFile::exists(app.dir.filePath("workspaces.json")));
+        // The Graph hidden: the one area shows a Canvas; Alt+Q splits the Queue below it, and closes it again.
+        QVERIFY(app.commands.trigger("area.view-canvas"));
+        QTRY_VERIFY(find(app.window, "canvasArea") && !app.canvas->isVisible());
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(find(app.window, "queueArea") && find(app.window, "queueEntry-cli-waiting"));
+        QCOMPARE(app.workspace.graphArea(), 0);
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(!find(app.window, "queueArea"));
+        QCOMPARE(app.workspace.viewOf(1), QString("canvas"));
+        QCOMPARE(app.workspace.count(), 1);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

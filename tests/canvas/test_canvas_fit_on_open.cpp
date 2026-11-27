@@ -51,7 +51,6 @@ struct BarApp {
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         app.runs = runs.get();
         bar = std::make_unique<RunBar>(runs.get(), root + "/run-bar.json", &app.chrome);
-        bar->registerCommands(app.commands);
         queue = std::make_unique<RunQueue>(RunQueuePaths{root + "/runs", root + "/queue", root + "/engine.lock"}, service.get());
         app.runBar = bar.get();
         app.runQueue = queue.get();

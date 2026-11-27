@@ -541,6 +541,38 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #541: an inherited pack says so in its row status, and the question to trust it carries the inherited warning.
+    void anInheritedPackSaysSoInItsStatusAndInTheTrustQuestion() {
+        QVERIFY(pack_fixture::writeSayPack(baseData() + "/packs", "default"));
+        enterProject("Acme", {"packs"});
+        std::unique_ptr<ProjectModel> model;
+        App app(load(emptyDoc));
+        model = makeModel(app);
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(open(app.window, "settingsPanel"));
+        click(app, NEED("settingsPage-packs"));
+        QTRY_VERIFY(find(app.window, "packState-io.example.tools"));
+        QCOMPARE(textOf(NEED("packState-io.example.tools")), QString("inherited, not trusted"));
+        // Trusting it here is refused before any question (the Default decides), so the page says why.
+        click(app, NEED("packTrust-io.example.tools"));
+        QTRY_VERIFY(find(app.window, "packsFailure"));
+        QVERIFY(textOf(NEED("packsFailure")).contains("Default"));
+        QVERIFY(!find(app.window, "packQuestion"));
+        // Installing the same version asks, and that question carries the inherited warning (an own copy has none).
+        QVERIFY(pack_fixture::writeSayPack(path("source"), "own"));
+        clickHeader(app, "packAddRow");
+        QTRY_VERIFY(find(app.window, "packLocation"));
+        type(app, NEED("packLocation"), path("source/io.example.tools"));
+        click(app, NEED("packAdd"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
+        QVERIFY(textOf(NEED("packQuestionDetail")).contains("Inherited from Default: this pack runs from the Default project's folder"));
+        QTRY_VERIFY_WITH_TIMEOUT(NEED("packNo")->isEnabled(), 20000);
+        click(app, NEED("packNo"));
+        QTRY_VERIFY(!find(app.window, "packQuestion"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // Pictures: FUGUE_SHOT_DIR=<dir> test_projects_window savesThePicturesOfTheWindow
 
     void savesThePicturesOfTheWindow() {

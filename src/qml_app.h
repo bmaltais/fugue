@@ -67,7 +67,7 @@ struct AppObjects {
     ImageActions *imageActions = nullptr; // optional
     ColorHistory *colorHistory = nullptr; // optional
     LayoutColors *layoutColors = nullptr; // optional
-    RunBar *runBar = nullptr;             // optional: the run toolbar and queue panel (#60)
+    RunBar *runBar = nullptr;             // optional: the run toolbar (#60)
     RunQueue *runQueue = nullptr;         // optional, with runBar
     SidePanels *sidePanels = nullptr;     // optional: the side panels (#56)
     NodeLibrary *nodeLibrary = nullptr;   // optional, with sidePanels

@@ -192,9 +192,8 @@ struct RunApp {
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
         app.runs = runs.get();
-        // The run toolbar and the queue panel, as main() makes them, with the test's own folders.
+        // The run toolbar and the Queue area, as main() makes them, with the test's own folders.
         bar = std::make_unique<fugue::RunBar>(runs.get(), root + "/run-bar.json", &app.chrome);
-        bar->registerCommands(app.commands);
         queue = std::make_unique<fugue::RunQueue>(fugue::RunQueuePaths{root + "/runs", root + "/queue", root + "/engine.lock"},
                                                   service.get());
         queue->setOpenUrl([self](const QUrl &url) { self->openedFolders << url; });
@@ -1803,7 +1802,7 @@ echo '{"outputs": {"text": "painted"}}'
         QVERIFY(r.app.warnings.isEmpty());
     }
 
-    // ---- The run toolbar and the queue panel (#60) ----
+    // ---- The run toolbar and the Queue area (#60) ----
 
     static void click(const RunApp &r, QQuickItem *target) {
         QVERIFY(target);
@@ -2047,32 +2046,30 @@ echo '{"outputs": {"text": "painted"}}'
         }
     }
 
-    // The queue panel stays attached to the bar wherever it is: over it when the bar is low, under
-    // it when the bar is high, and inside the window when the bar is at a side (#120).
-    void theQueuePanelFollowsTheBar() {
+    // The toolbar's queue button and Alt+Q toggle the one Queue area (#648): it takes the bottom of the Graph's area, the button shows
+    // it is on, and either closes it again. Its rows are the queue's.
+    void theQueueButtonAndAltQToggleTheQueueArea() {
         RunApp r(kGraph);
         QVERIFY(r.app.open());
-        r.bar->setPlace({0.5, 1});
-        QQuickItem *bar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
-        QTRY_VERIFY(bar->y() > bar->parentItem()->height() / 2);
+        QVERIFY(!named(r, "queueArea"));
+        QVERIFY(!named(r, "runQueueButton")->property("current").toBool());
         click(r, named(r, "runQueueButton"));
-        QQuickItem *panel = nullptr;
-        QTRY_VERIFY((panel = named(r, "runQueuePanel")) && panel->isVisible());
-        QTRY_VERIFY(panel->y() + panel->height() <= bar->y());
-        QVERIFY(panel->y() >= 0);
-
-        r.bar->setPlace({0, 0.5});
-        QTRY_COMPARE(bar->x(), 4 * r.app.theme.look()->property("unit").toReal());
-        QTRY_VERIFY(panel->x() >= 0);
-        QVERIFY(panel->x() + panel->width() <= panel->parentItem()->width());
-        QVERIFY(panel->y() >= 0 && panel->y() + panel->height() <= panel->parentItem()->height());
-        QVERIFY(panel->y() + panel->height() <= bar->y() || panel->y() >= bar->y() + bar->height());
+        QQuickItem *area = nullptr;
+        QTRY_VERIFY((area = named(r, "queueArea")) && area->isVisible());
+        QCOMPARE(r.app.workspace.viewOf(2), QString("queue"));
+        QTRY_VERIFY(named(r, "runQueueButton")->property("current").toBool());
+        QTRY_VERIFY(r.queue->watching());
+        QQuickItem *graph = r.app.canvas;
+        QVERIFY(area->mapToScene(QPointF(0, 0)).y() >= graph->mapToScene(QPointF(0, graph->height())).y());
+        r.app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(!named(r, "queueArea"));
+        QTRY_VERIFY(!r.queue->watching());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
-    // The panel lists this window's runs and a CLI run in one queue; "move to front" reorders the
+    // The Queue area lists this window's runs and a CLI run in one queue; "move to front" reorders the
     // waiting ones, "cancel" takes a run out whoever started it.
-    void theQueuePanelListsCliRunsAndReordersAndCancels() {
+    void theQueueAreaListsCliRunsAndReordersAndCancels() {
         RunApp r(kGraph);
         QVERIFY(r.app.open());
         const QString runs = r.app.dir.path() + "/runs";
@@ -2096,20 +2093,14 @@ echo '{"outputs": {"text": "painted"}}'
         QCOMPARE(r.runs->runs().size(), 2);
         const QString first = r.runs->runs().at(0), second = r.runs->runs().at(1);
 
-        QVERIFY(!named(r, "runQueuePanel"));
-        click(r, named(r, "runQueueButton"));
+        QVERIFY(!named(r, "queueArea"));
+        r.app.key(Qt::Key_Q, Qt::AltModifier);
         QQuickItem *panel = nullptr;
-        QTRY_VERIFY((panel = named(r, "runQueuePanel")) && panel->isVisible());
+        QTRY_VERIFY((panel = named(r, "queueArea")) && panel->isVisible());
         QTRY_VERIFY(named(r, "queueEntry-cli-going"));
         QVERIFY(named(r, "queueEntry-cli-waiting"));
         QVERIFY(named(r, "queueEntry-" + first));
         QVERIFY(named(r, "queueEntry-" + second));
-        // The panel hangs from the bar, under it at the top of the window.
-        {
-            QQuickItem *bar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
-            QVERIFY(qAbs(panel->x() + panel->width() / 2 - (bar->x() + bar->width() / 2)) <= 1);
-            QVERIFY(panel->y() >= bar->y() + bar->height());
-        }
         QCOMPARE(named(r, "queueEntry-cli-going")->findChild<QQuickItem *>("queueDetail")->property("text").toString(),
                  QStringLiteral("Starting · from the command line"));
         QVERIFY(named(r, "queueFront-" + first)->isVisible() && !named(r, "queueFront-cli-going")->isVisible());
@@ -2136,11 +2127,10 @@ echo '{"outputs": {"text": "painted"}}'
         QCOMPARE(finished.first().at(0).toString(), first);
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
 
-        // The panel closes with Escape and with the toolbar's button.
-        QTRY_VERIFY(named(r, "runQueuePanel")->hasActiveFocus() || named(r, "runQueuePanel")->isVisible());
-        named(r, "runQueuePanel")->forceActiveFocus();
-        r.app.key(Qt::Key_Escape);
-        QTRY_VERIFY(!named(r, "runQueuePanel"));
+        // The area closes with the toolbar's button, and the queue stops reading the run's events.
+        QVERIFY(r.queue->watching());
+        click(r, named(r, "runQueueButton"));
+        QTRY_VERIFY(!named(r, "queueArea"));
         QVERIFY(!r.queue->watching());
 
         QVERIFY(queue.remove(QStringLiteral("cli-going")));

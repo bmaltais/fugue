@@ -124,7 +124,7 @@ private slots:
         QVERIFY(!w.showView(2, "canvas")); // already
         QVERIFY(!w.showView(2, "storyboard"));
         const QVariantList choices = w.viewChoices(2);
-        QCOMPARE(choices.size(), 3);
+        QCOMPARE(choices.size(), 4); // graph, canvas, app, queue
         QCOMPARE(choices.at(0).toMap().value("id").toString(), QString("graph"));
         QVERIFY(choices.at(0).toMap().value("moves").toBool());
         QVERIFY(choices.at(1).toMap().value("current").toBool());
@@ -140,6 +140,93 @@ private slots:
         QCOMPARE(w.areaOf("graph"), 0);
         QCOMPARE(w.viewOf(2), QString("canvas"));
         QCOMPARE(w.active(), 2);
+    }
+
+    // The Queue (#648) is one per window: panel.queue splits the active area along its bottom (30% of its height, never under the
+    // Queue's minimum) and a second press closes that area; a choice of Queue in another area trades the two.
+    void theQueueIsOnePerWindowAndPanelQueueSplitsAndClosesIt() {
+        QCOMPARE(Workspace().views()->multiplicity("queue"), QString("one-per-window"));
+        CommandRegistry commands;
+        registerDefaultCommands(commands);
+        Workspace w;
+        w.registerCommands(commands);
+        QCOMPARE(commands.keys("panel.queue"), QStringList({"Alt+Q"}));
+        QSignalSpy message(&w, &Workspace::message);
+        QSignalSpy opened(&w, &Workspace::queueOpened);
+        w.setBodySize(QSizeF(1000, 800));
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.count(), 2);
+        QCOMPARE(w.queueArea(), 2);
+        QCOMPARE(w.active(), 2); // the keyboard goes to the Queue
+        QCOMPARE(opened.count(), 1);
+        QCOMPARE(opened.first().at(0).toInt(), 2);
+        QVERIFY(opened.first().at(1).toBool());
+        const AreaTree::Node &branch = w.areaTree().root();
+        QCOMPARE(int(branch.axis), int(AreaAxis::Column));
+        QCOMPARE(branch.children[0].area.view, QString("graph")); // the Queue is below
+        QCOMPARE(branch.children[1].area.view, QString("queue"));
+        QVERIFY(qAbs(branch.children[1].size - Workspace::kQueueShare) < 1e-9);
+        QVERIFY(commands.entry("panel.queue").value("checked").toBool());
+        // The same command closes it, and the layout is the default again (no file).
+        QVERIFY(commands.trigger("panel.queue"));
+        QCOMPARE(w.count(), 1);
+        QCOMPARE(w.queueArea(), 0);
+        QCOMPARE(root(w), root(Workspace()));
+        QVERIFY(!commands.entry("panel.queue").value("checked").toBool());
+        // A short area gives the Queue its minimum height (120 of 300 px), not 30%.
+        w.setBodySize(QSizeF(1000, 300));
+        QVERIFY(w.toggleQueue());
+        QVERIFY(qAbs(w.areaTree().root().children[1].size - 0.4) < 1e-9);
+        // One per window: a Canvas area choosing Queue trades with it.
+        QVERIFY(w.closeArea(2));
+        w.setBodySize({});
+        w.splitArea(1, "row");
+        QVERIFY(w.toggleQueue()); // from the Canvas area (2): below it
+        QCOMPARE(w.viewOf(w.queueArea()), QString("queue"));
+        const int queue = w.queueArea();
+        QVERIFY(w.viewChoices(1).at(3).toMap().value("moves").toBool());
+        QVERIFY(w.showView(1, "queue"));
+        QCOMPARE(w.queueArea(), 1);
+        QCOMPARE(w.viewOf(queue), QString("graph"));
+        QVERIFY(message.isEmpty());
+        // The Queue alone in the window (its only area): the command shows the Graph there instead.
+        QVERIFY(w.closeArea(w.areaOf("canvas")));
+        QVERIFY(w.closeArea(w.graphArea()));
+        QCOMPARE(w.count(), 1);
+        QCOMPARE(w.viewOf(w.areaTree().areaIds().first()), QString("queue"));
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.graphArea(), w.areaTree().areaIds().first());
+    }
+
+    // The App's keys (Ctrl+Enter, Escape) follow the active area (AppView::shown): splitting the App's area leaves it active and
+    // asks for no focus for the Queue.
+    void splittingTheAppsAreaKeepsTheAppActive() {
+        Workspace w;
+        w.splitArea(1, "row");
+        QVERIFY(w.showView(2, "app"));
+        QCOMPARE(w.active(), 2);
+        QSignalSpy opened(&w, &Workspace::queueOpened);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.viewOf(w.queueArea()), QString("queue"));
+        QCOMPARE(w.active(), 2);
+        QCOMPARE(w.viewOf(w.active()), QString("app"));
+        QCOMPARE(opened.count(), 1);
+        QVERIFY(!opened.first().at(1).toBool());
+        QVERIFY(w.toggleQueue()); // closes
+        QCOMPARE(w.active(), 2);
+    }
+
+    void panelQueueSaysSoWhenTheAreaIsTooSmallToSplit() {
+        Workspace w;
+        QSignalSpy message(&w, &Workspace::message);
+        w.setBodySize(QSizeF(1000, 230)); // Graph 120 + Queue 120 = 240 tall
+        QVERIFY(!w.toggleQueue());
+        QCOMPARE(w.count(), 1);
+        QCOMPARE(message.count(), 1);
+        QVERIFY(!message.first().first().toString().isEmpty());
+        w.setBodySize(QSizeF(1000, 240));
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(message.count(), 1);
     }
 
     void closingTheGraphsAreaJustClosesItAndShowViewBringsTheGraphBack() {

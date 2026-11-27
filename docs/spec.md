@@ -3224,7 +3224,7 @@ and the `?` overlay marks each one.
 | `run.start` | Run | Ctrl+Enter | same |
 | `run.start-first` | Run, ahead of the queue | Ctrl+Shift+Enter | same |
 | `run.to-here` | Run to the selected node | Shift+Enter | added |
-| `run.cancel` | Cancel the run | Ctrl+Alt+Enter, Escape while running (Escape cancels first, then leaves a group; while the queue panel has the focus, Escape closes it instead) | Escape added |
+| `run.cancel` | Cancel the run | Ctrl+Alt+Enter, Escape while running (Escape cancels first, then leaves a group) | Escape added |
 | `file.new` | New workflow | Ctrl+N | added |
 | `file.open` | Open | Ctrl+O | same |
 | `file.save` | Save | Ctrl+S | same |
@@ -3258,7 +3258,7 @@ and the `?` overlay marks each one.
 | `view.picture-smart`, `view.picture-sinks`, `view.picture-all` | The picture mode: Smart, Sinks and inputs only, All (View > Picture, checked; writes `picture_mode`, [12.7](#127-inspection)) | none | added (#263) |
 | `node.picture-show`, `node.picture-hide`, `node.picture-default` | A node's own picture choice, over the mode: Show picture, Hide picture, Default picture (the Node menu and the node's menu, left out where they would change nothing; one undo step) | none | added (#263) |
 | `panel.nodes`, `panel.workflows` | Toggle the node library, the workflows panel | N, W | same |
-| `panel.queue` | Toggle the run queue panel | Alt+Q | added (ComfyUI's `q` is Quit here) |
+| `panel.queue` | Toggle the Queue area: split one off the bottom of the active area, or close it (12.16); context `app` | Alt+Q | added (ComfyUI's `q` is Quit here) |
 | `view.toggle-menu-bar`, `view.toggle-tabs`, `view.toggle-run-toolbar`, `view.toggle-selection-toolbar`, `view.toggle-breadcrumb`, `view.toggle-run-status`, `view.toggle-zoom-readout` | Show or hide each bar | none (View > Bars and panels) | added |
 | `view.focus-mode` | Hide all bars and panels; the same key brings them back as they were | H | added |
 | `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
@@ -3460,12 +3460,12 @@ turning it on later never brings back an old session. Rules:
 Run to here; reasons for invalid connections; search filtered by port type; a Frame and a Group
 as separate things; visible cache and frozen state; per-node errors with group paths; one undo
 stack across everything; one file format; on-disk recovery; per-output control of what is
-embedded; versioned node types; no shared Python environment; a queue panel that lists runs
-started from a terminal too ([12.13](#1213-run-toolbar-and-queue-panel)).
+embedded; versioned node types; no shared Python environment; a Queue area that lists runs
+started from a terminal too ([12.13](#1213-run-toolbar-and-queue)).
 
-### 12.13 Run toolbar and queue panel
+### 12.13 Run toolbar and queue
 
-A toolbar floats over the graph (#60, M3), as ComfyUI's action bar, and a panel hangs from it. Both
+A toolbar floats over the graph (#60, M3), as ComfyUI's action bar, and the queue is a view of its own (#648). Both
 read and write the queue of [9.8](#98-runs-across-processes) and the commands of [12.4](#124-default-keymap);
 they add no queue of their own.
 
@@ -3482,9 +3482,14 @@ they add no queue of their own.
 - **Batch count** (1 to 99): one Run makes that many runs, queued together in order, each taking the
   document as it is then, so a seed set to increment gives each its own number (ComfyUI's batch
   count). It applies to Run, Run first and Run to here.
-- **Queue panel** (`RunQueuePanel.qml`, `panel.queue`, Alt+Q, or the toolbar's queue button): hung from
-  the bar wherever it is, centered on it (held inside the graph), under it when there is room, else
-  on the side with more room, and kept shorter to fit there. *Running and
+- **Queue** (#648; `workspace/QueueArea.qml`, the `queue` view type of 12.16; `panel.queue`, Alt+Q, or the toolbar's queue
+  button, whose mark shows a Queue area is there): an area of its own, one per window, no longer a panel floating from the bar
+  (Blender's Timeline and Info are areas too). With no Queue area the command splits the active area along its bottom and
+  shows the Queue in the new lower part, 30% of the area's height and never under the Queue's minimum (280 x 120 px);
+  with one it closes that area, and the layout is as before. When the area is too small to split, the notice line says
+  so. Any area's view menu lists Queue too (choosing it where another area shows it trades the two), and it works
+  with the Graph hidden. The toolbar's queue button runs the same command. The queue reads the going run's events and the
+  history only while a Queue area is made. *Running and
   waiting* lists the run going first, then the waiting ones in queue order, **whoever started them**:
   this window, or `fugue run` from a terminal. A row has the workflow's name, the node going with its
   progress or "Waiting", where it came from, the time since it began (or was queued), **move to front**
@@ -3525,7 +3530,7 @@ and the window keeps its item budget.
   panel gives way, never the strip: the graph keeps at least 160 px. The strip stays on the left when a panel is
   docked on the right. **Action tabs** (#192): a row of kind `action` launches a command instead of toggling a panel and is never marked open or
   checked: Templates (`file.templates`, third in the top group directly under Workflows) and Settings (`app.settings`, Ctrl+,,
-  alone at the lower end past a hairline). Which end a row sits at is its `edge` field in the table, not QML. The run queue (`panel.queue`) is a floating panel of the run toolbar, not a docked side
+  alone at the lower end past a hairline). Which end a row sits at is its `edge` field in the table, not QML. The run queue (`panel.queue`) is an area view (12.16), not a docked side
   panel, and the media results are a view inside the workflows panel; neither has a tab (follow-ups: a queue and a
   results tab once they are docked panels).
 - **Container** (`SidePanel.qml`): a title bar with a button that moves the panel to the other side
@@ -3614,7 +3619,7 @@ focus mode and the file all read that one place.
 | --- | --- | --- |
 | `menu-bar` | `view.toggle-menu-bar` | the menu bar; not shown, it **auto-hides** (below), never disappears |
 | `workflow-tabs` | `view.toggle-tabs` | the workflow tabs (12.10); still only from the second workflow on |
-| `run-toolbar` | `view.toggle-run-toolbar` | the run toolbar (12.13); the queue panel hangs from it and goes with it |
+| `run-toolbar` | `view.toggle-run-toolbar` | the run toolbar (12.13) |
 | `selection-toolbar` | `view.toggle-selection-toolbar` | the toolbar above a selection |
 | `breadcrumb` | `view.toggle-breadcrumb` | the group breadcrumb |
 | `run-status` | `view.toggle-run-status` | the run pill at the top right |
@@ -3668,9 +3673,10 @@ focus mode and the file all read that one place.
   defaults. The run toolbar's older `visible` in `run-bar.json` and the side panels' older `tab` in
   `side-panels.json` are read once, when `chrome.json` has nothing for them; those files keep the toolbar's
   place and batch count and the panel's side and width.
-- The queue panel (`panel.queue`) is open or not for the window's life, and is not an id of its own:
-  it hangs from the run toolbar, so hiding the toolbar or entering focus mode hides it, and it comes
-  back with the toolbar.
+- The Queue (`panel.queue`) is not an id of its own: it is an area (12.16, #648), kept with the layout in `workspaces.json`, so
+  hiding the run toolbar or entering focus mode does not hide it (focus mode hides the area headers as it does for every area).
+  The older "queue open" flag of the run toolbar's panel was never written to `chrome.json` or `side-panels.json` (a window
+  started with it closed), so there is nothing to migrate.
 - Not built: workspaces (a named set of shown bars, Photoshop's Essentials), a minimap (12.9, later), a
   status bar and a bottom panel (none exist). Follow-ups of #160: auto-hide for the workflow tabs (done as a side effect of
   #262: they are in the menu bar's row, so one reveal brings both)
@@ -3717,6 +3723,7 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   | `graph` | Graph | `workflow` | `canvas/FugueCanvas.qml` (declared by the window, adopted) | 160 x 120 px | one per window |
   | `canvas` | Canvas | `image` | `workspace/CanvasArea.qml` | 240 x 180 px | many |
   | `app` | App | `layout-template` | `apps/AppArea.qml` | 800 x 360 px | one per window |
+  | `queue` | Queue | `list-ordered` | `workspace/QueueArea.qml` | 280 x 120 px | one per window |
 
   A component other than the Graph is an `AreaView` (`workspace/AreaView.qml`): made with its area's id and the
   state its type has there, and it says what to keep (`areaStateEdited`) only on a change of its own. A type no row
@@ -3726,10 +3733,10 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   per window until a second Graph has its own pointer, link drag and zoom requests (research 5.5, risk 2): choosing
   Graph or App in another area **moves it there** (the two areas trade what they show, the other area's canvas too).
   The Graph may have **no area** (`Workspace::graphArea()` is 0): it is then hidden but alive (`Main.qml`: the canvas is
-  not visible, so its run toolbar, queue panel and context menu go with it, and the areas' `views` map does not list it, so no
+  not visible, so its run toolbar and context menu go with it, and the areas' `views` map does not list it, so no
   area places it); the commands that act on it are off (the `canvas` command context follows "the Graph is shown in an
   area" while the window has areas, and the group-selected, group and compare contexts, which are its selection's, go with it: node
-  search, the edit, node, group, compare and Graph view keys, and the queue panel, which hangs from it), and Run, the file
+  search, the edit, node, group, compare and Graph view keys), and Run, the file
   and window commands stay (context `app`), so do Focus mode (H), the node library and workflows panels (N, W: the strip still
   opens them; a library row brings the Graph into the active area first, a drop over where the Graph is not adds nothing) and Ctrl+V
   into an App area (`CommandRegistry::setAlsoWhen`). Opening a workflow from the workflows panel or Edit workflow from a Canvas area
@@ -3780,9 +3787,15 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   without taking it, to make that area active) in the canvas's place with the canvas's margins, and the canvas moves
   into it as its area's view; what was placed from the canvas's `x`, `y` and height (the side strip, the side panel,
   the auto-hide menu bar's handle) is placed from the body (the host, or the canvas with one area), so it does not
-  move. The run toolbar and queue panel, node search, the context menu and the dialogs stay hung from the canvas and
+  move. The run toolbar, node search, the context menu and the dialogs stay hung from the canvas and
   so stay inside the Graph's area, and hide with it while no area shows it. Back to the default layout, the canvas returns to the column, the host and what it held go,
   and the window is item for item the default one again.
+- **The Queue view** (#648; `workspace/QueueArea.qml`, details in 12.13). One per window, like the Graph: choosing it in another
+  area trades the two. `panel.queue` (Alt+Q, context `app`, so it works with the Graph hidden) splits the active area along its
+  bottom with the Queue in the new part (`Workspace::toggleQueue`: 30% of the area's height, never under the Queue's 120 px, refused
+  with a line on the notice when the tree would not fit the body) and closes the Queue's area when there is one (an only area that
+  shows the Queue shows the Graph instead). Its menu row (View > Bars and panels) is checked while a Queue area exists. Closing it
+  back to one Graph area is the default window again, with no file.
 - **Area header** (`workspace/AreaHeader.qml`, `areaHeader-<id>`, one per area, only while there are two or more areas or the one area is not the Graph (the default window's Graph has the window's own header, #262); 7u =
   28 px tall, `popup` color, a hairline foot): the **view-type menu** at the start (`areaType-<id>`: the view's glyph,
   its name, a chevron; a click opens the list of view types, the current one checked, Graph (or the App) marked "moves here" in
@@ -3883,7 +3896,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
   reads the run folders newest first (at most 400 looked at), keeps the ended runs (ok or failed) whose record has this key, and
   lists them below the session's; so takes follow the app across projects and roots as History does (the run folders are one
   per-user store, not per project) and last as long as History does (run folders go 7 days after the run ends, 10.5). A take read
-  back has no pictures yet: its results come from `RunService::replay` (the queue panel's "show results"; the same thumbnails a
+  back has no pictures yet: its results come from `RunService::replay` (the Queue area's "show results"; the same thumbnails a
   live run makes, from the content-addressed cache, so a run whose result is cached shows at once), asked for the newest take
   when the app is shown and for each other take only when the strip draws it (`AppView::ensureTake`), so a long history costs
   nothing until it is looked at. **Random seeds are recorded**: a seed left to Random is drawn by the form (in the input's
@@ -3934,7 +3947,7 @@ A workflow whose document has an `app` block (4.9) opens as one simple screen in
 - **Keys.** Every control takes Tab; Enter or Space opens or flips it; Ctrl+Enter (Run) works from any text field, a prompt
   included, and Ctrl+Shift+Enter, Run ahead of the queue, with it.
 - **Run** binds the form's values into a copy of the workflow (`bindApp`, 4.9) and queues it through RunService like any run:
-  one queue, one GPU, the queue panel lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
+  one queue, one GPU, the Queue area lists it, `fugue runs` sees it. The tab's document and file are never changed. Ctrl+Enter
   (also ahead of the queue) and Ctrl+Alt+Enter act on the app while it is shown and on the graph otherwise. The app owns no
   outputs: a run's results are the existing run history's, which the takes strip reads back (above).
 - **Open in Graph** (the rail's Graph item, which runs `view.toggle-app`) switches this tab to the graph, the same workflow as an ordinary tab: the whole window, as for any
@@ -5558,6 +5571,7 @@ Building M4 made these further choices.
 | #394 `.fugueapp` bundles, `fugue app export`, Keep this app | 11.5, 12.18, 13.3 |
 | #398 an app as its own application (`fugue --app`) | 12.18, 13.3 |
 | #450 App view as a view type of an area | 12.16, 12.17 |
+| #648 the Queue as a view type of an area (`panel.queue`, Alt+Q) | 12.13, 12.16 |
 | #484 optional pictures (a branch bypassed when left empty) | 4.9, 12.17 |
 | #396 Apps docs and tests | 4.10, [docs/apps.md](apps.md), GLOSSARY |
 | #406 HTTP Request node in a first-party network pack | 6.13, Appendix A |

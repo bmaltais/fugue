@@ -88,6 +88,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-26 The Queue is a view type of the areas (#648; owner idea, coordinator agrees, confidence high)
+
+- Control: `src/workspace/QueueArea.qml` (`queueArea`, the old `RunQueuePanel.qml` moved, its rows `queueEntry-<run>`, `queueFront-<run>`, `queueCancel-<run>`, `historyEntry-<run>`, `historyResults-<run>`, `historyFolder-<run>` unchanged); the `queue` row of the view registry (every area's view menu lists it); `panel.queue` (Alt+Q, now context `app`; View > Bars and panels row, checked while a Queue area exists); the run toolbar's queue button (`runQueueButton`, now runs `panel.queue`; its mark shows a Queue area is there).
+- Old: a floating panel hung from the run toolbar inside the Graph, placed by `FloatPlace` beside the bar, closed with Escape; it went with the Graph (hidden Graph, focus mode, the toolbar hidden).
+- New: the Queue is an area, one per window. Alt+Q with none splits the active area along its bottom and shows the Queue there (30% of the area's height, never under 120 px); Alt+Q again closes that area and the layout is as it was (back to one Graph area is the default window, no file). It is also choosable in any area's view menu (trading with the Queue's area, note "moves here") and keeps its place in the saved layout. A too-small area says so on the notice line instead of doing nothing. The panel's shadow, card, width, Escape key and placement code are gone; its rows, buttons and strings are the same.
+- Why: a panel floating over the Graph hid the work and could not exist while the Graph was hidden (#647); as an area it has a size the person sets by the border, sits where the work is not, and follows the one model every other view follows. Alt+Q stays the quick way, and the toolbar's button its pointer twin.
+- Convention: Blender's Timeline and Info editors, areas split off the bottom of the screen and closed again, switched in the editor-type menu. Differs: Blender has no one key that splits one off and closes it; Alt+Q does both, as the panel's key did.
+- Rules met: Floor (the rows' buttons are `ViewButton`s, 28px, unchanged), Primary (none: the rows are equal), Destructive (`queueCancel-<run>` keeps its `danger` tint and a chunk of its own at the row's end; closing the area loses nothing, the queue is the files'), Gaps and Words (unchanged; one new word, **Queue**, the Run queue menu row's name), Keyboard (Tab and the arrows move along the buttons as before; Escape no longer closes it, Alt+Q or the area's close button does), States (no change), Right-to-left (the area mirrors with the window), Empty ("Nothing is running." and "Finished runs show here." unchanged).
+
 ### 2026-11-26 Any area can switch its view, the Graph's too (#647; decided by the coordinator, medium-high)
 
 - Control: `src/workspace/AreaHeader.qml`, the view-type menu (`areaType-<id>`, the Graph's header in the one-area window too); the commands `area.view-graph` and `area.view-canvas`; `src/Main.qml` (the Graph hidden while no area shows it).

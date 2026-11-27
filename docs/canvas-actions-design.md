@@ -238,7 +238,7 @@ Sampler inside a group needs no path rule). Other runs' events are ignored. At a
 view has the focus, as `run.cancel` does. Cancel ends all the runs this press started, waiting ones first. A cancelled
 run writes nothing.
 
-**Errors in plain words.** One line in the bar, in `look.error`. **Details** opens the run in the queue panel. The
+**Errors in plain words.** One line in the bar, in `look.error`. **Details** opens the run in the Queue area. The
 sentences:
 
 | Code | Line |
@@ -277,7 +277,7 @@ Every control gets a Decisions row in ui-ergonomics.md when it is built.
 
 **One queue.** An action run is a `RunService::start(RunRequest{document, workflow})`:
 - `document` is the bound copy and `workflow` is the action's file path;
-- it goes into the shared queue, so it shows in the queue panel under the action's name, can be moved to the front,
+- it goes into the shared queue, so it shows in the Queue area under the action's name, can be moved to the front,
   is cancelled the same way and follows the one-GPU lock;
 - it has no Graph tab: a new small `CanvasActions` object (`canvas/canvas_actions.*`) owns these runs and reads
   their events, as `CanvasRuns` does for tabs;
@@ -555,7 +555,7 @@ generation path): the preview is the action's own graph, run through `RunService
    after the state has been still for 600 ms, or half the last run's time if that is longer, at most 5 s (a slow model waits longer, so
    it cannot flood the GPU); at most one preview run exists; a change that makes it stale cancels it at once and the next waits for
    its end; the same state is never run twice; not ready (no selection, a blocker, a Generate running) cancels and starts nothing. A preview is an
-   ordinary queued run: it shows in the queue panel, waits for the one GPU and for runs queued before it. Live starts off every
+   ordinary queued run: it shows in the Queue area, waits for the one GPU and for runs queued before it. Live starts off every
    session and per canvas view, is turned off when the canvas changes, and a failed preview switches it off with the one-line error, so a
    broken action cannot retry on every keystroke.
 6. **Eligible actions.** An action whose Canvas Write has an `image` link and a selection (Generative fill, Refine, Remove). Expand

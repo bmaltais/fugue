@@ -1,0 +1,62 @@
+#!/bin/bash
+set -euo pipefail
+
+# Cheap source checks that run in well under a second (no build); bin/test runs them first.
+#
+# 1. moc trap (#617): moc reads a raw string as code. In a file it parses, a raw string that spans lines and has a line
+#    with `//` followed by a `"` (typically a URL in JSON, `"source": "https://..."`) makes moc treat the rest
+#    of the line as a comment and stop: it prints nothing ("No relevant classes found") and the link then
+#    fails with "undefined reference to vtable". Put the URL on the string's last line, build it in pieces
+#    (QStringLiteral("https:") + "//..."), or move the text to a file. (A `//` with no `"` after it on the line,
+#    or on the last line, is fine; checked with moc 6.)
+# 2. templates submodule (#641): a branch must not move the `templates` gitlink to a commit that does not
+#    contain the one on the base (origin/main): a stale submodule checkout committed with `git commit -a`
+#    rolled it back once (#622). A deliberate rollback says so with "templates rollback" in a commit message.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+base=${1:-origin/main}
+failed=0
+
+mapfile -t files < <(git grep -l -E 'Q_OBJECT|Q_GADGET|Q_NAMESPACE|\.moc"' -- 'src/*.cpp' 'src/*.h' 'tests/*.cpp' 'tests/*.h' 2>/dev/null || true)
+if ((${#files[@]})); then
+  hits=$(perl -0777 -ne '
+    while (/R"([^(\s]{0,16})\((.*?)\)\1"/gs) {
+      my $start = $-[0]; my @lines = split /\n/, $2, -1;
+      for my $i (0 .. $#lines - 1) {
+        next unless $lines[$i] =~ m{//.*"};
+        print "$ARGV:", 1 + (substr($_, 0, $start) =~ tr/\n//) + $i, "\n";
+      }
+    }' "${files[@]}" || true)
+  if [[ -n $hits ]]; then
+    echo "bin/check-quick: a raw string line with // before a double quote in a file moc reads (moc then emits nothing, #617):" >&2
+    echo "$hits" | sed 's/^/  /' >&2
+    echo "  Move the // to the string's last line or build it in pieces; see docs/testing.md." >&2
+    failed=1
+  fi
+fi
+
+if git rev-parse --verify -q "$base" >/dev/null && [[ -e templates/.git ]] ; then
+  old=$(git rev-parse -q --verify "$base:templates" 2>/dev/null || true)
+  new=$(git rev-parse -q --verify "HEAD:templates" 2>/dev/null || true)
+  if [[ -n $old && -n $new && $old != "$new" ]]; then
+    # Compare in the submodule when both commits are there; if the old one is missing, fetch it first.
+    if ! git -C templates cat-file -e "$old^{commit}" 2>/dev/null; then
+      GIT_TERMINAL_PROMPT=0 timeout 20 git -C templates fetch -q origin "$old" 2>/dev/null || true # never asks for a password, never hangs
+    fi
+    if git -C templates cat-file -e "$old^{commit}" 2>/dev/null && git -C templates cat-file -e "$new^{commit}" 2>/dev/null; then
+      if ! git -C templates merge-base --is-ancestor "$old" "$new"; then
+        if git log "$base..HEAD" --format=%B | grep -qi 'templates rollback'; then
+          echo "bin/check-quick: templates moves backwards ($old -> $new), allowed by a 'templates rollback' commit message" >&2
+        else
+          echo "bin/check-quick: this branch moves the templates submodule backwards: $new does not contain $base's $old." >&2
+          echo "  A stale submodule checkout was probably committed. Run: git submodule update --init, then" >&2
+          echo "  git checkout $base -- templates (or merge main) and commit. A real rollback needs 'templates rollback' in a commit message." >&2
+          failed=1
+        fi
+      fi
+    else
+      echo "bin/check-quick: cannot compare templates commits ($old, $new): not in the submodule checkout (run git submodule update --init)" >&2
+    fi
+  fi
+fi
+exit $failed

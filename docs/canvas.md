@@ -219,7 +219,7 @@ folder for the results, and a format (PNG, JPEG, WebP or the layers as .ora). **
 action on all of it (the whole picture is the selection), writes the result to the results folder under the picture's name
 (`harbour.png` becomes `harbour.png` there, or `harbour-2.png` when that name is taken: nothing is replaced) and removes
 the temporary canvas. It runs in the background, one picture at a time, through the same queue as every run, so it waits
-for the GPU and shows in the queue panel. The dialog lists each picture as Waiting, Running, Done, Failed (with the reason)
+for the GPU and shows in the Queue area. The dialog lists each picture as Waiting, Running, Done, Failed (with the reason)
 or Cancelled, and a progress bar; a picture that fails never stops the others. **Cancel batch** ends the run under way and marks
 the pictures not started as cancelled; **Hide** closes the dialog and leaves the batch running (reopen it to see where it is).
 An action that works on a crop frame beyond the canvas (Expand) cannot be batched.
