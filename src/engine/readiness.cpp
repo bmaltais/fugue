@@ -108,7 +108,9 @@ void ReadinessPlan::recount() {
 int ReadinessPlan::installCount() const {
     return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.installs(); }));
 }
-int ReadinessPlan::trustOnlyCount() const { return int(packs.size()) - installCount(); }
+int ReadinessPlan::trustOnlyCount() const {
+    return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.action == ReadinessPack::Action::Trust; }));
+}
 int ReadinessPlan::environmentCount() const {
     return int(std::count_if(packs.cbegin(), packs.cend(), [](const ReadinessPack &p) { return p.hasEnvironment(); }));
 }
@@ -141,7 +143,9 @@ QStringList ReadinessPlan::lines() const {
     QStringList out{headline(), QString()};
     for (const ReadinessPack &row : packs) {
         const PackSummary &p = row.pack;
-        out << QStringLiteral("  %1 %2 %3 (%4)").arg(row.installs() ? QStringLiteral("Install and trust pack:") : QStringLiteral("Trust pack:"),
+        out << QStringLiteral("  %1 %2 %3 (%4)").arg(row.installs() ? QStringLiteral("Install and trust pack:")
+                                                      : row.action == ReadinessPack::Action::Setup ? QStringLiteral("Set up pack:")
+                                                                                                   : QStringLiteral("Trust pack:"),
                                                   packName(p), p.version, p.id);
         if (const QString from = sourceText(p.source); row.installs() && !from.isEmpty())
             out << QStringLiteral("    From:      %1").arg(from);
@@ -186,7 +190,7 @@ QJsonObject ReadinessPlan::toJson() const {
     QJsonArray packRows, modelRows;
     for (const ReadinessPack &row : packs) {
         const PackSummary &p = row.pack;
-        QJsonObject o{{"action", row.installs() ? "install" : "trust"}, {"pending", row.pending}, {"id", p.id}, {"version", p.version}, {"name", p.name},
+        QJsonObject o{{"action", row.installs() ? "install" : row.action == ReadinessPack::Action::Setup ? "setup" : "trust"}, {"pending", row.pending}, {"id", p.id}, {"version", p.version}, {"name", p.name},
                       {"runtime", QJsonArray::fromStringList(p.runtimeKinds)}, {"permissions", QJsonArray::fromStringList(p.permissions)},
                       {"secrets", QJsonArray::fromStringList(p.secrets)}};
         if (const QString from = sourceText(p.source); !from.isEmpty())
@@ -311,19 +315,25 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
             plan.packs.append(row);
             continue;
         }
-        // Installed here: only its trust may be missing, for a pack in the packs folder.
-        if (!installedHere || !env.trust || TrustStore::isBuiltIn(want.id) || env.trust->isTrusted(want.id, want.version))
+        // Installed here: its trust or its setup may be missing, for a pack in the packs folder. A pack with a setup command
+        // and no marker (it never ran here, or it was installed before the marker existed) is offered the setup.
+        if (!installedHere || !env.trust || TrustStore::isBuiltIn(want.id))
             continue;
+        const bool trusted = env.trust->isTrusted(want.id, want.version);
         for (const QFileInfo &entry : QDir(env.packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
             if (entry.fileName().startsWith(QLatin1Char('.')) || parsePackRef(entry.fileName()).id != want.id)
                 continue;
             const Result<PackSummary> summary = summarizePack(entry.filePath());
             if (!summary || summary->version != want.version)
                 continue;
+            const bool setupNeeded = !summary->setupCommand.isEmpty() && !packSetupDone(entry.filePath(), summary->setupCommand);
+            if (trusted && !setupNeeded)
+                break;
             ReadinessPack row;
-            row.action = ReadinessPack::Action::Trust;
+            row.action = trusted ? ReadinessPack::Action::Setup : ReadinessPack::Action::Trust;
             row.pack = *summary;
             row.folderName = entry.fileName();
+            row.setupNeeded = setupNeeded;
             plan.packs.append(row);
             break;
         }
@@ -431,7 +441,10 @@ PackPrompts approvals(const PackSummary &shown, ReadinessRun &run, bool &refused
 QString rowName(const ReadinessPlan &plan, int index) {
     if (index < plan.packs.size()) {
         const ReadinessPack &row = plan.packs.at(index);
-        return QStringLiteral("%1 %2").arg(row.installs() ? QStringLiteral("install pack") : QStringLiteral("trust pack"), row.pack.id);
+        return QStringLiteral("%1 %2").arg(row.installs() ? QStringLiteral("install pack")
+                                           : row.action == ReadinessPack::Action::Setup ? QStringLiteral("set up pack")
+                                                                                        : QStringLiteral("trust pack"),
+                                           row.pack.id);
     }
     return QStringLiteral("download %1").arg(plan.models.at(index - plan.packs.size()).name);
 }
@@ -521,6 +534,24 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             outcome.packsChanged = true;
             folderName = QFileInfo(added->pack.folder).fileName();
             installedFolders << run.packsDir + QLatin1Char('/') + folderName;
+        }
+        // An installed pack whose setup never ran: the same yes runs it (the install path already did, 6.6).
+        if (!row.installs() && row.setupNeeded) {
+            const Result<PackSummary> done = setUpPack(folderName, run.packsDir, prompts);
+            if (!done) {
+                Errors errors = done.errors();
+                if (refused)
+                    errors.prepend(makeError(QStringLiteral("pack_invalid"),
+                                             QStringLiteral("The pack %1 is not what the list showed, so its setup was not run.").arg(row.pack.id)));
+                stopAt(i, errors, report.stopped() && !errors.isEmpty() && errors.first().code != QLatin1String("setup_failed"));
+                break;
+            }
+            outcome.packsChanged = true;
+        }
+        if (row.action == ReadinessPack::Action::Setup) {
+            ++outcome.done;
+            finish(i, RowState::Done);
+            continue;
         }
         // The same yes trusts it (6.7): trust is per id and version, so a new version asks again.
         const Result<PackSummary> trusted = trustPack(folderName, run.packsDir, trust, prompts);
