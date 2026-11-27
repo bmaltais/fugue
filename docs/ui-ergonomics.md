@@ -1486,3 +1486,12 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Old: the dismiss buttons were stock `ToolButton`s with a Glyph (no ring, hover or tooltip of the kit); the bars were stock `ProgressBar`s and a spinning `BusyIndicator`, in the style's colors.
 - New: the dismiss buttons are the flat `ViewButton` with the Lucide `x` and the tip "Dismiss" (7u, a Tab stop, the same as `appNoticeDismiss`). `KitProgress` is the slider's recessed rail with a tone fill; indeterminate it glides a third of the rail back and forth, slowly, and rests still under reduced motion. The export preview's busy mark is that indeterminate bar, 14u wide, centred.
 - Rules met: Floor (the dismiss buttons 7u; a bar is not a control), Learned place (every button stays where it was, same order), Gaps (unchanged), Reduced motion (the bar does not move).
+
+### 2026-11-27 Combo box, destination menu and tab popups in the Fugue kit (#509, batches 4 and 5)
+
+- Control: `Also drive…` in the group interface editor (`exposedAlsoDrive<i>`, `src/canvas/GroupDialogs.qml`); the Get ready sheet's `getReadyDestinations` menu (`src/workflow/GetReadySheet.qml`); the tab rename and color popups (`tabRenamePopup-<i>`, `tabColorPopup-<i>`, `src/workflow/WorkflowTabs.qml`).
+- Old: a stock `ComboBox` (Material field, its own popup); a stock `Menu` with checkable `MenuItem`s (Material rows); two popups with an inline rectangle background.
+- New: the combo is an `AppChoice` (a raised `KitDropdown` chip, 7u, opening a `WidgetMenu`), its prompt "Also drive…" is the chip's text and it goes back to the prompt after a pick. The destination list is a `WidgetMenu` under **Change model folder…** (the chosen folder has the check, a hairline, then **Pick a folder…** and **Find model folders…**). The tab popups use `PopupSurface`.
+- Keys: the chip is a Tab stop; Enter, Space or Down opens the list, Up and Down move, Enter picks, Escape closes and the focus returns to the chip (or **Change model folder…**). The sheet's own Enter and Escape are unchanged while no list is open.
+- Rules met: Floor (7u chip), Learned place (every control where it was, same order), Keyboard (above).
+- Not changed on purpose: the tab close and new-tab `ToolButton`s (de-styled, no focus by design: the tab itself is the Tab stop, Ctrl+W and Ctrl+T are the keys).

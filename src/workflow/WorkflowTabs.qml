@@ -117,11 +117,7 @@ Item {
                     padding: root.look.unit * 2
                     focus: true
                     onOpened: { renameField.forceActiveFocus(); renameField.selectAll() }
-                    background: Rectangle {
-                        color: root.look.popup
-                        radius: root.look.popupCorner
-                        border.color: root.look.hairlineStrong
-                    }
+                    background: PopupSurface { look: root.look }
                     contentItem: TextField {
                         id: renameField
                         objectName: "tabRenameField-" + tabButton.index
@@ -176,11 +172,7 @@ Item {
                     objectName: "tabColorPopup-" + tabButton.index
                     y: tabButton.height
                     padding: root.look.unit * 2
-                    background: Rectangle {
-                        color: root.look.popup
-                        radius: root.look.popupCorner
-                        border.color: root.look.hairlineStrong
-                    }
+                    background: PopupSurface { look: root.look }
                     contentItem: Row {
                         spacing: root.look.unit
                         Repeater {
