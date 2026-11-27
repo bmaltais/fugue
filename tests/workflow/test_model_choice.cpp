@@ -156,14 +156,14 @@ private slots:
                                           "(same model, Q8_0, from another source)."));
 
         const SwapNotice two = swapNotice(SwapKind::Opened, {other, plain});
-        QCOMPARE(two.title, QStringLiteral("Opened with your files"));
+        QCOMPARE(two.title, QStringLiteral("Opened with your 2 files"));
         QCOMPARE(two.lines.size(), 2);
         QCOMPARE(two.lines.at(1).toMap().value("tier").toString(), QStringLiteral("same model")); // no tier, same source: the plain words
         const QStringList sentences = two.text.split(QLatin1Char('\n'));
         QCOMPARE(sentences.size(), 2); // nothing left out of what the copy button copies
         QVERIFY(sentences.at(1).startsWith(QStringLiteral("Opened with your file mine-flux-2-klein-4b-fp8.safetensors in place of")));
 
-        QCOMPARE(swapNotice(SwapKind::Used, {other, plain}).title, QStringLiteral("Using your files"));
+        QCOMPARE(swapNotice(SwapKind::Used, {other, plain}).title, QStringLiteral("Using your 2 files"));
         QVERIFY(swapNotice(SwapKind::Used, {plain}).text.startsWith(QStringLiteral("Used your file")));
         QVERIFY(swapNotice(SwapKind::Opened, {}).isEmpty());
         QCoreApplication::removeTranslator(&translator);

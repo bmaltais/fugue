@@ -218,7 +218,7 @@ Item {
                     objectName: "noticeSwap"
                     width: parent.width
                     tone: "attention"
-                    title: "Opened with your files"
+                    title: "Opened with your 2 files"
                     lines: [{ mine: "Qwen3-4B-Q8_0.gguf", theirs: "qwen3/Qwen3-4B-Q8_0.gguf", minePath: "/models/text_encoders/Qwen3-4B-Q8_0.gguf",
                               tier: "same model · Q8_0 · another source" },
                             { mine: "flux-2-klein-4b.safetensors", theirs: "flux-2-klein-4b-fp8.safetensors", minePath: "/models/diffusion_models/flux-2-klein-4b.safetensors",

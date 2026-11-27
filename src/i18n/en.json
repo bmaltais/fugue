@@ -2338,14 +2338,14 @@
   "The exact files the template was made with, in place of yours: Get ready shows what it fetches before anything starts": "The exact files the template was made with, in place of yours: Get ready shows what it fetches before anything starts",
   "Opened with your %n files": {
     "one": "Opened with your file",
-    "other": "Opened with your files"
+    "other": "Opened with your %n files"
   },
   "Using your %n files": {
     "one": "Using your file",
-    "other": "Using your files"
+    "other": "Using your %n files"
   },
   "Open with your %n files": {
     "one": "Open with your file",
-    "other": "Open with your files"
+    "other": "Open with your %n files"
   }
 }
