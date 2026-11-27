@@ -4,12 +4,13 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../kit"
-import "../apps"
+import "widgets"
 
 // What groups and Frames ask (spec 5): whether Make group leaves the selected sinks outside
-// (5.5), a Frame's new title (5.1), and the interface editor of the group shown (5.4): its
-// name, its exposed inputs (name, label, section, range, the inner inputs they drive, order)
-// and outputs. Every change is one edit of App.canvasModel; a refusal shows its reason.
+// (5.5), a port's new label (#72), a library update or rename (5.3), and the interface editor of
+// the group shown (5.4): its name, its exposed inputs (label, what they set, the inner inputs
+// they drive, order; name, section, default, range and choices under Details) and outputs.
+// Every change is one edit of App.canvasModel; a refusal shows its reason.
 Item {
     id: root
 
@@ -89,33 +90,17 @@ Item {
                     copyText: root.model.groups.problem
                 }
             }
-            GlyphButton {
+            ViewButton {
+                look: root.look
+                flat: true
+                compact: true
                 glyph: "x"
-                focusPolicy: Qt.NoFocus
-                label: qsTr("Dismiss")
-                onClicked: { root.model.groups.dismiss() }
+                tip: qsTr("Dismiss")
+                activeFocusOnTab: false
+                onTapped: root.model.groups.dismiss()
             }
         }
     }
-
-    // A small button with a Lucide glyph (docs/canvas-look.md 16) and its name for screen readers.
-    component GlyphButton: ToolButton {
-        id: glyphButton
-        property string glyph
-        property string label
-        Accessible.name: label
-        ToolTip.text: label
-        ToolTip.visible: hovered
-        ToolTip.delay: App.theme.look.tooltipDelay
-        contentItem: Glyph {
-            look: root.look
-            name: glyphButton.glyph
-            color: glyphButton.enabled ? root.look.text : root.look.label
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
 
     Question {
         id: sinksAsk
@@ -288,15 +273,82 @@ Item {
         }
     }
 
-    // The interface editor (5.4). Its rows are made from groupInterface() again after each edit.
+    // The interface editor (5.4): what the group's card shows. A dusk header names it and says what it is for; the name, then the
+    // inputs and the outputs as kit groups, each row its label on the card, what it sets or where it comes from in words, and its
+    // order and removal; the rest (the name links use, section, default, range, choices, the type) under its Details. The lists
+    // under each section add inner ports, as Expose on the group does from a port. Every change is one edit at once; the rows
+    // are made from groupInterface() again after each, and the focus stays on the control it was on (the row's, after a move).
+    // Keys: Tab walks it in reading order; Up and Down in a label go to the row above or below, Alt+Up and Alt+Down move the
+    // row; Enter keeps a field's text; Escape closes.
     Question {
         id: editor
         objectName: "groupInterfaceEditor"
-        width: Math.min(root.width - 12 * root.look.unit, 760)
-        height: Math.min(root.height - 12 * root.look.unit, 640)
+        heading: qsTr("Group inputs and outputs")
+        subheading: qsTr("Choose what this group shows on its card: the inputs it asks for and the results it gives.")
+        tone: "dusk"
+        width: Math.min((Overlay.overlay ? Overlay.overlay.width : 760) - 12 * App.theme.look.unit, 720)
+        height: Math.min((Overlay.overlay ? Overlay.overlay.height : 680) - 12 * App.theme.look.unit, 720)
         property var face: ({})
-        function reload() { face = root.model.groups.groupInterface() }
-        onOpened: reload()
+        property var details: ({}) // the rows whose Details are open, by "in:<name>" or "out:<name>"; kept across reloads
+        property string focusAfter: "" // the control to focus once the rows are made again (a moved row's)
+        function reload() {
+            const focused = editor.contentItem.Window.activeFocusItem
+            const name = focusAfter !== "" ? focusAfter : (focused && inside(focused) ? focused.objectName : "")
+            focusAfter = ""
+            face = root.model.groups.groupInterface()
+            if (name !== "")
+                Qt.callLater(refocus, name)
+        }
+        function inside(item) {
+            for (let at = item; at; at = at.parent)
+                if (at === editor.contentItem)
+                    return true
+            return false
+        }
+        function find(from, name) {
+            for (const child of from.children) {
+                if (child.objectName === name && child.visible)
+                    return child
+                const found = find(child, name)
+                if (found)
+                    return found
+            }
+            return null
+        }
+        function refocus(name) {
+            const item = find(editor.contentItem, name)
+            if (item)
+                item.forceActiveFocus()
+        }
+        function toggleDetails(key) {
+            const next = Object.assign({}, details)
+            next[key] = !next[key]
+            details = next
+        }
+        function renameDetails(from, to) {
+            if (!details[from])
+                return
+            const next = Object.assign({}, details)
+            delete next[from]
+            next[to] = true
+            details = next
+        }
+        // Moves a row and keeps the focus on the moved row's `control` ("Label", "Up" or "Down"); a button that cannot act at the new
+        // place (Move up on the first row) hands it to the other one.
+        function move(output, name, to, control) {
+            const count = ((output ? face.outputs : face.inputs) || []).length
+            if (to < 0 || to >= count)
+                return
+            const shown = control === "Up" && to === 0 ? "Down" : control === "Down" && to === count - 1 ? "Up" : control
+            focusAfter = (output ? "exposedOutput" : "exposed") + shown + to
+            if (!root.model.groups.moveExposed(output, name, to))
+                focusAfter = ""
+        }
+        onOpened: {
+            details = ({}) // each opening starts with every row's Details shut
+            reload()
+            nameField.forceActiveFocus()
+        }
         Connections {
             target: root.model
             enabled: editor.visible
@@ -304,34 +356,496 @@ Item {
             function onScopeChanged() { if (!root.model.inGroup) editor.close(); else editor.reload() }
         }
 
+        // A quiet line under a section or a row.
+        component Quiet: Text {
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: root.look.label
+            font.pixelSize: root.look.labelSize
+        }
+        // One setting of a row's Details: its name, then the field.
+        component DetailLabel: Text {
+            textFormat: Text.PlainText
+            color: root.look.label
+            font.pixelSize: root.look.labelSize
+            Layout.alignment: Qt.AlignVCenter
+        }
+        component RowButton: ViewButton {
+            look: root.look
+            flat: true
+            compact: true
+        }
+        // An action that adds one of a list (Add an input…, Also set…): a button with a plus, opening the window's menu of the
+        // choices ({title}; arrows move, Enter picks, typing filters a long list, Escape closes). `chosen(index)` says which.
+        component AddButton: ViewButton {
+            id: add
+            property var choices: []
+            signal chosen(int index)
+            look: root.look
+            glyph: "plus"
+            trailingGlyph: "chevron-down"
+            visible: choices.length > 0
+            onTapped: {
+                const at = add.mapToItem(Overlay.overlay, 0, add.height)
+                addMenu.wantX = at.x
+                addMenu.wantY = at.y
+                addMenu.anchorHeight = add.height
+                addMenu.open()
+            }
+            WidgetMenu {
+                id: addMenu
+                objectName: "groupAddMenu" // not "widgetMenu": that is the canvas's own, which tests find by name
+                look: root.look
+                parent: Overlay.overlay
+                anchorWidth: add.width
+                searchable: add.choices.length > 12
+                entries: add.choices.map((c, i) => ({text: c.title, value: i}))
+                onPicked: v => {
+                    add.forceActiveFocus()
+                    add.chosen(Number(v))
+                }
+            }
+        }
+
+        // One exposed input.
+        component InputRow: Item {
+            id: inputRow
+            required property var modelData
+            required property int index
+            readonly property string key: "in:" + modelData.name
+            readonly property bool open: editor.details[key] === true
+            readonly property int count: (editor.face.inputs || []).length
+            width: parent ? parent.width : implicitWidth
+            implicitHeight: column.implicitHeight + 3 * root.look.unit
+            height: implicitHeight
+            // A value as its field shows it: empty when there is none.
+            function shown(key) {
+                const value = modelData[key]
+                return value === undefined || value === null ? "" : String(value)
+            }
+            function change(key, value) {
+                const next = {name: modelData.name, label: modelData.label, section: modelData.section,
+                              min: modelData.min, max: modelData.max, type: modelData.type,
+                              default: modelData.default === undefined ? "" : String(modelData.default),
+                              choices: modelData.choices}
+                next[key] = value
+                if (key === "name")
+                    editor.renameDetails(inputRow.key, "in:" + value.trim())
+                root.model.groups.editExposedInput(modelData.name, next)
+            }
+            // Up and Down go to the label above or below; with Alt they move the row.
+            function rowKeys(event) {
+                if (event.key !== Qt.Key_Up && event.key !== Qt.Key_Down)
+                    return
+                const step = event.key === Qt.Key_Up ? -1 : 1
+                if (event.modifiers & Qt.AltModifier)
+                    editor.move(false, modelData.name, index + step, "Label")
+                else
+                    editor.refocus("exposedLabel" + (index + step))
+                event.accepted = true
+            }
+            KitSeparator { look: root.look; visible: inputRow.index > 0 }
+            ColumnLayout {
+                id: column
+                x: 3 * root.look.unit
+                y: 1.5 * root.look.unit
+                width: parent.width - 6 * root.look.unit
+                spacing: root.look.unit
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 2 * root.look.unit
+                    ThemedTextField {
+                        objectName: "exposedLabel" + inputRow.index
+                        Layout.fillWidth: true
+                        text: inputRow.modelData.label
+                        placeholderText: inputRow.modelData.name
+                        Accessible.name: qsTr("Label on the card")
+                        ToolTip.text: qsTr("The name on the group's card; empty shows %1").arg(inputRow.modelData.name)
+                        ToolTip.visible: hovered && !activeFocus
+                        ToolTip.delay: root.look.tooltipDelay
+                        Keys.onPressed: event => inputRow.rowKeys(event)
+                        onEditingFinished: if (text !== inputRow.modelData.label) inputRow.change("label", text)
+                    }
+                    RowButton {
+                        objectName: "exposedDetails" + inputRow.index
+                        text: qsTr("Details")
+                        trailingGlyph: inputRow.open ? "chevron-up" : "chevron-down"
+                        tip: qsTr("Name, section, default and range")
+                        checkable: true
+                        current: inputRow.open
+                        accented: false
+                        onTapped: editor.toggleDetails(inputRow.key)
+                    }
+                    RowButton {
+                        objectName: "exposedUp" + inputRow.index
+                        glyph: "chevron-up"
+                        tip: qsTr("Move up (Alt+Up)")
+                        enabled: inputRow.index > 0
+                        onTapped: editor.move(false, inputRow.modelData.name, inputRow.index - 1, "Up")
+                    }
+                    RowButton {
+                        objectName: "exposedDown" + inputRow.index
+                        glyph: "chevron-down"
+                        tip: qsTr("Move down (Alt+Down)")
+                        enabled: inputRow.index < inputRow.count - 1
+                        onTapped: editor.move(false, inputRow.modelData.name, inputRow.index + 1, "Down")
+                    }
+                    RowButton {
+                        objectName: "exposedRemove" + inputRow.index
+                        glyph: "x"
+                        tip: qsTr("Stop exposing")
+                        onTapped: root.model.groups.removeExposedInput(inputRow.modelData.name)
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 2 * root.look.unit
+                    Quiet {
+                        objectName: "exposedSets" + inputRow.index
+                        Layout.fillWidth: true
+                        text: inputRow.modelData.sets
+                    }
+                    AddButton {
+                        objectName: "exposedAlsoDrive" + inputRow.index
+                        flat: true
+                        compact: true
+                        text: qsTr("Also set…")
+                        tip: qsTr("One input of the card that sets another inner input of the same type too")
+                        choices: editor.visible ? root.model.groups.exposeCandidates(inputRow.modelData.name) : []
+                        onChosen: i => root.model.groups.exposeInput(choices[i].node, choices[i].input, inputRow.modelData.name)
+                    }
+                }
+                Loader { // the Details, made only while open
+                    Layout.fillWidth: true
+                    active: inputRow.open
+                    visible: active
+                    sourceComponent: GridLayout {
+                        columns: 2
+                        columnSpacing: 2 * root.look.unit
+                        rowSpacing: root.look.unit
+                        DetailLabel { text: qsTr("Name") }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 2 * root.look.unit
+                            ThemedTextField {
+                                objectName: "exposedName" + inputRow.index
+                                Layout.preferredWidth: 35 * root.look.unit
+                                text: inputRow.modelData.name
+                                Accessible.name: qsTr("Name")
+                                onEditingFinished: if (text !== inputRow.modelData.name) inputRow.change("name", text)
+                            }
+                            Quiet {
+                                Layout.fillWidth: true
+                                text: qsTr("What links and the command line use")
+                            }
+                        }
+                        DetailLabel { text: qsTr("Section") }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 2 * root.look.unit
+                            ThemedTextField {
+                                objectName: "exposedSection" + inputRow.index
+                                Layout.preferredWidth: 35 * root.look.unit
+                                text: inputRow.modelData.section
+                                placeholderText: qsTr("None")
+                                Accessible.name: qsTr("Section")
+                                onEditingFinished: if (text !== inputRow.modelData.section) inputRow.change("section", text)
+                            }
+                            Quiet {
+                                Layout.fillWidth: true
+                                text: qsTr("Advanced folds on the card")
+                            }
+                        }
+                        DetailLabel { text: qsTr("Default") }
+                        ThemedTextField {
+                            objectName: "exposedDefault" + inputRow.index
+                            Layout.preferredWidth: 35 * root.look.unit
+                            text: inputRow.shown("default")
+                            placeholderText: qsTr("The inner value")
+                            Accessible.name: qsTr("Default")
+                            onEditingFinished: if (text !== inputRow.shown("default")) inputRow.change("default", text)
+                        }
+                        DetailLabel {
+                            visible: inputRow.modelData.type === "number"
+                            text: qsTr("Range")
+                        }
+                        RowLayout {
+                            visible: inputRow.modelData.type === "number"
+                            spacing: 2 * root.look.unit
+                            ThemedTextField {
+                                objectName: "exposedMin" + inputRow.index
+                                Layout.preferredWidth: 20 * root.look.unit
+                                text: inputRow.shown("min")
+                                placeholderText: qsTr("min")
+                                Accessible.name: qsTr("Smallest value")
+                                validator: DoubleValidator {}
+                                onEditingFinished: if (text !== inputRow.shown("min")) inputRow.change("min", text)
+                            }
+                            ThemedTextField {
+                                objectName: "exposedMax" + inputRow.index
+                                Layout.preferredWidth: 20 * root.look.unit
+                                text: inputRow.shown("max")
+                                placeholderText: qsTr("max")
+                                Accessible.name: qsTr("Largest value")
+                                validator: DoubleValidator {}
+                                onEditingFinished: if (text !== inputRow.shown("max")) inputRow.change("max", text)
+                            }
+                        }
+                        DetailLabel {
+                            visible: choicesField.visible
+                            text: qsTr("Choices")
+                        }
+                        ThemedTextField {
+                            id: choicesField
+                            objectName: "exposedChoices" + inputRow.index
+                            visible: inputRow.modelData.choices !== "" || inputRow.modelData.innerChoices !== ""
+                            Layout.fillWidth: true
+                            text: inputRow.modelData.choices
+                            placeholderText: inputRow.modelData.innerChoices
+                            Accessible.name: qsTr("Choices")
+                            onEditingFinished: if (text !== inputRow.modelData.choices) inputRow.change("choices", text)
+                        }
+                        DetailLabel { text: qsTr("Type") }
+                        Quiet {
+                            Layout.fillWidth: true
+                            text: inputRow.modelData.type
+                        }
+                    }
+                }
+            }
+        }
+
+        // One exposed output.
+        component OutputRow: Item {
+            id: outputRow
+            required property var modelData
+            required property int index
+            readonly property string key: "out:" + modelData.name
+            readonly property bool open: editor.details[key] === true
+            readonly property int count: (editor.face.outputs || []).length
+            width: parent ? parent.width : implicitWidth
+            implicitHeight: column.implicitHeight + 3 * root.look.unit
+            height: implicitHeight
+            // Up and Down go to the label above or below; with Alt they move the row.
+            function rowKeys(event) {
+                if (event.key !== Qt.Key_Up && event.key !== Qt.Key_Down)
+                    return
+                const step = event.key === Qt.Key_Up ? -1 : 1
+                if (event.modifiers & Qt.AltModifier)
+                    editor.move(true, modelData.name, index + step, "Label")
+                else
+                    editor.refocus("exposedOutputLabel" + (index + step))
+                event.accepted = true
+            }
+            KitSeparator { look: root.look; visible: outputRow.index > 0 }
+            ColumnLayout {
+                id: column
+                x: 3 * root.look.unit
+                y: 1.5 * root.look.unit
+                width: parent.width - 6 * root.look.unit
+                spacing: root.look.unit
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 2 * root.look.unit
+                    ThemedTextField {
+                        objectName: "exposedOutputLabel" + outputRow.index
+                        Layout.fillWidth: true
+                        text: outputRow.modelData.label
+                        placeholderText: outputRow.modelData.name
+                        Accessible.name: qsTr("Label on the card")
+                        ToolTip.text: qsTr("The name on the group's card; empty shows %1").arg(outputRow.modelData.name)
+                        ToolTip.visible: hovered && !activeFocus
+                        ToolTip.delay: root.look.tooltipDelay
+                        Keys.onPressed: event => outputRow.rowKeys(event)
+                        onEditingFinished: if (text !== outputRow.modelData.label)
+                                               root.model.groups.renamePort(outputRow.modelData.fromNode, outputRow.modelData.fromPort, true, text)
+                    }
+                    RowButton {
+                        objectName: "exposedOutputDetails" + outputRow.index
+                        text: qsTr("Details")
+                        trailingGlyph: outputRow.open ? "chevron-up" : "chevron-down"
+                        tip: qsTr("Name and type")
+                        checkable: true
+                        current: outputRow.open
+                        accented: false
+                        onTapped: editor.toggleDetails(outputRow.key)
+                    }
+                    RowButton {
+                        objectName: "exposedOutputUp" + outputRow.index
+                        glyph: "chevron-up"
+                        tip: qsTr("Move up (Alt+Up)")
+                        enabled: outputRow.index > 0
+                        onTapped: editor.move(true, outputRow.modelData.name, outputRow.index - 1, "Up")
+                    }
+                    RowButton {
+                        objectName: "exposedOutputDown" + outputRow.index
+                        glyph: "chevron-down"
+                        tip: qsTr("Move down (Alt+Down)")
+                        enabled: outputRow.index < outputRow.count - 1
+                        onTapped: editor.move(true, outputRow.modelData.name, outputRow.index + 1, "Down")
+                    }
+                    RowButton {
+                        objectName: "exposedOutputRemove" + outputRow.index
+                        glyph: "x"
+                        tip: qsTr("Stop exposing")
+                        onTapped: root.model.groups.unexposeOutput(outputRow.modelData.name)
+                    }
+                }
+                Quiet {
+                    objectName: "exposedFrom" + outputRow.index
+                    Layout.fillWidth: true
+                    text: outputRow.modelData.comesFrom
+                }
+                Loader {
+                    Layout.fillWidth: true
+                    active: outputRow.open
+                    visible: active
+                    sourceComponent: GridLayout {
+                        columns: 2
+                        columnSpacing: 2 * root.look.unit
+                        rowSpacing: root.look.unit
+                        DetailLabel { text: qsTr("Name") }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 2 * root.look.unit
+                            ThemedTextField {
+                                objectName: "exposedOutputName" + outputRow.index
+                                Layout.preferredWidth: 35 * root.look.unit
+                                text: outputRow.modelData.name
+                                Accessible.name: qsTr("Name")
+                                onEditingFinished: if (text !== outputRow.modelData.name) {
+                                    editor.renameDetails(outputRow.key, "out:" + text.trim())
+                                    root.model.groups.renameExposedOutput(outputRow.modelData.name, text)
+                                }
+                            }
+                            Quiet {
+                                Layout.fillWidth: true
+                                text: qsTr("What links and the command line use")
+                            }
+                        }
+                        DetailLabel { text: qsTr("Type") }
+                        Quiet {
+                            Layout.fillWidth: true
+                            text: outputRow.modelData.type
+                        }
+                    }
+                }
+            }
+        }
+
         ColumnLayout {
             anchors.fill: parent
             spacing: 3 * root.look.unit
-            LayoutMirroring.enabled: root.rightToLeft
-            LayoutMirroring.childrenInherit: true
 
-            RowLayout {
+            ScrollView {
+                id: faceScroll
                 Layout.fillWidth: true
-                Label { text: qsTr("Group name") }
-                ThemedTextField {
-                    objectName: "groupName"
-                    Layout.fillWidth: true
-                    text: editor.face.name || ""
-                    onEditingFinished: if (text !== editor.face.name) root.model.groups.renameGroup(text)
-                }
-                Label {
-                    color: root.look.label
-                    text: (editor.face.id || "") + " " + (editor.face.version || "")
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                ScrollBar.vertical: FugueScrollBar { look: root.look }
+                Column {
+                    width: faceScroll.availableWidth - (faceScroll.ScrollBar.vertical as FugueScrollBar).inset
+                    KitGroup {
+                        look: root.look
+                        KitRow {
+                            look: root.look
+                            label: qsTr("Name")
+                            hint: qsTr("The title on the group's card")
+                            ThemedTextField {
+                                id: nameField
+                                objectName: "groupName"
+                                width: 44 * root.look.unit
+                                text: editor.face.name || ""
+                                Accessible.name: qsTr("Group name")
+                                Accessible.description: tipText
+                                readonly property string tipText: qsTr("Saved as %1, version %2").arg(editor.face.id || "").arg(editor.face.version || "")
+                                ToolTip.text: tipText
+                                ToolTip.visible: hovered && !activeFocus
+                                ToolTip.delay: root.look.tooltipDelay
+                                onEditingFinished: if (text !== editor.face.name) root.model.groups.renameGroup(text)
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        width: parent.width
+                        KitSection {
+                            look: root.look
+                            Layout.fillWidth: true
+                            text: qsTr("Inputs")
+                        }
+                        AddButton {
+                            objectName: "groupAddInput"
+                            Layout.alignment: Qt.AlignBottom
+                            text: qsTr("Add an input…")
+                            tip: qsTr("Show one more inner input on the card")
+                            choices: editor.visible && editor.face ? root.model.groups.exposeChoices(false) : [] // made again with each reload
+                            onChosen: i => root.model.groups.exposeInput(choices[i].node, choices[i].port)
+                        }
+                    }
+                    Item { width: 1; height: root.look.unit }
+                    Quiet {
+                        objectName: "groupNoInputs"
+                        visible: (editor.face.inputs || []).length === 0
+                        width: parent.width
+                        leftPadding: 2 * root.look.unit
+                        text: qsTr("No inputs yet: the card asks for nothing. Use Add an input…, or right-click an input inside the group and choose Expose on the group.")
+                    }
+                    KitGroup {
+                        look: root.look
+                        visible: (editor.face.inputs || []).length > 0
+                        Repeater {
+                            model: editor.face.inputs || []
+                            delegate: InputRow {}
+                        }
+                    }
+
+                    RowLayout {
+                        width: parent.width
+                        KitSection {
+                            look: root.look
+                            Layout.fillWidth: true
+                            text: qsTr("Outputs")
+                        }
+                        AddButton {
+                            objectName: "groupAddOutput"
+                            Layout.alignment: Qt.AlignBottom
+                            text: qsTr("Add an output…")
+                            tip: qsTr("Show one more inner output on the card")
+                            choices: editor.visible && editor.face ? root.model.groups.exposeChoices(true) : [] // made again with each reload
+                            onChosen: i => root.model.groups.exposeOutput(choices[i].node, choices[i].port)
+                        }
+                    }
+                    Item { width: 1; height: root.look.unit }
+                    Quiet {
+                        objectName: "groupNoOutputs"
+                        visible: (editor.face.outputs || []).length === 0
+                        width: parent.width
+                        leftPadding: 2 * root.look.unit
+                        text: qsTr("No outputs yet: nothing leaves the group. Use Add an output…, or right-click an output inside the group and choose Expose on the group.")
+                    }
+                    KitGroup {
+                        look: root.look
+                        visible: (editor.face.outputs || []).length > 0
+                        Repeater {
+                            model: editor.face.outputs || []
+                            delegate: OutputRow {}
+                        }
+                    }
                 }
             }
+
             RowLayout {
                 Layout.fillWidth: true
                 visible: root.model.groups.problem !== ""
                 spacing: 2 * root.look.unit
-                Label {
+                Text {
                     Layout.fillWidth: true
+                    textFormat: Text.PlainText
                     wrapMode: Text.Wrap
                     color: root.look.error
+                    font.pixelSize: root.look.labelSize
                     text: root.model.groups.problem
                 }
                 KitCopyButton {
@@ -339,207 +853,6 @@ Item {
                     look: root.look
                     Layout.alignment: Qt.AlignTop
                     copyText: root.model.groups.problem
-                }
-            }
-
-            ScrollView {
-                id: faceScroll
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                ScrollBar.vertical: FugueScrollBar { look: root.look }
-                ColumnLayout {
-                    width: faceScroll.availableWidth - (faceScroll.ScrollBar.vertical as FugueScrollBar).inset
-                    spacing: 2 * root.look.unit
-
-                    Label {
-                        font.bold: true
-                        text: qsTr("Inputs")
-                    }
-                    Label {
-                        visible: (editor.face.inputs || []).length === 0
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: root.look.label
-                        text: qsTr("Right-click an inner input and choose Expose on the group to add one.")
-                    }
-                    Repeater {
-                        model: editor.face.inputs || []
-                        delegate: Rectangle {
-                            id: inputRow
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            implicitHeight: inputColumn.implicitHeight + 4 * root.look.unit
-                            radius: root.look.smallCorner
-                            color: root.look.well
-                            function change(key, value) {
-                                const next = {name: modelData.name, label: modelData.label, section: modelData.section,
-                                              min: modelData.min, max: modelData.max, type: modelData.type,
-                                              default: modelData.default === undefined ? "" : String(modelData.default),
-                                              choices: modelData.choices}
-                                next[key] = value
-                                root.model.groups.editExposedInput(modelData.name, next)
-                            }
-                            ColumnLayout {
-                                id: inputColumn
-                                x: 2 * root.look.unit
-                                y: 2 * root.look.unit
-                                width: parent.width - 4 * root.look.unit
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    ThemedTextField {
-                                        objectName: "exposedName" + inputRow.index
-                                        Layout.preferredWidth: 35 * root.look.unit
-                                        text: inputRow.modelData.name
-                                        placeholderText: qsTr("name")
-                                        onEditingFinished: if (text !== inputRow.modelData.name) inputRow.change("name", text)
-                                    }
-                                    ThemedTextField {
-                                        Layout.fillWidth: true
-                                        text: inputRow.modelData.label
-                                        placeholderText: qsTr("Label")
-                                        onEditingFinished: if (text !== inputRow.modelData.label) inputRow.change("label", text)
-                                    }
-                                    ThemedTextField {
-                                        objectName: "exposedSection" + inputRow.index
-                                        Layout.preferredWidth: 30 * root.look.unit
-                                        text: inputRow.modelData.section
-                                        placeholderText: qsTr("Section")
-                                        onEditingFinished: if (text !== inputRow.modelData.section) inputRow.change("section", text)
-                                    }
-                                    Label { color: root.look.label; text: inputRow.modelData.type }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    visible: inputRow.modelData.type === "number"
-                                    Label { text: qsTr("Range") }
-                                    ThemedTextField {
-                                        Layout.preferredWidth: 22 * root.look.unit
-                                        text: inputRow.modelData.min === undefined ? "" : String(inputRow.modelData.min)
-                                        placeholderText: qsTr("min")
-                                        validator: DoubleValidator {}
-                                        onEditingFinished: inputRow.change("min", text)
-                                    }
-                                    ThemedTextField {
-                                        Layout.preferredWidth: 22 * root.look.unit
-                                        text: inputRow.modelData.max === undefined ? "" : String(inputRow.modelData.max)
-                                        placeholderText: qsTr("max")
-                                        validator: DoubleValidator {}
-                                        onEditingFinished: inputRow.change("max", text)
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Label { text: qsTr("Default") }
-                                    ThemedTextField {
-                                        objectName: "exposedDefault" + inputRow.index
-                                        Layout.preferredWidth: 30 * root.look.unit
-                                        text: inputRow.modelData.default === undefined ? "" : String(inputRow.modelData.default)
-                                        placeholderText: qsTr("the inner value")
-                                        onEditingFinished: inputRow.change("default", text)
-                                    }
-                                    Label {
-                                        visible: choicesField.visible
-                                        text: qsTr("Choices")
-                                    }
-                                    ThemedTextField {
-                                        id: choicesField
-                                        visible: inputRow.modelData.choices !== "" || inputRow.modelData.innerChoices !== ""
-                                        Layout.fillWidth: true
-                                        text: inputRow.modelData.choices
-                                        placeholderText: inputRow.modelData.innerChoices
-                                        onEditingFinished: if (text !== inputRow.modelData.choices) inputRow.change("choices", text)
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Label {
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.Wrap
-                                        color: root.look.label
-                                        text: qsTr("Drives %1").arg(inputRow.modelData.targets.join(", "))
-                                    }
-                                    AppChoice {
-                                        id: alsoDrive
-                                        objectName: "exposedAlsoDrive" + inputRow.index
-                                        look: root.look
-                                        readonly property var candidates: editor.visible ? root.model.groups.exposeCandidates(inputRow.modelData.name) : []
-                                        visible: candidates.length > 0
-                                        label: qsTr("Also drive another input")
-                                        value: ""
-                                        options: [{value: "", text: qsTr("Also drive…")}].concat(candidates.map((c, i) => ({value: String(i), text: c.title})))
-                                        onPicked: v => {
-                                            if (v !== "") {
-                                                const c = candidates[Number(v)]
-                                                root.model.groups.exposeInput(c.node, c.input, inputRow.modelData.name)
-                                            }
-                                        }
-                                    }
-                                    GlyphButton {
-                                        glyph: "chevron-up"
-                                        enabled: inputRow.index > 0
-                                        label: qsTr("Move up")
-                                        onClicked: root.model.groups.moveExposed(false, inputRow.modelData.name, inputRow.index - 1)
-                                    }
-                                    GlyphButton {
-                                        glyph: "chevron-down"
-                                        enabled: inputRow.index < (editor.face.inputs || []).length - 1
-                                        label: qsTr("Move down")
-                                        onClicked: root.model.groups.moveExposed(false, inputRow.modelData.name, inputRow.index + 1)
-                                    }
-                                    GlyphButton {
-                                        glyph: "x"
-                                        label: qsTr("Stop exposing")
-                                        onClicked: root.model.groups.removeExposedInput(inputRow.modelData.name)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Label {
-                        Layout.topMargin: 2 * root.look.unit
-                        font.bold: true
-                        text: qsTr("Outputs")
-                    }
-                    Repeater {
-                        model: editor.face.outputs || []
-                        delegate: RowLayout {
-                            id: outputRow
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            ThemedTextField {
-                                Layout.preferredWidth: 35 * root.look.unit
-                                text: outputRow.modelData.name
-                                onEditingFinished: if (text !== outputRow.modelData.name)
-                                                       root.model.groups.renameExposedOutput(outputRow.modelData.name, text)
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                color: root.look.label
-                                text: qsTr("from %1 · %2").arg(outputRow.modelData.from).arg(outputRow.modelData.type)
-                            }
-                            GlyphButton {
-                                glyph: "chevron-up"
-                                enabled: outputRow.index > 0
-                                label: qsTr("Move up")
-                                onClicked: root.model.groups.moveExposed(true, outputRow.modelData.name, outputRow.index - 1)
-                            }
-                            GlyphButton {
-                                glyph: "chevron-down"
-                                enabled: outputRow.index < (editor.face.outputs || []).length - 1
-                                label: qsTr("Move down")
-                                onClicked: root.model.groups.moveExposed(true, outputRow.modelData.name, outputRow.index + 1)
-                            }
-                            GlyphButton {
-                                glyph: "x"
-                                label: qsTr("Stop exposing")
-                                onClicked: root.model.groups.unexposeOutput(outputRow.modelData.name)
-                            }
-                        }
-                    }
                 }
             }
 

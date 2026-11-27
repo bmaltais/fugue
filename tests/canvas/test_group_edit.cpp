@@ -143,6 +143,62 @@ private slots:
         QVERIFY(f.groups.exposeCandidates("nothing").isEmpty());
     }
 
+    // The editor says what an exposed port does in words, with the inner nodes' titles and the ports' labels, and lists
+    // what is left to add.
+    void theInterfaceSaysWhatEachPortSetsInWords() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas{&registry};
+        GroupEdit &groups = *canvas.groups();
+        const Result<Document> loaded = Document::load(QByteArray(R"({"fugue": 1,
+          "graph": {"nodes": {
+            "loader": {"type": "fugue/load-models", "version": "1.2.0", "inputs": {}},
+            "encode": {"type": "fugue/text-encode", "version": "1.2.0", "inputs": {"model": {"from": "loader.model"}}},
+            "sample": {"type": "fugue/sampler", "version": "1.5.0",
+                       "inputs": {"model": {"from": "loader.model"}, "conditioning": {"from": "encode.conditioning"}}},
+            "picture": {"type": "fugue/vae-decode", "version": "1.0.0", "inputs": {"latent": {"from": "sample.latent"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "picture.image"}}}}},
+          "layout": {"nodes": {"loader": {"pos": [0, 0]}, "encode": {"pos": [300, 0], "title": "Encode"},
+                               "sample": {"pos": [600, 0], "title": "Sample"}, "picture": {"pos": [900, 0], "title": "Picture"},
+                               "save": {"pos": [1200, 0]}}}})"));
+        QVERIFY(loaded.ok());
+        canvas.setDocument(loaded.value());
+        canvas.select({"encode", "sample", "picture"});
+        const QString instance = groups.makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(groups.problem()));
+        QVERIFY(groups.enterGroup(instance));
+
+        QVariantMap face = groups.groupInterface();
+        QCOMPARE(face.value("inputs").toList().value(0).toMap().value("sets").toString(),
+                 QStringLiteral("Sets Model on Encode and Sample"));
+        const QVariantMap output = face.value("outputs").toList().value(0).toMap();
+        QCOMPARE(output.value("comesFrom").toString(), QStringLiteral("From Image on Picture"));
+        QCOMPARE(output.value("fromNode").toString(), QStringLiteral("picture"));
+
+        // Two labels on one node: each says where it goes.
+        QVERIFY(groups.exposeInput("sample", "seed"));
+        QVERIFY2(groups.exposeInput("sample", "variation_seed", "seed"), qPrintable(groups.problem()));
+        face = groups.groupInterface();
+        QCOMPARE(face.value("inputs").toList().value(1).toMap().value("sets").toString(),
+                 QStringLiteral("Sets Seed on Sample and Variation seed on Sample"));
+
+        // What is left to add: never a port exposed already.
+        QStringList inputs, outputs;
+        for (const QVariant &choice : groups.exposeChoices(false)) {
+            const QVariantMap map = choice.toMap();
+            inputs << map.value("node").toString() + "." + map.value("port").toString();
+            if (inputs.last() == "sample.steps")
+                QCOMPARE(map.value("title").toString(), QStringLiteral("Sample \u203a Steps"));
+        }
+        for (const QVariant &choice : groups.exposeChoices(true))
+            outputs << choice.toMap().value("node").toString() + "." + choice.toMap().value("port").toString();
+        QVERIFY(inputs.contains("sample.steps"));
+        for (const char *exposed : {"encode.model", "sample.model", "sample.seed", "sample.variation_seed"})
+            QVERIFY2(!inputs.contains(exposed), exposed);
+        QVERIFY(outputs.contains("sample.latent"));
+        QVERIFY(!outputs.contains("picture.image"));
+    }
+
     void aRefusalSetsTheProblemAndAnEditThatWorksClearsIt() {
         Fixture f;
         QSignalSpy changed(&f.groups, &GroupEdit::problemChanged);

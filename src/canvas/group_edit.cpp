@@ -49,6 +49,16 @@ std::optional<double> numberOf(const QVariant &value) {
                                                                                      : std::nullopt;
 }
 
+// "A", "A and B", "A, B and C": a list as a sentence says it.
+QString spokenList(const QStringList &items) {
+    if (items.size() <= 1)
+        return items.value(0);
+    QString head = items.first();
+    for (qsizetype i = 1; i + 1 < items.size(); ++i)
+        head = GroupEdit::tr("%1, %2").arg(head, items.at(i));
+    return GroupEdit::tr("%1 and %2").arg(head, items.last());
+}
+
 } // namespace
 GroupEdit::GroupEdit(const Registry *registry, CanvasModel *canvas, QObject *parent)
     : QObject(parent), m_registry(registry), m_canvas(canvas) {}
@@ -422,6 +432,61 @@ QVariantList GroupEdit::exposeCandidates(const QString &name) const {
     return candidates;
 }
 
+GroupEdit::PortWords GroupEdit::portWords(const PortRef &port, bool output) const {
+    for (const CanvasModel::NodeRow &row : m_canvas->m_rows) {
+        if (row.id != port.node)
+            continue;
+        for (const CanvasModel::Port &candidate : output ? row.outputs : row.inputs)
+            if (candidate.name == port.port)
+                return {candidate.label.isEmpty() ? candidate.name : candidate.label, row.title.isEmpty() ? row.id : row.title};
+        return {port.port, row.title.isEmpty() ? row.id : row.title};
+    }
+    return {port.port, port.node};
+}
+
+QString GroupEdit::setsText(const QList<PortRef> &targets) const {
+    // The inner inputs by their label, in order: "Model on Encode and Sample", "Seed on Sample and Steps on Refine".
+    QStringList labels;
+    QMap<QString, QStringList> titles;
+    for (const PortRef &target : targets) {
+        const PortWords words = portWords(target, false);
+        if (!labels.contains(words.port))
+            labels << words.port;
+        titles[words.port] << words.node;
+    }
+    QStringList parts;
+    for (const QString &label : std::as_const(labels))
+        parts << tr("%1 on %2").arg(label, spokenList(titles.value(label)));
+    return parts.isEmpty() ? tr("Sets nothing inside") : tr("Sets %1").arg(spokenList(parts));
+}
+
+QString GroupEdit::comesFromText(const PortRef &from) const {
+    const PortWords words = portWords(from, true);
+    return tr("From %1 on %2").arg(words.port, words.node);
+}
+
+QVariantList GroupEdit::exposeChoices(bool output) const {
+    const GroupDefinition *group = m_canvas->m_document.group(m_canvas->scopeGroup());
+    if (!group)
+        return {};
+    QSet<QString> exposed;
+    if (output)
+        for (const GroupOutput &port : group->outputs)
+            exposed.insert(port.from.toString());
+    else
+        for (const GroupInput &port : group->inputs)
+            for (const PortRef &target : port.targets)
+                exposed.insert(target.toString());
+    QVariantList choices;
+    for (const CanvasModel::NodeRow &row : m_canvas->m_rows)
+        for (const CanvasModel::Port &port : output ? row.outputs : row.inputs)
+            if (!exposed.contains(PortRef{row.id, port.name}.toString()))
+                choices.append(QVariantMap{{"node", row.id}, {"port", port.name},
+                                           {"title", (row.title.isEmpty() ? row.id : row.title) + QStringLiteral(" \u203a ")
+                                                         + (port.label.isEmpty() ? port.name : port.label)}});
+    return choices;
+}
+
 QVariantMap GroupEdit::groupInterface() const {
     const QString id = m_canvas->scopeGroup();
     const Document whole = m_canvas->document();
@@ -445,12 +510,17 @@ QVariantMap GroupEdit::groupInterface() const {
                                   {"innerChoices", spec && spec->choices && !input.choices ? spec->choices->join(QStringLiteral(", "))
                                                    : QString()},
                                   {"targets", targets},
+                                  {"sets", setsText(input.targets)},
                                   {"type", spec ? spec->type.toString() : QString()}});
     }
     for (const GroupOutput &output : group->outputs) {
         const OutputSpec *spec = face.output(output.name);
         outputs.append(QVariantMap{{"name", output.name},
+                                   {"label", output.label},
                                    {"from", output.from.toString()},
+                                   {"fromNode", output.from.node},
+                                   {"fromPort", output.from.port},
+                                   {"comesFrom", comesFromText(output.from)},
                                    {"type", spec ? spec->type.toString() : QString()}});
     }
     return {{"id", id},

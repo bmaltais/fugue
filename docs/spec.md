@@ -894,6 +894,16 @@ with an id and a version, and it appears in node search.
   and outputs, sets labels, sections, ranges, defaults and choices (a subset of the inner input's),
   reorders them and adds inner inputs of the same type to an exposed input. Renaming an exposed
   input or output renames it on every instance, and in the face of every group around it.
+  It also exposes: **Add an input…** and **Add an output…** list the inner ports not exposed yet
+  (node title, then the port's label), as Expose on the group does from a port. Each row shows
+  the label on the card (its placeholder the name shown when there is none; an output's label is
+  its face label, #72) and says what it does with the inner nodes' titles and the ports' labels,
+  never ids: "Sets Model on Encode and Sample", "From Image on Picture" (`GroupEdit::groupInterface`,
+  `sets` and `comesFrom`). The name links and `--set` use, the section, the default, the range,
+  the choices and the type sit under the row's Details; the group's id and version in the name's
+  tooltip. Every change is one undo step at once; Done closes. Keys: Tab in reading order (the
+  focus stays where it was when the rows are made again after an edit), Up and Down between the
+  rows' labels, Alt+Up and Alt+Down move a row, Escape closes (docs/ui-ergonomics.md, 2026-11-27).
 - An exposed input or output whose inner node is deleted leaves the face, and every instance
   loses its value or links for it; a group around it that exposed that port loses it too, outwards
   through every level.

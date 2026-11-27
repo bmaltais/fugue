@@ -3,6 +3,7 @@
 // Ctrl+Shift+G ungroups, a Frame's title drags it with its nodes, and the Advanced header opens
 // and folds. Driven by keys and the mouse on the real Main.qml, offscreen.
 
+#include <QDir>
 #include <QFont>
 #include <QQuickStyle>
 
@@ -28,6 +29,23 @@ const QByteArray kGraph = R"({
   }},
   "layout": {"nodes": {"prompt": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "save": {"pos": [640, 0]}},
              "view": {"center": [400, 200], "zoom": 1}}
+})";
+
+// A group like the owner's (2026-11-27): one model feeds Encode and Sample, the picture leaves for a Save outside.
+const QByteArray kModelGraph = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "loader": {"type": "fugue/load-models", "version": "1.2.0", "inputs": {}},
+    "encode": {"type": "fugue/text-encode", "version": "1.2.0", "inputs": {"model": {"from": "loader.model"}, "prompt": "a fox"}},
+    "sample": {"type": "fugue/sampler", "version": "1.5.0",
+               "inputs": {"model": {"from": "loader.model"}, "conditioning": {"from": "encode.conditioning"}}},
+    "picture": {"type": "fugue/vae-decode", "version": "1.0.0", "inputs": {"latent": {"from": "sample.latent"}}},
+    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "picture.image"}}}
+  }},
+  "layout": {"nodes": {"loader": {"pos": [0, 0]}, "encode": {"pos": [300, 0], "title": "Encode"},
+                       "sample": {"pos": [600, 0], "title": "Sample"}, "picture": {"pos": [900, 0], "title": "Picture"},
+                       "save": {"pos": [1200, 0]}},
+             "view": {"center": [600, 200], "zoom": 0.7}}
 })";
 
 } // namespace
@@ -390,6 +408,97 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(at.x(), at.y()));
         QTRY_VERIFY(app.model.scopeDocument().layout.value("nodes").toObject().value("gen").toObject().value("advanced").toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The interface editor by keys alone (spec 5.4, docs/canvas-look.md 20.1): it opens on the name; Tab reaches a row's label;
+    // an edit keeps the focus where Tab took it although the rows are made again; Alt+Down moves the row and the focus with
+    // it; Escape closes.
+    void theInterfaceEditorWorksByKeysAlone() {
+        App app(load(kModelGraph));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.model.select({"encode", "sample", "picture"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        QVERIFY(app.commands.trigger("group.interface"));
+        QTRY_VERIFY(app.model.inGroup());
+        QVERIFY(app.model.groups()->exposeInput("sample", "seed"));
+        const auto focused = [&] { return app.window->activeFocusItem() ? app.window->activeFocusItem()->objectName() : QString(); };
+        QTRY_COMPARE(focused(), QStringLiteral("groupName"));
+        app.key(Qt::Key_Tab); // Add an input…
+        app.key(Qt::Key_Tab);
+        QTRY_COMPARE(focused(), QStringLiteral("exposedLabel0"));
+        for (const char letter : QByteArray("Base model"))
+            QTest::keyClick(app.window, letter);
+        app.key(Qt::Key_Tab);
+        const auto inputs = [&] { return app.model.groups()->groupInterface().value("inputs").toList(); };
+        QTRY_COMPARE(inputs().value(0).toMap().value("label").toString(), QStringLiteral("Base model"));
+        QTRY_COMPARE(focused(), QStringLiteral("exposedDetails0"));
+        app.key(Qt::Key_Down); // to the next row's label
+        QTRY_COMPARE(focused(), QStringLiteral("exposedDetails0")); // Down on a button does nothing
+        app.key(Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_COMPARE(focused(), QStringLiteral("exposedLabel0"));
+        app.key(Qt::Key_Down, Qt::AltModifier);
+        QTRY_COMPARE(inputs().value(1).toMap().value("name").toString(), QStringLiteral("model"));
+        QTRY_COMPARE(focused(), QStringLiteral("exposedLabel1"));
+        app.key(Qt::Key_Up);
+        QTRY_COMPARE(focused(), QStringLiteral("exposedLabel0"));
+        QObject *editor = app.window->findChild<QObject *>("groupInterfaceEditor");
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!editor->property("visible").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // FUGUE_SHOT_DIR=<folder>: the interface editor of a group like the owner's (one model input that sets two nodes, one image
+    // output), then with several inputs, dark and light, and the tab rename popup. Pictures only; nothing is asserted.
+    void theInterfaceEditorLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        for (const auto &[theme, tag] : {std::pair{"catppuccin", "dark"}, std::pair{"catppuccin-latte", "light"}}) {
+            App app(load(kModelGraph), {}, Look{theme, 8});
+            QVERIFY(app.open());
+            app.window->resize(1100, 760);
+            app.workflows.dismissPendingTrust();
+            app.workflows.dismissNotice();
+            app.model.select({"encode", "sample", "picture"});
+            app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+            QTRY_COMPARE(app.model.document().groups.size(), 1);
+            QVERIFY(app.commands.trigger("group.interface"));
+            QTRY_VERIFY(app.model.inGroup());
+            const auto shot = [&](const QString &name) {
+                QTest::qWait(300);
+                QVERIFY(test_support::grab(app.window).save(QString("%1/%2-%3.png").arg(out, name, tag)));
+            };
+            QObject *editor = app.window->findChild<QObject *>("groupInterfaceEditor");
+            QVERIFY(editor);
+            QTRY_VERIFY(editor->property("opened").toBool());
+            shot("group-editor-one");
+            if (QQuickItem *details = item(app.window->contentItem(), "exposedDetails0")) {
+                QTest::mouseClick(app.window, Qt::LeftButton, {},
+                                  details->mapToScene(QPointF(details->width() / 2, details->height() / 2)).toPoint());
+                shot("group-editor-one-details");
+            }
+            app.key(Qt::Key_Escape);
+            QTRY_VERIFY(!editor->property("visible").toBool());
+
+            QVERIFY(app.model.groups()->exposeInput("encode", "prompt"));
+            QVERIFY(app.model.groups()->exposeInput("sample", "seed"));
+            QVERIFY(app.model.groups()->exposeInput("sample", "steps"));
+            QVERIFY(app.model.groups()->editExposedInput("steps", {{"name", "steps"}, {"label", ""}, {"section", "Advanced"},
+                                                                    {"type", "number"}}));
+            QVERIFY(app.commands.trigger("group.interface"));
+            QTRY_VERIFY(editor->property("opened").toBool());
+            shot("group-editor-several");
+            app.key(Qt::Key_Escape);
+            QTRY_VERIFY(!editor->property("visible").toBool());
+
+            emit app.workflows.tabRenameRequested(0);
+            QQuickItem *field = nullptr;
+            QTRY_VERIFY((field = item(app.window->contentItem(), "tabRenameField-0")) && field->isVisible());
+            shot("tab-rename");
+        }
     }
 };
 

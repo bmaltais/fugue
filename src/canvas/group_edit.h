@@ -85,9 +85,14 @@ public:
     //
     // Each edit is one undo step on the whole workflow, so instances elsewhere follow.
 
-    // {name, version, inputs: [{name, label, section, min, max, targets: ["node.input"],
-    // type}], outputs: [{name, from, type}]}; empty at the top.
+    // {id, name, version, inputs: [{name, label, section, min, max, default, choices, innerChoices,
+    // targets: ["node.input"], sets, type}], outputs: [{name, label, from, fromNode, fromPort,
+    // comesFrom, type}]}; empty at the top. `sets` and `comesFrom` say it in words, with the inner
+    // nodes' titles and the ports' labels: "Sets Model on Encode and Sample", "From Image on Picture".
     Q_INVOKABLE QVariantMap groupInterface() const;
+    // The inner inputs (or outputs) of the group shown that are not exposed yet, in the canvas's
+    // order, as [{node, port, title: "<node title> > <port label>"}]: the editor's Add lists.
+    Q_INVOKABLE QVariantList exposeChoices(bool output) const;
     // Expose an inner input (into: as one more target of that exposed input) or output, and
     // stop exposing it.
     Q_INVOKABLE bool exposeInput(const QString &node, const QString &input, const QString &into = {});
@@ -152,6 +157,15 @@ signals:
     void libraryRenameOffered(const QString &libraryId, const QString &name);
 
 private:
+    // An inner port as a person reads it: its label and its node's title (the ids when the
+    // level shown has no such row).
+    struct PortWords {
+        QString port;
+        QString node;
+    };
+    PortWords portWords(const fugue::PortRef &port, bool output) const;
+    QString setsText(const QList<fugue::PortRef> &targets) const;
+    QString comesFromText(const fugue::PortRef &from) const;
     void setNotice(const QString &notice);
     QString libraryPath() const;
     // The sinks among the selected nodes, for the question Make group asks first.

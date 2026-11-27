@@ -121,11 +121,17 @@ Item {
                     padding: root.look.unit * 2
                     focus: true
                     onOpened: { renameField.forceActiveFocus(); renameField.selectAll() }
+                    // The field is the popup (owner, 2026-11-27: a field in a padded card read as a box in a box): one card, its
+                    // edge and shadow, the text inside it as an inline rename.
                     background: PopupSurface { look: root.look }
                     contentItem: ThemedTextField {
                         id: renameField
                         objectName: "tabRenameField-" + tabButton.index
                         implicitWidth: 40 * root.look.unit
+                        implicitHeight: 6 * root.look.unit
+                        leftPadding: root.look.unit // with the popup's padding the text sits 3u in, as a menu row's
+                        rightPadding: root.look.unit
+                        framed: false
                         selectByMouse: true
                         Accessible.name: qsTr("Workflow name")
                         onAccepted: {
