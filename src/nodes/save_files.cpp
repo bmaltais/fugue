@@ -232,6 +232,14 @@ Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const Q
                      QStringLiteral("Pick another name or folder in the node."));
 }
 
+Errors replacePath(Errors errors, const QString &opened, const QString &shown) {
+    for (Error &error : errors) {
+        error.message.replace(opened, shown);
+        error.hint.replace(opened, shown);
+    }
+    return errors;
+}
+
 Result<QString> saveAsNew(const SaveLocation &where, const QString &extension, const QByteArray &bytes) {
     PartialFile::removeStale(*where.dir); // what a save that died here left behind
     PartialFile partial(*where.dir, numberedName(where.name, 1, extension));

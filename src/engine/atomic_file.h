@@ -60,6 +60,13 @@ private:
 // that path, so a test can swap a folder for a link in that gap.
 extern void (*beforeFolderOpen)(const QString &path);
 
+// Test seams for the fallback of commit() on a filesystem without RENAME_NOREPLACE: with
+// `forceLinkFallback` set the rename is not tried, and `beforeUnlinkPartial`, when set, is called
+// with the partial file's descriptor number after it was closed and before the name is unlinked
+// (-1 when it was never open).
+extern void (*beforeUnlinkPartial)(int fd);
+extern bool forceLinkFallback;
+
 enum class Overwrite {
     Replace, // an existing file at the name is replaced, in the same step
     Never,   // an existing file at the name is kept, even one made a moment ago by another writer

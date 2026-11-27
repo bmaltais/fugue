@@ -14,6 +14,7 @@
 
 #include <vector>
 
+#include "engine/atomic_file.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/media.h"
@@ -90,6 +91,36 @@ private slots:
         const Result<VImage> image = handle->image();
         QVERIFY(image.ok());
         QCOMPARE(pixel(*image, 5, 5), (std::vector<double>{255, 0, 0}));
+    }
+
+    // #414: a file probed through the open folder is the file of that folder, whatever is linked at the
+    // folder's path afterwards, and a link at the file's own name is refused.
+    void probingThroughTheOpenFolderIgnoresALinkSwappedInForIt() {
+        QTemporaryDir dir;
+        FileHashes hashes(dir.filePath("hashes.json"));
+        QVERIFY(QDir(dir.path()).mkpath("in"));
+        QVERIFY(QDir(dir.path()).mkpath("other"));
+        const Result<MediaHandle> mine = MediaHandle::fromImage(drawn(64, 48, 4, 4));
+        const Result<MediaHandle> theirs = MediaHandle::fromImage(drawn(16, 8, 4, 4));
+        QVERIFY(mine.ok() && theirs.ok());
+        QVERIFY(mine->saved(dir.filePath("in"), "p", hashes).ok());
+        QVERIFY(theirs->saved(dir.filePath("other"), "p", hashes).ok());
+        const Result<FolderFd> folder = FolderFd::open(dir.filePath("in"), false);
+        QVERIFY(folder.ok());
+        QVERIFY(QDir().rename(dir.filePath("in"), dir.filePath("in-moved")));
+        QVERIFY(QFile::link(dir.filePath("other"), dir.filePath("in")));
+
+        const Result<MediaHandle> probed = MediaHandle::probeIn(MediaType::Image, *folder, "p.png", hashes);
+        QVERIFY2(probed.ok(), qPrintable(probed.error().message));
+        QCOMPARE(probed->width(), 64);
+        QCOMPARE(probed->hash(), sha256File(dir.filePath("in-moved/p.png")));
+        QCOMPARE(probed->path(), dir.filePath("in/p.png"));
+
+        QVERIFY(QFile::link(dir.filePath("other/p.png"), dir.filePath("in-moved/l.png")));
+        const Result<MediaHandle> linked = MediaHandle::probeIn(MediaType::Image, *folder, "l.png", hashes);
+        QVERIFY(!linked.ok());
+        QCOMPARE(linked.error().code, QString("permission_denied"));
+        QCOMPARE(MediaHandle::probeIn(MediaType::Image, *folder, "none.png", hashes).error().code, QString("file_not_found"));
     }
 
     void savingWritesALosslessPngNamedAfterTheOutput() {

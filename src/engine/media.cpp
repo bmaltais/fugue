@@ -1,8 +1,17 @@
 #include "media.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 
+#include "engine/atomic_file.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 
@@ -181,6 +190,29 @@ Result<MediaHandle> MediaHandle::probe(MediaType type, const QString &path, File
     if (type == MediaType::Image)
         return probeImage(info.absoluteFilePath(), hashes);
     return probeWithFfprobe(type, info.absoluteFilePath(), hashes);
+}
+
+Result<MediaHandle> MediaHandle::probeIn(MediaType type, const FolderFd &dir, const QString &leaf, FileHashes &hashes) {
+    const QString shown = QDir(dir.path()).filePath(leaf);
+    const QByteArray name = QFile::encodeName(leaf);
+    errno = 0;
+    const int fd = ::openat(dir.fd(), name.constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) {
+        const int error = errno;
+        if (error == ENOENT)
+            return makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no file %1.").arg(shown));
+        return makeError(error == ELOOP ? QStringLiteral("permission_denied") : writeFailureCode(error),
+                         QStringLiteral("Cannot read %1: %2.").arg(shown, error == ELOOP ? QStringLiteral("it is a link") : QString::fromLocal8Bit(strerror(error))));
+    }
+    struct stat info {};
+    const bool plain = ::fstat(fd, &info) == 0 && S_ISREG(info.st_mode);
+    // The open file itself (a /proc link no rename can redirect), for libvips and ffprobe.
+    const QString read = QStringLiteral("/proc/%1/fd/%2").arg(::getpid()).arg(fd);
+    const Result<MediaHandle> handle = !plain ? Result<MediaHandle>(makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no file %1.").arg(shown)))
+                                       : type == MediaType::Image ? probeImage(read, hashes, shown)
+                                                                  : probeWithFfprobe(type, read, hashes, shown);
+    ::close(fd);
+    return handle;
 }
 
 Result<MediaHandle> MediaHandle::saved(const QString &dir, const QString &name, FileHashes &hashes) const {

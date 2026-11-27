@@ -16,6 +16,7 @@
 #include "engine/atomic_file.h"
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
+#include "engine/hash.h"
 
 namespace fugue {
 
@@ -77,26 +78,27 @@ double seconds(const QJsonValue &value) {
 
 } // namespace
 
-Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes) {
+Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes, const QString &shown) {
+    const QString &named = shown.isEmpty() ? path : shown;
     const Result<QByteArray> output =
         ffmpeg::run(QStringLiteral("ffprobe"),
                     {"-v", "error", "-print_format", "json", "-show_format", "-show_streams", path},
                     QStringLiteral("media_unreadable"));
     if (!output)
-        return output.error().code == QLatin1String("internal") ? output.error() : unreadable(path, type);
+        return output.error().code == QLatin1String("internal") ? output.error() : unreadable(named, type);
     const QJsonObject probe = QJsonDocument::fromJson(*output).object();
     const QJsonObject format = probe.value("format").toObject();
     const QJsonArray streams = probe.value("streams").toArray();
 
     MediaHandle handle;
     handle.m_type = type;
-    handle.m_path = path;
-    handle.m_format = formatName(format.value("format_name").toString(), path);
+    handle.m_path = named;
+    handle.m_format = formatName(format.value("format_name").toString(), named);
 
     if (type == MediaType::Video) {
         const QJsonObject video = firstStream(streams, QStringLiteral("video"));
         if (video.isEmpty() || video.value("width").toInt() <= 0)
-            return unreadable(path, type);
+            return unreadable(named, type);
         // The size it is shown at: ffmpeg turns frames by the display
         // rotation when it decodes them, so frames have this size too.
         const bool turned = std::abs(rotation(video)) % 180 == 90;
@@ -126,7 +128,7 @@ Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString 
     } else {
         const QJsonObject audio = firstStream(streams, QStringLiteral("audio"));
         if (audio.isEmpty())
-            return unreadable(path, type);
+            return unreadable(named, type);
         handle.m_channels = audio.value("channels").toInt();
         handle.m_sampleRate = audio.value("sample_rate").toString().toInt();
         handle.m_duration = seconds(format.value("duration"));
@@ -134,9 +136,9 @@ Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString 
             handle.m_duration = seconds(audio.value("duration"));
     }
 
-    handle.m_hash = hashes.hash(path);
+    handle.m_hash = shown.isEmpty() ? hashes.hash(path) : sha256File(path);
     if (handle.m_hash.isEmpty())
-        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(path));
+        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(named));
     return handle;
 }
 

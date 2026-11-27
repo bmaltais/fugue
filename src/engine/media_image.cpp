@@ -9,6 +9,7 @@
 
 #include "engine/atomic_file.h"
 #include "engine/file_hashes.h"
+#include "engine/hash.h"
 #include "engine/vips.h"
 
 namespace fugue {
@@ -104,12 +105,13 @@ Result<vips::VImage> MediaHandle::image() const {
     }
 }
 
-Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &hashes) {
+Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &hashes, const QString &shown) {
+    const QString &named = shown.isEmpty() ? path : shown;
     if (!initVips())
         return vipsUnavailable();
     MediaHandle handle;
     handle.m_type = MediaType::Image;
-    handle.m_path = path;
+    handle.m_path = named;
     try {
         // Opening reads the header only; pixels are decoded when read.
         const VImage image = VImage::new_from_file(fileName(path).constData());
@@ -120,11 +122,11 @@ Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &has
         handle.m_channels = image.bands();
         handle.m_format = formatOf(image);
     } catch (const vips::VError &) {
-        return makeError(QStringLiteral("media_unreadable"), QStringLiteral("%1 is not an image Fugue can read.").arg(path));
+        return makeError(QStringLiteral("media_unreadable"), QStringLiteral("%1 is not an image Fugue can read.").arg(named));
     }
-    handle.m_hash = hashes.hash(path);
+    handle.m_hash = shown.isEmpty() ? hashes.hash(path) : sha256File(path);
     if (handle.m_hash.isEmpty())
-        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(path));
+        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(named));
     return handle;
 }
 
