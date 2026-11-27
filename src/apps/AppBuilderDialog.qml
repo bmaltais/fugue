@@ -577,10 +577,11 @@ Item {
                 text: root.builder.notice
             }
 
-            QuestionAnswers {
-                leadingSpacer: !root.builder.editing
+            // Cancel, Remove app (editing only: the danger tint, its own chunk; undo brings the app back), Apply, the primary last.
+            KitDialogButtons {
                 ThemedButton {
                     objectName: "builderRemoveApp"
+                    dialogRole: "destructive"
                     visible: root.builder.editing
                     text: qsTr("Remove app")
                     flat: true
@@ -590,12 +591,9 @@ Item {
                             dialog.close()
                     }
                 }
-                Item {
-                    visible: root.builder.editing
-                    Layout.fillWidth: true
-                }
                 ThemedButton {
                     objectName: "builderCancel"
+                    dialogRole: "cancel"
                     text: qsTr("Cancel")
                     onClicked: dialog.close()
                 }

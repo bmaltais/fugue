@@ -585,9 +585,12 @@ private slots:
         QVERIFY(QFile::remove(baseData() + "/projects/gone/project.json"));
         enterProject("Acme", {"preferences", "models", "packs"});
         std::unique_ptr<ProjectModel> model; // made before the window, so it outlives its QML
-        App app(load(emptyDoc));
+        // FUGUE_SHOT_THEME=catppuccin-latte for the light pictures, FUGUE_SHOT_RTL=1 for right to left.
+        App app(load(emptyDoc), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME")});
         model = makeModel(app);
         QVERIFY(app.open());
+        if (qEnvironmentVariable("FUGUE_SHOT_RTL") == "1") // after open(): the translator sets the language's direction
+            QGuiApplication::setLayoutDirection(Qt::RightToLeft);
         app.window->resize(960, 708);
         app.commands.trigger("file.projects");
         QTRY_VERIFY(open(app.window, "projectsDialog"));
@@ -598,6 +601,9 @@ private slots:
         click(app, NEED("newProjectBack"));
         click(app, NEED("projectSettings"));
         shot(app, "projects-settings");
+        app.window->findChild<QObject *>("projectsDialog")->setProperty("blockedName", "Beta");
+        app.window->findChild<QObject *>("projectsDialog")->setProperty("view", "blocked");
+        shot(app, "projects-blocked");
         QMetaObject::invokeMethod(app.window->findChild<QObject *>("projectsDialog"), "close");
         QTRY_VERIFY(!open(app.window, "projectsDialog"));
         app.commands.trigger("app.settings");

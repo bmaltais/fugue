@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 
 // The two small questions of Select > Modify and Transform selection (#251). Modify asks one pixel amount (Expand, Contract,
 // Feather, Border, Smooth: the title and the hint change, the field is the same); Transform asks Scale %, Rotate degrees
@@ -101,8 +102,8 @@ Item {
                 opacity: 0.7
                 text: root.info.hint
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: modifyAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: modifyAsk.close() }
                 ThemedButton {
                     id: modifyOk
                     objectName: "canvasModifyOk"
@@ -202,8 +203,8 @@ Item {
                 opacity: 0.7
                 text: qsTr("Scales and turns about the selection's center, then moves it. What leaves the picture is lost.")
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: transformAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: transformAsk.close() }
                 ThemedButton {
                     id: transformOk
                     objectName: "canvasTransformOk"

@@ -135,7 +135,8 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // Close a tab with unsaved changes: Cancel, Discard (danger tint, its own chunk), Save (the primary, last at the right).
+    // Close a tab with unsaved changes, GNOME's order (KitDialogButtons): Cancel, Discard (danger tint, its own chunk), Save (the
+    // primary, last at the right).
     void theCloseTabQuestionTintsDiscardAndEndsOnSave() {
         App app(load(emptyDoc));
         QVERIFY(app.open());
@@ -144,15 +145,15 @@ private slots:
         QMetaObject::invokeMethod(ask, "open");
         QTRY_VERIFY(opened(app, "closeAsk"));
         const QList<QQuickItem *> answers = row(app, {"closeDiscard", "closeCancel", "closeSave"});
-        // Discard stands alone at the far side in the danger tint; Cancel, then the primary last at the right.
-        QCOMPARE(answers[0]->objectName(), QString("closeDiscard"));
-        QCOMPARE(answers[1]->objectName(), QString("closeCancel"));
+        QCOMPARE(answers[0]->objectName(), QString("closeCancel"));
+        QCOMPARE(answers[1]->objectName(), QString("closeDiscard"));
         QCOMPARE(answers[2]->objectName(), QString("closeSave"));
-        QVERIFY(answers[0]->property("danger").toBool());
-        QVERIFY(!answers[1]->property("primary").toBool() && !answers[1]->property("danger").toBool());
+        QVERIFY(answers[1]->property("danger").toBool());
+        QVERIFY(!answers[0]->property("primary").toBool() && !answers[0]->property("danger").toBool());
         QVERIFY(answers[2]->property("primary").toBool());
-        QVERIFY(sceneRect(answers[1]).left() - sceneRect(answers[0]).right()
-                > 2 * (sceneRect(answers[2]).left() - sceneRect(answers[1]).right()));
+        const qreal gap = answers[0]->parentItem()->property("spacing").toReal(); // the row's gap
+        QVERIFY(sceneRect(answers[1]).left() - sceneRect(answers[0]).right() >= 2 * gap - 0.5);
+        QVERIFY(sceneRect(answers[2]).left() - sceneRect(answers[1]).right() >= 2 * gap - 0.5);
         QVERIFY(answers[2]->hasActiveFocus()); // Enter takes the primary (D5)
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!ask->property("visible").toBool());

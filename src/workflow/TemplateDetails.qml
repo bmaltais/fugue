@@ -234,15 +234,14 @@ Rectangle {
         }
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: sheet.look.hairline }
-        RowLayout {
+        KitDialogButtons {
             id: actionRow
-            Layout.fillWidth: true
             Layout.margins: 4 * sheet.u
-            spacing: 2 * sheet.u
             // The template's own models, for anyone who wants them in place of their files (opens Get ready with Download chosen): a
             // secondary that names what it fetches, at the row's start, apart from Cancel and Open, so it never reads as the way to open.
             KitChip {
                 objectName: "templateDetailsDownload"
+                dialogRole: "extra"
                 look: sheet.look
                 bordered: true
                 visible: sheet.withFiles && sheet.template.ownDownloadSize !== ""
@@ -252,10 +251,10 @@ Rectangle {
                 tip: qsTr("%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.").arg(text)
                 onTapped: sheet.downloadOwn()
             }
-            Item { Layout.fillWidth: true }
             ThemedButton {
                 id: cancelButton
                 objectName: "templateDetailsCancel"
+                dialogRole: "cancel"
                 text: qsTr("Cancel")
                 onClicked: sheet.cancel()
             }

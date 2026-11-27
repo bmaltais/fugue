@@ -7,10 +7,14 @@ import "../kit"
 // A small modal question over the window (group, Frame and rename questions, Save before
 // closing). It closes at once, with no fade, so the key pressed right after it reaches the canvas
 // (#74): Material's 220 ms exit kept the window's shortcuts asleep meanwhile, as menus once did.
-// Its answers are ThemedButtons (ViewButton, D4) in a QuestionAnswers row (#235). Right to left its content mirrors, as Settings and Projects do (#228): a popup lives in the
+// Its answers are ThemedButtons (ViewButton, D4) in a KitDialogButtons row (#235). Right to left its content mirrors, as Settings and Projects do (#228): a popup lives in the
 // overlay, outside the window's mirrored root, so it sets the mirroring on its own content.
 // It reads App.theme.look directly, not its own `look` property, in the bindings that run while it is created: with
 // Qt's sliced GC (QV4_GC_TIMELIMIT) a collection in the middle of a window's creation made `look` read null there (#320).
+//
+// Its actions are a KitDialogButtons row (docs/ui-ergonomics.md 2026-11-27): Enter where no button and no text field has the focus
+// presses that row's default answer, and Escape presses its cancel answer (a question with none closes as its closePolicy says).
+// A text field keeps its own Enter (its onAccepted), and a focused button its own.
 //
 // A form dialog names itself with `heading` (and a `subheading`): a compact KitHero in the popup's header, in `tone` (sea for the
 // canvas dialogs, docs/canvas-look.md 20.21), full width over the card's padding. A plain question sets none and has no header.
@@ -52,6 +56,43 @@ Popup {
                 onClosed: question.close()
             }
         }
+    }
+    // The content's own item, so the keys the content leaves come here before the popup.
+    contentItem: FocusScope {
+        // A popup sizes itself to its one content child; with a content item of its own it takes that item's implicit size.
+        implicitWidth: children.length > 0 ? children[0].implicitWidth : 0
+        implicitHeight: children.length > 0 ? children[0].implicitHeight : 0
+        Keys.onReturnPressed: event => event.accepted = question.pressDefault()
+        Keys.onEnterPressed: event => event.accepted = question.pressDefault()
+        Keys.onEscapePressed: event => event.accepted = question.pressCancel()
+    }
+    // The KitDialogButtons row of the question (the first one, depth first), or null.
+    function dialogButtons(): Item {
+        const search = item => {
+            for (let i = 0; i < item.children.length; ++i) {
+                const child = item.children[i]
+                if (!child.visible)
+                    continue
+                if (child["pressDefault"] !== undefined && child["pressCancel"] !== undefined)
+                    return child
+                const found = search(child)
+                if (found)
+                    return found
+            }
+            return null
+        }
+        return contentItem ? search(contentItem) : null
+    }
+    function pressDefault(): bool {
+        const focused = contentItem ? contentItem.Window.activeFocusItem : null
+        if (focused instanceof TextInput || focused instanceof TextEdit)
+            return false
+        const answers = dialogButtons()
+        return answers !== null && answers["pressDefault"]()
+    }
+    function pressCancel(): bool {
+        const answers = dialogButtons()
+        return answers !== null && answers["pressCancel"]()
     }
     Binding {
         target: question.contentItem

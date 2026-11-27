@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Fugue
+import "../kit"
 
 // The mask editor (#172, spec 14.4): a picture at full size to paint a mask on. A LargeViewDialog
 // whose viewer is CompareView in `single` mode with a MaskLayer over it. It knows nothing of nodes:
@@ -387,12 +388,12 @@ LargeViewDialog {
                   : root.layers ? qsTr("[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask layers alone")
                   : qsTr("[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask alone")
         }
-        Row {
+        KitDialogButtons {
             id: buttons
             anchors.right: parent.right
-            spacing: 2 * root.look.unit
             ViewButton {
                 objectName: "maskCancel"
+                dialogRole: "cancel"
                 look: root.look
                 text: qsTr("Cancel")
                 onTapped: root.cancel()

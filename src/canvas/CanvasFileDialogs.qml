@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../menu"
+import "../kit"
 
 // The questions of the Canvas view's menus: File's Rename canvas…, Share… (#249), Clear canvas… and Delete canvas… (#232 slice B), and
 // Layer's Layer properties… (#252: name, opacity, blend mode and layer mask of one layer, applied as ONE revision). Each
@@ -74,7 +75,7 @@ Item {
                 id: propsName
                 objectName: "canvasPropertiesName"
                 Layout.fillWidth: true
-                onAccepted: propsOk.clicked()
+                onAccepted: if (propsOk.enabled) propsOk.clicked()
                 Accessible.name: qsTr("Layer name")
             }
             DragNumberField {
@@ -128,8 +129,8 @@ Item {
                     onTapped: root.propsMaskRemove = !root.propsMaskRemove
                 }
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: propsAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: propsAsk.close() }
                 ThemedButton {
                     id: propsOk
                     objectName: "canvasPropertiesOk"
@@ -154,10 +155,10 @@ Item {
                 id: renameField
                 objectName: "canvasRenameField"
                 Layout.fillWidth: true
-                onAccepted: renameOk.clicked()
+                onAccepted: if (renameOk.enabled) renameOk.clicked()
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: renameAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: renameAsk.close() }
                 ThemedButton {
                     id: renameOk
                     objectName: "canvasRenameOk"
@@ -185,9 +186,8 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("Share “%1” as a package that opens in Fugue. With its history, the person can step back through every change; without, they get the layers as they are now.").arg(root.canvasName)
             }
-            QuestionAnswers {
-                spacing: 4 * root.u
-                ThemedButton { text: qsTr("Cancel"); onClicked: shareAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: shareAsk.close() }
                 ThemedButton {
                     objectName: "canvasShareWithHistory"
                     text: qsTr("With history…")
@@ -230,17 +230,18 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("Clear “%1”? Every layer is replaced by one empty layer. Undo brings them back.").arg(root.canvasName)
             }
-            QuestionAnswers {
-                spacing: 4 * root.u
+            KitDialogButtons {
                 ThemedButton {
                     id: clearKeep
                     objectName: "canvasClearKeep"
+                    dialogRole: "cancel"
                     text: qsTr("Keep")
                     highlighted: true
                     onClicked: clearAsk.close()
                 }
                 ThemedButton {
                     objectName: "canvasClearYes"
+                    dialogRole: "destructive"
                     text: qsTr("Clear")
                     danger: true
                     onClicked: { clearAsk.close(); root.view.backend.clearCanvas() }
@@ -261,17 +262,18 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("Delete “%1” for good? Its layers and its whole history are removed. This cannot be undone.").arg(root.canvasName)
             }
-            QuestionAnswers {
-                spacing: 4 * root.u
+            KitDialogButtons {
                 ThemedButton {
                     id: deleteKeep
                     objectName: "canvasDeleteKeep"
+                    dialogRole: "cancel"
                     text: qsTr("Keep")
                     highlighted: true
                     onClicked: deleteAsk.close()
                 }
                 ThemedButton {
                     objectName: "canvasDeleteYes"
+                    dialogRole: "destructive"
                     text: qsTr("Delete")
                     danger: true
                     onClicked: { deleteAsk.close(); root.view.backend.deleteCanvas() }

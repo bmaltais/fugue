@@ -724,16 +724,18 @@ ColumnLayout {
                 wrapMode: Text.Wrap
                 text: qsTr("Remove %1? Its saved key is deleted from providers.json.").arg(removeAsk.instance ? removeAsk.instance.name : "")
             }
-            QuestionAnswers {
+            KitDialogButtons {
                 ThemedButton {
                     id: keepButton
                     objectName: "providerRemoveKeep"
+                    dialogRole: "cancel"
                     text: qsTr("Keep it")
                     highlighted: true
                     onClicked: removeAsk.close()
                 }
                 ThemedButton {
                     objectName: "providerRemoveGo"
+                    dialogRole: "destructive"
                     text: qsTr("Remove")
                     danger: true
                     onClicked: {

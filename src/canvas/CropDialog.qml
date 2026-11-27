@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
+import "../kit"
 
 // The larger crop window of a Crop node (#73): the picture at full size with the same frame and
 // handles, the four numbers editable, an aspect lock (free, the source's, 1:1, 4:3, 3:2, 16:9, and
@@ -75,27 +76,37 @@ LargeViewDialog {
         onCommitted: r => root.draft = r
     }
 
-    footer: Row {
-        spacing: 2 * root.look.unit
+    // The fields at the start, Cancel and OK at the end (KitDialogButtons). An Item of a known height, not a layout: a layout's
+    // height comes a frame late, and the picture above it was fitted again (a moved frame under a drag).
+    footer: Item {
+        width: parent ? parent.width : 0
+        height: Math.max(cropFields.implicitHeight, 7 * root.look.unit)
         RectangleFields {
+            id: cropFields
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
             prefix: "crop"
             look: root.look
             values: root.draft
             onEdited: (field, text) => root.setField(field, text)
         }
-        Item { width: 2 * root.look.unit; height: 1 }
-        ViewButton {
-            objectName: "cropCancel"
-            look: root.look
-            text: qsTr("Cancel")
-            onTapped: root.close()
-        }
-        ViewButton {
-            objectName: "cropOk"
-            look: root.look
-            text: qsTr("OK")
-            primary: true
-            onTapped: root.apply()
+        KitDialogButtons {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            ViewButton {
+                objectName: "cropCancel"
+                dialogRole: "cancel"
+                look: root.look
+                text: qsTr("Cancel")
+                onTapped: root.close()
+            }
+            ViewButton {
+                objectName: "cropOk"
+                look: root.look
+                text: qsTr("OK")
+                primary: true
+                onTapped: root.apply()
+            }
         }
     }
 }

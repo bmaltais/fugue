@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Fugue
+import "../kit"
 
 // The Cache page of the settings panel (spec 10.6, #141): what Fugue keeps under ~/.cache/fugue
 // with a Clear for each kind (and one Clear all) and, under it, the limits that keep each kind in bounds. Clear asks
@@ -87,17 +88,18 @@ ColumnLayout {
             }
             // The safe answer is the highlighted one; Clear is last and apart, in the danger tint (docs/ui-ergonomics.md:
             // Destructive; the cohesion audit's D8).
-            Row {
-                spacing: page.u
+            KitDialogButtons {
+                Layout.topMargin: page.u
                 SettingsParts.SmallButton {
                     objectName: "cacheNo"
+                    dialogRole: "cancel"
                     highlighted: true
                     text: qsTr("Cancel")
                     onClicked: page.cache.answer(false)
                 }
-                Item { width: page.u; height: 1 }
                 SettingsParts.SmallButton {
                     objectName: "cacheYes"
+                    dialogRole: "destructive"
                     danger: true
                     text: qsTr("Clear")
                     onClicked: page.cache.answer(true)

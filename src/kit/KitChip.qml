@@ -37,6 +37,8 @@ Rectangle {
     property bool danger: false
     // Looks disabled (dimmed) but still hovers, so its `tip` can say why it does nothing (a Move up on the first row); `tapped` is the host's to ignore.
     property bool dimmed: false
+    // Its place in a dialog's KitDialogButtons row: "extra", "cancel", "destructive" or "accept" (the default).
+    property string dialogRole
     readonly property string tone: toned ? KitTone.nearest(chip) : ""
     readonly property color currentFill: tone === "" || look.params.controlColour === "accent" ? look.selectedRow
                                          : Qt.alpha(look.tone(tone).glass, 0.34)

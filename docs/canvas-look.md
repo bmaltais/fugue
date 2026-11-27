@@ -806,6 +806,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Single-line text field | `src/canvas/ThemedTextField.qml` | Built (20.6): a Templates `TextField` on a `KitWell`, 7u, 2.5u in, a plain placeholder; `framed: false` for a field that is its popup |
 | Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7); `KitChip.toned` tints a chip that is on with the panel's tone |
 | Notice: a tone, a title, a body or lines, actions, copy, dismiss | `KitNotice` | Built (20.23): every notice of the window; `Banner` is gone |
+| A dialog's actions: one row at the bottom right, GNOME's order, arrows, Enter and Escape | `KitDialogButtons` | Built (20.24): every question, sheet and form dialog; `QuestionAnswers` is gone |
 | Copy button for an error message | `KitCopyButton` | Built: a 6u round `KitChip` with the `copy` glyph, a check for `durCopied` after a press; `copyText` is the whole message with details and ids |
 | Toggle | `KitToggle` | Built (20.8, 20.11) |
 | Segmented chooser | `KitSegmented` | Built (20.9) |
@@ -1297,4 +1298,18 @@ takes Tab, else the window. It mirrors right to left with the application. The n
 Measured contrast on the tone tints (derive.py's derivation, every shipped theme): the text at least 4.5:1 everywhere (catppuccin-latte
 5.59 to 6.31, tokyo-night 4.61 to 4.84); the glyph's ink at least 3:1 everywhere (catppuccin-latte 4.75 to 5.67, tokyo-night 4.09 to
 4.98); the tier badge's label on `kitChip` as the kit's (5.98 catppuccin-latte, 4.64 tokyo-night).
+
+### 20.24 KitDialogButtons: a dialog's one row of actions (Built, 2026-11-27)
+
+`src/kit/KitDialogButtons.qml`. Decision, the order and default of every dialog, and the references (GNOME HIG and libadwaita's
+`AdwAlertDialog`, Apple's HIG Alerts, KDE's order through Qt's `QDialogButtonBox::KdeLayout`, and why GNOME's): docs/ui-ergonomics.md,
+2026-11-27. No look of its own: its children are the window's buttons (`ThemedButton`/`ViewButton`, or `KitChip` in the kit's sheets).
+
+| Part | Rule |
+| --- | --- |
+| Roles | each child's `dialogRole`: `extra`, `cancel`, `destructive`, `accept` (the default) |
+| Order | extras at the start, a stretch, Cancel, the destructive answer, the acting answers with the primary last: the bottom right; right to left it mirrors |
+| Gaps | 2u between buttons; 4u around a destructive answer (before it after Cancel, after it before an acting answer); the stretch keeps the extras at least 4u away |
+| Default | `defaultButton`, else the visible `primary` one; in a question about a loss that is the safe answer (D8) |
+| Keys | Left and Right move the focus as seen and stop at the ends; Tab follows the same order; Enter or Space press the focused button (the keyboard's 2px ring; on the accent fill it is the fill's ink); Escape in the row presses Cancel (`cancelOnEscape: false` where Escape closes more, Projects). A `Question` adds Enter with no button or text field focused (the default) and Escape anywhere in it (Cancel); another host calls `pressDefault()` and `pressCancel()` |
 

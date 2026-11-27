@@ -42,6 +42,8 @@ Rectangle {
     property bool compact: false
     // A toggle (Compare, Snap, Show candidate): assistive tools hear it as on or off, `current` being on.
     property bool checkable: false
+    // Its place in a dialog's KitDialogButtons row: "extra", "cancel", "destructive" or "accept" (the default).
+    property string dialogRole
     signal tapped
     // An Alt+click of its own (#226: a layer's eye shows that layer alone); with it, a plain click is a click with no
     // modifier.
@@ -73,7 +75,8 @@ Rectangle {
     // The edge: the focus ring first, then a form button's hairline, then a plain well button's hover edge.
     readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
     border.width: ring ? 2 : bordered && !toned ? 1 : 0
-    border.color: ring ? (alarmed ? look.error : look.accent) : look.hairlineStrong
+    // On the accent fill (the primary) the ring is the fill's ink, as KitChip's: an accent ring on the accent did not show.
+    border.color: ring ? (marked ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button

@@ -117,8 +117,8 @@ Item {
                 text: qsTr("A group never writes files or shows previews from inside. Leave %1 outside the group, wired to its output?")
                           .arg(sinksAsk.sinks.join(", "))
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: sinksAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: sinksAsk.close() }
                 ThemedButton {
                     objectName: "groupSinksInside"
                     text: qsTr("Put inside")
@@ -174,8 +174,8 @@ Item {
                       ? qsTr("The node keeps its values and links, and runs on the new version. Inputs and outputs that go are flagged where they no longer fit; undo moves it back.")
                       : qsTr("Every instance of the group in this workflow moves to the new version; values and links of inputs and outputs that go are dropped.")
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: updateAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: updateAsk.close() }
                 ThemedButton {
                     objectName: "groupUpdateOk"
                     text: updateAsk.major ? qsTr("Move") : qsTr("Update")
@@ -209,8 +209,8 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("%1 is in the library. Rename it there too, as \u201c%2\u201d?").arg(libraryAsk.libraryId, libraryAsk.name)
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Only here"); onClicked: libraryAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Only here"); onClicked: libraryAsk.close() }
                 ThemedButton {
                     objectName: "libraryRenameYes"
                     text: qsTr("Rename in the library")
@@ -255,10 +255,10 @@ Item {
                 id: renameField
                 objectName: "renameField"
                 Layout.fillWidth: true
-                onAccepted: renameOk.clicked()
+                onAccepted: if (renameOk.enabled) renameOk.clicked()
             }
-            QuestionAnswers {
-                ThemedButton { text: qsTr("Cancel"); onClicked: renameAsk.close() }
+            KitDialogButtons {
+                ThemedButton { dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: renameAsk.close() }
                 ThemedButton {
                     id: renameOk
                     objectName: "renameOk"
@@ -962,7 +962,7 @@ Item {
                 }
             }
 
-            QuestionAnswers {
+            KitDialogButtons {
                 ThemedButton {
                     objectName: "groupInterfaceClose"
                     text: qsTr("Done")
