@@ -51,6 +51,7 @@ Window {
     property int frosts: 0
     property bool frostOn: false
     property bool noticeShown: true
+    property bool popShown: false
     property int dismissals: 0
     Column {
         width: parent.width
@@ -61,6 +62,11 @@ Window {
             height: kitNotice.height
             activeFocusOnTab: true
             Item { id: gone; visible: false; activeFocusOnTab: true }
+            Loader { // a notice made and dropped in one turn, as the helper's offer is when it is dismissed
+                objectName: "popLoader"
+                active: window.popShown
+                sourceComponent: KitNotice { objectName: "popNotice"; width: 100; title: "Gone soon" }
+            }
             KitNotice {
                 id: kitNotice
                 objectName: "kitNotice"
@@ -240,6 +246,19 @@ private slots:
         QTRY_COMPARE(window->property("dismissals").toInt(), 1);
         QVERIFY(!notice->isVisible());
         QTRY_COMPARE(window->activeFocusItem() ? window->activeFocusItem()->objectName() : QString(), QString("noticeHost"));
+        delete window;
+    }
+
+    // A notice dropped before its queued announcement runs (#681): no warning from the call that comes after it.
+    void aNoticeDroppedAtOnceSaysNothingMore() {
+        Shell shell(dir.filePath("notice-gone"), "tokyo-night");
+        QQuickWindow *window = show(shell, windowQml, QUrl("qrc:/test_kit.qml"));
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::failOnWarning();
+        window->setProperty("popShown", true);
+        window->setProperty("popShown", false); // the Loader and its notice go before the queued call
+        QTest::qWait(50);
+        QVERIFY(!window->findChild<QQuickItem *>("popNotice"));
         delete window;
     }
 

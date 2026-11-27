@@ -621,6 +621,12 @@ private slots:
         QDir().mkpath(out);
         App app(load(lookApp), {}, Look{themeName, 12});
         Rig rig(app);
+        // The pointer leaves the window first, so no tooltip ("All apps (Ctrl+Shift+A)" over Run again) is in the picture (#696).
+        const auto shot = [&app](const QString &path) {
+            QTest::mouseMove(app.window, QPoint(-20, -20));
+            QTest::qWait(100);
+            test_support::grab(app.window).save(path);
+        };
         app.workflows.setTemplateRoots({{(fugueSourceDir() + QStringLiteral("/tests/apps/templates")), false}});
         QVERIFY(app.open());
         for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
@@ -680,48 +686,59 @@ private slots:
         for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
             app.window->resize(size);
             QTest::qWait(400);
-            test_support::grab(app.window).save(QString("%1/app-running-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+            shot(QString("%1/app-running-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
         }
         finish("r3", made("third.png", 1392, 752, 120));
         QTRY_COMPARE(find(app.window, "appTakes")->property("count").toInt(), 3);
         for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
             app.window->resize(size);
             QTest::qWait(400);
-            test_support::grab(app.window).save(QString("%1/app-result-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+            shot(QString("%1/app-result-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
         }
         // What the app still needs (#469): the quiet panel above the inputs.
         rig.view.needs()->setPlan(needsPlan());
         for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
             app.window->resize(size);
             QTest::qWait(400);
-            test_support::grab(app.window).save(QString("%1/app-needs-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+            shot(QString("%1/app-needs-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
         }
         rig.view.needs()->setPlan(ReadinessPlan());
+        // The inputs hidden: the slim strip with the way back and Run (appStripRun), on KitRaise.under.
+        for (const QSize size : {QSize(1888, 971), QSize(900, 700)}) {
+            app.window->resize(size);
+            QTest::qWait(400);
+            tap(app.window, find(app.window, "appHideInputs"));
+            QTRY_VERIFY(find(app.window, "appStripRun"));
+            QTest::qWait(400);
+            shot(QString("%1/app-strip-%2x%3.png").arg(out).arg(size.width()).arg(size.height()));
+            tap(app.window, find(app.window, "appShowInputs"));
+            QTRY_VERIFY(find(app.window, "appForm"));
+        }
         // Zoomed into the picture, the stage's own controls shown.
         QQuickItem *viewer = find(app.window, "appResultViewer");
         QVERIFY(viewer);
         QMetaObject::invokeMethod(viewer, "zoomAt", Q_ARG(QVariant, viewer->width() / 2), Q_ARG(QVariant, viewer->height() / 2), Q_ARG(QVariant, 3.0));
         QTest::qWait(300);
-        test_support::grab(app.window).save(QString("%1/app-zoomed.png").arg(out));
+        shot(QString("%1/app-zoomed.png").arg(out));
         // The Apps dialog from the rail.
         app.window->resize(1888, 971);
         tap(app.window, find(app.window, "appRailApps"));
         QTRY_VERIFY(find(app.window, "appsDialog") || app.window->findChild<QObject *>("appsDialog"));
         QTest::qWait(500);
-        test_support::grab(app.window).save(QString("%1/app-apps-dialog.png").arg(out));
+        shot(QString("%1/app-apps-dialog.png").arg(out));
         // Right to left: the rows mirror (rail and stage to the end side, the panel to the start); the picture does not.
         QTest::keyClick(app.window, Qt::Key_Escape);
         QGuiApplication::setLayoutDirection(Qt::RightToLeft);
         app.window->resize(1200, 760);
         QTest::qWait(500);
-        test_support::grab(app.window).save(QString("%1/app-rtl.png").arg(out));
+        shot(QString("%1/app-rtl.png").arg(out));
         QGuiApplication::setLayoutDirection(Qt::LeftToRight);
         // The graph, with Fugue's mark at the window bar's start.
         app.window->resize(1888, 971);
         QVERIFY(app.commands.run("view.toggle-app"));
         QTRY_VERIFY(find(app.window, "canvas"));
         QTest::qWait(400);
-        test_support::grab(app.window).save(QString("%1/app-graph-corner.png").arg(out));
+        shot(QString("%1/app-graph-corner.png").arg(out));
         qDeleteAll(app.engine.rootObjects());
         }
     }

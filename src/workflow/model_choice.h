@@ -155,6 +155,8 @@ public:
 
     QVariantMap reading() const { return m_reading; } // hash -> percent
     bool hashing() const { return !m_hashing.isEmpty(); }
+    // The banner shows this module's "Reading your file… N%" line now.
+    bool readingLine() const { return !m_readLine.isEmpty() && m_host.saying() == m_readLine; }
     bool hasRecord() const { return !m_record.isEmpty(); }
     bool undoable() const; // the banner's Undo: its tab is shown, unedited, and the banner still says something
     void undo();

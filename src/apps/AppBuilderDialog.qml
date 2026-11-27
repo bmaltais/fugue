@@ -472,8 +472,11 @@ Item {
                     }
                 }
 
-                // The App view's form, as this list makes it.
+                // The App view's form, as this list makes it. Shown only where the list keeps room for a row's controls beside it: in
+                // a narrow window (560 px) the list takes the whole width, or a row's remove button and "Also set…" were cut (#696).
                 ColumnLayout {
+                    objectName: "builderPreviewColumn"
+                    visible: dialog.width >= 150 * root.look.unit
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: 2

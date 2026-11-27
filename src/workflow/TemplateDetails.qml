@@ -30,8 +30,8 @@ Rectangle {
 
     readonly property var source: template.source ? template.source : {}
     readonly property bool withFiles: template.opensWithFiles === true // ready only through the person's files: Open uses them
-    // How many files of the person's Open uses (two models one file stands in for count once).
-    readonly property int yourFiles: new Set((template.onDisk ?? []).map(d => d.file)).size
+    // How many files of the person's Open uses (two models one file stands in for count once), by path as the banner counts them.
+    readonly property int yourFiles: new Set((template.onDisk ?? []).map(d => d.path || d.file)).size
     // Enter takes the primary (docs/ui-ergonomics.md D5); a focused button takes its own Enter first.
     Keys.onReturnPressed: sheet.open()
     Keys.onEnterPressed: sheet.open()

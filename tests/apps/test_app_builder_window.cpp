@@ -224,6 +224,32 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // At 560 px the inputs list takes the width (the preview waits for a wider window), so a row's remove button and "Also set…" are
+    // whole inside the dialog (#696).
+    void aNarrowWindowKeepsEveryRowControlInside() {
+        App app(load(workflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        app.window->resize(560, 760);
+        QVERIFY(app.commands.trigger("app.make"));
+        QTRY_VERIFY(dialogOpen(app));
+        QVERIFY(app.model.appBuilder()->exposeInput("sample", "seed"));
+        QVERIFY(app.model.appBuilder()->exposeInput("sample", "steps"));
+        QTRY_VERIFY(find(app.window, "builderRemove-0"));
+        QVERIFY(!find(app.window, "builderPreview"));
+        const QObject *dialog = app.window->findChild<QObject *>("appBuilderDialog");
+        QVERIFY(dialog);
+        const qreal edge = dialog->property("x").toReal() + dialog->property("width").toReal();
+        QQuickItem *remove = find(app.window, "builderRemove-0");
+        QVERIFY(remove->mapToScene(QPointF(remove->width(), 0)).x() <= edge);
+        QTRY_VERIFY(find(app.window, "builderAlso-0"));
+        QQuickItem *also = find(app.window, "builderAlso-0");
+        QVERIFY(also->mapToScene(QPointF(also->width(), 0)).x() <= edge);
+        QQuickItem *label = find(app.window, "builderLabel-0");
+        QVERIFY(label->width() >= 20 * 4);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     void plainApplyStaysInTheGraph() {
         App app(load(workflow));
         Rig rig(app);

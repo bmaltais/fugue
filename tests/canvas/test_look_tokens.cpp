@@ -271,6 +271,11 @@ private slots:
         QVERIFY(look::contrast(colors.value("foreground"), t.menuRow) >= 4.5);
         QVERIFY(look::contrast(colors.value("foreground"), t.dangerFill) >= 4.5);
         QVERIFY(look::contrast(colors.value("foreground"), t.dangerHover) >= 4.5);
+        // The danger chips derive from the dialog answer's red, so they are red in every theme (hackerman's raw red is green).
+        for (const QColor &chip : {t.dangerFill, t.dangerHover}) {
+            const look::Oklch o = look::oklch(chip);
+            QVERIFY2(o.C < .02 || o.h <= 50 || o.h >= 330, qPrintable(QStringLiteral("%1 hue %2").arg(chip.name()).arg(o.h)));
+        }
         // A dialog's destructive answer: the solid red and its hover with the chosen ink (white or the theme's dark colour) at 4.5:1 or
         // more, in light and dark themes.
         QVERIFY(t.dangerInk == QColor(Qt::white) || t.dangerInk == (read.light ? colors.value("foreground") : colors.value("background")));
@@ -315,6 +320,8 @@ private slots:
             QVERIFY(look::contrast(t.label, over(t.bypassBody, layer)) >= 4.5);
             QVERIFY(look::contrast(text, over(t.bypassBody, layer)) >= 4.5);
         }
+        // The tier badge of a notice's swap line (KitBadge: label colour on kitChip, a solid fill that sits on any tint) reads too (#681).
+        QVERIFY2(look::contrast(t.label, t.kitChip) >= 4.5, qPrintable(QString::number(look::contrast(t.label, t.kitChip))));
         for (const char *role : {"blue", "green", "magenta", "orange"}) {
             const look::RoleTokens r = look::roleTokens(t, colors.value(role), text, read.light);
             QVERIFY2(look::contrast(text, r.tint) >= 4.5, qPrintable(role));

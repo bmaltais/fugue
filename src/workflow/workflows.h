@@ -87,6 +87,8 @@ class Workflows : public QObject {
     Q_PROPERTY(QVariantList noticeLines READ noticeLines NOTIFY noticeChanged)
     // A file chosen in place of a missing model is being read (#605): its button waits, and a second click does nothing.
     Q_PROPERTY(bool hashingUses READ hashingUses NOTIFY hashingUsesChanged)
+    // The banner's line is "Reading your file… 42%" (not a read that only Get ready asked for, which has no line): the banner says it once.
+    Q_PROPERTY(bool readingNotice READ readingNotice NOTIFY noticeChanged)
     // The files being read, per row (UI design 2026-11-26): the wanted model's hash -> percent read (-1 while not known). A row shows its
     // own busy state from it; the others stay pressable.
     Q_PROPERTY(QVariantMap reading READ reading NOTIFY readingChanged)
@@ -358,6 +360,7 @@ public:
     // read first. False when there is no such template or nothing to use.
     Q_INVOKABLE bool openTemplateWithWhatYouHave(const QString &id);
     bool hashingUses() const { return m_choice->hashing(); }
+    bool readingNotice() const { return m_choice->readingLine(); }
     // What the App view keeps changed: the banner, the Get ready list and the Needs panel look again.
     void usesChanged();
     // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
