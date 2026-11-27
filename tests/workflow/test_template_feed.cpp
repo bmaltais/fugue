@@ -416,6 +416,7 @@ private slots:
         enabled = false;
         driver.settingsChanged();
         QCOMPARE(roots.size(), 3);
+        QTRY_VERIFY(!feed.busy()); // a check already under way finishes its requests; no new one starts
         const int asked = int(m_server.requests().size());
         QTest::qWait(150);
         QCOMPARE(int(m_server.requests().size()), asked);

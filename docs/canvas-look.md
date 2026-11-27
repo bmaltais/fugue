@@ -598,7 +598,7 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
 - **Selection toolbar** (#74, as ComfyUI's selection toolbox): over the selection's box, centred
   (under it when there is no room above), 9u tall, `popup` fill, `hairline` edge, corner
   `min(R, 10)`, no shadow (it would fall on the selection). Buttons 7u square, 14 px glyphs in
-  `label`, `menu-row` and `text` under the pointer, 40% when off: Run to here (one node), Bypass,
+  `label`, `menu-row` and `text` under the pointer, 40% when off: Run to here (`arrow-right-to-line`) and Run from here (`arrow-right-from-line`) side by side (one node), Bypass,
   Color (the color menu), Frame, Enter (a group), Open Image (a node with an image), Delete, and
   "…" (the node's menu). Hidden during a gesture, a title edit, the drop list or the magnifier.
 - **Magnifier** (#74, off unless Settings > General turns it on, #123): far out, the node a short hover rests on at zoom 1 over itself, on a
@@ -687,7 +687,7 @@ A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoad
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
 chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the
-selection toolbar (#74) trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for its Templates action (#192) layout-template and its Settings action settings, and for where a model lives (#164) monitor and server, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye, and for the area header (#217, #228) columns-2 and rows-2 (split) and waypoints (the Graph view, apart from the Workflows tab's workflow), and for the Canvas view's tool strip (#230) hand, zoom-in and circle-dashed (Quick Mask); the full list with code points in
+selection toolbar (#74) arrow-right-to-line, arrow-right-from-line (#701), trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for its Templates action (#192) layout-template and its Settings action settings, and for where a model lives (#164) monitor and server, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye, and for the area header (#217, #228) columns-2 and rows-2 (split) and waypoints (the Graph view, apart from the Workflows tab's workflow), and for the Canvas view's tool strip (#230) hand, zoom-in and circle-dashed (Quick Mask); the full list with code points in
 `share/fonts/lucide-fugue.txt`. About 60 glyphs, about 22 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 

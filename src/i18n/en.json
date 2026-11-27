@@ -862,6 +862,8 @@
   "Run queue": "Run queue",
   "Run the setup of %1 %2?": "Run the setup of %1 %2?",
   "Run the workflow": "Run the workflow",
+  "Run from here": "Run from here",
+  "Run from the selected node": "Run from the selected node",
   "Run to here": "Run to here",
   "Run to the selected node": "Run to the selected node",
   "Run, ahead of the queue": "Run, ahead of the queue",

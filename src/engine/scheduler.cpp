@@ -351,7 +351,7 @@ public:
         }
         // Sinks and the run's target are the roots; under validate the condition is unknown, so everything is.
         for (NodeRun &n : m_nodes)
-            if (m_dry || n.readers == 0 || n.node->sink)
+            if (m_dry || n.readers == 0 || n.node->sink || (!m_graph.from.isEmpty() && n.path == m_graph.from))
                 demand(n);
 
         if (!m_dry) {

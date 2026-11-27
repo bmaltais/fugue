@@ -309,9 +309,10 @@ void Compiler::checkProviders() {
 
 // "Run to here" needs a node that runs.
 void Compiler::checkTarget() {
-    if (m_options.target.isEmpty())
+    const QString &wanted = !m_options.target.isEmpty() ? m_options.target : m_options.from;
+    if (wanted.isEmpty())
         return;
-    const auto it = m_flat.constFind(m_options.target);
+    const auto it = m_flat.constFind(wanted);
     if (it != m_flat.constEnd() && !it->hidden && it->mode != NodeMode::Bypass)
         return;
     QStringList paths;
@@ -320,10 +321,10 @@ void Compiler::checkTarget() {
             paths << flat.path;
     Error error = makeError(QStringLiteral("usage"),
                             it == m_flat.constEnd()
-                                ? QStringLiteral("There is no node %1 to run to.").arg(m_options.target)
-                                : QStringLiteral("Node %1 is bypassed, so a run cannot stop at it.").arg(m_options.target));
+                                ? QStringLiteral("There is no node %1 to run to.").arg(wanted)
+                                : QStringLiteral("Node %1 is bypassed, so a run cannot stop at it.").arg(wanted));
     error.valid = QJsonArray::fromStringList(paths);
-    addHint(error, m_options.target, paths);
+    addHint(error, wanted, paths);
     fail(error);
 }
 
@@ -1088,13 +1089,16 @@ void Compiler::checkCarried(const Flat &flat, const QString &input, const InputV
 // Bypass, mute, sinks inside groups, and what no sink needs (4.8).
 bool Compiler::quiet(const Flat &flat) const {
     const bool entered = !m_options.entered.isEmpty() && flat.path.section(QLatin1Char('/'), 0, -2) == m_options.entered;
-    return flat.inGroup && flat.spec().sink && flat.path != m_options.target && !entered;
+    return flat.inGroup && flat.spec().sink && flat.path != m_options.target && flat.path != m_options.from && !entered;
 }
 
 CompiledGraph Compiler::shape() {
     CompiledGraph graph;
     graph.source = m_doc.sourceHash();
     graph.target = m_options.target;
+    if (m_options.target.isEmpty())
+        graph.from = m_options.from;
+    const bool partial = !graph.target.isEmpty() || !graph.from.isEmpty();
 
     // Bypass: rewire the links, then leave the bypassed nodes out.
     // Sinks inside a group never run (5.5), unless the run stops at one, or the user has
@@ -1187,8 +1191,24 @@ CompiledGraph Compiler::shape() {
         if (live.contains(m_options.target))
             roots << m_options.target;
     } else {
+        QSet<QString> below; // "run from here": from and everything after it
+        if (!m_options.from.isEmpty() && live.contains(m_options.from)) {
+            QHash<QString, QStringList> readers;
+            for (const Flat &flat : live)
+                for (const QString &dep : sources(flat.inputs))
+                    readers[dep] << flat.path;
+            QStringList open{m_options.from};
+            while (!open.isEmpty()) {
+                const QString path = open.takeLast();
+                if (below.contains(path))
+                    continue;
+                below.insert(path);
+                open << readers.value(path);
+            }
+            roots << m_options.from;
+        }
         for (const Flat &flat : live)
-            if (flat.spec().sink && !quiet(flat))
+            if (flat.spec().sink && !quiet(flat) && (m_options.from.isEmpty() || below.contains(flat.path)))
                 roots << flat.path;
     }
     QSet<QString> needed;
@@ -1204,14 +1224,14 @@ CompiledGraph Compiler::shape() {
             if (quiet(flat))
                 continue; // a view sink nothing needed reads: nothing was lost, so nothing to warn of
             graph.skipped[flat.path] = QStringLiteral("not_part_of_output");
-            if (m_options.target.isEmpty()) {
+            if (!partial) {
                 CompiledNode unused;
                 unused.type = flat.spec().id;
                 unused.version = flat.spec().version;
                 unused.inputs = flat.inputs;
                 graph.unused[flat.path] = unused;
             }
-            if (m_options.target.isEmpty())
+            if (!partial)
                 warn(nodeError(QStringLiteral("not_part_of_output"), flat.path,
                                QStringLiteral("Node %1 is not part of any output: no sink depends on it.")
                                    .arg(flat.path)));
@@ -1390,6 +1410,8 @@ QJsonObject CompiledGraph::toJson() const {
     QJsonObject result{{"fugue-compiled", format}, {"source", source}, {"nodes", jsonNodes}, {"skipped", jsonSkipped}};
     if (!target.isEmpty())
         result["target"] = target;
+    if (!from.isEmpty())
+        result["from"] = from;
     return result;
 }
 
@@ -1422,6 +1444,9 @@ std::optional<CompiledGraph> readCompiled(const QJsonObject &json, Errors &error
     if (!json.value("target").isUndefined() && !isPathId(json.value("target").toString()))
         fail(QStringLiteral("\"target\" must be a path id, not %1.").arg(shown(json.value("target"))));
     graph.target = json.value("target").toString();
+    if (!json.value("from").isUndefined() && !isPathId(json.value("from").toString()))
+        fail(QStringLiteral("\"from\" must be a path id, not %1.").arg(shown(json.value("from"))));
+    graph.from = json.value("from").toString();
 
     if (!json.value("nodes").isObject())
         fail(QStringLiteral("\"nodes\" must be an object keyed by path id."));

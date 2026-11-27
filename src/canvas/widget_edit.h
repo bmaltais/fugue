@@ -170,6 +170,12 @@ public:
     Q_INVOKABLE void setSeedMode(const QString &node, const QString &input, const QString &mode);
     // Every incrementing seed gains one (back to its minimum past the maximum), one undo step.
     Q_INVOKABLE void advanceSeeds();
+    // "Run from here" (spec 3.4): the whole workflow as a run takes it, with every random or increment seed of the nodes
+    // strictly upstream of `node` (in the level shown) set to the seed its shown result used, when there is one. The canvas's
+    // own document is not touched. `held` gets "node/input" for each seed that was held, for advanceSeeds not to advance.
+    fugue::Document holdUpstream(const QString &node, QSet<QString> *held) const;
+    // advanceSeeds() leaving the increment seeds named in `held` (holdUpstream's keys) as they are.
+    void advanceSeedsExcept(const QSet<QString> &held);
 
     // --- the model picker ---
     // One model (engine/model_offers.h): a provider's, or a file on disk.

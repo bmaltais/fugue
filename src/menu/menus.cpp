@@ -61,7 +61,7 @@ QVariantMap pictureMenu() {
 
 // The Run menu, and the menu behind the run toolbar's split button (#60): the same rows.
 QVariantList runItems() {
-    return {command("run.start"), command("run.start-first"), command("run.to-here"), separator(), command("run.cancel")};
+    return {command("run.start"), command("run.start-first"), command("run.to-here"), command("run.from-here"), separator(), command("run.cancel")};
 }
 
 // The Bars and panels submenu (#129), as Photoshop's Window menu: every bar and panel with a check
@@ -225,7 +225,7 @@ QVariantList node() {
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),
             ifOn("group.ungroup"), ifOn("group.enter"), ifOn("group.interface"), ifOn("group.make-unique"),
             ifOn("group.save-to-library"), ifOn("group.update"), ifOn("node.move-version"), separator(),
-            command("run.to-here"), separator(),
+            command("run.to-here"), command("run.from-here"), separator(),
             command("edit.delete")};
 }
 

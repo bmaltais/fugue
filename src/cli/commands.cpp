@@ -297,6 +297,8 @@ Reply runsResult(const Command &command, Context &context) {
                 wanted.insert(sink);
             if (wanted.isEmpty() && !graph->target.isEmpty())
                 wanted.insert(graph->target);
+            if (wanted.isEmpty() && !graph->from.isEmpty())
+                wanted.insert(graph->from);
         }
     }
     QJsonObject outputs;

@@ -1595,3 +1595,10 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Keys: the chip is a Tab stop; Enter, Space or Down opens the list, Up and Down move, Enter picks, Escape closes and the focus returns to the chip (or **Change model folder…**). The sheet's own Enter and Escape are unchanged while no list is open.
 - Rules met: Floor (7u chip), Learned place (every control where it was, same order), Keyboard (above).
 - Not changed on purpose: the tab close and new-tab `ToolButton`s (de-styled, no focus by design: the tab itself is the Tab stop, Ctrl+W and Ctrl+T are the keys).
+
+### 2026-11-27 Run from here: two run buttons on the selection toolbar (#701)
+
+- Control: `src/canvas/FugueCanvas.qml` selection toolbar, `toolbar-run.to-here` and `toolbar-run.from-here` (7u, the first two buttons, 1u apart as the rest of the chunk); `run.from-here` in the Run menu and the node context menu, after Run to here; no key (Shift+Enter stays Run to here).
+- Old: one play button, Run to here.
+- New: two buttons so the direction is one click: `arrow-right-to-line` (to here) and `arrow-right-from-line` (from here), a matched arrow pair (Lucide has no play-with-bar glyph), each with its command label as tooltip and accessible name. Run from here also holds the seeds upstream of the node (spec 3.4).
+- Rules met: Floor (28px), Gaps (within the run chunk, 1u as before), Learned place (Run to here keeps the first place and its key), Primary (neither is accent: the toolbar's run buttons are plain).

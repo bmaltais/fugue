@@ -18,7 +18,7 @@
 // started in one tab never paints another.
 //
 // Commands: run.start (Ctrl+Enter), run.start-first (Ctrl+Shift+Enter, ahead of the queue),
-// run.to-here (Shift+Enter: up to the one selected node, adding no preview), run.cancel
+// run.to-here (Shift+Enter: up to the one selected node, adding no preview), run.from-here (that node and the sinks after it), run.cancel
 // (Ctrl+Alt+Enter, and Escape while a run is going: the `run` context is on while one of the
 // window's runs is waiting or active). Cancel takes the active run, else the last waiting.
 // Each start takes the document as it is and then advances the seeds set to increment
@@ -105,6 +105,8 @@ public:
 
     Q_INVOKABLE QString start(bool first = false);
     Q_INVOKABLE QString runToSelected();
+    // Run from here (spec 3.4): the selected node and the sinks after it, the nodes before it held as their shown results.
+    Q_INVOKABLE QString runFromSelected();
     Q_INVOKABLE void cancel();
     // Shows the results of a run that ended on the nodes of the shown workflow, as they were when it
     // ended (the Queue area's history): `workflow` is the file the run started from. False,
@@ -196,8 +198,8 @@ private:
     QString rowFor(const QString &key) const;
     QString keyFor(const QString &node) const;
     static qreal progressOf(const NodeView &view);
-    QString startRun(const QString &target, bool first);
-    QString startOne(const QString &tab, const QString &target, bool first);
+    QString startRun(const QString &target, bool first, const QString &from = {});
+    QString startOne(const QString &tab, const QString &target, bool first, const QString &from = {});
     QString currentTab() const;
     void onEvent(const QString &run, const QJsonObject &event);
     void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors);

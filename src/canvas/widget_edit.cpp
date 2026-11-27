@@ -611,10 +611,55 @@ std::optional<double> WidgetEdit::lastSeed(const QString &node, const QString &i
     return ok ? std::optional<double>(seed) : std::nullopt;
 }
 
-void WidgetEdit::advanceSeeds() {
+Document WidgetEdit::holdUpstream(const QString &node, QSet<QString> *held) const {
+    Document level = m_canvas->scopeDocument();
+    // Every node a path of links leads from to `node`, not `node` itself.
+    QSet<QString> upstream;
+    QStringList open{node};
+    while (!open.isEmpty()) {
+        const Node &current = level.graph.nodes.value(open.takeLast());
+        const auto add = [&](const InputValue &value) {
+            if (value.kind() == InputValue::Kind::Link && level.graph.nodes.contains(value.from().node)
+                && !upstream.contains(value.from().node)) {
+                upstream.insert(value.from().node);
+                open << value.from().node;
+            }
+        };
+        for (const InputValue &value : current.inputs) {
+            add(value);
+            if (value.kind() == InputValue::Kind::List)
+                for (const InputValue &item : value.items())
+                    add(item);
+        }
+    }
+    upstream.remove(node); // a loop cannot compile, but the end point's own seeds are never held
+    for (const QString &id : upstream) {
+        Node &held_node = level.graph.nodes[id];
+        QStringList inputs = incrementing(level, id);
+        for (auto it = held_node.inputs.cbegin(); it != held_node.inputs.cend(); ++it)
+            if (it.value().kind() == InputValue::Kind::Auto && !inputs.contains(it.key()))
+                inputs << it.key();
+        for (const QString &input : inputs) {
+            const QString mode = seedMode(id, input);
+            const std::optional<double> seed = lastSeed(id, input);
+            if ((mode != QLatin1String("random") && mode != QLatin1String("increment")) || !seed)
+                continue;
+            held_node.inputs.insert(input, InputValue::literal(*seed));
+            if (held && mode == QLatin1String("increment"))
+                held->insert(id + QLatin1Char('/') + input);
+        }
+    }
+    return m_canvas->merged(level);
+}
+
+void WidgetEdit::advanceSeeds() { advanceSeedsExcept({}); }
+
+void WidgetEdit::advanceSeedsExcept(const QSet<QString> &held) {
     Document document = m_canvas->scopeDocument();
     for (auto it = document.graph.nodes.begin(); it != document.graph.nodes.end(); ++it) {
         for (const QString &input : incrementing(document, it.key())) {
+            if (held.contains(it.key() + QLatin1Char('/') + input))
+                continue;
             const Target t = target(it.key(), input);
             const InputValue value = it.value().inputs.value(input);
             if (t.widget != QLatin1String("seed")
