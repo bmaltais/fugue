@@ -388,6 +388,7 @@ void CanvasModel::applyMetrics() {
     m_headerHeight = qRound(7 * u);
     m_rowHeight = qRound((m_compact ? 6.5 : 6) * u);
     m_tallRowHeight = qRound(16 * u);
+    m_emptyTallRowHeight = qRound(11 * u);
     m_padTop = qRound((m_compact ? 0.5 : 1) * u);
     m_padBottom = qRound((m_compact ? 1.5 : 2) * u);
     m_defaultWidth = qRound((m_compact ? 56 : 60) * u);
@@ -740,7 +741,13 @@ void CanvasModel::layOut(NodeRow &row) const {
             qreal height = m_rowHeight;
             if (tall) {
                 height = m_tallRowHeight;
-                if (value.kind() == InputValue::Kind::Literal && value.literal().isString())
+                // Empty: the caption and one line, so Text Template's four empty wells are not four tall boxes (#715).
+                const bool empty = value.isEmpty() ? !(port.defaultValue.isString() && !port.defaultValue.toString().isEmpty())
+                                   : value.kind() == InputValue::Kind::Literal && value.literal().isString()
+                                         && value.literal().toString().isEmpty();
+                if (empty)
+                    height = m_emptyTallRowHeight;
+                else if (value.kind() == InputValue::Kind::Literal && value.literal().isString())
                     height = std::clamp(node_size::multilineHeight(
                                             node_size::wrappedLines(value.literal().toString(), textWidth, m_textSize,
                                                                     int(maxTall / 16) + 1),

@@ -1136,7 +1136,7 @@ Widgets come from a fixed set. No pack ships UI code in v0.1, so every node look
 | `widget` | For | Notes |
 | --- | --- | --- |
 | `spin` (default for number), `slider` | number | |
-| `line` (default for text), `multiline` | text | A multiline well shows as many lines as its row was sized for (the row's lines plus the caption, #715). A click in a field puts the caret where it landed; Tab into one puts it at the end (#715). |
+| `line` (default for text), `multiline` | text | A multiline well shows as many lines as its row was sized for (the row's lines plus the caption, #715), every line of the value is drawn, and while it is cut the caption line says `+N lines`; empty, the well rests at the caption and one line (11u). A click in a field puts the caret where it landed; Tab into one puts it at the end (#715). |
 | `toggle` | boolean | |
 | `choice` | text with `choices` | Default when `choices` is present. |
 | `file`, `folder` | text | Opens the portal picker (`FilePicker`; Qt's own dialog when there is no portal). The value is a path. |

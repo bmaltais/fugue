@@ -73,6 +73,31 @@ Item {
     function portTip(port) {
         return "<b>" + plainHtml(port.label) + "</b>" + (port.description ? "<br>" + plainHtml(port.description) : "")
     }
+    // A value cut on the card, whole in its row's tooltip but for 12 lines (#715): a 2,000-character prompt would fill the
+    // window. The tooltip wraps at about 45 characters (ToolTipStyle), so a paragraph counts one line per 45; what is cut
+    // ends in "…" and "+N lines". Line breaks stay (rich text would fold them into spaces).
+    function cutTip(text, maxLines) {
+        const perLine = 45
+        const paragraphs = String(text).split("\n")
+        let used = 0, shown = []
+        for (let i = 0; i < paragraphs.length; ++i) {
+            const need = Math.max(1, Math.ceil(paragraphs[i].length / perLine))
+            if (used + need > maxLines) {
+                const room = maxLines - used
+                let rest = need - room
+                for (let j = i + 1; j < paragraphs.length; ++j)
+                    rest += Math.max(1, Math.ceil(paragraphs[j].length / perLine))
+                if (room > 0)
+                    shown.push(paragraphs[i].slice(0, room * perLine).replace(/\s+$/, "") + "…")
+                else
+                    shown[shown.length - 1] += "…"
+                return shown.map(plainHtml).join("<br>") + "<br><i>" + plainHtml(qsTr("+%n lines", "", rest)) + "</i>"
+            }
+            shown.push(paragraphs[i])
+            used += need
+        }
+        return shown.map(plainHtml).join("<br>")
+    }
     property string hoverKey: "" // the port under the pointer: "o:<name>" or "i:<name>"
     property string activeCorner: "" // the resize corner under the pointer or being dragged
 
@@ -507,7 +532,7 @@ Item {
                     ToolTip.visible: (overMe || under) && !face.dragging && face.full && shown
                                      && ((modelData.description || "") !== "" || valueCut)
                     ToolTip.delay: node.look.tooltipDelay
-                    ToolTip.text: node.portTip(modelData) + (valueCut ? "<br>" + node.plainHtml((widgetLoader.item as InputWidget).valueText) : "")
+                    ToolTip.text: node.portTip(modelData) + (valueCut ? "<br>" + node.cutTip((widgetLoader.item as InputWidget).valueText, 12) : "")
 
                     Loader {
                         id: widgetLoader

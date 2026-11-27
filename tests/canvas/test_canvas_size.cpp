@@ -153,6 +153,17 @@ private slots:
         QCOMPARE(text.value("rowHeight").toDouble(), node_size::multilineHeight(4, 12));
     }
 
+    // #715: an empty multiline input rests at the caption and one line (11u), not the 16u a filled one starts at; it
+    // grows as soon as it has text, by the rule it always had.
+    void anEmptyMultilineRestsAtElevenUnits() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(placed, "")));
+        const qreal u = canvas.textSize() / 3.0;
+        QCOMPARE(port(node(canvas, "prompt"), "inputs", "text").value("rowHeight").toDouble(), std::round(11 * u));
+        canvas.setDocument(document(workflow(placed, "a red fox")));
+        QCOMPARE(port(node(canvas, "prompt"), "inputs", "text").value("rowHeight").toDouble(), std::round(16 * u));
+    }
+
     // A long prompt is measured only as far as the row's 40u cap, so typing into it does
     // not lay the whole text out on every key (CPU time, tests/cpu_time.h).
     void aLongPromptIsMeasuredOnlyToTheCap() {

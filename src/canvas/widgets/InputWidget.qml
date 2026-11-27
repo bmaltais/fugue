@@ -97,6 +97,11 @@ Rectangle {
             return qsTr("Reading model… %1%").arg(Math.floor(hashing.progress * 100))
         if (kind === "model" && (port.value === undefined || port.value === ""))
             return port.grows === true ? "" : port.required ? qsTr("Choose a model") : emptyModelText
+        // A multiline well shows all its lines (the card sizes the row for them; the port's `value` is only the first, for a one-line face).
+        if (tall && typeof literal === "string")
+            return literal
+        if (tall && literal === undefined && typeof edits.spec(nodeId, name)["default"] === "string")
+            return edits.spec(nodeId, name)["default"]
         return port.value !== undefined ? port.value : ""
     }
     // The glyph after the value (a Lucide name): what a click at the right end opens.
@@ -180,6 +185,17 @@ Rectangle {
         font.italic: root.linked
         font.features: { "tnum": 1 }
     }
+    // "+N lines" at the right of the caption line while a multiline well cuts its text (#715): MoreLines.qml, made the first time
+    // the well is cut (a resting card, and a well that fits, cost nothing more).
+    property bool moreMade: false
+    readonly property bool cutShort: tall && valueLabel.truncated && !editingText
+    onCutShortChanged: makeMore()
+    function makeMore() {
+        if (cutShort && !moreMade) {
+            moreMade = true
+            make("MoreLines.qml", { label: valueLabel })
+        }
+    }
     Glyph {
         id: glyphMark
         visible: root.glyph !== "" && !root.editingText
@@ -236,6 +252,7 @@ Rectangle {
             make("ToggleSwitch.qml")
         else if (kind === "color")
             make("ColorSwatch.qml")
+        makeMore()
     }
     property bool chevronsMade: false
 

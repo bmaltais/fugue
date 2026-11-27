@@ -303,9 +303,9 @@ private slots:
         QTRY_VERIFY(!app.typing());
         QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox\nin snow"));
         QCOMPARE(app.steps(), 1);
-        // The face shows the first line.
+        // The face shows every line (#715: it showed only the first, though the row was sized for them all).
         QTRY_COMPARE(canvas_test::item(app.widget("all", "notes"), "widgetValue")->property("text").toString(),
-                     QString("a fox"));
+                     QString("a fox\nin snow"));
         // Escape keeps the text too: a prompt is never lost to a key.
         app.click(app.in("all", "notes"));
         QTRY_VERIFY(app.typing());
@@ -378,6 +378,60 @@ private slots:
         app.type("35mm photo");
         QTest::qWait(150);
         QVERIFY(test_support::grab(app.window).save(out + "/text-editor-open.png"));
+    }
+
+    // #715: "+N lines" on the caption line exactly while the well cuts its text, and it counts what is hidden.
+    void aCutMultilineWellSaysHowManyLinesItHides() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        QQuickItem *well = app.widget("all", "notes");
+        QVERIFY(well);
+        QVERIFY(!canvas_test::item(well, "widgetMoreLines")); // an empty well shows whole: nothing is made
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.type("l1");
+        for (int line = 2; line <= 12; ++line) {
+            app.key(Qt::Key_Return);
+            app.type(QString("l%1").arg(line));
+        }
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.typing());
+        QQuickItem *label = canvas_test::item(app.widget("all", "notes"), "widgetValue"); // the row may be made again
+        QTRY_VERIFY(label->property("text").toString().endsWith("l12"));
+        QTRY_VERIFY(label->property("truncated").toBool());
+        const int shown = label->property("lineCount").toInt();
+        QTRY_VERIFY(canvas_test::item(app.widget("all", "notes"), "widgetMoreLines"));
+        QQuickItem *more = canvas_test::item(app.widget("all", "notes"), "widgetMoreLines");
+        QTRY_VERIFY(more->isVisible());
+        QCOMPARE(more->property("text").toString(), QString("+%1 lines").arg(12 - shown));
+        // Cut back to what shows: the words go.
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.key(Qt::Key_A, Qt::ControlModifier);
+        app.type("short");
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.typing());
+        QTRY_VERIFY(!more->isVisible());
+    }
+
+    // #715: the tooltip of a cut value shows at most 12 lines, then "…" and how many are left; line breaks stay.
+    void aCutValuesTooltipIsCappedAtTwelveLines() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        QQuickItem *node = app.widget("all", "notes");
+        while (node && node->metaObject()->indexOfMethod("cutTip(QVariant,QVariant)") < 0)
+            node = node->parentItem();
+        QVERIFY(node);
+        const auto tip = [&](const QString &text) {
+            QVariant out;
+            QMetaObject::invokeMethod(node, "cutTip", Q_RETURN_ARG(QVariant, out), Q_ARG(QVariant, text), Q_ARG(QVariant, 12));
+            return out.toString();
+        };
+        QCOMPARE(tip("one\ntwo"), QString("one<br>two"));
+        const QString twenty = QStringList(QList<QString>(20, "line")).join('\n');
+        QCOMPARE(tip(twenty), QString("line<br>").repeated(11) + "line…<br><i>+8 lines</i>");
+        QVERIFY(tip(QString(2000, 'x')).endsWith("…<br><i>+33 lines</i>")); // 45 characters a line, 12 shown
+        QCOMPARE(tip("a<b"), QString("a&lt;b"));
     }
 
     void aToggleFlipsOnAClick() {
@@ -1056,6 +1110,38 @@ private slots:
             app.workflows.dismissNotice();
             QTest::qWait(300);
             QVERIFY(test_support::grab(app.window).save(QString("%1/apply-loras-%2.png").arg(out, each.tag)));
+        }
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715): a long prompt cut with its "+N lines", a short one whole, a Text Template with its empty wells at
+    // 11u, in both node styles, dark and light. Pictures only; nothing is asserted.
+    void textOnNodesLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        const char *graph = R"({"fugue": 1,
+          "graph": {"nodes": {
+            "long": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a lighthouse on a cliff at dusk, waves breaking on the rocks below, gulls circling, warm light in the lantern room, a storm gathering far out at sea, painted in the style of a nineteenth century seascape, soft brushwork, deep teal and amber, dramatic clouds\nsecond paragraph: negative: blurry, low quality, oversaturated, extra limbs\nthird paragraph: composition rule of thirds, lighthouse on the left, horizon low\nfourth: 35mm film grain\nfifth: no text, no watermark\nsixth: highly detailed\nseventh line\neighth line\nninth line\ntenth line"}},
+            "short": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a red fox\nin the snow"}},
+            "empty": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": ""}},
+            "tpl": {"type": "fugue/text-template", "version": "1.0.0", "inputs": {"a": {"from": "short.text"}}}}},
+          "layout": {"nodes": {"long": {"pos": [20, 20]}, "short": {"pos": [330, 20]}, "empty": {"pos": [330, 190]},
+                               "tpl": {"pos": [640, 20]}},
+                     "view": {"center": [500, 320], "zoom": 1}}})";
+        struct Shot {
+            const char *theme;
+            const char *style;
+            const char *tag;
+        };
+        for (const Shot &each : {Shot{"catppuccin", "compact", "compact-dark"}, Shot{"catppuccin-latte", "compact", "compact-light"},
+                                 Shot{"catppuccin", "flat", "flat-dark"}, Shot{"catppuccin-latte", "flat", "flat-light"}}) {
+            App app(load(graph), {}, canvas_test::Look{each.theme, 8, each.style});
+            QVERIFY(app.open());
+            app.window->resize(1000, 640);
+            app.workflows.dismissNotice();
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(app.window).save(QString("%1/text-on-nodes-%2.png").arg(out, each.tag)));
         }
     }
 
