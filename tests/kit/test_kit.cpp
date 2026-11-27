@@ -41,7 +41,7 @@ import "qrc:/kit"
 Window {
     id: window
     width: 420
-    height: 360
+    height: 460
     visible: true
     property real level: 5
     property bool on: false
@@ -50,8 +50,29 @@ Window {
     property int steps: 0
     property int frosts: 0
     property bool frostOn: false
+    property bool noticeShown: true
+    property int dismissals: 0
     Column {
         width: parent.width
+        // A notice in a panel that takes Tab, its returnFocus hidden: the focus falls back to the panel.
+        Rectangle {
+            objectName: "noticeHost"
+            width: parent.width
+            height: kitNotice.height
+            activeFocusOnTab: true
+            Item { id: gone; visible: false; activeFocusOnTab: true }
+            KitNotice {
+                id: kitNotice
+                objectName: "kitNotice"
+                width: parent.width
+                visible: window.noticeShown
+                tone: "attention"
+                title: "Opened with your file"
+                lines: [{ mine: "a.gguf", theirs: "b.gguf", minePath: "/m/a.gguf", tier: "" }]
+                returnFocus: gone
+                onDismissed: { window.noticeShown = false; window.dismissals++ }
+            }
+        }
         Rectangle {
             id: sky
             width: 200
@@ -200,6 +221,26 @@ private slots:
             QSKIP("FUGUE_TEST_ON_SCREEN asks for a real window");
         QCOMPARE(QGuiApplication::platformName(), QStringLiteral("offscreen"));
         QVERIFY(qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY"));
+    }
+
+    // KitNotice (docs/canvas-look.md 20.23): Escape on its × asks to dismiss it once, the focus goes to the nearest item above that takes
+    // Tab when returnFocus is hidden, and a line with no tier is spoken with no trailing comma.
+    void aNoticeTakesEscapeAndGivesTheFocusBack() {
+        Shell shell(dir.filePath("notice"), "tokyo-night");
+        QQuickWindow *window = show(shell, windowQml, QUrl("qrc:/test_kit.qml"));
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *notice = window->findChild<QQuickItem *>("kitNotice");
+        QVERIFY(notice);
+        QCOMPARE(notice->property("spoken").toString(), QString("Opened with your file\na.gguf in place of b.gguf"));
+        QQuickItem *close = nullptr;
+        QTRY_VERIFY((close = window->findChild<QQuickItem *>("kitNoticeDismiss")));
+        close->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(close->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_COMPARE(window->property("dismissals").toInt(), 1);
+        QVERIFY(!notice->isVisible());
+        QTRY_COMPARE(window->activeFocusItem() ? window->activeFocusItem()->objectName() : QString(), QString("noticeHost"));
+        delete window;
     }
 
     void kitControlsKeepTheirContract() {

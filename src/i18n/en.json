@@ -2216,7 +2216,6 @@
   "Use my file: %1 (%2). Click the warning to keep this card up.": "Use my file: %1 (%2). Click the warning to keep this card up.",
   "Back to %1, which needs a download (%2)": "Back to %1, which needs a download (%2)",
   "Back to %1, which needs a download": "Back to %1, which needs a download",
-  "Download %1…": "Download %1…",
   "This app needs %n models, and you have them on disk.": {
     "one": "This app needs %n model, and you have it on disk.",
     "other": "This app needs %n models, and you have them on disk."
@@ -2336,5 +2335,27 @@
   "only if another branch is chosen": "only if another branch is chosen",
   "Delete the partial download (%1)": "Delete the partial download (%1)",
   "Paused": "Paused",
-  "Resume": "Resume"
+  "Resume": "Resume",
+  "another source": "another source",
+  "in place of": "in place of",
+  "Your file: %1": "Your file: %1",
+  "In place of: %1": "In place of: %1",
+  "%1 in place of %2, %3": "%1 in place of %2, %3",
+  "Opens with your %1 (%2)": "Opens with your %1 (%2)",
+  "Your file": "Your file",
+  "Download the template's own files (%1)…": "Download the template's own files (%1)…",
+  "%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.": "%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.",
+  "Opened with your %n files": {
+    "one": "Opened with your file",
+    "other": "Opened with your %n files"
+  },
+  "Using your %n files": {
+    "one": "Using your file",
+    "other": "Using your %n files"
+  },
+  "Open with your %n files": {
+    "one": "Open with your file",
+    "other": "Open with your %n files"
+  },
+  "%1 in place of %2": "%1 in place of %2"
 }

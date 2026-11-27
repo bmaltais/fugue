@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import Fugue
 import ".."
 import "../canvas"
+import "../kit"
 import "../workflow"
 import "../run"
 import "../settings"
@@ -55,7 +56,7 @@ ApplicationWindow {
 
     // Not an app (the file has no block, or one that does not read): the window says so and offers the full window.
     Item {
-        anchors { fill: parent; bottomMargin: notice.height }
+        anchors { fill: parent; bottomMargin: notice.visible ? notice.height + 4 * win.u : 0 }
         AppPage {
             anchors.fill: parent
             standalone: true
@@ -91,50 +92,40 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
+    // The window's one notice (docs/canvas-look.md 20.23): what the workflow lacks with Get ready…, or the files "Use my file" put in
+    // place, one line each, with Undo. The same KitNotice as the full window's banner, a card over the foot of the page.
+    KitNotice {
         id: notice
         objectName: "appNotice"
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: visible ? 8 * win.u : 0
+        readonly property bool swapped: App.workflows.noticeLines.length > 0
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 * win.u }
         visible: App.workflows.notice.length > 0
-        color: win.look.popup
-        topLeftRadius: 0
-        topRightRadius: 0
-        bottomLeftRadius: win.cardRadius
-        bottomRightRadius: win.cardRadius
-        RowLayout {
-            anchors { fill: parent; leftMargin: 4 * win.u; rightMargin: 4 * win.u }
-            spacing: 3 * win.u
-            Text {
-                Layout.fillWidth: true
-                text: App.workflows.notice
-                color: win.look.text
-                font.pixelSize: win.look.labelSize
-                elide: Text.ElideRight
-            }
-            // One button for everything the workflow lacks: packs, their trust and environments, and models (#379).
-            ViewButton {
-                objectName: "appGetReady"
-                look: win.look
-                text: qsTr("Get ready…")
-                primary: true
-                visible: App.workflows.getReadyOffer
-                onTapped: App.workflows.readiness.show()
-            }
-            ViewButton {
-                objectName: "appNoticeUndo"
-                look: win.look
-                text: qsTr("Undo")
-                visible: App.workflows.noticeUndoable
-                onTapped: App.workflows.undoNotice()
-            }
-            ViewButton {
-                objectName: "appNoticeDismiss"
-                look: win.look
-                glyph: "x"
-                flat: true
-                tip: qsTr("Dismiss")
-                onTapped: App.workflows.dismissNotice()
+        look: win.look
+        tone: swapped ? "attention" : App.workflows.getReadyOffer ? "info" : "neutral"
+        title: swapped ? App.workflows.noticeTitle : App.workflows.notice
+        lines: App.workflows.noticeLines
+        copyText: App.workflows.notice
+        announceChanges: !App.workflows.hashingUses // "Reading your file… 42%" is said once, not at every percent
+        onDismissed: App.workflows.dismissNotice()
+        actions: Component {
+            Row {
+                spacing: 2 * win.u
+                // One button for everything the workflow lacks: packs, their trust and environments, and models (#379).
+                ViewButton {
+                    objectName: "appGetReady"
+                    look: win.look
+                    text: qsTr("Get ready…")
+                    primary: true
+                    visible: App.workflows.getReadyOffer
+                    onTapped: App.workflows.readiness.show()
+                }
+                ViewButton {
+                    objectName: "appNoticeUndo"
+                    look: win.look
+                    text: qsTr("Undo")
+                    visible: App.workflows.noticeUndoable
+                    onTapped: App.workflows.undoNotice()
+                }
             }
         }
     }

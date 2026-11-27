@@ -81,6 +81,10 @@ class Workflows : public QObject {
     Q_PROPERTY(QVariantList pendingTrust READ pendingTrust NOTIFY pendingTrustChanged)
     // A line for the banner: what failed to open, or what the workflow lacks. Empty for none.
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
+    // A swap of "Use my file" in lines (SwapNotice, model_choice.h): the banner's title and one {mine, theirs, minePath, tier} per file;
+    // empty for any other line, which `notice` alone says.
+    Q_PROPERTY(QString noticeTitle READ noticeTitle NOTIFY noticeChanged)
+    Q_PROPERTY(QVariantList noticeLines READ noticeLines NOTIFY noticeChanged)
     // A file chosen in place of a missing model is being read (#605): its button waits, and a second click does nothing.
     Q_PROPERTY(bool hashingUses READ hashingUses NOTIFY hashingUsesChanged)
     // The files being read, per row (UI design 2026-11-26): the wanted model's hash -> percent read (-1 while not known). A row shows its
@@ -127,6 +131,8 @@ public:
     QVariantList recoverable() const { return m_recoverable; }
     QVariantList pendingTrust() const { return m_pendingTrust; }
     QString notice() const { return m_notice; }
+    QString noticeTitle() const { return m_noticeTitle; }
+    QVariantList noticeLines() const { return m_noticeLines; }
     QUrl suggestedFolder() const;
     ModelDownloads *downloads() const { return m_downloads; }
     ReadinessSheet *readiness() const { return m_readiness; }
@@ -371,6 +377,11 @@ public:
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
     Q_INVOKABLE void notify(const QString &text) { setNotice(text); }
+    // A swap's banner, in lines (what ModelChoice says; a test's picture).
+    void notifySwaps(const SwapNotice &swaps) {
+        setNotice(swaps.text, swaps.title, swaps.lines);
+        m_noticeTab = choiceFacts().shownTab;
+    }
     // The model folders changed (the first-run setup, #619): the templates' and the banner's missing models are read again, and `notice` is said when not empty.
     void modelFoldersChanged(const QString &notice);
 
@@ -456,7 +467,8 @@ private:
     void refreshRegistry();
     bool isPristine(int index) const;
     QString untitledName() const;
-    void setNotice(const QString &text);
+    void setNotice(const QString &text, const QString &title = {}, const QVariantList &lines = {});
+    void showMissing(); // the shown tab's own line: what it lacks, or nothing
     void analyze(const Document &document, const QString &title);
     // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
     void offerReadiness();
@@ -508,6 +520,10 @@ private:
     QVariantList m_recoverable;
     QVariantList m_pendingTrust;
     QString m_notice;
+    QString m_noticeTitle;     // a swap's banner (SwapNotice): its title and lines, with `m_notice` its whole text
+    QVariantList m_noticeLines;
+    QString m_noticeTab;                   // the tab a swap's banner is about
+    QHash<QString, SwapNotice> m_tabSwaps; // a swap's banner of a tab not shown, shown again with its tab
     QString m_projectName;
     QString m_sessionPath;
     bool m_sessionEnabled = false;

@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import Fugue
 import "apps"
 import "canvas"
+import "kit"
 import "menu"
 import "panels"
 import "run"
@@ -160,34 +161,19 @@ ApplicationWindow {
                 Layout.preferredHeight: item ? (item as Item).implicitHeight : 0
                 Layout.margins: active ? 2 * App.theme.look.unit : 0
                 active: helperNotice.shown
-                sourceComponent: Banner {
+                sourceComponent: KitNotice {
                     objectName: "helperNotice"
                     look: App.theme.look
-                    tone: "moss" // an offer to get something ready, as Get ready's
-                    RowLayout {
-                        id: noticeRow
-                        width: parent.width
-                        spacing: 8
-                        Label {
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            color: App.theme.look.text
-                            text: helperNotice.pacman ? qsTr("Faster generation on your NVIDIA card: install fugue-helper-cuda")
-                                                      : qsTr("Faster generation on your NVIDIA card: download the CUDA helper")
-                        }
+                    tone: "info" // an offer, not a problem: nothing is wrong without it
+                    title: helperNotice.pacman ? qsTr("Faster generation on your NVIDIA card: install fugue-helper-cuda")
+                                               : qsTr("Faster generation on your NVIDIA card: download the CUDA helper")
+                    onDismissed: helperNotice.dismiss()
+                    actions: Component {
                         ThemedButton {
                             objectName: "helperNoticeCopy"
                             highlighted: true
                             text: helperNotice.pacman ? qsTr("Copy %1").arg(helperNotice.command) : qsTr("Copy the install command")
                             onClicked: helperNotice.copy()
-                        }
-                        ViewButton {
-                            objectName: "helperNoticeDismiss"
-                            look: App.theme.look
-                            glyph: "x" // the Lucide x every other close and dismiss draws (canvas-look 16)
-                            flat: true
-                            tip: qsTr("Dismiss")
-                            onTapped: helperNotice.dismiss()
                         }
                     }
                 }

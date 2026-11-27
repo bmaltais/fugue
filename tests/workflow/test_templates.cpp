@@ -2328,12 +2328,13 @@ private slots:
         QCOMPARE(item(window->contentItem(), "templateDownload-mix")->property("text").toString(), QString("Download 5.9 GB")); // the uncovered one only
         shoot("template-card-ready-through-your-file");
 
-        // The details: the template's own download is the secondary, left of Open.
+        // The details: the template's own download is the secondary, at the row's start, apart from Cancel and Open.
         QObject *dialog = window->findChild<QObject *>("templatesDialog");
         QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "zit"), Q_ARG(QVariant, QVariant())));
         QQuickItem *own = nullptr;
         QTRY_VERIFY((own = item(window->contentItem(), "templateDetailsDownload")) && own->isVisible());
-        QCOMPARE(own->property("text").toString(), QString("Download 8.7 GB…"));
+        QCOMPARE(own->property("text").toString(), QString("Download the template's own files (8.7 GB)…"));
+        QCOMPARE(item(window->contentItem(), "templateDetailsOpen")->property("text").toString(), QString("Open with your file")); // the primary says what it opens with
         shoot("template-details-download");
         QVERIFY(QMetaObject::invokeMethod(dialog, "closeDetails"));
 
@@ -2395,6 +2396,125 @@ private slots:
         QTRY_VERIFY(sheet->view().value("headline").toString().contains("download 1 model, 5.9 GB and use 1 file you already have"));
         shoot("get-ready-mixed");
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
+    }
+
+    // The swap banner (docs/ui-ergonomics.md 2026-11-27) of a template opened with one of the person's files in place of two models: one
+    // line per model drawn, the title counts the one file, it is announced once; Escape with the focus on Undo dismisses it (before the
+    // window's Escape shortcut: a run in progress is not cancelled) and gives the focus to the graph; on another tab it is put aside and
+    // comes back with its tab. FUGUE_SHOT_DIR=<folder> [FUGUE_SHOT_THEME=<omarchy theme>] [FUGUE_SHOT_TAG=<tag>] also saves the details'
+    // actions and the banner as pictures.
+    void theSwapBannerListsEachModelTakesEscapeAndStaysWithItsTab() {
+        const QString shots = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG", QStringLiteral("shot"));
+        const QString themeName = qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night"));
+        if (!shots.isEmpty())
+            QDir().mkpath(shots);
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray header = R"({"cap_embedder.1.weight": {"dtype": "F16", "shape": [3840, 2560], "data_offsets": [0, 0]},
+                                      "x_embedder.weight": {"dtype": "F16", "shape": [3840, 64], "data_offsets": [0, 0]}})";
+        QByteArray file;
+        for (int i = 0; i < 8; ++i)
+            file.append(char((quint64(header.size()) >> (8 * i)) & 0xff));
+        writeFile(models.filePath("diffusion_models/z_image_turbo_bf16.safetensors"), file + header);
+        QJsonObject first{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'1')}, {"name", "z_image_turbo_int8_convrot.safetensors"}};
+        QJsonObject second{{"resource", "fugue/diffusion-model"}, {"hash", "sha256:" + QString(64, u'3')}, {"name", "z_image_turbo_fp16.safetensors"}};
+        const QJsonObject firstHandle = first, secondHandle = second;
+        first.insert("source", "http://127.0.0.1:9/z.safetensors");
+        first.insert("size", 6200000000.0);
+        second.insert("source", "http://127.0.0.1:9/f.safetensors");
+        second.insert("size", 2200000000.0);
+        makeTemplate(f.bundled.filePath("zit"), {{"title", "Z-Image Turbo, two passes"}, {"description", "Text to image, then a second pass that sharpens it."}},
+                     workflow({{"a", node("fugue/load-models", {{"diffusion_model", firstHandle}})}, {"b", node("fugue/load-models", {{"diffusion_model", secondHandle}})}},
+                              {{"models", QJsonArray{first, second}}}));
+        QTemporaryDir dir;
+        QFile shell(dir.filePath("shell.toml"));
+        QVERIFY(shell.open(QIODevice::WriteOnly));
+        shell.write("[font]\nbase-size = 12\n");
+        shell.close();
+        const QString from = "/usr/share/omarchy/themes/" + themeName;
+        QDir(dir.path()).mkpath("theme");
+        QFile::copy(from + "/colors.toml", dir.filePath("theme/colors.toml"));
+        if (QFile::exists(from + "/light.mode"))
+            QFile::copy(from + "/light.mode", dir.filePath("theme/light.mode"));
+        Translator translator(dir.path() + "/language");
+        QCoreApplication::installTranslator(&translator);
+        Theme theme(dir.path());
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        registerDefaultCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = dir.filePath("recovery");
+        locations.trustPath = dir.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        registerMenuCommands(commands);
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        registerFileCommands(commands, workflows);
+        QQmlApplicationEngine engine;
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvas, &workflows});
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->resize(1000, 640);
+        const auto shoot = [&](const QString &name) {
+            if (shots.isEmpty())
+                return;
+            QTest::qWait(500);
+            QVERIFY(test_support::grab(window).save(QString("%1/%2-%3-%4.png").arg(shots, name, themeName, tag)));
+        };
+        int cancels = 0; // a run in progress: Escape is Cancel the run's key too
+        QVERIFY(commands.setHandler("run.cancel", [&cancels] { ++cancels; }));
+        commands.setContextActive("run", true);
+        QVERIFY(commands.run("file.templates"));
+        QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "templateCard-zit"));
+        QObject *dialog = window->findChild<QObject *>("templatesDialog");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "zit"), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(item(window->contentItem(), "templateDetailsOpen") && item(window->contentItem(), "templateDetailsOpen")->isVisible());
+        shoot("details-actions");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "closeDetails"));
+        QTRY_VERIFY(item(window->contentItem(), "templatesGrid"));
+        item(window->contentItem(), "templatesGrid")->forceActiveFocus();
+        int at = 0;
+        for (const QVariant &card : dialog->property("shown").toList())
+            if (card.toMap().value("id").toString() == "zit")
+                break;
+            else
+                ++at;
+        item(window->contentItem(), "templatesGrid")->setProperty("currentIndex", at);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QQuickItem *undo = nullptr;
+        QTRY_VERIFY((undo = item(window->contentItem(), "noticeUndo")) && undo->isVisible());
+        QQuickItem *banner = item(window->contentItem(), "workflowNotice");
+        QCOMPARE(banner->property("title").toString(), QString("Opened with your file")); // one file of the person's, two models
+        QTRY_COMPARE(item(banner, "noticeLines")->property("count").toInt(), 2);
+        QTRY_COMPARE(banner->property("announcements").toInt(), 2); // "Reading your file…" once (not each percent), then the banner once
+        shoot("swap-banner-graph");
+        // Its own tab keeps it: another tab shows that tab's line, and back on this one it is there again with its Undo.
+        const int swapped = workflows.current();
+        workflows.newWorkflow();
+        QTRY_VERIFY(workflows.noticeLines().isEmpty());
+        workflows.setCurrent(swapped);
+        QTRY_COMPARE(workflows.noticeLines().size(), 2);
+        QTRY_VERIFY((undo = item(window->contentItem(), "noticeUndo")) && undo->isVisible());
+        // Escape on Undo: the notice goes, the graph has the focus, the run goes on.
+        undo->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(undo->hasActiveFocus());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!banner->isVisible());
+        QVERIFY(workflows.notice().isEmpty());
+        QCOMPARE(cancels, 0);
+        QQuickItem *focused = window->activeFocusItem();
+        bool inGraph = false;
+        for (QQuickItem *p = focused; p; p = p->parentItem())
+            inGraph |= p->objectName() == "canvas";
+        QVERIFY2(inGraph, qPrintable(focused ? focused->objectName() : QString("nothing")));
+        qDeleteAll(engine.rootObjects());
+        QCoreApplication::removeTranslator(&translator);
     }
 
     // #164: a card says where its models are: on this machine, on a paired host, both, or

@@ -6,6 +6,7 @@
 #include <QtTest>
 
 #include "../fake_app_destination.h"
+#include "translator.h"
 #include "workflow/model_choice.h"
 
 using namespace fugue;
@@ -131,6 +132,68 @@ class TestModelChoice : public QObject {
     Q_OBJECT
 
 private slots:
+    // The swap banner in lines (docs/ui-ergonomics.md 2026-11-27): a title that counts the files (English plural forms, as main() loads
+    // them), one {mine, theirs, minePath, tier} per file in order, the tier as the chip's words, and the whole text one sentence a line,
+    // which is what the banner's copy button copies.
+    void aSwapNoticeHasAPluralTitleOneLinePerFileAndTheWholeText() {
+        QTemporaryDir dir;
+        Translator translator(dir.filePath("language"));
+        QCoreApplication::installTranslator(&translator);
+        OnDiskUse other = useFor(hashB, QStringLiteral("qwen3/Qwen3-4B-Q8_0.gguf"));
+        other.match.otherSource = true;
+        OnDiskUse plain = useFor(hashA, QStringLiteral("flux-2-klein-4b-fp8.safetensors"));
+        plain.match.tier.clear();
+
+        const SwapNotice one = swapNotice(SwapKind::Opened, {other});
+        QCOMPARE(one.title, QStringLiteral("Opened with your file"));
+        QCOMPARE(one.lines.size(), 1);
+        const QVariantMap line = one.lines.first().toMap();
+        QCOMPARE(line.value("mine").toString(), QStringLiteral("mine-qwen3/Qwen3-4B-Q8_0.gguf"));
+        QCOMPARE(line.value("theirs").toString(), QStringLiteral("qwen3/Qwen3-4B-Q8_0.gguf"));
+        QCOMPARE(line.value("minePath").toString(), QStringLiteral("/models/mine-qwen3/Qwen3-4B-Q8_0.gguf"));
+        QCOMPARE(line.value("tier").toString(), QStringLiteral("same model · Q8_0 · another source"));
+        QCOMPARE(one.text, QStringLiteral("Opened with your file mine-qwen3/Qwen3-4B-Q8_0.gguf in place of qwen3/Qwen3-4B-Q8_0.gguf "
+                                          "(same model, Q8_0, from another source)."));
+
+        const SwapNotice two = swapNotice(SwapKind::Opened, {other, plain});
+        QCOMPARE(two.title, QStringLiteral("Opened with your 2 files"));
+        QCOMPARE(two.lines.size(), 2);
+        QCOMPARE(two.lines.at(1).toMap().value("tier").toString(), QStringLiteral("same model")); // no tier, same source: the plain words
+        const QStringList sentences = two.text.split(QLatin1Char('\n'));
+        QCOMPARE(sentences.size(), 2); // nothing left out of what the copy button copies
+        QVERIFY(sentences.at(1).startsWith(QStringLiteral("Opened with your file mine-flux-2-klein-4b-fp8.safetensors in place of")));
+
+        QCOMPARE(swapNotice(SwapKind::Used, {other, plain}).title, QStringLiteral("Using your 2 files"));
+        OnDiskUse sameFile = plain; // a second model the same file of the person's stands in for: one file, two lines
+        sameFile.wanted.insert("name", QStringLiteral("flux-2-klein-4b-Q8_0.gguf"));
+        const SwapNotice oneFile = swapNotice(SwapKind::Opened, {plain, sameFile});
+        QCOMPARE(oneFile.title, QStringLiteral("Opened with your file"));
+        QCOMPARE(oneFile.lines.size(), 2);
+        QVERIFY(swapNotice(SwapKind::Used, {plain}).text.startsWith(QStringLiteral("Used your file")));
+        QVERIFY(swapNotice(SwapKind::Opened, {}).isEmpty());
+        QCoreApplication::removeTranslator(&translator);
+    }
+
+    // The module hands its owner the lines, not only the joined text, when the owner takes them.
+    void anOpenWithFilesHandsTheBannerItsLines() {
+        World world;
+        FakeGraph graph{world};
+        ChoiceHost host = world.host();
+        SwapNotice said;
+        host.sayChoice = [&](const SwapNotice &notice) {
+            said = notice;
+            world.notice = notice.text;
+        };
+        ModelChoice choice(host, graph);
+        choice.openAsked(QStringLiteral("open:A"));
+        choice.openWith(QStringLiteral("open:A"), {useFor(hashA), useFor(hashB, QStringLiteral("b.gguf"))}, [](const Uses &) { return true; }, QString(), {});
+        while (!world.reads.isEmpty())
+            world.finishRead();
+        QCOMPARE(said.lines.size(), 2);
+        QCOMPARE(said.lines.at(1).toMap().value("theirs").toString(), QStringLiteral("b.gguf"));
+        QVERIFY(choice.undoable()); // the banner's text is what Undo checks is still said
+    }
+
     // One read per target, shared by the asks; each ask is answered with its own token (16ed98fd, 79343fb7).
     void twoAsksForTheSameFilesShareOneReadAndTakeItOnce() {
         Rig rig;

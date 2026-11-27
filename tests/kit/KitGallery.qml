@@ -207,6 +207,37 @@ Item {
                     }
                 }
             }
+            // Notices, one per tone (KitNotice, docs/canvas-look.md 20.23): the swap of "Use my file" as the owner met it, with Undo.
+            Column {
+                x: 3.5 * App.theme.look.unit
+                width: parent.width - 2 * x
+                spacing: 2 * App.theme.look.unit
+                bottomPadding: 4.5 * App.theme.look.unit
+                KitSection { text: "Notices" }
+                KitNotice {
+                    objectName: "noticeSwap"
+                    width: parent.width
+                    tone: "attention"
+                    title: "Opened with your 2 files"
+                    lines: [{ mine: "Qwen3-4B-Q8_0.gguf", theirs: "qwen3/Qwen3-4B-Q8_0.gguf", minePath: "/models/text_encoders/Qwen3-4B-Q8_0.gguf",
+                              tier: "same model · Q8_0 · another source" },
+                            { mine: "flux-2-klein-4b.safetensors", theirs: "flux-2-klein-4b-fp8.safetensors", minePath: "/models/diffusion_models/flux-2-klein-4b.safetensors",
+                              tier: "same model · full-precision" }]
+                    copyText: "Opened with your file Qwen3-4B-Q8_0.gguf in place of qwen3/Qwen3-4B-Q8_0.gguf (same model, Q8_0, from another source)."
+                    actions: Component { KitChip { text: "Undo" } }
+                }
+                KitNotice { width: parent.width; tone: "info"; title: "Faster generation on your NVIDIA card: download the CUDA helper" }
+                KitNotice {
+                    objectName: "noticeError"
+                    width: parent.width
+                    tone: "error"
+                    title: "Could not open sunset.fugue"
+                    body: "The file is not a Fugue workflow: line 3, a value is missing."
+                    copyText: "Could not open sunset.fugue: the file is not a Fugue workflow: line 3, a value is missing."
+                }
+                KitNotice { width: parent.width; tone: "success"; title: "Downloaded 2 models." }
+                KitNotice { width: parent.width; tone: "neutral"; compact: true; title: "Showing Sky alone"; dismissTip: "Show every layer" }
+            }
             KitSeparator { }
             Row {
                 x: 4.5 * App.theme.look.unit

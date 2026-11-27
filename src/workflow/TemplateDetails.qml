@@ -10,6 +10,9 @@ import "../kit"
 // from its preview, the title and the whole description, where it comes from, the models it uses and whether
 // each is here, the packs it needs, its sample inputs, and Open (the primary) and Cancel. `template` is one entry of
 // Workflows::templates(). The dialog closes it on Escape; it shows it and puts the focus back on the card.
+// A template ready only through the person's own files (#605, #616) says so on each model it stands in for ("Your file", and which),
+// and its actions say what they do (docs/ui-ergonomics.md 2026-11-27): "Open with your files" is the primary; the template's own
+// download is a secondary at the row's start, "Download the template's own files (8.4 GB)…", apart from Cancel and Open.
 Rectangle {
     id: sheet
     objectName: "templateDetails"
@@ -26,6 +29,12 @@ Rectangle {
     onVisibleChanged: if (visible) forceActiveFocus()
 
     readonly property var source: template.source ? template.source : {}
+    readonly property bool withFiles: template.opensWithFiles === true // ready only through the person's files: Open uses them
+    // How many files of the person's Open uses (two models one file stands in for count once).
+    readonly property int yourFiles: new Set((template.onDisk ?? []).map(d => d.file)).size
+    // Enter takes the primary (docs/ui-ergonomics.md D5); a focused button takes its own Enter first.
+    Keys.onReturnPressed: sheet.open()
+    Keys.onEnterPressed: sheet.open()
     readonly property string sourceText: source.name && source.author ? qsTr("Based on %1 by %2").arg(source.name).arg(source.author)
                                          : source.name ? qsTr("Based on %1").arg(source.name)
                                          : source.author ? qsTr("Workflow by %1").arg(source.author) : ""
@@ -133,6 +142,10 @@ Rectangle {
                     delegate: RowLayout {
                         id: row
                         required property var modelData
+                        // The person's file that stands in for this model, when there is one (Workflows::templates' onDisk).
+                        // Only when Open will use it (opensUsingFiles: with "Ask me" a template partly covered opens with its own models).
+                        readonly property var yours: sheet.template.opensUsingFiles === true
+                                                     ? (sheet.template.onDisk ?? []).find(d => d.name === modelData.name) ?? null : null
                         objectName: "templateDetailsModel-" + modelData.name
                         Layout.fillWidth: true
                         spacing: 2 * sheet.u
@@ -154,14 +167,16 @@ Rectangle {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: [row.modelData.kind, row.modelData.size, row.modelData.license].filter(p => p !== "").join(" · ")
-                                elide: Text.ElideRight
+                                text: row.yours ? qsTr("Opens with your %1 (%2)").arg(row.yours.file).arg(row.yours.same)
+                                      : [row.modelData.kind, row.modelData.size, row.modelData.license].filter(p => p !== "").join(" · ")
+                                elide: row.yours ? Text.ElideMiddle : Text.ElideRight
                                 color: sheet.look.label
                                 font.pixelSize: sheet.look.labelSize
                             }
                         }
                         Text {
-                            text: row.modelData.status === "disk" ? qsTr("On disk")
+                            text: row.yours ? qsTr("Your file")
+                                  : row.modelData.status === "disk" ? qsTr("On disk")
                                   : row.modelData.status === "served" ? qsTr("Served") : qsTr("Missing")
                             color: row.modelData.status === "missing" ? sheet.look.error : sheet.look.label
                             font.pixelSize: sheet.look.labelSize
@@ -220,27 +235,34 @@ Rectangle {
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: sheet.look.hairline }
         RowLayout {
+            id: actionRow
             Layout.fillWidth: true
             Layout.margins: 4 * sheet.u
             spacing: 2 * sheet.u
-            Item { Layout.fillWidth: true }
-            // The template's own models, for anyone who wants them in place of their files (opens Get ready with Download chosen).
+            // The template's own models, for anyone who wants them in place of their files (opens Get ready with Download chosen): a
+            // secondary that names what it fetches, at the row's start, apart from Cancel and Open, so it never reads as the way to open.
             KitChip {
                 objectName: "templateDetailsDownload"
                 look: sheet.look
                 bordered: true
-                visible: sheet.template.opensWithFiles === true && sheet.template.ownDownloadSize !== ""
-                text: qsTr("Download %1…").arg(sheet.template.ownDownloadSize)
+                visible: sheet.withFiles && sheet.template.ownDownloadSize !== ""
+                text: qsTr("Download the template's own files (%1)…").arg(sheet.template.ownDownloadSize)
+                // A narrow sheet cuts the label, never Cancel and Open: the whole label is in the tip.
+                maxTextWidth: Math.max(12 * sheet.u, actionRow.width - cancelButton.width - openButton.width - 12 * sheet.u)
+                tip: qsTr("%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.").arg(text)
                 onTapped: sheet.downloadOwn()
             }
+            Item { Layout.fillWidth: true }
             ThemedButton {
+                id: cancelButton
                 objectName: "templateDetailsCancel"
                 text: qsTr("Cancel")
                 onClicked: sheet.cancel()
             }
             ThemedButton {
+                id: openButton
                 objectName: "templateDetailsOpen"
-                text: qsTr("Open")
+                text: sheet.withFiles ? qsTr("Open with your %n files", "", sheet.yourFiles) : qsTr("Open")
                 highlighted: true
                 onClicked: sheet.open()
             }

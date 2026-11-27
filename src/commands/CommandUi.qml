@@ -111,35 +111,17 @@ Item {
             root.openCanvasView(id)
     }
 
-    // The keymap file could not be used (or holds mistakes): the defaults still work.
-    Banner {
+    // The keymap file could not be used (or holds mistakes): the defaults still work. Attention, not error: nothing stops working.
+    KitNotice {
         id: notice
         objectName: "keymapNotice"
-        property bool dismissed: false
-        visible: App.commands.problems.length > 0 && !dismissed
+        property bool closed: false
+        visible: App.commands.problems.length > 0 && !closed
         look: root.look
-        tone: "ember" // a warning in the warm tone, a calm card like every notice (docs/canvas-look.md 20.21)
+        tone: "attention"
+        title: qsTr("Your keymap file has problems; the default keys apply where it could not be used. Press ? to see them.")
+        onDismissed: notice.closed = true
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 2 * root.u }
-        RowLayout {
-            id: noticeRow
-            width: parent.width
-            LayoutMirroring.enabled: root.rightToLeft
-            LayoutMirroring.childrenInherit: true
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                color: root.look.text
-                text: qsTr("Your keymap file has problems; the default keys apply where it could not be used. Press ? to see them.")
-            }
-            ViewButton {
-                objectName: "keymapNoticeDismiss"
-                look: root.look
-                glyph: "x" // the Lucide x every other close and dismiss draws (canvas-look 16)
-                flat: true
-                tip: qsTr("Dismiss")
-                onTapped: notice.dismissed = true
-            }
-        }
     }
 
     // The quit question (#235): a Question like the others, its answers the window's one button. Keep working, the safe
