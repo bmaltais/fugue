@@ -69,6 +69,8 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Duplicate"), {}, "app", "added"},
         {"file.close-others", QT_TRANSLATE_NOOP("Command", "Close the other workflows"),
          QT_TRANSLATE_NOOP("Command", "Close other tabs"), {}, "app", "added"},
+        {"tab.close-all", QT_TRANSLATE_NOOP("Command", "Close every tab (asks once if some have unsaved changes)"),
+         QT_TRANSLATE_NOOP("Command", "Close all tabs…"), {}, "app", "added"},
         {"file.tab-color", QT_TRANSLATE_NOOP("Command", "Pick the tab's color"), QT_TRANSLATE_NOOP("Command", "Tab color…"), {}, "app", "added"},
         {"edit.clear", QT_TRANSLATE_NOOP("Command", "Clear the workflow (remove every node)"),
          QT_TRANSLATE_NOOP("Command", "Clear workflow"), {}, "canvas", "same"},

@@ -87,6 +87,10 @@ Item {
         }
         function onExportCompiledRequested() { compiledDialog.open() }
         function onSaveAsRequested() { saveDialog.open() }
+        function onCloseAllConfirmationRequested(unsavedTabs) {
+            closeAllAsk.unsavedTabs = unsavedTabs
+            closeAllAsk.open()
+        }
         function onCloseConfirmationRequested(index, title) {
             closeAsk.index = index
             closeAsk.title = title
@@ -258,6 +262,40 @@ Item {
                     text: qsTr("Save")
                     highlighted: true
                     onClicked: { closeAsk.close(); App.workflows.saveAndClose(closeAsk.index) }
+                }
+            }
+        }
+    }
+
+    // Close all tabs with some unsaved: asked once, as Quit asks (CommandUi.qml). Keep working is the safe, highlighted answer.
+    Question {
+        id: closeAllAsk
+        objectName: "closeAllAsk"
+        property int unsavedTabs: 0
+        onOpened: closeAllKeep.forceActiveFocus()
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 4 * root.look.unit
+            LayoutMirroring.enabled: root.rightToLeft
+            LayoutMirroring.childrenInherit: true
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("%n tabs have unsaved changes. Close all tabs anyway?", "", closeAllAsk.unsavedTabs)
+            }
+            QuestionAnswers {
+                ThemedButton {
+                    id: closeAllKeep
+                    objectName: "closeAllKeep"
+                    text: qsTr("Cancel")
+                    highlighted: true
+                    onClicked: closeAllAsk.close()
+                }
+                ThemedButton {
+                    objectName: "closeAllDiscard"
+                    text: qsTr("Discard and close all")
+                    danger: true
+                    onClicked: { closeAllAsk.close(); App.workflows.discardAndCloseAll() }
                 }
             }
         }

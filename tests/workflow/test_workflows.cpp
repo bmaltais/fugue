@@ -889,6 +889,44 @@ private slots:
         QVERIFY(f.workflows->notice().contains("unsaved"));
     }
 
+    // Close all tabs (tab.close-all): no unsaved tab closes them at once; an unsaved one asks once, Cancel keeps all, Discard closes all
+    // and leaves a fresh workflow and no recovery copy.
+    void closeAllTabsAsksOnceForUnsavedTabsAndLeavesNoRecoveryCopy() {
+        Fixture f;
+        registerFileCommands(f.commands, *f.workflows);
+        QVERIFY(write(f.file("a.fugue"), textNode));
+        QVERIFY(write(f.file("b.fugue"), textNode));
+        QVERIFY(f.workflows->openPath(f.file("a.fugue")));
+        QVERIFY(f.workflows->openPath(f.file("b.fugue")));
+        f.workflows->newWorkflow();
+        QCOMPARE(f.workflows->count(), 3);
+        QSignalSpy asked(f.workflows.get(), &Workflows::closeAllConfirmationRequested);
+        QVERIFY(f.commands.run("tab.close-all"));
+        QCOMPARE(asked.size(), 0);
+        QCOMPARE(f.workflows->count(), 1); // the window ends as after the last tab's close: one fresh workflow
+        QVERIFY(f.workflows->pathOf(0).isEmpty());
+        QCOMPARE(f.canvas.nodes()->rowCount(), 0);
+
+        // One unsaved tab: asked once; Cancel (nothing called) keeps every tab.
+        QVERIFY(f.workflows->openPath(f.file("a.fugue")));
+        QVERIFY(f.workflows->openPath(f.file("b.fugue")));
+        f.canvas.addNode("fugue/number", 0, 0);
+        f.workflows->writeRecoveryCopies();
+        QVERIFY(!QDir(f.locations.recoveryDir).entryList({"*.fugue"}).isEmpty());
+        const int before = f.workflows->count();
+        QVERIFY(f.commands.run("tab.close-all"));
+        QCOMPARE(asked.size(), 1);
+        QCOMPARE(asked.first().at(0).toInt(), 1);
+        QCOMPARE(f.workflows->count(), before);
+
+        // Discard and close all: every tab goes, one fresh workflow stays, the recovery copy is removed.
+        f.workflows->discardAndCloseAll();
+        QCOMPARE(f.workflows->count(), 1);
+        QVERIFY(f.workflows->pathOf(0).isEmpty());
+        QVERIFY(!f.workflows->tabs().first().toMap().value("unsaved").toBool());
+        QVERIFY(QDir(f.locations.recoveryDir).entryList({"*.fugue"}).isEmpty());
+    }
+
     void aCleanTabClosesWithoutAskingAndTheWindowCloseCommandUsesIt() {
         Fixture f;
         registerFileCommands(f.commands, *f.workflows);

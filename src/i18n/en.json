@@ -1022,6 +1022,13 @@
   "%1 copy": "%1 copy",
   "A workflow's name cannot hold a slash.": "A workflow's name cannot hold a slash.",
   "Close other tabs": "Close other tabs",
+  "Close all tabs…": "Close all tabs…",
+  "Close every tab (asks once if some have unsaved changes)": "Close every tab (asks once if some have unsaved changes)",
+  "Discard and close all": "Discard and close all",
+  "%n tabs have unsaved changes. Close all tabs anyway?": {
+    "one": "%n tab has unsaved changes. Close all tabs anyway?",
+    "other": "%n tabs have unsaved changes. Close all tabs anyway?"
+  },
   "Close the other workflows": "Close the other workflows",
   "Copy %1": "Copy %1",
   "Could not rename %1 to %2.": "Could not rename %1 to %2.",
