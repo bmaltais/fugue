@@ -43,11 +43,49 @@ QMutex &fileLock() {
     return mutex;
 }
 
-QJsonObject readPacks(const QString &path) {
+QJsonObject readFileObject(const QString &path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return {};
-    return QJsonDocument::fromJson(file.readAll()).object().value("packs").toObject();
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+QJsonObject readPacks(const QString &path) { return readFileObject(path).value("packs").toObject(); }
+
+// The digest of the secrets a pack declared when it was trusted (packSecretsDigest), per pack id and version; absent
+// for a yes given before this was recorded or for a pack that was not installed then.
+QJsonObject readSealed(const QString &path) { return readFileObject(path).value("secrets").toObject(); }
+
+// Whether the pack is still the one that was trusted: its declared secrets are what the yes covered (#497).
+bool secretsUnchanged(const QJsonObject &sealed, const QString &packId, const QString &version) {
+    const QString recorded = sealed.value(packId).toObject().value(version).toString();
+    if (recorded.isEmpty())
+        return true;
+    const QString now = packSecretsDigest(packId, version);
+    return now.isEmpty() || now == recorded;
+}
+
+Errors writeTrust(const QString &path, const QJsonObject &packs, QJsonObject sealed) {
+    // Only what a trusted version still has.
+    for (const QString &id : sealed.keys()) {
+        QJsonObject versions = sealed.value(id).toObject();
+        for (const QString &version : versions.keys()) {
+            bool kept = false;
+            for (const QJsonValue &value : packs.value(id).toArray())
+                kept |= value.toString() == version;
+            if (!kept)
+                versions.remove(version);
+        }
+        if (versions.isEmpty())
+            sealed.remove(id);
+        else
+            sealed.insert(id, versions);
+    }
+    QJsonObject file{{"packs", packs}};
+    if (!sealed.isEmpty())
+        file.insert("secrets", sealed);
+    // Only its owner may read or change what they trust (replaceFile makes the folder).
+    return replaceFile(path, writeJson(file), QFileInfo(path).fileName(), FileMode::OwnerOnly);
 }
 
 } // namespace
@@ -61,7 +99,7 @@ bool TrustStore::isTrustedByDefault(const QString &packId, const QString &versio
         return false;
     for (const QJsonValue &value : readPacks(defaultProjectPath()).value(packId).toArray())
         if (value.toString() == version)
-            return isInheritedPack(packId, version);
+            return isInheritedPack(packId, version) && secretsUnchanged(readSealed(defaultProjectPath()), packId, version);
     return false;
 }
 
@@ -69,7 +107,7 @@ bool TrustStore::isTrusted(const QString &packId, const QString &version) const 
     if (isBuiltIn(packId))
         return true;
     for (const QJsonValue &value : readPacks(m_path).value(packId).toArray())
-        if (value.toString() == version)
+        if (value.toString() == version && secretsUnchanged(readSealed(m_path), packId, version))
             return true;
     return isTrustedByDefault(packId, version);
 }
@@ -92,10 +130,20 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
         return {};
     QJsonObject packs = readPacks(m_path);
     QJsonArray versions = packs.value(packId).toArray();
-    versions.append(version);
+    bool known = false; // a yes whose pack.json changed since: the version is there, the digest is renewed
+    for (const QJsonValue &value : versions)
+        known |= value.toString() == version;
+    if (!known)
+        versions.append(version);
     packs.insert(packId, versions);
-    // Only its owner may read or change what they trust (replaceFile makes the folder).
-    return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
+    QJsonObject sealed = readSealed(m_path);
+    QJsonObject own = sealed.value(packId).toObject();
+    if (const QString digest = packSecretsDigest(packId, version); !digest.isEmpty())
+        own.insert(version, digest);
+    else
+        own.remove(version);
+    sealed.insert(packId, own);
+    return writeTrust(m_path, packs, sealed);
 }
 
 Errors TrustStore::forget(const QString &packId, const QString &version) {
@@ -115,7 +163,7 @@ Errors TrustStore::forget(const QString &packId, const QString &version) {
         packs.remove(packId);
     else
         packs.insert(packId, kept);
-    return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
+    return writeTrust(m_path, packs, readSealed(m_path));
 }
 
 Errors TrustStore::forget(const QString &packId) {
@@ -124,7 +172,7 @@ Errors TrustStore::forget(const QString &packId) {
     if (!packs.contains(packId))
         return {};
     packs.remove(packId);
-    return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
+    return writeTrust(m_path, packs, readSealed(m_path));
 }
 
 Errors TrustStore::revoke(const QString &packId, const QString &version) {

@@ -1153,7 +1153,7 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   should still avoid echoing a key; this is the net under it. Not masked: media files a node writes (a value inside an image is not looked for).
 - **Isolation between packs is advisory.** A trusted pack's program runs as you ([6.7](#67-trust)): it can read Fugue's config folder, `pack-secrets.json` included, exactly as it can read `providers.json`. Handing each pack only its own values stops an honest
   pack, a mistake and a look-alike node from reaching another's key; it does not stop a pack you trusted from being hostile. The trust question says so. Use a key with the narrowest rights the service offers.
-- **Known gaps (filed).** A pack edited in place on disk to add `settings` after it was trusted is not asked about again; the runner's change check covers the node's own files. A node that is deterministic does not have secret values in its cache key.
+- **Edited in place, and the cache (#497, #498).** The runner's change check ([7.1](#71-process-setup)) covers the node's own `node.json` and entry and the pack's `pack.json`, so a pack edited on disk after it was loaded does not run until it is loaded again. A yes in the trust file also records a hash of the secrets the pack declares (names and origin rules in `settings`, not labels) when the pack is installed: a `pack.json` edited in place to read other secrets, or to change where one may go, is no longer trusted and asks again, and the new yes covers the new set (a yes recorded before this, or for a pack not installed then, has no hash and is trusted as before). A node's cache key holds a hash of the stored values and origins its pack would hand it ([10.1](#101-keys)), never a value, so a changed key or origin runs the node again instead of serving a result made with the old one.
 - **Trust.** The install, trust and Get ready questions list the secrets a pack reads by name ([6.7](#67-trust)).
 
 ### 6.5 Where packs live and how they load
@@ -1189,7 +1189,7 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
 - The pack goes to `packs/<id>`, or to `packs/<id>@<major>` when `packs/<id>` holds another major
   (#90): `pack add` of another major neither replaces nor untrusts the one installed, and `pack add`
   of a major already installed is `pack_exists`. `remove`, `update` and `trust` take the folder
-  name, `<id>` or `<id>@<major>`; an update stays in its major (a new major is an `add`). The pack goes with a `.fugue-source.json` beside `pack.json` saying where it
+  name, `<id>` or `<id>@<major>`; an update stays in its major (a new major is an `add`). An update whose pack has a setup needs the setup accepted: declining it leaves the installed pack, its environment and its trust as they were (`setup_declined`; in `update` of all packs, a warning), because the fresh copy has no environment (#521). The pack goes with a `.fugue-source.json` beside `pack.json` saying where it
   came from (and the commit a ref resolved to), so `update` can fetch it again. The `.git`
   folder is not kept. A pack is checked in a staging folder first and put in place only when
   it loads and the person agreed; a refusal or a failure leaves no half-installed pack.
@@ -2796,7 +2796,9 @@ A node's key is the SHA-256 of the canonical JSON of:
 - for a Canvas Region, its `canvas` is the id of the Active canvas when it was empty (#246) and its `revision` the full hash that `head` was at when the workflow was compiled ([14.5](#145-the-canvas-revision-store-206-208)), so it is in the key like any literal;
 - for a node that reads data of its own which decides its answer, that data's fingerprint (a
   kernel's `keyExtra`; Enhance Prompt's template, so editing a template is a new result). Absent
-  for every other node, so their keys are as they were.
+  for every other node, so their keys are as they were;
+- for a node whose pack declares secrets ([6.4.1](#641-secrets)) and has some set, a hash of the
+  values and origins it would be handed, never a value (#498).
 
 Rules:
 

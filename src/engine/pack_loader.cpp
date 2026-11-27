@@ -11,6 +11,7 @@
 #include "engine/trust_store.h"
 #include "engine/version.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -410,6 +411,27 @@ QSet<QString> packKeysIn(const QStringList &paths) {
 }
 
 } // namespace
+
+QString packSecretsDigest(const QString &id, const QString &version) {
+    QStringList paths = packSearchPaths();
+    paths << inheritedPackPaths();
+    for (const QString &path : paths)
+        for (const QFileInfo &entry : QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (entry.fileName().startsWith(QLatin1Char('.')) || parsePackRef(entry.fileName()).id != id)
+                continue;
+            const Result<QJsonObject> read = readJsonObject(entry.filePath() + QStringLiteral("/pack.json"));
+            if (!read || read->value("id").toString() != id || read->value("version").toString() != version)
+                continue;
+            // The name and the origin rule of each declared secret: what decides which values a pack is handed
+            // and where they may go. Labels and descriptions are only text.
+            QStringList lines;
+            for (const QJsonValue &setting : read->value("settings").toArray())
+                lines << setting.toObject().value("name").toString() + QLatin1Char(':') + setting.toObject().value("origin").toString();
+            lines.sort();
+            return QString::fromLatin1(QCryptographicHash::hash(lines.join(QLatin1Char('\n')).toUtf8(), QCryptographicHash::Sha256).toHex());
+        }
+    return {};
+}
 
 QList<InheritedPack> inheritedPacks() {
     QList<InheritedPack> found;

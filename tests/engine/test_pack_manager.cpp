@@ -24,6 +24,11 @@ void write(const QString &path, const QByteArray &bytes) {
     file.write(bytes);
 }
 
+QByteArray readAll(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
 void writeJson(const QString &path, const QJsonObject &object) { write(path, QJsonDocument(object).toJson()); }
 
 // A pack `source/<id>` holding one command node "tool"; `network` and `setup` are optional.
@@ -386,6 +391,68 @@ private slots:
         QCOMPARE(updatePacks("io.example.tools", {}, packs(), trustStore(), answering(Answer::Yes)).error().code, QString("setup_failed"));
         QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.0"));
         QCOMPARE(leftovers(), QStringList{"io.example.tools"});
+    }
+
+    // #497: trust covers the secrets a pack declared when it was said yes to. A pack.json edited in place to read
+    // others asks again, and the yes that follows covers the new set. Uses the session's own packs folder (the
+    // trust store looks the installed pack up in the search paths), which is the test's temporary home.
+    void aPackJsonEditedInPlaceToReadSecretsAsksAgain() {
+        const QString id = "io.example.keyed";
+        const QString folder = packsDir() + "/" + id;
+        QDir(folder).removeRecursively();
+        const QString dir = makePack(source(), id, "1.0.0");
+        QVERIFY(addPack(dir, {}, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+
+        // The same file again: still trusted.
+        QJsonObject pack = QJsonDocument::fromJson(readAll(folder + "/pack.json")).object();
+        writeJson(folder + "/pack.json", pack);
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        // A label edit does not matter; a new secret does.
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}}};
+        writeJson(folder + "/pack.json", pack);
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
+        QVERIFY(trustPack(id, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "Key"}}};
+        writeJson(folder + "/pack.json", pack);
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"origin", "required"}}};
+        writeJson(folder + "/pack.json", pack);
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0")); // the rule of where a value may go changed too
+        QDir(packsDir()).removeRecursively();
+    }
+
+    // #521: declining the setup question of an update used to swap in the fresh copy (no environment) and delete
+    // the old folder with its environment. The old pack now stays as it was.
+    void decliningTheSetupOfAnUpdateKeepsTheOldPackAndItsEnvironment() {
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir -p .venv && touch .venv/ok"}}};
+        const QString dir = makePack(source(), "io.example.tools", "1.0.0", false, setup);
+        QVERIFY(addPack(dir, {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
+        QVERIFY(trustPack("io.example.tools", packs(), trustStore(), answering(Answer::Yes)).ok());
+
+        makePack(source(), "io.example.tools", "1.0.1", false, setup);
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.runSetup = [](const PackSummary &) { return Answer::No; };
+        QCOMPARE(updatePacks("io.example.tools", {}, packs(), trustStore(), prompts).error().code, QString("setup_declined"));
+        QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.0"));
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
+        QVERIFY(trustStore().isTrusted("io.example.tools", "1.0.0")); // nothing changed, so trust stays
+        QCOMPARE(leftovers(), QStringList{"io.example.tools"});
+
+        // Updating every pack reports it as a warning and goes on.
+        const Result<QList<PackAdded>> all = updatePacks({}, {}, packs(), trustStore(), prompts);
+        QVERIFY(all.ok());
+        QVERIFY(all->isEmpty());
+        QCOMPARE(all.warnings().size(), 1);
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
+
+        // Accepting the setup updates it and the environment is made again.
+        QCOMPARE(updatePacks("io.example.tools", {}, packs(), trustStore(), answering(Answer::Yes))->size(), 1);
+        QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.1"));
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
     }
 
     void updatingAllGoesOnPastOneThatFails() {

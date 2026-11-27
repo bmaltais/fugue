@@ -49,6 +49,11 @@ QStringList packSearchPaths();
 // `packs`, and an anonymous root.
 QStringList inheritedPackPaths();
 
+// A hash of the secrets the installed pack of this id and version declares (its `settings`: names and origin rules,
+// not labels), found in the pack folders and the inherited ones; empty when no such pack is installed. The trust
+// store keeps it with a yes, so a pack.json edited in place to read other secrets asks again (#497).
+QString packSecretsDigest(const QString &id, const QString &version);
+
 // A pack of the Default project, as this session sees it: listed and usable, never written.
 struct InheritedPack {
     QString id;
