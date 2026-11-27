@@ -180,7 +180,7 @@ QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<Ma
         if (family.isEmpty()) {
             // No family of Fugue's own: the engine's name for it, when it gave one, and no Recommended mark (no shape rules).
             if (asked != engine.constEnd())
-                marks.insert(file.path, ModelMark{asked->recognised ? asked->version : QString(), false, {}, notRecognised});
+                marks.insert(file.path, ModelMark{asked->recognised ? engineFamilyName(asked->version) : QString(), false, {}, notRecognised});
             continue;
         }
         marks.insert(file.path, ModelMark{family, false, {}, notRecognised});

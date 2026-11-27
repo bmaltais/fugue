@@ -873,10 +873,12 @@ private slots:
             }
             return out;
         };
-        QTRY_COMPARE(rows(), (QStringList{"# Fits klein9b.safetensors", "qwen_3_8b.safetensors", "# Other",
-                                          "qwen_3_4b.safetensors (dim)", "mystery.safetensors", "t5xxl.safetensors (dim)",
-                                          "Family: All", "Type a name…"}));
-        app.key(Qt::Key_Return); // the first is the one that fits
+        QTRY_COMPARE(rows().join('|'), (QStringList{"None", "# Fits klein9b.safetensors", "qwen_3_8b.safetensors", "# Other",
+                                                    "qwen_3_4b.safetensors (dim)", "mystery.safetensors", "t5xxl.safetensors (dim)",
+                                                    "Family: All", "Type a name…"})
+                                           .join('|'));
+        app.key(Qt::Key_Down); // None is first (the text encoder is optional since 1.4.0), then the one that fits
+        app.key(Qt::Key_Return);
         QTRY_COMPARE(app.stored("models", "text_encoder").toObject().value("name").toString(), QString("qwen_3_8b.safetensors"));
         // The list opens on the model in use, checked (the owner, 2026-11-24): the stored diffusion model is
         // matched by its hash when the file's is known, else by its name, and only one entry is checked.

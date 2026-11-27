@@ -7,6 +7,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/model_family.h"
 #include "engine/model_inspect.h"
 #include "engine/model_recommend.h"
 
@@ -32,7 +33,8 @@ class TestModelInspect : public QObject {
   case "$f" in
     *unknown*) printf '{"path":"%s","recognised":false}\n' "$f" ;;
     *bad*) printf '{"path":"%s","error":"unreadable"}\n' "$f" ;;
-    *) printf '{"path":"%s","recognised":true,"version":"Fake DiT","id":3,"is_dit":true,"video":false,"inpaint":false,"latent_channels":16,"vae_kind":"flux"}\n' "$f" ;;
+    *fillish*) printf '{"path":"%s","recognised":true,"version":"Flux Fill","id":"flux_fill","is_dit":true,"video":false,"inpaint":true,"latent_channels":16,"vae_kind":"flux"}\n' "$f" ;;
+    *) printf '{"path":"%s","recognised":true,"version":"Fake DiT","id":"fake_dit","is_dit":true,"video":false,"inpaint":false,"latent_channels":16,"vae_kind":"flux"}\n' "$f" ;;
   esac
 done
 )"));
@@ -145,6 +147,33 @@ private slots:
         QVERIFY(runs().isEmpty());
         QVERIFY(engineDetectsKind(QStringLiteral("fugue/model")));
         QVERIFY(!engineDetectsKind(QStringLiteral("fugue/vae")));
+    }
+
+    // The engine's names in the table's style: a fallback lands in the table's group where both are one family.
+    void theEnginesNamesAreInTheTablesStyle() {
+        const auto family = [](const char *engine) { return engineFamilyName(QString::fromLatin1(engine)); };
+        QCOMPARE(family("Flux"), modelFamily(QStringLiteral("fugue/diffusion-model"), QStringLiteral("flux1-dev.safetensors")));
+        QCOMPARE(family("Flux Fill"), QStringLiteral("FLUX.1"));
+        QCOMPARE(family("Flux.2 klein"), QStringLiteral("FLUX.2 Klein")); // the engine cannot tell 4B from 9B
+        QCOMPARE(family("Qwen Image Layered"), modelFamily(QStringLiteral("fugue/diffusion-model"), QStringLiteral("qwen_image_edit.gguf")));
+        QCOMPARE(family("Wan 2.2 I2V"), QStringLiteral("Wan 2.2"));
+        QCOMPARE(family("Wan 2.x"), QStringLiteral("Wan 2.x"));
+        QCOMPARE(family("SDXL Inpaint"), QStringLiteral("SDXL"));
+        QCOMPARE(family("SD 1.x Inpaint"), QStringLiteral("SD 1.5"));
+        QCOMPARE(family("sd3.x"), QStringLiteral("SD3")); // whole name, any case
+        QCOMPARE(family("Chroma Radiance"), QStringLiteral("Chroma"));
+        QCOMPARE(family("Z-Image"), QStringLiteral("Z-Image"));
+        QCOMPARE(family("Some New Engine Model"), QStringLiteral("Some New Engine Model")); // no entry: as the engine wrote it
+
+        // Through the marks: the engine's "Flux Fill" for a file the table cannot name is the "FLUX.1" group.
+        write("fillish.safetensors", "x");
+        ModelInspector inspector(path("helper.sh"), path("cache.json"));
+        const QList<MarkedFile> files{{path("fillish.safetensors"), 1}};
+        QCOMPARE(markModels(QStringLiteral("fugue/diffusion-model"), files, RecommendContext{}, ModelShapes::shared(), &inspector)
+                     .value(files[0].path)
+                     .family,
+                 QStringLiteral("FLUX.1"));
+        QCOMPARE(inspector.inspect({files[0].path}).value(files[0].path).id, QStringLiteral("flux_fill")); // the id is the engine's string
     }
 };
 

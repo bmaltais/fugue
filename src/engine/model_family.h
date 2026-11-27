@@ -21,6 +21,12 @@ QString modelFamily(const QString &resource, const QString &name);
 // each once, in the order the models come in.
 QStringList modelFamilies(const QJsonArray &models);
 
+// The picker family for the engine's own version name (#703: "Flux", "SDXL Inpaint", "Flux.2 klein", what `fugue-helper --inspect`
+// answers as `version`), in this table's style, so a file the table does not name lands in the same group as one it does where
+// both are one family ("Flux", "Flux Fill" and "Flux Control" are "FLUX.1"; the three Qwen Image versions are "Qwen-Image").
+// An inpaint, pix2pix or tiny variant is its base family's. A name with no entry is returned as the engine wrote it.
+QString engineFamilyName(const QString &engineName);
+
 // Every family name the table knows, in its order: what a filter may offer before any model is seen.
 QStringList knownModelFamilies();
 

@@ -80,6 +80,10 @@ Rectangle {
     readonly property bool canvasMissing: kind === "canvas" && canvasId !== "" && !linked && canvasRow.id === undefined
     // The value shown is cut short (the node is narrow): the row's tooltip says it whole (CanvasNode.qml).
     readonly property bool valueCut: valueLabel.visible && valueLabel.truncated
+    // What an empty optional model picker says: a provider's model is "any ready" one, but a model part (Load Models' CLIP-L,
+    // Checkpoint, an optional text encoder or VAE) left empty is just not used.
+    readonly property string emptyModelText: ["fugue/diffusion-model", "fugue/text-encoder", "fugue/clip-vision", "fugue/vae", "fugue/lora", "fugue/model"]
+        .indexOf(String(edits.spec(nodeId, name).type)) >= 0 ? qsTr("None") : qsTr("Any ready model")
     readonly property string valueText: {
         if (linked)
             return edits.source(nodeId, name)
@@ -92,7 +96,7 @@ Rectangle {
         if (hashing.progress !== undefined)
             return qsTr("Reading model… %1%").arg(Math.floor(hashing.progress * 100))
         if (kind === "model" && (port.value === undefined || port.value === ""))
-            return port.required ? qsTr("Choose a model") : qsTr("Any ready model")
+            return port.required ? qsTr("Choose a model") : emptyModelText
         return port.value !== undefined ? port.value : ""
     }
     // The glyph after the value (a Lucide name): what a click at the right end opens.
@@ -402,7 +406,7 @@ Rectangle {
         const current = literal !== undefined ? literal.name : undefined
         const currentHash = literal !== undefined ? literal.hash : undefined
         if (spec.optional)
-            entries.push({ text: qsTr("Any ready model"), value: { unset: true }, checked: current === undefined })
+            entries.push({ text: emptyModelText, value: { unset: true }, checked: current === undefined })
         // Grouped by provider instance (this machine, a paired host), each under its name. A
         // model that is not ready says so, and its note says how to make it ready: Fugue never
         // starts one by itself (8.4). Then the files on disk, under the folder each is in.

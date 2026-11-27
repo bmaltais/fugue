@@ -95,7 +95,7 @@ QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resou
 // (engine/model_shape.h): said here, before the helper fails to load them with less to say.
 // The inputs a mismatch of each part is blamed on.
 struct PartInputs {
-    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL, clipG, clipVision;
+    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL, clipG, clipVision, checkpoint;
 };
 
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
@@ -111,12 +111,13 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                                    {QStringLiteral("high_noise_diffusion_model_path"), inputs.highNoise},
                                                    {QStringLiteral("clip_l_path"), inputs.clipL},
                                                    {QStringLiteral("clip_g_path"), inputs.clipG},
-                                                   {QStringLiteral("clip_vision_path"), inputs.clipVision}};
+                                                   {QStringLiteral("clip_vision_path"), inputs.clipVision},
+                                                   {QStringLiteral("model_path"), derived.contains(QStringLiteral("checkpoint")) ? inputs.checkpoint : QString()}};
     const QStringList partNames{QStringLiteral("base"),     QStringLiteral("text_encoder"), QStringLiteral("vae"),
                                 QStringLiteral("high_noise"), QStringLiteral("clip_l"),       QStringLiteral("clip_g"),
-                                QStringLiteral("clip_vision")};
+                                QStringLiteral("clip_vision"), QStringLiteral("checkpoint")};
     for (qsizetype i = 0; i < parts.size(); ++i) {
-        if (!paths.contains(parts.at(i).first))
+        if (!paths.contains(parts.at(i).first) || (parts.at(i).second.isEmpty() && parts.at(i).first == QLatin1String("model_path")))
             continue;
         const std::optional<ModelShape> part = shapes.of(paths.value(parts.at(i).first).toString());
         if (part && !part->unloadable.isEmpty()) {
@@ -342,6 +343,10 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     const bool checkpoint = base.value(QStringLiteral("resource")).toString() == kModelType; // every part in one file
     ModelFiles files;
     files.context.insert(checkpoint ? QStringLiteral("model_path") : QStringLiteral("diffusion_model_path"), path(base));
+    // A diffusion model beside a checkpoint (SDXL inpainting): the checkpoint gives the text encoders and the VAE, the
+    // diffusion model replaces its UNet (the engine's model_path with diffusion_model_path).
+    if (derived.contains(QStringLiteral("checkpoint")))
+        files.context.insert(QStringLiteral("model_path"), path(derived.value(QStringLiteral("checkpoint"))));
     if (derived.contains(QStringLiteral("high_noise")))
         files.context.insert(QStringLiteral("high_noise_diffusion_model_path"), path(derived.value(QStringLiteral("high_noise"))));
     if (derived.contains(QStringLiteral("text_encoder"))) {
@@ -367,7 +372,7 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         return *missing;
     if (!shares)
         return files;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input, input, input}, files.loras))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input, input, input, input}, files.loras))
         return *mismatch;
     // After the parts' check: a text encoder of the wrong family is the first thing to say.
     if (const std::optional<Error> absent = addTokenizer(files.context, derived, library, *context.hashes)) {
@@ -699,7 +704,10 @@ public:
     // the node says so before a run (#85). Reads no file to find them: one with the handle's
     // name is taken to be it, as any check does (8.9).
     Errors check(const NodeContext &context) const override {
-        Errors errors = checkParts(context);
+        Errors errors;
+        if (const std::optional<Error> missing = missingPart(context))
+            return {*missing};
+        errors = checkParts(context);
         if (const std::optional<Error> warning = notRecognisedWarning(context))
             errors.append(*warning);
         return errors;
@@ -735,9 +743,13 @@ public:
                                                           *context.hashes, ModelLibrary::Hashing::RememberedOnly);
             return found ? found.value() : QString();
         };
-        const QString encoder = path("text_encoder");
-        QJsonObject paths{{"diffusion_model_path", path("diffusion_model")}, {"vae_path", path("vae")}};
-        paths.insert(encoderKeyOf(encoder), encoder);
+        QJsonObject paths{{"diffusion_model_path", path("diffusion_model")}};
+        if (hasInput(context, "vae"))
+            paths.insert(QStringLiteral("vae_path"), path("vae"));
+        if (hasInput(context, "text_encoder")) {
+            const QString encoder = path("text_encoder");
+            paths.insert(encoderKeyOf(encoder), encoder);
+        }
         if (hasHighNoise(context))
             paths.insert(QStringLiteral("high_noise_diffusion_model_path"), path("high_noise_diffusion_model"));
         if (hasClipL(context))
@@ -746,12 +758,14 @@ public:
             paths.insert(QStringLiteral("clip_g_path"), path("clip_g"));
         if (hasInput(context, "clip_vision"))
             paths.insert(QStringLiteral("clip_vision_path"), path("clip_vision"));
+        if (hasInput(context, "checkpoint"))
+            paths.insert(QStringLiteral("model_path"), path("checkpoint"));
         // Blamed on the part that does not fit, where its picker is.
         if (const std::optional<Error> mismatch = partsMismatch(
                 derived(context), paths,
                 {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString(),
                  QStringLiteral("high_noise_diffusion_model"), QStringLiteral("clip_l"), QStringLiteral("clip_g"),
-                 QStringLiteral("clip_vision")}))
+                 QStringLiteral("clip_vision"), QStringLiteral("checkpoint")}))
             return {*mismatch};
         // MOSS Image's tokenizer is a file of the model, listed missing like the model files (Get ready, #544).
         if (const QJsonObject tokenizer = companionTokenizer(paths.value(QStringLiteral("diffusion_model_path")).toString()); !tokenizer.isEmpty()) {
@@ -769,6 +783,8 @@ public:
     }
 
     Result<Values> run(const NodeContext &context) override {
+        if (const std::optional<Error> missing = missingPart(context))
+            return Errors{*missing};
         QJsonObject parts = derived(context);
         // A model that reads the Qwen3.5 tokenizer: the catalog's goes in the model as its companion file, so what Text
         // Encode caches depends on it (#542) and a paired host is sent its handle (#544). A saved tokenizer input of
@@ -782,15 +798,32 @@ public:
     }
 
 private:
+    // The Text encoder and the VAE are optional only because a Checkpoint can give them: without one each is needed.
+    static std::optional<Error> missingPart(const NodeContext &context) {
+        if (hasInput(context, "checkpoint"))
+            return std::nullopt;
+        for (const char *name : {"text_encoder", "vae"}) {
+            if (hasInput(context, name))
+                continue;
+            Error error = makeError(QStringLiteral("input_missing"),
+                                    QStringLiteral("Load Models needs a %1: the diffusion model alone does not carry it.")
+                                        .arg(QLatin1String(name) == QLatin1String("vae") ? QStringLiteral("VAE") : QStringLiteral("text encoder")),
+                                    QStringLiteral("Pick one, or pick a Checkpoint that has it."));
+            error.input = QLatin1String(name);
+            return error;
+        }
+        return std::nullopt;
+    }
     static bool hasHighNoise(const NodeContext &context) {
         return !context.input(QStringLiteral("high_noise_diffusion_model")).isEmpty();
     }
     static bool hasClipL(const NodeContext &context) { return hasInput(context, "clip_l"); }
     static bool hasInput(const NodeContext &context, const char *name) { return !context.input(QLatin1String(name)).isEmpty(); }
     static QJsonObject derived(const NodeContext &context) {
-        QJsonObject parts{{"base", context.input(QStringLiteral("diffusion_model")).json()},
-                          {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
-                          {"vae", context.input(QStringLiteral("vae")).json()}};
+        QJsonObject parts{{"base", context.input(QStringLiteral("diffusion_model")).json()}};
+        for (const char *name : {"text_encoder", "vae", "checkpoint"})
+            if (hasInput(context, name))
+                parts.insert(QLatin1String(name), context.input(QLatin1String(name)).json());
         if (hasClipL(context))
             parts.insert(QStringLiteral("clip_l"), context.input(QStringLiteral("clip_l")).json());
         for (const char *name : {"clip_g", "clip_vision"})

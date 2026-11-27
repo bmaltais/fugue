@@ -72,7 +72,8 @@ Document workflowLoading(const QString &image) {
             {"load", node("fugue/load-image", {{"file", image}})},
             {"gone", node("fugue/load-image", {{"file", "/nowhere/lost.png"}})},
             {"prompt", node("fugue/text", {{"text", "a fox in the snow"}})},
-            {"models", node("fugue/load-models", {{"diffusion_model", model}})}}}}},
+            {"models", node("fugue/load-models", {{"diffusion_model", model}})},
+            {"empty", node("fugue/preview", {})}}}}}, // a required input with nothing in it: the graph does not compile
         {"requires", QJsonObject{{"models", QJsonArray{QJsonObject{{"resource", "fugue/diffusion-model"},
                                                                    {"hash", hash},
                                                                    {"name", "m.gguf"},
@@ -496,7 +497,7 @@ private slots:
         QSignalSpy compiledAsked(&workflows, &Workflows::exportCompiledRequested);
         QVERIFY(commands.run("file.export-compiled"));
         QCOMPARE(compiledAsked.size(), 1);
-        QVERIFY(!workflows.exportCompiled(dir.filePath("broken"))); // its Load Models lacks two files
+        QVERIFY(!workflows.exportCompiled(dir.filePath("broken"))); // its Preview has nothing to show
         QVERIFY(workflows.notice().contains("does not compile"));
         QVERIFY(!QFileInfo::exists(dir.filePath("broken.json")));
         const int shared = workflows.current();
