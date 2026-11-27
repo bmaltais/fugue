@@ -20,6 +20,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <functional>
 
+#include "engine/place_policy.h"
 #include "engine/providers.h"
 #include "settings/cache_model.h"
 #include "settings/model_setup.h"
@@ -189,7 +190,8 @@ public:
     // (pinned to its kind), each off one that is an own root is removed; `download` is where new downloads go ("" or Fugue's own: the
     // default). `markDone` also writes models_setup "done". One read and one atomic write of this session's own settings.json (a
     // project's own file in a project). Returns {error, added, removed, vanished}: a folder that is gone or already a root is not added.
-    Q_INVOKABLE QVariantMap applyModelSetup(const QVariantList &folders, const QString &download, bool markDone, const QStringList &notLookedInto = {});
+    // `policy`: a root it may not touch (a place left off, a network) is taken as it is, with no stat.
+    QVariantMap applyModelSetup(const QVariantList &folders, const QString &download, bool markDone, const PlacePolicy &policy = PlacePolicy());
     // Writes only models_setup ("done" or "skipped"). "" or why not.
     Q_INVOKABLE QString markModelSetup(const QString &state);
 

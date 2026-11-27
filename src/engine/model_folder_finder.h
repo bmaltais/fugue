@@ -106,6 +106,7 @@ struct FindResult {
 
 // `path` with its links resolved by reading them one component at a time, never stat'ing past a link that leads into a network or
 // autofs mount (empty then). The component-safe way to look at a path before the person has said yes.
+// (Defined with the PlacePolicy, engine/place_policy.h, which is the one rule for what may be touched.)
 QString finderResolve(const QString &path, const FinderEnv &env);
 
 // The locations to offer, in order. Existing ones only (an lstat each, built component by component with finderResolve(), so a

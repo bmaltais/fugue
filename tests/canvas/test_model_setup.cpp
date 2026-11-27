@@ -785,6 +785,120 @@ private slots:
         QVERIFY(seen);
     }
 
+    // The yes never resolves a root with a stat: a root that is a link into a place left off stays as written (nothing is resolved onto
+    // the drive), so the folder it leads to is not taken for a root already in use.
+    void theYesDoesNotResolveARootBehindALinkIntoAPlaceLeftOff() {
+        QDir().mkpath(m_mnt + "/data/models");
+        QVERIFY(QFile::link(m_mnt + "/data/models", m_home + "/models"));
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{m_home + "/models"}).isEmpty());
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        FinderLocation drive;
+        drive.id = "drive:" + m_mnt;
+        drive.path = drive.scope = m_mnt;
+        FinderLocation homePlace;
+        homePlace.id = "home";
+        homePlace.path = homePlace.scope = m_home;
+        const QVariantList folders{QVariantMap{{"path", m_mnt + "/data/models"}, {"kind", "layout"}, {"on", true}}};
+        const QVariantMap result = settings.applyModelSetup(folders, QString(), false, PlacePolicy({homePlace}, {homePlace, drive}, env()));
+        QVERIFY(result.value("error").toString().isEmpty());
+        QCOMPARE(result.value("added").toInt(), 1); // on main's rule the link was resolved by a stat and this was "already a root"
+    }
+
+    // A share mounted while the sheet is open is a network drive for the pick: nothing is read or stat'd on it.
+    void aShareMountedWhileTheSheetIsOpenIsNotTouchedByAPick() {
+        QDir().mkpath(m_mnt + "/nas/models");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(false);
+        FinderEnv later = env();
+        later.networkMounts = {m_mnt + "/nas"};
+        setup.setEnv(later);
+        m_touched.clear();
+        QVERIFY(setup.addFolder(m_mnt + "/nas/models").isEmpty());
+        QTest::qWait(50);
+        for (const QString &touched : std::as_const(m_touched))
+            QVERIFY2(!touched.startsWith(m_mnt + "/nas"), qPrintable("touched " + touched));
+    }
+
+    // The person's own pick inside a place left off is a download choice (it is theirs).
+    void aPickedFolderInAPlaceLeftOffIsADownloadChoice() {
+        comfy(m_mnt + "/d/ComfyUI");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.setFreeSpace([](const QString &) { return qint64(100) * 1000 * 1000 * 1000; });
+        setup.show(true);
+        setup.setLocationChecked("drive:" + m_mnt, false);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        QVERIFY(setup.addFolder(m_mnt + "/d/ComfyUI/models").isEmpty());
+        QTRY_VERIFY(!rowOf(setup.rows(), "ComfyUI/models").isEmpty() && setup.primaryEnabled());
+        bool seen = false;
+        for (const QVariant &choice : setup.choices())
+            seen = seen || choice.toMap().value("value").toString() == m_mnt + "/d/ComfyUI/models";
+        QVERIFY(seen);
+    }
+
+    // A typed file is not a folder, on the consent screen and in a place left off too.
+    void aFileIsNotAFolderEvenWhereNothingIsResolved() {
+        touchFile(m_home + "/afile");
+        touchFile(m_mnt + "/afile");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.show(false);
+        QVERIFY(!setup.addFolder(m_home + "/afile").isEmpty());
+        QVERIFY(!setup.addFolder(m_mnt + "/afile").isEmpty());
+        setup.setLocationChecked("drive:" + m_mnt, false);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        QVERIFY(!setup.addFolder(m_mnt + "/afile").isEmpty());
+    }
+
+    // An answer kept for a folder is asked again once the ticks change (the cache is per policy).
+    void aKeptFreeSpaceIsAskedAgainAfterTheTicksChange() {
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        bool known = false;
+        setup.setFreeSpace([&known](const QString &) { return known ? qint64(100) * 1000 * 1000 * 1000 : qint64(-1); });
+        setup.show(true);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        QVERIFY(setup.choices().value(0).toMap().value("free").toString().isEmpty()); // asked once: unknown, and kept
+        known = true;
+        setup.searchAgain();
+        setup.setLocationChecked("home", false);
+        setup.search();
+        QTRY_VERIFY(!setup.looking());
+        QVERIFY(!setup.choices().value(0).toMap().value("free").toString().isEmpty());
+    }
+
+    // The download choices are worked out once, not by a readlink walk on every binding read.
+    void downloadChoicesAreNotRecomputedOnEveryRead() {
+        comfy(m_home + "/ComfyUI");
+        SettingsModel settings;
+        settings.attach(nullptr, nullptr, &m_registry);
+        ModelSetup &setup = *settings.modelSetup();
+        setup.setEnv(env());
+        setup.setFreeSpace([](const QString &) { return qint64(100) * 1000 * 1000 * 1000; });
+        searchAll(setup);
+        setup.choices();
+        m_touched.clear();
+        setup.choices();
+        setup.download();
+        setup.downloadHint();
+        setup.downloadLow();
+        setup.downloadWarning();
+        QVERIFY2(m_touched.isEmpty(), qPrintable(m_touched.join(", ")));
+    }
+
     // InvokeAI is off by default; when ticked, the folders it can tell apart are added single-kind.
     void invokeAiIsOffAndWhenTickedIsAddedByTheFoldersItCanTell() {
         touchFile(m_home + "/invokeai/invokeai.yaml");

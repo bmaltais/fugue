@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "engine/model_folder_finder.h"
+#include "engine/place_policy.h"
 
 namespace fugue {
 
@@ -138,6 +139,7 @@ private:
         bool inherited = false;
         bool writable = true;
         bool busy = false;  // being counted on the worker
+        bool picked = false; // the person's own pick (Add a folder)
         QString kind;       // "layout", a type id, or "" (not told: the person chooses)
     };
 
@@ -157,7 +159,8 @@ private:
     FinderJob makeJob() const;
     QList<FinderLocation> tickedLocations() const;
     qint64 freeSpace(const QString &path) const;
-    bool inLeftOffPlace(const QString &path) const;
+    void refreshPolicy();
+    bool downloadChoice(const Row &row) const;
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
@@ -168,6 +171,7 @@ private:
     bool m_envSet = false;
     std::function<qint64(const QString &)> m_free;
     mutable QHash<QString, qint64> m_freeCache;
+    mutable QHash<QString, bool> m_choiceCache; // by row path: cleared when the policy is rebuilt
     bool m_open = false;
     bool m_firstRun = false;
     QString m_phase = QStringLiteral("consent");
@@ -187,6 +191,7 @@ private:
         ModelSetup *target = nullptr;
     };
     std::shared_ptr<Receiver> m_receiver;
+    PlacePolicy m_policy; // what may be touched: rebuilt when a tick or the phase changes
     FinderEnv m_envNow;   // the mounts as they were when the sheet opened, for what the window checks
 };
 
