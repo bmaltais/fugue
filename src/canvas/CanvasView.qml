@@ -2169,8 +2169,10 @@ Item {
         onWorkflowOpened: {
             if (root.hostCloses)
                 root.closeRequested()
-            else if (App.workspace)
+            else if (App.workspace && App.workspace.graphArea > 0)
                 App.workspace.active = App.workspace.graphArea
+            else if (App.workspace)
+                App.commands.trigger("area.view-graph") // no area shows the Graph: this one does, so the opened workflow is seen
         }
     }
 

@@ -18,6 +18,8 @@ Item {
     property bool atHome: false
     // The tab is a plain graph with something in it: App opens the builder, and its segment says so ("Make app…").
     property bool plainGraph: false
+    // No area shows the Graph (Main.qml graphHidden): neither segment is chosen unless the App is shown.
+    property bool graphHidden: false
 
     implicitWidth: seg.implicitWidth
     implicitHeight: seg.implicitHeight
@@ -31,10 +33,12 @@ Item {
         focusOnPress: false // a click leaves the keys with the page; Tab still reaches it
         options: [sw.plainGraph ? qsTr("Make app…") : qsTr("App"), qsTr("Graph")]
         optionNames: ["appViewSwitchApp", "appViewSwitchGraph"]
-        currentIndex: sw.appShown || sw.atHome ? 0 : 1
+        currentIndex: sw.appShown || sw.atHome ? 0 : sw.graphHidden ? -1 : 1
         text: qsTr("View")
         onMoved: index => {
-            if ((index === 0) !== (sw.appShown || sw.atHome))
+            if (sw.graphHidden && index === 1 && !sw.appShown && !sw.atHome)
+                App.commands.trigger("area.view-graph") // the Graph comes into the active area
+            else if ((index === 0) !== (sw.appShown || sw.atHome))
                 App.commands.trigger("view.toggle-app")
         }
     }

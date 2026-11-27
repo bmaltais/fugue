@@ -20,6 +20,8 @@ Item {
     readonly property CanvasLook look: App.theme.look
     // The canvas, to turn a drop point into world coordinates.
     property FugueCanvas canvasView
+    // No area shows the Graph (Main.qml): a dropped file adds nothing to it.
+    property bool graphHidden: false
     property real noticeInset: 0 // the rail at the window's left edge, which the notice keeps clear of
     property alias closeQuestion: closeAsk
     property alias trustQuestion: trustAsk
@@ -102,6 +104,18 @@ Item {
         onDropped: (drop) => {
             if (!drop.hasUrls)
                 return
+            if (root.graphHidden) {
+                // No area shows the Graph: it comes back into the active area, and the files go to the middle of its view (where it
+                // was is no place to aim at). A workflow opens as it would anyway.
+                const urls = drop.urls
+                App.commands.trigger("area.view-graph")
+                Qt.callLater(() => {
+                    const view = root.canvasView
+                    const w = view ? view.toWorld(view.width / 2, view.height / 2) : Qt.point(0, 0)
+                    App.workflows.dropUrls(urls, w.x, w.y)
+                })
+                return
+            }
             const p = root.canvasView ? root.canvasView.mapFromItem(dropArea, drop.x, drop.y) : Qt.point(0, 0)
             const w = root.canvasView ? root.canvasView.toWorld(p.x, p.y) : p
             App.workflows.dropUrls(drop.urls, w.x, w.y)

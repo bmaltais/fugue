@@ -212,7 +212,7 @@ ApplicationWindow {
             FugueCanvas {
                 id: fugueCanvas
                 objectName: "canvas"
-                visible: !win.appShown && !win.homeShown
+                visible: !win.appShown && !win.homeShown && !win.graphHidden
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // The side panel (#56) takes its width from the canvas, on the side it docks.
@@ -266,7 +266,7 @@ ApplicationWindow {
         }
 
         // The file pickers, the save and trust and recovery questions, the drop area.
-        WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas; noticeInset: win.stripWidth }
+        WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas; graphHidden: win.graphHidden; noticeInset: win.stripWidth }
         GroupDialogs { anchors.fill: parent }
         RemoteConsentQuestion {}
         AppBuilderDialog { anchors.fill: parent }
@@ -365,15 +365,43 @@ ApplicationWindow {
     // What the areas sit in: the canvas alone, or the host while there are several.
     property Item areaHost: null
     readonly property Item body: areaHost ?? fugueCanvas
+    // No area shows the Graph (Blender's editors: any area can switch its view): it stays alive, hidden, with its run toolbar and
+    // context menu, and the commands that act on it are off (the `canvas` context). It re-places itself when an area shows it again.
+    readonly property bool graphHidden: areaHost !== null && App.workspace !== null && App.workspace.graphArea === 0
+    function syncGraphContext() {
+        if (App.commands)
+            App.commands.setContextActive("canvas", !graphHidden)
+    }
+    // A search or a context menu open on the Graph closes with it (they would hang over nothing).
+    onGraphHiddenChanged: {
+        syncGraphContext()
+        if (graphHidden) {
+            App.canvasModel.search.close()
+            const menu = contextMenu.menu as Popup
+            if (menu)
+                menu.close()
+        }
+    }
+    // What the Graph's own things (a library row, an opened workflow, the App | Graph switch) need: an area shows it, the active one
+    // when none does (as Ctrl+Alt+G).
+    function showGraph() {
+        if (graphHidden)
+            App.commands.trigger("area.view-graph")
+    }
     function syncAreas() {
+        const wasApp = areaHost !== null && App.appView !== null && App.appView.shown
         const tree = App.workspace ? App.workspace.tree : AreaLayout.defaultTree()
-        const split = tree.root?.type === "branch"
+        // The host is for every layout but the default one: the Graph alone in the one area, drawn by the window's column.
+        const split = !(tree.root?.type === "leaf" && tree.root.view === "graph")
         if (split && !areaHost) {
             areaHost = areaHostComponent.createObject(mainLayout) as Item
             fugueCanvas.parent = areaHost
         }
+        // The Graph is listed only while an area shows it: with none, no area adopts it and nothing places it.
         const views = {}
-        views[String(App.workspace ? App.workspace.graphArea : 1)] = fugueCanvas
+        const graphArea = App.workspace ? App.workspace.graphArea : 1
+        if (graphArea > 0)
+            views[String(graphArea)] = fugueCanvas
         areas.views = views
         areas.host = split ? areaHost : null
         areas.node = tree.root
@@ -383,6 +411,10 @@ ApplicationWindow {
             areaHost = null
         }
         syncAppAreas()
+        // The one area that showed the App now shows the Graph (picked in its menu, or Ctrl+Alt+A): the tab's own mode would
+        // show the App page instead.
+        if (!split && wasApp)
+            App.appView.openInGraph()
     }
     // A press in an area makes it the active one (the commands act on it), and gives its view the keys.
     function activateAreaAt(point) {
@@ -547,6 +579,7 @@ ApplicationWindow {
         syncRunBar()
         syncSidePanel()
         syncAreas()
+        syncGraphContext()
         syncApp()
         syncHome()
     }
@@ -744,11 +777,22 @@ ApplicationWindow {
                                  : qsTr("%1 could not be deleted from the library.").arg(name)))
             }
             // A click adds the node in the middle of the view; a drop, where it was let go.
+            // With no area showing the Graph, a click brings it into the active area first.
             onNodeActivated: typeId => {
-                const p = fugueCanvas.toWorld(fugueCanvas.width / 2, fugueCanvas.height / 2)
-                App.canvasModel.addNode(typeId, p.x, p.y)
+                const hidden = win.graphHidden
+                win.showGraph()
+                const add = () => {
+                    const p = fugueCanvas.toWorld(fugueCanvas.width / 2, fugueCanvas.height / 2)
+                    App.canvasModel.addNode(typeId, p.x, p.y)
+                }
+                if (hidden)
+                    Qt.callLater(add) // once the Graph is placed in its area
+                else
+                    add()
             }
             onNodeDropped: (typeId, sceneX, sceneY) => {
+                if (win.graphHidden)
+                    return
                 const at = fugueCanvas.mapFromItem(null, sceneX, sceneY)
                 if (at.x < 0 || at.y < 0 || at.x > fugueCanvas.width || at.y > fugueCanvas.height)
                     return
@@ -765,11 +809,13 @@ ApplicationWindow {
             look: App.theme.look
             tabs: App.workflows.tabs
             recent: App.recentFiles.entries
-            onTabRequested: index => App.workflows.current = index
+            onTabRequested: index => App.workflows.current = index // as the tab bar: the active area keeps its view
             onTabCloseRequested: index => App.workflows.closeTab(index)
             onFileRequested: path => {
                 if (!App.workflows.openPath(path))
                     App.recentFiles.forget(path)
+                else if (!(App.appView && App.appView.shown))
+                    win.showGraph() // an app opened into a shown App stays there
             }
             onCloseRequested: App.sidePanels.tab = ""
             // What the browser remembers: the view, the mode and the favorites filter (media_state.h).
@@ -806,10 +852,15 @@ ApplicationWindow {
                 else if (action === "copy") App.mediaLibrary.copyPath(item.path)
                 else if (action === "favorite") App.mediaLibrary.toggleFavorite(item.path)
                 else if (action === "send") App.workflows.sendImage(item.path)
-                else if (action === "workflow") App.workflows.openPath(item.path)
-                else if (action === "rerun") {
+                else if (action === "workflow") {
                     if (App.workflows.openPath(item.path))
+                        win.showGraph()
+                }
+                else if (action === "rerun") {
+                    if (App.workflows.openPath(item.path)) {
+                        win.showGraph()
                         App.commands.trigger("run.start")
+                    }
                 }
                 else if (action === "delete") App.mediaLibrary.trash(item.path)
             }

@@ -60,7 +60,7 @@ QString CommandRegistry::add(const CommandSpec &spec, Handler handler) {
         return QStringLiteral("%1 has no description").arg(spec.id);
     if (!kContexts.contains(spec.context))
         return QStringLiteral("%1: unknown context \"%2\"").arg(spec.id, spec.context);
-    Entry entry{spec, std::move(handler), {}, {}, {}, {}, {}};
+    Entry entry{spec, std::move(handler), {}, {}, {}, {}, {}, {}};
     entry.spec.keys.clear();
     for (const QString &key : spec.keys) {
         QString problem;
@@ -107,6 +107,14 @@ bool CommandRegistry::setEnabledWhen(const QString &id, Check check) {
     if (it == m_index.constEnd())
         return false;
     m_entries[*it].enabledWhen = std::move(check);
+    return true;
+}
+
+bool CommandRegistry::setAlsoWhen(const QString &id, Check check) {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    m_entries[*it].alsoWhen = std::move(check);
     return true;
 }
 
@@ -161,7 +169,7 @@ bool CommandRegistry::isEnabled(const QString &id) const {
     if (it == m_index.constEnd())
         return false;
     const Entry &entry = m_entries[*it];
-    return entry.handler && m_activeContexts.contains(entry.spec.context) && (!entry.enabledWhen || entry.enabledWhen());
+    return entry.handler && entryOn(entry) && (!entry.enabledWhen || entry.enabledWhen());
 }
 
 bool CommandRegistry::trigger(const QString &id) { return triggerOn(id, {}); }
@@ -189,7 +197,7 @@ QString CommandRegistry::ownerOf(const QString &key) const {
     const Entry *best = nullptr;
     int bestRank = -1;
     for (const Entry &entry : m_entries) {
-        if (!entry.handler || !entry.keys.contains(canonical) || !m_activeContexts.contains(entry.spec.context))
+        if (!entry.handler || !entry.keys.contains(canonical) || !entryOn(entry))
             continue;
         // Specificity first, then the user's own binding over a default, then registration order.
         const int rank = int(kContexts.indexOf(entry.spec.context)) * 2 + (entry.userKeys.contains(canonical) ? 1 : 0);
@@ -245,7 +253,16 @@ void CommandRegistry::setContextActive(const QString &context, bool active) {
     emit changed();
 }
 
-bool CommandRegistry::contextActive(const QString &context) const { return m_activeContexts.contains(context); }
+bool CommandRegistry::contextActive(const QString &context) const {
+    if (!m_activeContexts.contains(context))
+        return false;
+    const bool ofGraph = context == QLatin1String("group-selected") || context == QLatin1String("group") || context == QLatin1String("compare");
+    return !ofGraph || m_activeContexts.contains(QStringLiteral("canvas"));
+}
+
+bool CommandRegistry::entryOn(const Entry &entry) const {
+    return contextActive(entry.spec.context) || (entry.alsoWhen && entry.alsoWhen());
+}
 
 bool CommandRegistry::belongsToTextField(const QString &key) {
     const QKeySequence sequence(key, QKeySequence::PortableText);
@@ -406,7 +423,7 @@ QStringList CommandRegistry::problems() const { return m_fileProblems + m_keymap
 QStringList CommandRegistry::activeKeys() const {
     QSet<QString> keys;
     for (const Entry &entry : m_entries)
-        if (entry.handler && m_activeContexts.contains(entry.spec.context))
+        if (entry.handler && entryOn(entry))
             for (const QString &key : entry.keys)
                 keys.insert(key);
     QStringList sorted(keys.begin(), keys.end());

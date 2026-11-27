@@ -3,8 +3,12 @@
 // Graph) trades the active area's view, the page is made only while an area shows the App, a workflow with no app block says so in
 // the area, and closing the split gives the default window back.
 
+#include <QClipboard>
 #include <QDir>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QQuickStyle>
+#include <QSignalSpy>
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
@@ -200,6 +204,39 @@ private slots:
         QTRY_COMPARE(app.workspace.viewOf(2), QString("graph"));
         tapSwitch(app, "appViewSwitchApp");
         QTRY_COMPARE(app.workspace.viewOf(2), QString("app"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // #647: the one area may show the App with no Graph anywhere: Ctrl+V still reaches the App, the Graph's commands are off, and
+    // picking Graph there shows the Graph (not the tab's App page).
+    void aOneAreaAppWindowPastesIntoTheAppAndGivesTheGraphBack() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        QImage picture(6, 4, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        auto *data = new QMimeData;
+        data->setImageData(picture);
+        QGuiApplication::clipboard()->setMimeData(data);
+        QVERIFY(app.workspace.showView(1, "app"));
+        QTRY_VERIFY(find(app.window, "appArea") && find(app.window, "appPage"));
+        QCOMPARE(app.workspace.graphArea(), 0);
+        QTRY_VERIFY(rig.view.shown());
+        QVERIFY(!app.commands.isEnabled("node.search"));
+        QVERIFY(app.commands.isEnabled("edit.paste")); // the App's picture, not the hidden Graph's
+        // The Shortcut list is remade when the App is shown or hidden, so Ctrl+V is a live key, not only an enabled command.
+        QSignalSpy remade(&app.commands, &CommandRegistry::changed);
+        emit rig.view.shownChanged();
+        QVERIFY(!remade.isEmpty());
+        QVERIFY(app.commands.activeKeys().contains("Ctrl+V"));
+        QVERIFY(app.commands.isEnabled("view.reset-layout")); // not the default window
+        QVERIFY(app.workspace.showView(1, "graph"));
+        QTRY_VERIFY(!find(app.window, "areaHost"));
+        QTRY_VERIFY(find(app.window, "canvas"));
+        QTRY_VERIFY(!find(app.window, "appPage"));
+        QVERIFY(!rig.view.shown());
+        QVERIFY(app.commands.isEnabled("node.search"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
         qDeleteAll(app.engine.rootObjects());
     }

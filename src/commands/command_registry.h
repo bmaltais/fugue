@@ -76,6 +76,9 @@ public:
     // False when the id is not registered.
     bool setEnabledWhen(const QString &id, Check check);
     bool setCheckedWhen(const QString &id, Check check);
+    // The command also runs (and its keys are live) while its context is off, when `check` holds: Ctrl+V goes to the App view in an
+    // area while the Graph, and with it the `canvas` context, is hidden.
+    bool setAlsoWhen(const QString &id, Check check);
     // A toggle's menu name follows the state of its target ("Bypass", then "Remove bypass"):
     // the check returns the English text of the name, or empty for the command's own label.
     // Translated in the "Command" context; the description (the `?` overlay) stays neutral.
@@ -123,6 +126,8 @@ public:
     // `app` is always active. A ticket that owns a context turns it on and off (QML too: the Canvas view's layers
     // panel turns `canvas-layers` on while the pointer is over it, #226).
     Q_INVOKABLE void setContextActive(const QString &context, bool active);
+    // A context is on when it was turned on; the group-selected, group and compare contexts are the Graph's selection, so they
+    // are off while `canvas` is (no area shows the Graph).
     bool contextActive(const QString &context) const;
     static QStringList contexts();
 
@@ -194,7 +199,7 @@ private:
     struct Entry {
         CommandSpec spec;
         Handler handler;
-        Check enabledWhen, checkedWhen;
+        Check enabledWhen, checkedWhen, alsoWhen;
         std::function<QString()> labelWhen;
         QStringList keys; // effective, canonical
         QStringList userKeys; // the subset the user added
@@ -203,6 +208,7 @@ private:
         QString command, key;
     };
 
+    bool entryOn(const Entry &entry) const;
     static QString canonicalKey(const QString &key, QString *problem = nullptr);
     void rebuild();
     QVariantList resolve(const QVariantList &items, const QVariantMap &target, bool context = false) const;

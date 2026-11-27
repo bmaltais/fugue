@@ -219,10 +219,107 @@ private slots:
         QTRY_COMPARE(app.workspace.active(), 1);
         app.key(Qt::Key_G, Qt::ControlModifier | Qt::AltModifier);
         QTRY_COMPARE(app.workspace.graphArea(), 1);
-        // The Graph's area cannot show a Canvas: the key does nothing there.
-        QTRY_COMPARE(app.workspace.active(), 1);
-        app.key(Qt::Key_C, Qt::ControlModifier | Qt::AltModifier);
-        QCOMPARE(app.workspace.graphArea(), 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Any area can switch its view, the Graph's too (#647): with a Canvas in its place the Graph is hidden but alive, nothing
+    // that acts on it runs, and an area showing it again brings it back. A one-area window can show a Canvas as well.
+    void theGraphHidesWhenItsAreaShowsACanvasAndComesBack() {
+        App app(load(blank));
+        QVERIFY(app.open());
+        QTRY_COMPARE(window_items::describe(app.window->contentItem()), window_items::expected());
+        QVERIFY(app.canvas->isVisible());
+        QVERIFY(app.commands.isEnabled("node.search"));
+        QVERIFY(app.commands.trigger("area.view-canvas")); // the window's one area
+        QTRY_VERIFY(host(app));
+        QTRY_VERIFY(find(app.window, "canvasArea"));
+        QCOMPARE(app.workspace.graphArea(), 0);
+        QTRY_VERIFY(find(app.window, "areaHeader-1"));
+        QTRY_VERIFY(!app.canvas->isVisible());
+        QVERIFY(!app.commands.isEnabled("node.search"));
+        QVERIFY(!app.commands.trigger("node.search"));
+        QVERIFY(app.commands.contextActive("app"));
+        QVERIFY(app.commands.isEnabled("view.reset-layout")); // the layout is not the default
+        // Another area; the Graph comes back in it by the key, and is placed there.
+        settle();
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QTRY_COMPARE(app.workspace.count(), 2);
+        app.workspace.setActive(2);
+        QVERIFY(!app.canvas->isVisible());
+        app.key(Qt::Key_G, Qt::ControlModifier | Qt::AltModifier);
+        QTRY_COMPARE(app.workspace.graphArea(), 2);
+        QTRY_VERIFY(app.canvas->isVisible());
+        QVERIFY(app.commands.isEnabled("node.search"));
+        QTRY_VERIFY(app.canvas->width() > 50 && sceneRect(app.canvas).intersects(sceneRect(host(app))));
+        // Closing the Graph's area closes it; the Graph is hidden.
+        app.workspace.setActive(2);
+        QVERIFY(app.commands.trigger("area.close"));
+        QTRY_COMPARE(app.workspace.count(), 1);
+        QCOMPARE(app.workspace.graphArea(), 0);
+        QTRY_VERIFY(!app.canvas->isVisible());
+        QVERIFY(!app.commands.isEnabled("node.search"));
+        // Back in the one area: the default window again, item for item.
+        QVERIFY(app.commands.trigger("area.view-graph"));
+        QTRY_VERIFY(!host(app));
+        QTRY_VERIFY(app.canvas->isVisible());
+        QVERIFY(app.commands.isEnabled("node.search"));
+        QVERIFY(!app.commands.isEnabled("view.reset-layout"));
+        QTRY_COMPARE(window_items::describe(app.window->contentItem()), window_items::expected());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The default window's Graph header menu (#647): Canvas shows a Canvas in the one area; App is the window's own App | Graph
+    // switch (view.toggle-app), not an App area.
+    void theDefaultGraphHeaderMenuPicksACanvasOrRunsTheAppSwitch() {
+        App app(load(blank));
+        QVERIFY(app.open());
+        int toggled = 0;
+        QVERIFY(app.commands.setHandler("view.toggle-app", [&toggled] { ++toggled; }));
+        QTRY_VERIFY(find(app.window, "areaType-1"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "areaType-1")));
+        QObject *menu = nullptr;
+        QTRY_VERIFY((menu = app.window->findChild<QObject *>("areaViewMenu")) && menu->property("opened").toBool());
+        app.key(Qt::Key_Down);
+        app.key(Qt::Key_Down);
+        app.key(Qt::Key_Return); // App
+        QTRY_COMPARE(toggled, 1);
+        QCOMPARE(app.workspace.viewOf(1), QString("graph"));
+        QTRY_VERIFY(!app.window->findChild<QObject *>("areaViewMenu"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "areaType-1")));
+        QTRY_VERIFY((menu = app.window->findChild<QObject *>("areaViewMenu")) && menu->property("opened").toBool());
+        app.key(Qt::Key_Down);
+        app.key(Qt::Key_Return); // Canvas
+        QTRY_COMPARE(app.workspace.viewOf(1), QString("canvas"));
+        QTRY_VERIFY(host(app) && find(app.window, "canvasArea"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // While the Graph is hidden: H still leaves focus mode (it is the window's), a library row brings the Graph into the active
+    // area before it adds its node, and a node dropped from the library where the Graph is not adds nothing.
+    void withTheGraphHiddenFocusModeAndTheNodeLibraryStillWork() {
+        App app(load(blank));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.view-canvas"));
+        QTRY_VERIFY(find(app.window, "canvasArea") && !app.canvas->isVisible());
+        // The window's own focus: a Canvas view that has it keeps H for its Hand tool.
+        app.window->contentItem()->forceActiveFocus();
+        app.key(Qt::Key_H);
+        QTRY_VERIFY(app.chrome.focusMode());
+        app.window->contentItem()->forceActiveFocus();
+        app.key(Qt::Key_H);
+        QTRY_VERIFY(!app.chrome.focusMode());
+        app.sidePanels.setTab("nodes");
+        QQuickItem *library = nullptr;
+        QTRY_VERIFY((library = find(app.window, "nodeLibrary")) != nullptr);
+        const int before = app.model.document().graph.nodes.size();
+        QVERIFY(QMetaObject::invokeMethod(library, "nodeDropped", Q_ARG(QString, "fugue/text"), Q_ARG(double, 300), Q_ARG(double, 300)));
+        QTest::qWait(50);
+        QCOMPARE(app.model.document().graph.nodes.size(), before);
+        QCOMPARE(app.workspace.graphArea(), 0);
+        QVERIFY(QMetaObject::invokeMethod(library, "nodeActivated", Q_ARG(QString, "fugue/text")));
+        QTRY_COMPARE(app.workspace.graphArea(), 1);
+        QTRY_COMPARE(app.model.document().graph.nodes.size(), before + 1);
+        QTRY_VERIFY(app.canvas->isVisible());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

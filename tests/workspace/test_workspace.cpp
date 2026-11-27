@@ -1,5 +1,5 @@
 // The window's layout of areas (#217 slice 1, workspace/workspace.h), alone, with no window: split, close and the
-// view an area shows, the Graph that always keeps one area, the borders, the area commands, and the file
+// view an area shows, the Graph that may have no area, the borders, the area commands, and the file
 // (written a moment after a change, never for the default layout, removed when the layout is the default again,
 // read at start, a damaged one kept as .bad with one line for the notice).
 
@@ -115,12 +115,11 @@ private slots:
         QCOMPARE(w.viewOf(1), QString("app"));
     }
 
-    void theGraphKeepsAnAreaAndMovesWhereItIsChosen() {
+    void theGraphMovesWhereItIsChosenAndItsAreaMaySwitchToACanvas() {
         Workspace w;
         w.splitArea(1, "row");
         w.setAreaState(2, {{"canvasId", "c1"}});
-        QVERIFY(!w.canShow(1, "canvas")); // its area holds the Graph
-        QVERIFY(!w.showView(1, "canvas"));
+        QVERIFY(w.canShow(1, "canvas")); // the Graph's area is an area like the others
         QVERIFY(w.canShow(2, "graph"));
         QVERIFY(!w.showView(2, "canvas")); // already
         QVERIFY(!w.showView(2, "storyboard"));
@@ -129,20 +128,42 @@ private slots:
         QCOMPARE(choices.at(0).toMap().value("id").toString(), QString("graph"));
         QVERIFY(choices.at(0).toMap().value("moves").toBool());
         QVERIFY(choices.at(1).toMap().value("current").toBool());
-        QVERIFY(!w.viewChoices(1).at(1).toMap().value("enabled").toBool());
+        QVERIFY(w.viewChoices(1).at(1).toMap().value("enabled").toBool());
         // Choosing Graph in area 2 trades: area 1 shows what area 2 did, its canvas too.
         QVERIFY(w.showView(2, "graph"));
         QCOMPARE(w.graphArea(), 2);
         QCOMPARE(w.viewOf(1), QString("canvas"));
         QCOMPARE(w.areaState(1).value("canvasId").toString(), QString("c1"));
-        // Closing the Graph's area gives the Graph to the area that takes the place.
-        QVERIFY(w.closeArea(2));
+        // The Graph's own area switches to a Canvas: the Graph has no area, and the layout is no longer the default.
+        QVERIFY(w.showView(2, "canvas"));
+        QCOMPARE(w.graphArea(), 0);
+        QCOMPARE(w.areaOf("graph"), 0);
+        QCOMPARE(w.viewOf(2), QString("canvas"));
+        QCOMPARE(w.active(), 2);
+    }
+
+    void closingTheGraphsAreaJustClosesItAndShowViewBringsTheGraphBack() {
+        Workspace w;
+        w.splitArea(1, "row");
+        QVERIFY(w.closeArea(1)); // the Graph's area: nothing takes the Graph
         QCOMPARE(w.count(), 1);
-        QCOMPARE(w.viewOf(1), QString("graph"));
-        QCOMPARE(w.active(), 1);
-        // The canvas area 1 showed is still in its state, for when it shows a Canvas again.
-        QCOMPARE(w.areaTree().area(1)->state.value("canvas").toObject().value("canvasId").toString(), QString("c1"));
-        QVERIFY(!w.closeArea(1)); // the only area
+        QCOMPARE(w.viewOf(2), QString("canvas"));
+        QCOMPARE(w.graphArea(), 0);
+        QCOMPARE(w.active(), 2);
+        QVERIFY(!w.closeArea(2)); // the only area
+        // With no Graph the commands fall back to the active area, and toggle-app gives the App to it.
+        QVERIFY(w.toggleApp());
+        QCOMPARE(w.viewOf(2), QString("app"));
+        QVERIFY(w.requestApp(false));
+        QCOMPARE(w.viewOf(2), QString("graph"));
+        QCOMPARE(w.graphArea(), 2);
+        // The Graph comes back in any area, the active one when asked by the command.
+        QVERIFY(w.showView(2, "canvas"));
+        w.splitArea(2, "column");
+        QCOMPARE(w.graphArea(), 0);
+        QVERIFY(w.showView(3, "graph"));
+        QCOMPARE(w.graphArea(), 3);
+        QCOMPARE(w.viewOf(2), QString("canvas"));
     }
 
     void backToOneGraphAreaRemovesTheFile() {
@@ -222,13 +243,14 @@ private slots:
         QCOMPARE(readFile(file() + ".bad"), bytes);
     }
 
-    void aLayoutWithoutTheGraphGetsItInItsFirstArea() {
+    void aLayoutWithoutTheGraphStaysWithoutIt() {
         writeFile(file(), R"({"format": 1, "root": {"type": "branch", "axis": "row", "children": [
             {"size": 0.5, "node": {"type": "leaf", "area": 4, "view": "canvas", "state": {"canvas": {"canvasId": "c1"}}}},
             {"size": 0.5, "node": {"type": "leaf", "area": 7, "view": "storyboard"}}]}})");
         Workspace w(file());
         w.restore();
-        QCOMPARE(w.viewOf(4), QString("graph"));
+        QCOMPARE(w.viewOf(4), QString("canvas"));
+        QCOMPARE(w.graphArea(), 0); // the Graph is hidden, not forced into an area
         QCOMPARE(w.viewOf(7), QString("storyboard")); // a newer build's view is kept
         QCOMPARE(w.areaTree().area(4)->state.value("canvas").toObject().value("canvasId").toString(), QString("c1"));
         QCOMPARE(w.active(), 4);
@@ -258,7 +280,7 @@ private slots:
         // One area: only the splits can run.
         QVERIFY(commands.isEnabled("area.split-row"));
         QVERIFY(!commands.isEnabled("area.close"));
-        QVERIFY(!commands.isEnabled("area.view-canvas"));
+        QVERIFY(commands.isEnabled("area.view-canvas")); // the Graph's area may show a Canvas
         QVERIFY(!commands.isEnabled("view.reset-layout"));
         QVERIFY(commands.entry("area.view-graph").value("checked").toBool());
         QVERIFY(commands.triggerKey("Ctrl+\\"));
