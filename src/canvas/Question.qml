@@ -14,7 +14,8 @@ import "../kit"
 //
 // Its actions are a KitDialogButtons row (docs/ui-ergonomics.md 2026-11-27): Enter where no button and no text field has the focus
 // presses that row's default answer, and Escape presses its cancel answer (a question with none closes as its closePolicy says).
-// A text field keeps its own Enter (its onAccepted), and a focused button its own.
+// A text field keeps its own Enter (its onAccepted), and a focused button its own. A question that opens with nothing focused gives the
+// focus to the default answer.
 //
 // A form dialog names itself with `heading` (and a `subheading`): a compact KitHero in the popup's header, in `tone` (sea for the
 // canvas dialogs, docs/canvas-look.md 20.21), full width over the card's padding. A plain question sets none and has no header.
@@ -59,6 +60,7 @@ Popup {
     }
     // The content's own item, so the keys the content leaves come here before the popup.
     contentItem: FocusScope {
+        focus: true // the keys reach it (and the row's default) also when the question focuses nothing itself
         // A popup sizes itself to its one content child; with a content item of its own it takes that item's implicit size.
         implicitWidth: children.length > 0 ? children[0].implicitWidth : 0
         implicitHeight: children.length > 0 ? children[0].implicitHeight : 0
@@ -66,12 +68,36 @@ Popup {
         Keys.onEnterPressed: event => event.accepted = question.pressDefault()
         Keys.onEscapePressed: event => event.accepted = question.pressCancel()
     }
+    // When the question opened with nothing of its content focused (its own onOpened focused no field or answer), the row's default
+    // answer takes the focus, so Enter, the arrows and Space work at once. After the question's own onOpened, which runs first.
+    onOpened: Qt.callLater(question.focusDefault)
+    // A focus scope gives the focus back to the item that had it last: a question shown again would open on the answer the person
+    // left it on (a Discard), so the answers forget it when the question closes.
+    onClosed: {
+        const answers = dialogButtons(true)
+        if (answers)
+            for (const answer of answers["buttons"])
+                answer.focus = false
+    }
+    function focusDefault() {
+        if (!opened || !contentItem)
+            return
+        let at = contentItem.Window.activeFocusItem
+        while (at && at !== contentItem)
+            at = at.parent
+        if (at && contentItem.Window.activeFocusItem !== contentItem)
+            return // something inside has the focus: a field, an answer
+        const answers = dialogButtons(false)
+        const answer = answers ? answers["defaultAction"]() : null
+        if (answer && answers["usable"](answer))
+            answer.forceActiveFocus(Qt.TabFocusReason)
+    }
     // The KitDialogButtons row of the question (the first one, depth first), or null.
-    function dialogButtons(): Item {
+    function dialogButtons(hiddenToo: bool): Item {
         const search = item => {
             for (let i = 0; i < item.children.length; ++i) {
                 const child = item.children[i]
-                if (!child.visible)
+                if (!child.visible && !hiddenToo)
                     continue
                 if (child["pressDefault"] !== undefined && child["pressCancel"] !== undefined)
                     return child
@@ -87,11 +113,11 @@ Popup {
         const focused = contentItem ? contentItem.Window.activeFocusItem : null
         if (focused instanceof TextInput || focused instanceof TextEdit)
             return false
-        const answers = dialogButtons()
+        const answers = dialogButtons(false)
         return answers !== null && answers["pressDefault"]()
     }
     function pressCancel(): bool {
-        const answers = dialogButtons()
+        const answers = dialogButtons(false)
         return answers !== null && answers["pressCancel"]()
     }
     Binding {

@@ -44,6 +44,7 @@ RowLayout {
     QtObject {
         id: own
         property var buttons: []
+        property var watched: [] // the buttons whose role change re-arranges the row
         property bool arranging: false
     }
 
@@ -55,17 +56,26 @@ RowLayout {
     function hasRole(role: string): bool {
         return own.buttons.some(b => b.visible && row.roleOf(b) === role)
     }
-    function usable(button): bool {
-        return button !== null && button.visible && button.enabled
+    function usable(button): bool { // a KitChip that is `dimmed` looks off and does nothing
+        return button !== null && button.visible && button.enabled && button["dimmed"] !== true
     }
 
-    // Puts the children in the order above. Runs when the row is made and when a button is added (a Repeater, a Loader).
+    // Puts the buttons in the order above. Runs when the row is made, when a child is added and when a button's role changes; a
+    // change of visibility moves nothing (the order is by role; the gaps follow the visible buttons by binding). Only children with a
+    // `dialogRole` (ViewButton, ThemedButton, KitChip) are buttons; anything else stays where it is, at the start.
     function arrange() {
         const helpers = [apart, dangerBefore, dangerAfter]
         const found = []
         for (let i = 0; i < children.length; ++i) {
-            if (!helpers.includes(children[i]))
+            if (!helpers.includes(children[i]) && children[i]["dialogRole"] !== undefined)
                 found.push(children[i])
+        }
+        for (const b of found) {
+            b["dialogRow"] = true // the dialog button's one size, and the solid red for a destructive answer
+            if (!own.watched.includes(b)) {
+                own.watched = own.watched.concat([b])
+                b["dialogRoleChanged"].connect(row.schedule)
+            }
         }
         const sorted = found.map((b, i) => ({ b: b, i: i, r: row.rank[row.roleOf(b)] }))
                             .sort((x, y) => x.r - y.r || x.i - y.i).map(e => e.b)
@@ -74,17 +84,33 @@ RowLayout {
                              .concat([apart], sorted.filter(b => row.roleOf(b) === "cancel"), [dangerBefore],
                                      sorted.filter(b => row.roleOf(b) === "destructive"), [dangerAfter],
                                      sorted.filter(b => row.roleOf(b) === "accept"))
-        if (wanted.every((item, i) => children[i] === item))
+        const now = []
+        for (let i = 0; i < children.length; ++i) {
+            if (wanted.includes(children[i]))
+                now.push(children[i])
+        }
+        let first = 0
+        while (first < wanted.length && now[first] === wanted[first])
+            ++first
+        if (first === wanted.length)
             return
+        // From the first one out of place on, each is taken out and put back in order (a layout and the Tab chain follow the
+        // children's order); the ones before it stay. A button that had the focus gets it back.
+        const focused = wanted.slice(first).find(item => item.activeFocus) ?? null
         own.arranging = true
-        for (const item of wanted) { // taken out and put back in order: a layout and the Tab chain follow the children's order
+        for (const item of wanted.slice(first)) {
             item.parent = null
             item.parent = row
         }
         own.arranging = false
+        if (focused)
+            focused.forceActiveFocus(Qt.TabFocusReason)
+    }
+    function schedule() {
+        Qt.callLater(row.arrange)
     }
     Component.onCompleted: arrange()
-    onChildrenChanged: if (!own.arranging) Qt.callLater(row.arrange)
+    onChildrenChanged: if (!own.arranging) row.schedule()
 
     function defaultAction() { // untyped: a ViewButton or a KitChip, both with `tapped`
         if (defaultButton)

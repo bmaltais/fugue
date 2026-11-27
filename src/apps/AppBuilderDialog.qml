@@ -578,13 +578,14 @@ Item {
             }
 
             // Cancel, Remove app (editing only: the danger tint, its own chunk; undo brings the app back), Apply, the primary last.
+            // Enter (from a toggle, a choice or a row, as from a field) applies and stays: it never opens the App view by itself.
             KitDialogButtons {
+                defaultButton: builderApply
                 ThemedButton {
                     objectName: "builderRemoveApp"
                     dialogRole: "destructive"
                     visible: root.builder.editing
                     text: qsTr("Remove app")
-                    flat: true
                     danger: true
                     onClicked: {
                         if (root.builder.removeApp())
@@ -598,6 +599,7 @@ Item {
                     onClicked: dialog.close()
                 }
                 ThemedButton {
+                    id: builderApply
                     objectName: "builderApply"
                     text: qsTr("Apply")
                     enabled: root.builder.problems.length === 0

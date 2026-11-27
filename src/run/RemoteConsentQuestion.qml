@@ -50,21 +50,20 @@ Question {
             wrapMode: Text.Wrap
             text: qsTr("Yes is remembered for each service until you remove it or change its address.")
         }
-        // No is the default as well as the focus: Enter with no button focused never sends either.
+        // No is the default, highlighted and focused (D8): Enter never sends; Yes takes a deliberate press.
         KitDialogButtons {
-            defaultButton: noButton
             ThemedButton {
                 id: noButton
                 objectName: "remoteConsentNo"
                 dialogRole: "cancel"
                 text: qsTr("No, cancel the run")
+                highlighted: true
                 onClicked: ask.answer(false)
             }
             ThemedButton {
                 id: allowButton
                 objectName: "remoteConsentYes"
                 text: qsTr("Yes, send it")
-                highlighted: true
                 onClicked: ask.answer(true)
             }
         }

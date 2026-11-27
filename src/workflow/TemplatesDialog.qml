@@ -618,6 +618,9 @@ Popup {
         }
         TemplateDetails {
             anchors.fill: parent
+            // Outside the content's mirrored subtree: it mirrors itself, its action row too.
+            LayoutMirroring.enabled: dialog.rightToLeft
+            LayoutMirroring.childrenInherit: true
             visible: dialog.detail !== null
             template: dialog.detail ?? dialog.noDetail
             onOpen: dialog.openTemplate(dialog.detailId)

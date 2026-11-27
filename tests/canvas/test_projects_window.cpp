@@ -598,6 +598,23 @@ private slots:
         click(app, NEED("projectNew"));
         type(app, NEED("newProjectName"), "client");
         shot(app, "projects-new");
+        {
+            // The New view scrolled to its foot, where its row of actions is.
+            const std::function<QObject *(QQuickItem *)> flick = [&](QQuickItem *from) -> QObject * {
+                for (QQuickItem *child : from->childItems()) {
+                    if (QString::fromLatin1(child->metaObject()->className()) == "QQuickFlickable")
+                        return child;
+                    if (QObject *found = flick(child))
+                        return found;
+                }
+                return nullptr;
+            };
+            QObject *scroller = flick(qvariant_cast<QQuickItem *>(app.window->findChild<QObject *>("projectsDialog")->property("contentItem")));
+            QVERIFY(scroller);
+            scroller->setProperty("contentY", qMax(0.0, scroller->property("contentHeight").toReal() - scroller->property("height").toReal()));
+            shot(app, "projects-new-foot");
+            scroller->setProperty("contentY", 0);
+        }
         click(app, NEED("newProjectBack"));
         click(app, NEED("projectSettings"));
         shot(app, "projects-settings");

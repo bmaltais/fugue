@@ -39,6 +39,9 @@ Rectangle {
     property bool dimmed: false
     // Its place in a dialog's KitDialogButtons row: "extra", "cancel", "destructive" or "accept" (the default).
     property string dialogRole
+    // In a dialog's row (KitDialogButtons sets it): the dialog button's one size, as ViewButton's in a row (7u tall, 3u each side, the
+    // text size in Medium), and a destructive answer is the solid red (`dangerSolid`, white ink) instead of the tint.
+    property bool dialogRow: false
     readonly property string tone: toned ? KitTone.nearest(chip) : ""
     readonly property color currentFill: tone === "" || look.params.controlColour === "accent" ? look.selectedRow
                                          : Qt.alpha(look.tone(tone).glass, 0.34)
@@ -48,21 +51,35 @@ Rectangle {
     readonly property bool pressed: tap.pressed
 
     implicitHeight: 7 * look.unit
-    implicitWidth: round ? implicitHeight : pill && text === "" ? 2 * implicitHeight : Math.max(content.implicitWidth + 5 * look.unit, implicitHeight)
+    implicitWidth: round ? implicitHeight : pill && text === "" ? 2 * implicitHeight
+                   : Math.max(content.implicitWidth + (dialogRow ? 6 : 5) * look.unit, implicitHeight)
     width: implicitWidth
     height: implicitHeight
     radius: round || (pill && look.params.chipShape === "pill") ? height / 2 : Math.min(look.params.cornerChip * look.unit, 0.45 * height)
     readonly property bool glass: frosted && look.frost > 0.001 // the frost setting at 0 makes it the plain chip
     readonly property color ink: primary ? look.accentForeground
+                                 : solidDanger ? look.dangerInk
                                  : glass && glassLoader.item ? (glassLoader.item as KitFrost).ink : glass ? "white" : look.text
     readonly property bool darkInk: glass && glassLoader.item ? (glassLoader.item as KitFrost).pale : false
     readonly property bool alarmed: danger && enabled && !primary
+    readonly property bool solidDanger: alarmed && dialogRow
     color: primary ? (pressed ? Qt.darker(look.accent, 1.15) : hovered ? Qt.lighter(look.accent, 1.08) : look.accent)
+         : solidDanger ? (hovered || pressed ? look.dangerSolidHover : look.dangerSolid)
          : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
          : glass ? "transparent" : pressed ? look.menuRow : current ? currentFill : hovered ? look.kitChipHover : look.kitChip
     readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
-    border.width: ring ? 2 : bordered ? 1 : 0
-    border.color: ring ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
+    // On the accent fill (the primary) the ring is drawn outside instead, 3px off its edge, as ViewButton's (review, 2026-11-27).
+    border.width: ring && !primary && !solidDanger ? 2 : bordered && !solidDanger ? 1 : 0
+    border.color: ring ? (alarmed ? look.error : look.accent) : look.hairlineStrong
+    Rectangle {
+        visible: chip.ring && (chip.primary || chip.solidDanger)
+        anchors.fill: parent
+        anchors.margins: -3
+        radius: chip.radius + 3
+        color: "transparent"
+        border.width: 2
+        border.color: chip.solidDanger ? chip.look.error : chip.look.accent
+    }
     activeFocusOnTab: enabled
     opacity: enabled && !dimmed ? 1 : 0.4
     Accessible.role: Accessible.Button
@@ -107,7 +124,7 @@ Rectangle {
             color: chip.ink
             style: chip.glass && !chip.darkInk ? Text.Raised : Text.Normal // white ink gets a soft 1px shadow
             styleColor: Qt.rgba(0, 0, 0, 0.35)
-            font.pixelSize: Math.round(chip.look.textSize * 13 / 12)
+            font.pixelSize: chip.dialogRow ? chip.look.textSize : Math.round(chip.look.textSize * 13 / 12)
             font.weight: Font.Medium
         }
     }

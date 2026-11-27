@@ -144,8 +144,13 @@ private slots:
 
     // Enter where no button has the focus presses the default (the primary); in a text field it is the field's; Escape is Cancel.
     void enterPressesTheDefaultAndEscapeCancels() {
-        open();
-        item("plain")->forceActiveFocus();
+        open(); // nothing forced: the question gives the default the focus itself
+        QTRY_COMPARE(focused(), QString("save"));
+        key(Qt::Key_Return);
+        QCOMPARE(window->property("answered").toString(), QString("save"));
+
+        window->setProperty("answered", QString());
+        item("plain")->forceActiveFocus(); // the focus on something that is neither an answer nor a field
         QTRY_COMPARE(focused(), QString("plain"));
         key(Qt::Key_Return);
         QCOMPARE(window->property("answered").toString(), QString("save"));

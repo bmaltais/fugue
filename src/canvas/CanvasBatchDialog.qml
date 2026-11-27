@@ -243,7 +243,8 @@ Question {
             }
         }
 
-        // Running: Hide, then Cancel batch (the danger tint, its own chunk) at the end. Finished: Close (the primary), New batch.
+        // Running: Hide, then Cancel batch (the danger tint, its own chunk) at the end. Finished: New batch at the start, Close (the
+        // primary) at the end.
         // Before a run: Close, then Run (the primary).
         KitDialogButtons {
             ThemedButton {
@@ -264,6 +265,7 @@ Question {
             }
             ThemedButton {
                 objectName: "canvasBatchAgain"
+                dialogRole: "extra"
                 visible: root.batch !== null && root.batch.finished
                 text: qsTr("New batch")
                 onClicked: root.batch.reset()

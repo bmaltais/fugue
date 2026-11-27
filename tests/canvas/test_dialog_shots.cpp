@@ -32,6 +32,24 @@ QString png(const QString &path) {
     return path;
 }
 
+// The same graph with a Preview of the crop and an app over it: the picture in, the crop out.
+QByteArray withApp(const QString &file) {
+    return QStringLiteral(R"({
+  "fugue": 1,
+  "app": {"format": 1, "title": "Crop it", "defaultView": "graph",
+          "inputs": [{"role": "image", "name": "picture", "targets": ["load.file"], "label": "Your picture"}],
+          "outputs": [{"node": "shown", "label": "The crop"}]},
+  "graph": {"nodes": {
+    "load": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "%1"}},
+    "crop": {"type": "fugue/crop", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "x": 20, "y": 10, "width": 120, "height": 90}},
+    "shown": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "crop.image"}}},
+    "region": {"type": "fugue/canvas-region", "version": "1.0.0", "inputs": {"canvas": ""}}
+  }},
+  "layout": {"nodes": {"load": {"pos": [0, 0]}, "crop": {"pos": [300, 0]}, "shown": {"pos": [300, 330]}, "region": {"pos": [600, 0]}},
+             "view": {"center": [400, 200], "zoom": 1}}
+})").arg(file).toUtf8();
+}
+
 // A picture to crop and a canvas region with no canvas: the Crop and Region windows open on them.
 QByteArray graphOf(const QString &file) {
     return QStringLiteral(R"({
@@ -43,6 +61,17 @@ QByteArray graphOf(const QString &file) {
   }},
   "layout": {"nodes": {"load": {"pos": [0, 0]}, "crop": {"pos": [300, 0]}, "region": {"pos": [600, 0]}}, "view": {"center": [400, 200], "zoom": 1}}
 })").arg(file).toUtf8();
+}
+
+// The first Repeater under `from` (a question's list of packs or services), to give it a made-up list.
+QObject *repeaterIn(QQuickItem *from) {
+    for (QQuickItem *child : from->childItems()) {
+        if (QString::fromLatin1(child->metaObject()->className()) == "QQuickRepeater")
+            return child;
+        if (QObject *found = repeaterIn(child))
+            return found;
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -121,8 +150,27 @@ private slots:
         popup(app, "closeAsk", "close-tab", {{"title", "fox-pass.fugue"}});
         popup(app, "closeAllAsk", "close-all", {{"unsavedTabs", 3}});
         popup(app, "trustAsk", "trust");
+        {
+            // With a pack in its list: the Repeater shows what App.workflows.pendingTrust would.
+            QObject *trust = named(app, "trustAsk");
+            QObject *list = repeaterIn(qvariant_cast<QQuickItem *>(trust->property("contentItem")));
+            QVERIFY(list);
+            list->setProperty("model", QVariantList{QVariantMap{{"id", "io.example.tools"}, {"version", "1.2.0"},
+                                                                {"source", "github.com/example/fugue-tools"},
+                                                                {"types", QStringList{"io.example.tools/tool", "io.example.tools/shell"}},
+                                                                {"secrets", QStringList{"EXAMPLE_TOKEN"}}}});
+            popup(app, "trustAsk", "trust-packs");
+        }
         popup(app, "recoverAsk", "recover");
         popup(app, "remoteConsentAsk", "remote-consent");
+        {
+            QObject *consent = named(app, "remoteConsentAsk");
+            QObject *list = repeaterIn(qvariant_cast<QQuickItem *>(consent->property("contentItem")));
+            QVERIFY(list);
+            list->setProperty("model", QVariantList{QVariantMap{{"instance", "fal.ai"}, {"host", "fal.run"}, {"text", "picture and prompt"}},
+                                                    QVariantMap{{"instance", "My DGX"}, {"host", "gx10.local:8188"}, {"text", "mask"}}});
+            popup(app, "remoteConsentAsk", "remote-consent-services");
+        }
         {
             QVERIFY(app.commands.trigger("panel.nodes")); // the question lives in the Node library panel
             QObject *group = nullptr;
@@ -263,6 +311,15 @@ private slots:
         inlineQuestion(app, "cache", "cacheQuestion", "cache-question");
         QVERIFY(QMetaObject::invokeMethod(named(app, "settingsPanel"), "close"));
         QTRY_VERIFY(!named(app, "settingsPanel")->property("visible").toBool());
+
+        // The App builder on a workflow that has an app (Edit app: Remove app shows), in a tab of its own.
+        app.workflows.openText(QString::fromUtf8(withApp(png(files.filePath("a.png")))));
+        QTRY_VERIFY(app.model.appBuilder()->hasBlock());
+        QVERIFY(app.commands.trigger("app.edit"));
+        QTRY_VERIFY(named(app, "appBuilderDialog")->property("opened").toBool());
+        save(app, "app-builder-edit");
+        QVERIFY(QMetaObject::invokeMethod(named(app, "appBuilderDialog"), "close"));
+        QTRY_VERIFY(!named(app, "appBuilderDialog")->property("visible").toBool());
 
         // Last, as it changes the graph: the group interface editor of a group made of Crop.
         app.model.select({"crop"});

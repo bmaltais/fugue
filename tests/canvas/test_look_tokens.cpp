@@ -271,6 +271,9 @@ private slots:
         QVERIFY(look::contrast(colors.value("foreground"), t.menuRow) >= 4.5);
         QVERIFY(look::contrast(colors.value("foreground"), t.dangerFill) >= 4.5);
         QVERIFY(look::contrast(colors.value("foreground"), t.dangerHover) >= 4.5);
+        // A dialog's destructive answer: the solid red and its hover with white ink at 4.5:1 or more, in light and dark themes.
+        QVERIFY2(look::contrast(t.dangerInk, t.dangerSolid) >= 4.5, qPrintable(t.dangerSolid.name()));
+        QVERIFY2(look::contrast(t.dangerInk, t.dangerSolidHover) >= 4.5, qPrintable(t.dangerSolidHover.name()));
         for (const QColor &port : look::portColors(colors, read.light, t)) {
             QVERIFY2(look::contrast(port, t.body) >= 2.99, qPrintable(port.name()));
             QVERIFY2(look::contrast(port, t.canvas) >= 2.99, qPrintable(port.name()));

@@ -160,6 +160,34 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A question that focuses nothing itself (the group's sinks question) opens with its default focused: the arrows move between the
+    // answers and Enter presses the focused one, with no Tab first. The trust question's default is Not now: Enter never allows a pack.
+    void aQuestionOpensWithItsDefaultFocusedAndTakesKeys() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        const auto focused = [&] { return app.window->activeFocusItem() ? app.window->activeFocusItem()->objectName() : QString(); };
+        QObject *sinks = popup(app, "groupSinksAsk");
+        sinks->setProperty("sinks", QStringList{"Save image"});
+        QMetaObject::invokeMethod(sinks, "open");
+        QTRY_VERIFY(opened(app, "groupSinksAsk"));
+        QTRY_COMPARE(focused(), QString("groupSinksOutside"));
+        app.key(Qt::Key_Left);
+        QCOMPARE(focused(), QString("groupSinksInside"));
+        app.key(Qt::Key_Right);
+        QCOMPARE(focused(), QString("groupSinksOutside"));
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(!sinks->property("visible").toBool());
+
+        QObject *trust = popup(app, "trustAsk");
+        QMetaObject::invokeMethod(trust, "open");
+        QTRY_VERIFY(opened(app, "trustAsk"));
+        QTRY_COMPARE(focused(), QString("trustLater"));
+        QVERIFY(find(app.window, "trustLater")->property("primary").toBool());
+        QVERIFY(!find(app.window, "trustAllow")->property("primary").toBool());
+        QMetaObject::invokeMethod(trust, "close");
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // Pictures: FUGUE_SHOT_DIR=<dir> test_question_dialogs savesThePictures (nothing without the variable).
     void savesThePictures() {
         if (qgetenv("FUGUE_SHOT_DIR").isEmpty())

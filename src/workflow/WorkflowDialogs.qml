@@ -342,17 +342,19 @@ Item {
                           + (modelData.secrets.length > 0 ? "\n" + qsTr("Reads secrets: %1").arg(modelData.secrets.join(", ")) : "")
                 }
             }
+            // Not now is the default, highlighted and focused: Allow lets a pack's programs run as you, so it takes a deliberate
+            // press, never a stray Enter (D8).
             KitDialogButtons {
                 ThemedButton {
                     objectName: "trustLater"
                     dialogRole: "cancel"
                     text: qsTr("Not now")
+                    highlighted: true
                     onClicked: App.workflows.dismissPendingTrust()
                 }
                 ThemedButton {
                     objectName: "trustAllow"
                     text: qsTr("Allow")
-                    highlighted: true
                     onClicked: App.workflows.allowPendingTrust()
                 }
             }

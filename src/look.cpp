@@ -209,6 +209,13 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (contrast(fg, t.dangerHover) >= 4.5)
             break;
     }
+    // A dialog's destructive answer: the theme's red as a solid fill with white ink, darkened in steps of 5% black until the ink
+    // reads at 4.5:1 (catppuccin-latte's red needs none, catppuccin's pastel red about 45%); the hover 12% darker still.
+    t.dangerInk = QColor(Qt::white);
+    t.dangerSolid = red;
+    for (int step = 1; step <= 20 && contrast(t.dangerInk, t.dangerSolid) < 4.5; ++step)
+        t.dangerSolid = mix(red, QColor(Qt::black), step * .05);
+    t.dangerSolidHover = mix(t.dangerSolid, QColor(Qt::black), .12);
     // The sheen: the least alpha of light (the text on dark themes, white on light ones) that
     // makes the step; on a fill with no room to lighten, of black at the bottom instead.
     const auto sheen = [&](const QColor &over, double step) {
@@ -634,6 +641,9 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     m_menuRow = t.menuRow;
     m_dangerFill = t.dangerFill;
     m_dangerHover = t.dangerHover;
+    m_dangerSolid = t.dangerSolid;
+    m_dangerSolidHover = t.dangerSolidHover;
+    m_dangerInk = t.dangerInk;
     m_bevel = t.bevel;
     m_sheenTop = t.sheenTop;
     m_sheenBottom = t.sheenBottom;
