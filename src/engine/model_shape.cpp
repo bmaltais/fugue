@@ -48,6 +48,9 @@ constexpr int kMostQuantTensors = 8192;
 constexpr qint64 kLongestHeader = 64 * 1024 * 1024;
 // The most metadata fields, tensors or list items a header may count (a tokenizer has ~250k).
 constexpr quint64 kMostEntries = 10 * 1000 * 1000;
+// SD3's pooled vector joins CLIP-L's 768 and CLIP-G's 1280.
+constexpr int kSd3ClipLWidth = 768;
+constexpr int kSd3ClipGWidth = 1280;
 
 // Reads a GGUF header field by field, failing once for good on a short or absurd read.
 class GgufReader {
@@ -369,6 +372,25 @@ ModelShape shapeOf(const Header &header) {
                         QStringLiteral("txt_in.in_layer.weight"), QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight"),
                         QStringLiteral("text_embedder.proj.weight"), QStringLiteral("txtmlp.1.weight")}));
     shape.clipWidth = inputWidth(tensor(shapes, {QStringLiteral("vector_in.in_layer.weight")}));
+    // SD3's pooled vector: CLIP-L (768) and CLIP-G (1280) joined, 2048 wide.
+    if (const std::optional<int> pooled = inputWidth(tensor(shapes, {QStringLiteral("y_embedder.mlp.0.weight")}));
+        pooled && *pooled == kSd3ClipLWidth + kSd3ClipGWidth && hasTensor(shapes, QStringLiteral("joint_blocks."))) {
+        shape.clipWidth = kSd3ClipLWidth;
+        shape.clipGWidth = kSd3ClipGWidth;
+    }
+    // Wan 2.1 image-to-video reads a CLIP vision model through img_emb.
+    shape.clipVisionWidth = inputWidth(tensor(shapes, {QStringLiteral("img_emb.proj.1.weight")}));
+    // Chroma (the engine finds it by this tensor too, model_loader.cpp) and Chroma Radiance.
+    shape.chroma = hasTensor(shapes, QStringLiteral("distilled_guidance_layer.in_proj."));
+    // A CLIP vision file (ComfyUI's clip_vision folder): vision_model.*, with no diffusion layers.
+    if (hasTensor(shapes, QStringLiteral("vision_model.embeddings."))) {
+        shape.isClipVision = true;
+        if (const auto cls = tensor(shapes, {QStringLiteral("vision_model.embeddings.class_embedding")}); cls && !cls->isEmpty())
+            shape.clipVisionWidth = int(cls->last());
+        // Its 3x14x14 patch_embedding would read as a diffusion model's image input: it is none, and no text encoder.
+        if (!hasTensor(shapes, QStringLiteral("text_model.")))
+            return shape;
+    }
     std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
@@ -411,7 +433,7 @@ ModelShape shapeOf(const Header &header) {
             shape.latentChannels = 16;
         // FLUX.1 (vector_in) and SD3 (context_embedder with joint_blocks); a diffusers FLUX.2 has a
         // context_embedder too, reading an LLM.
-        const bool t5 = wan || hasTensor(shapes, QStringLiteral("vector_in."))
+        const bool t5 = wan || shape.chroma || hasTensor(shapes, QStringLiteral("vector_in."))
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
         // Krea 2 (#684): its text goes through txtfusion (a 12-to-1 projector over the encoder's layers) into txtmlp,
@@ -542,7 +564,8 @@ Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &
 
 bool loadsT5(const ModelShape &diffusionModel) {
     const bool wan = diffusionModel.textKind == TextKind::T5 && diffusionModel.videoVae.value_or(false);
-    return wan || (diffusionModel.textKind == TextKind::T5 && diffusionModel.clipWidth);
+    // FLUX.1 and SD3 read a CLIP-L beside it (clipWidth); Chroma reads the T5 alone.
+    return wan || diffusionModel.chroma || (diffusionModel.textKind == TextKind::T5 && diffusionModel.clipWidth);
 }
 
 Fit loadableClipFits(const ModelShape &diffusionModel, const ModelShape &clip) {
@@ -557,6 +580,34 @@ Fit loadableClipFits(const ModelShape &diffusionModel, const ModelShape &clip) {
     if (!clip.hiddenSize)
         return Fit::Unknown;
     return *clip.hiddenSize == *diffusionModel.clipWidth ? Fit::Fits : Fit::DoesNotFit;
+}
+
+Fit loadableClipGFits(const ModelShape &diffusionModel, const ModelShape &clip) {
+    if (!clip.unloadable.isEmpty())
+        return Fit::DoesNotFit;
+    if (clip.textKind && *clip.textKind != TextKind::Clip)
+        return Fit::DoesNotFit;
+    if (!diffusionModel.textKind) // nothing known of the model
+        return Fit::Unknown;
+    if (!diffusionModel.clipGWidth)
+        return Fit::DoesNotFit;
+    if (!clip.hiddenSize)
+        return Fit::Unknown;
+    return *clip.hiddenSize == *diffusionModel.clipGWidth ? Fit::Fits : Fit::DoesNotFit;
+}
+
+Fit loadableClipVisionFits(const ModelShape &diffusionModel, const ModelShape &clipVision) {
+    if (!clipVision.unloadable.isEmpty())
+        return Fit::DoesNotFit;
+    if (clipVision.kind && !clipVision.isClipVision) // a file known to be something else
+        return Fit::DoesNotFit;
+    if (!diffusionModel.textKind) // nothing known of the model
+        return Fit::Unknown;
+    if (!diffusionModel.clipVisionWidth)
+        return Fit::DoesNotFit;
+    if (!clipVision.isClipVision || !clipVision.clipVisionWidth)
+        return Fit::Unknown;
+    return *clipVision.clipVisionWidth == *diffusionModel.clipVisionWidth ? Fit::Fits : Fit::DoesNotFit;
 }
 
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae) {

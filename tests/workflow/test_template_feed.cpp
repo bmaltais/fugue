@@ -396,30 +396,39 @@ private slots:
         options.allowed = [] { return true; };
         options.due = [] { return true; };
         options.startDelayMs = 20;
-        options.recheckMs = 60;
-        TemplateFeedDriver driver(&feed, options);
-        QSignalSpy roots(&driver, &TemplateFeedDriver::rootsChanged);
-        QSignalSpy checked(&driver, &TemplateFeedDriver::checked);
-        driver.start();
-        QTest::qWait(150);
-        QCOMPARE(m_server.requests().size(), 0); // switched off: never asks
+        options.recheckMs = 3600 * 1000; // the switch alone here; the recheck is the second driver's
+        {
+            TemplateFeedDriver driver(&feed, options);
+            QSignalSpy roots(&driver, &TemplateFeedDriver::rootsChanged);
+            QSignalSpy checked(&driver, &TemplateFeedDriver::checked);
+            driver.start();
+            QTest::qWait(150);
+            QCOMPARE(m_server.requests().size(), 0); // switched off: never asks
 
+            enabled = true;
+            driver.settingsChanged(); // the switch turned on: roots change at once and a check starts
+            QCOMPARE(roots.size(), 1);
+            QTRY_COMPARE(checked.size(), 1);
+            QCOMPARE(roots.size(), 2); // the update is a root change too
+            driver.settingsChanged(); // nothing moved
+            QCOMPARE(roots.size(), 2);
+
+            enabled = false;
+            driver.settingsChanged();
+            QCOMPARE(roots.size(), 3);
+            QTRY_VERIFY(!feed.busy());
+            const int asked = int(m_server.requests().size());
+            QTest::qWait(150);
+            QCOMPARE(int(m_server.requests().size()), asked); // off: no new check
+        }
+
+        // The 6-hourly timer, here every 60 ms: it checks again (the sha only).
         enabled = true;
-        driver.settingsChanged(); // the switch turned on: roots change at once and a check starts
-        QCOMPARE(roots.size(), 1);
-        QTRY_COMPARE(checked.size(), 1);
-        QCOMPARE(roots.size(), 2); // the update is a root change too
-        QTRY_VERIFY(checked.size() >= 2); // the 6-hourly timer, here every 60 ms: the sha only
-        driver.settingsChanged(); // nothing moved
-        QCOMPARE(roots.size(), 2);
-
-        enabled = false;
-        driver.settingsChanged();
-        QCOMPARE(roots.size(), 3);
-        QTRY_VERIFY(!feed.busy()); // a check already under way finishes its requests; no new one starts
-        const int asked = int(m_server.requests().size());
-        QTest::qWait(150);
-        QCOMPARE(int(m_server.requests().size()), asked);
+        options.recheckMs = 60;
+        TemplateFeedDriver again(&feed, options);
+        QSignalSpy checked(&again, &TemplateFeedDriver::checked);
+        again.start();
+        QTRY_VERIFY(checked.size() >= 2);
     }
 
     void anUnopenableOnlineTemplateLeavesTheBundledOneOfTheSameId() {

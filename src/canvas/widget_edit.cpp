@@ -742,6 +742,7 @@ namespace {
 const QString kDiffusionModel = QStringLiteral("fugue/diffusion-model");
 const QString kModel = QStringLiteral("fugue/model");
 const QString kTextEncoder = QStringLiteral("fugue/text-encoder");
+const QString kClipVision = QStringLiteral("fugue/clip-vision");
 const QString kVae = QStringLiteral("fugue/vae");
 const QString kLora = QStringLiteral("fugue/lora");
 } // namespace
@@ -777,7 +778,7 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     // A part is judged against the diffusion model; a diffusion model or checkpoint only by
     // whether the helper can load it at all.
     const bool judgedAlone = part == kDiffusionModel || part == kModel;
-    if (part != kTextEncoder && part != kVae && part != kLora && !judgedAlone) {
+    if (part != kTextEncoder && part != kClipVision && part != kVae && part != kLora && !judgedAlone) {
         m_fits.remove(key);
         return;
     }
@@ -802,7 +803,10 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     for (const Model &model : m_diskModels.value(modelsKey(node, input)))
         paths << model.path;
     using Rule = Fit (*)(const ModelShape &, const ModelShape &);
-    const Rule rule = part == kTextEncoder ? (input == QLatin1String("clip_l") ? Rule(loadableClipFits) : Rule(loadableTextEncoderFits))
+    const Rule rule = part == kTextEncoder ? (input == QLatin1String("clip_l")   ? Rule(loadableClipFits)
+                                              : input == QLatin1String("clip_g") ? Rule(loadableClipGFits)
+                                                                                 : Rule(loadableTextEncoderFits))
+                      : part == kClipVision ? Rule(loadableClipVisionFits)
                       : part == kVae        ? Rule(vaeFits)
                       : part == kLora       ? Rule([](const ModelShape &model, const ModelShape &lora) { return loraFits(model, lora); })
                                             : nullptr;
@@ -864,7 +868,7 @@ qint64 WidgetEdit::otherModelsMb(const QString &node, const QString &input) {
             continue;
         const InputSpec *spec = m_canvas->inputSpec(node, it.key());
         const QString type = spec ? spec->type.type.toString() : QString();
-        if (type != kDiffusionModel && type != kTextEncoder && type != kVae)
+        if (type != kDiffusionModel && type != kTextEncoder && type != kClipVision && type != kVae)
             continue;
         const Result<QString> found = library().resolve(it.value().handle(), hashes(), ModelLibrary::Hashing::RememberedOnly);
         if (found)

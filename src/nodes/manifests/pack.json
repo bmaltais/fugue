@@ -167,6 +167,16 @@
       "files": "text-encoder"
     },
     {
+      "id": "fugue/clip-vision",
+      "version": 1,
+      "kind": "resource",
+      "name": "CLIP vision",
+      "folders": [
+        "clip_vision",
+        "clip-vision"
+      ]
+    },
+    {
       "id": "fugue/vae",
       "version": 1,
       "kind": "resource",

@@ -70,6 +70,15 @@ struct ModelShape {
     std::optional<int> latentChannels; // a diffusion model's or a VAE's
     std::optional<int> hiddenSize;     // a text encoder's
     std::optional<int> clipWidth;      // a diffusion model's pooled CLIP vector (FLUX.1's vector_in); none when it reads no CLIP
+    // A diffusion model's pooled CLIP-G vector (SD3's y_embedder takes CLIP-L's 768 and CLIP-G's 1280 in one 2048-wide vector,
+    // so clipWidth is 768 for SD3 too); none when it reads no CLIP-G.
+    std::optional<int> clipGWidth;
+    // A diffusion model's CLIP vision input (Wan 2.1 image-to-video's img_emb): the width it takes; none when it reads none.
+    // A CLIP vision file's (vision_model.*): isClipVision, with the width of its class embedding here too.
+    std::optional<int> clipVisionWidth;
+    bool isClipVision = false;
+    // Chroma and Chroma Radiance (distilled_guidance_layer): they read a T5-XXL alone, no CLIP.
+    bool chroma = false;
     // A text encoder's kind, or the kind a diffusion model reads.
     std::optional<TextKind> textKind;
     // A VAE's: whether it is a video VAE; a diffusion model's: whether it wants one.
@@ -136,13 +145,18 @@ enum class Fit { Unknown, Fits, DoesNotFit };
 Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
 // textEncoderFits for Load Models' text encoder input: one LLM encoder (`llm_path`, spec 14.3), or
 // the T5 of Wan (UMT5) or FLUX.1 (`t5xxl_path`). A CLIP encoder does not fit there (it goes in
-// the CLIP-L input), nor does the T5 of SD3.
+// the CLIP-L input), nor does a T5 where the model reads none.
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
-// Whether Load Models loads the T5 a diffusion model reads: Wan's and FLUX.1's.
+// Whether Load Models loads the T5 a diffusion model reads: Wan's, FLUX.1's, SD3's and Chroma's.
 bool loadsT5(const ModelShape &diffusionModel);
 // textEncoderFits for Load Models' CLIP-L input (`clip_l_path`): a CLIP encoder as wide as the
 // pooled vector the diffusion model reads (FLUX.1's 768). A model that reads no CLIP takes none.
 Fit loadableClipFits(const ModelShape &diffusionModel, const ModelShape &clip);
+// Load Models' CLIP-G input (`clip_g_path`): SD3 reads CLIP-G (1280 wide) beside its CLIP-L and T5.
+Fit loadableClipGFits(const ModelShape &diffusionModel, const ModelShape &clip);
+// Load Models' CLIP Vision input (`clip_vision_path`): a CLIP vision file as wide as the model's img_emb takes
+// (Wan 2.1 image-to-video, 1280 for CLIP-H). A model with no img_emb takes none.
+Fit loadableClipVisionFits(const ModelShape &diffusionModel, const ModelShape &clipVision);
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae);
 // A LoRA fits a diffusion model when the layers it changes that the model has are as wide in
 // both, and at least one is found; none found tells nothing (another naming, as kohya's SDXL

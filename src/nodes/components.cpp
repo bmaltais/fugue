@@ -94,7 +94,7 @@ QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resou
 // (engine/model_shape.h): said here, before the helper fails to load them with less to say.
 // The inputs a mismatch of each part is blamed on.
 struct PartInputs {
-    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL;
+    QString diffusionModel, textEncoder, vae, lora, highNoise, clipL, clipG, clipVision;
 };
 
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
@@ -108,9 +108,12 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                                    {encoderKey, inputs.textEncoder},
                                                    {QStringLiteral("vae_path"), inputs.vae},
                                                    {QStringLiteral("high_noise_diffusion_model_path"), inputs.highNoise},
-                                                   {QStringLiteral("clip_l_path"), inputs.clipL}};
-    const QStringList partNames{QStringLiteral("base"), QStringLiteral("text_encoder"), QStringLiteral("vae"),
-                                QStringLiteral("high_noise"), QStringLiteral("clip_l")};
+                                                   {QStringLiteral("clip_l_path"), inputs.clipL},
+                                                   {QStringLiteral("clip_g_path"), inputs.clipG},
+                                                   {QStringLiteral("clip_vision_path"), inputs.clipVision}};
+    const QStringList partNames{QStringLiteral("base"),     QStringLiteral("text_encoder"), QStringLiteral("vae"),
+                                QStringLiteral("high_noise"), QStringLiteral("clip_l"),       QStringLiteral("clip_g"),
+                                QStringLiteral("clip_vision")};
     for (qsizetype i = 0; i < parts.size(); ++i) {
         if (!paths.contains(parts.at(i).first))
             continue;
@@ -149,9 +152,9 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
         const TextKind is = encoder->textKind.value_or(TextKind::Llm);
         const TextKind reads = diffusion->textKind.value_or(TextKind::Llm);
         const QString why = is == TextKind::Clip
-                                ? QStringLiteral("it is %1, which goes in the CLIP-L input; this one takes %2.").arg(kind(is), kind(reads))
+                                ? QStringLiteral("it is %1, which goes in the CLIP-L or CLIP-G input; this one takes %2.").arg(kind(is), kind(reads))
                             : is == TextKind::T5 && reads == TextKind::T5 && !loadsT5(*diffusion)
-                                ? QStringLiteral("it is %1, and Load Models loads the T5 of FLUX.1 and Wan only.").arg(kind(is))
+                                ? QStringLiteral("it is %1, and Load Models loads the T5 of FLUX.1, SD3, Chroma and Wan only.").arg(kind(is))
                             : is == TextKind::T5 && reads != TextKind::T5
                                 ? QStringLiteral("it is %1, and the model reads %2.").arg(kind(is), kind(reads))
                             : !diffusion->llmFamily.isEmpty() && !encoder->llmFamily.isEmpty() && diffusion->llmFamily != encoder->llmFamily
@@ -182,6 +185,43 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                           .arg(*diffusion->clipWidth);
             return mismatch(inputs.clipL, QStringLiteral("The CLIP encoder %1 does not fit %2: %3").arg(name("clip_l"), name("base"), why),
                             QStringLiteral("Pick another in Load Models: its list shows the CLIP encoders that fit first."));
+        }
+    }
+    // SD3 reads a CLIP-G beside its CLIP-L and T5; a model that reads none is given none.
+    const bool hasClipG = paths.contains(QStringLiteral("clip_g_path")) && !paths.value(QStringLiteral("clip_g_path")).toString().isEmpty();
+    if (diffusion->clipGWidth && !hasClipG && !inputs.clipG.isEmpty())
+        return mismatch(inputs.clipG, QStringLiteral("%1 reads a CLIP-G text encoder too, and none is set.").arg(name("base")),
+                        QStringLiteral("Pick the CLIP-G encoder (clip_g) in Load Models."));
+    if (hasClipG) {
+        const std::optional<ModelShape> clip = shapes.of(paths.value(QStringLiteral("clip_g_path")).toString());
+        if (clip && loadableClipGFits(*diffusion, *clip) == Fit::DoesNotFit) {
+            const QString why = clip->textKind.value_or(TextKind::Clip) != TextKind::Clip
+                                    ? QStringLiteral("it is %1, not a CLIP encoder.").arg(kind(clip->textKind.value_or(TextKind::Llm)))
+                                : !diffusion->clipGWidth
+                                    ? QStringLiteral("the model reads no CLIP-G encoder.")
+                                    : QStringLiteral("it is %1 wide, and the model reads %2.")
+                                          .arg(clip->hiddenSize.value_or(0))
+                                          .arg(*diffusion->clipGWidth);
+            return mismatch(inputs.clipG, QStringLiteral("The CLIP encoder %1 does not fit %2: %3").arg(name("clip_g"), name("base"), why),
+                            QStringLiteral("Pick another in Load Models: its list shows the CLIP encoders that fit first."));
+        }
+    }
+    // Wan 2.1 image-to-video reads a CLIP vision model beside its text encoder (the engine refuses to start without one).
+    const bool hasClipVision =
+        paths.contains(QStringLiteral("clip_vision_path")) && !paths.value(QStringLiteral("clip_vision_path")).toString().isEmpty();
+    if (diffusion->clipVisionWidth && !hasClipVision && !inputs.clipVision.isEmpty())
+        return mismatch(inputs.clipVision, QStringLiteral("%1 reads a CLIP vision model too, and none is set.").arg(name("base")),
+                        QStringLiteral("Pick the CLIP vision model (clip_vision) in Load Models."));
+    if (hasClipVision) {
+        const std::optional<ModelShape> vision = shapes.of(paths.value(QStringLiteral("clip_vision_path")).toString());
+        if (vision && loadableClipVisionFits(*diffusion, *vision) == Fit::DoesNotFit) {
+            const QString why = vision->kind && !vision->isClipVision ? QStringLiteral("it is not a CLIP vision model.")
+                                : !diffusion->clipVisionWidth        ? QStringLiteral("the model reads no CLIP vision model.")
+                                                                     : QStringLiteral("it is %1 wide, and the model reads %2.")
+                                                                           .arg(vision->clipVisionWidth.value_or(0))
+                                                                           .arg(*diffusion->clipVisionWidth);
+            return mismatch(inputs.clipVision, QStringLiteral("The CLIP vision model %1 does not fit %2: %3").arg(name("clip_vision"), name("base"), why),
+                            QStringLiteral("Pick another in Load Models: its list shows the CLIP vision models that fit first."));
         }
     }
     const std::optional<ModelShape> vae = shapes.of(paths.value(QStringLiteral("vae_path")).toString());
@@ -309,6 +349,10 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     }
     if (derived.contains(QStringLiteral("clip_l")))
         files.context.insert(QStringLiteral("clip_l_path"), path(derived.value(QStringLiteral("clip_l"))));
+    if (derived.contains(QStringLiteral("clip_g")))
+        files.context.insert(QStringLiteral("clip_g_path"), path(derived.value(QStringLiteral("clip_g"))));
+    if (derived.contains(QStringLiteral("clip_vision")))
+        files.context.insert(QStringLiteral("clip_vision_path"), path(derived.value(QStringLiteral("clip_vision"))));
     if (derived.contains(QStringLiteral("vae")))
         files.context.insert(QStringLiteral("vae_path"), path(derived.value(QStringLiteral("vae"))));
     if (derived.contains(QStringLiteral("tokenizer")) && !shares) // a paired host finds it in its own folders
@@ -322,7 +366,7 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         return *missing;
     if (!shares)
         return files;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input}, files.loras))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}, input, input, input}, files.loras))
         return *mismatch;
     // After the parts' check: a text encoder of the wrong family is the first thing to say.
     if (const std::optional<Error> absent = addTokenizer(files.context, derived, library, *context.hashes)) {
@@ -668,11 +712,16 @@ public:
             paths.insert(QStringLiteral("high_noise_diffusion_model_path"), path("high_noise_diffusion_model"));
         if (hasClipL(context))
             paths.insert(QStringLiteral("clip_l_path"), path("clip_l"));
+        if (hasInput(context, "clip_g"))
+            paths.insert(QStringLiteral("clip_g_path"), path("clip_g"));
+        if (hasInput(context, "clip_vision"))
+            paths.insert(QStringLiteral("clip_vision_path"), path("clip_vision"));
         // Blamed on the part that does not fit, where its picker is.
         if (const std::optional<Error> mismatch = partsMismatch(
                 derived(context), paths,
                 {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString(),
-                 QStringLiteral("high_noise_diffusion_model"), QStringLiteral("clip_l")}))
+                 QStringLiteral("high_noise_diffusion_model"), QStringLiteral("clip_l"), QStringLiteral("clip_g"),
+                 QStringLiteral("clip_vision")}))
             return {*mismatch};
         // MOSS Image's tokenizer is a file of the model, listed missing like the model files (Get ready, #544).
         if (const QJsonObject tokenizer = companionTokenizer(paths.value(QStringLiteral("diffusion_model_path")).toString()); !tokenizer.isEmpty()) {
@@ -706,13 +755,17 @@ private:
     static bool hasHighNoise(const NodeContext &context) {
         return !context.input(QStringLiteral("high_noise_diffusion_model")).isEmpty();
     }
-    static bool hasClipL(const NodeContext &context) { return !context.input(QStringLiteral("clip_l")).isEmpty(); }
+    static bool hasClipL(const NodeContext &context) { return hasInput(context, "clip_l"); }
+    static bool hasInput(const NodeContext &context, const char *name) { return !context.input(QLatin1String(name)).isEmpty(); }
     static QJsonObject derived(const NodeContext &context) {
         QJsonObject parts{{"base", context.input(QStringLiteral("diffusion_model")).json()},
                           {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
                           {"vae", context.input(QStringLiteral("vae")).json()}};
         if (hasClipL(context))
             parts.insert(QStringLiteral("clip_l"), context.input(QStringLiteral("clip_l")).json());
+        for (const char *name : {"clip_g", "clip_vision"})
+            if (hasInput(context, name))
+                parts.insert(QLatin1String(name), context.input(QLatin1String(name)).json());
         if (hasHighNoise(context))
             parts.insert(QStringLiteral("high_noise"), context.input(QStringLiteral("high_noise_diffusion_model")).json());
         return parts;
