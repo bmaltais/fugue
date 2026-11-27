@@ -3831,6 +3831,10 @@ header, border or file; areas are there for whoever asks for them (View > Areas,
   with a line on the notice when the tree would not fit the body) and closes the Queue's area when there is one (an only area that
   shows the Queue shows the Graph instead). Its menu row (View > Bars and panels) is checked while a Queue area exists. Closing it
   back to one Graph area is the default window again, with no file.
+  **Place memory** (the Alt+Q bug of 2026-11-27): closing it remembers the axis, the side, its share of its and its neighbour's room,
+  and the neighbour's area id (`queuePlace` in `workspaces.json`, written while the layout is not the default; for the default
+  window it lasts the session). Alt+Q splits that area the same way again; when it is gone or the result does not fit, or the Queue was
+  never shown, the bottom split above is made. Reset layout forgets it.
 - **Area header** (`workspace/AreaHeader.qml`, `areaHeader-<id>`, one per area, only while there are two or more areas or the one area is not the Graph (the default window's Graph has the window's own header, #262); 7u =
   28 px tall, `popup` color, a hairline foot): the **view-type menu** at the start (`areaType-<id>`: the view's glyph,
   its name, a chevron; a click opens the list of view types, the current one checked, Graph (or the App) marked "moves here" in

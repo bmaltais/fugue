@@ -21,12 +21,14 @@
 // The Queue is a view of its own (#648, spec 12.16): one per window, like the Graph. panel.queue (Alt+Q, context `app`) toggles it:
 // with no Queue area it splits the active area along its bottom and shows the Queue there (a share of kQueueShare of the area,
 // never under the Queue's minimum), refused with a message when the area is too small; with one it closes that area (the only
-// area, if it is the Queue, shows the Graph again). The keyboard goes to the new Queue and it becomes the active area, except
+// area, if it is the Queue, shows the Graph again). Closing it remembers its place (axis, side, share of its and its neighbour's
+// room, the neighbour's area id); the next press restores that when the neighbour is still there and the tree fits, else the bottom split. The keyboard goes to the new Queue and it becomes the active area, except
 // when the area split shows the App (its keys follow the active area): see queueOpened.
 //
 // Commands (context `app`): area.split-row (Ctrl+\), area.split-column (Ctrl+Alt+\), area.close (Ctrl+Alt+W),
 // area.view-graph (Ctrl+Alt+G), area.view-canvas (Ctrl+Alt+C), each on the active area, and view.reset-layout.
 
+#include <QJsonObject>
 #include <QObject>
 #include <QSizeF>
 #include <QTimer>
@@ -152,6 +154,8 @@ private:
     // The Graph's area, else the first area: what the active area falls back to.
     int fallbackArea() const;
     void save();
+    void rememberQueue(int queue);
+    bool openQueueWhereItWas(int *made);
 
     QString m_path;
     ViewRegistry m_views;
@@ -159,6 +163,8 @@ private:
     int m_active = 1;
     QSizeF m_bodySize;
     QTimer m_saveTimer;
+    // Where the Queue was when panel.queue last closed it (queuePlace in the layout file, spec 12.16): {axis, end, share, from}, or empty.
+    QJsonObject m_queuePlace;
 };
 
 } // namespace fugue

@@ -28,6 +28,7 @@
 
 #include <QByteArray>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QList>
 #include <QRectF>
 #include <QSizeF>
@@ -118,6 +119,10 @@ public:
     // `length` shared out by `shares` (summing to 1), no part under its minimum while the minimums fit; when
     // they do not, in proportion to the minimums. Each part ends on a whole pixel.
     static QList<double> distribute(double length, const QList<double> &shares, const QList<double> &minimums);
+
+    // A top-level key of the saved form this version keeps for its owner (Workspace's "queuePlace"); a null value removes it.
+    QJsonValue extra(const QString &key) const { return m_extra.value(key); }
+    void setExtra(const QString &key, const QJsonValue &value);
 
     QJsonObject toJson() const;
     QByteArray save() const; // toJson() in Fugue's file form (engine/json.h)

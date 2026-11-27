@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QJsonValue>
 
 #include "commands/command_registry.h"
 #include "engine/atomic_file.h"
@@ -128,7 +129,9 @@ void Workspace::save() {
     m_saveTimer.stop();
     if (m_path.isEmpty() || isDefault(m_tree))
         return;
-    if (const Errors errors = replaceFile(m_path, m_tree.save(), QStringLiteral("the layout")); !errors.isEmpty())
+    AreaTree out = m_tree;
+    out.setExtra(QStringLiteral("queuePlace"), m_queuePlace.isEmpty() ? QJsonValue() : QJsonValue(m_queuePlace));
+    if (const Errors errors = replaceFile(m_path, out.save(), QStringLiteral("the layout")); !errors.isEmpty())
         qWarning().noquote() << "workspace:" << errors.first().message;
 }
 
@@ -162,6 +165,8 @@ void Workspace::restore() {
         return;
     }
     keepGraph(read);
+    m_queuePlace = read.extra(QStringLiteral("queuePlace")).toObject();
+    read.setExtra(QStringLiteral("queuePlace"), QJsonValue());
     m_tree = read;
     m_active = fallbackArea();
     emit changed();
@@ -284,9 +289,64 @@ bool Workspace::requestApp(bool app) {
     return toggleApp();
 }
 
+// Remembers where area `queue` sits: the axis of its branch, whether it is after its neighbour (the one close() gives its room to),
+// its share of the two rooms together, and that neighbour's first area.
+void Workspace::rememberQueue(int queue) {
+    const AreaTree::Path path = m_tree.pathOf(queue);
+    if (path.isEmpty())
+        return;
+    const AreaTree::Node *parent = m_tree.node(path.mid(0, path.size() - 1));
+    const int index = path.last();
+    const int next = index > 0 ? index - 1 : index + 1;
+    if (!parent || parent->leaf || next >= int(parent->children.size()))
+        return;
+    const AreaTree::Node &neighbour = parent->children[size_t(next)];
+    AreaTree::Path inside = path.mid(0, path.size() - 1);
+    inside << next;
+    QList<int> ids;
+    for (const int id : m_tree.areaIds()) {
+        const AreaTree::Path other = m_tree.pathOf(id);
+        if (other.size() >= inside.size() && other.mid(0, inside.size()) == inside)
+            ids << id;
+    }
+    const double total = parent->children[size_t(index)].size + neighbour.size;
+    if (ids.isEmpty() || !(total > 0))
+        return;
+    m_queuePlace = QJsonObject{{"axis", parent->axis == AreaAxis::Row ? "row" : "column"},
+                               {"end", index > 0},
+                               {"share", parent->children[size_t(index)].size / total},
+                               {"from", ids.first()}};
+}
+
+// Splits the remembered neighbour as the Queue was, when that area is still there and the result fits.
+bool Workspace::openQueueWhereItWas(int *made) {
+    AreaAxis axis;
+    const int from = m_queuePlace.value("from").toInt();
+    const double share = m_queuePlace.value("share").toDouble();
+    if (!m_tree.area(from) || !readAxis(m_queuePlace.value("axis").toString(), &axis))
+        return false;
+    AreaTree next = m_tree;
+    *made = next.split(from, axis, ViewRegistry::kQueue, share, m_queuePlace.value("end").toBool(true));
+    if (!*made || (!m_bodySize.isEmpty() && !next.fits(m_bodySize, minimum())))
+        return false;
+    const bool focus = m_tree.area(from)->view != ViewRegistry::kApp;
+    commit(next);
+    if (focus)
+        setActive(*made);
+    emit queueOpened(*made, focus);
+    return true;
+}
+
 bool Workspace::toggleQueue() {
-    if (const int queue = queueArea())
-        return m_tree.count() > 1 ? closeArea(queue) : showView(queue, ViewRegistry::kGraph);
+    if (const int queue = queueArea()) {
+        if (m_tree.count() < 2)
+            return showView(queue, ViewRegistry::kGraph);
+        rememberQueue(queue);
+        return closeArea(queue);
+    }
+    int placed = 0;
+    if (!m_queuePlace.isEmpty() && openQueueWhereItWas(&placed))
+        return true;
     const int id = m_tree.area(m_active) ? m_active : fallbackArea();
     if (!m_tree.area(id))
         return false;
@@ -346,6 +406,7 @@ QVariantMap Workspace::areaState(int id) const {
 }
 
 void Workspace::reset() {
+    m_queuePlace = {};
     if (isDefault(m_tree) && m_tree.area(1))
         return;
     commit(AreaTree());

@@ -464,6 +464,13 @@ QJsonObject AreaTree::nodeToJson(const Node &node) {
     return json;
 }
 
+void AreaTree::setExtra(const QString &key, const QJsonValue &value) {
+    if (value.isNull() || value.isUndefined())
+        m_extra.remove(key);
+    else
+        m_extra.insert(key, value);
+}
+
 QJsonObject AreaTree::toJson() const {
     QJsonObject json = m_extra;
     json.insert("format", kFormat);
