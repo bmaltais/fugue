@@ -68,18 +68,11 @@ Rectangle {
          : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
          : glass ? "transparent" : pressed ? look.menuRow : current ? currentFill : hovered ? look.kitChipHover : look.kitChip
     readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
-    // On the accent fill (the primary) the ring is drawn outside instead, 3px off its edge, as ViewButton's (review, 2026-11-27).
-    border.width: ring && !primary && !solidDanger ? 2 : bordered && !solidDanger ? 1 : 0
-    border.color: ring ? (alarmed ? look.error : look.accent) : look.hairlineStrong
-    Rectangle {
-        visible: chip.ring && (chip.primary || chip.solidDanger)
-        anchors.fill: parent
-        anchors.margins: -3
-        radius: chip.radius + 3
-        color: "transparent"
-        border.width: 2
-        border.color: chip.solidDanger ? chip.look.error : chip.look.accent
-    }
+    // In a dialog's row the primary and the solid red answer have no ring of their own: the row draws one 3px outside them
+    // (KitDialogButtons; review, 2026-11-27).
+    readonly property bool ringOutside: dialogRow && (primary || solidDanger)
+    border.width: ring && !ringOutside ? 2 : bordered && !solidDanger ? 1 : 0
+    border.color: ring ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled && !dimmed ? 1 : 0.4
     Accessible.role: Accessible.Button

@@ -80,20 +80,12 @@ Rectangle {
          : hovered ? look.kitChipHover : look.kitChip
     // The edge: the focus ring first, then a form button's hairline, then a plain well button's hover edge.
     readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
-    // On the accent fill (the primary) the ring is drawn outside instead (`outerRing`): an accent ring on the accent did not show, and
-    // an ink ring inside it read as a smaller button on a light card (review, 2026-11-27).
-    border.width: ring && !marked && !solidDanger ? 2 : bordered && !toned && !solidDanger ? 1 : 0
-    border.color: ring ? (alarmed ? look.error : look.accent) : look.hairlineStrong
-    // The focus ring of an accent-filled button: 2px of accent 3px outside its edge, as GNOME's focus outline.
-    Rectangle {
-        visible: button.ring && (button.marked || button.solidDanger)
-        anchors.fill: parent
-        anchors.margins: -3
-        radius: button.radius + 3
-        color: "transparent"
-        border.width: 2
-        border.color: button.solidDanger ? button.look.error : button.look.accent
-    }
+    // On the accent fill (the primary) the ring is the fill's ink, as KitChip's: an accent ring on the accent did not show. In a dialog's
+    // row the primary and the solid red answer have no ring of their own: the row draws one 3px outside them (KitDialogButtons), as an
+    // ink ring inside read as a smaller button on a light card (review, 2026-11-27).
+    readonly property bool ringOutside: dialogRow && (marked || solidDanger)
+    border.width: ring && !ringOutside ? 2 : bordered && !toned && !solidDanger ? 1 : 0
+    border.color: ring ? (marked ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button

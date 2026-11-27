@@ -40,11 +40,38 @@ RowLayout {
     Item { id: apart; Layout.fillWidth: true }
     Item { id: dangerBefore; visible: row.hasRole("cancel") && row.hasRole("destructive") }
     Item { id: dangerAfter; visible: row.hasRole("destructive") && row.hasRole("accept") }
+    // The keyboard's focus ring of an accent-filled or solid red answer: 2px of accent (of the error colour on the red) 3px outside
+    // it, as GNOME's focus outline; one item for the row, made the first time and put inside the focused answer (not a child of the
+    // layout). Other answers draw their own on their edge.
+    readonly property var ringTarget: own.buttons.find(b => b.activeFocus && b["ring"] === true && b["ringOutside"] === true) ?? null
+    onRingTargetChanged: {
+        if (ringTarget && !own.ring)
+            own.ring = ringComponent.createObject(ringTarget) as Item
+        else if (own.ring)
+            own.ring.parent = ringTarget
+    }
+    Component {
+        id: ringComponent
+        Rectangle {
+            objectName: "dialogOuterRing"
+            readonly property var target: row.ringTarget
+            visible: target !== null
+            x: -3
+            y: -3
+            width: (target ? target.width : 0) + 6
+            height: (target ? target.height : 0) + 6
+            radius: (target ? target.radius : 0) + 3
+            color: "transparent"
+            border.width: 2
+            border.color: target && target.solidDanger === true ? App.theme.look.error : App.theme.look.accent
+        }
+    }
 
     QtObject {
         id: own
         property var buttons: []
         property var watched: [] // the buttons whose role change re-arranges the row
+        property Item ring: null // the outer focus ring, once made
         property bool arranging: false
     }
 

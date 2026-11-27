@@ -127,6 +127,10 @@ private slots:
         key(Qt::Key_Left);
         QCOMPARE(focused(), QString("discard"));
         QVERIFY(discard->property("ring").toBool()); // the keyboard's focus ring
+        // On the solid red (as on the accent fill) the ring is the row's, 3px outside the answer.
+        QQuickItem *outer = window->findChild<QQuickItem *>("dialogOuterRing");
+        QVERIFY(outer && outer->isVisible() && outer->parentItem() == discard);
+        QCOMPARE(outer->width(), discard->width() + 6);
         key(Qt::Key_Left);
         key(Qt::Key_Left);
         key(Qt::Key_Left); // stops at the start
