@@ -20,7 +20,9 @@ Item {
         const at = well.mapToItem(Overlay.overlay, 0, well.height)
         const end = well.mapToItem(Overlay.overlay, well.width, 0)
         const menu = menuComponent.createObject(picker, {
-            wantX: at.x, wantY: at.y, width: Math.max(end.x - at.x, 120), anchorHeight: well.height,
+            wantX: at.x, wantY: at.y, anchorWidth: end.x - at.x, anchorHeight: well.height,
+            // A model's file name keeps its end (Q4_K_M, fp8, .gguf) when the window is too narrow for it.
+            elide: entries === null ? Text.ElideMiddle : Text.ElideRight,
             entries: entries !== null ? entries : host.modelEntries(), followModels: entries === null,
             followCanvases: follow === "canvases",
             // A model list, or a long one, is searched (#84).

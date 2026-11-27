@@ -187,7 +187,7 @@ Item {
         look: grid.look
         parent: Overlay.overlay
         property var entry: null
-        width: 30 * grid.u
+        anchorWidth: 30 * grid.u
         entries: menu.entry === null ? [] : [
             {text: menu.entry.bookmarked ? qsTr("Unpin") : qsTr("Pin to the top"), value: "bookmark"},
             {text: qsTr("Duplicate"), value: "duplicate", detail: qsTr("Ctrl+D")},

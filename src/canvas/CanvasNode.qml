@@ -65,10 +65,11 @@ Item {
     // (no port marks either). Bound to the tier, never to the zoom.
     property int tier: 0
     property bool hovered: false
+    // Text made safe to put in rich text.
+    function plainHtml(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
     // The hover help of a port row: its label in bold, then its description, as rich text.
     function portTip(port) {
-        const escape = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        return "<b>" + escape(port.label) + "</b><br>" + escape(port.description || "")
+        return "<b>" + plainHtml(port.label) + "</b>" + (port.description ? "<br>" + plainHtml(port.description) : "")
     }
     property string hoverKey: "" // the port under the pointer: "o:<name>" or "i:<name>"
     property string activeCorner: "" // the resize corner under the pointer or being dragged
@@ -477,14 +478,17 @@ Item {
                     height: modelData.rowHeight
                     opacity: dim ? 0.25 : 1
 
-                    // Hover help: the label in bold and the manifest's description (empty: none).
+                    // Hover help: the label in bold and the manifest's description (empty: none), then the whole value
+                    // when the widget had to cut it short (a narrow node).
                     HoverHandler { id: inputHover }
+                    readonly property bool valueCut: widgetLoader.item !== null && (widgetLoader.item as InputWidget).valueCut
                     ToolTip.visible: (inputHover.hovered || under) && !face.dragging && face.full && shown
-                                     && (modelData.description || "") !== ""
+                                     && ((modelData.description || "") !== "" || valueCut)
                     ToolTip.delay: node.look.tooltipDelay
-                    ToolTip.text: node.portTip(modelData)
+                    ToolTip.text: node.portTip(modelData) + (valueCut ? "<br>" + node.plainHtml((widgetLoader.item as InputWidget).valueText) : "")
 
                     Loader {
+                        id: widgetLoader
                         objectName: "widgetLoader"
                         active: input.hasWidget && input.shown
                         visible: face.full

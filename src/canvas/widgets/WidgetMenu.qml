@@ -34,19 +34,31 @@ Popup {
     readonly property var shown: filtered(entries, query)
     signal picked(var value)
 
-    // A caller that sets no `width` gets one that fits the widest entry (text, detail and the row's insets), never
-    // less than 32 units: without it the list has no width of its own and the menu opens as a 4px strip.
+    // How wide it opens (one rule for every list, docs/ui-ergonomics.md 2026-11-27): at least the field that opened it
+    // (`anchorWidth`, in the overlay's pixels), and as wide as its widest entry needs (text, place badge, detail, the
+    // row's insets and the scroll bar's gutter), never less than 32 units, never wider than `maxWidth` nor the window. A
+    // field on a narrow node, or one zoomed out, opens a list sized for its entries, not for itself: the menu lives in
+    // the window's overlay, so it is drawn at screen scale whatever the canvas zoom. A caller that sets `width` takes over.
+    property real anchorWidth: 0
+    property real maxWidth: 160 * look.unit
+    // How a row too long for the list is cut. A file name keeps its end (the quantization, the precision, the
+    // extension): the model menus set Text.ElideMiddle. The row's tooltip shows the whole text.
+    property int elide: Text.ElideRight
     FontMetrics { id: rowFont; font.pixelSize: menu.look.labelSize }
-    implicitWidth: {
+    readonly property real entriesWidth: {
         let widest = 0
         for (const e of entries) {
             if (e.separator === true)
                 continue
             const detail = e.detail !== undefined && e.detail !== "" ? rowFont.advanceWidth(e.detail) + 12 : 0
-            widest = Math.max(widest, rowFont.advanceWidth(e.text ?? "") + detail)
+            const badge = e.place !== undefined && e.heading !== true ? 16 + 4 : 0
+            widest = Math.max(widest, rowFont.advanceWidth(e.text ?? "") + badge + detail)
         }
-        return Math.ceil(Math.max(32 * look.unit, 8 + 12 + 6 + widest + 8 + 2 * padding + 8))
+        const gutter = entries.length > maxRows ? Math.round(2.5 * look.unit) : 0 // FugueScrollBar.breadth
+        return Math.ceil(8 + 12 + 6 + widest + 8 + gutter + 2 * padding)
     }
+    implicitWidth: Math.min(Math.max(anchorWidth, Math.min(Math.max(32 * look.unit, entriesWidth), maxWidth)),
+                            overlay ? Placement.maxExtent(overlay.width) : Infinity)
     readonly property real rowHeight: Math.round(look.textSize * 2)
     // An entry with a `thumbnail` (a file URL) shows it small at the left, in a taller row.
     readonly property real thumbHeight: Math.round(look.textSize * 3.2)
@@ -185,7 +197,7 @@ Popup {
             Rectangle {
                 visible: entry.separator
                 x: 8
-                width: parent.width - 16 - list.edge
+                width: parent.width - 16
                 anchors.verticalCenter: parent.verticalCenter
                 height: 1
                 color: menu.look.hairline
@@ -214,13 +226,15 @@ Popup {
                 fillMode: Image.PreserveAspectCrop
             }
             Text {
+                id: label
+                objectName: "widgetMenuText"
                 visible: !entry.separator
                 x: entry.hasThumbnail ? parent.height + 4 : entry.heading ? 8 : 8 + 12 + 6
-                width: parent.width - x - 8 - detail.width - list.edge - (placeBadge.visible ? placeBadge.width + 4 : 0)
+                width: parent.width - x - 8 - detail.width - (placeBadge.visible ? placeBadge.width + 4 : 0)
                 height: entry.hasThumbnail ? parent.height : menu.rowHeight
                 verticalAlignment: entry.heading ? Text.AlignBottom : Text.AlignVCenter
                 bottomPadding: entry.heading ? 2 : 0
-                elide: Text.ElideRight
+                elide: menu.elide
                 textFormat: Text.PlainText
                 text: entry.modelData.text ?? "" // a separator has none
                 color: entry.usable && entry.modelData.dim !== true ? menu.look.text : menu.look.label
@@ -235,7 +249,7 @@ Popup {
                 visible: entry.note !== ""
                 x: 8 + 12 + 6
                 y: menu.rowHeight - 4
-                width: parent.width - x - 8 - list.edge
+                width: parent.width - x - 8
                 wrapMode: Text.Wrap
                 textFormat: Text.PlainText
                 text: entry.note
@@ -260,7 +274,7 @@ Popup {
             Text {
                 id: detail
                 anchors.right: parent.right
-                anchors.rightMargin: 8 + list.edge
+                anchors.rightMargin: 8
                 height: menu.rowHeight
                 verticalAlignment: Text.AlignVCenter
                 textFormat: Text.PlainText
@@ -268,7 +282,12 @@ Popup {
                 color: menu.look.label
                 font.pixelSize: menu.look.labelSize
             }
+            // A row cut short (the list at its widest, the window narrow) shows its whole text on hover.
+            ToolTip.visible: rowMouse.containsMouse && label.truncated
+            ToolTip.delay: menu.look.tooltipDelay
+            ToolTip.text: label.text
             MouseArea {
+                id: rowMouse
                 anchors.fill: parent
                 hoverEnabled: true
                 onEntered: if (entry.usable) list.currentIndex = entry.index

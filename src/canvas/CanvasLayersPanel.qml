@@ -149,7 +149,7 @@ Rectangle {
     }
     function openMenu(item, x, y, entries, picked) {
         const at = item.mapToItem(Overlay.overlay, x, y)
-        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y, width: 64 * u, anchorHeight: 0, entries: entries}) as WidgetMenu
+        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y, anchorWidth: 64 * u, anchorHeight: 0, entries: entries}) as WidgetMenu
         menu.picked.connect(picked)
         menu.open()
     }
