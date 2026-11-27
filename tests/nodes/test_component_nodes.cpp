@@ -806,6 +806,79 @@ private slots:
         QVERIFY(wide.error().message.contains("1280 wide"));
     }
 
+    // #704: SD3's split files (diffusion model, CLIP-L, CLIP-G, T5) and Wan 2.1 image-to-video's CLIP vision model.
+    QJsonObject sd3(Bench &bench, const QStringList &without = {}) {
+        QJsonObject parts{
+            {"diffusion_model", bench.model("fugue/diffusion-model", "diffusion_models/sd3.5_large.safetensors",
+                                            safetensors({{"context_embedder.weight", QJsonArray{2432, 4096}},
+                                                         {"x_embedder.proj.weight", QJsonArray{2432, 16, 2, 2}},
+                                                         {"y_embedder.mlp.0.weight", QJsonArray{2432, 2048}},
+                                                         {"joint_blocks.0.x_block.attn.qkv.weight", QJsonArray{7296, 2432}}}))},
+            {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/t5xxl.safetensors",
+                                         safetensors({{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                                      {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}}))},
+            {"clip_l", bench.model("fugue/text-encoder", "text_encoders/clip_l.safetensors",
+                                   safetensors({{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 768}}}))},
+            {"clip_g", bench.model("fugue/text-encoder", "text_encoders/clip_g.safetensors",
+                                   safetensors({{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 1280}}}))},
+            {"vae", bench.model("fugue/vae", "vae/ae.safetensors", safetensors({{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}}))}};
+        for (const QString &part : without)
+            parts.remove(part);
+        return bench.loaded(parts);
+    }
+
+    void loadModelsPassesSd3sThreeEncoders() {
+        Bench bench;
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(sd3(bench))}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject context = request->params.value("context").toObject();
+        QCOMPARE(context.value("t5xxl_path").toString(), Bench::modelPath("text_encoders/t5xxl.safetensors"));
+        QCOMPARE(context.value("clip_l_path").toString(), Bench::modelPath("text_encoders/clip_l.safetensors"));
+        QCOMPARE(context.value("clip_g_path").toString(), Bench::modelPath("text_encoders/clip_g.safetensors"));
+        QVERIFY(!context.contains("llm_path"));
+        QVERIFY(!context.contains("clip_vision_path"));
+    }
+
+    void sd3WithoutClipGOrWithTheWrongOneIsModelMismatchOnTheClipGInput() {
+        Bench bench;
+        const Result<JobRequest> none = bench.request(kTextEncode, {{"model", Value(sd3(bench, {"clip_g"}))}, {"prompt", Value("a fox")}});
+        QVERIFY(!none);
+        QCOMPARE(none.error().code, QStringLiteral("model_mismatch"));
+        QVERIFY2(none.error().message.contains("CLIP-G"), qPrintable(none.error().message));
+        // CLIP-L in the CLIP-G input.
+        QJsonObject model = sd3(bench);
+        QJsonObject derived = model.value("derived").toObject();
+        derived.insert("clip_g", derived.value("clip_l"));
+        model.insert("derived", derived);
+        const Result<JobRequest> wrong = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QVERIFY(!wrong);
+        QVERIFY2(wrong.error().message.contains("768 wide"), qPrintable(wrong.error().message));
+    }
+
+    void loadModelsPassesWan21sClipVisionAndAsksForItWhenTheModelReadsOne() {
+        Bench bench;
+        const QByteArray wan = safetensors({{"patch_embedding.weight", QJsonArray{5120, 36, 1, 2, 2}},
+                                            {"text_embedding.0.weight", QJsonArray{5120, 4096}},
+                                            {"img_emb.proj.1.weight", QJsonArray{1280, 1280}}});
+        QJsonObject parts{{"diffusion_model", bench.model("fugue/diffusion-model", "diffusion_models/wan2.1_i2v_480p.safetensors", wan)},
+                          {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/umt5.safetensors",
+                                                       safetensors({{"shared.weight", QJsonArray{256384, 4096}},
+                                                                    {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}}))},
+                          {"vae", bench.model("fugue/vae", "vae/wan_2.1_vae.safetensors",
+                                              safetensors({{"decoder.conv1.weight", QJsonArray{384, 16, 3, 3, 3}}}))}};
+        const Result<JobRequest> none = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        QVERIFY(!none);
+        QCOMPARE(none.error().code, QStringLiteral("model_mismatch"));
+        QVERIFY2(none.error().message.contains("CLIP vision"), qPrintable(none.error().message));
+        parts.insert("clip_vision", bench.model("fugue/clip-vision", "clip_vision/clip_vision_h.safetensors",
+                                                safetensors({{"vision_model.embeddings.class_embedding", QJsonArray{1280}}})));
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(bench.loaded(parts))}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject context = request->params.value("context").toObject();
+        QCOMPARE(context.value("clip_vision_path").toString(), Bench::modelPath("clip_vision/clip_vision_h.safetensors"));
+        QCOMPARE(context.value("t5xxl_path").toString(), Bench::modelPath("text_encoders/umt5.safetensors"));
+    }
+
     void aT5ForAnLlmModelSaysWhatTheModelReadsNotThatLoadModelsTakesIt() {
         Bench bench;
         const QJsonObject parts{

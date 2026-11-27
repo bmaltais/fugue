@@ -370,6 +370,127 @@ private slots:
         QCOMPARE(loadableClipFits(ModelShape{}, clipL), Fit::Unknown);
     }
 
+    // #704, tensor names and shapes as the files' headers have them (read 2026-11-27, Hugging Face, headers only):
+    // SD3.5 Large (Comfy-Org/stable-diffusion-3.5-fp8, the diffusion part of its checkpoint, prefix kept), Chroma
+    // (lodestones/Chroma, chroma-unlocked-v50), Chroma Radiance (lodestones/Chroma1-Radiance, latest_x0), Wan 2.1 I2V
+    // 480p (Comfy-Org/Wan_2.1_ComfyUI_repackaged) and its clip_vision_h.
+    void sd3ReadsClipLClipGAndT5() {
+        writeSafetensors(file("sd3.5_large.safetensors"),
+                         {{"model.diffusion_model.pos_embed", QJsonArray{1, 36864, 2432}},
+                          {"model.diffusion_model.x_embedder.proj.weight", QJsonArray{2432, 16, 2, 2}},
+                          {"model.diffusion_model.context_embedder.weight", QJsonArray{2432, 4096}},
+                          {"model.diffusion_model.y_embedder.mlp.0.weight", QJsonArray{2432, 2048}},
+                          {"model.diffusion_model.t_embedder.mlp.0.weight", QJsonArray{2432, 256}},
+                          {"model.diffusion_model.joint_blocks.0.context_block.attn.qkv.weight", QJsonArray{7296, 2432}},
+                          {"model.diffusion_model.joint_blocks.0.x_block.attn.qkv.weight", QJsonArray{7296, 2432}},
+                          {"model.diffusion_model.final_layer.linear.weight", QJsonArray{64, 2432}}});
+        writeSafetensors(file("t5xxl.safetensors"), {{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                                     {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}});
+        writeSafetensors(file("clip_l.safetensors"), {{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 768}}});
+        writeSafetensors(file("clip_g.safetensors"), {{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 1280}}});
+        const ModelShape sd3 = shape(file("sd3.5_large.safetensors")), t5 = shape(file("t5xxl.safetensors"));
+        const ModelShape clipL = shape(file("clip_l.safetensors")), clipG = shape(file("clip_g.safetensors"));
+        QCOMPARE(sd3.textKind, std::optional<TextKind>(TextKind::T5));
+        QCOMPARE(sd3.clipWidth, std::optional<int>(768));
+        QCOMPARE(sd3.clipGWidth, std::optional<int>(1280));
+        QVERIFY(!sd3.chroma);
+        QVERIFY(loadsT5(sd3));
+        QCOMPARE(loadableTextEncoderFits(sd3, t5), Fit::Fits);
+        QCOMPARE(loadableTextEncoderFits(sd3, clipL), Fit::DoesNotFit); // each CLIP has its own input
+        QCOMPARE(loadableClipFits(sd3, clipL), Fit::Fits);
+        QCOMPARE(loadableClipFits(sd3, clipG), Fit::DoesNotFit);
+        QCOMPARE(loadableClipGFits(sd3, clipG), Fit::Fits);
+        QCOMPARE(loadableClipGFits(sd3, clipL), Fit::DoesNotFit);
+        QCOMPARE(loadableClipGFits(sd3, t5), Fit::DoesNotFit);
+        QCOMPARE(loadableClipGFits(ModelShape{}, clipG), Fit::Unknown);
+        // CLIP-G fits SD3 only: FLUX.1 reads no CLIP-G, and a model that reads no CLIP takes none.
+        writeSafetensors(file("flux1.safetensors"), {{"txt_in.weight", QJsonArray{3072, 4096}},
+                                                     {"vector_in.in_layer.weight", QJsonArray{3072, 768}},
+                                                     {"img_in.weight", QJsonArray{3072, 64}}});
+        QVERIFY(!shape(file("flux1.safetensors")).clipGWidth);
+        QCOMPARE(loadableClipGFits(shape(file("flux1.safetensors")), clipG), Fit::DoesNotFit);
+        QCOMPARE(loadableClipGFits(diffusionModel(7680, 32), clipG), Fit::DoesNotFit);
+        // A diffusers FLUX.2's context_embedder (no joint_blocks, no y_embedder) is still an LLM reader.
+        QVERIFY(!loadsT5(diffusionModel(7680, 32)));
+    }
+
+    // Chroma has distilled_guidance_layer and no vector_in: it reads a T5-XXL alone, never a language model.
+    void chromaReadsT5WithNoClip() {
+        const QJsonObject chroma{{"distilled_guidance_layer.in_proj.weight", QJsonArray{5120, 64}},
+                                 {"distilled_guidance_layer.layers.0.in_layer.weight", QJsonArray{5120, 5120}},
+                                 {"distilled_guidance_layer.out_proj.weight", QJsonArray{3072, 5120}},
+                                 {"double_blocks.0.img_attn.qkv.weight", QJsonArray{9216, 3072}},
+                                 {"single_blocks.0.linear1.weight", QJsonArray{21504, 3072}},
+                                 {"final_layer.linear.weight", QJsonArray{64, 3072}},
+                                 {"img_in.weight", QJsonArray{3072, 64}},
+                                 {"txt_in.weight", QJsonArray{3072, 4096}}};
+        writeSafetensors(file("chroma-unlocked-v50.safetensors"), chroma);
+        // Chroma Radiance works on pixels: its patch embedder is 4D and it has no image_in the reader knows.
+        QJsonObject radiance = chroma;
+        radiance.remove("img_in.weight");
+        radiance.insert("img_in_patch.weight", QJsonArray{3072, 3, 16, 16});
+        radiance.insert("nerf_final_layer_conv.conv.weight", QJsonArray{3, 64, 3, 3});
+        writeSafetensors(file("chroma-radiance.safetensors"), radiance);
+        writeSafetensors(file("t5xxl.safetensors"), {{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                                     {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}});
+        writeSafetensors(file("qwen3_4b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 2560}},
+                                                        {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}}});
+        writeSafetensors(file("clip_l.safetensors"), {{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 768}}});
+        writeSafetensors(file("ae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}});
+        const ModelShape t5 = shape(file("t5xxl.safetensors"));
+        for (const char *name : {"chroma-unlocked-v50.safetensors", "chroma-radiance.safetensors"}) {
+            const ModelShape model = shape(file(name));
+            QVERIFY(model.chroma);
+            QCOMPARE(model.textKind, std::optional<TextKind>(TextKind::T5));
+            QVERIFY(model.llmFamily.isEmpty());
+            QVERIFY(!model.clipWidth);
+            QVERIFY(loadsT5(model));
+            QCOMPARE(loadableTextEncoderFits(model, t5), Fit::Fits);
+            QCOMPARE(loadableTextEncoderFits(model, shape(file("qwen3_4b.safetensors"))), Fit::DoesNotFit);
+            QCOMPARE(loadableClipFits(model, shape(file("clip_l.safetensors"))), Fit::DoesNotFit); // reads no CLIP
+        }
+        QCOMPARE(shape(file("chroma-unlocked-v50.safetensors")).latentChannels, std::optional<int>(16));
+        QCOMPARE(vaeFits(shape(file("chroma-unlocked-v50.safetensors")), shape(file("ae.safetensors"))), Fit::Fits);
+    }
+
+    // Wan 2.1 image-to-video has img_emb (its CLIP vision projection); Wan 2.2's and the text-to-video ones have none.
+    void wan21ImageToVideoReadsAClipVisionModel() {
+        const QJsonObject wan{{"patch_embedding.weight", QJsonArray{5120, 36, 1, 2, 2}},
+                              {"text_embedding.0.weight", QJsonArray{5120, 4096}},
+                              {"time_embedding.0.weight", QJsonArray{5120, 256}}};
+        QJsonObject i2v = wan;
+        i2v.insert("img_emb.proj.0.weight", QJsonArray{1280});
+        i2v.insert("img_emb.proj.1.weight", QJsonArray{1280, 1280});
+        i2v.insert("img_emb.proj.3.weight", QJsonArray{5120, 1280});
+        writeSafetensors(file("wan2.1_i2v_480p_14B.safetensors"), i2v);
+        writeSafetensors(file("wan2.2_i2v_high.safetensors"), wan);
+        writeSafetensors(file("clip_vision_h.safetensors"), {{"vision_model.embeddings.class_embedding", QJsonArray{1280}},
+                                                             {"vision_model.embeddings.patch_embedding.weight", QJsonArray{1280, 3, 14, 14}},
+                                                             {"vision_model.embeddings.position_embedding.weight", QJsonArray{257, 1280}},
+                                                             {"vision_model.post_layernorm.weight", QJsonArray{1280}},
+                                                             {"visual_projection.weight", QJsonArray{1024, 1280}}});
+        writeSafetensors(file("clip_vision_other.safetensors"), {{"vision_model.embeddings.class_embedding", QJsonArray{768}}});
+        writeSafetensors(file("clip_l.safetensors"), {{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 768}}});
+        writeSafetensors(file("ae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}});
+        const ModelShape wan21 = shape(file("wan2.1_i2v_480p_14B.safetensors")), wan22 = shape(file("wan2.2_i2v_high.safetensors"));
+        const ModelShape vision = shape(file("clip_vision_h.safetensors"));
+        QCOMPARE(wan21.clipVisionWidth, std::optional<int>(1280));
+        QVERIFY(!wan22.clipVisionWidth);
+        QVERIFY(vision.isClipVision);
+        QCOMPARE(vision.clipVisionWidth, std::optional<int>(1280));
+        QVERIFY(!vision.textKind); // no text encoder, no diffusion model
+        QCOMPARE(loadableClipVisionFits(wan21, vision), Fit::Fits);
+        QCOMPARE(loadableClipVisionFits(wan21, shape(file("clip_vision_other.safetensors"))), Fit::DoesNotFit); // 768 wide
+        QCOMPARE(loadableClipVisionFits(wan22, vision), Fit::DoesNotFit); // reads none
+        QCOMPARE(loadableClipVisionFits(wan21, shape(file("clip_l.safetensors"))), Fit::DoesNotFit); // a text encoder
+        QCOMPARE(loadableClipVisionFits(wan21, shape(file("ae.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loadableClipVisionFits(ModelShape{}, vision), Fit::Unknown);
+        // The rest of Wan's fits are unchanged.
+        QCOMPARE(wan21.textKind, std::optional<TextKind>(TextKind::T5));
+        QCOMPARE(wan21.latentChannels, std::optional<int>(16));
+        QVERIFY(loadsT5(wan21));
+    }
+
     // Wan (#105): text_embedding beside a 3D patch_embedding, as its GGUF names them. It reads UMT5
     // (a T5) and wants a video VAE, and its UMT5 is the one T5 Load Models takes (t5xxl_path).
     void wanReadsUmt5AndTakesAVideoVae() {
