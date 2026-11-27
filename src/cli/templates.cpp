@@ -8,6 +8,7 @@
 #include "cli/commands.h"
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
+#include "engine/template_feed.h"
 #include "engine/templates.h"
 
 namespace fugue::cli {
@@ -63,7 +64,9 @@ Reply templateList(const Command &, Context &context) {
                                   {"app", appAsJson(t)},
                                   {"own", t.own},
                                   {"inherited", t.inherited},
-                                  {"origin", t.inherited ? QStringLiteral("inherited from Default") : t.own ? QStringLiteral("own") : QStringLiteral("bundled")},
+                                  {"online", t.online},
+                                  {"origin", t.inherited ? QStringLiteral("inherited from Default") : t.own ? QStringLiteral("own")
+                                                                                                          : t.online ? QStringLiteral("online") : QStringLiteral("bundled")},
                                   {"folder", t.folder},
                                   {"workflow", t.workflow},
                                   {"preview", t.preview},
@@ -87,6 +90,28 @@ Reply templateList(const Command &, Context &context) {
         reply.errors.append(problem);
     }
     return reply;
+}
+
+// `fugue template update` (#699): fetch the templates now, whatever settings.json's fetch_templates says (the person asked).
+Reply templateUpdate(const Command &, Context &) {
+    if (TemplateFeed::disabledByEnvironment())
+        return Reply::failure(makeError("usage", QStringLiteral("FUGUE_TEMPLATES is set, so Fugue reads that folder and never fetches templates."),
+                                        QStringLiteral("Unset FUGUE_TEMPLATES to fetch.")));
+    const FeedResult result = TemplateFeed::checkNow();
+    if (result.outcome == FeedResult::Outcome::Failed)
+        return Reply::failure(makeError("download_failed", result.error, QStringLiteral("The templates in use are unchanged.")));
+    const bool updated = result.outcome == FeedResult::Outcome::Updated;
+    QJsonObject data{{"result", updated ? "updated" : "current"},
+                     {"commit", result.sha},
+                     {"previous", result.previous},
+                     {"folder", TemplateFeed::currentRoot()}};
+    if (updated) {
+        data.insert("files", result.files);
+        data.insert("downloaded", result.downloaded);
+    }
+    return Reply::success(data, updated ? QStringLiteral("Templates updated to %1: %2 of %3 files downloaded.")
+                                                .arg(result.sha.left(10)).arg(result.downloaded).arg(result.files)
+                                        : QStringLiteral("Templates are up to date at %1.").arg(result.sha.left(10)));
 }
 
 Reply workflowFromTemplate(const Command &command, Context &context) {

@@ -12,6 +12,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTemporaryDir>
+#include <QNetworkAccessManager>
 #include <QTimer>
 #include <QUrl>
 
@@ -32,6 +33,7 @@
 #include "engine/pack_loader.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/template_feed.h"
 #include "engine/trust_store.h"
 #include "node_type_reloads.h"
 #include "engine/fugue_home.h"
@@ -292,6 +294,30 @@ int main(int argc, char *argv[]) {
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::dropRecoveryCopies);
     }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &workspace, &fugue::Workspace::flush);
+    // New templates without a release (#699): once after the window shows, and again when the switch is turned on,
+    // at most once in 6 hours; Browse templates and the apps list read again when the fetch ends.
+    QNetworkAccessManager feedNetwork;
+    fugue::TemplateFeed templateFeed(&feedNetwork);
+    if (!appArgument && !fugue::TemplateFeed::disabledByEnvironment()) {
+        const auto maybeFetch = [&templateFeed, &appSettings] {
+            if (appSettings.fetchTemplates() && !templateFeed.busy() && fugue::TemplateFeed::due())
+                templateFeed.check();
+        };
+        QObject::connect(&templateFeed, &fugue::TemplateFeed::finished, &workflows, [&workflows, &appSettings](const fugue::FeedResult &) {
+            workflows.refreshTemplateRoots();
+            appSettings.templatesChecked();
+        });
+        QObject::connect(&appSettings, &fugue::SettingsModel::changed, &workflows,
+                         [&workflows, &appSettings, &maybeFetch, shown = appSettings.fetchTemplates()]() mutable {
+                             // The switch moved: the roots change at once (off hides the fetched folder, on shows it).
+                             if (shown != appSettings.fetchTemplates()) {
+                                 shown = appSettings.fetchTemplates();
+                                 workflows.refreshTemplateRoots();
+                                 maybeFetch();
+                             }
+                         });
+        QTimer::singleShot(2000, &workflows, maybeFetch);
+    }
     // The first time, in the Default session, with no model folder yet: ask, before searching anything (#619).
     if (!appArgument)
         QTimer::singleShot(0, appSettings.modelSetup(), [&appSettings] { appSettings.modelSetup()->maybeOffer(); });

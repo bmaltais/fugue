@@ -55,6 +55,9 @@
 // | restore_tabs     | true or false: start with the saved       | true                     |
 // |                  | workflows that were open when the session |                          |
 // |                  | ended (12.10, #212)                        |                          |
+// | fetch_templates  | true or false: fetch new templates from   | true                     |
+// |                  | fugue-workflows on its own (11.10, #699); |                          |
+// |                  | off: bundled and your own only            |                          |
 // | cache_results_gb | size limit of the result cache in GB;    | 10                       |
 // |                  | 0: none (10.5, #141)                     |                          |
 // | cache_thumbnails_gb | size limit of the picture previews in | 1                        |
@@ -98,6 +101,7 @@ struct Settings {
     bool lookCornersOmarchy = false; // the corner radius is Hyprland's rounding as the Corners slider's base (was corner_radius "omarchy")
     double lookSpacing = 0.5; // the kit's gaps and padding, 0 to 1; 0.5 as designed
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
+    bool fetchTemplates = true;  // fetch new templates from fugue-workflows on its own (#699)
     bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)
     // The cache limits (#141); the cache manager turns them into bytes. 0 is no limit.
     static constexpr double maxCacheGb = 100000;

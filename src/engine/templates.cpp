@@ -3,6 +3,8 @@
 #include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "engine/project.h"
+#include "engine/settings.h"
+#include "engine/template_feed.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -317,11 +319,20 @@ QList<TemplateRoot> TemplateLibrary::standardRoots() {
     const QString given = qEnvironmentVariable("FUGUE_TEMPLATES");
     if (!given.isEmpty())
         return roots << TemplateRoot{QDir::cleanPath(given), false, false};
+    if (currentSettings().fetchTemplates)
+        if (const QString online = TemplateFeed::currentRoot(); !online.isEmpty())
+            roots << TemplateRoot{online, false, false, true};
+    if (const QString bundled = bundledRoot(); !bundled.isEmpty())
+        roots << TemplateRoot{bundled, false, false};
+    return roots;
+}
+
+QString TemplateLibrary::bundledRoot() {
     const QString app = QCoreApplication::applicationDirPath();
     for (const QString &candidate : {app + QStringLiteral("/../share/fugue/templates"), app + QStringLiteral("/templates")})
         if (QFileInfo(candidate).isDir())
-            return roots << TemplateRoot{QDir::cleanPath(candidate), false, false};
-    return roots;
+            return QDir::cleanPath(candidate);
+    return {};
 }
 
 void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
@@ -350,6 +361,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             Template t;
             t.own = root.own;
             t.inherited = root.inherited;
+            t.online = root.online;
             QJsonObject about;
             if (entry.isDir()) {
                 const QDir folder(entry.absoluteFilePath());
@@ -359,7 +371,8 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 t.id = entry.fileName();
                 if (seen.contains(t.id))
                     continue; // the person's own, listed first, wins, even one that is broken
-                seen.insert(t.id);
+                if (!root.online)
+                    seen.insert(t.id); // a fetched one only takes its id once it opens: else the bundled one stays (#699)
                 t.folder = entry.absoluteFilePath();
                 t.workflow = folder.filePath(kWorkflow);
                 const TemplatePreview shown = previewFilesIn(t.folder);
@@ -424,6 +437,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             t.families = modelFamilies(t.models);
             if (entry.isDir()) // not a loose .fugue file: its folder is the person's own
                 t.carriedPacks = carriedPacksOf(t.id, t.folder, document->requirements, problems);
+            seen.insert(t.id);
             found.append({t, category != categories.end() ? category->first : int(categories.size())});
         }
     }

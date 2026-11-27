@@ -2378,5 +2378,10 @@
     "other": "Open with your %n files"
   },
   "%1 in place of %2": "%1 in place of %2",
-  "“%1” is not a number: type one, as 0.5, or leave the field empty for no limit.": "“%1” is not a number: type one, as 0.5, or leave the field empty for no limit."
+  "“%1” is not a number: type one, as 0.5, or leave the field empty for no limit.": "“%1” is not a number: type one, as 0.5, or leave the field empty for no limit.",
+  "Get new templates": "Get new templates",
+  "Not checked yet.": "Not checked yet.",
+  "Last check %1 failed: %2": "Last check %1 failed: %2",
+  "Last checked %1.": "Last checked %1.",
+  "Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1": "Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1"
 }

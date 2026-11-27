@@ -1126,6 +1126,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: recognition over recall (a frame tells clips apart where a file name cannot); the mark keeps a video from being taken for a still.
 - Rule: Floor (unchanged: the mark is not a target, the cell is). Primary, Destructive, Gaps, Posture: unchanged.
 
+### 2026-11-27 get new templates (#699)
+
+- Control: Settings > General, `src/settings/SettingsPanel.qml` "Get new templates" (`fetchTemplates`), a `SettingsParts.Toggle`, after Reopen tabs at start, before Language. Writes `fetch_templates` in settings.json. Its note ends with the "Last checked" time or the last error. The window gains no other control: the templates arrive on their own.
+- Old: a new or fixed template reached a person only with a Fugue release.
+- New: Fugue fetches the changed template files on its own, at most every 6 hours; the switch turns it off and applies at once; Browse templates lists new templates when the fetch ends.
+- Why: no steps to repeat (it just works), a choice made once so it is a setting, and a visible state ("Last checked") so a silent failure can be seen.
+- Rule: Floor (the toggle is the existing 28px one). Primary (the toggle only). Destructive (none; the bundled and own templates are never touched). Gaps (unchanged). Posture: pointer, once.
+
 ### 2026-11-22 reopen tabs at start (#212)
 
 - Control: Settings > General, `src/settings/SettingsPanel.qml` "Reopen tabs at start" (`restoreTabs`), a `SettingsParts.Toggle`, after Magnify small nodes on hover, before Language. Writes `restore_tabs` in settings.json. The window itself gains no control: the tabs come back on their own.

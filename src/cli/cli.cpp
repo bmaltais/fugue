@@ -64,7 +64,7 @@ const char *helpText =
     "  node list [--type <port type>] | node describe <type id>[@<major>]...\n"
     "  pack list (origin: own or inherited from Default, read-only there) | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
     "  model list [--type <resource type>] [--hash]\n"
-    "  template list (origin: own, bundled or inherited from Default)\n"
+    "  template list (origin: own, online, bundled or inherited from Default) | template update (fetch new templates now)\n"
     "  settings list\n"
     "  project list | project show [name|path] | project new <name> [--in <dir>] [--inherits a,b] | project add <dir>\n"
     "  project remove <name|path> | project inherits <name|path> <items|none>\n"

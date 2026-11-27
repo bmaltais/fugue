@@ -206,6 +206,8 @@ public:
     // bar's actions, #231), and the roots they come from (a test, or a project switch, may change them).
     QList<Template> templateList() const;
     void setTemplateRoots(const QList<TemplateRoot> &roots) { m_templateRoots = roots; }
+    // The standard roots again, after the templates the feed fetched or the switch for them changed (#699); the lists follow.
+    void refreshTemplateRoots();
     // A workflow file as a new tab with no file, named `title` (an action's, #231 Edit workflow): saving asks where, so the
     // file it came from (a bundled template, or compiled into Fugue) is never written. False (with a notice) when it
     // cannot be read.

@@ -757,6 +757,18 @@ private slots:
                 click(app, NEED("settingsPage-" + page));
                 QTest::qWait(300);
                 QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2-%3x%4.png").arg(out, page).arg(size.width()).arg(size.height())));
+                if (page == "general") { // the General page is longer than the window: also scrolled to Reopen tabs and Get new templates
+                    QQuickItem *flickable = nullptr;
+                    for (QQuickItem *flick : app.window->contentItem()->findChildren<QQuickItem *>())
+                        if (flick->property("contentHeight").isValid() && scroll_checks::barOf(flick) && flick->isVisible())
+                            flickable = flick;
+                    QQuickItem *toggle = app.window->contentItem()->findChild<QQuickItem *>("restoreTabs");
+                    QVERIFY(flickable && toggle);
+                    auto *content = flickable->property("contentItem").value<QQuickItem *>();
+                    flickable->setProperty("contentY", toggle->mapToItem(content, QPointF()).y() - 120);
+                    QTest::qWait(300);
+                    QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-general-scrolled-%2x%3.png").arg(out).arg(size.width()).arg(size.height())));
+                }
             }
         }
     }

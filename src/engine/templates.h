@@ -28,8 +28,9 @@
 // Fugue and is not listed; one whose pack is not installed, or installed at another version, is
 // listed with the pack named.
 //
-// The bundled templates (the fugue-workflows repo, at the commit a Fugue release pins) and the
-// person's own (~/Documents/Fugue/templates) are two roots of the same kind. The person's own
+// The bundled templates (the fugue-workflows repo, at the commit a Fugue release pins), the ones
+// fetched since (engine/template_feed.h, #699) and the person's own (~/Documents/Fugue/templates)
+// are roots of the same kind, searched in that order of precedence: own, fetched, bundled. The person's own
 // folder may also hold plain .fugue files, each a template named after its file.
 
 #include <QJsonArray>
@@ -53,6 +54,9 @@ struct TemplateRoot {
     // The Default project's own templates, which a project that inherits `templates` lists read-only (1.4.2),
     // after its own. `own` is set too: they are a person's, not Fugue's.
     bool inherited = false;
+    // The templates fetched from fugue-workflows on their own (engine/template_feed.h, #699): listed after the person's own,
+    // before the bundled ones. A template here that this Fugue cannot open does not hide the bundled one of the same id.
+    bool online = false;
 };
 
 // A pack a template folder carries (`packs/<id>/`): its id and version as its pack.json says.
@@ -86,6 +90,7 @@ struct Template {
     QStringList families;      // the model families of its models (engine/model_family.h), read, never written
     bool own = false;
     bool inherited = false;    // the Default project's own template, read-only here (1.4.2); `own` is set too
+    bool online = false;       // from the fetched feed (#699), not bundled
     QJsonArray models;         // Document::models(): resource, hash, name, source
     QJsonArray providerModels; // Document::providerModels(): resource, name; a provider's models (no hash), as the fal.ai apps name
     QStringList neededPacks;   // namespaces of its packs not installed, or installed at another version
@@ -117,11 +122,15 @@ class TemplateLibrary {
 public:
     TemplateLibrary(QList<TemplateRoot> roots, const Registry *registry);
 
-    // The person's own folder, then the bundled one: $FUGUE_TEMPLATES when set; else
-    // <prefix>/share/fugue/templates beside the running binary's bin/, else templates/ beside
+    // The person's own folder, then the fetched one, then the bundled one: $FUGUE_TEMPLATES when set (it replaces
+    // both of the others); else the fetched folder (when settings.json's fetch_templates is on and one was
+    // fetched), then <prefix>/share/fugue/templates beside the running binary's bin/, else templates/ beside
     // the binary (the build folder links the source tree's there).
     // A project that inherits `templates` (1.4.2) has the Default's own folder between them, tagged inherited.
     static QList<TemplateRoot> standardRoots();
+    // The templates this release ships: <prefix>/share/fugue/templates beside the running binary's bin/, else templates/
+    // beside the binary; empty when there is none.
+    static QString bundledRoot();
     static QString ownFolder(); // ~/Documents/Fugue/templates; a project's: <root>/documents/templates
     // The Default project's own folder (the ordinary session's ~/Documents/Fugue/templates), from inside a project too.
     static QString defaultOwnFolder();

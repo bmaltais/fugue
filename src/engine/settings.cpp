@@ -23,7 +23,7 @@ const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "models_setup", "pack_paths",    "new_seed",
                         "embed_workflow", "look_corners_omarchy",  "hover_magnifier",
-                        "restore_tabs",   "picture_mode", "step_preview", "use_on_disk", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style"};
+                        "restore_tabs",   "fetch_templates", "picture_mode", "step_preview", "use_on_disk", "cache_results_gb", "cache_thumbnails_gb", "runs_kept", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -120,6 +120,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.frost = std::clamp(value.toDouble(0.6), 0.0, 1.0);
     else if (key == QLatin1String("restore_tabs"))
         settings.restoreTabs = value.toBool();
+    else if (key == QLatin1String("fetch_templates"))
+        settings.fetchTemplates = value.toBool();
     else if (key == QLatin1String("cache_results_gb"))
         settings.cacheResultsGb = value.toDouble();
     else if (key == QLatin1String("cache_thumbnails_gb"))
@@ -163,7 +165,7 @@ QString settingOriginName(SettingOrigin origin) {
 }
 
 SettingClass settingClass(const QString &key) {
-    static const QStringList preferences{"navigation", "language", "look_corners_omarchy", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview", "use_on_disk"};
+    static const QStringList preferences{"navigation", "language", "look_corners_omarchy", "hover_magnifier", "frost", "look_preset", "look_colour", "look_glow", "look_depth", "look_corners", "look_spacing", "node_style", "new_seed", "embed_workflow", "restore_tabs", "fetch_templates", "picture_mode", "step_preview", "use_on_disk"};
     if (preferences.contains(key))
         return SettingClass::Preferences;
     if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
@@ -215,7 +217,7 @@ QJsonValue settingDefault(const QString &key) {
     if (key == QLatin1String("look_glow") || key == QLatin1String("look_depth") || key == QLatin1String("look_corners")
         || key == QLatin1String("look_spacing"))
         return 0.5;
-    if (key == QLatin1String("restore_tabs"))
+    if (key == QLatin1String("restore_tabs") || key == QLatin1String("fetch_templates"))
         return true;
     if (key == QLatin1String("cache_results_gb"))
         return 10;
@@ -263,8 +265,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= 1 ? QString() : QStringLiteral("%1 must be a number from 0 to 1.").arg(key);
     if (key == QLatin1String("hover_magnifier"))
         return value.isBool() ? QString() : QStringLiteral("hover_magnifier must be true or false.");
-    if (key == QLatin1String("restore_tabs"))
-        return value.isBool() ? QString() : QStringLiteral("restore_tabs must be true or false.");
+    if (key == QLatin1String("restore_tabs") || key == QLatin1String("fetch_templates"))
+        return value.isBool() ? QString() : QStringLiteral("%1 must be true or false.").arg(key);
     if (key == QLatin1String("cache_results_gb") || key == QLatin1String("cache_thumbnails_gb")) {
         if (value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= Settings::maxCacheGb)
             return {};
@@ -505,6 +507,8 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
         return settings.lookSpacing;
     if (key == QLatin1String("restore_tabs"))
         return settings.restoreTabs;
+    if (key == QLatin1String("fetch_templates"))
+        return settings.fetchTemplates;
     if (key == QLatin1String("cache_results_gb"))
         return settings.cacheResultsGb;
     if (key == QLatin1String("cache_thumbnails_gb"))

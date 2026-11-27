@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QLocale>
+#include <QDateTime>
 #include <QRegularExpression>
 #include <QSet>
 
@@ -23,6 +24,7 @@
 #include "engine/paths.h"
 #include "engine/project.h"
 #include "engine/providers_file.h"
+#include "engine/template_feed.h"
 #include "engine/template_search.h"
 #include "settings/provider_presets.h"
 #include "look_params.h"
@@ -816,6 +818,15 @@ void SettingsModel::openLookFile() {
     const QString path = createLookFile();
     if (m_openUrl)
         m_openUrl(QUrl::fromLocalFile(path));
+}
+
+QString SettingsModel::templatesStatus() const {
+    const fugue::FeedStatus status = fugue::TemplateFeed::status();
+    if (!status.checked.isValid())
+        return tr("Not checked yet.");
+    if (!status.error.isEmpty())
+        return tr("Last check %1 failed: %2").arg(QLocale().toString(status.checked.toLocalTime(), QLocale::ShortFormat), status.error);
+    return tr("Last checked %1.").arg(QLocale().toString(status.checked.toLocalTime(), QLocale::ShortFormat));
 }
 
 } // namespace fugue
