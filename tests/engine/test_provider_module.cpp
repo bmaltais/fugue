@@ -304,9 +304,14 @@ private slots:
         const auto toy = make("io.example.toyhttp");
         QVERIFY(toy);
         QCOMPARE(run(*toy, {}).state, QStringLiteral("done"));
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(m_log).contains("shutdown"), 6000);
+        // Wait on the module's own stop event, not on a time: the idle timer fires one second after the
+        // last job, and under load the first job can take longer than that, so the number of starts so
+        // far is read after the stop, and the next job must add exactly one.
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(m_log).contains("shutdown"), 30000);
+        const qsizetype startsBefore = logLines(m_log).count("start");
+        QVERIFY(startsBefore >= 1);
         QCOMPARE(run(*toy, {}).state, QStringLiteral("done"));
-        QCOMPARE(logLines(m_log).count("start"), 2);
+        QTRY_COMPARE(logLines(m_log).count("start"), startsBefore + 1);
         const Result<Nothing> stopped = await<Nothing>([&](Reply<Nothing> reply) { toy->shutdown(std::move(reply)); });
         QVERIFY(stopped.ok());
     }
