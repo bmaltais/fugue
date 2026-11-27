@@ -23,6 +23,7 @@
 #include "engine/run_folder.h"
 #include "engine/scheduler.h"
 #include "nodes/builtin.h"
+#include "nodes/save_files.h"
 
 using namespace fugue;
 
@@ -257,6 +258,15 @@ private slots:
         QVERIFY(QFileInfo::exists(outDir() + "/twice.webm"));
         QVERIFY(QFileInfo::exists(outDir() + "/twice-2.webm"));
         QVERIFY(QDir(outDir()).entryList(QDir::Files | QDir::Hidden).filter(".part").isEmpty());
+    }
+
+    // #414: ffmpeg's /proc/<pid>/fd/<n> in an error is the file the person asked for.
+    void anFfmpegErrorNamesTheUsersFileNotTheProcLink() {
+        const Errors errors = nodes::replacePath({makeError(QStringLiteral("node_failed"), QStringLiteral("/proc/42/fd/7: No space left on device"),
+                                                            QStringLiteral("See /proc/42/fd/7."))},
+                                                 QStringLiteral("/proc/42/fd/7"), QStringLiteral("/home/u/out/a.mp4"));
+        QCOMPARE(errors.first().message, QString("/home/u/out/a.mp4: No space left on device"));
+        QCOMPARE(errors.first().hint, QString("See /home/u/out/a.mp4."));
     }
 
     void aNameThatIsAPathIsRefusedOnTheNameInput() {

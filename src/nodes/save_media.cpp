@@ -128,14 +128,15 @@ public:
         args += {"-f", container->muxer, partial.path()};
         const Result<QByteArray> made = ffmpeg::run(QStringLiteral("ffmpeg"), args, QStringLiteral("node_failed"));
         if (!made)
-            return made.errors();
+            return replacePath(made.errors(), partial.path(), QDir(where->folder).filePath(numberedName(where->name, 1, container->extension)));
         if (!tags.isEmpty())
             QFile::remove(tags);
 
         const Result<QString> target = commitAsNew(partial, where->folder, where->name, container->extension);
         if (!target)
             return target.errors();
-        const Result<MediaHandle> file = MediaHandle::probe(m_type, *target, *context.hashes);
+        // Read through the folder that was written to, so a link swapped in for it now changes nothing.
+        const Result<MediaHandle> file = MediaHandle::probeIn(m_type, *where->dir, QFileInfo(*target).fileName(), *context.hashes);
         if (!file)
             return file.errors();
         return Result<Values>(Values{{"file", Value(file.value())}}, embedded.warnings());

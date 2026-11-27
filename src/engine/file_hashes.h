@@ -63,6 +63,11 @@ public:
     // unchanged; empty otherwise. Never reads the file.
     QString known(const QString &path);
 
+    // For a file held open: its hash, with the identity (`size`, `mtimeNs`, from fstat of the open file)
+    // taken from the open file, not from a path. The remembered hash of `shown` when those match; else
+    // `readPath` (the open file's /proc link) is hashed and remembered under `shown` with them.
+    QString hashOpen(const QString &shown, const QString &readPath, qint64 size, qint64 mtimeNs);
+
     // Records that the file now at `path` has `hash`, without reading it. For
     // a file whose bytes are known, such as one just moved or hard-linked into
     // the result cache's store (a rename keeps size and modification time).

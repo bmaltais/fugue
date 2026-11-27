@@ -66,6 +66,11 @@ QString numberedName(const QString &name, int n, const QString &extension);
 Result<QString> commitAsNew(PartialFile &partial, const QString &folder, const QString &name, const QString &extension);
 
 // Writes `bytes` under the first free numbered name in `where` and returns its path.
+// ffmpeg names the file it writes by what it was given, `/proc/<pid>/fd/<n>` (PartialFile::path), which
+// means nothing to a person: in each message and hint of `errors`, `opened` is replaced by `shown`, the
+// file the person asked for.
+Errors replacePath(Errors errors, const QString &opened, const QString &shown);
+
 Result<QString> saveAsNew(const SaveLocation &where, const QString &extension, const QByteArray &bytes);
 
 } // namespace fugue::nodes

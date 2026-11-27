@@ -168,6 +168,9 @@ Errors makeFolder(const QString &dir) {
                       QStringLiteral("Cannot create the folder %1: %2.").arg(dir, QString::fromStdString(error.message())))};
 }
 
+void (*beforeUnlinkPartial)(int fd) = nullptr;
+bool forceLinkFallback = false;
+
 PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
 
 PartialFile::PartialFile(const FolderFd &dir, const QString &name)
@@ -274,7 +277,9 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
     }
     // Claimed in the same step as the move, so a writer that found the name free a moment
     // before cannot take it too.
-    if (::renameat2(dir, from.constData(), dir, to.constData(), RENAME_NOREPLACE) == 0) {
+    if (forceLinkFallback) {
+        errno = EINVAL;
+    } else if (::renameat2(dir, from.constData(), dir, to.constData(), RENAME_NOREPLACE) == 0) {
         m_committed = true;
         return true;
     }
@@ -285,10 +290,18 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
     // A filesystem without RENAME_NOREPLACE: a hard link is made only when the name is free.
     if (::linkat(dir, from.constData(), dir, to.constData(), 0) != 0)
         return errno == EEXIST ? Result<bool>(false) : Result<bool>(writeFailed(target, errno));
-    if (m_dir)
+    if (m_dir) {
+        // Closed before it is unlinked: on NFS, unlinking an open file leaves a `.nfsXXXX` behind
+        // until the last close.
+        const int open = std::exchange(m_file, -1);
+        if (open >= 0)
+            ::close(open);
+        if (beforeUnlinkPartial)
+            beforeUnlinkPartial(open);
         ::unlinkat(dir, from.constData(), 0);
-    else
+    } else {
         QFile::remove(m_path);
+    }
     m_committed = true;
     return true;
 }

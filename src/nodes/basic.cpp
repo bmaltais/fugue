@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include "engine/atomic_file.h"
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
@@ -60,7 +61,7 @@ public:
         if (const std::optional<Error> missing = missingFile(file))
             return *missing;
         const QString kind = mediaTypeName(m_type);
-        const Result<MediaHandle> media = MediaHandle::probe(m_type, file, *context.hashes);
+        const Result<MediaHandle> media = probeFile(context, file);
         if (!media)
             return media.errors();
         Values values{{kind, Value(media.value())}};
@@ -84,6 +85,19 @@ public:
     }
 
 private:
+    // The handle of `file`. Under file roots `file` is canonical (no link in it), so its folder is walked
+    // without following a link and the file read through it: a link swapped in for a folder after the
+    // check cannot make the node read another file than the one the roots allowed (#414, as 13.6).
+    Result<MediaHandle> probeFile(const NodeContext &context, const QString &file) const {
+        if (!context.roots)
+            return MediaHandle::probe(m_type, file, *context.hashes);
+        const QFileInfo info(file);
+        const Result<FolderFd> dir = FolderFd::open(info.absolutePath(), false);
+        if (!dir)
+            return dir.errors();
+        return MediaHandle::probeIn(m_type, *dir, info.fileName(), *context.hashes);
+    }
+
     // Load Image 1.1's `mask` output (14.4), beside its image: a painted mask, else 1 - alpha, else 0.
     static Result<Values> withMask(const NodeContext &context, const MediaHandle &picture, Values values) {
         Errors warnings;
@@ -168,7 +182,7 @@ public:
         if (!target)
             return target.errors();
 
-        const Result<MediaHandle> file = MediaHandle::probe(MediaType::Image, *target, *context.hashes);
+        const Result<MediaHandle> file = MediaHandle::probeIn(MediaType::Image, *where->dir, QFileInfo(*target).fileName(), *context.hashes);
         if (!file)
             return file.errors();
         return Result<Values>(Values{{"file", Value(file.value())}}, embedded.warnings());

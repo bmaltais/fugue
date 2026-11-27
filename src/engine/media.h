@@ -28,6 +28,8 @@
 
 namespace fugue {
 
+class FolderFd;
+
 class FileHashes;
 
 enum class MediaType { Image, Video, Audio };
@@ -70,6 +72,11 @@ public:
     // and audio; nothing is decoded) and the content hash from `hashes`.
     // Fails with file_not_found or media_unreadable.
     static Result<MediaHandle> probe(MediaType type, const QString &path, FileHashes &hashes);
+    // The same for the file `leaf` of the open folder `dir`: the file is opened through the folder's
+    // descriptor (never following a link at `leaf`) and the metadata and hash come from that open
+    // file, so a folder or file swapped for a link after the folder was opened cannot make this
+    // report another file. The handle's path is `dir.path()/leaf`, as downstream nodes read by path.
+    static Result<MediaHandle> probeIn(MediaType type, const FolderFd &dir, const QString &leaf, FileHashes &hashes);
 
     // The serialized form of 2.4. fromJson needs an absolute path and a
     // sha256 hash, and fails with invalid_document otherwise. toJson writes
@@ -133,8 +140,10 @@ public:
     MediaHandle atPath(const QString &path) const;
 
 private:
-    static Result<MediaHandle> probeImage(const QString &path, FileHashes &hashes);
-    static Result<MediaHandle> probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes);
+    // `path` is read; with `shown`, that is the path the handle and the messages carry instead (an
+    // open file's /proc link), and the hash is made from what is read, not remembered by path.
+    static Result<MediaHandle> probeImage(const QString &path, FileHashes &hashes, const QString &shown = {}, const QString &shownHash = {});
+    static Result<MediaHandle> probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes, const QString &shown = {}, const QString &shownHash = {});
     Result<MediaHandle> savedImage(const QString &dir, const QString &name, FileHashes &hashes) const;
     Result<MediaHandle> withEditsApplied(const QString &dir, const QString &name, FileHashes &hashes) const;
 

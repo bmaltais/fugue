@@ -5,8 +5,12 @@
 
 #include <QDir>
 #include <QFile>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "engine/atomic_file.h"
 
@@ -243,6 +247,52 @@ private slots:
         QFile::setPermissions(path("o5/x/t"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
         QVERIFY(written);
         QCOMPARE(readAll(path("o5/x/t/a.png")), QByteArray("c"));
+    }
+
+    // #414: where a rename that never replaces is missing (NFS), the partial file is closed before its
+    // name is unlinked, so no `.nfsXXXX` is left behind. The order is observed through a seam, as the
+    // test has no NFS.
+    void theLinkFallbackClosesThePartialFileBeforeUnlinkingIt() {
+        const Result<FolderFd> dir = FolderFd::open(path("nfs"), true);
+        QVERIFY(dir.ok());
+        PartialFile partial(dir.value(), "a.png");
+        QVERIFY(!hasErrors(partial.write("c", "a.png")));
+        static int closed = 0, seen = -2;
+        closed = 0;
+        seen = -2;
+        beforeUnlinkPartial = [](int fd) {
+            seen = fd;
+            errno = 0;
+            closed = (fd >= 0 && ::fcntl(fd, F_GETFD) == -1 && errno == EBADF) ? 1 : 0;
+        };
+        forceLinkFallback = true;
+        const Result<bool> committed = partial.commit("a.png", Overwrite::Never);
+        forceLinkFallback = false;
+        beforeUnlinkPartial = nullptr;
+        QVERIFY(committed.ok() && *committed);
+        QVERIFY(seen >= 0);
+        QCOMPARE(closed, 1);
+        QCOMPARE(QDir(path("nfs")).entryList(QDir::Files | QDir::Hidden), QStringList{"a.png"});
+    }
+
+    // #414: in a folder with no read permission the stale partial files cannot be listed, so none is removed
+    // (stated in the spec); the save itself still works.
+    void staleFilesStayInAWriteOnlyFolder() {
+        QVERIFY(QDir(path("")).mkpath("wo"));
+        const QString stale = path("wo/.a.png.fugue-999999-1.part");
+        writeAll(stale, "x");
+        QProcess::execute("touch", {"-d", "2020-01-01", stale});
+        QVERIFY(QFile::setPermissions(path("wo"), QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        const Result<FolderFd> dir = FolderFd::open(path("wo"), false);
+        bool saved = false;
+        if (dir.ok()) {
+            PartialFile::removeStale(dir.value());
+            PartialFile partial(dir.value(), "a.png");
+            saved = !hasErrors(partial.write("c", "a.png")) && partial.commit("a.png", Overwrite::Never).ok();
+        }
+        QFile::setPermissions(path("wo"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QVERIFY(saved);
+        QVERIFY(QFileInfo::exists(stale));
     }
 
     void foldersAreMadeAndAnExistingNameIsKept() {
