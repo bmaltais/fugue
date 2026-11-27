@@ -87,6 +87,10 @@ _Avoid_: scene, patch (a *project* is a workspace, below)
 A folder Fugue finds models in: its own (`~/.local/share/fugue/models`) or one the settings add, in ComfyUI's layout or holding one kind. In code, a *root*. The one downloads go in is the *download folder*.
 _Avoid_: model path, models dir
 
+**Model choice** (a **Use my file** ask):
+An ask to use a file already on disk in place of a missing model, spec 2.5. One module, `workflow/model_choice.h`, owns the ask with its destination (a tab, and the graph or the App view) fixed when it is made, one hash read per target shared by the asks, one automatic swap per model, the tried marks, cancel by token, the result per ask, the Undo record and the "Reading your file" line, and the open asked for last. The graph and the App view are its two destinations (`ChoiceDestination`).
+_Avoid_: use-on-disk state, swap
+
 **Part**:
 A download not finished yet, `<file>.part` beside where the model goes; it becomes the model only once its hash is the handle's.
 _Avoid_: temp file, partial
