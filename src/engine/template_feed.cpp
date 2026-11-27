@@ -156,6 +156,8 @@ bool TemplateFeed::disabledByEnvironment() { return !qEnvironmentVariable("FUGUE
 
 QString TemplateFeed::storeDir() { return (shared() ? baseDataDir() : dataDir()) + QStringLiteral("/templates-online"); }
 
+bool TemplateFeed::storeIsShared() { return shared(); }
+
 bool TemplateFeed::automaticAllowed() {
     return !disabledByEnvironment() && shared() && !TemplateLibrary::bundledIsBuildTree();
 }
@@ -220,15 +222,16 @@ void TemplateFeed::check() {
     if (m_busy)
         return;
     m_busy = true;
-    m_previous = currentSha();
     m_wanted.clear();
     QDir().mkpath(storeDir());
     m_lock = std::make_unique<QLockFile>(storeDir() + QStringLiteral("/.lock"));
-    m_lock->setStaleLockTime(15 * 60 * 1000);
+    m_lock->setStaleLockTime(0); // only a holder that died is stale: a live update may take long
     if (!m_lock->tryLock(0)) {
         m_lock.reset();
+        m_previous = currentSha();
         return done({FeedResult::Outcome::Busy, m_previous, m_previous, QStringLiteral("Another Fugue is updating the templates."), 0, 0});
     }
+    m_previous = currentSha(); // read under the lock: another Fugue may have just switched
     // Staging folders a crashed update left (this process's own name is replaced when it stages).
     const QDateTime old = QDateTime::currentDateTimeUtc().addSecs(-kStaleStagingSecs);
     for (const QFileInfo &stale : QDir(storeDir()).entryInfoList({QStringLiteral(".staging-*")}, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot | QDir::NoSymLinks))
@@ -380,9 +383,27 @@ void TemplateFeed::gotFile() {
 void TemplateFeed::finish() {
     if (!holdsTemplates(m_staging))
         return fail(QStringLiteral("The templates hold no templates."));
+    // Which templates the bundled root held now: a snapshot hides only the bundled ids that were there and are not in it.
+    QJsonArray bundledIds;
+    const QString bundledRoot = m_bundled.isEmpty() ? TemplateLibrary::bundledRoot() : m_bundled;
+    if (!bundledRoot.isEmpty())
+        for (const QFileInfo &entry : QDir(bundledRoot).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+            if (QFileInfo(entry.absoluteFilePath() + QStringLiteral("/template.json")).isFile()
+                || QFileInfo(entry.absoluteFilePath() + QStringLiteral("/workflow.fugue")).isFile())
+                bundledIds.append(entry.fileName());
+    QFile idsFile(m_staging + QStringLiteral("/bundled-ids.json"));
+    if (!idsFile.open(QIODevice::WriteOnly | QIODevice::NewOnly) || idsFile.write(QJsonDocument(QJsonObject{{"bundled", bundledIds}}).toJson()) < 0)
+        return fail(QStringLiteral("Fugue could not write the template record."));
+    idsFile.close();
     const QString target = storeDir() + QLatin1Char('/') + m_sha;
-    if (QFileInfo::exists(target) && !QDir(target).removeRecursively())
-        return fail(QStringLiteral("Fugue could not replace %1.").arg(target));
+    // Never remove a live folder in place: other Fugues may be reading it. It is renamed aside, then removed.
+    QString aside;
+    if (QFileInfo::exists(target)) {
+        aside = target + QStringLiteral(".old-") + QString::number(::getpid());
+        QDir(aside).removeRecursively();
+        if (!QDir().rename(target, aside))
+            return fail(QStringLiteral("Fugue could not replace %1.").arg(target));
+    }
     if (!QDir().rename(m_staging, target))
         return fail(QStringLiteral("Fugue could not move the templates into %1.").arg(target));
     QSaveFile current(currentPath());
@@ -390,6 +411,8 @@ void TemplateFeed::finish() {
         QDir(target).removeRecursively();
         return fail(QStringLiteral("Fugue could not write %1.").arg(currentPath()));
     }
+    if (!aside.isEmpty())
+        QDir(aside).removeRecursively();
     // The previous one stays: a window that scanned it a moment ago may still be reading it.
     for (const QFileInfo &old : QDir(storeDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks))
         if (old.fileName() != m_sha && old.fileName() != m_previous && isSha(old.fileName()))

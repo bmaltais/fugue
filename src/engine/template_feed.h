@@ -68,6 +68,8 @@ public:
     // FUGUE_HOME or --home root), and not a development build whose bundled folder is the build tree's link into the source
     // checkout (the developer's submodule wins).
     static bool automaticAllowed();
+    // The store is the one the Default session and chosen projects share (not a scratch FUGUE_HOME or --home root's own).
+    static bool storeIsShared();
     // Smaller caps for a test: one file, every file, the entries. resetLimitsForTest() puts the real ones back.
     static void setLimitsForTest(qint64 maxFile, qint64 maxTotal, int maxEntries);
     static void resetLimitsForTest();

@@ -319,7 +319,9 @@ QList<TemplateRoot> TemplateLibrary::standardRoots() {
     const QString given = qEnvironmentVariable("FUGUE_TEMPLATES");
     if (!given.isEmpty())
         return roots << TemplateRoot{QDir::cleanPath(given), false, false};
-    if (currentSettings().fetchTemplates)
+    // A development build (the build tree's link into the source checkout) never lists the shared store: the installed Fugue's
+    // fetched copy would hide the checkout's own templates.
+    if (currentSettings().fetchTemplates && !(bundledIsBuildTree() && TemplateFeed::storeIsShared()))
         roots << TemplateRoot{QString(), false, false, true}; // its folder is read from `current` at each scan
     if (const QString bundled = bundledRoot(); !bundled.isEmpty())
         roots << TemplateRoot{bundled, false, false};
@@ -363,10 +365,15 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
     };
     Categories shared;
     bool onlineInUse = false;
+    QSet<QString> snapshotBundled; // the bundled ids the snapshot was made beside (bundled-ids.json); none known: nothing is hidden
     for (const TemplateRoot &root : m_roots) {
         const QString path = pathOf(root);
-        if (root.online && !path.isEmpty() && QFileInfo(path).isDir())
+        if (root.online && !path.isEmpty() && QFileInfo(path).isDir()) {
             onlineInUse = true;
+            if (const Result<QJsonObject> record = readObject(QDir(path).filePath(QStringLiteral("bundled-ids.json"))); record)
+                for (const QJsonValue id : record->value(QStringLiteral("bundled")).toArray())
+                    snapshotBundled.insert(id.toString());
+        }
         if (!root.own && shared.isEmpty() && !path.isEmpty() && QFileInfo(QDir(path).filePath(QStringLiteral("categories.json"))).isFile())
             shared = readCategories(path);
     }
@@ -395,7 +402,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 t.id = entry.fileName();
                 if (root.online)
                     onlineIds.insert(t.id);
-                else if (bundled && onlineInUse && !onlineIds.contains(t.id))
+                else if (bundled && onlineInUse && snapshotBundled.contains(t.id) && !onlineIds.contains(t.id))
                     continue; // deleted or renamed upstream: the fetched snapshot no longer has it
                 if (seen.contains(t.id))
                     continue; // the person's own, listed first, wins, even one that is broken

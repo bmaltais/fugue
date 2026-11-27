@@ -352,16 +352,21 @@ private slots:
         write(bundled.path() + "/beta/workflow.fugue", flow());
         write(bundled.path() + "/gone/template.json", category("Gone", "a"));
         write(bundled.path() + "/gone/workflow.fugue", flow());
+        // A template this release added that the snapshot (made before it) never heard of stays: only what was bundled when the
+        // snapshot was made and is not in it was deleted upstream.
+        write(bundled.path() + "/fresh/template.json", category("Fresh", "a"));
+        write(bundled.path() + "/fresh/workflow.fugue", flow());
+        write(online.path() + "/bundled-ids.json", R"({"bundled": ["alpha", "beta", "gone"]})");
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);
         const TemplateLibrary library({TemplateRoot{online.path(), false, false, true}, {bundled.path(), false}}, &registry);
         QStringList ids;
         for (const Template &t : library.list())
             ids << t.id;
-        QCOMPARE(ids, (QStringList{"beta", "alpha"})); // the fetched order (B, then A) holds for the bundled stand-in too; "gone" is hidden
+        QCOMPARE(ids, (QStringList{"beta", "alpha", "fresh"})); // the fetched order (B, then A) holds for the bundled stand-in too; "gone" is hidden
         // Without a fetched snapshot nothing is hidden.
         const TemplateLibrary plain({{bundled.path(), false}}, &registry);
-        QCOMPARE(plain.list().size(), 3);
+        QCOMPARE(plain.list().size(), 4);
     }
 
     void anOnlineTemplateFolderIsAnAppByItsIdNotItsPath() {
@@ -459,15 +464,25 @@ private slots:
             return false;
         };
         QVERIFY(Settings().fetchTemplates);
+        qputenv("FUGUE_HOME", m_dir.filePath("scratch-root").toUtf8()); // a scratch root has a store of its own, listed even in a dev build
         QVERIFY(hasOnline());
         QVERIFY(!hasErrors(changeSetting(settingsPath(), "fetch_templates", false)));
         QVERIFY(!hasOnline());
         QVERIFY(!hasErrors(changeSetting(settingsPath(), "fetch_templates", true)));
         QVERIFY(hasOnline());
+        // A development build (the bundled folder is the build tree's link) never lists the shared store, so the checkout's own
+        // templates are not hidden by the installed Fugue's fetched copy; a scratch root's own store is listed.
+        qunsetenv("FUGUE_HOME");
+        QVERIFY(TemplateLibrary::bundledIsBuildTree());
+        QVERIFY(TemplateFeed::storeIsShared());
+        QVERIFY(!hasOnline());
+        qputenv("FUGUE_HOME", m_dir.filePath("scratch-root").toUtf8());
+        QVERIFY(hasOnline());
         qputenv("FUGUE_TEMPLATES", m_dir.path().toUtf8());
         QVERIFY(TemplateFeed::disabledByEnvironment());
         QVERIFY(!hasOnline());
         qunsetenv("FUGUE_TEMPLATES");
+        qunsetenv("FUGUE_HOME");
     }
 };
 
