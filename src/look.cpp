@@ -761,6 +761,26 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     emit changed();
 }
 
+QColor CanvasLook::categoryColor(const QString &category) const {
+    // Top level -> header tone; `blob` -1 is the tone's glass, else that blob (Video takes dusk's rose, so no two share a colour).
+    static const struct {
+        const char *category;
+        const char *tone;
+        int blob;
+    } map[] = {{"Image", "sea", -1},   {"Basic", "slate", -1}, {"Diffusion", "dusk", -1},
+               {"Text", "moss", -1},   {"Generate", "ember", -1}, {"Video", "dusk", 1}};
+    const QString top = category.section(QLatin1Char('/'), 0, 0);
+    for (const auto &entry : map) {
+        if (top != QLatin1String(entry.category))
+            continue;
+        const QVariantMap tone = this->tone(QLatin1String(entry.tone));
+        const QColor base = entry.blob < 0 ? tone.value(QStringLiteral("glass")).value<QColor>()
+                                           : tone.value(QStringLiteral("blobs")).toList().value(entry.blob).value<QColor>();
+        return fugue::look::lift(base, m_body, 3.0);
+    }
+    return QColor(Qt::transparent);
+}
+
 QVariantMap CanvasLook::role(const QString &name) const {
     if (const auto it = m_roles.constFind(name); it != m_roles.constEnd())
         return *it;

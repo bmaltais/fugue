@@ -16,6 +16,7 @@ Item {
     property alias info: thumbnail.info
     property alias text: thumbnail.text
     property string maskFile // the painted mask's file, empty for none
+    property bool compact: false // the Compact node card's picture corner (Thumbnail's)
     property size pixels: canvasModel.previewSize(nodeId)
     readonly property alias overlayLayer: overlay
 
@@ -29,6 +30,7 @@ Item {
         anchors.fill: parent
         look: root.look
         full: true
+        compact: root.compact
     }
     MaskLayer {
         id: overlay

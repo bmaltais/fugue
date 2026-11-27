@@ -273,6 +273,10 @@ public:
                 {"blobs", QVariantList{QColor(QLatin1String(found->blob0)), QColor(QLatin1String(found->blob1)), QColor(QLatin1String(found->blob2))}},
                 {"glass", QColor(QLatin1String(found->glass))}};
     }
+    // The colour of a node's category dot (docs/canvas-look.md 20.14, #476): the top level of the manifest's category ("Image/Adjust" is
+    // Image) picks a header tone, and the colour is moved only in lightness until it reads at 3:1 on the card, so it follows a light
+    // or dark theme. Transparent for a category with none (a pack's own): the caller draws its kind mark.
+    Q_INVOKABLE QColor categoryColor(const QString &category) const;
     Q_INVOKABLE QString glyph(const QString &name) const;
     QString iconFont() const;
     QString serifFont() const;

@@ -20,6 +20,9 @@ Item {
     property bool editable: true
     property int wheelModifiers: Qt.NoModifier
     readonly property alias viewer: viewer
+    // A rounded frame, as CompareView's (the Compact node card).
+    property real cornerRadius: 0
+    property color cornerColor: "transparent"
 
     signal committed(var rect)
     signal changing(var rect) // at every step of a drag, as CropFrame's
@@ -37,6 +40,8 @@ Item {
         labelA: ""
         showZoom: true
         wheelModifiers: root.wheelModifiers
+        cornerRadius: root.cornerRadius
+        cornerColor: root.cornerColor
         onPressed: root.pressed()
         onActivated: root.activated()
     }

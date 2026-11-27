@@ -43,6 +43,10 @@ public:
 
     // Trusted in this session's own file, or, for an inherited pack, in the Default's.
     bool isTrusted(const QString &packId, const QString &version) const;
+    // This session's own file lists the version, whatever its secrets are now: what a person's yes recorded (not the Default's).
+    bool isListed(const QString &packId, const QString &version) const;
+    // The secrets digest recorded with that yes; empty when none was.
+    QString sealedDigest(const QString &packId, const QString &version) const;
     // Trusted only because the Default trusts that inherited pack: the file here does not say so.
     bool isTrustedByDefault(const QString &packId, const QString &version) const;
     // The Default project's trust.json (read-only here).
@@ -50,6 +54,9 @@ public:
     // `secretsDigest`: packSecretsDigest of the pack being trusted, when the caller has just read its folder; else the one
     // the loader parsed (a pack not loaded has none, and then none is kept).
     Errors trust(const QString &packId, const QString &version, const QString &secretsDigest = {});
+    // Puts back a yes that was taken away for a moment (an update that failed): the version is listed again with exactly
+    // `digest` (empty: none), never one computed now, so an edit of the secrets made since the yes still asks.
+    Errors restore(const QString &packId, const QString &version, const QString &digest);
     // Trust on first sight: a version trusted before digests were kept gets `digest` now (nothing for a version that is not
     // trusted here or already has one), so a later edit of its secrets asks again.
     Errors adoptSecretsDigest(const QString &packId, const QString &version, const QString &digest);

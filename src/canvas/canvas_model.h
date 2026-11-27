@@ -142,6 +142,7 @@ public:
         Media,         // a video or sound result's player: {type, url, label, width, height, duration, file}, else empty
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
+        Category,        // the node type's top-level category ("Image"), else empty: the colour of a Compact header's dot (#476)
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
         NewerMajor,      // a node running on an older installed major: the newest version it can move to (3.6, #118), else empty
         ErrorDetail,     // the whole error text when `error` is the short words of a missing pack (#264), else empty: the chip's tooltip
@@ -762,6 +763,9 @@ private:
         // Hidden because its `shown_when` does not hold (#429), not folded as Advanced: the value is kept,
         // a link ends the hiding, and the section header goes with the last row that applies.
         bool notUsed = false;
+        // Compact (#476): an output and a socket-only input on one row (the board's card): this port's row is shared, the output
+        // with the input at its left. Never set in Flat.
+        bool sharesRow = false;
     };
     // Stacking order of nodes that overlap: raised when a node is selected or moved, not saved.
     QHash<QString, int> m_stack;
@@ -789,6 +793,7 @@ private:
         bool pinned = false;
         bool advancedOpen = false; // layout: the Advanced section shown (layout.nodes.<id>.advanced)
         fugue::PictureOverride picture = fugue::PictureOverride::Default; // layout.nodes.<id>.picture (#263)
+        QString category;          // the top level of the node type's category, empty for a group or a placeholder
         int groupSize = 0;         // a group instance: its definition's node count, shown on a row of its own
         QRectF thumbnail;   // where the run's thumbnail goes, empty without one
         std::vector<Port> inputs;

@@ -52,6 +52,7 @@ Item {
     required property var media            // a video or sound result's player (#116): {type, url, label, file, ...}, else empty
     required property string updateAvailable // a group the library has a newer version of (5.3)
     required property string newerMajor // a node on an older installed major: the newest version to move to (3.6)
+    required property string category // the node type's top-level category ("Image"), else empty: the Compact header dot's colour (#476)
     required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
 
     z: stack // overlapping nodes: the one selected or moved last is in front
@@ -134,6 +135,10 @@ Item {
                         longest = Math.max(longest, String(p.label).length)
                 return Math.round(Math.min(node.width * 0.5, Math.max(node.width * 0.36, padX + longest * 6.4 + 8)))
             }
+            // The Compact picture recipe (Thumbnail.qml's corner): a viewer on the face has the well's corner, the same for every kind of
+            // picture. Flat keeps each viewer's own.
+            readonly property real pictureCorner: compact
+                ? Math.min(pm.cornerWell * node.look.unit, 0.2 * Math.min(node.thumbnailRect.width, node.thumbnailRect.height)) : 0
             readonly property bool hairlines: compact && pm.rowSeparators === "hairline"
             readonly property bool bypassed: node.mode === "bypass"
             readonly property bool muted: node.mode === "mute"
@@ -160,6 +165,10 @@ Item {
             // The kind mark: the shape and color of the first output (a sink: its first input).
             readonly property var kindPort: node.outputs.length > 0 ? node.outputs[0]
                                           : node.inputs.length > 0 ? node.inputs[0] : null
+            // Compact: the dot is the node's category colour (a round dot; the port dots at the card's edge carry the types), and a node
+            // with no category (a pack's own, a placeholder) keeps the kind mark (#476).
+            readonly property color categoryTone: compact ? node.look.categoryColor(node.category) : "transparent"
+            readonly property bool byCategory: categoryTone.a > 0
 
             // What the header's meta says, besides the warnings and the pin: the mode first,
             // then the run's state.
@@ -268,7 +277,8 @@ Item {
                         }
                     }
                     Rectangle {
-                        visible: face.hairlines && face.full && node.rowsMade && !node.collapsed && node.outputs.length > 0 && node.inputs.length > 0
+                        visible: face.hairlines && face.full && node.rowsMade && !node.collapsed && node.outputs.length > 0
+                                 && node.inputs.some(p => p.sharesRow !== true && !p.hidden)
                         x: face.padX
                         y: node.outputs.length > 0 ? node.outputs[node.outputs.length - 1].rowTop + node.outputs[node.outputs.length - 1].rowHeight : 0
                         width: node.width - 2 * face.padX
@@ -346,11 +356,11 @@ Item {
                     height: 1
                     color: node.look.bevel
                 }
-                // The kind mark, 8 px.
+                // The kind mark, 8 px; in Compact the node's category dot, where it has a category.
                 Rectangle {
                     id: kind
-                    readonly property string shape: face.kindPort ? face.kindPort.shape : ""
-                    visible: face.kindPort !== null && node.groupSize === 0
+                    readonly property string shape: face.byCategory ? "circle" : face.kindPort ? face.kindPort.shape : ""
+                    visible: (face.kindPort !== null || face.byCategory) && node.groupSize === 0
                     x: face.compact ? face.padX - 1 : 3 * face.u - 1
                     anchors.verticalCenter: parent.verticalCenter
                     width: 8
@@ -358,7 +368,8 @@ Item {
                     radius: shape === "circle" || shape === "ring" ? 4 : Math.min(face.corner, 1.5)
                     rotation: shape === "diamond" ? 45 : 0
                     scale: shape === "diamond" ? 0.85 : 1
-                    color: shape !== "ring" && face.kindPort ? node.canvasView.portColor(face.kindPort.color) : "transparent"
+                    color: face.byCategory ? face.categoryTone
+                         : shape !== "ring" && face.kindPort ? node.canvasView.portColor(face.kindPort.color) : "transparent"
                     border.width: shape === "ring" ? 1.5 : 0
                     border.color: face.kindPort ? node.canvasView.portColor(face.kindPort.color) : "transparent"
                 }
@@ -380,7 +391,8 @@ Item {
                 }
             }
 
-            // One row per port, outputs first (docs/canvas-look.md 4.3).
+            // One row per port, outputs first (docs/canvas-look.md 4.3); in Compact an output shares its row with a socket-only input
+            // (the port's `sharesRow`, #476): the input has the left half, the output the right.
             Repeater {
                 model: node.collapsed || !node.rowsMade ? 0 : node.outputs.length
                 delegate: Item {
@@ -392,6 +404,9 @@ Item {
                     readonly property bool dim: face.dragging
                         && node.canvasModel.dragProblem(node.nodeId, modelData.name, true) !== ""
                     readonly property bool under: node.hoverKey === "o:" + modelData.name
+                    readonly property bool sharesRow: modelData.sharesRow === true
+                    // On a shared row the pointer is over this output only in the right half.
+                    readonly property bool overMe: outputHover.hovered && (!sharesRow || outputHover.point.position.x >= width / 2)
                     y: modelData.rowTop
                     width: node.width
                     height: modelData.rowHeight
@@ -399,7 +414,7 @@ Item {
 
                     // Hover help: the label in bold and the manifest's description (empty: none).
                     HoverHandler { id: outputHover }
-                    ToolTip.visible: (outputHover.hovered || under) && !face.dragging && face.full
+                    ToolTip.visible: (overMe || under) && !face.dragging && face.full
                                      && (modelData.description || "") !== ""
                     ToolTip.delay: node.look.tooltipDelay
                     ToolTip.text: node.portTip(modelData)
@@ -410,7 +425,8 @@ Item {
                         anchors.right: parent.right
                         anchors.rightMargin: face.padX
                         anchors.verticalCenter: parent.verticalCenter
-                        width: Math.min(implicitWidth, parent.width - 2 * face.padX - (chip.item ? (chip.item as Item).width + 2 * face.u : 0))
+                        width: Math.min(implicitWidth, (output.sharesRow ? parent.width / 2 - face.padX : parent.width - 2 * face.padX)
+                                                        - (chip.item ? (chip.item as Item).width + 2 * face.u : 0))
                         text: output.modelData.label
                         elide: Text.ElideLeft
                         textFormat: Text.PlainText
@@ -469,6 +485,8 @@ Item {
                     readonly property bool dim: face.dragging
                         && node.canvasModel.dragProblem(node.nodeId, modelData.name, false) !== ""
                     readonly property bool under: node.hoverKey === "i:" + modelData.name
+                    readonly property bool sharesRow: modelData.sharesRow === true
+                    readonly property bool overMe: inputHover.hovered && (!sharesRow || inputHover.point.position.x < width / 2)
                     // A value input's row has its widget (widgets/InputWidget.qml, #48) across it, the
                     // label drawn over the widget's well; a linked one shows where its value comes from.
                     readonly property bool hasWidget: modelData.widget
@@ -485,7 +503,7 @@ Item {
                     // when the widget had to cut it short (a narrow node).
                     HoverHandler { id: inputHover }
                     readonly property bool valueCut: widgetLoader.item !== null && (widgetLoader.item as InputWidget).valueCut
-                    ToolTip.visible: (inputHover.hovered || under) && !face.dragging && face.full && shown
+                    ToolTip.visible: (overMe || under) && !face.dragging && face.full && shown
                                      && ((modelData.description || "") !== "" || valueCut)
                     ToolTip.delay: node.look.tooltipDelay
                     ToolTip.text: node.portTip(modelData) + (valueCut ? "<br>" + node.plainHtml((widgetLoader.item as InputWidget).valueText) : "")
@@ -605,6 +623,8 @@ Item {
                         look: node.look
                         source: node.thumbnail
                         wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
+                        cornerRadius: face.pictureCorner
+                        cornerColor: face.bodyFill
                         onPressed: node.canvasModel.select([node.nodeId])
                         onActivated: node.canvasView.openCrop(node.nodeId)
                         opacity: node.thumbnailDim ? 0.5 : 1
@@ -621,6 +641,7 @@ Item {
                         info: node.thumbnailInfo
                         text: node.thumbnailText
                         maskFile: face.maskFile
+                        compact: face.compact
                         opacity: node.thumbnailDim ? 0.5 : 1
                     }
                 }
@@ -631,6 +652,7 @@ Item {
                         look: node.look
                         kind: node.media.type
                         label: node.media.file || node.media.label || ""
+                        corner: face.compact ? face.pictureCorner : node.look.thumbCorner
                         // The file is opened only while the node is in view: a decoder per video is held from then on.
                         source: node.inView ? node.media.url : ""
                         expandable: node.media.type === "video"
@@ -648,6 +670,8 @@ Item {
                         nodeId: node.nodeId
                         compare: node.compare
                         viewState: node.compareView
+                        cornerRadius: face.pictureCorner
+                        cornerColor: face.bodyFill
                         look: node.look
                         // Selected: the wheel zooms the picture, with or without a key; not selected, a plain wheel moves the canvas (#437)
                         wheelModifiers: node.selected ? Qt.KeyboardModifierMask : Qt.AltModifier
