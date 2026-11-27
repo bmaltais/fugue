@@ -18,6 +18,7 @@
 #include "cli/runs.h"
 #include "engine/canvas_batch.h"
 #include "engine/json.h"
+#include "engine/pack_manager.h"
 #include "engine/queue.h"
 #include "engine/run_folder.h"
 
@@ -30,6 +31,9 @@ std::atomic<bool> g_stop{false};
 // The first signal asks to stop; a second one means the wait is too long for the person, and ends the process as the signal would.
 void onSignal(int number) {
     if (g_stop.exchange(true)) {
+        // A pack's setup runs in a group of its own, which the terminal's signal does not reach: end it with us.
+        if (const qint64 group = runningSetupGroup().load(); group > 1)
+            ::kill(pid_t(-group), SIGKILL);
         ::signal(number, SIG_DFL);
         ::raise(number);
     }

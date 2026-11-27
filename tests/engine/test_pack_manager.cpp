@@ -11,6 +11,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <unistd.h>
+
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
 #include "engine/registry.h"
@@ -571,8 +573,9 @@ private slots:
     // only when the new copy is whole; a live owner's backup is kept whatever its age.
     void aDeadOwnersBackupComesBackUnlessTheNewCopyIsWhole() {
         const QString id = "io.example.tools";
-        const QString dead = QString(".old-%1-aaaaaaaaaaaa-%2").arg(deadPid()).arg(id);
-        const QString live = QString(".old-%1-bbbbbbbbbbbb-%2").arg(QCoreApplication::applicationPid()).arg(id);
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        const QString dead = QString(".old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(now - 100).arg(id);
+        const QString live = QString(".old-%1-%2-bbbbbbbbbbbb-%3").arg(QCoreApplication::applicationPid()).arg(now).arg(id);
         const QJsonObject setup{{"command", QJsonArray{"true"}}};
         const auto sweep = [&] { // any stage sweeps
             const QString other = makePack(source(), "io.example.other", "1.0.0");
@@ -595,6 +598,7 @@ private slots:
         makePack(packs(), id, "1.1.0", false, setup);
         sweep();
         QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        QVERIFY(QDir(packs()).entryList({".staging-*"}, QDir::Dirs | QDir::Hidden).isEmpty()); // the half-made folder is gone
         // The target is whole (no setup): the backup is deleted.
         QDir(packs() + "/" + id).removeRecursively();
         makePack(packs(), id, "1.1.0");
@@ -614,6 +618,8 @@ private slots:
     void anUpdateStoppedWithALockedFolderStillGetsTheOldPackBack() {
         const QString id = "io.example.tools";
         QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        if (geteuid() == 0)
+            QSKIP("root can delete a read-only folder");
         const QString marker = m_dir.path() + "/setup-started";
         const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir d && touch d/f && chmod 555 d && touch '" + marker + "' && sleep 30"}}};
         makePack(source(), id, "1.0.1", false, setup);
@@ -623,6 +629,55 @@ private slots:
         QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
         QVERIFY(!QFileInfo::exists(packs() + "/" + id + "/d"));
         QProcess::execute("chmod", {"-R", "u+w", packs()}); // so the scratch folder can go
+    }
+
+    // #418: a link at the target is never followed or deleted through: the old pack is kept as `.rescue-*`.
+    void aLinkAtTheTargetIsNeverFollowedBySweep() {
+        const QString id = "io.example.tools";
+        QTemporaryDir outside;
+        write(outside.path() + "/keep.txt", "dev work");
+        QDir().mkpath(packs());
+        QVERIFY(QFile::link(outside.path(), packs() + "/" + id));
+        const QString dead = QString(".old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(QDateTime::currentSecsSinceEpoch() - 100).arg(id);
+        makePack(packs(), dead, "1.0.0");
+        QVERIFY(addPack(makePack(source(), "io.example.other", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(QFileInfo(outside.path() + "/keep.txt").isFile());
+        QVERIFY(QFileInfo(packs() + "/" + id).isSymLink());
+        QVERIFY(!QFileInfo::exists(packs() + "/" + dead));
+        QVERIFY(!QDir(packs()).entryList({".rescue-*"}, QDir::Dirs | QDir::Hidden).isEmpty());
+    }
+
+    // #418: two dead backups of one folder: the oldest comes back, and the other goes once the target is whole.
+    void ofTwoDeadBackupsTheOldestComesBack() {
+        const QString id = "io.example.tools";
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        makePack(packs(), QString(".old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(now - 300).arg(id), "1.0.0");
+        makePack(packs(), QString(".old-%1-%2-bbbbbbbbbbbb-%3").arg(deadPid()).arg(now - 100).arg(id), "1.5.0");
+        QVERIFY(addPack(makePack(source(), "io.example.other", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        QVERIFY(QDir(packs()).entryList({".old-*"}, QDir::Dirs | QDir::Hidden).isEmpty()); // the newer one goes once the target is whole
+    }
+
+    // #418: a pack removed after a crash does not come back from its dead backup.
+    void aRemovedPackDoesNotComeBackFromABackup() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        makePack(packs(), QString(".old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(QDateTime::currentSecsSinceEpoch() - 100).arg(id), "0.9.0");
+        QVERIFY(removePack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(addPack(makePack(source(), id, "1.1.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.1.0"));
+    }
+
+    // #418: a failed update of the same version puts its trust back when the old pack is back; a changed version loses none.
+    void aFailedUpdateKeepsTheTrustOfTheOldPack() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        makePack(source(), id, "1.0.0", false, {{"command", QJsonArray{"false"}}}); // same version, new setup that fails
+        QCOMPARE(updatePacks(id, {}, packs(), trustStore(), answering(Answer::Yes)).error().code, QString("setup_failed"));
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
     }
 
     // #418: one command at a time changes the packs folder.

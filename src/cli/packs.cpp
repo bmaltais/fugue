@@ -8,6 +8,7 @@
 #include <QTextStream>
 
 #include <poll.h>
+#include <cerrno>
 #include <unistd.h>
 
 #include <memory>
@@ -68,16 +69,24 @@ Answer yesNo(const QString &question) {
     QTextStream err(stderr);
     err << question << " [y/N] ";
     err.flush();
-    static QTextStream in(stdin); // one reader: a second would lose what the first buffered
-    // Wait for the line in slices: a Ctrl-C or a TERM ends the wait (the read would retry after the signal), and counts as no.
+    // The line is read a byte at a time straight from the descriptor, so nothing is buffered out of sight of the poll: an answer
+    // typed ahead is read at once, and a Ctrl-C or a TERM ends the wait (a read would retry after the signal) and counts as no.
+    QByteArray bytes;
     for (;;) {
         if (stopRequested())
             return Answer::No;
         pollfd fd{STDIN_FILENO, POLLIN, 0};
-        if (poll(&fd, 1, 100) > 0)
+        if (poll(&fd, 1, 100) <= 0)
+            continue;
+        char c = 0;
+        const ssize_t got = read(STDIN_FILENO, &c, 1);
+        if (got < 0 && errno == EINTR)
+            continue;
+        if (got != 1 || c == '\n')
             break;
+        bytes.append(c);
     }
-    const QString line = in.readLine().trimmed().toLower();
+    const QString line = QString::fromUtf8(bytes).trimmed().toLower();
     if (line == QLatin1String("y") || line == QLatin1String("yes"))
         return Answer::Yes;
     return Answer::No;
@@ -218,11 +227,15 @@ Reply packAdd(const Command &command, Context &context) {
         text += QStringLiteral(" Its setup ran.");
     // Beside another major of the pack its folder is <id>@<major>, which the pack commands take.
     const Result<PackSummary> trusted = trustPack(QFileInfo(added->pack.folder).fileName(), packsDir(), trust, prompts);
-    if (!trusted)
+    if (!trusted) {
+        if (stopRequested())
+            return Reply::failure(makeError(QStringLiteral("cancelled"), QStringLiteral("Stopped: %1 %2 is installed, but not trusted.").arg(added->pack.id, added->pack.version),
+                                            QStringLiteral("Look at it, then `fugue pack trust %1`.").arg(added->pack.id)));
         return Reply::failure(trusted.errors().first().code == QLatin1String("cancelled")
                                   ? Errors{makeError(QStringLiteral("pack_invalid"), QStringLiteral("The pack changed while it was set up, so it was installed but not trusted."),
                                                      QStringLiteral("Look at it, then `fugue pack trust %1`.").arg(added->pack.id))}
                                   : trusted.errors());
+    }
     text += QStringLiteral(" Trusted it.");
     Reply reply = Reply::success(addedJson(*added), text);
     reply.errors = added.warnings();

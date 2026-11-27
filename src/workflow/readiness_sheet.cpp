@@ -505,7 +505,7 @@ void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
     else if (!outcome.cancelled && outcome.failedRow < 0)
         m_message = tr("Some rows were skipped, so it is not everything: they are listed below.");
     else if (outcome.cancelled)
-        m_message = tr("Stopped. A pack is never left half installed; a download keeps what it had and resumes. What is not done yet is listed below.");
+        m_message = tr("Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.");
     else {
         QStringList lines;
         for (const Error &error : outcome.errors)

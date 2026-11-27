@@ -262,7 +262,7 @@
   "Source": "Source",
   "Start blank": "Start blank",
   "Stop": "Stop",
-  "Stopped. A pack is never left half installed; a download keeps what it had and resumes. What is not done yet is listed below.": "Stopped. A pack is never left half installed; a download keeps what it had and resumes. What is not done yet is listed below.",
+  "Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.": "Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.",
   "Strong: thick frosted glass.": "Strong: thick frosted glass.",
   "Switch this workflow between its App view and the graph": "Switch this workflow between its App view and the graph",
   "The grid's spacing in canvas pixels (%1)": "The grid's spacing in canvas pixels (%1)",

@@ -1194,21 +1194,26 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   folder is not kept. A pack is checked in a staging folder first and put in place only when
   it loads and the person agreed; a refusal or a failure leaves no half-installed pack.
   The setup itself runs in the installed folder, not in staging: an environment it makes (a virtual environment) holds absolute
-  paths and would break if moved. It runs in its own process group. A stop (the window's Stop; in the CLI Ctrl-C or TERM, which
-  also answer a `[y/N]` question with no, and a second one ends the process) kills the setup and is reported as `cancelled`, not
-  `setup_failed`, in a clone too (`fetch_failed` is for a real failure). A new pack's half-made folder is removed; an update moves
-  the old pack back (the half-made one is first moved aside, and the old pack's folder is never deleted before it is back; if the
-  move back fails the error names the folder, kept as `.rescue-*`). Setting up an already installed pack is the exception: a stop
-  can leave its environment half made (no marker, so Get ready offers the setup again). Only a model's resumable `.part` stays
-  (#418). A pack is put in place, replaced, removed or set up under a lock on the packs folder (`.packs.lock`, released when
-  its holder dies), so the sheet, Settings > Packs and the CLI never change a pack at once; one that cannot get it within 2 s fails
-  with `pack_busy` and the holder's pid. What was asked is looked at again under the lock (the folder, and for a setup the pack
-  itself). The trust of the id and version being replaced is forgotten before the new code is in place, so a trusted pack never
-  runs other code during a setup. Folders a command makes in the packs folder are named `.staging-<pid>-<time>-<random>` and
-  `.old-<pid>-<random>-<folder>` (the pack an update set aside). A later command, under the lock, removes a `.staging-` only when its
-  process is gone (or a week old), keeps a live owner's `.old-` whatever its age, and for a dead owner's `.old-` puts the old pack
-  back unless the new copy is whole (no setup, or its marker `.fugue-setup.json` names the command; a marker that came in with
-  the copied files is dropped), then deletes it. A link is never followed. Get ready shows a model with a kept `.part` as "partial,
+  paths and would break if moved. A setup (not git) runs in its own process group, so a stop kills what it started too; a second
+  Ctrl-C kills the group from the signal handler. A stop (the window's Stop; in the CLI Ctrl-C or TERM, which also answer a `[y/N]`
+  question with no, a typed-ahead answer being read first) kills the setup and is reported as `cancelled`, not `setup_failed`, in a
+  clone too (`fetch_failed` is for a real failure). A new pack's half-made folder is removed; an update moves the old pack back
+  (the half-made one is first moved aside, and the old pack's folder is never deleted before it is back; if the move back fails
+  the error names the folder, kept as `.rescue-*`). Setting up an already installed pack is the exception: a stop can leave its
+  environment half made (no marker, so Get ready offers the setup again). A stop at the trust step keeps the finished install,
+  untrusted. Only a model's resumable `.part` stays (#418). A pack is put in place, replaced, removed or set up under a lock on
+  the packs folder (`.packs.lock`, released when its holder dies), so the sheet, Settings > Packs and the CLI never change a pack
+  at once; one that cannot get it within 2 s fails with `pack_busy` and the holder's pid. What was asked is looked at again under
+  the lock (the folder, and for a setup the pack itself). The new version's trust is forgotten before the new code is in place,
+  so a trusted pack never runs other code during a setup; the old version's goes once the update worked, and a failed update of
+  the same version puts its trust back when the old pack is back and its secrets are unchanged. A crash leaves it forgotten.
+  Folders a command makes in the packs folder are named `.staging-<pid>-<time>-<random>` and
+  `.old-<pid>-<time>-<random>-<folder>` (the pack an update set aside). A later command, under the lock, removes a `.staging-` only
+  when its process is gone (a pid handed out again, by its start time, counts as gone), keeps a live owner's `.old-` whatever its
+  age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole (no setup, or its marker
+  `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped), deleting the others only
+  then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
+  at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` as "partial,
   will resume".
 - A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
   offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by
