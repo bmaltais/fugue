@@ -4,7 +4,7 @@
 // an exponent. The point is always accepted; a comma is a decimal point only where the language writes it so
 // (QLocale::decimalPoint() is ","), and is refused elsewhere, so "1,000" is never read as 1 in English. A thousands separator
 // is never accepted. One rule for every typed number of the window: the group editor's and the App builder's ranges, a node's
-// number field while it steps, a slider's typed value and the Canvas view's selection fields. QML reads it as the
+// number field while it steps and when it is saved, a slider's typed value and the Canvas view's selection fields. QML reads it as the
 // `TypedNumber` singleton, on the default locale (Qt.locale()); `pattern` changes with it (the Translator says so when the
 // language changes live, localeChanged()). A number too large or too small for a double ("1e999", "1e-400") is refused.
 

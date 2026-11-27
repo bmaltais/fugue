@@ -52,7 +52,10 @@ Item {
         return isNaN(v) ? fallback : Math.round(v * 10) / 10
     }
     // Whether a field holds a whole number from `bottom` to `top` (empty or half-typed is not).
+    // Reading `TypedNumber.pattern` makes the bindings that call this follow a live language switch (parse alone has no
+    // notify signal, so `ready` and `transformReady` stayed as the old language left them until the next keystroke).
     function inRange(field, bottom, top) {
+        const rule = TypedNumber.pattern
         const v = TypedNumber.parse(field.text)
         return !isNaN(v) && v >= bottom && v <= top
     }

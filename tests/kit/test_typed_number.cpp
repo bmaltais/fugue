@@ -1,5 +1,7 @@
 // Typed numbers (typed_number.h, docs/ui-ergonomics.md "Typed numbers"): a point always, a comma only where the language
 // writes the decimal point as one, never a thousands separator.
+#include <QQmlComponent>
+#include <QQmlEngine>
 #include <QRegularExpressionValidator>
 #include <QScopeGuard>
 #include <QSignalSpy>
@@ -46,6 +48,35 @@ private slots:
         QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
         QVERIFY(qIsNaN(number.parse("1,000")));
         QCOMPARE(number.parse("0.5"), 0.5);
+    }
+
+    // A binding that reads a typed number through `parse` follows a live language switch only when it also reads `pattern`
+    // (parse has no notify signal): the idiom of CanvasSelectionDialogs.inRange (#690).
+    void aBindingFollowsALiveLanguageSwitchThroughThePattern() {
+        const QLocale before;
+        const auto restore = qScopeGuard([&] { QLocale::setDefault(before); });
+        QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+        QQmlEngine engine;
+        TypedNumber number;
+        qmlRegisterSingletonInstance("FugueTest", 1, 0, "TypedNumber", &number);
+        QQmlComponent component(&engine);
+        component.setData(R"(
+            import QtQml
+            import FugueTest
+            QtObject {
+                property string text: "0,5"
+                function ready(t) {
+                    const rule = TypedNumber.pattern
+                    return !isNaN(TypedNumber.parse(t))
+                }
+                readonly property bool ok: ready(text)
+            })", QUrl());
+        std::unique_ptr<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+        QVERIFY(!object->property("ok").toBool());
+        QLocale::setDefault(QLocale(QLocale::Danish, QLocale::Denmark));
+        TypedNumber::localeChanged();
+        QVERIFY(object->property("ok").toBool());
     }
 
     // The validator's pattern: empty and whole numbers are acceptable, a partial number is only intermediate.

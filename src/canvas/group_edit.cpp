@@ -568,9 +568,10 @@ bool GroupEdit::editExposedInput(const QString &name, const QVariantMap &change)
     const QString type = change.value("type").toString();
     const QString given = change.value("default").toString().trimmed();
     if (change.value("default").isValid() && !given.isEmpty()) {
-        bool isNumber = false;
-        const double number = given.toDouble(&isNumber);
-        edit.defaultValue = type == QLatin1String("number") && isNumber ? QJsonValue(number)
+        // A number input's default is read by the one rule for typed numbers, in the language's own decimal point ("0,5" in
+        // Danish); text that is not a number goes on as text and the type check refuses it.
+        const std::optional<double> number = TypedNumber::read(given, QLocale());
+        edit.defaultValue = type == QLatin1String("number") && number ? QJsonValue(*number)
                             : type == QLatin1String("boolean")         ? QJsonValue(given == QLatin1String("true"))
                                                                        : QJsonValue(given);
     }

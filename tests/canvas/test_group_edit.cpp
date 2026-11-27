@@ -245,6 +245,24 @@ private slots:
         QCOMPARE(f.groups.groupInterface().value("inputs").toList().last().toMap().value("max").toDouble(), 40.0);
     }
 
+    // The Default field takes the same rule as every typed number (#690): "20,0" is 20 in a language that writes the
+    // decimal point as a comma and is not a number in English, where the type check refuses the text it keeps.
+    void aNumberDefaultFollowsTheTypedNumberRule() {
+        const QLocale before;
+        const auto restore = qScopeGuard([&] { QLocale::setDefault(before); });
+        Fixture f;
+        QVERIFY(f.groups.enterGroup(f.instance));
+        QVERIFY(f.groups.exposeInput("gen", "steps"));
+        const auto stored = [&] { return f.groups.groupInterface().value("inputs").toList().last().toMap().value("default"); };
+        QLocale::setDefault(QLocale(QLocale::Danish, QLocale::Denmark));
+        QVERIFY2(f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"default", "20,0"}}),
+                 qPrintable(f.groups.problem()));
+        QCOMPARE(stored().toDouble(), 20.0);
+        QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+        QVERIFY(!f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"default", "21,0"}}));
+        QCOMPARE(stored().toDouble(), 20.0);
+    }
+
     void aRefusalSetsTheProblemAndAnEditThatWorksClearsIt() {
         Fixture f;
         QSignalSpy changed(&f.groups, &GroupEdit::problemChanged);
