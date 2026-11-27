@@ -105,6 +105,18 @@ Result<vips::VImage> MediaHandle::image() const {
     }
 }
 
+std::optional<QSize> MediaHandle::imageHeaderSize(const QString &path) {
+    if (!initVips())
+        return std::nullopt;
+    try {
+        const VImage image = VImage::new_from_file(fileName(path).constData());
+        const bool turned = orientationOf(image) >= 5 && orientationOf(image) <= 8;
+        return turned ? QSize(image.height(), image.width()) : QSize(image.width(), image.height());
+    } catch (const vips::VError &) {
+        return std::nullopt;
+    }
+}
+
 Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &hashes, const QString &shown, const QString &shownHash) {
     const QString &named = shown.isEmpty() ? path : shown;
     if (!initVips())

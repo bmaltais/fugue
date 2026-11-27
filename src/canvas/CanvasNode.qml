@@ -42,6 +42,7 @@ Item {
     required property string runsOn // "<service> (<host>)" for a node routed to a service off this machine (8.2, #404), else empty
     required property string thumbnail
     required property string thumbnailInfo
+    required property string predictedSize // the size this node will make, known before a run (#601); "" when unknown or measured
     required property string thumbnailFile
     required property rect thumbnailRect
     required property string thumbnailText // in the image's place (a shown text, a label)
@@ -179,7 +180,8 @@ Item {
                                             : node.runState === "cached" && node.seconds >= 0
                                               ? formatSeconds(node.seconds)
                                             : node.runState === "frozen" ? qsTr("Frozen")
-                                            : node.runState === "skipped" ? qsTr("Skipped") : ""
+                                            : node.runState === "skipped" ? qsTr("Skipped")
+                                            : node.predictedSize
             function formatSeconds(s) {
                 return s < 10 ? qsTr("%1 s").arg(s.toFixed(1)) : s < 60 ? qsTr("%1 s").arg(Math.round(s))
                      : qsTr("%1 min").arg((s / 60).toFixed(1))
@@ -938,6 +940,8 @@ Item {
                             text: face.caption
                             color: face.frozen ? node.look.text : node.look.label
                             font.pixelSize: node.look.captionSize
+                            // A size known before the run, not measured: the label color, in italics (docs/canvas-look.md section 9).
+                            font.italic: node.predictedSize !== "" && face.caption === node.predictedSize
                             font.features: { "tnum": 1 }
                         }
                         // Warnings: a count and the triangle, in the label color. Hovered, they

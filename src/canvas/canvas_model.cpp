@@ -103,6 +103,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Warnings: return run.warnings;
     case Thumbnail: return run.thumbnail;
     case ThumbnailInfo: return run.thumbnailInfo;
+    case PredictedSize: return run.predictedSize;
     case ThumbnailFile: return run.thumbnailFile;
     case ThumbnailText: return run.thumbnailText;
     case ThumbnailDim: return run.thumbnailDim;
@@ -125,7 +126,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"},
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
-            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}, {LiveFrame, "liveFrame"}, {LiveAspect, "liveAspect"},
+            {ThumbnailInfo, "thumbnailInfo"}, {PredictedSize, "predictedSize"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}, {LiveFrame, "liveFrame"}, {LiveAspect, "liveAspect"},
             {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
             {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}, {Stack, "stack"},
             {ErrorDetail, "errorDetail"}, {ErrorPack, "errorPack"}, {RunsOn, "runsOn"}};
@@ -1899,6 +1900,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnail = state.value("thumbnail").toString();
     run.thumbnailAspect = state.value("thumbnailAspect", 1).toReal();
     run.thumbnailInfo = state.value("thumbnailInfo").toString();
+    run.predictedSize = state.value("predictedSize").toString();
     run.thumbnailFile = state.value("thumbnailFile").toString();
     run.thumbnailSize = state.value("thumbnailSize").toSizeF();
     run.thumbnailText = state.value("thumbnailText").toString();
@@ -1918,7 +1920,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
                                 || before.thumbnailAspect != run.thumbnailAspect;
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
-                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim, NodeList::LiveFrame, NodeList::LiveAspect,
+                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::PredictedSize, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim, NodeList::LiveFrame, NodeList::LiveAspect,
                  NodeList::Compare, NodeList::Media, NodeList::Outputs, NodeList::Notice, NodeList::ErrorDetail, NodeList::ErrorPack, NodeList::RunsOn});
     if (previewChanged)
         emit previewSizeChanged(node);

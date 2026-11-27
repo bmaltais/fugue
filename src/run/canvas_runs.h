@@ -161,6 +161,7 @@ private:
         QStringList warnings;
         QString notice; // a check's word on why the node cannot run now, and the fix (8.5)
         QString runsOn; // "<service> (<host>)" when a check routed the node off this machine (#404)
+        QString predictedSize; // "1024 × 1024": the size its picture will have, from the check (#601); empty when not known
         QString thumbnail;
         int thumbnailWidth = 0;
         int thumbnailHeight = 0;

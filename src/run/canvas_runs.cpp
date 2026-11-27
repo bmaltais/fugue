@@ -27,6 +27,20 @@ QString topOf(const QString &path) { return path.section('/', 0, 0); }
 // The path ids from the outermost group instance down to the node: "g7", "g7/inner3",
 // "g7/inner3/s2". Each level keeps its own view, so a group shows what its inside does and,
 // entered, its inner nodes show their own.
+// "1024 \u00d7 1024", how a picture's size reads on a node (a measured one in its chip, a predicted one in its header).
+QString sizeText(int width, int height) { return QStringLiteral("%1 \u00d7 %2").arg(width).arg(height); }
+
+// The size a node's check predicted for its picture (#601): `sizes` is {"<output>": [width, height]}. The output the node is
+// known by, the picture first, then the latent, then a mask; none when it predicted nothing.
+QString predictedText(const QJsonObject &sizes) {
+    for (const char *port : {"image", "latent", "mask"}) {
+        const QJsonArray size = sizes.value(QLatin1String(port)).toArray();
+        if (size.size() == 2 && size.at(0).toInt() > 0 && size.at(1).toInt() > 0)
+            return sizeText(size.at(0).toInt(), size.at(1).toInt());
+    }
+    return {};
+}
+
 QStringList levelsOf(const QString &path) {
     QStringList levels;
     const QStringList parts = path.split('/');
@@ -374,7 +388,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
                       {"error", view.error},      {"warnings", view.warnings}, {"values", view.values},
                       {"notice", view.notice},    {"errorDetail", view.errorDetail}, {"errorPack", view.pack}, {"runsOn", view.runsOn}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
-        const QString size = QStringLiteral("%1 \u00d7 %2").arg(width).arg(height);
+        const QString size = sizeText(width, height);
         state.insert("thumbnail", url);
         state.insert("thumbnailAspect", qreal(height) / width);
         state.insert("thumbnailSize", QSizeF(width, height));
@@ -428,6 +442,9 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         compare.insert("labelB", info.labelB);
         state.insert("compare", compare);
     }
+    // A size known before a run (#601) shows only while no measured one does: the picture's chip is the measure.
+    if (!view.predictedSize.isEmpty() && !state.contains("thumbnailInfo"))
+        state.insert("predictedSize", view.predictedSize);
     // While a node runs, what its slot shows is the last run's, at half strength, until this
     // run's preview comes.
     if (state.contains("thumbnail") && aggregate(view) == QLatin1String("running") && !view.live)
@@ -773,6 +790,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
             view.warnings.clear();
             view.notice.clear();
             view.runsOn.clear();
+            view.predictedSize.clear();
             if (asked.edit || !failed) {
                 view.clearError();
                 view.state.clear();
@@ -783,8 +801,10 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         }
         NodeView &view = next[top];
         const QString state = it.value().toObject().value("state").toString();
-        if (top == it.key())
+        if (top == it.key()) {
             view.runsOn = it.value().toObject().value("runsOn").toString();
+            view.predictedSize = predictedText(it.value().toObject().value("sizes").toObject());
+        }
         if (top != it.key()) {
             const bool failed = runs.nodes.value(top).inner.value(it.key()) == QLatin1String("error");
             view.inner.insert(it.key(), failed && !asked.edit ? QStringLiteral("error") : state);
@@ -815,6 +835,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         view.warnings.clear();
         view.notice.clear();
         view.runsOn.clear();
+        view.predictedSize.clear();
         if (asked.edit || !failed) {
             view.state.clear();
             view.clearError();

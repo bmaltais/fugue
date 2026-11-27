@@ -167,6 +167,8 @@ struct RunOutcome {
     // Under validate only: what a kernel's own check() reported, errors naming their node (and input), kept apart from
     // `errors` (warnings) because a run would fail on each (10.3, #600).
     Errors checkErrors;
+    // Under validate only: the sizes the kernels predicted (GraphCheck::sizes).
+    QMap<QString, PictureSizes> sizes;
 };
 
 // One run. start() returns at once; finished() comes later from the event
@@ -229,6 +231,9 @@ struct GraphCheck {
     // What the nodes' kernels reported from check() (a formula that does not parse): errors, each naming its node and,
     // when it has one, its input, that a run of the same values would fail on. No run is needed to know them.
     Errors checkErrors;
+    // The size of the pictures each node would make, by path id and output name, known before a run (#601): from the
+    // kernels' outputSizes() through the links. A cached node's are the prediction too; what is downstream of it reads its real result.
+    QMap<QString, PictureSizes> sizes;
     // Ended early by CheckAbort::abort(): what is above is incomplete.
     bool aborted = false;
 };

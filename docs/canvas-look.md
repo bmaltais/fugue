@@ -480,6 +480,10 @@ Glyphs are [Lucide](https://lucide.dev) icons (ISC license), bundled as a subset
 | Error | 1 px `error` | `error-header` | `triangle-alert`, `error` | | 1 | error chip under the node (4.7) |
 | Bypassed | dashed `bypass-edge` | `bypass-header` | `corner-down-right` | "Bypassed" | 1 (body `bypass-body`) | the node tinted magenta; a dashed line in the type color from the input to the output it feeds (spec 3.5) |
 | Muted | `hairline` | | `ban` | "Muted" | 0.4 | the whole node faded, untinted; its outgoing wires 0.4 |
+
+A size known before a run (#601): a node with no measured size, and no other caption, says the size of its picture in its header's meta, `label`
+colour in italics at caption size (`1024 × 1024`), as it was worked out by the dry check from the pictures upstream and the node's own numbers. A
+measured size is the black chip on the picture (4.6); a result's time takes the caption's place. An unknown size shows nothing.
 | Skipped | `hairline` | | `skip-forward` | "Skipped" | 0.6 | an upstream node is muted |
 | Missing type | dashed `error` | title in `error`: the type id | `circle-help` | | 1 | ports kept from the file; a body line "Not installed. Find it in packs…" (spec 11.6) |
 | Warning | | | `triangle-alert`, `label`, with a count | | 1 | hovering the count and triangle shows the warnings in one card of the canvas (`popup`, a `hairline-strong` edge); a click keeps it up until a click elsewhere, Esc or a change of level; its text can be selected and copied (#72) |

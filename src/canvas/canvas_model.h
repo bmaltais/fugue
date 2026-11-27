@@ -129,6 +129,7 @@ public:
         Warnings,  // list of warning messages
         Thumbnail, // the last image or video frame, as a URL
         ThumbnailInfo, // its info chip ("1024 × 1024")
+        PredictedSize, // the size its picture will have, known before a run ("1024 × 1024"); empty when unknown or measured (#601)
         ThumbnailFile, // the file a Save Image wrote, shown beside the size
         ThumbnailRect, // where it sits in the node, from the node's top left
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
@@ -821,6 +822,7 @@ private:
         qreal thumbnailAspect = 1;
         QSizeF thumbnailSize;
         QString thumbnailInfo;
+        QString predictedSize; // the check's prediction (#601), shown quieter than a measured size
         QString thumbnailFile;
         QString thumbnailText;
         bool thumbnailDim = false;
