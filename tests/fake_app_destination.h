@@ -1,7 +1,7 @@
 #pragma once
 
 // The App view's side of a Model choice, played by a test: it is shown when `shownNow` says so, and counts the choices it takes
-// (the real one is AppViewDestination over an AppView; tests/apps/test_app_view.cpp wires that one to Workflows).
+// (the real one is AppViewDestination over an AppView; test_templates.cpp theRealAppViewTakesTheChoiceAndWorkflowsJudgesTheTabByIt wires that one to Workflows).
 
 #include "workflow/model_choice.h"
 
@@ -21,7 +21,6 @@ public:
     ChoiceRecord took(const QString &, const Document *) const override { return {}; }
     bool holds(const ChoiceRecord &) const override { return false; }
     bool revert(const ChoiceRecord &) override { return false; }
-    bool undoInput(const QString &, const QString &) override { return false; }
 
 private:
     std::function<bool()> m_shown;

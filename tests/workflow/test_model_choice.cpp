@@ -107,7 +107,6 @@ public:
         ++reverted;
         return true;
     }
-    bool undoInput(const QString &, const QString &) override { return false; }
 
 private:
     World &m_world;

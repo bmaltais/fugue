@@ -113,9 +113,10 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     needs->setUseSource([&workflows](const QString &hash) { return workflows.onDiskOffer(hash); });
     QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QStringList &hashes) { workflows.useOnDisk(hashes); });
     QObject::connect(&workflows, &Workflows::readingChanged, needs, [&workflows, needs] { needs->setReading(workflows.reading()); });
-    // The App view is the second destination of a choice (workflow/model_choice.h); it lives as long as the view does.
+    // The App view is the second destination of a choice (workflow/model_choice.h); it lives as long as the view does, and Workflows
+    // forgets it as the view goes (at quit the view is destroyed first: nothing may reach it through the choice after that).
     const auto destination = std::make_shared<AppViewDestination>(view);
-    QObject::connect(&view, &QObject::destroyed, &workflows, [destination] {});
+    QObject::connect(&view, &QObject::destroyed, &workflows, [&workflows, destination] { workflows.setAppDestination(nullptr); });
     workflows.setAppDestination(destination.get());
     QObject::connect(&view, &AppView::usesChanged, &workflows, &Workflows::usesChanged);
     QObject::connect(&workflows, &Workflows::usesApplied, needs, &NeedsModel::refreshSoon);

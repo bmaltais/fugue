@@ -20,12 +20,6 @@ public:
     ChoiceRecord took(const QString &, const Document *) const override { return {}; } // its Undo is per input, its own
     bool holds(const ChoiceRecord &) const override { return false; }
     bool revert(const ChoiceRecord &) override { return false; }
-    bool undoInput(const QString &tab, const QString &hash) override {
-        if (m_view.tab() != tab)
-            return false;
-        m_view.undoUse(hash);
-        return true;
-    }
 
 private:
     AppView &m_view;

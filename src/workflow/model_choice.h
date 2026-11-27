@@ -59,7 +59,6 @@ public:
     virtual ChoiceRecord took(const QString &tab, const Document *before) const = 0;
     virtual bool holds(const ChoiceRecord &record) const = 0; // the record's Undo still applies
     virtual bool revert(const ChoiceRecord &record) = 0;      // the banner's Undo; false when nothing was put back
-    virtual bool undoInput(const QString &tab, const QString &hash) = 0; // one input's Undo (the App view's line)
 };
 
 // The shown tab's document: one undo step per choice, written to a file only when the person saves.
@@ -73,7 +72,6 @@ public:
     ChoiceRecord took(const QString &tab, const Document *before) const override;
     bool holds(const ChoiceRecord &record) const override;
     bool revert(const ChoiceRecord &record) override;
-    bool undoInput(const QString &, const QString &) override { return false; }
 
 private:
     CanvasModel &m_canvas;
@@ -145,7 +143,6 @@ public:
     bool hasRecord() const { return !m_record.isEmpty(); }
     bool undoable() const; // the banner's Undo: its tab is shown, unedited, and the banner still says something
     void undo();
-    bool undoInput(const QString &tab, ChoiceView view, const QString &hash);
     Uses inForce(const QString &tab) const { return m_app ? m_app->inForce(tab) : Uses(); }
 
 signals:

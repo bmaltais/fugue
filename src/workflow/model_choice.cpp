@@ -449,7 +449,7 @@ void ModelChoice::announce(const QString &tab, ChoiceView view, const QList<OnDi
 
 bool ModelChoice::openWith(const QString &key, const QList<OnDiskUse> &uses, const std::function<bool(const Uses &)> &openIt, const QString &original,
                            std::function<void(bool)> opened) {
-    Q_ASSERT(m_latestOpen == key); // every way here goes through Workflows::beginOpen
+    m_latestOpen = key; // the last open asked for, also when a caller forgot Workflows::beginOpen: it must never be dropped silently
     if (m_hashing.contains(key))
         return true; // a second click while the files are being read opens no second tab
     // The files' hashes are read first (once, on the worker); the template opens when they are known.
@@ -529,9 +529,5 @@ void ModelChoice::undo() {
         m_host.changed(true); // what it lacks again, with its Get ready button
 }
 
-bool ModelChoice::undoInput(const QString &tab, ChoiceView view, const QString &hash) {
-    ChoiceDestination *where = dest(view);
-    return where && where->undoInput(tab, hash);
-}
 
 } // namespace fugue
