@@ -4,12 +4,17 @@
 // values and the size of the linked picture) and then as a run does. The guard is that the two agree: a size shown
 // before a run must be the size the run makes, whatever the node's rule (Resize's contain, Pad's target, ...).
 
-#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
+
+#include <chrono>
+#include <future>
+#include <thread>
 
 #include <vips/vips8>
 
@@ -153,11 +158,42 @@ private slots:
         QTemporaryDir dir;
         const QByteArray fifo = QFile::encodeName(dir.filePath("pipe.png"));
         QCOMPARE(mkfifo(fifo.constData(), 0600), 0);
-        QElapsedTimer timer;
-        timer.start();
-        QVERIFY(!MediaHandle::imageHeaderSize(dir.filePath("pipe.png")));
-        QVERIFY(!MediaHandle::imageHeaderSize("/dev/null"));
-        QVERIFY(timer.elapsed() < 2000);
+        // On a worker with a timed wait: were the guard removed, the open would block for ever, and this must fail, not hang.
+        // A blocked open is let go by opening the pipe's other end ourselves, so the worker can be joined.
+        std::promise<std::pair<bool, bool>> done;
+        std::future<std::pair<bool, bool>> result = done.get_future();
+        const QString pipe = dir.filePath("pipe.png");
+        std::thread worker([&done, pipe] {
+            const bool fifo = MediaHandle::imageHeaderSize(pipe).has_value();
+            done.set_value({fifo, MediaHandle::imageHeaderSize("/dev/null").has_value()});
+        });
+        const bool inTime = result.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        if (!inTime)
+            ::close(::open(fifo.constData(), O_RDWR | O_NONBLOCK));
+        worker.join();
+        QVERIFY2(inTime, "imageHeaderSize waited on a FIFO");
+        QCOMPARE(result.get(), (std::pair<bool, bool>{false, false}));
+    }
+
+    // The memo is keyed on what stat says, not on size and millisecond time alone: a file of the same size, put back to the same
+    // modification time, is another file (its change time and the time in nanoseconds differ).
+    void aSameSizeSameTimeReplacementIsNotTheOldSize() {
+        QTemporaryDir dir;
+        const QString file = dir.filePath("p.ppm");
+        const auto write = [&](const QByteArray &header) {
+            QFile out(file);
+            QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            out.write(header + QByteArray(36, '\x40')); // 4 x 3 and 3 x 4 pixels of one byte: the same size in bytes
+        };
+        write("P5\n4 3\n255\n");
+        struct stat before;
+        QCOMPARE(::stat(QFile::encodeName(file).constData(), &before), 0);
+        QCOMPARE(MediaHandle::imageHeaderSize(file), std::optional<QSize>(QSize(4, 3)));
+        QTest::qWait(20); // past the kernel's coarse clock, so the change time moves
+        write("P5\n3 4\n255\n");
+        const struct timespec times[2] = {before.st_atim, before.st_mtim};
+        QCOMPARE(::utimensat(AT_FDCWD, QFile::encodeName(file).constData(), times, 0), 0);
+        QCOMPARE(MediaHandle::imageHeaderSize(file), std::optional<QSize>(QSize(3, 4)));
     }
 
     // An EXIF turn of a quarter swaps the sides: the size is the one the picture is seen at, as the run's handle says.
@@ -198,6 +234,18 @@ private slots:
         context.inputs = {{"width", 0}, {"height", 16000}, {"fit", QString("stretch")}, {"method", QString("nearest")}};
         context.inputSizes.insert("image", QSize(1000, 100));
         QCOMPARE(m_kernels.node("fugue/resize")->check(context).size(), 1);
+    }
+
+    // A picture that is only passed on keeps its size past 16384 (a 20000 px file works through Blur and Invert); the node that
+    // would make a new picture that big has no size to show and refuses it in its check (#671).
+    void aPassedOnPictureKeepsItsSizePastTheLimit() {
+        const QSize wide(20000, 10);
+        QCOMPARE(predict("fugue/blur", {{"radius", 2}, {"sigma", 1.0}}, wide).value("image"), wide);
+        QCOMPARE(predict("fugue/invert", {}, wide).value("image"), wide);
+        QCOMPARE(predict("fugue/flip", {{"direction", QString("vertically")}}, wide).value("image"), wide);
+        QCOMPARE(predict("fugue/rotate", {{"rotation", QString("90 degrees")}}, wide).value("image"), QSize(10, 20000));
+        QCOMPARE(predict("fugue/crop", {{"x", 0}, {"y", 0}, {"width", 18000}, {"height", 5}}, wide).value("image"), QSize(18000, 5));
+        QVERIFY(predict("fugue/upscale-image", {{"scale", 2.0}, {"method", QString("nearest")}}, wide).isEmpty());
     }
 
     void loadImageKnowsItsFilesSizeAndEmptyLatentsAndSolidMasksKnowTheirNumbers() {

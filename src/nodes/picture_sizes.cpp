@@ -81,9 +81,13 @@ PictureSizes imageSizes(const std::optional<QSize> &size) {
     return size && !tooBig(*size) ? PictureSizes{{QStringLiteral("image"), *size}} : PictureSizes();
 }
 
+PictureSizes passedSizes(const std::optional<QSize> &size) {
+    return size ? PictureSizes{{QStringLiteral("image"), *size}} : PictureSizes();
+}
+
 PictureSizes SameSizeKernel::outputSizes(const NodeContext &context) const {
     const auto size = context.inputSizes.constFind(QStringLiteral("image"));
-    return size == context.inputSizes.constEnd() ? PictureSizes() : imageSizes(size.value());
+    return size == context.inputSizes.constEnd() ? PictureSizes() : passedSizes(size.value());
 }
 
 } // namespace fugue::nodes::picturesize

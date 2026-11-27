@@ -237,7 +237,7 @@ public:
         const std::optional<QSize> in = inputSize(context);
         const std::optional<int> x = ps::wholeInput(context, "x"), y = ps::wholeInput(context, "y");
         const std::optional<int> width = ps::wholeInput(context, "width"), height = ps::wholeInput(context, "height");
-        return in && x && y && width && height ? imageSize(ps::crop(*in, *x, *y, *width, *height)) : PictureSizes();
+        return in && x && y && width && height ? ps::passedSizes(ps::crop(*in, *x, *y, *width, *height)) : PictureSizes();
     }
 
     Result<Values> run(const NodeContext &context) override {
@@ -644,7 +644,7 @@ public:
         const QString rotation = context.input("rotation").text();
         if (!in || rotation.isEmpty())
             return {};
-        return imageSize(rotation.startsWith(QLatin1String("90")) || rotation.startsWith(QLatin1String("270")) ? in->transposed() : *in);
+        return ps::passedSizes(rotation.startsWith(QLatin1String("90")) || rotation.startsWith(QLatin1String("270")) ? in->transposed() : *in);
     }
 
     Result<Values> run(const NodeContext &context) override {

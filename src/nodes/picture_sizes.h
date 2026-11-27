@@ -35,8 +35,13 @@ bool tooBig(QSize size);
 // The error a size past kMaxSide is, on `input` (value_out_of_range); the words say what made it.
 Error tooBigError(const QString &input, const QString &what, QSize size);
 
-// The "image" output of this size, or none when it is not known or past kMaxSide: the one rule for what is shown.
+// The "image" output of this size, or none when it is not known or past kMaxSide: for a node that makes new pixels of a size it
+// works out (Resize, Upscale, Pad: past kMaxSide it is that node's error, and no picture exists to show a size for).
 PictureSizes imageSizes(const std::optional<QSize> &size);
+// The "image" output of a picture that is only passed on or cut from its input (Blur, Invert, Rotate, Crop, ...): the size is
+// shown whatever it is, so a 20000 px picture from Load Image keeps its size down the chain. A node that refuses a side past
+// kMaxSide says so in its own check (#671).
+PictureSizes passedSizes(const std::optional<QSize> &size);
 
 // A number input written (not linked and not yet known: none) as a whole number.
 std::optional<int> wholeInput(const NodeContext &context, const char *name);
