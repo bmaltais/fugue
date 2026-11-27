@@ -49,8 +49,9 @@ QColor lift(const QColor &color, const QColor &against, double target = 3.0);
 struct Tokens {
     QColor canvas, dot, dotMajor, body, header, hairline, hairlineStrong, well, label, popup;
     QColor errorHeader, errorChip, selectedRow, menuRow, dangerFill, dangerHover;
-    // A dialog's destructive answer (Discard, Delete, Quit; KitDialogButtons): a solid fill of the theme's red with white ink, the red
-    // darkened until the ink reads at 4.5:1, so it is the same strong red in light and dark themes; the hover a step darker.
+    // A dialog's destructive answer (Discard, Delete, Quit; KitDialogButtons): the theme's red itself as a solid fill, so it looks alike
+    // in light and dark themes, with the ink that reads on it best (white, or the theme's dark colour) at 4.5:1; the fill moves only when
+    // neither ink does; the hover a step stronger.
     QColor dangerSolid, dangerSolidHover, dangerInk;
     // A bypassed node (9): the body and the header tinted with the palette's magenta, and the
     // dashed edge in it, as ComfyUI draws a bypassed node in magenta. The tint steps down

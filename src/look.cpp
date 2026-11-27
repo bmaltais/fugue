@@ -209,13 +209,29 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (contrast(fg, t.dangerHover) >= 4.5)
             break;
     }
-    // A dialog's destructive answer: the theme's red as a solid fill with white ink, darkened in steps of 5% black until the ink
-    // reads at 4.5:1 (catppuccin-latte's red needs none, catppuccin's pastel red about 45%); the hover 12% darker still.
-    t.dangerInk = QColor(Qt::white);
-    t.dangerSolid = red;
-    for (int step = 1; step <= 20 && contrast(t.dangerInk, t.dangerSolid) < 4.5; ++step)
-        t.dangerSolid = mix(red, QColor(Qt::black), step * .05);
-    t.dangerSolidHover = mix(t.dangerSolid, QColor(Qt::black), .12);
+    // A dialog's destructive answer: the theme's red itself as a solid fill, so it looks alike in light and dark themes, with the ink
+    // that reads on it best: white, or the theme's dark colour (the background of a dark theme, the text of a light one), at 4.5:1. Only
+    // when neither reaches it is the fill darkened (white ink) or lightened (dark ink) in 5% steps, whichever needs fewer. The hover
+    // is a step stronger: 12% away from the ink.
+    {
+        const QColor white(Qt::white);
+        const QColor dark = light ? fg : bg;
+        const bool whiteInk = contrast(white, red) >= contrast(dark, red);
+        t.dangerInk = whiteInk ? white : dark;
+        t.dangerSolid = red;
+        if (contrast(t.dangerInk, red) < 4.5) {
+            QColor darker = red, lighter = red;
+            int down = 0, up = 0;
+            while (down < 20 && contrast(white, darker) < 4.5)
+                darker = mix(red, QColor(Qt::black), ++down * .05);
+            while (up < 20 && contrast(dark, lighter) < 4.5)
+                lighter = mix(red, QColor(Qt::white), ++up * .05);
+            const bool goDark = contrast(white, darker) >= 4.5 && (down <= up || contrast(dark, lighter) < 4.5);
+            t.dangerInk = goDark ? white : dark;
+            t.dangerSolid = goDark ? darker : lighter;
+        }
+        t.dangerSolidHover = mix(t.dangerSolid, t.dangerInk == white ? QColor(Qt::black) : QColor(Qt::white), .12);
+    }
     // The sheen: the least alpha of light (the text on dark themes, white on light ones) that
     // makes the step; on a fill with no room to lighten, of black at the bottom instead.
     const auto sheen = [&](const QColor &over, double step) {
