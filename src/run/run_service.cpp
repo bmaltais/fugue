@@ -210,7 +210,7 @@ public:
         // replace the providers the check is using), which it ends at once. A check waits
         // on describe() (a paired host: up to its transfer timeout); a run does not.
         if (m_checking) {
-            m_parked.append({id, request});
+            m_parked.append({id, request, consented}); // a yes given meanwhile is not asked for again
             if (m_checkAbort)
                 m_checkAbort->abort();
             return;
@@ -317,13 +317,15 @@ public:
         for (Asking &asking : m_askings) {
             if (asking.fingerprints == fingerprints) { // the same question is up: this run is covered by its answer
                 asking.runs.append({id, request});
-                if (unionOfSends(asking.services, services)) // it may send kinds of data the first run's words do not list
-                    emit remoteConsentNeeded(asking.runs.first().id, asking.services); // the open question says them now
+                if (unionOfSends(asking.services, services)) { // it may send kinds of data the first run's words do not list
+                    asking.revision++; // an answer to the question as it was shown is no answer to this one
+                    emit remoteConsentNeeded(asking.runs.first().id, asking.services, asking.revision); // the open question says them now
+                }
                 return Consent::Asked;
             }
         }
         m_askings.append(Asking{{{id, request}}, fingerprints, services});
-        emit remoteConsentNeeded(id, services);
+        emit remoteConsentNeeded(id, services, m_askings.last().revision);
         return Consent::Asked;
     }
 
@@ -331,33 +333,35 @@ public:
     // True when anything was added.
     static bool unionOfSends(QJsonArray &have, const QJsonArray &more) {
         bool changed = false;
-        for (int i = 0; i < have.size() && i < more.size(); ++i) {
-            QJsonObject service = have.at(i).toObject();
-            if (service.value("instance") != more.at(i).toObject().value("instance"))
-                continue;
-            QStringList sends;
-            for (const QJsonValue &kind : service.value("sends").toArray())
-                sends << kind.toString();
-            const int before = int(sends.size());
-            for (const QJsonValue &kind : more.at(i).toObject().value("sends").toArray())
-                if (!sends.contains(kind.toString()))
+        for (const QJsonValue &added : more) {
+            const QString instance = added.toObject().value("instance").toString();
+            for (int i = 0; i < have.size(); ++i) {
+                QJsonObject service = have.at(i).toObject();
+                if (service.value("instance").toString() != instance)
+                    continue;
+                QStringList sends;
+                for (const QJsonValue &kind : service.value("sends").toArray())
                     sends << kind.toString();
-            if (sends.size() == before)
-                continue;
-            static const QStringList kinds{"pictures", "masks", "audio", "video", "prompts"}; // the order sendsOf lists them in
-            std::stable_sort(sends.begin(), sends.end(), [](const QString &x, const QString &y) { return kinds.indexOf(x) < kinds.indexOf(y); });
-            service.insert("sends", QJsonArray::fromStringList(sends));
-            service.insert("text", sendsText(sends));
-            have.replace(i, service);
-            changed = true;
+                const qsizetype before = sends.size();
+                for (const QJsonValue &kind : added.toObject().value("sends").toArray())
+                    if (!sends.contains(kind.toString()))
+                        sends << kind.toString();
+                if (sends.size() == before)
+                    break;
+                static const QStringList kinds{"pictures", "masks", "audio", "video", "prompts"}; // the order sendsOf lists them in
+                std::stable_sort(sends.begin(), sends.end(), [](const QString &x, const QString &y) { return kinds.indexOf(x) < kinds.indexOf(y); });
+                service.insert("sends", QJsonArray::fromStringList(sends));
+                service.insert("text", sendsText(sends));
+                have.replace(i, service);
+                changed = true;
+                break;
+            }
         }
         return changed;
     }
 
     QString consentPath() const { return m_setup.consentPath.isEmpty() ? RemoteConsent::defaultPath() : m_setup.consentPath; }
 
-    // The person's answer: yes keeps what was shown (the fingerprints kept with the question, not what the registry holds now) and
-    // starts every run of the question in order; no ends them as cancelled. A yes that cannot be kept fails the runs and says so.
     // How many runs wait on an off-machine question now (tests: every run has joined before the answer).
     int askedRuns() const {
         int count = 0;
@@ -366,7 +370,11 @@ public:
         return count;
     }
 
-    void answerRemote(const QString &id, bool allow) {
+    // The person's answer: yes keeps what was shown (the fingerprints kept with the question, not what the registry holds now) and
+    // starts every run of the question in order; no ends them as cancelled. A yes that cannot be kept fails the runs and says so.
+    // `revision` is the question's as the person saw it: a yes for an older one (a run joined and added data after it was shown) starts
+    // nothing, keeps nothing and asks again with the question as it is now. A no is always honoured.
+    void answerRemote(const QString &id, bool allow, int revision) {
         int found = -1;
         for (int i = 0; i < m_askings.size() && found < 0; ++i)
             for (const Parked &run : m_askings.at(i).runs)
@@ -374,6 +382,11 @@ public:
                     found = i;
         if (found < 0)
             return;
+        if (allow && m_askings.at(found).revision != revision) {
+            const Asking &now = m_askings.at(found);
+            emit remoteConsentNeeded(now.runs.first().id, now.services, now.revision);
+            return;
+        }
         const Asking asking = m_askings.takeAt(found);
         if (!allow) {
             for (const Parked &run : asking.runs)
@@ -416,7 +429,7 @@ public:
                     m_askings.removeAt(i);
                 emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
                 if (lead && !left.runs.isEmpty()) // the question is the next run's now
-                    emit remoteConsentNeeded(left.runs.first().id, left.services);
+                    emit remoteConsentNeeded(left.runs.first().id, left.services, left.revision);
                 return;
             }
         }
@@ -504,7 +517,7 @@ signals:
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
     // A run would send data to off-machine services the person has not allowed (8.2, #404): `services` is
     // [{"instance", "host", "sends": [..], "text"}]. The run waits for answerRemote.
-    void remoteConsentNeeded(const QString &run, const QJsonArray &services);
+    void remoteConsentNeeded(const QString &run, const QJsonArray &services, int revision);
 
 private:
     struct Waiting {
@@ -778,12 +791,16 @@ private:
     void settleAfterCheck() {
         if (m_checking)
             return; // a check is under way: its end schedules this again, so the parked starts keep their order
-        const QList<Parked> parked = std::exchange(m_parked, {});
-        for (const Parked &p : parked)
-            start(p.id, p.request);
+        // One run a pass: the others stay in m_parked while its check spins an event loop, where cancel() and shutdown() find them.
+        if (!m_parked.isEmpty()) {
+            const Parked p = m_parked.takeFirst();
+            start(p.id, p.request, p.consented);
+            if (!m_parked.isEmpty())
+                QTimer::singleShot(0, this, [this] { settleAfterCheck(); });
+        }
         if (!m_waiting.isEmpty())
             poll();
-        if (m_checkTicket >= 0 && !m_active)
+        if (m_parked.isEmpty() && m_checkTicket >= 0 && !m_active)
             QTimer::singleShot(0, this, &RunThread::checkNow);
     }
 
@@ -809,6 +826,7 @@ private:
     struct Parked {
         QString id;
         RunRequest request;
+        bool consented = false; // the person said yes to what it sends (answerRemote) while a check was under way
     };
     QList<Parked> m_parked; // started while a check was under way
     // The off-machine question (#404) and the runs of one batch that wait for its answer, oldest first; the first is its lead.
@@ -816,6 +834,7 @@ private:
         QList<Parked> runs;
         QJsonObject fingerprints; // instance name -> consentFingerprint, as shown
         QJsonArray services;
+        int revision = 1; // bumped when a joined run adds data to the question's words
     };
     QList<Asking> m_askings;
     bool m_checking = false;
@@ -861,8 +880,8 @@ void RunService::cancel(const QString &run) {
     QMetaObject::invokeMethod(m_worker, [w = m_worker, run] { w->cancel(run); }, Qt::QueuedConnection);
 }
 
-void RunService::answerRemote(const QString &run, bool allow) {
-    QMetaObject::invokeMethod(m_worker, [w = m_worker, run, allow] { w->answerRemote(run, allow); }, Qt::QueuedConnection);
+void RunService::answerRemote(const QString &run, bool allow, int revision) {
+    QMetaObject::invokeMethod(m_worker, [w = m_worker, run, allow, revision] { w->answerRemote(run, allow, revision); }, Qt::QueuedConnection);
 }
 
 void RunService::check(const RunRequest &request, int ticket) {

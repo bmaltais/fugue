@@ -251,7 +251,12 @@ private:
     QHash<QString, TabRuns> m_tabs;
     QString m_runsOn;                                // the last runsOn() told
     void noteRunsOn();
-    QList<QPair<QString, QJsonArray>> m_remoteAsks; // runs waiting for the off-machine question (#404), oldest first
+    struct RemoteAsk {
+        QString run;
+        QJsonArray services;
+        int revision = 0; // of the question as shown, given back with the answer
+    };
+    QList<RemoteAsk> m_remoteAsks; // runs waiting for the off-machine question (#404), oldest first
     QHash<QString, QString> m_tabOf; // run id -> tab id
     QStringList m_order;
     QSet<QString> m_first; // the waiting runs started ahead of the queue (they keep their order)

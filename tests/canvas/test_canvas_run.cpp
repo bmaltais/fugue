@@ -119,6 +119,8 @@ fugue::Description imageDescription() {
 // While set, a SlowProvider's describe() never answers: a paired host that takes its whole
 // transfer timeout. Set and read on the test's thread and the run thread.
 std::atomic<bool> g_describeHangs{false};
+// How many times a SlowProvider has been asked to describe itself: a test waits on it to know which check is under way.
+std::atomic<int> g_describes{0};
 
 // A provider whose description takes a while, as a real one over HTTP does: checkGraph waits
 // for it on an event loop of its own.
@@ -126,6 +128,7 @@ class SlowProvider : public FakeProvider {
 public:
     using FakeProvider::FakeProvider;
     void describe(fugue::Reply<fugue::Description> reply) override {
+        g_describes.fetch_add(1);
         if (g_describeHangs.load()) {
             m_unanswered.append(std::move(reply));
             return;
@@ -1014,6 +1017,82 @@ private slots:
         QTRY_COMPARE(text(), QStringLiteral("prompts"));
         r.runs->answerRemote(false);
         QTRY_VERIFY(r.runs->remoteQuestion().isEmpty());
+    }
+
+    // #505 review: a yes given to the question as it was shown does not cover a run that joined after it (and added data): the run
+    // thread starts nothing, keeps nothing and asks again, listing the union. The stale yes is sent as the window sends it, with the
+    // revision it was shown with.
+    void aYesForAnOlderQuestionStartsNothingAndAsksAgain() {
+        const auto graph = [](const QString &prompt) {
+            return QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+                "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "%1", "seed": 5}},
+                "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "gen.image"}}}}}})")
+                .arg(prompt).toUtf8();
+        };
+        RunApp r(graph({}), true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        QStringList queued;
+        QList<int> revisions;
+        QString lead;
+        connect(r.service.get(), &RunService::event, this, [&](const QString &run, const QJsonObject &event) {
+            if (event.value("event").toString() == QLatin1String("run.queued"))
+                queued << run;
+        });
+        connect(r.service.get(), &RunService::remoteConsentNeeded, this, [&](const QString &run, const QJsonArray &, int revision) {
+            lead = run;
+            revisions << revision;
+        });
+        fugue::RunRequest quiet, written;
+        quiet.document = load(graph({}));
+        written.document = load(graph("a cat"));
+        r.service->start(quiet);
+        QTRY_COMPARE(revisions.size(), 1);
+        r.service->start(written);
+        QTRY_COMPARE(r.service->askedRuns(), 2); // it joined, and the question says prompts now
+        QTRY_COMPARE(revisions.size(), 2);
+        QVERIFY(revisions.last() > revisions.first());
+        r.service->answerRemote(lead, true, revisions.first()); // the yes given to the first wording
+        QCOMPARE(r.service->askedRuns(), 2);                    // (a call on the run thread: the answer has been handled)
+        QTRY_COMPARE(revisions.size(), 3);                      // and it asked again, with the question as it is
+        QCOMPARE(revisions.last(), revisions.at(1));
+        QVERIFY(queued.isEmpty());
+        QVERIFY(!QFile::exists(r.app.dir.path() + "/remote-consent.json"));
+        QCOMPARE(r.runs->remoteQuestion().value("services").toList().first().toMap().value("text").toString(), QStringLiteral("prompts"));
+        r.service->answerRemote(lead, false, revisions.first()); // a no is honoured whatever it was shown
+        QTRY_VERIFY(r.service->askedRuns() == 0);
+    }
+
+    // #505 review: a cancel for a run still parked behind an earlier run's check is not lost: it ends cancelled and never starts.
+    void aCancelForAParkedRunWhileAnEarlierOnesCheckSpinsIsKept() {
+        RunApp r(kGraph, true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        QStringList queued, cancelled;
+        connect(r.service.get(), &RunService::event, this, [&](const QString &run, const QJsonObject &event) {
+            if (event.value("event").toString() == QLatin1String("run.queued"))
+                queued << run;
+            else if (event.value("event").toString() == QLatin1String("run.done") && event.value("status").toString() == QLatin1String("cancelled"))
+                cancelled << run;
+        });
+        fugue::RunRequest request;
+        request.document = r.app.model.document();
+        const int before = g_describes.load();
+        QStringList ids;
+        for (int i = 0; i < 3; ++i)
+            ids << r.service->start(request);
+        // The second run's check is under way once the first one's describe has answered and another has begun.
+        QTRY_VERIFY(g_describes.load() >= before + 2);
+        r.service->cancel(ids.at(2));
+        QTRY_VERIFY(cancelled.contains(ids.at(2)));
+        QTRY_COMPARE_WITH_TIMEOUT(r.service->askedRuns(), 2, 10000); // the second joined the question the first asked
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        r.runs->answerRemote(true);
+        QTRY_COMPARE(queued, ids.mid(0, 2));
+        QTest::qWait(300);
+        QVERIFY(!queued.contains(ids.at(2)));
+        for (const QString &id : ids.mid(0, 2))
+            r.service->cancel(id);
     }
 
     // #505: the runs of one question start in the order they were clicked, even when a run's check was cut short by one that came
