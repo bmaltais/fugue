@@ -640,6 +640,17 @@ FocusScope {
             mediaDialog = mediaDialogComponent.createObject(canvas, {canvasModel: canvas.model})
         mediaDialog.openFor(node)
     }
+    // The text window of a node's text input (#715), made on the first use: `input` empty is the node's first multiline input.
+    function openText(node, input) {
+        if (!textDialog)
+            textDialog = textDialogComponent.createObject(canvas, {edits: model.widgets, canvasModel: model})
+        textDialog.openFor(node, input)
+    }
+    property var textDialog: null
+    Component {
+        id: textDialogComponent
+        TextDialog { onClosed: canvas.forceActiveFocus() }
+    }
     property var mediaDialog: null
     Component {
         id: mediaDialogComponent
@@ -1562,6 +1573,7 @@ FocusScope {
     Connections {
         target: canvas.model
         function onNodeRenameRequested(node) { canvas.renamingNode = node }
+        function onTextEditRequested(node) { canvas.openText(node, "") }
         function onFrameRenameRequested(frame) { canvas.renamingFrame = frame }
     }
     // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a

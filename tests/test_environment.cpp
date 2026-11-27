@@ -110,6 +110,16 @@ void isolateFromTheDesktop() {
     if (!qEnvironmentVariableIsSet("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES"))
         qputenv("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES", "");
     qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/fugue-tests-have-no-session-bus");
+#ifdef FUGUE_TEST_BIN
+    // Nor the real omarchy-local-ai (it surveys the tailnet and rewrites state; a machine that has it listed its models in a picker
+    // test that expects none): ctest puts the stand-in in build/test-bin first on PATH, and so does a run by hand.
+    {
+        const QByteArray bin = FUGUE_TEST_BIN;
+        const QByteArray path = qgetenv("PATH");
+        if (!path.startsWith(bin + ':'))
+            qputenv("PATH", path.isEmpty() ? bin : bin + ':' + path);
+    }
+#endif
     // Nor the machine's GPU helper (a source checkout's build-helper-*/ sits beside build/): none,
     // unless a test names one (empty FUGUE_HELPER: no helper, engine/helper_provider.h).
     if (!qEnvironmentVariableIsSet("FUGUE_HELPER"))

@@ -254,6 +254,8 @@ Rectangle {
             make("ColorSwatch.qml")
         makeMore()
     }
+    // The room at the caption line's end the expand button takes (#715): "+N lines" stays clear of it, hovered or not, so it does not jump.
+    readonly property real expandRoom: tall && editable && canvasView && canvasView.openText !== undefined ? 24 + 2 : 0
     property bool chevronsMade: false
 
     MouseArea {
@@ -261,7 +263,7 @@ Rectangle {
         objectName: "widgetMouse"
         anchors.fill: parent
         enabled: root.editable && !root.editingText
-        hoverEnabled: root.kind === "spin"
+        hoverEnabled: root.kind === "spin" || root.tall
         preventStealing: true
         cursorShape: root.kind === "spin" || root.kind === "slider" ? Qt.SizeHorCursor
                    : root.typed ? Qt.IBeamCursor : Qt.PointingHandCursor
@@ -272,7 +274,11 @@ Rectangle {
         onContainsMouseChanged: {
             if (containsMouse && !root.chevronsMade) {
                 root.chevronsMade = true
-                root.make("SpinChevrons.qml", { mouse: mouse })
+                // A spin's chevrons and a multiline well's expand button (#715) appear on the first hover.
+                if (root.kind === "spin")
+                    root.make("SpinChevrons.qml", { mouse: mouse })
+                else if (root.tall && root.editable)
+                    root.make("ExpandButton.qml", { mouse: mouse })
             }
         }
         onPressed: event => {

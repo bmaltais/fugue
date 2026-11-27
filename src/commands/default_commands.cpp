@@ -48,6 +48,8 @@ QList<Row> defaultRows() {
         {"edit.delete", QT_TRANSLATE_NOOP("Command", "Delete"), {"Delete", "Backspace"}, {}, "canvas", same},
         {"edit.select-all", QT_TRANSLATE_NOOP("Command", "Select all"), {"Ctrl+A"}, {}, "canvas", same},
         {"edit.rename", QT_TRANSLATE_NOOP("Command", "Rename"), {"F2"}, {"Double-click a node's title"}, "canvas", "F2 added"},
+        {"node.edit-text", QT_TRANSLATE_NOOP("Command", "Edit the node's text in a larger window"), {"Alt+T"}, {"The expand button on a text field"}, "canvas", "added",
+         QT_TRANSLATE_NOOP("Command", "Edit text…")},
         {"node.bypass", QT_TRANSLATE_NOOP("Command", "Bypass"), {"Ctrl+B"}, {}, "canvas", same},
         {"node.mute", QT_TRANSLATE_NOOP("Command", "Mute"), {"Ctrl+M"}, {}, "canvas", same},
         {"node.collapse", QT_TRANSLATE_NOOP("Command", "Collapse"), {"Alt+C"}, {}, "canvas", same},

@@ -1979,6 +1979,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.compare = state.value("compare").toMap();
     run.media = state.value("media").toMap();
     run.values = state.value("values").toMap();
+    run.texts = state.value("texts").toMap();
     run.notice = state.value("notice").toString();
     run.runsOn = state.value("runsOn").toString();
     run.errorDetail = state.value("errorDetail").toString();
@@ -2160,4 +2161,18 @@ QStringList CanvasModel::selectedIds() const {
         if (m_selected.contains(row.id))
             ids << row.id;
     return ids;
+}
+
+void CanvasModel::reveal(const QString &node) {
+    if (node.isEmpty() || rowOf(node) < 0)
+        return;
+    select({node});
+    // Its header in the middle of the view, at the zoom the view has.
+    const QPointF at = position(node) + QPointF(30 * unit(), 10 * unit());
+    moveView(at.x(), at.y(), view().value("zoom", 1).toReal());
+}
+
+QString CanvasModel::textEditNode(const QString &target) const {
+    const QString node = !target.isEmpty() ? target : selectedIds().size() == 1 ? selectedIds().first() : QString();
+    return !node.isEmpty() && !m_widgets->textInputs(node).isEmpty() ? node : QString();
 }

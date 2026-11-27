@@ -497,6 +497,16 @@ public:
     Q_INVOKABLE QVariantMap compareResult(const QString &node) const { return m_run.value(node).compare; }
     // A video or sound result's player data (the `media` role): what the large view plays.
     Q_INVOKABLE QVariantMap mediaResult(const QString &node) const { return m_run.value(node).media; }
+    // The whole text each output of the node made in its last run, by output name (#715): what a linked text input
+    // got. Empty before a run, and after the run state is cleared.
+    QVariantMap runTexts(const QString &node) const { return m_run.value(node).texts; }
+    // The node's error as its card shows it (a run's or a check's); empty when none.
+    Q_INVOKABLE QString runError(const QString &node) const { return m_run.value(node).error; }
+    // The node the text window (node.edit-text) opens on: `target` (the node a menu was opened on) when it has a text input,
+    // else the one selected node when it has; empty when there is none.
+    QString textEditNode(const QString &target) const;
+    // Selects the node alone and puts its header in the middle of the view, at the zoom the view has.
+    Q_INVOKABLE void reveal(const QString &node);
     Q_INVOKABLE void setCompareView(const QString &node, const QVariantMap &changes);
     // One of "flip", "next-mode", "fit", "actual" on the node, as the keys do. False when the
     // node is no Compare Images or the step is unknown.
@@ -694,6 +704,8 @@ signals:
     // The edit.rename command and a double-click on a title (#55) or on a group's port (#72): the
     // window asks for the new title or label.
     void nodeRenameRequested(const QString &node);
+    // The node.edit-text command (#715): the window opens the text window on the node's first multiline input.
+    void textEditRequested(const QString &node);
     void portRenameRequested(const QString &node, const QString &port, bool output);
     // A paste added nodes from this document: the same questions as for opening it (missing
     // nodes, packs to trust) are asked of it (Workflows).
@@ -840,6 +852,7 @@ private:
         QVariantMap compare;
         QVariantMap media;
         QVariantMap values;
+        QVariantMap texts; // output name -> the whole text of the last run (runTexts)
         QString notice;
         QString runsOn;
         QString errorDetail;

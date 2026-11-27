@@ -360,6 +360,129 @@ private slots:
         QVERIFY(app.typing()); // the field stays open, as the form's does
     }
 
+
+    // #715 slice 3: the text window, opened from the expand button and Alt+T, edits the input as one undo step and keeps the canvas live.
+    void theTextWindowEditsTheInputFromTheButtonAndFromAltT() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        // The button shows on hover and not before.
+        QTest::mouseMove(app.window, app.in("all", "notes"));
+        QTRY_VERIFY(canvas_test::item(app.widget("all", "notes"), "widgetExpand"));
+        QQuickItem *button = canvas_test::item(app.widget("all", "notes"), "widgetExpand");
+        QTRY_VERIFY(button->isVisible());
+        app.click(button->mapToScene(QPointF(12, 12)).toPoint());
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        QVERIFY(app.typing()); // it is a text field: bare keys are its own
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
+        app.type("a fox");
+        app.key(Qt::Key_Return);
+        app.type("in snow");
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox\nin snow")); // in the document as typed
+        QCOMPARE(dialogItem("textCounts")->property("text").toString(), QString("13 characters · 4 words · 2 lines"));
+        // Ctrl+Enter runs and leaves the window open.
+        app.key(Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(app.runs, 1);
+        QVERIFY(dialogItem("textArea")->hasActiveFocus());
+        // Tab goes to the node's other text input, Shift+Tab back; the title follows.
+        app.key(Qt::Key_Tab);
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Name"));
+        app.key(Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox\nin snow")); // Escape keeps the text
+        QCOMPARE(app.steps(), 1);                                           // one visit, one step
+        app.model.undoStack()->undo();
+        QCOMPARE(app.stored("all", "notes"), QJsonValue(QJsonValue::Undefined)); // back to unset
+        app.model.undoStack()->redo();
+        // Alt+T on the selected node opens it on the first multiline input; the canvas behind stays usable.
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("a fox\nin snow"));
+        app.key(Qt::Key_End, Qt::ControlModifier);
+        app.type("!");
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox\nin snow!"));
+        app.click(app.screen(700, 600)); // the canvas takes the click: the window stays up
+        QVERIFY(dialogItem("textArea"));
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier); // and Alt+T brings the typing back into it
+        QTRY_VERIFY(dialogItem("textArea")->hasActiveFocus());
+        app.type("?");
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox\nin snow!?"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        QCOMPARE(app.steps(), 3); // the first visit, then each of the two typed in the second (the click ended the first's session)
+    }
+
+    // #715: a linked input shows the source's last text, read-only, and Go to source selects the source.
+    void aLinkedInputInTheTextWindowIsReadOnlyAndGoesToItsSource() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"join"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        QVERIFY(dialogItem("textArea")->property("readOnly").toBool());
+        QVERIFY(dialogItem("textLinkNote")->property("text").toString().contains("has not made any text yet"));
+        app.model.setRunState("prompt", {{"state", "cached"}, {"texts", QVariantMap{{"text", "a red fox"}}}});
+        QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("a red fox"));
+        app.type("x"); // read-only: nothing is typed
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("a red fox"));
+        QCOMPARE(app.steps(), 0);
+        QQuickItem *go = dialogItem("textGoToSource");
+        QVERIFY(go);
+        app.click(go->mapToScene(QPointF(go->width() / 2, go->height() / 2)).toPoint());
+        QTRY_COMPARE(app.model.selectedIds(), QStringList{"prompt"});
+        QVERIFY(dialogItem("textArea")); // the window stays
+        app.key(Qt::Key_Escape);
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715 slice 3): the text window on a long prompt, editable and linked. Picture only.
+    void theTextWindowLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        WidgetApp app;
+        QVERIFY(app.open());
+        app.window->resize(1100, 760);
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        app.type("a red fox in the snow at dawn, soft light, detailed fur, shallow depth of field,");
+        app.key(Qt::Key_Return);
+        app.type("35mm photo, film grain, muted colours, a quiet forest behind it with tall pines and a low mist rising between the trunks");
+        app.key(Qt::Key_Return);
+        app.type("negative: blurry, text, watermark");
+        QTest::qWait(150);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-window.png"));
+        app.key(Qt::Key_Escape);
+        app.model.select({"join"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        app.model.setRunState("prompt", {{"state", "cached"}, {"texts", QVariantMap{{"text", "a red fox\nin the snow at dawn"}}}});
+        QTest::qWait(150);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-window-linked.png"));
+        // A narrow window, and the expand button on a hovered well.
+        app.key(Qt::Key_Escape);
+        app.window->resize(420, 640);
+        QTest::qWait(100);
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        QTest::qWait(150);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-window-narrow.png"));
+        app.key(Qt::Key_Escape);
+        app.window->resize(900, 640);
+        QTest::qWait(100);
+        QTest::mouseMove(app.window, app.in("all", "notes"));
+        QTest::qWait(150);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-expand-button.png"));
+    }
+
     // FUGUE_SHOT_DIR=<folder> (#715): a multiline field open on a long prompt, caret in the middle. Picture only.
     void anOpenMultilineEditorLook() {
         const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");

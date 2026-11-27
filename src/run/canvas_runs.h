@@ -168,6 +168,7 @@ private:
         int thumbnailWidth = 0;
         int thumbnailHeight = 0;
         QVariantMap values;
+        QVariantMap texts; // output -> its whole text, from the last run (CanvasModel::runTexts)
         QString thumbnailFile; // the file a sink wrote, named under its picture
         QString imagePath;     // the full image behind `thumbnail`, for Open, Copy and Save Image
         QVariantMap media;     // a video or sound result's player: type, url, label, width, height, duration, file

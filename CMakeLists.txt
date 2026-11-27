@@ -532,6 +532,9 @@ set(fugue_test_bin ${CMAKE_BINARY_DIR}/test-bin)
 file(MAKE_DIRECTORY ${fugue_test_bin})
 file(WRITE ${fugue_test_bin}/omarchy-local-ai "#!/bin/sh\necho 'tests never run the real omarchy-local-ai' >&2\nexit 1\n")
 file(CHMOD ${fugue_test_bin}/omarchy-local-ai PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+# A test run by hand has no ctest to prepend it: tests/test_environment.cpp puts the same folder first on PATH (a machine that has the real
+# omarchy-local-ai listed its models in the first-run picker test, which passed only under ctest, 2026-11-27).
+target_compile_definitions(fugue_test_support PRIVATE FUGUE_TEST_BIN="${fugue_test_bin}")
 foreach(test_name ${fugue_all_tests})
   set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT_MODIFICATION PATH=path_list_prepend:${fugue_test_bin})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT ${fugue_test_timeout_seconds})
