@@ -1298,7 +1298,7 @@ takes Tab, else the window. It mirrors right to left with the application. The n
 
 Measured contrast on the tone tints (derive.py's derivation, every shipped theme): the text at least 4.5:1 everywhere (catppuccin-latte
 5.59 to 6.31, tokyo-night 4.61 to 4.84); the glyph's ink at least 3:1 everywhere (catppuccin-latte 4.75 to 5.67, tokyo-night 4.09 to
-4.98); the tier badge's label on `kitChip` as the kit's (5.98 catppuccin-latte, 4.64 tokyo-night).
+4.98); the tier badge's label on `kitChip` as the kit's (at least 4.5 in every shipped theme, a test: 5.98 catppuccin-latte, 4.64 tokyo-night).
 
 ### 20.24 KitDialogButtons: a dialog's one row of actions (Built, 2026-11-27)
 

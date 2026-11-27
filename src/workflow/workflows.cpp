@@ -225,8 +225,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
         refreshMissing(force);
     };
     host.endReading = [this] {
-        setNotice({});
-        setNotice(m_missingNotice);
+        setNotice(m_missingNotice); // once: a second change would rebuild the card and drop the focus of a notice button
     };
     host.offerSheet = [this] { offerReadiness(); };
     host.later = [this](std::function<void()> what) { after(std::move(what)); };
@@ -261,11 +260,13 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
                 m_tabSwaps.insert(m_noticeTab, SwapNotice{m_noticeTitle, m_noticeLines, m_notice});
             showMissing();
         }
-        if (const auto it = m_tabSwaps.constFind(shown); it != m_tabSwaps.constEnd() && (m_notice.isEmpty() || m_notice == m_missingNotice)) {
+        if (const auto it = m_tabSwaps.constFind(shown); it != m_tabSwaps.constEnd()) {
             const SwapNotice swaps = *it;
-            m_tabSwaps.erase(it);
-            setNotice(swaps.text, swaps.title, swaps.lines);
-            m_noticeTab = shown;
+            m_tabSwaps.erase(it); // restored below, or dropped when another line is showing: it must not return on a later visit
+            if (m_notice.isEmpty() || m_notice == m_missingNotice) {
+                setNotice(swaps.text, swaps.title, swaps.lines);
+                m_noticeTab = shown;
+            }
         }
         if (m_choice->hasRecord())
             emit noticeChanged(); // the banner's Undo belongs to the tab it was opened in
@@ -1017,7 +1018,9 @@ QVariantList Workflows::templates() const {
     for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
         QVariantList missing;
         ModelLibrary library = models;
-        downloadable(t.models, library); // the folders they would go in
+        // The folders they would go in. Only the download root moves: the model folders searched, so `absent` and what covers it,
+        // are those of coveringUses and onDiskNow (ModelLibrary::current), and the sheet and the open agree (#681).
+        downloadable(t.models, library);
         const QList<MissingModel> absent = library.missing(t.models, hashes);
         // The same model is on disk in another file (#370, #605): per missing model, the file; `covered` are the hashes it would replace.
         QVariantList onDisk;
@@ -1040,6 +1043,7 @@ QVariantList Workflows::templates() const {
                                       {"hash", model.handle.value(QStringLiteral("hash")).toString()},
                                       {"same", use.sameModelText()},
                                       {"file", match->name},
+                                      {"path", match->path}, // the banner counts the person's files by path too (swapNotice)
                                       {"tier", match->tier},
                                       {"otherSource", match->otherSource}});
         }

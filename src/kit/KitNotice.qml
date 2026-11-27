@@ -92,8 +92,16 @@ Item {
     // Once per message: when its words come while it shows, or it shows with words not yet heard (not when a panel above it opens
     // again on the same words). Weighed once the bindings have settled (a title and its lines change one after the other), and said
     // through the card, the item screen readers know as the alert.
-    function listen() { Qt.callLater(notice.speak) }
+    // A notice made in a Loader can be gone before the call comes (the helper's offer, dismissed): `gone` stops it then.
+    property bool gone: false
+    Component.onDestruction: gone = true
+    function listen() {
+        if (!notice.gone)
+            Qt.callLater(notice.speak)
+    }
     function speak() {
+        if (notice.gone)
+            return
         if (notice.spoken === "") {
             notice.heard = ""
             return

@@ -1290,6 +1290,7 @@ private slots:
         QCOMPARE(card.value("onDisk").toList().size(), 1);
         QCOMPARE(card.value("onDisk").toList().at(0).toMap().value("file").toString(), QString("z_image_turbo_bf16.safetensors"));
         QCOMPARE(card.value("onDisk").toList().at(0).toMap().value("same").toString(), QString("same model, bf16"));
+        QVERIFY(card.value("onDisk").toList().at(0).toMap().value("path").toString().endsWith("/z_image_turbo_bf16.safetensors")); // counted by path
         QCOMPARE(card.value("status").toString(), QString("Ready · uses your bf16 file"));
         QVERIFY(card.value("opensWithFiles").toBool());
         QCOMPARE(card.value("downloadSize").toString(), QString()); // the model the file stands in for is not a download of this card
@@ -1994,6 +1995,27 @@ private slots:
         QTRY_VERIFY(!rig.workflows->hashingUses());
         for (const QString &notice : std::as_const(notices))
             QVERIFY2(!notice.contains("Reading your file"), qPrintable(notice));
+    }
+
+    // #681 (2): a swap's banner put aside with its tab is not kept when another line is showing on return; it does not come back on a
+    // later visit.
+    void aStoredSwapBannerIsDroppedWhenAPlainLineShowsOnReturn() {
+        UseRig rig;
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
+        const int a = rig.workflows->current();
+        QTRY_VERIFY(rig.swapped());
+        QTRY_VERIFY(!rig.workflows->noticeLines().isEmpty());
+        QVERIFY(rig.workflows->openPath(rig.plain("b.fugue")));
+        const int b = rig.workflows->current();
+        QVERIFY(rig.workflows->noticeLines().isEmpty()); // a's banner is put aside
+        rig.workflows->setCurrent(a);
+        rig.workflows->notify("something else"); // a plain line takes the place on a
+        rig.workflows->setCurrent(b);
+        rig.workflows->setCurrent(a);
+        rig.workflows->dismissNotice();
+        rig.workflows->setCurrent(b);
+        rig.workflows->setCurrent(a);
+        QVERIFY(rig.workflows->noticeLines().isEmpty());
     }
 
     // #633 (4): the App view's swap does not mark the graph's: both views take the file.

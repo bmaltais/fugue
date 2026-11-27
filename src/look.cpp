@@ -197,18 +197,6 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (contrast(fg, t.menuRow) >= 4.5)
             break;
     }
-    // A button that cancels or deletes (#120): the well tinted red on the popup surface, the text
-    // reading on it at 4.5:1; the hover a step redder, lessened by the same rule.
-    for (const double k : {.30, .26, .22, .18, .14, .10}) {
-        t.dangerFill = mix(t.popup, red, k);
-        if (contrast(fg, t.dangerFill) >= 4.5)
-            break;
-    }
-    for (const double k : {.46, .40, .34, .28, .22, .16}) {
-        t.dangerHover = mix(t.popup, red, k);
-        if (contrast(fg, t.dangerHover) >= 4.5)
-            break;
-    }
     // A dialog's destructive answer: the theme's red as a solid fill, so it looks alike in light and dark themes, with the ink
     // that reads on it best: white, or the theme's dark colour (the background of a dark theme, the text of a light one), at 4.5:1. Only
     // when neither reaches it is the fill darkened (white ink) or lightened (dark ink) in 5% steps, whichever needs fewer. The hover
@@ -269,6 +257,19 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         t.dangerInk = chosen.second;
         t.dangerSolidHover = mix(t.dangerSolid, t.dangerInk == white ? QColor(Qt::black) : QColor(Qt::white), .12);
     }
+    // A button that cancels or deletes (#120): the well tinted red on the popup surface, the text
+    // reading on it at 4.5:1; the hover a step redder, lessened by the same rule. The red is the dialog
+    // answer's (dangerSolid), not the theme's raw one, which is green in hackerman.
+    for (const double k : {.30, .26, .22, .18, .14, .10}) {
+        t.dangerFill = mix(t.popup, t.dangerSolid, k);
+        if (contrast(fg, t.dangerFill) >= 4.5)
+            break;
+    }
+    for (const double k : {.46, .40, .34, .28, .22, .16}) {
+        t.dangerHover = mix(t.popup, t.dangerSolid, k);
+        if (contrast(fg, t.dangerHover) >= 4.5)
+            break;
+    }
     // The sheen: the least alpha of light (the text on dark themes, white on light ones) that
     // makes the step; on a fill with no room to lighten, of black at the bottom instead.
     const auto sheen = [&](const QColor &over, double step) {
@@ -319,7 +320,12 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     t.kitSeparator = mix(t.kitGroup, fg, .10);
     t.kitTrack = mix(t.kitGroup, fg, light ? .30 : .28);
     t.kitKnob = QColor(Qt::white); // Drift: a white knob and thumb on every theme, on and off
-    t.kitChip = mix(t.kitGroup, fg, .10);
+    // A chip a step off the group, lessened until the label colour reads on it at 4.5:1 (the tier badge of a notice, KitBadge, #681).
+    for (const double k : {.10, .08, .06, .04, .02}) {
+        t.kitChip = mix(t.kitGroup, fg, k);
+        if (contrast(t.label, t.kitChip) >= 4.5)
+            break;
+    }
     t.kitChipHover = mix(t.kitGroup, fg, .17);
     t.kitHeroShade = QColor(0, 0, 0, 140);
     t.kitHeroPill = QColor(0, 0, 0, 112);
