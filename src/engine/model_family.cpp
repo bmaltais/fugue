@@ -26,6 +26,8 @@ const QList<Rule> &rules() {
     static const QList<Rule> table{
         {image, QStringLiteral("FLUX.2 Klein 9B"), re(QStringLiteral("flux[-_.]?2.*klein.*9b"))},
         {image, QStringLiteral("FLUX.2 Klein 4B"), re(QStringLiteral("flux[-_.]?2.*klein.*4b"))},
+        // Krea 2 (#684), Turbo and Raw: one architecture, so one family; the files are told apart by their stem.
+        {image, QStringLiteral("Krea 2"), re(QStringLiteral("krea[-_ ]?2"))},
         {image, QStringLiteral("Z-Image"), re(QStringLiteral("z[-_]?image"))},
         {image, QStringLiteral("Qwen-Image"), re(QStringLiteral("qwen[-_]?image"))},
         {image, QStringLiteral("Wan 2.2"), re(QStringLiteral("wan[-_]?2[._]?2"))},
@@ -34,6 +36,8 @@ const QList<Rule> &rules() {
         // Text encoders (#370): the LLM a diffusion model reads. #369's templates name none of these.
         {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3.5 9B"), re(QStringLiteral("qwen[-_]?3[._]?5.*9b"))},
         {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3 8B"), re(QStringLiteral("qwen[-_]?3.*8b"))},
+        // Krea 2 reads Qwen3-VL 4B (#684): above Qwen3 4B, whose pattern also matches qwen3vl_4b_*.
+        {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3-VL 4B"), re(QStringLiteral("qwen[-_]?3[-_]?vl.*4b"))},
         {{QStringLiteral("text-encoder")}, QStringLiteral("Qwen3 4B"), re(QStringLiteral("qwen[-_]?3.*4b"))},
         {{QStringLiteral("seedvr2-model")}, QStringLiteral("SeedVR2"), re(QStringLiteral(""))},
         {{QStringLiteral("upscale-model")}, QStringLiteral("Real-ESRGAN"), re(QStringLiteral("esrgan"))},

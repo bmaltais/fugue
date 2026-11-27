@@ -367,12 +367,12 @@ ModelShape shapeOf(const Header &header) {
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
                         QStringLiteral("txt_in.in_layer.weight"), QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight"),
-                        QStringLiteral("text_embedder.proj.weight")}));
+                        QStringLiteral("text_embedder.proj.weight"), QStringLiteral("txtmlp.1.weight")}));
     shape.clipWidth = inputWidth(tensor(shapes, {QStringLiteral("vector_in.in_layer.weight")}));
     std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
-                        QStringLiteral("patch_embedding.weight"), QStringLiteral("video_embedder.weight")});
+                        QStringLiteral("patch_embedding.weight"), QStringLiteral("video_embedder.weight"), QStringLiteral("first.weight")});
     // A diffusers UNet names its input convolution conv_in (a VAE has encoder.conv_in and
     // decoder.conv_in): only SDXL Inpaint's, which takes 9 channels, is read from it.
     if (!image) {
@@ -414,10 +414,15 @@ ModelShape shapeOf(const Header &header) {
         const bool t5 = wan || hasTensor(shapes, QStringLiteral("vector_in."))
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
-        shape.videoVae = wan || (hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in.")));
+        // Krea 2 (#684): its text goes through txtfusion (a 12-to-1 projector over the encoder's layers) into txtmlp,
+        // and it takes the Wan VAE of Qwen-Image; stable-diffusion.cpp finds it by txtfusion.projector.
+        const bool krea2 = hasTensor(shapes, QStringLiteral("txtfusion.projector."));
+        shape.videoVae = wan || krea2 || (hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in.")));
         // The LLM it reads: Qwen-Image Qwen2.5-VL (txt_in.weight), but Qwen-Image 2.1 Qwen3-VL
         // (txt_in.in_layer, text_norm); Z-Image (cap_embedder) and FLUX.2 (txt_in with no vector_in) Qwen3.
-        if (*shape.videoVae && !wan)
+        if (krea2) // Qwen3-VL 4B
+            shape.llmFamily = QStringLiteral("qwen3");
+        else if (*shape.videoVae && !wan)
             shape.llmFamily = hasTensor(shapes, QStringLiteral("txt_in.in_layer.")) ? QStringLiteral("qwen3") : QStringLiteral("qwen2.5");
         else if (!t5 && (hasTensor(shapes, QStringLiteral("cap_embedder.")) || hasTensor(shapes, QStringLiteral("txt_in."))))
             shape.llmFamily = QStringLiteral("qwen3");

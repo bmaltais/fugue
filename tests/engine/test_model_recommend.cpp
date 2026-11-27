@@ -34,6 +34,18 @@ ModelShape qwen8() {
     return shape;
 }
 
+// Krea 2's header figures (#684): the real INT8 file's.
+ModelShape krea2() {
+    ModelShape shape;
+    shape.kind = ModelKind::DiffusionModel;
+    shape.textWidth = 2560;
+    shape.hidden = 6144;
+    shape.latentChannels = 16;
+    shape.videoVae = true;
+    shape.llmFamily = QStringLiteral("qwen3");
+    return shape;
+}
+
 ComputeDevice cuda3090() { return {"cuda", "NVIDIA GeForce RTX 3090", 8.6, 24576}; }
 ComputeDevice vulkan() { return {"vulkan", "AMD Radeon", std::nullopt, 24576}; }
 
@@ -73,6 +85,17 @@ private slots:
         const auto onVulkan = recommend(files, {vulkan(), 0, nullptr});
         QVERIFY(onVulkan.contains(at("flux-2-klein-9b-Q8_0.gguf")));
         QCOMPARE(onVulkan.size(), 1);
+    }
+    // Krea 2 Turbo (#684): the 25 GB bf16 file does not fit a 24 GB card, so the INT8 one is the pick; Raw is another model.
+    void krea2TurboOnA3090() {
+        const QList<RecommendCandidate> files{
+            file("krea2_turbo_bf16.safetensors", krea2(), 25 * kGb),
+            file("krea2_turbo_int8_convrot.safetensors", krea2(), 13492686496),
+            file("krea2_raw_bf16.safetensors", krea2(), 25 * kGb),
+        };
+        const auto picked = recommend(files, {cuda3090(), 4858, nullptr});
+        QCOMPARE(picked.size(), 1);
+        QVERIFY(picked.contains(at("krea2_turbo_int8_convrot.safetensors")));
     }
     // 2 and 3: the memory is dropped on first, then the best tier left wins, whatever the speed.
     void memoryThenTier() {

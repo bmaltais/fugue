@@ -35,7 +35,8 @@
 //
 // Families and formats, from tensor names too: an LLM encoder is Qwen3 (q_norm in its
 // attention), Qwen3.5 (linear_attn layers) or Qwen2.5 (neither); Z-Image and FLUX.2 read Qwen3,
-// Qwen-Image Qwen2.5-VL (Qwen-Image 2.1, with txt_in.in_layer, Qwen3-VL), so another family does not fit. A file in a quantization
+// Qwen-Image Qwen2.5-VL (Qwen-Image 2.1, with txt_in.in_layer, Qwen3-VL), Krea 2 (txtfusion.projector; first and
+// txtmlp.1 give its 16 channels and 2560-wide text, it wants the Wan VAE) Qwen3-VL 4B, so another family does not fit. A file in a quantization
 // stable-diffusion.cpp cannot load fits nothing: a ComfyUI quantization (comfy_quant tensors,
 // whose JSON payloads give the formats) unless every format in the file is one a real run
 // proved (int8_tensorwise; nvfp4, as in fp8mixed files, aborts the helper), GPTQ (weight_codebook),
