@@ -392,7 +392,13 @@ public:
 private:
     // --- small helpers ---
 
-    std::optional<ModelLibrary> m_library; // read when a node first needs it (modelFilesElsewhere)
+    std::optional<ModelLibrary> m_library; // read when a node first needs it: one for the run, or for the whole check (#607)
+
+    ModelLibrary &library() {
+        if (!m_library)
+            m_library.emplace(ModelLibrary::current(m_env.registry));
+        return *m_library;
+    }
 
     QDateTime now() const { return utcNow(m_env.clock); }
 
@@ -937,6 +943,7 @@ private:
         context.inputs = n.inputs;
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
+        context.library = m_env.registry ? &library() : nullptr;
         for (const Error &error : n.providerKernel ? n.providerKernel->check(context) : n.kernel->check(context))
             sortFinding(error, n.path, m_outcome.errors, m_outcome.checkErrors);
     }
@@ -954,8 +961,6 @@ private:
             const InputSpec *spec = n.type->input(it.key());
             if (!spec || it.value().isEmpty() || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
                 continue;
-            if (!m_library)
-                m_library.emplace(ModelLibrary::current(m_env.registry)); // one for the run
             if (hashedHandleMissing(it.value().toJson()))
                 return true;
         }
@@ -974,7 +979,7 @@ private:
             const std::optional<PortType> type = PortType::parse(object.value("resource").toString());
             return type && m_env.registry->portKind(*type) == PortKind::Resource
                    && object.value("hash").toString().startsWith(QLatin1String("sha256:"))
-                   && !m_library->resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+                   && !library().resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
         }
         for (const QJsonValue &part : object) // a derived model's parts, its LoRAs
             if ((part.isObject() || part.isArray()) && hashedHandleMissing(part))
@@ -983,18 +988,15 @@ private:
     }
 
     void warnMissingModels(const NodeRun &n) {
-        std::optional<ModelLibrary> library; // read from the settings for the first resource input
         for (auto it = n.inputs.begin(); it != n.inputs.end(); ++it) {
             const InputSpec *spec = n.type->input(it.key());
             if (!spec || !m_env.registry || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
                 continue;
-            if (!library)
-                library.emplace(ModelLibrary::current(m_env.registry));
             if (it.value().isEmpty())
                 continue; // not known yet (a link from a node that has not run)
             // A check reads no model file: one with the handle's name is taken to be it.
             const Result<QJsonValue> found =
-                library->withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+                library().withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
             if (found)
                 continue;
             Error warning = found.error();

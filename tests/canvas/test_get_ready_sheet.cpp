@@ -72,7 +72,7 @@ QVariantMap bigView() {
                                     model("ae.safetensors", "335 MB", "", "type from Segment Nodes"),
                                     model("sam2_hiera_large.pt", "898 MB", "Apache-2.0", "type from Segment Nodes")}},
             {"destination", "/home/me/.local/share/fugue/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}},
-            {"hasModels", true}, {"hasDownloads", true}, {"busy", false}, {"primary", "Install"}, {"usesCount", 0}, {"freeText", "343.2 GB free"},
+            {"hasModels", true}, {"optionalModels", QVariantList{}}, {"hasDownloads", true}, {"busy", false}, {"primary", "Install"}, {"usesCount", 0}, {"freeText", "343.2 GB free"},
             {"sizeText", "19.7 GB"}, {"lowSpace", false}, {"problems", QStringList{}},
             {"question", QVariantMap{}}, {"message", ""}, {"ok", false}, {"retry", QStringList{}}, {"empty", false}};
 }
@@ -83,7 +83,7 @@ QVariantMap fakeView() {
                             {"state", ""}, {"detail", ""}, {"fraction", 0.0}, {"hash", "h1"}, {"use", QVariantMap()}, {"choice", ""},
                             {"sizeKnown", true}, {"error", ""}};
     return {{"headline", "Fugue will download 1 model, 5.9 GB."}, {"packs", QVariantList{}}, {"models", QVariantList{model}},
-            {"destination", "/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}}, {"hasModels", true},
+            {"destination", "/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}}, {"hasModels", true}, {"optionalModels", QVariantList{}},
             {"hasDownloads", true}, {"busy", false}, {"primary", "Install"}, {"usesCount", 0},
             {"freeText", "300 GB free"}, {"sizeText", "5.9 GB"}, {"lowSpace", false}, {"problems", QStringList{}}, {"question", QVariantMap{}},
             {"message", ""}, {"ok", false}, {"retry", QStringList{}}, {"empty", false}};
@@ -107,7 +107,7 @@ QVariantMap coveredView(bool mixed = false, const QString &choice = "disk") {
                        : choice == "download" ? "Fugue will download 1 model, 8.7 GB."
                                               : "Nothing to download: Fugue will use the file you already have.";
     return {{"headline", headline}, {"packs", QVariantList{}}, {"models", models},
-            {"destination", "/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}}, {"hasModels", true},
+            {"destination", "/models"}, {"destinationTitle", "Fugue's models folder"}, {"destinations", QVariantList{}}, {"hasModels", true}, {"optionalModels", QVariantList{}},
             {"hasDownloads", downloads}, {"busy", false}, {"primary", downloads ? "Install" : "Use my file"}, {"usesCount", mixed ? 1 : choice == "disk" ? 1 : 0},
             {"freeText", "1979 GB free"}, {"sizeText", mixed ? "5.9 GB" : choice == "download" ? "8.7 GB" : ""}, {"lowSpace", false},
             {"problems", QStringList{}}, {"question", QVariantMap{}}, {"message", ""}, {"ok", false}, {"retry", QStringList{}}, {"empty", false}};

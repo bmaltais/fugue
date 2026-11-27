@@ -393,6 +393,10 @@ private slots:
             hashes << model.toObject().value("hash").toString();
         QVERIFY(!hashes.contains(hash));   // only a, which only the Switch's lazy side reads
         QVERIFY(hashes.contains(other));   // b is read by a sink too
+        QStringList optional; // #594: the one left out is offered apart, and only that one
+        for (const QJsonValue model : requestFor(loaded.value(), registry()).optionalModels)
+            optional << model.toObject().value("hash").toString();
+        QCOMPARE(optional, QStringList{hash});
     }
 
     void aModelWithNoSourceCountsAsMissingToo() {

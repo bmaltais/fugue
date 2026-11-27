@@ -186,7 +186,9 @@ private slots:
             pack.version = "1.0.0";
             pack.needsInstall = pack.hasSource = true;
             pack.source = PackSource{PackSource::Kind::Path, folder, {}, {}};
-            return ReadinessRequest{{pack}, {}};
+            ReadinessRequest request;
+            request.packs = {pack};
+            return request;
         });
         sheet.show();
         QCOMPARE(sheet.view().value("packs").toList().size(), 1);

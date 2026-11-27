@@ -102,6 +102,18 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
              {"action", tr("Download")}},
             m.entry);
     }
+    // Models only another branch of a Switch needs (#594): non-blocking, listed after the rest with the download on offer. They do not
+    // make the panel show by themselves (`ready`): a ready app keeps its App view clean, and the Get ready sheet lists them too.
+    for (const ReadinessModel &m : plan.optionalModels) {
+        QStringList parts{tr("only if another branch is chosen")};
+        if (!m.host.isEmpty())
+            parts << tr("from %1").arg(m.host);
+        add({{"kind", "optional"}, {"key", "optional:" + m.name}, {"name", m.name}, {"id", QString()}, {"hash", m.entry.value("hash").toString()},
+             {"detail", parts.join(QStringLiteral(" · "))}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : tr("size not recorded")},
+             {"licence", m.license}, {"licenceUrl", m.licenseUrl}, {"canDownload", !m.deferred && !m.entry.isEmpty()},
+             {"action", tr("Download")}},
+            m.entry);
+    }
     // What cannot be made ready from here has no action: a quiet line each.
     for (const Error &problem : plan.problems)
         add({{"kind", "problem"}, {"key", "problem:" + problem.message}, {"name", problem.message}, {"id", QString()}, {"hash", QString()},
@@ -131,7 +143,10 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
     if (downloads > 0)
         counts << (bytes > 0 ? tr("%n models (%1)", nullptr, downloads).arg((unknown ? tr("at least ") : QString()) + ModelDownloads::sizeText(bytes))
                              : tr("%n models", nullptr, downloads));
-    QString headline = counts.isEmpty() ? (items.isEmpty() || covered > 0 ? QString() : tr("This app cannot be made ready from this machine."))
+    const bool anyBlocking = std::any_of(items.cbegin(), items.cend(), [](const QVariant &item) {
+        return item.toMap().value("kind").toString() != QLatin1String("optional");
+    });
+    QString headline = counts.isEmpty() ? (!anyBlocking || covered > 0 ? QString() : tr("This app cannot be made ready from this machine."))
                                         : tr("This app needs %1.").arg(counts.join(tr(" and ")));
     if (covered > 0 && counts.isEmpty())
         headline = tr("This app needs %n models, and you have them on disk.", nullptr, covered);

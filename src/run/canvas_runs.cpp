@@ -1096,11 +1096,12 @@ QString CanvasRuns::lastPicture() const {
 QVariantList CanvasRuns::errors() const {
     const TabRuns runs = m_tabs.value(m_shownTab);
     QVariantList list = runs.errors;
-    // A run that failed on the same node and code has said it already.
+    // A run that failed on a node has said what is wrong there: the run's error wins over a check's, whatever the codes (#607),
+    // as on the node itself.
     for (const QVariant &found : runs.checkErrors) {
         const QVariantMap check = found.toMap();
         const bool listed = std::any_of(list.cbegin(), list.cend(), [&](const QVariant &e) {
-            return e.toMap().value("node") == check.value("node") && e.toMap().value("code") == check.value("code");
+            return e.toMap().value("node") == check.value("node");
         });
         if (!listed)
             list << found;

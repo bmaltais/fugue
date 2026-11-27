@@ -1970,6 +1970,25 @@ private slots:
         QTRY_VERIFY(rig.swapped());
     }
 
+    // #639 (spec 2.5): an App-view read that ends while another tab is shown is dropped, not swapped silently: the swap is
+    // said in the banner of the tab shown, so it waits until its tab is.
+    void anAppViewReadEndingOnAnotherTabIsRetriedWhenItIsShown() {
+        UseRig rig;
+        int taken = 0;
+        rig.workflows->setAppShown([](const QString &) { return true; });
+        rig.workflows->setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
+            ++taken;
+            return true;
+        });
+        QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
+        const int a = rig.workflows->current();
+        QVERIFY(rig.workflows->openPath(rig.plain("b.fugue"))); // a is read while b is shown
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QCOMPARE(taken, 0);
+        rig.workflows->setCurrent(a);
+        QTRY_COMPARE(taken, 1);
+    }
+
     // #633 (5): A, B, A, B during one read: the idle mark from the second visit to A does not hide the file when A is shown again.
     void aStaleIdleMarkDoesNotSkipTheCheckAfterADroppedRead() {
         UseRig rig;

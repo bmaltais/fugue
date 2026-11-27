@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -54,6 +55,10 @@ struct WantedPack {
 struct ReadinessRequest {
     QList<WantedPack> packs;
     QJsonArray models; // Document::models()'s form
+    // Models only a Switch's lazy side holds (#594): they block nothing, so the plan lists them apart (`optionalModels`), unless the
+    // person chose one (its hash is in `optionalChosen`): then it is a row of the plan like the others, marked `optional`.
+    QJsonArray optionalModels;
+    QSet<QString> optionalChosen;
 };
 
 // The packs a document uses (TrustStore::packsUsed), each with where to get it: the carried pack's
@@ -99,11 +104,15 @@ struct ReadinessModel {
     // row stays and says so (#493). Empty: this machine is where it runs.
     QString onHost;
     QString typeFrom;   // deferred: the pack that gives its type (its name), or empty when the list cannot tell
+    bool optional = false; // only a Switch's lazy side needs it (#594): in `models` only because the person chose to download it
 };
 
 struct ReadinessPlan {
     QList<ReadinessPack> packs;
     QList<ReadinessModel> models;
+    // The missing models only a lazy side needs and the person did not choose: non-blocking, so not in `models`, `empty()`, the
+    // headline or the sizes. Each has a download target, or is left out (no source, no place to put it).
+    QList<ReadinessModel> optionalModels;
     QString destination;   // the model folder the models go into (settings' download_folder, or Fugue's own)
     QStringList destinations; // every model folder they may go in (the Change… choices)
     qint64 downloadBytes = 0;    // the models' sizes that are known

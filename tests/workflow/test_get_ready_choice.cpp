@@ -31,11 +31,17 @@ struct Rig {
     Translator translator{dir.filePath("language")}; // English plural forms come from the catalog, as in the app
     QJsonArray models; // what the "workflow" still lacks: the test plays the window and takes a model out when its file is set
     QStringList covered; // the hashes that have a file of the same weights
+    QJsonArray optional; // #594: models only another Switch branch needs
     ReadinessSheet sheet;
 
     explicit Rig(const QStringList &haveFiles, const QJsonArray &wanted)
         : models(wanted), covered(haveFiles),
-          sheet((nodes::addBuiltinNodeTypes(registry), &registry), dir.filePath("trust.json"), [this] { return ReadinessRequest{{}, models}; }) {
+          sheet((nodes::addBuiltinNodeTypes(registry), &registry), dir.filePath("trust.json"), [this] {
+              ReadinessRequest request;
+              request.models = models;
+              request.optionalModels = optional;
+              return request;
+          }) {
         QCoreApplication::installTranslator(&translator);
         sheet.setUseSource([this](const QString &hash) {
             return covered.contains(hash) ? QVariantMap{{"file", "qwen_3_8b_int8_convrot.safetensors"}, {"same", "same model, INT8"}} : QVariantMap();
@@ -84,6 +90,44 @@ private slots:
         QVERIFY(!rig.sheet.isOpen());
         QCOMPARE(rig.sheet.phase(), QString("review"));
         QVERIFY(rig.sheet.waitIdle(10)); // no thread was ever made
+    }
+
+    // #594: a model only another branch needs is listed apart, "Not now" by default (the yes downloads nothing of it, and with nothing
+    // else there is nothing to run); chosen, it is part of the download, and turned off again it goes.
+    void anOptionalModelWaitsForItsOwnDownload() {
+        Rig rig({}, {});
+        rig.optional = QJsonArray{model("other-branch.gguf", hashA, 2.0e9)};
+        rig.sheet.show();
+        QVERIFY(rig.view().value("models").toList().isEmpty());
+        QVariantList optional = rig.view().value("optionalModels").toList();
+        QCOMPARE(optional.size(), 1);
+        QVERIFY(!optional.at(0).toMap().value("on").toBool());
+        QVERIFY(rig.view().value("empty").toBool()); // nothing for the yes to do
+        QVERIFY(!rig.view().value("hasDownloads").toBool());
+        QCOMPARE(rig.view().value("headline").toString(), QString("Nothing is needed to run. Models only another branch uses can be downloaded below."));
+        rig.sheet.setOptional(hashA, true);
+        optional = rig.view().value("optionalModels").toList();
+        QCOMPARE(optional.size(), 1); // the same row, now on
+        QVERIFY(optional.at(0).toMap().value("on").toBool());
+        QVERIFY(rig.view().value("models").toList().isEmpty()); // not repeated in Models
+        QVERIFY(!rig.view().value("empty").toBool());
+        QVERIFY(rig.view().value("hasDownloads").toBool());
+        QCOMPARE(rig.view().value("headline").toString(), QString("Fugue will download 1 model, 2.0 GB."));
+        QVERIFY(rig.sheet.currentPlan().models.isEmpty()); // the Needs panel's plan: a sheet's choice never makes it a need
+        rig.sheet.setOptional(hashA, false);
+        QVERIFY(rig.view().value("empty").toBool());
+        rig.sheet.show(); // a new look starts from Not now again
+        QVERIFY(!rig.view().value("optionalModels").toList().at(0).toMap().value("on").toBool());
+    }
+
+    // A required model that cannot be had, beside an optional one: the headline says so, never "Nothing is needed to run".
+    void anOptionalModelBesideAnUnobtainableOneSaysTheProblem() {
+        QJsonObject nowhere = model("gone.gguf", hashB, 1.0e9);
+        nowhere.remove("source");
+        Rig rig({}, {nowhere});
+        rig.optional = QJsonArray{model("other-branch.gguf", hashA, 2.0e9)};
+        rig.sheet.show();
+        QVERIFY(rig.view().value("headline").toString() != QString("Nothing is needed to run. Models only another branch uses can be downloaded below."));
     }
 
     // Check 2: Download chosen, the headline and the totals are the download's, the primary is Install and the destination is shown.

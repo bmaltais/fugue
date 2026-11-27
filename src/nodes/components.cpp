@@ -653,7 +653,8 @@ public:
     // the node says so before a run (#85). Reads no file to find them: one with the handle's
     // name is taken to be it, as any check does (8.9).
     Errors check(const NodeContext &context) const override {
-        const ModelLibrary library = ModelLibrary::current(context.registry);
+        std::optional<ModelLibrary> own; // none is given outside a check pass
+        const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));
         const auto path = [&](const char *input) {
             const Result<QString> found = library.resolve(context.input(QLatin1String(input)).json().toObject(),
                                                           *context.hashes, ModelLibrary::Hashing::RememberedOnly);
