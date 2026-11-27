@@ -1449,3 +1449,25 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why (medium-high): VS Code's and Godot's new-project flows take a parent folder and a name and make the folder; Blender's browser has a create-directory button only because it browses. A new project's folder is almost always new, so no picker button is needed, and it does not depend on which backend answers. An existing folder to use as the root stays possible from the CLI (`fugue project new --in`) and `Open folder…` for one that is already a project.
 - Rules met: Primary (no new control), Words (the line says what will be made and where), Floor (field and Choose… unchanged), Gaps (a caption line, as the notes).
 - Not checked by a person: the portal picker in the real window.
+
+### 2026-11-26 Compare node: the plain wheel zooms the picture while the node is selected (#437; owner decision)
+
+- Control: `src/canvas/CanvasNode.qml`, the Compare Images face (`compareViewer`, `wheelModifiers`); no control added or moved.
+- Old: only Alt+wheel zoomed the picture on the face; a plain wheel always moved the graph, even over a selected node.
+- New: while the node is selected, the wheel over its picture zooms the picture (plain, or with a key held, Alt or Ctrl); not selected, the plain wheel stays the graph's and Alt+wheel zooms the picture as before.
+- Why: selecting the node is the person's statement that they are working on its picture; the Large view and the App stage already zoom with the plain wheel. An unselected node keeps the wheel so the graph can still be panned across a Compare node.
+- Rules met: Learned place (nothing moved), Posture (selection already means "this is the one acted on").
+- Not checked by a person: a real mouse in a real window (the window test sends wheel events).
+
+### 2026-11-26 Packs page: a secret's Key row wraps its chips (#540)
+
+- Control: the Key row of a pack secret in `src/settings/PacksPage.qml` (`packSecret-*`, `packSecretSet-*`, `packSecretClear-*`); order unchanged.
+- Old: the field shrank to leave 26u for the chips, but the chips did not wrap, so on a very narrow panel Set... and Clear ran past the tray's edge.
+- New: the field and chips are one `Flow`: the field gives up width down to 30u, then Set... and Clear go under it. Always inside the tray.
+- Rules met: Floor (chips unchanged, 24px), Gaps (2u between, as before).
+
+### 2026-11-26 Dialogs that fade keep the keys of a dialog opened during the fade (#503)
+
+- Control: none visible; `src/kit/KitFocusKeep.qml` in About, the shortcuts help, Apps, node search, Projects, Settings and Templates.
+- Old: Escape on About, then F1 within the fade (~150 ms): when About's exit ended Qt gave the focus back to the window, so the help's Escape did nothing.
+- New: the help keeps the keys; the closing popup restores only when no other popup has them.

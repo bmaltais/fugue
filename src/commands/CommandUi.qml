@@ -196,6 +196,7 @@ Item {
         exit: Transition {
             NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
         }
+        KitFocusKeep { popup: help }
         // The registry is read each time the overlay opens, so a later registration or a
         // changed language shows.
         property var entries: []

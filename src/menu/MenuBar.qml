@@ -410,6 +410,7 @@ Rectangle {
                 }
             }
             onOpened: aboutClose.forceActiveFocus(Qt.OtherFocusReason)
+            KitFocusKeep { popup: aboutPopup }
             contentItem: Item {
                 implicitHeight: 4 * bar.u + 7 * bar.u
                 LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft

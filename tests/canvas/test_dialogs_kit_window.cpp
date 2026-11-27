@@ -163,12 +163,30 @@ private slots:
         QTRY_VERIFY(find(app.window, "aboutClose")->hasActiveFocus());
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app, "about"));
-        // Wait for About's exit to end: when it does, the popup gives the focus back, and a dialog opened during the fade would lose
-        // it (#503). Then the keys are the window's again: the next dialog hears its Escape.
-        QTRY_VERIFY(!named(app, "about")->property("visible").toBool());
+        // The keys are the window's again: the next dialog hears its Escape.
         QVERIFY(app.commands.trigger("app.shortcuts"));
         QTRY_VERIFY(isOpen(app, "help"));
         QTRY_VERIFY(focusOnPopup(app, "help"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!isOpen(app, "help"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A dialog opened while another fades out keeps the keyboard when the fade ends (#503): the closing popup gives the focus back
+    // only if it still has it.
+    void aDialogOpenedDuringAFadeKeepsTheFocus() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        openAbout(app);
+        QTRY_VERIFY(find(app.window, "aboutClose")->hasActiveFocus());
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!isOpen(app, "about"));
+        QVERIFY(named(app, "about")->property("visible").toBool()); // still fading out
+        QVERIFY(app.commands.trigger("app.shortcuts"));
+        QTRY_VERIFY(isOpen(app, "help"));
+        QTRY_VERIFY(!named(app, "about")->property("visible").toBool()); // the fade is over: About's exit has ended
+        QTest::qWait(50);
+        QVERIFY(focusOnPopup(app, "help"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app, "help"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

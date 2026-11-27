@@ -327,6 +327,43 @@ private slots:
     }
 
     // The keys belong to the node: with no Compare Images selected they are not taken.
+    // #437: a plain wheel over a selected Compare node zooms its picture; over an unselected one it stays the graph's.
+    void aPlainWheelZoomsThePictureOnlyWhileTheNodeIsSelected() {
+        QTemporaryDir files;
+        RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 16, 10, Qt::blue)));
+        QVERIFY(r.app.open());
+        r.run();
+        QTRY_VERIFY(r.viewer());
+        QQuickItem *mouse = item(r.viewer(), "compareMouse");
+        QVERIFY(mouse);
+        const QPointF mid = mouse->mapToScene(QPointF(mouse->width() / 2, mouse->height() / 2));
+        const auto wheel = [&](Qt::KeyboardModifiers modifiers) {
+            QWheelEvent event(mid, r.app.window->mapToGlobal(mid), QPoint(), QPoint(0, 120), Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(r.app.window, &event);
+            QTest::qWait(50);
+        };
+        const auto pictureZoom = [&] { return r.app.model.compareView("cmp").value("zoom", 1.0).toReal(); };
+
+        r.app.model.select({"left"});
+        const qreal graph = r.app.zoom();
+        wheel({});
+        QVERIFY(r.app.zoom() > graph); // not selected: the graph's
+        QCOMPARE(pictureZoom(), 1.0);
+
+        r.app.model.select({"cmp"});
+        QTest::qWait(100);
+        const qreal graphNow = r.app.zoom();
+        QCOMPARE(pictureZoom(), 1.0);
+        wheel({});
+        QVERIFY2(pictureZoom() > 1.0, "a plain wheel over the selected node zooms its picture");
+        QCOMPARE(r.app.zoom(), graphNow);
+        const qreal zoomed = pictureZoom();
+        wheel(Qt::AltModifier); // with a key too, as before
+        QVERIFY(pictureZoom() > zoomed);
+        QCOMPARE(r.app.zoom(), graphNow);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
     void theKeysApplyOnlyWithACompareNodeSelected() {
         QTemporaryDir files;
         RunApp r(graphOf(write(files.filePath("a.png"), 16, 10, Qt::red), write(files.filePath("b.png"), 16, 10, Qt::blue)));
