@@ -1081,7 +1081,8 @@ private slots:
         QStringList ids;
         for (int i = 0; i < 3; ++i)
             ids << r.service->start(request);
-        // The second run's check is under way once the first one's describe has answered and another has begun.
+        // A check is under way again once two describes have begun: the first run's check, cut short by the second start, then its
+        // re-check. The third is cancelled while it waits parked behind that check.
         QTRY_VERIFY(g_describes.load() >= before + 2);
         r.service->cancel(ids.at(2));
         QTRY_VERIFY(cancelled.contains(ids.at(2)));
@@ -1089,10 +1090,30 @@ private slots:
         QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
         r.runs->answerRemote(true);
         QTRY_COMPARE(queued, ids.mid(0, 2));
-        QTest::qWait(300);
+        QCOMPARE(r.service->askedRuns(), 0); // blocks on the run thread: everything it had queued has been handled
         QVERIFY(!queued.contains(ids.at(2)));
         for (const QString &id : ids.mid(0, 2))
             r.service->cancel(id);
+    }
+
+    // #505 review: a copy of a question that left the run thread before the window's answer reached it (the run thread busy, a double
+    // click) never comes back on screen as a question whose Yes and No do nothing; a newer revision (a refused yes, asked again) does.
+    void aLateCopyOfAnAnsweredQuestionIsNotAskedAgain() {
+        RunApp r(kGraph, true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        const QJsonArray services{QJsonObject{{"instance", "cloud"}, {"text", "pictures"}}};
+        emit r.service->remoteConsentNeeded("run-x", services, 1);
+        QCOMPARE(r.runs->remoteQuestion().value("run").toString(), QString("run-x"));
+        r.runs->answerRemote(true); // the run thread knows no run-x: the answer goes nowhere, as one already settled there
+        QVERIFY(r.runs->remoteQuestion().isEmpty());
+        emit r.service->remoteConsentNeeded("run-x", services, 1); // a late copy of what was answered
+        QVERIFY(r.runs->remoteQuestion().isEmpty());
+        emit r.service->remoteConsentNeeded("run-x", services, 2); // asked again with more: shown
+        QCOMPARE(r.runs->remoteQuestion().value("run").toString(), QString("run-x"));
+        r.runs->answerRemote(false);
+        emit r.service->event("run-x", QJsonObject{{"event", "run.done"}, {"status", "cancelled"}});
+        emit r.service->remoteConsentNeeded("run-x", services, 1); // after run.done nothing is remembered for it
+        QCOMPARE(r.runs->remoteQuestion().value("run").toString(), QString("run-x"));
     }
 
     // #505: the runs of one question start in the order they were clicked, even when a run's check was cut short by one that came

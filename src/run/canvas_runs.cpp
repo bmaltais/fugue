@@ -104,6 +104,11 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
                     emit remoteQuestionChanged();
                 return;
             }
+        // A question already answered at this revision or a newer one is settled on the run thread: a late copy of it (sent before
+        // the answer arrived there) must not come back as a question whose Yes and No do nothing. A refused yes is re-asked with a
+        // higher revision, so it still shows.
+        if (const auto it = m_answeredRevision.constFind(run); it != m_answeredRevision.constEnd() && revision <= it.value())
+            return;
         m_remoteAsks.append({run, services, revision});
         if (m_remoteAsks.size() == 1)
             emit remoteQuestionChanged();
@@ -112,6 +117,7 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     connect(m_service, &RunService::event, this, [this](const QString &run, const QJsonObject &event) {
         if (event.value("event").toString() != QLatin1String("run.done"))
             return;
+        m_answeredRevision.remove(run);
         const bool first = !m_remoteAsks.isEmpty() && m_remoteAsks.first().run == run;
         m_remoteAsks.removeIf([&](const auto &ask) { return ask.run == run; });
         if (first)
@@ -1148,6 +1154,7 @@ void CanvasRuns::answerRemote(bool allow) {
     if (m_remoteAsks.isEmpty())
         return;
     const RemoteAsk ask = m_remoteAsks.takeFirst();
+    m_answeredRevision.insert(ask.run, ask.revision);
     emit remoteQuestionChanged();
     m_service->answerRemote(ask.run, allow, ask.revision);
 }
