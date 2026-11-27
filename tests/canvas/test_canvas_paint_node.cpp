@@ -149,6 +149,9 @@ class TestCanvasPaintNode : public QObject {
             editor->setProperty("folder", folder);
             layer = editor->property("paintCanvas").value<PaintLayer *>();
             QTRY_VERIFY(layer && layer->zoom() > 0);
+            // The window lays out in its first frames: the OK button first sits at the top, then under the picture. A drag
+            // before that lands on a stale layer position and paints nothing; wait until the footer is below the layer.
+            QTRY_VERIFY(center("maskOk").y() > layer->mapToScene(QPointF(0, layer->height())).y());
         }
         QPoint at(double x, double y) const {
             return layer->mapToScene(QPointF(layer->originX() + x * layer->zoom(), layer->originY() + y * layer->zoom())).toPoint();
