@@ -808,6 +808,7 @@ void Workflows::announceUses(const QString &tab, const QList<OnDiskUse> &chosen,
 
 bool Workflows::openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened) {
     const QString key = QStringLiteral("open:") + chosen.id;
+    m_latestOpen = key; // every way here (a card, Open with what you have) is the last open asked for; A, B, then A again opens A
     if (m_hashing.contains(key))
         return true; // a second click while the files are being read opens no second tab
     // The files' hashes are read first (once, on the worker); the template opens when they are known.
