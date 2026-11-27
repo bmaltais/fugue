@@ -733,21 +733,35 @@ Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
 
 } // namespace
 
-QString nodeSeal(const QString &dir, const QString &entry) {
+QString nodeSeal(const QString &dir, const QString &entry, const QByteArray &packJson) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    // The pack's own pack.json (beside the node's folder) too: it declares the secrets the runner hands over (#497).
-    // A node outside a pack folder has none, and then only its own files count.
-    const QString packJson = QFileInfo(QFileInfo(dir).canonicalFilePath() + QStringLiteral("/../pack.json")).canonicalFilePath();
-    QStringList names{QStringLiteral("node.json"), entry};
-    if (!packJson.isEmpty())
-        names << packJson;
-    for (const QString &name : names) {
+    for (const QString &name : {QStringLiteral("node.json"), entry}) {
         // A file that does not exist has no canonical path; QFile would warn about an empty name.
         const QString path = name.isEmpty() ? QString() : QFileInfo(QDir(dir).absoluteFilePath(name)).canonicalFilePath();
         QFile file(path);
         if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
             return {};
         hash.addData(file.readAll());
+        hash.addData(QByteArrayView("\0", 1));
+    }
+    // The pack's own pack.json (it declares the secrets the runner hands over, #497) and `.fugue-source.json` (where it
+    // came from, which decides the key its secrets are stored under), beside the node's folder. A node outside a pack
+    // folder has neither, and then only its own files count. The loader passes the bytes of pack.json it parsed, so what
+    // is sealed is what was read, not what is on disk a moment later.
+    const QString packFolder = QFileInfo(dir).canonicalFilePath() + QStringLiteral("/..");
+    for (const QString &name : {QStringLiteral("pack.json"), QStringLiteral(".fugue-source.json")}) {
+        QByteArray bytes;
+        if (name == QLatin1String("pack.json") && !packJson.isEmpty()) {
+            bytes = packJson;
+        } else {
+            QFile file(QFileInfo(packFolder + QLatin1Char('/') + name).canonicalFilePath());
+            if (file.fileName().isEmpty() || !file.open(QIODevice::ReadOnly))
+                continue;
+            bytes = file.readAll();
+        }
+        hash.addData(name.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(bytes);
         hash.addData(QByteArrayView("\0", 1));
     }
     return QString::fromLatin1(hash.result().toHex());
@@ -758,7 +772,7 @@ QString packSecretsKeyPart(const NodeType &type) {
         return {};
     const Result<QMap<QString, StoredSecret>> stored = secretsFor(type);
     if (!stored)
-        return QStringLiteral("unreadable"); // the run fails on it; the key only has to differ from a good store's
+        return QString::fromLatin1(kSecretsUnreadable); // the run fails on it; the scheduler never caches under this key
     if (stored->isEmpty())
         return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);

@@ -12,6 +12,10 @@
 #include "engine/version.h"
 
 #include <QCryptographicHash>
+#include <QFile>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -289,7 +293,7 @@ QString reasonOf(const Errors &errors) {
 
 // Loads one node folder; empty reason on success, the type id in `typeId`.
 QString loadNode(Registry &registry, const PackManifest &pack, const QString &folder, const QString &name,
-                 PackOrigin origin, QString &typeId, Errors &warnings) {
+                 PackOrigin origin, QString &typeId, Errors &warnings, const QByteArray &packBytes) {
     const QString path = folder + QLatin1Char('/') + name + QStringLiteral("/node.json");
     const Result<QJsonObject> read = readJsonObject(path);
     if (!read.ok())
@@ -335,7 +339,7 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         if (!pack.secrets.isEmpty())
             type.packSource = readPackSource(folder).location;
         if (runtime.value("kind").toString() == QLatin1String("command"))
-            type.seal = nodeSeal(nodeDir, runtime.value("entry").toString());
+            type.seal = nodeSeal(nodeDir, runtime.value("entry").toString(), packBytes);
         errors = registry.add(type);
     } else {
         errors = parsed.errors();
@@ -412,27 +416,6 @@ QSet<QString> packKeysIn(const QStringList &paths) {
 
 } // namespace
 
-QString packSecretsDigest(const QString &id, const QString &version) {
-    QStringList paths = packSearchPaths();
-    paths << inheritedPackPaths();
-    for (const QString &path : paths)
-        for (const QFileInfo &entry : QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-            if (entry.fileName().startsWith(QLatin1Char('.')) || parsePackRef(entry.fileName()).id != id)
-                continue;
-            const Result<QJsonObject> read = readJsonObject(entry.filePath() + QStringLiteral("/pack.json"));
-            if (!read || read->value("id").toString() != id || read->value("version").toString() != version)
-                continue;
-            // The name and the origin rule of each declared secret: what decides which values a pack is handed
-            // and where they may go. Labels and descriptions are only text.
-            QStringList lines;
-            for (const QJsonValue &setting : read->value("settings").toArray())
-                lines << setting.toObject().value("name").toString() + QLatin1Char(':') + setting.toObject().value("origin").toString();
-            lines.sort();
-            return QString::fromLatin1(QCryptographicHash::hash(lines.join(QLatin1Char('\n')).toUtf8(), QCryptographicHash::Sha256).toHex());
-        }
-    return {};
-}
-
 QList<InheritedPack> inheritedPacks() {
     QList<InheritedPack> found;
     const QStringList paths = inheritedPackPaths();
@@ -484,11 +467,69 @@ bool PackReport::hasProblems() const {
     return false;
 }
 
+namespace {
+
+QMutex &digestLock() {
+    static QMutex mutex;
+    return mutex;
+}
+
+// The digest of each pack the loader parsed, by id and version: what trust compares with (packSecretsDigest).
+QHash<QString, QString> &loadedDigests() {
+    static QHash<QString, QString> digests;
+    return digests;
+}
+
+QString digestKey(const QString &id, const QString &version) { return id + QLatin1Char('\n') + version; }
+
+// pack.json read once: the bytes (sealed) and what was parsed from those bytes.
+Result<QJsonObject> readPackJson(const QString &folder, QByteArray &bytes) {
+    const QString path = folder + QStringLiteral("/pack.json");
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        bytes = file.readAll();
+        const Result<QJsonDocument> document = parseJson(bytes, path);
+        if (document && document->isObject())
+            return document->object();
+        bytes.clear();
+    }
+    return readJsonObject(path); // the errors, which name the file
+}
+
+} // namespace
+
+QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation) {
+    // The name and origin rule of each declared secret and where the pack came from (the key its values are stored
+    // under): what decides which values it is handed and where they may go. Labels and descriptions are only text.
+    QStringList lines;
+    for (const PackSecretSpec &spec : secrets)
+        lines << spec.name + QLatin1Char(':') + (spec.originRequired ? QStringLiteral("required") : QStringLiteral("optional"));
+    lines.sort();
+    lines << QStringLiteral("source:") + sourceLocation;
+    return QString::fromLatin1(QCryptographicHash::hash(lines.join(QLatin1Char('\n')).toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+
+QString packSecretsDigest(const QString &id, const QString &version) {
+    QMutexLocker lock(&digestLock());
+    return loadedDigests().value(digestKey(id, version));
+}
+
+QString packSecretsDigestOfFolder(const QString &folder) {
+    QByteArray bytes;
+    const Result<QJsonObject> read = readPackJson(folder, bytes);
+    if (!read)
+        return {};
+    Errors ignored;
+    const std::optional<PackManifest> pack = parsePack(read.value(), PackOrigin::Disk, ignored);
+    return pack ? packSecretsDigestOf(pack->secrets, readPackSource(folder).location) : QString();
+}
+
 LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin) {
     LoadedPack loaded;
     loaded.path = folder;
 
-    const Result<QJsonObject> read = readJsonObject(folder + QStringLiteral("/pack.json"));
+    QByteArray packBytes; // what the seals of its nodes cover
+    const Result<QJsonObject> read = readPackJson(folder, packBytes);
     if (!read.ok()) {
         loaded.errors = read.errors();
         return loaded;
@@ -528,7 +569,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
 
     for (const QString &name : pack->nodes) {
         QString typeId;
-        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors);
+        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors, packBytes);
         if (!reason.isEmpty())
             loaded.disabled << PackProblem{name, reason};
         else if (!loaded.nodes.contains(typeId))
@@ -549,6 +590,16 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
         registry.setPackSource(pack->id, pack->version, shared, source.commit.isEmpty() ? source.ref : source.commit);
     }
     loaded.enabled = true;
+    if (origin == PackOrigin::Disk) {
+        // What trust compares (6.7): the secrets this load parsed, not another folder that happens to name the same pack.
+        const QString digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location);
+        {
+            QMutexLocker lock(&digestLock());
+            loadedDigests().insert(digestKey(pack->id, pack->version), digest);
+        }
+        // A pack trusted before digests were kept is trusted on first sight: later edits ask again.
+        TrustStore().adoptSecretsDigest(pack->id, pack->version, digest);
+    }
     return loaded;
 }
 

@@ -124,7 +124,7 @@ Error defaultsTrust(const QString &packId, const QString &version) {
 
 } // namespace
 
-Errors TrustStore::trust(const QString &packId, const QString &version) {
+Errors TrustStore::trust(const QString &packId, const QString &version, const QString &secretsDigest) {
     QMutexLocker lock(&fileLock());
     if (isBuiltIn(packId) || isTrusted(packId, version))
         return {};
@@ -138,10 +138,27 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
     packs.insert(packId, versions);
     QJsonObject sealed = readSealed(m_path);
     QJsonObject own = sealed.value(packId).toObject();
-    if (const QString digest = packSecretsDigest(packId, version); !digest.isEmpty())
+    if (const QString digest = secretsDigest.isEmpty() ? packSecretsDigest(packId, version) : secretsDigest; !digest.isEmpty())
         own.insert(version, digest);
     else
         own.remove(version);
+    sealed.insert(packId, own);
+    return writeTrust(m_path, packs, sealed);
+}
+
+Errors TrustStore::adoptSecretsDigest(const QString &packId, const QString &version, const QString &digest) {
+    if (isBuiltIn(packId) || digest.isEmpty())
+        return {};
+    QMutexLocker lock(&fileLock());
+    const QJsonObject packs = readPacks(m_path);
+    bool trusted = false;
+    for (const QJsonValue &value : packs.value(packId).toArray())
+        trusted |= value.toString() == version;
+    QJsonObject sealed = readSealed(m_path);
+    QJsonObject own = sealed.value(packId).toObject();
+    if (!trusted || !own.value(version).toString().isEmpty())
+        return {};
+    own.insert(version, digest);
     sealed.insert(packId, own);
     return writeTrust(m_path, packs, sealed);
 }

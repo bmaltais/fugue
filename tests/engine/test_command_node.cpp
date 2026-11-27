@@ -863,6 +863,52 @@ wait
         QVERIFY(QFile::remove(m_root.path() + "/pack.json"));
     }
 
+    // #497: where the pack came from (`.fugue-source.json`) decides the key its secrets are stored under, so it is sealed too.
+    void aChangedSourceRecordChangesTheSeal() {
+        Node node = makeNode(m_root.path(), "sourced", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        QFile manifest(node.dir + "/node.json"); // the seal covers it, so it must be there
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write("{}");
+        manifest.close();
+        const QString before = nodeSeal(node.dir, "./run.sh");
+        QFile source(m_root.path() + "/.fugue-source.json");
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write("{\"kind\": \"path\", \"location\": \"/a\"}");
+        source.close();
+        const QString recorded = nodeSeal(node.dir, "./run.sh");
+        QVERIFY(recorded != before);
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write("{\"kind\": \"path\", \"location\": \"/b\"}");
+        source.close();
+        QVERIFY(nodeSeal(node.dir, "./run.sh") != recorded);
+        QVERIFY(QFile::remove(m_root.path() + "/.fugue-source.json"));
+        // The bytes the loader parsed are what is sealed, whatever is on disk a moment later.
+        QFile pack(m_root.path() + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write("{\"a\": 1}");
+        pack.close();
+        const QString onDisk = nodeSeal(node.dir, "./run.sh");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write("{\"a\": 2}");
+        pack.close();
+        QCOMPARE(nodeSeal(node.dir, "./run.sh", "{\"a\": 1}"), onDisk);
+        QVERIFY(QFile::remove(m_root.path() + "/pack.json"));
+    }
+
+    // #498: a store that cannot be read makes a key no result is kept under (the scheduler gives such a node a run-only key).
+    void anUnreadableSecretStoreGivesTheUncacheableKeyPart() {
+        Node node = makeNode(m_root.path(), "unreadable", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        node.type.packSecrets = {"token_1"};
+        PackSecretStore store;
+        QVERIFY(store.clear("io.github.test.tools", "token_1").isEmpty());
+        QFile file(store.path());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("not json {");
+        file.close();
+        QCOMPARE(packSecretsKeyPart(node.type), QString::fromLatin1(kSecretsUnreadable));
+        QVERIFY(QFile::remove(store.path()));
+    }
+
     // #498: what a pack node reads from the secret store is part of its cache key, as a hash and never a value.
     void thePackSecretsAreInTheKeyPartAsAHashOnly() {
         const QString first = "made-up-key-1357";

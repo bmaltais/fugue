@@ -49,10 +49,15 @@ QStringList packSearchPaths();
 // `packs`, and an anonymous root.
 QStringList inheritedPackPaths();
 
-// A hash of the secrets the installed pack of this id and version declares (its `settings`: names and origin rules,
-// not labels), found in the pack folders and the inherited ones; empty when no such pack is installed. The trust
-// store keeps it with a yes, so a pack.json edited in place to read other secrets asks again (#497).
+// A hash of what decides which secrets a pack is handed and where they go: the names and origin rules of its `settings`
+// and where it came from (`.fugue-source.json`, the key its values are stored under). Labels and descriptions are not in
+// it. The trust store keeps it with a yes, so a pack edited in place to read other secrets asks again (#497).
+QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation);
+// The digest of the pack of this id and version as the loader last parsed it (loadPack, Disk packs): not another folder
+// that names the same pack. Empty for a pack that was not loaded.
 QString packSecretsDigest(const QString &id, const QString &version);
+// The digest of the pack in `folder`, read now; empty when its pack.json does not parse.
+QString packSecretsDigestOfFolder(const QString &folder);
 
 // A pack of the Default project, as this session sees it: listed and usable, never written.
 struct InheritedPack {

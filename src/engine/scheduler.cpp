@@ -776,6 +776,7 @@ private:
         const bool unknown = resolved.unknown;
         KeyParts parts;
         parts.inputs = resolved.keyInputs;
+        bool secretsUnreadable = false; // the pack's secret store could not be read: no result is kept under this key
 
         // The provider checks come before anything that depends on every input being
         // known, so that validate reports them (8.5) for a node with a randomized seed
@@ -827,8 +828,10 @@ private:
         } else if (n.kernel) {
             parts.extra = n.kernel->keyExtra(n.inputs);
             // A pack node reads secrets that are not inputs: a hash of them is part of its key (#498).
-            if (const QString secrets = packSecretsKeyPart(*n.type); !secrets.isEmpty())
+            if (const QString secrets = packSecretsKeyPart(*n.type); !secrets.isEmpty()) {
                 parts.extra += QStringLiteral("\nsecrets:") + secrets;
+                secretsUnreadable = secrets == QLatin1String(kSecretsUnreadable);
+            }
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
             // Its own persistent program, which holds memory between runs (7.3).
@@ -855,6 +858,8 @@ private:
         if (!n.type->deterministic) {
             if (m_dry)
                 return hostGone ? giveUp(n, *hostGone) : stale(n);
+            parts.run = runId();
+        } else if (secretsUnreadable) {
             parts.run = runId();
         }
         n.key = cacheKey(parts);
