@@ -836,6 +836,102 @@ wait
         QVERIFY2(changed.error().message.contains("changed on disk"), qPrintable(changed.error().message));
     }
 
+    // #497: the pack.json beside the node's folder declares its secrets, so editing it counts as a change.
+    void aPackJsonChangedOnDiskSinceItWasLoadedIsNotRun() {
+        Node node = makeNode(m_root.path(), "packsealed", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        {
+            QFile manifest(node.dir + "/node.json");
+            QVERIFY(manifest.open(QIODevice::WriteOnly));
+            manifest.write("{}");
+            QFile pack(m_root.path() + "/pack.json");
+            QVERIFY(pack.open(QIODevice::WriteOnly));
+            pack.write("{\"id\": \"io.github.test.tools\"}");
+        }
+        const QString without = nodeSeal(node.dir, "./run.sh");
+        node.type.seal = without;
+        CommandKernel kernel(kGraceMs);
+        QVERIFY(kernel.run(contextFor(node)).ok());
+
+        QFile pack(m_root.path() + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write("{\"id\": \"io.github.test.tools\", \"settings\": []}");
+        pack.close();
+        QVERIFY(nodeSeal(node.dir, "./run.sh") != without);
+        const Result<Values> changed = kernel.run(contextFor(node));
+        QVERIFY(!changed.ok());
+        QVERIFY2(changed.error().message.contains("changed on disk"), qPrintable(changed.error().message));
+        QVERIFY(QFile::remove(m_root.path() + "/pack.json"));
+    }
+
+    // #497: where the pack came from (`.fugue-source.json`) decides the key its secrets are stored under, so it is sealed too.
+    void aChangedSourceRecordChangesTheSeal() {
+        Node node = makeNode(m_root.path(), "sourced", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        QFile manifest(node.dir + "/node.json"); // the seal covers it, so it must be there
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write("{}");
+        manifest.close();
+        const QString before = nodeSeal(node.dir, "./run.sh");
+        QFile source(m_root.path() + "/.fugue-source.json");
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write("{\"kind\": \"path\", \"location\": \"/a\"}");
+        source.close();
+        const QString recorded = nodeSeal(node.dir, "./run.sh");
+        QVERIFY(recorded != before);
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write("{\"kind\": \"path\", \"location\": \"/b\"}");
+        source.close();
+        QVERIFY(nodeSeal(node.dir, "./run.sh") != recorded);
+        QVERIFY(QFile::remove(m_root.path() + "/.fugue-source.json"));
+        // The bytes the loader parsed are what is sealed, whatever is on disk a moment later.
+        QFile pack(m_root.path() + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write("{\"a\": 1}");
+        pack.close();
+        const QString onDisk = nodeSeal(node.dir, "./run.sh");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write("{\"a\": 2}");
+        pack.close();
+        QCOMPARE(nodeSeal(node.dir, "./run.sh", "{\"a\": 1}"), onDisk);
+        QVERIFY(QFile::remove(m_root.path() + "/pack.json"));
+    }
+
+    // #498: a store that cannot be read makes a key no result is kept under (the scheduler gives such a node a run-only key).
+    void anUnreadableSecretStoreGivesTheUncacheableKeyPart() {
+        Node node = makeNode(m_root.path(), "unreadable", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        node.type.packSecrets = {"token_1"};
+        PackSecretStore store;
+        QVERIFY(store.clear("io.github.test.tools", "token_1").isEmpty());
+        QFile file(store.path());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("not json {");
+        file.close();
+        QCOMPARE(packSecretsKeyPart(node.type), QString::fromLatin1(kSecretsUnreadable));
+        QVERIFY(QFile::remove(store.path()));
+    }
+
+    // #498: what a pack node reads from the secret store is part of its cache key, as a hash and never a value.
+    void thePackSecretsAreInTheKeyPartAsAHashOnly() {
+        const QString first = "made-up-key-1357";
+        Node node = makeNode(m_root.path(), "keypart", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        QVERIFY(packSecretsKeyPart(node.type).isEmpty()); // declares none
+        node.type.packSecrets = {"token_1"};
+        PackSecretStore store;
+        QVERIFY(store.clear("io.github.test.tools", "token_1").isEmpty());
+        QVERIFY(packSecretsKeyPart(node.type).isEmpty()); // none set
+        QVERIFY(store.set("io.github.test.tools", "token_1", first, "https://api.example.com").isEmpty());
+        const QString one = packSecretsKeyPart(node.type);
+        QVERIFY(!one.isEmpty());
+        QVERIFY(!one.contains(first));
+        QCOMPARE(packSecretsKeyPart(node.type), one); // stable
+        QVERIFY(store.set("io.github.test.tools", "token_1", "made-up-key-2468", "https://api.example.com").isEmpty());
+        QVERIFY(packSecretsKeyPart(node.type) != one); // another value
+        QVERIFY(store.set("io.github.test.tools", "token_1", first, "https://other.example.com").isEmpty());
+        QVERIFY(packSecretsKeyPart(node.type) != one); // another origin
+        QVERIFY(store.set("io.github.test.tools", "token_1", first, "https://api.example.com").isEmpty());
+        QCOMPARE(packSecretsKeyPart(node.type), one);
+        QVERIFY(store.clear("io.github.test.tools", "token_1").isEmpty());
+    }
+
     void shuttingDownEndsARunInFlightAndRefusesNewOnes() {
         const Node node = makeNode(m_root.path(), "persshut", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);

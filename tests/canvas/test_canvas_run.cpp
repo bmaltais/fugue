@@ -1346,6 +1346,39 @@ private slots:
         QCOMPARE(r.role("load", NodeList::Error).toString(), ran);
     }
 
+    // #607: a run that failed on a node and a later check that finds the same node wrong in another way are one error in the
+    // list and the pill: the run's.
+    void aRunsErrorAndAChecksOnOneNodeAreListedOnce() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString file = folder.filePath("x.png");
+        RunApp r(QByteArray(R"({
+          "fugue": 1,
+          "graph": {"nodes": {
+            "load": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": %1}},
+            "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "load.image"}}}
+          }},
+          "layout": {"nodes": {"load": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}}
+        })").replace("%1", '"' + file.toUtf8() + '"'));
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QFile out(file);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        out.write("this is not an image");
+        out.close();
+        QVERIFY(!r.runs->start().isEmpty());
+        QTRY_VERIFY(finished.size() >= 1);
+        QTRY_COMPARE(r.state("load"), QStringLiteral("error"));
+        const QString ranCode = r.runs->errors().value(0).toMap().value("code").toString();
+        QVERIFY(QFile::remove(file)); // now the check finds the file gone, a different code than the run's
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        const QVariantList errors = r.runs->errors();
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().toMap().value("code").toString(), ranCode);
+    }
+
     // #600 review: a check's finding (the file is not there) does not outlive a run that starts after the file is put there:
     // the run's start clears the saved findings, so the pill does not list the missing file after a run that succeeded.
     void aRunClearsTheLastChecksFindings() {

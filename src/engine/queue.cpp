@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include <cerrno>
+#include <climits>
 #include <ctime>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -331,9 +332,16 @@ qint64 Lock::holderPid(const QString &path, qint64 exceptPid) {
     struct stat info {};
     if (::stat(QFile::encodeName(path).constData(), &info) != 0)
         return 0;
+    // The real path of the lock file: an fd of a process is compared with it by readlink, which never touches the
+    // file (a stat of /proc/<pid>/fd/<n> follows the link and can block on a hung FUSE or NFS file).
+    const QString real = QFileInfo(path).canonicalFilePath();
+    if (real.isEmpty())
+        return 0;
     // One line per lock: `1: FLOCK  ADVISORY  WRITE 4242 08:02:1234567 0 EOF` (pid, then major:minor:inode). The
     // device is not compared: on btrfs subvolumes stat() and /proc/locks name different ones. The inode picks the
-    // candidates, and a candidate counts only when one of its open files is this very file.
+    // candidates, and a candidate counts only when one of its fds is this very file and its fdinfo has a `lock:`
+    // line for the inode: having the file open is not holding the lock (every waiting worker keeps it open). Where
+    // /proc is missing or unreadable nobody is named.
     const QByteArray inode = ':' + QByteArray::number(quint64(info.st_ino));
     QFile locks(QStringLiteral("/proc/locks"));
     if (!locks.open(QIODevice::ReadOnly))
@@ -347,9 +355,18 @@ qint64 Lock::holderPid(const QString &path, qint64 exceptPid) {
             continue;
         const QDir fds(QStringLiteral("/proc/%1/fd").arg(pid));
         for (const QString &fd : fds.entryList(QDir::AllEntries | QDir::System | QDir::NoDotAndDotDot)) {
-            struct stat opened {};
-            if (::stat(QFile::encodeName(fds.filePath(fd)).constData(), &opened) == 0 && opened.st_ino == info.st_ino && opened.st_dev == info.st_dev)
-                return pid;
+            char target[PATH_MAX];
+            const ssize_t length = ::readlink(QFile::encodeName(fds.filePath(fd)).constData(), target, sizeof(target) - 1);
+            if (length <= 0 || QString::fromLocal8Bit(target, int(length)) != real)
+                continue;
+            QFile fdinfo(QStringLiteral("/proc/%1/fdinfo/%2").arg(pid).arg(fd));
+            if (!fdinfo.open(QIODevice::ReadOnly))
+                continue;
+            for (const QByteArray &entry : fdinfo.readAll().split('\n')) {
+                const QList<QByteArray> parts = entry.simplified().split(' ');
+                if (entry.startsWith("lock:") && parts.size() >= 7 && parts.at(2) == "FLOCK" && parts.at(6).endsWith(inode))
+                    return pid;
+            }
         }
     }
     return 0;

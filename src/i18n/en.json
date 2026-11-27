@@ -1906,6 +1906,7 @@
   "Environments": "Environments",
   "Get ready": "Get ready",
   "Install and trust": "Install and trust",
+  "Set up": "Set up",
   "Trust": "Trust",
   "Apps": "Apps",
   "Only apps: templates that open as one simple screen": "Only apps: templates that open as one simple screen",
@@ -2310,5 +2311,10 @@
   "Folder to make it in": "Folder to make it in",
   "Left empty, the project goes in Fugue's projects folder.": "Left empty, the project goes in Fugue's projects folder.",
   "The project gets a folder of its own inside this one.": "The project gets a folder of its own inside this one.",
-  "The project will be made at %1": "The project will be made at %1"
+  "The project will be made at %1": "The project will be made at %1",
+  "Nothing is needed to run. Models only another branch uses can be downloaded below.": "Nothing is needed to run. Models only another branch uses can be downloaded below.",
+  "Only if another branch is chosen": "Only if another branch is chosen",
+  "Used only if a Switch takes its other branch.": "Used only if a Switch takes its other branch.",
+  "Download or not now: %1": "Download or not now: %1",
+  "only if another branch is chosen": "only if another branch is chosen"
 }

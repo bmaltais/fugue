@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -54,6 +55,10 @@ struct WantedPack {
 struct ReadinessRequest {
     QList<WantedPack> packs;
     QJsonArray models; // Document::models()'s form
+    // Models only a Switch's lazy side holds (#594): they block nothing, so the plan lists them apart (`optionalModels`), unless the
+    // person chose one (its hash is in `optionalChosen`): then it is a row of the plan like the others, marked `optional`.
+    QJsonArray optionalModels;
+    QSet<QString> optionalChosen;
 };
 
 // The packs a document uses (TrustStore::packsUsed), each with where to get it: the carried pack's
@@ -64,10 +69,13 @@ ReadinessRequest requestFor(const Document &document, const Registry &registry, 
                             const QString &baseFolder = {});
 
 struct ReadinessPack {
-    enum class Action { Install, Trust }; // Trust: installed here already, not trusted yet
+    // Trust: installed here already, not trusted yet. Setup: installed and trusted, its setup command never ran to its end
+    // here (no marker, 6.6): a pack installed before the marker existed is offered it too.
+    enum class Action { Install, Trust, Setup };
     Action action = Action::Install;
     PackSummary pack;   // what is shown and approved: for an install as it was previewed
-    QString folderName; // Trust: the installed folder's name, which `trustPack` takes
+    QString folderName; // Trust, Setup: the installed folder's name, which `trustPack` and `setUpPack` take
+    bool setupNeeded = false; // Trust, Setup: the pack has a setup command and no marker; the same yes runs it before it is trusted
     // A git pack: before the yes nothing is fetched, so `pack` holds only what the workflow records (id, version, name, source)
     // and the row says its details come after the download. After the yes it is cloned (https only, size capped), checked
     // against that record, and installed from that clone.
@@ -76,7 +84,7 @@ struct ReadinessPack {
     std::shared_ptr<PreparedPack> prepared;
 
     bool installs() const { return action == Action::Install; }
-    bool hasEnvironment() const { return installs() && !pending && !pack.setupCommand.isEmpty(); }
+    bool hasEnvironment() const { return (installs() || setupNeeded) && !pending && !pack.setupCommand.isEmpty(); }
 };
 
 struct ReadinessModel {
@@ -96,11 +104,15 @@ struct ReadinessModel {
     // row stays and says so (#493). Empty: this machine is where it runs.
     QString onHost;
     QString typeFrom;   // deferred: the pack that gives its type (its name), or empty when the list cannot tell
+    bool optional = false; // only a Switch's lazy side needs it (#594): in `models` only because the person chose to download it
 };
 
 struct ReadinessPlan {
     QList<ReadinessPack> packs;
     QList<ReadinessModel> models;
+    // The missing models only a lazy side needs and the person did not choose: non-blocking, so not in `models`, `empty()`, the
+    // headline or the sizes. Each has a download target, or is left out (no source, no place to put it).
+    QList<ReadinessModel> optionalModels;
     QString destination;   // the model folder the models go into (settings' download_folder, or Fugue's own)
     QStringList destinations; // every model folder they may go in (the Change… choices)
     qint64 downloadBytes = 0;    // the models' sizes that are known

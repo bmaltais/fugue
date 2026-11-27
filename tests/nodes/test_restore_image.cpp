@@ -35,6 +35,7 @@ class TestRestoreImage : public QObject {
     Kernels m_kernels;
     FileHashes m_hashes{m_dir.filePath("hashes.json")};
     int m_runs = 0;
+    bool m_remember = true; // the hash of a file written here is known, as after a run or a Get ready
 
     NodeContext context(Values inputs) {
         for (const InputSpec &spec : m_registry.nodeType("fugue/restore-image")->inputs)
@@ -69,9 +70,11 @@ class TestRestoreImage : public QObject {
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(content) != content.size())
             qFatal("cannot write %s", qPrintable(path));
-        return QJsonObject{{"resource", resource},
-                           {"hash", "sha256:" + QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex())},
-                           {"name", name}};
+        file.close(); // flushed, so the size and time a hash is remembered with are the file's
+        const QString hash = "sha256:" + QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex());
+        if (m_remember)
+            m_hashes.remember(path, hash);
+        return QJsonObject{{"resource", resource}, {"hash", hash}, {"name", name}};
     }
     QJsonObject model(const QString &name = "seedvr2_test.safetensors",
                       const QStringList &tensors = {"vid_in.proj.weight", "positive_conditioning", "negative_conditioning"}) {
@@ -253,6 +256,12 @@ private slots:
         wide.insert("tile", Value(1024.0));
         wide.insert("overlap", Value(600.0));
         QCOMPARE(codes(wide), QString("value_out_of_range:overlap"));
+        // #607: a file of that name whose hash is not known may be another variant than the one a paired host would use: not judged.
+        m_remember = false;
+        Values unknown = inputs(image);
+        unknown.insert("model", Value(model("klein-unknown.safetensors", {"double_blocks.0.img_attn.qkv.weight", "txt_in.weight"})));
+        m_remember = true;
+        QCOMPARE(codes(unknown), QString());
     }
 
     void colorFixNoneKeepsTheModelsPicture() {

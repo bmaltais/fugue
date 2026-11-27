@@ -12,6 +12,7 @@
 
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
+#include "engine/registry.h"
 
 using namespace fugue;
 
@@ -22,6 +23,11 @@ void write(const QString &path, const QByteArray &bytes) {
     QFile file(path);
     QVERIFY2(file.open(QIODevice::WriteOnly), qPrintable(path));
     file.write(bytes);
+}
+
+QByteArray readAll(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
 void writeJson(const QString &path, const QJsonObject &object) { write(path, QJsonDocument(object).toJson()); }
@@ -386,6 +392,111 @@ private slots:
         QCOMPARE(updatePacks("io.example.tools", {}, packs(), trustStore(), answering(Answer::Yes)).error().code, QString("setup_failed"));
         QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.0"));
         QCOMPARE(leftovers(), QStringList{"io.example.tools"});
+    }
+
+    // #497: trust covers the secrets a pack declared when it was said yes to, and where it came from. A pack.json edited in
+    // place to read others, or a changed `.fugue-source.json` (the key the values are stored under), asks again once the
+    // loader has read it; the new yes covers the new set. The digest is the one of the pack the loader parsed, so a decoy
+    // folder of the same name does not keep trust. Uses the session's own packs folder (the test's temporary home).
+    void aPackJsonEditedInPlaceToReadSecretsAsksAgain() {
+        const QString id = "io.example.keyed";
+        const QString folder = packsDir() + "/" + id;
+        QDir(packsDir()).removeRecursively();
+        const QString dir = makePack(source(), id, "1.0.0");
+        QVERIFY(addPack(dir, {}, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        const auto load = [&] { Registry registry; loadPacks(registry, {packsDir()}); };
+        load();
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+
+        // The same file again: still trusted.
+        QJsonObject pack = QJsonDocument::fromJson(readAll(folder + "/pack.json")).object();
+        writeJson(folder + "/pack.json", pack);
+        load();
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        // A decoy: another folder with the old pack.json, which the loader rejects. It does not stand in for the real one.
+        QDir().mkpath(packsDir() + "/" + id + "@1");
+        QVERIFY(QFile::copy(folder + "/pack.json", packsDir() + "/" + id + "@1/pack.json"));
+        // A new secret asks again.
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}}};
+        writeJson(folder + "/pack.json", pack);
+        load();
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
+        QVERIFY(trustPack(id, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        load();
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        // A label edit does not matter; the rule of where a value may go does.
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "Key"}}};
+        writeJson(folder + "/pack.json", pack);
+        load();
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"origin", "required"}}};
+        writeJson(folder + "/pack.json", pack);
+        load();
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
+        QVERIFY(trustPack(id, packsDir(), trustStore(), answering(Answer::Yes)).ok());
+        load();
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+        // Where the pack came from decides the key its secrets are stored under: a changed record asks again.
+        write(folder + "/.fugue-source.json", R"({"kind": "path", "location": "/somewhere/else"})");
+        load();
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
+        QDir(packsDir()).removeRecursively();
+    }
+
+    // A pack trusted before digests were kept is trusted on first sight when the loader reads it, so a later edit asks.
+    void aTrustedPackWithNoDigestGetsOneWhenLoaded() {
+        const QString id = "io.example.old";
+        const QString folder = packsDir() + "/" + id;
+        QDir(packsDir()).removeRecursively();
+        makePack(packsDir(), id, "1.0.0");
+        // A yes the way an older Fugue wrote it: the version, no digest.
+        write(TrustStore::defaultPath(), QByteArray(R"({"packs": {"io.example.old": ["1.0.0"]}})"));
+        TrustStore trust; // the session's own file, which the loader keeps the digest in
+        QVERIFY(trust.isTrusted(id, "1.0.0"));
+        Registry first;
+        loadPacks(first, {packsDir()});
+        QVERIFY(readAll(TrustStore::defaultPath()).contains("secrets")); // the digest is kept now
+        QVERIFY(trust.isTrusted(id, "1.0.0"));
+        QJsonObject pack = QJsonDocument::fromJson(readAll(folder + "/pack.json")).object();
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}}};
+        writeJson(folder + "/pack.json", pack);
+        Registry second;
+        loadPacks(second, {packsDir()});
+        QVERIFY(!trust.isTrusted(id, "1.0.0"));
+        QDir(packsDir()).removeRecursively();
+        QFile::remove(TrustStore::defaultPath());
+    }
+
+    // #521: declining the setup question of an update used to swap in the fresh copy (no environment) and delete
+    // the old folder with its environment. The old pack now stays as it was.
+    void decliningTheSetupOfAnUpdateKeepsTheOldPackAndItsEnvironment() {
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir -p .venv && touch .venv/ok"}}};
+        const QString dir = makePack(source(), "io.example.tools", "1.0.0", false, setup);
+        QVERIFY(addPack(dir, {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
+        QVERIFY(trustPack("io.example.tools", packs(), trustStore(), answering(Answer::Yes)).ok());
+
+        makePack(source(), "io.example.tools", "1.0.1", false, setup);
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.runSetup = [](const PackSummary &) { return Answer::No; };
+        QCOMPARE(updatePacks("io.example.tools", {}, packs(), trustStore(), prompts).error().code, QString("setup_declined"));
+        QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.0"));
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
+        QVERIFY(trustStore().isTrusted("io.example.tools", "1.0.0")); // nothing changed, so trust stays
+        QCOMPARE(leftovers(), QStringList{"io.example.tools"});
+
+        // Updating every pack reports it as a warning and goes on.
+        const Result<QList<PackAdded>> all = updatePacks({}, {}, packs(), trustStore(), prompts);
+        QVERIFY(all.ok());
+        QVERIFY(all->isEmpty());
+        QCOMPARE(all.warnings().size(), 1);
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
+
+        // Accepting the setup updates it and the environment is made again.
+        QCOMPARE(updatePacks("io.example.tools", {}, packs(), trustStore(), answering(Answer::Yes))->size(), 1);
+        QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.1"));
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/ok").isFile());
     }
 
     void updatingAllGoesOnPastOneThatFails() {

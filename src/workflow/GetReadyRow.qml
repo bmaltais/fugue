@@ -36,6 +36,9 @@ Rectangle {
     property string choice
     property string useLine
     property string downloadText
+    // The first answer's words and the choice's name for a screen reader: "Use my file" by default; an optional model (#594) says "Not now".
+    property string firstText: qsTr("Use my file")
+    property string choiceName: qsTr("Use my file or download: %1").arg(title)
     property bool choiceLocked: false
     signal choiceMoved(bool useDisk)
 
@@ -153,12 +156,12 @@ Rectangle {
             Layout.leftMargin: 6 * row.u
             Layout.topMargin: 0.5 * row.u
             look: row.look
-            options: [qsTr("Use my file"), row.downloadText]
+            options: [row.firstText, row.downloadText]
             optionNames: ["getReadyChoiceUse-" + row.title, "getReadyChoiceDownload-" + row.title]
             currentIndex: row.choice === "disk" ? 0 : 1
             enabled: !row.choiceLocked
             keepsEnter: false
-            text: qsTr("Use my file or download: %1").arg(row.title)
+            text: row.choiceName
             onMoved: index => row.choiceMoved(index === 0)
         }
         ProgressBar {

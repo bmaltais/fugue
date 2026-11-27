@@ -81,8 +81,9 @@ namespace {
 // Says that the run is waiting its turn (#625): its queue entry is not active, so another run, of this root or of
 // another, has the engine or the GPU. The pid is the active run's, else the process that holds either lock (not
 // `ownWorker`: the run's own worker briefly holds the engine lock while it tries for the GPU's). False, and nothing said,
-// when nobody can be named and no other entry is active: the run may only be starting, so it is looked at again.
-bool announceWaiting(const RunFolder &folder, qint64 ownWorker, Context &context) {
+// when nobody can be named and no other entry is active: the run may only be starting, so it is looked at again,
+// unless `force` (its entry has been waiting a while): then it says so without a pid (#636).
+bool announceWaiting(const RunFolder &folder, qint64 ownWorker, Context &context, bool force) {
     qint64 pid = 0;
     bool otherActive = false;
     for (const QueueEntry &entry : Queue(context.queueDir).entries())
@@ -94,7 +95,7 @@ bool announceWaiting(const RunFolder &folder, qint64 ownWorker, Context &context
     for (const QString &path : {context.lockPath, Queue::crossRootLockFor(context.lockPath)})
         if (pid == 0 && !path.isEmpty())
             pid = Lock::holderPid(path, ownWorker);
-    if (pid == 0 && !otherActive)
+    if (pid == 0 && !otherActive && !force)
         return false;
     if (context.json) {
         QJsonObject event{{"event", "waiting"}, {"run", folder.id()}};
@@ -150,7 +151,7 @@ RunStatus streamEvents(const RunFolder &folder, Context &context, bool sayWaitin
                 if (mine.active)
                     announced = true; // started: not looked at again
                 else
-                    announced = announceWaiting(folder, mine.pid, context);
+                    announced = announceWaiting(folder, mine.pid, context, waited.elapsed() >= 5000);
             }
         }
         QThread::msleep(50);

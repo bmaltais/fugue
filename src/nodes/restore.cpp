@@ -125,11 +125,14 @@ public:
                 return {*bad};
         if (!context.hashes || !context.inputs.contains(QStringLiteral("model")) || !context.inputs.contains(QStringLiteral("vae")))
             return {};
-        const ModelLibrary library = ModelLibrary::current(context.registry);
+        std::optional<ModelLibrary> own; // none is given outside a check pass
+        const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));
+        // Only a file known to be the one picked (its remembered hash is the handle's): a file of the same name with no known
+        // hash may be a different variant than the one a paired host would use, so nothing is said of it (#607).
         const auto path = [&](const char *input) {
-            const Result<QString> found = library.resolve(context.input(QLatin1String(input)).json().toObject(), *context.hashes,
-                                                          ModelLibrary::Hashing::RememberedOnly);
-            return found ? found.value() : QString();
+            const QJsonObject handle = context.input(QLatin1String(input)).json().toObject();
+            const Result<QString> found = library.resolve(handle, *context.hashes, ModelLibrary::Hashing::RememberedOnly);
+            return found && context.hashes->known(found.value()) == handle.value(QStringLiteral("hash")).toString() ? found.value() : QString();
         };
         const QString model = path("model"), vae = path("vae");
         if (model.isEmpty() || vae.isEmpty())

@@ -211,6 +211,31 @@ private slots:
         QCOMPARE(single.size(), 1);
     }
 
+    // #594: a model only another Switch branch needs is a row with its download, listed after the blocking ones; it does not make the
+    // panel show by itself and it is not in the headline.
+    void anOptionalModelIsARowThatBlocksNothing() {
+        NeedsModel needs;
+        ReadinessPlan plan;
+        plan.optionalModels << model(QStringLiteral("other-branch.gguf"), hashA, 1000, QString());
+        needs.setPlan(plan);
+        QVERIFY(needs.ready());
+        QCOMPARE(needs.items().size(), 1);
+        QCOMPARE(needs.items().at(0).toMap().value("kind").toString(), QString("optional"));
+        QVERIFY(needs.items().at(0).toMap().value("canDownload").toBool());
+        QVERIFY(needs.headline().isEmpty());
+        QSignalSpy single(&needs, &NeedsModel::downloadRequested);
+        needs.download(0);
+        QCOMPARE(single.size(), 1);
+        needs.setPlan(modelsPlan()); // a blocking model: the panel shows, the headline counts only it
+        QVERIFY(!needs.ready());
+        plan = modelsPlan();
+        plan.optionalModels << model(QStringLiteral("other-branch.gguf"), hashA, 1000, QString());
+        needs.setPlan(plan);
+        QVERIFY(!needs.ready());
+        QCOMPARE(needs.items().size(), 3);
+        QVERIFY(needs.headline().contains("2 models"));
+    }
+
     void aModelWaitingForAPackComesWithTheSheet() {
         NeedsModel needs;
         ReadinessPlan plan = withPack(ReadinessPlan());

@@ -76,4 +76,13 @@ QJsonArray modelsToHave(const Document &document, const Registry &registry) {
     return models;
 }
 
+QJsonArray optionalModels(const Document &document, const Registry &registry) {
+    const QSet<QString> lazyOnly = conditionalModelHashes(document, registry);
+    QJsonArray models;
+    for (const QJsonValue model : document.models())
+        if (lazyOnly.contains(model.toObject().value(QStringLiteral("hash")).toString()))
+            models.append(model);
+    return models;
+}
+
 } // namespace fugue

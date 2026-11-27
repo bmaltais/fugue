@@ -130,6 +130,35 @@ private slots:
         m_server->on("GET", "/b.safetensors", [this](const auto &) { return HttpResponse{200, m_other, "application/octet-stream"}; });
     }
 
+    // #594: a model only another branch of a Switch holds is a non-blocking row apart: not in the models, the totals, the headline
+    // or empty(); a missing one with no source is no problem; chosen by the person it is a row like the others, marked optional.
+    void anOptionalModelIsListedApartAndCostsNothingUntilChosen() {
+        const QJsonArray wanted{model("a.safetensors", m_bytes, "/a.safetensors", 1200)};
+        QJsonObject noSource = model("b.safetensors", m_other, "/b.safetensors", 900);
+        noSource.remove("source");
+        ReadinessRequest r;
+        r.models = wanted;
+        r.optionalModels = QJsonArray{model("c.safetensors", QByteArray(10, 'c'), "/c.safetensors", 700), noSource};
+        const ReadinessPlan plan = buildReadinessPlan(r, env());
+        QCOMPARE(plan.models.size(), 1);
+        QCOMPARE(plan.optionalModels.size(), 1); // the one with no source is left out
+        QCOMPARE(plan.optionalModels.at(0).name, QString("c.safetensors"));
+        QVERIFY(plan.problems.isEmpty());
+        QCOMPARE(plan.downloadBytes, qint64(1200));
+        QVERIFY(plan.optionalModels.at(0).size == 700 && !plan.optionalModels.at(0).target.path.isEmpty());
+        QVERIFY(plan.toJson().contains("optional_models"));
+        ReadinessRequest only;
+        only.optionalModels = r.optionalModels;
+        QVERIFY(buildReadinessPlan(only, env()).empty()); // nothing blocks, so nothing to do
+        // Chosen: a row of the plan, counted, marked optional.
+        r.optionalChosen.insert(sha256(QByteArray(10, 'c')));
+        const ReadinessPlan chosen = buildReadinessPlan(r, env());
+        QCOMPARE(chosen.models.size(), 2);
+        QVERIFY(chosen.optionalModels.isEmpty());
+        QVERIFY(!chosen.models.at(0).optional && chosen.models.at(1).optional);
+        QCOMPARE(chosen.downloadBytes, qint64(1900));
+    }
+
     void thePlanListsPacksEnvironmentsAndModelsWithTotals() {
         const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("true", 27000000));
         const QJsonArray wanted{model("a.safetensors", m_bytes, "/a.safetensors", 1200000000), model("b.safetensors", m_other, "/b.safetensors", -1)};
@@ -372,6 +401,46 @@ private slots:
         ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
         QVERIFY(runReadinessPlan(plan, run).ok);
         QVERIFY(m_trust->isTrusted("io.test.segment", "1.0.0"));
+    }
+
+    // #521: a pack whose setup never ran to its end here (no marker; one installed before the marker existed is the same) is
+    // offered the setup by Get ready, trusted or not, and the one yes runs it.
+    void anInstalledPackWithASetupAndNoMarkerIsOfferedTheSetup() {
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch environment.ok"));
+        PackPrompts yes;
+        yes.install = yes.trust = yes.runSetup = [](const PackSummary &) { return Answer::Yes; };
+        QVERIFY(addPack(folder, {}, packs(), *m_trust, yes).ok());
+        QVERIFY(trustPack("io.test.segment", packs(), *m_trust, yes).ok());
+        const QString installed = packs() + "/io.test.segment";
+        QVERIFY(QFileInfo(installed + "/environment.ok").isFile());
+        Registry loaded;
+        loadPacks(loaded, {packs()});
+        ReadinessEnv e = env();
+        e.registry = &loaded;
+        ReadinessRequest r = request(folder, {});
+        r.packs.first().needsInstall = false;
+        QVERIFY(buildReadinessPlan(r, e).packs.isEmpty()); // set up, trusted: nothing to do
+
+        // The environment is gone and so is the marker (what a pack installed before markers looks like).
+        QVERIFY(QFile::remove(installed + "/environment.ok"));
+        QVERIFY(QFile::remove(installed + "/.fugue-setup.json"));
+        const ReadinessPlan plan = buildReadinessPlan(r, e);
+        QCOMPARE(plan.packs.size(), 1);
+        QCOMPARE(plan.packs.first().action, ReadinessPack::Action::Setup);
+        QCOMPARE(plan.trustOnlyCount(), 0);
+        QCOMPARE(plan.environmentCount(), 1);
+        QVERIFY(plan.headline().contains("set up 1 environment"));
+        ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
+        run.cancelled = nullptr;
+        const ReadinessOutcome outcome = runReadinessPlan(plan, run);
+        QVERIFY(outcome.ok);
+        QVERIFY(QFileInfo(installed + "/environment.ok").isFile());
+        QVERIFY(buildReadinessPlan(r, e).packs.isEmpty()); // the marker is back
+
+        // A setup that fails leaves no marker, so it is offered again.
+        QVERIFY(QFile::remove(installed + "/.fugue-setup.json"));
+        QVERIFY(QFile::remove(installed + "/environment.ok"));
+        QCOMPARE(buildReadinessPlan(r, e).packs.size(), 1);
     }
 
     // Spec 8.9: a file with the handle's name and no remembered hash is taken to be the one, as `fugue validate` and the canvas

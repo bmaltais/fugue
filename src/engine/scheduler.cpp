@@ -392,7 +392,13 @@ public:
 private:
     // --- small helpers ---
 
-    std::optional<ModelLibrary> m_library; // read when a node first needs it (modelFilesElsewhere)
+    std::optional<ModelLibrary> m_library; // read when a node first needs it: one for the run, or for the whole check (#607)
+
+    ModelLibrary &library() {
+        if (!m_library)
+            m_library.emplace(ModelLibrary::current(m_env.registry));
+        return *m_library;
+    }
 
     QDateTime now() const { return utcNow(m_env.clock); }
 
@@ -776,6 +782,7 @@ private:
         const bool unknown = resolved.unknown;
         KeyParts parts;
         parts.inputs = resolved.keyInputs;
+        bool secretsUnreadable = false; // the pack's secret store could not be read: no result is kept under this key
 
         // The provider checks come before anything that depends on every input being
         // known, so that validate reports them (8.5) for a node with a randomized seed
@@ -826,6 +833,11 @@ private:
             n.models = {n.selection->instance + QLatin1Char('\n') + parts.model};
         } else if (n.kernel) {
             parts.extra = n.kernel->keyExtra(n.inputs);
+            // A pack node reads secrets that are not inputs: a hash of them is part of its key (#498).
+            if (const QString secrets = packSecretsKeyPart(*n.type); !secrets.isEmpty()) {
+                parts.extra += QStringLiteral("\nsecrets:") + secrets;
+                secretsUnreadable = secrets == QLatin1String(kSecretsUnreadable);
+            }
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
             // Its own persistent program, which holds memory between runs (7.3).
@@ -852,6 +864,8 @@ private:
         if (!n.type->deterministic) {
             if (m_dry)
                 return hostGone ? giveUp(n, *hostGone) : stale(n);
+            parts.run = runId();
+        } else if (secretsUnreadable) {
             parts.run = runId();
         }
         n.key = cacheKey(parts);
@@ -929,6 +943,7 @@ private:
         context.inputs = n.inputs;
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
+        context.library = m_env.registry ? &library() : nullptr;
         for (const Error &error : n.providerKernel ? n.providerKernel->check(context) : n.kernel->check(context))
             sortFinding(error, n.path, m_outcome.errors, m_outcome.checkErrors);
     }
@@ -946,8 +961,6 @@ private:
             const InputSpec *spec = n.type->input(it.key());
             if (!spec || it.value().isEmpty() || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
                 continue;
-            if (!m_library)
-                m_library.emplace(ModelLibrary::current(m_env.registry)); // one for the run
             if (hashedHandleMissing(it.value().toJson()))
                 return true;
         }
@@ -966,7 +979,7 @@ private:
             const std::optional<PortType> type = PortType::parse(object.value("resource").toString());
             return type && m_env.registry->portKind(*type) == PortKind::Resource
                    && object.value("hash").toString().startsWith(QLatin1String("sha256:"))
-                   && !m_library->resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+                   && !library().resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
         }
         for (const QJsonValue &part : object) // a derived model's parts, its LoRAs
             if ((part.isObject() || part.isArray()) && hashedHandleMissing(part))
@@ -975,18 +988,15 @@ private:
     }
 
     void warnMissingModels(const NodeRun &n) {
-        std::optional<ModelLibrary> library; // read from the settings for the first resource input
         for (auto it = n.inputs.begin(); it != n.inputs.end(); ++it) {
             const InputSpec *spec = n.type->input(it.key());
             if (!spec || !m_env.registry || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
                 continue;
-            if (!library)
-                library.emplace(ModelLibrary::current(m_env.registry));
             if (it.value().isEmpty())
                 continue; // not known yet (a link from a node that has not run)
             // A check reads no model file: one with the handle's name is taken to be it.
             const Result<QJsonValue> found =
-                library->withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+                library().withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
             if (found)
                 continue;
             Error warning = found.error();

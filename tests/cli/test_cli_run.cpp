@@ -383,6 +383,43 @@ private slots:
         QCOMPARE(Lock::holderPid(file, qint64(::getpid())), qint64(0)); // asked to leave this one out
     }
 
+    // #636: the lock is held by a child that inherited the fd; the pid /proc/locks names (this process) has let go of the
+    // file. Nobody is named, and a run that waits says so after about 5 s without a pid.
+    void aWaitWithAnUnnamedHolderSaysSoWithoutAPid() {
+        const QString file = path("state/fugue/engine.lock");
+        Held held(file);
+        QVERIFY(held.fd >= 0);
+        const pid_t child = ::fork();
+        QVERIFY(child >= 0);
+        if (child == 0) {
+            ::alarm(120);
+            ::pause();
+            ::_exit(0);
+        }
+        held.release(); // the child's copy keeps the lock
+        QCOMPARE(Lock::holderPid(file), qint64(0));
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.remove("QT_QPA_PLATFORM");
+        env.insert("XDG_CACHE_HOME", path("cache"));
+        env.insert("XDG_STATE_HOME", path("state"));
+        env.insert("XDG_CONFIG_HOME", path("config"));
+        env.insert("XDG_RUNTIME_DIR", path("runtime"));
+        env.remove("FUGUE_BASE_XDG_RUNTIME_DIR");
+        env.insert("HOME", path("home"));
+        env.insert("FUGUE_NODE_MANIFESTS", path("manifests"));
+        env.insert("FUGUE_TEST_GATE", gate());
+        QProcess process;
+        process.setProcessEnvironment(env);
+        process.start(FUGUE_FAKE_BINARY, QStringList{"run", path("flow.fugue"), "--wait"});
+        QVERIFY(process.waitForStarted());
+        QByteArray seen;
+        QTRY_VERIFY_WITH_TIMEOUT((seen += process.readAllStandardError(), seen.contains("Waiting for another Fugue run to finish")), 30000);
+        QVERIFY2(!seen.contains("(pid"), seen.constData());
+        ::kill(child, SIGKILL);
+        ::waitpid(child, nullptr, 0);
+        QVERIFY(process.waitForFinished(60000));
+    }
+
     void cancelStopsARunningRun() {
         const QString id = start("hold.fugue");
         QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 45000);

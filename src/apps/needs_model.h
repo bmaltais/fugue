@@ -7,10 +7,10 @@
 // the paths it already has (the model download line; the Get ready sheet, whose one yes covers packs, trust, environments and
 // models), and "Show in graph" asks the window to switch to the graph and centre the node.
 //
-// The panel is there while `items` is not empty and clears by itself when a refresh finds the app ready. The plan comes from an
+// The panel is there while `items` has a row that is not optional and clears by itself when a refresh finds the app ready. The plan comes from an
 // injected source (the window gives the shown tab's; a test gives a fake plan), the node of an item from an injected locator.
 //
-// Items: [{kind ("pack", "model" or "problem"), key, name, detail (the row's quiet line), size (text, empty when none), licence,
+// Items: [{kind ("pack", "model", "optional" (a model only another Switch branch needs, #594: it does not make the panel show) or "problem"), key, name, detail (the row's quiet line), size (text, empty when none), licence,
 // licenceUrl, canDownload (a model that can be had on its own: the pack rows and the models of a pack's type come with the
 // sheet), use (a model with a file of the same weights on disk: {file, same, tier, ...}, else empty), action ("Download" or "Install"), node (the graph's node, empty when unknown)}].
 
@@ -21,6 +21,7 @@
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include <algorithm>
 #include <functional>
 
 #include "engine/document.h"
@@ -68,7 +69,9 @@ public:
     // The graph is not there to jump to (the app's own window).
     void setGraphAvailable(bool available);
 
-    bool ready() const { return m_items.isEmpty(); }
+    bool ready() const {
+        return std::none_of(m_items.cbegin(), m_items.cend(), [](const QVariant &item) { return item.toMap().value(QStringLiteral("kind")).toString() != QLatin1String("optional"); });
+    }
     QVariantList items() const { return m_items; }
     QString headline() const { return m_headline; }
     bool startsAtOnce() const { return m_atOnce; }

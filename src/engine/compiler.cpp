@@ -1173,8 +1173,12 @@ CompiledGraph Compiler::shape() {
             dropped[path] = reason;
     }
     for (auto it = dropped.constBegin(); it != dropped.constEnd(); ++it) {
+        // An inner view sink nobody asked for: no node.skipped for it (#634). Its readers are listed as before.
+        const Flat &flat = live[it.key()];
+        const bool unaskedViewSink = quiet(flat) && flat.spec().viewOnly;
         live.remove(it.key());
-        graph.skipped[it.key()] = *it;
+        if (!unaskedViewSink)
+            graph.skipped[it.key()] = *it;
     }
 
     // Only what a sink, or the target, needs (3.4).
