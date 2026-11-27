@@ -1883,6 +1883,50 @@ private slots:
         QVERIFY(!none->params.contains("moss_edit_format"));
     }
 
+    // Krea 2 Edit (#718): the format and its settings reach both stages, the Sampler's from the conditioning, with
+    // the placements under the engine's names; the defaults are the engine's (boost 1, aligned, 768).
+    void krea2EditSettingsReachBothStages() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Value scene(picture(bench, QStringLiteral("scene.png"), 320, 192));
+        const Value person(picture(bench, QStringLiteral("person.png"), 192, 320));
+        Values krea{{"model", Value(model)}, {"prompt", Value("place this person at the table")},
+                    {"references", Value::list({scene, person})}, {"edit_format", Value("Krea 2 Edit")}};
+        const Result<JobRequest> defaults = bench.request(kTextEncode, krea);
+        QVERIFY2(defaults, defaults ? "" : qPrintable(defaults.error().message));
+        QCOMPARE(defaults->params.value("krea2_edit_format").toString(), QStringLiteral("krea2edit"));
+        QCOMPARE(defaults->params.value("krea2_ref_boost").toDouble(), 1.0);
+        QCOMPARE(defaults->params.value("krea2_ref_position").toString(), QStringLiteral("aligned"));
+        QCOMPARE(defaults->params.value("krea2_grounding_px").toInt(), 768);
+        QVERIFY(!defaults->params.contains("moss_edit_format"));
+
+        krea.insert("ref_boost", Value(2.5));
+        krea.insert("ref_position", Value("bag of features"));
+        krea.insert("scene_boost", Value(0.5));
+        krea.insert("scene_position", Value("beside"));
+        krea.insert("vision_size", Value(512));
+        const Result<JobRequest> encode = bench.request(kTextEncode, krea);
+        QVERIFY(encode);
+        QCOMPARE(encode->params.value("krea2_ref_boost").toDouble(), 2.5);
+        QCOMPARE(encode->params.value("krea2_ref_position").toString(), QStringLiteral("bag"));
+        QCOMPARE(encode->params.value("krea2_ref_boost_a").toDouble(), 0.5);
+        QCOMPARE(encode->params.value("krea2_ref_position_a").toString(), QStringLiteral("beside"));
+        QCOMPARE(encode->params.value("krea2_grounding_px").toInt(), 512);
+
+        const QString file = bench.workDir() + "/conditioning.bin";
+        const Result<Values> out =
+            bench.outputs(kTextEncode, krea, JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        const Result<Values> empty = bench.run(kEmptyLatent, {{"width", Value(320)}, {"height", Value(192)}});
+        const Result<JobRequest> sample =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", out->value("conditioning")},
+                                     {"latent", empty->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
+        QVERIFY(sample);
+        for (const char *key : {"krea2_edit_format", "krea2_ref_boost", "krea2_ref_position", "krea2_ref_boost_a",
+                                "krea2_ref_position_a", "krea2_grounding_px"})
+            QCOMPARE(sample->params.value(QLatin1String(key)), encode->params.value(QLatin1String(key)));
+    }
+
     // A reference whose file is gone or changed since Text Encode ran (a cached conditioning
     // outlives it) is said as such, not sent to the helper.
     void aReferenceThatChangedSinceTheEncodeIsAnError() {

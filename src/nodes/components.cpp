@@ -522,16 +522,50 @@ void sendReferenceSize(QJsonObject &params, const QString &size) {
         params.insert(QStringLiteral("ref_image_args"), QLatin1String(kExactReferenceArgs));
 }
 
-// The layout of a MOSS-Image edit (the engine's moss_edit_format): "default" is the engine's own
-// (the ai-toolkit layout, vision on when the encoder has it), "Moss-Image-Edit" is ComfyUI's
-// TextEncodeMOSSImageEdit format of that name (VAE references only). Other models ignore it. Text
-// Encode's input; the conditioning carries it to the Sampler. Default sends nothing.
+// The layout of an edit. "default" is the engine's own. "Moss-Image-Edit" is ComfyUI's
+// TextEncodeMOSSImageEdit format of that name (the engine's moss_edit_format: VAE references only).
+// "Krea 2 Edit" is the layout of the Krea 2 Identity Edit and General Edit LoRAs (ComfyUI-Krea2Edit;
+// the engine's krea2_edit_format krea2edit): references at the current timestep, fitted to the output,
+// seen by the vision encoder at Vision size, with a boost and a placement each. Other models ignore
+// both. Text Encode's inputs; the conditioning carries them to the Sampler (edit_format, and krea2_edit
+// with the settings), so both stages send the same. Default sends nothing.
 constexpr auto kMossImageEditFormat = "Moss-Image-Edit";
 constexpr auto kMossImageEditEngineFormat = "moss-image-edit";
+constexpr auto kKrea2EditFormat = "Krea 2 Edit";
 
-void sendEditFormat(QJsonObject &params, const QString &format) {
+// Text Encode's edit settings as the conditioning carries them: {"edit_format", "krea2_edit"}, empty for default.
+QJsonObject editFormatOf(const NodeContext &context) {
+    const QString format = context.input(QStringLiteral("edit_format")).text();
     if (format == QLatin1String(kMossImageEditFormat))
+        return {{"edit_format", format}};
+    if (format != QLatin1String(kKrea2EditFormat))
+        return {};
+    const auto number = [&](const char *name) { return context.input(QLatin1String(name)).number(); };
+    const auto text = [&](const char *name) { return context.input(QLatin1String(name)).text(); };
+    return {{"edit_format", format},
+            {"krea2_edit", QJsonObject{{"ref_boost", number("ref_boost")}, {"ref_position", text("ref_position")},
+                                       {"scene_boost", number("scene_boost")}, {"scene_position", text("scene_position")},
+                                       {"vision_size", number("vision_size")}}}};
+}
+
+// The engine's name of a placement (its krea2_ref_position).
+QString krea2Position(const QString &placement) {
+    return placement == QLatin1String("bag of features") ? QStringLiteral("bag") : placement.isEmpty() ? QStringLiteral("aligned") : placement;
+}
+
+void sendEditFormat(QJsonObject &params, const QJsonObject &format) {
+    const QString name = format.value(QStringLiteral("edit_format")).toString();
+    if (name == QLatin1String(kMossImageEditFormat)) {
         params.insert(QStringLiteral("moss_edit_format"), QLatin1String(kMossImageEditEngineFormat));
+    } else if (name == QLatin1String(kKrea2EditFormat)) {
+        const QJsonObject krea = format.value(QStringLiteral("krea2_edit")).toObject();
+        params.insert(QStringLiteral("krea2_edit_format"), QStringLiteral("krea2edit"));
+        params.insert(QStringLiteral("krea2_ref_boost"), krea.value(QStringLiteral("ref_boost")).toDouble(1));
+        params.insert(QStringLiteral("krea2_ref_position"), krea2Position(krea.value(QStringLiteral("ref_position")).toString()));
+        params.insert(QStringLiteral("krea2_ref_boost_a"), krea.value(QStringLiteral("scene_boost")).toDouble(1));
+        params.insert(QStringLiteral("krea2_ref_position_a"), krea2Position(krea.value(QStringLiteral("scene_position")).toString()));
+        params.insert(QStringLiteral("krea2_grounding_px"), qRound(krea.value(QStringLiteral("vision_size")).toDouble(768)));
+    }
 }
 
 // The references a conditioning carries (Text Encode puts them in its descriptor, as ComfyUI's
@@ -1038,7 +1072,7 @@ public:
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
             sendReferenceSize(params, context.input(QStringLiteral("reference_size")).text());
-            sendEditFormat(params, context.input(QStringLiteral("edit_format")).text());
+            sendEditFormat(params, editFormatOf(context));
         }
         JobRequest request = job(*files, params, true);
         // An image-to-video model makes its start from the first frame in the encode (Wan 2.2 I2V's
@@ -1081,8 +1115,9 @@ public:
             descriptor.insert(QStringLiteral("references"), carried);
             if (const QString size = context.input(QStringLiteral("reference_size")).text(); size == QLatin1String(kExactReferences))
                 descriptor.insert(QStringLiteral("reference_size"), size);
-            if (const QString format = context.input(QStringLiteral("edit_format")).text(); format == QLatin1String(kMossImageEditFormat))
-                descriptor.insert(QStringLiteral("edit_format"), format);
+            const QJsonObject format = editFormatOf(context);
+            for (auto it = format.begin(); it != format.end(); ++it)
+                descriptor.insert(it.key(), it.value());
         }
         return Values{{QStringLiteral("conditioning"), Value(dataHandle(kConditioningType, path.value(), descriptor))}};
     }
@@ -1179,8 +1214,7 @@ public:
             params.insert(QStringLiteral("ref_images"), sent.value());
             sendReferenceSize(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta"))
                                           .toObject().value(QStringLiteral("reference_size")).toString());
-            sendEditFormat(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta"))
-                                       .toObject().value(QStringLiteral("edit_format")).toString());
+            sendEditFormat(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta")).toObject());
         }
         // The first frame of an image-to-video conditioning, for the clip it was encoded for.
         const Result<CarriedFrame> carried = firstFrameOf(context.input(QStringLiteral("conditioning")), *context.hashes);

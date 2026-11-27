@@ -80,6 +80,48 @@
         "krea2",
         "style"
       ]
+    },
+    {
+      "id": "krea2-general-edit-v2-r128",
+      "resource": "fugue/lora",
+      "title": "Krea 2 General Edit V2 (rank 128)",
+      "description": "Instruction editing for Krea 2 (recolor, relight, add, remove, restyle), 0.91 GB; needs Text Encode's edit format Krea 2 Edit. Free for non-commercial use; commercial use needs a licence from the author.",
+      "file": "krea2_general_edit_v2_r128.safetensors",
+      "url": "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/f33b26291c640e8ec50b0da420bfee3c9a660daa/krea2_general_edit_v2_r128.safetensors",
+      "size": 914188760,
+      "sha256": "fbca6ab74b9bef3db8de1d4a49b93d4fe7a778f5d4ae6995e0769ea8de736f00",
+      "architecture": "Krea 2 LoRA (rank 128)",
+      "license": "Krea 2 Identity Edit V2 License (non-commercial) and Krea 2 Community License",
+      "license_url": "https://huggingface.co/conradlocke/krea2-identity-edit/blob/main/LICENSE_V2.md",
+      "commercial": false,
+      "author": "conradlocke (Lars Bouaraba)",
+      "source": "https://huggingface.co/conradlocke/krea2-identity-edit",
+      "tags": [
+        "krea2",
+        "edit",
+        "general edit"
+      ]
+    },
+    {
+      "id": "krea2-identity-edit-v2-r128",
+      "resource": "fugue/lora",
+      "title": "Krea 2 Identity Edit V2 (rank 128)",
+      "description": "Restages the person of one photo for Krea 2 (scene, pose, outfit, light), 0.91 GB; needs Text Encode's edit format Krea 2 Edit. Free for non-commercial use; commercial use needs a licence from the author.",
+      "file": "krea2_identity_edit_v2_r128.safetensors",
+      "url": "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/f33b26291c640e8ec50b0da420bfee3c9a660daa/krea2_identity_edit_v2_r128.safetensors",
+      "size": 914188768,
+      "sha256": "2082515f1eb66532f5efb5343eb15048a29e3abe9f356e35e784cc60d00b45f7",
+      "architecture": "Krea 2 LoRA (rank 128)",
+      "license": "Krea 2 Identity Edit V2 License (non-commercial) and Krea 2 Community License",
+      "license_url": "https://huggingface.co/conradlocke/krea2-identity-edit/blob/main/LICENSE_V2.md",
+      "commercial": false,
+      "author": "conradlocke (Lars Bouaraba)",
+      "source": "https://huggingface.co/conradlocke/krea2-identity-edit",
+      "tags": [
+        "krea2",
+        "edit",
+        "identity edit"
+      ]
     }
   ]
 }
