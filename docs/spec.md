@@ -1245,13 +1245,18 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   at once; one that cannot get it within 2 s fails with `pack_busy` and the holder's pid. What was asked is looked at again under
   the lock (the folder, and for a setup the pack itself). The new version's trust is forgotten before the new code is in place,
   so a trusted pack never runs other code during a setup; the old version's goes once the update worked, and a failed update of
-  the same version puts its trust back when the old pack is back and its secrets are unchanged. A crash leaves it forgotten.
-  Folders a command makes in the packs folder are named `.staging-<pid>-<time>-<random>` and
-  `.old-<pid>-<time>-<random>-<folder>` (the pack an update set aside). A later command, under the lock, removes a `.staging-` only
-  when its process is gone (a pid handed out again, by its start time, counts as gone), keeps a live owner's `.old-` whatever its
-  age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole (no setup, or its marker
-  `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped), deleting the others only
-  then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
+  the same version puts its trust back when the old pack is back: what the trust file held under the lock, with the secrets
+  digest it recorded (so a secrets edit made since the yes still asks), and nothing when the person untrusted it meanwhile. An
+  update that cannot set the old pack aside has changed no trust. A crash leaves it forgotten.
+  Folders a command makes in the packs folder are named `.staging-<pid>-<ticks>-<boot>-<random>`,
+  `.old-<pid>-<ticks>-<boot>-<time>-<random>-<folder>` (the pack an update set aside) and `.trash-<pid>-<ticks>-<boot>-<random>`
+  (a backup being deleted: it is renamed first, so a delete that fails half way leaves a folder that is never restored). The
+  owner is the process with that pid, that start time in clock ticks (`/proc/<pid>/stat` field 22) and that boot id; no clock is
+  read, and a pid handed out again or one from before a reboot is another process. A later command, under the lock, removes a
+  `.staging-` or `.trash-` only when its owner is gone (one `/proc` cannot be read for, as under hidepid, after an hour),
+  keeps a live owner's `.old-` whatever its age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole
+  (no setup, or its marker `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped),
+  deleting the others only then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
   at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` (after a Stop or a failure) as **Paused**, "412 MB of 850 MB", with a trash button on the row (**Delete the partial download**); the headline counts what is left ("download 2 models, 967 MB left") and the retry button says **Resume** while a part is kept. A stop's message is a plain note, not an error: it names a download ("Downloads keep what they had."), an install (undone) or a setup (may be run again) only when that was running.
 - A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
   offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by

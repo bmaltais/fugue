@@ -30,6 +30,9 @@
 
 namespace fugue {
 
+// The CLI's signal handler reads this: a lock-based atomic is not safe there.
+static_assert(std::atomic<qint64>::is_always_lock_free, "runningSetupGroup is read from a signal handler");
+
 std::atomic<qint64> &runningSetupGroup() {
     static std::atomic<qint64> group{0};
     return group;
@@ -97,24 +100,20 @@ bool looksLikeCommit(const QString &ref) {
     return hex.match(ref).hasMatch();
 }
 
-// Names of the folders a command makes in the packs folder. Each carries the owner's pid and the time it was made, so a later
-// command can tell whether the owner still works (#418), which a modification time cannot: a slow clone writes nothing for
-// minutes, and a rename keeps a folder's time. A pid that was handed out again after the owner died is told by its start time.
-//   .staging-<pid>-<epoch s>-<random>                scratch space
-//   .old-<pid>-<epoch s>-<random>-<folder name>      an installed pack set aside by an update: the name says where it goes back
-//   .rescue-<random>-<folder name>                   an old pack that could not be put back; nothing sweeps it
-QString randomPart() { return QUuid::createUuid().toString(QUuid::Id128).left(12); }
-
-QString stagingName() {
-    return QStringLiteral(".staging-%1-%2-%3").arg(QCoreApplication::applicationPid()).arg(QDateTime::currentSecsSinceEpoch()).arg(randomPart());
+// The kernel's id of this boot, without dashes; empty when /proc cannot say.
+QString bootId() {
+    QFile file(QStringLiteral("/proc/sys/kernel/random/boot_id"));
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QString id = QString::fromUtf8(file.readAll()).trimmed().toLower();
+    id.remove(QLatin1Char('-'));
+    static const QRegularExpression hex(QStringLiteral("^[0-9a-f]{1,32}$"));
+    return hex.match(id).hasMatch() ? id : QString();
 }
 
-QString backupName(const QString &folderName) {
-    return QStringLiteral(".old-%1-%2-%3-%4").arg(QCoreApplication::applicationPid()).arg(QDateTime::currentSecsSinceEpoch()).arg(randomPart(), folderName);
-}
-
-// When process `pid` started (epoch s), or -1 when /proc cannot say.
-qint64 processStartEpoch(qint64 pid) {
+// When process `pid` started, in clock ticks after boot (/proc/<pid>/stat, field 22): a number the clock cannot change.
+// -1 when /proc cannot say (hidepid, another pid namespace).
+qint64 startTicksOf(qint64 pid) {
     QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!stat.open(QIODevice::ReadOnly))
         return -1;
@@ -122,22 +121,58 @@ qint64 processStartEpoch(qint64 pid) {
     const QList<QByteArray> fields = line.mid(line.lastIndexOf(')') + 2).split(' '); // after "pid (comm) ": field 3 on
     if (fields.size() < 20)
         return -1;
-    const qint64 ticks = fields.at(19).toLongLong(); // field 22: start time in clock ticks after boot
-    QFile uptime(QStringLiteral("/proc/uptime"));
-    if (ticks <= 0 || !uptime.open(QIODevice::ReadOnly))
-        return -1;
-    const double up = uptime.readAll().split(' ').value(0).toDouble();
-    const long hz = sysconf(_SC_CLK_TCK);
-    return hz > 0 ? QDateTime::currentSecsSinceEpoch() - qint64(up) + ticks / hz : -1;
+    const qint64 ticks = fields.at(19).toLongLong();
+    return ticks > 0 ? ticks : -1;
 }
 
-// Whether the process that made a folder (`pid`, at `madeAt`) is still running: not when the pid belongs to a process that
-// started after the folder was made.
-bool ownerRunning(qint64 pid, qint64 madeAt) {
-    if (pid <= 0 || (::kill(pid_t(pid), 0) != 0 && errno != EPERM)) // EPERM: it exists, and is another user's
-        return false;
-    const qint64 started = processStartEpoch(pid);
-    return started < 0 || started <= madeAt + 5; // 5 s: the two clocks are read apart
+// Names of the folders a command makes in the packs folder. Each carries its owner: the pid, the process's start ticks and the
+// boot id, so a later command can tell whether the owner still works (#418), which a modification time cannot (a slow clone
+// writes nothing for minutes, and a rename keeps a folder's time). The owner is alive only when all three match: a pid handed
+// out again after the owner died has other ticks, a pid from before a reboot another boot id, and no wall clock is read (#673).
+//   .staging-<pid>-<ticks>-<boot>-<random>                scratch space
+//   .trash-<pid>-<ticks>-<boot>-<random>                  a folder being deleted; whatever a failed delete left is never restored
+//   .old-<pid>-<ticks>-<boot>-<epoch s>-<random>-<folder name>  an installed pack set aside by an update: the name says where it goes back
+//   .rescue-<random>-<folder name>                        an old pack that could not be put back; nothing sweeps it
+QString randomPart() { return QUuid::createUuid().toString(QUuid::Id128).left(12); }
+
+QString ownerPart() {
+    static const QString part = QStringLiteral("%1-%2-%3")
+                                    .arg(QCoreApplication::applicationPid())
+                                    .arg(std::max<qint64>(startTicksOf(QCoreApplication::applicationPid()), 0))
+                                    .arg(bootId().isEmpty() ? QStringLiteral("0") : bootId());
+    return part;
+}
+
+QString stagingName() { return QStringLiteral(".staging-%1-%2").arg(ownerPart(), randomPart()); }
+
+QString trashName() { return QStringLiteral(".trash-%1-%2").arg(ownerPart(), randomPart()); }
+
+// The time is only for the order of two backups of one folder; whether the owner lives is never told from it.
+QString backupName(const QString &folderName) {
+    return QStringLiteral(".old-%1-%2-%3-%4").arg(ownerPart()).arg(QDateTime::currentSecsSinceEpoch()).arg(randomPart(), folderName);
+}
+
+// The owner's part of a name, as the regular expressions below capture it.
+const QString ownerPattern = QStringLiteral("([0-9]{1,10})-([0-9]{1,20})-([0-9a-f]{1,32})");
+
+enum class Owner { Running, Gone, Unknown };
+
+// Whether the process that made a folder still runs. Unknown: /proc cannot be read for a pid that exists (hidepid), so it cannot
+// be told from another process.
+Owner ownerOf(const QRegularExpressionMatch &match, int first) {
+    const qint64 pid = match.captured(first).toLongLong();
+    const qint64 ticks = match.captured(first + 1).toLongLong();
+    const QString boot = match.captured(first + 2);
+    if (pid == QCoreApplication::applicationPid())
+        return QStringLiteral("%1-%2-%3").arg(pid).arg(ticks).arg(boot) == ownerPart() ? Owner::Running : Owner::Gone;
+    const QString now = bootId();
+    if (now.isEmpty())
+        return Owner::Unknown;
+    if (boot != now || pid <= 0)
+        return Owner::Gone;
+    if (const qint64 started = startTicksOf(pid); started >= 0)
+        return started == ticks ? Owner::Running : Owner::Gone;
+    return ::kill(pid_t(pid), 0) != 0 && errno != EPERM ? Owner::Gone : Owner::Unknown;
 }
 
 bool processAlive(qint64 pid) { return pid > 0 && (::kill(pid_t(pid), 0) == 0 || errno == EPERM); }
@@ -152,6 +187,14 @@ bool removeTree(const QString &path) {
 // Removes what is at `path`: a link as a link, a folder as a tree.
 bool removeEntry(const QString &path) {
     return QFileInfo(path).isSymLink() ? QFile::remove(path) : removeTree(path);
+}
+
+// Deletes a tree that must never be taken for a backup again: it is renamed to a `.trash-` name first, so a delete that fails
+// half way (a read-only folder inside) leaves a folder the sweep deletes later and never restores, not an `.old-` one that
+// looks like the oldest backup of its pack (#673). A rename that fails leaves nothing better than deleting in place.
+void discardTree(const QString &packsDir, const QString &path) {
+    const QString trash = packsDir + QLatin1Char('/') + trashName();
+    removeTree(QDir().rename(path, trash) ? trash : path);
 }
 
 // Whether the pack in `folder` is whole: it has no setup, or its setup ran to its end (the marker names the command).
@@ -177,6 +220,9 @@ QString rescueBackup(const QString &packsDir, const QString &folderName, const Q
 QString restoreBackup(const QString &packsDir, const QString &target, const QString &backup) {
     const QString name = QFileInfo(target).fileName();
     const auto kept = [&] { return QStringLiteral("The old version could not be put back; it is kept in %1").arg(rescueBackup(packsDir, name, backup)); };
+    // A backup whose delete failed half way is no pack: it is never put over anything (#673).
+    if (!readJsonObject(backup + QStringLiteral("/pack.json")))
+        return kept();
     QString aside;
     if (QFileInfo(target).isSymLink() || QFileInfo::exists(target)) {
         aside = packsDir + QLatin1Char('/') + stagingName();
@@ -231,20 +277,21 @@ private:
     bool m_held = false;
 };
 
-// The `.old-` folders of dead owners for one pack folder name, oldest first: [{path, epoch}].
+// The `.old-` folders of dead owners for one pack folder name, oldest first: [{path, when it was set aside}].
 struct DeadBackup {
     QString path;
     qint64 epoch = 0;
 };
 
 QList<DeadBackup> deadBackupsOf(const QString &packsDir, const QString &folderName) {
-    static const QRegularExpression pattern(QStringLiteral("^\\.old-([0-9]{1,10})-([0-9]{1,12})-[0-9a-f]{12}-(.+)$"));
+    static const QRegularExpression pattern(QStringLiteral("^\\.old-%1-([0-9]{1,12})-[0-9a-f]{12}-(.+)$").arg(ownerPattern));
     QList<DeadBackup> found;
     for (const QFileInfo &entry : QDir(packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::NoSymLinks)) {
         const QRegularExpressionMatch match = pattern.match(entry.fileName());
-        if (match.hasMatch() && match.captured(3) == folderName
-            && !ownerRunning(match.captured(1).toLongLong(), match.captured(2).toLongLong()))
-            found.append({entry.filePath(), match.captured(2).toLongLong()});
+        // An owner /proc cannot vouch for counts as gone: the sweep and every change run under the lock, so no update of a live
+        // owner is in the middle of its swap here.
+        if (match.hasMatch() && match.captured(5) == folderName && ownerOf(match, 1) != Owner::Running)
+            found.append({entry.filePath(), match.captured(4).toLongLong()});
     }
     std::sort(found.begin(), found.end(), [](const DeadBackup &x, const DeadBackup &y) { return x.epoch < y.epoch; });
     return found;
@@ -258,8 +305,8 @@ QList<DeadBackup> deadBackupsOf(const QString &packsDir, const QString &folderNa
 // A link at the target is never followed, nor deleted through. Names from before pids stay as they are, except a `.staging-`
 // one that is old. A trust the update forgot stays forgotten (#418).
 void removeStale(const QString &packsDir, const std::function<void(const QString &)> &log) {
-    static const QRegularExpression stagingPattern(QStringLiteral("^\\.staging-([0-9]{1,10})-([0-9]{1,12})-[0-9a-f]{12}$"));
-    static const QRegularExpression oldPattern(QStringLiteral("^\\.old-[0-9]{1,10}-[0-9]{1,12}-[0-9a-f]{12}-(.+)$"));
+    static const QRegularExpression scratchPattern(QStringLiteral("^\\.(?:staging|trash)-%1-[0-9a-f]{12}$").arg(ownerPattern));
+    static const QRegularExpression oldPattern(QStringLiteral("^\\.old-%1-[0-9]{1,12}-[0-9a-f]{12}-(.+)$").arg(ownerPattern));
     const PacksLock lock(packsDir, 0);
     if (!lock.held())
         return; // someone is changing packs now: the next command sweeps
@@ -270,14 +317,18 @@ void removeStale(const QString &packsDir, const std::function<void(const QString
     QSet<QString> folders;
     for (const QFileInfo &entry : QDir(packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::NoSymLinks)) {
         const QString name = entry.fileName();
-        if (name.startsWith(QLatin1String(".staging-"))) {
-            const QRegularExpressionMatch match = stagingPattern.match(name);
-            const bool stale = match.hasMatch() ? !ownerRunning(match.captured(1).toLongLong(), match.captured(2).toLongLong())
-                                                : entry.lastModified().secsTo(QDateTime::currentDateTime()) > 600;
+        if (name.startsWith(QLatin1String(".staging-")) || name.startsWith(QLatin1String(".trash-"))) {
+            const QRegularExpressionMatch match = scratchPattern.match(name);
+            const qint64 age = entry.lastModified().secsTo(QDateTime::currentDateTime());
+            bool stale = age > 600; // a name without an owner (from before pids)
+            if (match.hasMatch()) {
+                const Owner owner = ownerOf(match, 1);
+                stale = owner == Owner::Gone || (owner == Owner::Unknown && age > 3600);
+            }
             if (stale)
                 removeTree(entry.filePath());
-        } else if (const QRegularExpressionMatch match = oldPattern.match(name); match.hasMatch() && validPackId(match.captured(1))) {
-            folders.insert(match.captured(1));
+        } else if (const QRegularExpressionMatch match = oldPattern.match(name); match.hasMatch() && validPackId(match.captured(4))) {
+            folders.insert(match.captured(4));
         }
     }
     for (const QString &folderName : std::as_const(folders)) {
@@ -288,7 +339,7 @@ void removeStale(const QString &packsDir, const std::function<void(const QString
             if (QFileInfo(target).isSymLink()) { // someone's link: never followed
                 say(QStringLiteral("%1 is a link, so the old version of the pack was kept in %2").arg(target, rescueBackup(packsDir, folderName, backup.path)));
             } else if (QFileInfo::exists(target) && packComplete(target)) {
-                removeTree(backup.path); // the update finished; only its cleanup did not
+                discardTree(packsDir, backup.path); // the update finished; only its cleanup did not
             } else if (!restored) {
                 const QString lost = restoreBackup(packsDir, target, backup.path); // the update did not finish: the old pack comes back
                 restored = lost.isEmpty();
@@ -787,28 +838,33 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     // A pack that was removed after a crash must not come back: the sweep would put its old copy over the new install.
     if (!replacing)
         for (const DeadBackup &dead : deadBackupsOf(packsDir, folderName))
-            removeTree(dead.path);
+            discardTree(packsDir, dead.path);
     // Trust is per version, and a new version, a new commit or a re-install is new code: it asks again. The new version's trust
     // is forgotten BEFORE the new code is in place: the same id and version, trusted, must never run other code for the length
     // of a setup. The old version's, and the id's other versions', go only once the update has worked, so a failed one leaves
     // what it did not change. A failed update of the same version puts the trust back, only if the old pack is back as it was.
     const int foldersNow = int(foldersOfPack(summary.id, {packsDir}).size());
     const bool beside = replacing ? foldersNow > 1 : foldersNow > 0;
-    const bool wasTrusted = replacing && !summary.oldVersion.isEmpty() && summary.oldVersion == summary.version && summary.oldTrusted;
-    const QString trustedDigest = wasTrusted ? packSecretsDigestOfFolder(target) : QString();
-    Errors warnings = trust.forget(summary.id, summary.version);
+    // Read under the lock, from the trust file itself: a person may have untrusted the pack since the question (#673). What is put
+    // back is exactly what the file held, digest included, so a secrets edit made since the yes is not covered.
+    const bool wasTrusted = replacing && !summary.oldVersion.isEmpty() && summary.oldVersion == summary.version
+                            && trust.isListed(summary.id, summary.version);
+    const QString trustedDigest = wasTrusted ? trust.sealedDigest(summary.id, summary.version) : QString();
+    Errors warnings;
     // The old pack comes back (or says where it is): the text for the error, empty when it is back.
     const auto putBack = [&]() -> QString {
         const QString lost = restoreBackup(packsDir, target, backup);
-        if (lost.isEmpty() && wasTrusted && packSecretsDigestOfFolder(target) == trustedDigest)
-            trust.trust(summary.id, summary.version, trustedDigest);
+        if (lost.isEmpty() && wasTrusted)
+            trust.restore(summary.id, summary.version, trustedDigest); // best effort: the pack is back either way
         return lost;
     };
     if (replacing) {
         backup = packsDir + QLatin1Char('/') + backupName(folderName);
         if (!QDir().rename(target, backup))
-            return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot replace %1.").arg(target));
+            return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot replace %1.").arg(target)); // nothing changed, trust included
     }
+    // After the old pack is set aside, before the new code is in place.
+    warnings += trust.forget(summary.id, summary.version);
     if (!QDir().rename(staged.folder, target)) {
         const QString lost = replacing ? putBack() : QString();
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot move the pack into %1.").arg(packsDir),
@@ -840,7 +896,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
         markSetupDone(target, command);
     }
     if (replacing)
-        removeTree(backup);
+        discardTree(packsDir, backup);
     if (!beside)
         warnings += trust.forget(summary.id);
     else if (!summary.oldVersion.isEmpty())
@@ -1022,8 +1078,6 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue;
         }
         const Result<PackSummary> current = summarizePack(folder);
-        // Asked before the new copy is read: reading it records its secrets in the process, and the old one would look changed.
-        const bool oldTrusted = current && trust.isTrusted(current->id, current->version);
         Result<Staged> staged = stage(source, packsDir, prompts);
         if (!staged) {
             if (const auto stop = problem(name, staged.errors()))
@@ -1055,7 +1109,6 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue; // the same commit under the same pin
         }
         next->oldVersion = current ? current->version : QString();
-        next->oldTrusted = oldTrusted;
         next->updating = true;
         const Result<bool> yes = ask(prompts.install, *next, QStringLiteral("Updating a pack"));
         if (!yes) {
@@ -1110,7 +1163,7 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
     if (!removeTree(folder))
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot remove %1 completely.").arg(folder));
     for (const DeadBackup &dead : deadBackupsOf(packsDir, id)) // an old copy a crash left would come back on the next sweep
-        removeTree(dead.path);
+        discardTree(packsDir, dead.path);
     // Another major of the pack stays trusted.
     const QString packId = parsePackRef(id).id;
     const bool beside = !foldersOfPack(packId, {packsDir}).isEmpty();

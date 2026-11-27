@@ -54,7 +54,6 @@ struct PackSummary {
     qint64 setupSize = -1;    // bytes its setup downloads, when pack.json's setup says (`size`); -1 when it does not
     PackSource source;        // empty location when installed by copying into the folder by hand
     QString oldVersion;       // for an update: the version being replaced (empty when it did not load)
-    bool oldTrusted = false;  // for an update: the version being replaced was trusted (what a failed update puts back)
     bool updating = false;    // the pack replaces an installed one
 };
 
