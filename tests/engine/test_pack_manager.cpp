@@ -651,10 +651,18 @@ private slots:
     void ofTwoDeadBackupsTheOldestComesBack() {
         const QString id = "io.example.tools";
         const qint64 now = QDateTime::currentSecsSinceEpoch();
-        makePack(packs(), QString(".old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(now - 300).arg(id), "1.0.0");
-        makePack(packs(), QString(".old-%1-%2-bbbbbbbbbbbb-%3").arg(deadPid()).arg(now - 100).arg(id), "1.5.0");
+        // The folder is named dead, the pack inside says id (makePack(packs(), dead) would write the folder name as its id, which is no
+        // pack id: summarizePack failed and `->version` read what the stack held, "1.0.0" in nearly every run).
+        const auto backup = [&](const QString &name, const QString &version) {
+            QVERIFY(QDir().mkpath(packs()));
+            QVERIFY(QDir().rename(makePack(source(), id, version), packs() + "/" + name));
+        };
+        backup(QString(".old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(now - 300).arg(id), "1.0.0");
+        backup(QString(".old-%1-%2-bbbbbbbbbbbb-%3").arg(deadPid()).arg(now - 100).arg(id), "1.5.0");
         QVERIFY(addPack(makePack(source(), "io.example.other", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
-        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        const Result<PackSummary> restored = summarizePack(packs() + "/" + id);
+        QVERIFY2(restored.ok(), qPrintable(restored.ok() ? QString() : restored.error().message));
+        QCOMPARE(restored->version, QString("1.0.0"));
         QVERIFY(QDir(packs()).entryList({".old-*"}, QDir::Dirs | QDir::Hidden).isEmpty()); // the newer one goes once the target is whole
     }
 
