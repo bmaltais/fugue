@@ -8,6 +8,7 @@
 #include <QQuickStyle>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "canvas_app.h"
 #include "engine/pack_loader.h"
 #include "engine/templates.h"
@@ -66,7 +67,7 @@ struct BarApp {
 
 // A bundled template, as the Templates dialog hands it to the window.
 Template bundled(const QString &id) {
-    const QString folder = QStringLiteral(FUGUE_SOURCE_DIR "/templates/") + id;
+    const QString folder = (fugueSourceDir() + QStringLiteral("/templates/")) + id;
     Template chosen;
     chosen.id = id;
     chosen.title = id;

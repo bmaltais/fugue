@@ -3,6 +3,7 @@
 // ~/.config, ~/.local/share and ~/.local/state; its folders must be as they were after every command of
 // the project. The engine side is tests/engine/test_project_packs.cpp.
 
+#include "../test_paths.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -49,7 +50,7 @@ class TestCliProjectPacks : public QObject {
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(path("work"));
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
             process.kill();

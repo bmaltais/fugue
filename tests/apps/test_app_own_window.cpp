@@ -8,6 +8,7 @@
 #include <QQuickStyle>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../canvas/canvas_app.h"
 #include "../window_grab.h"
 #include "apps/app_launcher.h"
@@ -41,7 +42,7 @@ void tap(QQuickWindow *window, QQuickItem *item) {
     QTest::mouseClick(window, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
 }
 
-const QString templates = QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates");
+const QString templates = (fugueSourceDir() + QStringLiteral("/tests/apps/templates"));
 
 // A template folder that is an app: a prompt in, a picture out.
 void makeApp(const QString &root, const QString &id, const QString &title) {

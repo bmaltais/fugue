@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/fake_provider.h"
 #include "engine/helper_provider.h"
 #include "engine/omarchy_provider.h"
@@ -274,7 +275,7 @@ private slots:
         // Last, so "any ready model" stays omarchy's; models on disk only the helper serves.
         QTemporaryDir state;
         const OmarchyPaths paths{state.path(), state.path()};
-        qputenv("FUGUE_HELPER", FUGUE_FAKE_HELPER);
+        qputenv("FUGUE_HELPER", fugueFakeHelper().toUtf8());
         const QList<ProviderInstance> withHelper = defaultProviderInstances(paths);
         qputenv("FUGUE_HELPER", "");
         const QList<ProviderInstance> without = defaultProviderInstances(paths);

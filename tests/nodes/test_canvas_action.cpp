@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/canvas_action.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
@@ -19,8 +20,8 @@ using namespace fugue::canvas;
 
 namespace {
 
-const QString kTemplate = QStringLiteral(FUGUE_SOURCE_DIR "/templates/generative-fill/workflow.fugue");
-const QString kBundled = QStringLiteral(FUGUE_SOURCE_DIR "/share/actions/generative-fill.fugue");
+const QString kTemplate = (fugueSourceDir() + QStringLiteral("/templates/generative-fill/workflow.fugue"));
+const QString kBundled = (fugueSourceDir() + QStringLiteral("/share/actions/generative-fill.fugue"));
 
 // A small fill: a Region, a Text Encode and a Sampler (stand-ins for the model chain), a Write.
 QJsonObject fillWorkflow() {
@@ -421,7 +422,7 @@ private slots:
     // mask, colour matched back, a layer called Harmonized. Its block fits its graph, no input overlaps, and the bound
     // copy compiles with and without a prompt.
     void theHarmonizeTemplateFitsItsGraphAndItsBoundCopyCompiles() {
-        const Result<Document> document = Document::loadFile(QStringLiteral(FUGUE_SOURCE_DIR "/templates/harmonize/workflow.fugue"));
+        const Result<Document> document = Document::loadFile((fugueSourceDir() + QStringLiteral("/templates/harmonize/workflow.fugue")));
         QVERIFY2(document, qPrintable(firstMessage(document.errors())));
         const Result<std::optional<Action>> action = actionOf(*document);
         QVERIFY(action && action->has_value());
@@ -475,7 +476,7 @@ private slots:
         QFETCH(QString, selection);
         QFETCH(bool, hasPrompt);
         QFETCH(double, strength);
-        const Result<Document> document = Document::loadFile(QStringLiteral(FUGUE_SOURCE_DIR "/templates/%1/workflow.fugue").arg(id));
+        const Result<Document> document = Document::loadFile((fugueSourceDir() + QStringLiteral("/templates/%1/workflow.fugue")).arg(id));
         QVERIFY2(document, qPrintable(firstMessage(document.errors())));
         const Result<std::optional<Action>> action = actionOf(*document);
         QVERIFY(action && action->has_value());
@@ -531,7 +532,7 @@ private slots:
     void theUpscaleTemplatesFitTheirGraphsAndReadTheWholePictureWhateverIsSelected() {
         QFETCH(QString, id);
         QFETCH(bool, model);
-        const Result<Document> document = Document::loadFile(QStringLiteral(FUGUE_SOURCE_DIR "/templates/%1/workflow.fugue").arg(id));
+        const Result<Document> document = Document::loadFile((fugueSourceDir() + QStringLiteral("/templates/%1/workflow.fugue")).arg(id));
         QVERIFY2(document, qPrintable(firstMessage(document.errors())));
         const Result<std::optional<Action>> action = actionOf(*document);
         QVERIFY2(action && action->has_value(), qPrintable(firstMessage(action.errors())));
@@ -568,7 +569,7 @@ private slots:
     // role goes to Region's Layer and Write's Onto, the model and the threshold to the pack's node), and the bound copy compiles with and
     // without a selection. The pack's absence is the window's offer (tests/canvas/test_canvas_actions.cpp), not this check's.
     void theRemoveBackgroundTemplateFitsItsGraphWithItsPackLoaded() {
-        const QString folder = QStringLiteral(FUGUE_SOURCE_DIR "/templates/remove-background-action");
+        const QString folder = (fugueSourceDir() + QStringLiteral("/templates/remove-background-action"));
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);
         const LoadedPack pack = loadPack(registry, folder + "/packs/io.github.bmaltais.fugue-remove-background");

@@ -15,6 +15,7 @@
 
 #include <map>
 
+#include "../test_paths.h"
 #include "engine/model_folder_finder.h"
 #include "engine/model_library.h"
 #include "engine/model_shape.h"
@@ -108,7 +109,7 @@ class TestModelFolderFinder : public QObject {
 
 private slots:
     void initTestCase() {
-        QFile pack(QStringLiteral(FUGUE_SOURCE_DIR "/src/nodes/manifests/pack.json"));
+        QFile pack((fugueSourceDir() + QStringLiteral("/src/nodes/manifests/pack.json")));
         QVERIFY(pack.open(QIODevice::ReadOnly));
         for (const QJsonValue &value : QJsonDocument::fromJson(pack.readAll()).object().value("types").toArray()) {
             const QJsonObject object = value.toObject();

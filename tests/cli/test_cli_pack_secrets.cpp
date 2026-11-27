@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../engine/fake_http.h"
 
 using fugue::test::FakeHttpServer;
@@ -26,7 +27,7 @@ using fugue::test::HttpResponse;
 
 namespace {
 
-const QString kPack = QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs/io.github.bmaltais.fugue-http");
+const QString kPack = (fugueSourceDir() + QStringLiteral("/examples/packs/io.github.bmaltais.fugue-http"));
 const QString kPackId = QStringLiteral("io.github.bmaltais.fugue-http");
 const QString kType = QStringLiteral("io.github.bmaltais.fugue-http/request");
 const QByteArray kKey = "made-up-key-90210";
@@ -85,13 +86,13 @@ class TestPackSecretsCli : public QObject {
         outcome.err = process.readAllStandardError();
         return outcome;
     }
-    Outcome fugue(const QStringList &args, const QByteArray &input = {}) { return spawn(FUGUE_BINARY, args, input); }
+    Outcome fugue(const QStringList &args, const QByteArray &input = {}) { return spawn(fugueBinary(), args, input); }
     // `fugue <args>` with a terminal, answering `answers` (the install and trust question, the remove question).
     QByteArray withTerminal(const QStringList &args, const QByteArray &answers) {
         QStringList quoted;
         for (const QString &arg : args)
             quoted << shellQuote(arg);
-        return spawn("script", {"-qec", shellQuote(FUGUE_BINARY) + " " + quoted.join(' '), "/dev/null"}, answers).out;
+        return spawn("script", {"-qec", shellQuote(fugueBinary()) + " " + quoted.join(' '), "/dev/null"}, answers).out;
     }
 
     // Every file under the scratch folders, except `skip`, that holds `needle`.

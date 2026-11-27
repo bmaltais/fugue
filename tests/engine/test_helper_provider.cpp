@@ -18,6 +18,7 @@
 #include <csignal>
 #include <optional>
 
+#include "../test_paths.h"
 #include "engine/helper_provider.h"
 #include "engine/model_offers.h"
 #include "engine/providers.h"
@@ -48,7 +49,7 @@ class TestHelperProvider : public QObject {
     QTemporaryDir m_dir;
     QString m_log;
 
-    std::unique_ptr<HelperProvider> provider(const QJsonValue &idleSeconds = 60, const QString &program = FUGUE_FAKE_HELPER) {
+    std::unique_ptr<HelperProvider> provider(const QJsonValue &idleSeconds = 60, const QString &program = fugueFakeHelper()) {
         ProviderInstance instance;
         instance.name = QStringLiteral("Fugue helper");
         instance.type = QStringLiteral("fugue-helper");
@@ -129,7 +130,7 @@ private slots:
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(R"({"providers": [{"name": "Fugue helper", "type": "fugue-helper"}]})");
         file.close();
-        qputenv("FUGUE_HELPER", FUGUE_FAKE_HELPER);
+        qputenv("FUGUE_HELPER", fugueFakeHelper().toUtf8());
         std::optional<QList<ListedModel>> listed;
         listOfferedModels({}, {}, [&](QList<ListedModel> models) { listed = models; });
         QTRY_VERIFY(listed.has_value());

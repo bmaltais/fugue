@@ -13,6 +13,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
@@ -53,7 +54,7 @@ class TestHarmonizeSizes : public QObject {
 
     // The template's graph up to the seam map, loading `file` and `mask`; the sizes of the two results.
     void sizesFor(const QString &template_, const QString &file, const QString &mask, QSize &picture, QSize &map) {
-        QFile in(QStringLiteral(FUGUE_SOURCE_DIR "/templates/%1/workflow.fugue").arg(template_));
+        QFile in((fugueSourceDir() + QStringLiteral("/templates/%1/workflow.fugue")).arg(template_));
         QVERIFY(in.open(QIODevice::ReadOnly));
         QJsonObject root = QJsonDocument::fromJson(in.readAll()).object();
         QJsonObject graph = root.value("graph").toObject();

@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/canvas_store.h"
 #include "engine/paint_document.h"
 #include "engine/paint_file.h"
@@ -48,7 +49,7 @@ class TestCliCanvas : public QObject {
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(path("work"));
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
             process.kill();

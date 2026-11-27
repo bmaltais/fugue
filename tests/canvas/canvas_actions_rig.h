@@ -13,6 +13,7 @@
 
 #include <memory>
 
+#include "../test_paths.h"
 #include "canvas_app.h"
 #include "canvas/canvas_actions.h"
 #include "engine/fake_provider.h"
@@ -194,7 +195,7 @@ struct Rig {
     }
     // The repository's template `id` (its pack and sample files with it), then the actions read again.
     void addRepositoryTemplate(const QString &id) {
-        copyTree(QStringLiteral(FUGUE_SOURCE_DIR "/templates/") + id, templatesDir + "/" + id);
+        copyTree((fugueSourceDir() + QStringLiteral("/templates/")) + id, templatesDir + "/" + id);
         actions->refresh();
     }
     QVariantMap row(const QString &id) const {

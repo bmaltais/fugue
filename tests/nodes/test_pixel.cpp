@@ -37,6 +37,7 @@
 #include <cmath>
 #include <vector>
 
+#include "../test_paths.h"
 #include "engine/registry.h"
 #include "engine/vips.h"
 #include "nodes/builtin.h"
@@ -688,7 +689,7 @@ private slots:
         env.insert("HOME", dir.filePath("home")); // not the developer's Omarchy state (8.2)
         QProcess process;
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, {"run", dir.filePath("flow.fugue"), "--to", "c", "--wait", "--json"});
+        process.start(fugueBinary(), {"run", dir.filePath("flow.fugue"), "--to", "c", "--wait", "--json"});
         QVERIFY(process.waitForFinished(120000));
         QCOMPARE(process.exitCode(), 0);
         QString text;

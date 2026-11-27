@@ -23,6 +23,7 @@
 
 #include <csignal>
 
+#include "../test_paths.h"
 #include "engine/run_folder.h"
 
 using namespace fugue;
@@ -88,7 +89,7 @@ class TestCliProjectRun : public QObject {
             env.insert("FUGUE_HOME", home);
         QProcess process;
         process.setProcessEnvironment(env);
-        process.start(FUGUE_FAKE_BINARY, args);
+        process.start(fugueFakeBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
             process.kill();

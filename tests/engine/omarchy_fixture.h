@@ -15,12 +15,9 @@
 #include <QString>
 #include <QTemporaryDir>
 
+#include "../test_paths.h"
 #include "engine/omarchy_provider.h"
 #include "fake_http.h"
-
-#ifndef FUGUE_SOURCE_DIR
-#error "omarchy_fixture.h needs FUGUE_SOURCE_DIR"
-#endif
 
 namespace fugue::test {
 
@@ -31,7 +28,7 @@ inline bool writeFixtureFile(const QString &path, const QByteArray &bytes) {
 }
 
 inline QByteArray fixtureBytes(const QString &name) {
-    QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/tests/engine/data/omarchy/") + name);
+    QFile file(fugueSourceDir() + QStringLiteral("/tests/engine/data/omarchy/") + name);
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
 }
 

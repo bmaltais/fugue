@@ -16,6 +16,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
@@ -265,7 +266,7 @@ public:
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(m_dir.path()); // inside the write roots (13.6)
-        process.start(QStringLiteral(FUGUE_BINARY), args);
+        process.start(fugueBinary(), args);
         Ran ran;
         if (!process.waitForStarted())
             return ran;

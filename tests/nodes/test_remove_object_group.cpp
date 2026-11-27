@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/group_library.h"
@@ -39,7 +40,7 @@ class TestRemoveObjectGroup : public QObject {
 
     static LoadedPack loadInto(Registry &registry) {
         nodes::addBuiltinNodeTypes(registry);
-        return loadPack(registry, QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs/") + kPack);
+        return loadPack(registry, (fugueSourceDir() + QStringLiteral("/examples/packs/")) + kPack);
     }
 
 private slots:

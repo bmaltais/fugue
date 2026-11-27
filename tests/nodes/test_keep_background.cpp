@@ -14,6 +14,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
@@ -63,7 +64,7 @@ class TestKeepBackground : public QObject {
 
     // The template's chain with `keep` as the Advanced switch is set; the final picture's pixels.
     vips::VImage chain(double keep) {
-        QFile in(QStringLiteral(FUGUE_SOURCE_DIR "/templates/pose-from-description-keep-background/workflow.fugue"));
+        QFile in((fugueSourceDir() + QStringLiteral("/templates/pose-from-description-keep-background/workflow.fugue")));
         if (!in.open(QIODevice::ReadOnly))
             QTest::qFail("the template does not open", __FILE__, __LINE__);
         const QJsonObject edit = QJsonDocument::fromJson(in.readAll()).object().value("groups").toObject()
@@ -152,9 +153,9 @@ private slots:
     void theWholeTemplateCompilesWithItsCarriedPack() {
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);
-        const LoadedPack pack = loadPack(registry, QStringLiteral(FUGUE_SOURCE_DIR "/templates/pose-from-description-keep-background/packs/io.github.bmaltais.fugue-remove-background"));
+        const LoadedPack pack = loadPack(registry, (fugueSourceDir() + QStringLiteral("/templates/pose-from-description-keep-background/packs/io.github.bmaltais.fugue-remove-background")));
         QVERIFY2(pack.enabled && pack.disabled.isEmpty(), "the carried pack does not load");
-        QFile in(QStringLiteral(FUGUE_SOURCE_DIR "/templates/pose-from-description-keep-background/workflow.fugue"));
+        QFile in((fugueSourceDir() + QStringLiteral("/templates/pose-from-description-keep-background/workflow.fugue")));
         QVERIFY(in.open(QIODevice::ReadOnly));
         const Result<Document> document = Document::fromJson(QJsonDocument::fromJson(in.readAll()).object());
         QVERIFY(document.ok());

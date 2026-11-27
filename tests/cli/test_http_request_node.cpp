@@ -18,6 +18,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../engine/fake_http.h"
 
 using fugue::test::FakeHttpServer;
@@ -26,7 +27,7 @@ using fugue::test::HttpResponse;
 
 namespace {
 
-const QString kPack = QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs/io.github.bmaltais.fugue-http");
+const QString kPack = (fugueSourceDir() + QStringLiteral("/examples/packs/io.github.bmaltais.fugue-http"));
 const QString kType = QStringLiteral("io.github.bmaltais.fugue-http/request");
 
 struct Answer {
@@ -112,7 +113,7 @@ class TestHttpRequestNode : public QObject {
     }
 
     QByteArray fugue(const QStringList &args, int *exitCode = nullptr) {
-        return spawn(FUGUE_BINARY, args, {}, fugueEnv(), exitCode, 120000);
+        return spawn(fugueBinary(), args, {}, fugueEnv(), exitCode, 120000);
     }
 
     static QString shellQuote(const QString &text) { return "'" + QString(text).replace("'", "'\\''") + "'"; }
@@ -432,7 +433,7 @@ private slots:
     void thePackDeclaresTheNetworkAndTheTrustPromptShowsIt() {
         if (QStandardPaths::findExecutable("script").isEmpty())
             QSKIP("script (util-linux) is needed to give the program a terminal");
-        const QString command = shellQuote(FUGUE_BINARY) + " pack add " + shellQuote(kPack);
+        const QString command = shellQuote(fugueBinary()) + " pack add " + shellQuote(kPack);
         const QByteArray shown = spawn("script", {"-qec", command, "/dev/null"}, "n\n", fugueEnv());
         QVERIFY2(shown.contains("network"), shown.constData());
         QVERIFY(!QFileInfo(m_dir.filePath("fugue-home/data/fugue/packs/io.github.bmaltais.fugue-http")).exists()); // a no installs nothing
@@ -441,7 +442,7 @@ private slots:
     void aValidationNeverCallsTheServerAndARunDoes() {
         if (QStandardPaths::findExecutable("script").isEmpty())
             QSKIP("script (util-linux) is needed to give the program a terminal");
-        const QString command = shellQuote(FUGUE_BINARY) + " pack add " + shellQuote(kPack);
+        const QString command = shellQuote(fugueBinary()) + " pack add " + shellQuote(kPack);
         spawn("script", {"-qec", command, "/dev/null"}, "y\n", fugueEnv());
         QVERIFY(QFileInfo(m_dir.filePath("fugue-home/data/fugue/packs/io.github.bmaltais.fugue-http/pack.json")).isFile());
 

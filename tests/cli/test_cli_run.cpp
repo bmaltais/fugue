@@ -27,6 +27,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "../test_paths.h"
 #include "engine/queue.h"
 #include "cli/process.h"
 #include "engine/registry.h"
@@ -113,7 +114,7 @@ class TestCliRun : public QObject {
         handle.write(bytes);
     }
 
-    Outcome fugue(const QStringList &args, const QString &binary = FUGUE_FAKE_BINARY) const {
+    Outcome fugue(const QStringList &args, const QString &binary = fugueFakeBinary()) const {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove("QT_QPA_PLATFORM");
         env.remove("DISPLAY");
@@ -351,7 +352,7 @@ private slots:
             env.insert("FUGUE_TEST_GATE", gate());
             QProcess process;
             process.setProcessEnvironment(env);
-            process.start(FUGUE_FAKE_BINARY, QStringList{"run", path("flow.fugue"), "--wait"} + (json ? QStringList{"--json"} : QStringList{}));
+            process.start(fugueFakeBinary(), QStringList{"run", path("flow.fugue"), "--wait"} + (json ? QStringList{"--json"} : QStringList{}));
             QVERIFY(process.waitForStarted());
             const QByteArray expected = json ? QByteArray("\"waiting\"") : QByteArray("Waiting for another Fugue run to finish");
             QByteArray seen;
@@ -373,7 +374,7 @@ private slots:
     // The holder is found on any file system (btrfs subvolumes and /proc/locks name different devices): a file under the
     // build folder, not the tmpfs the other tests use.
     void theHolderOfALockFileIsFoundOutsideTmpfs() {
-        QTemporaryDir here(QStringLiteral(QT_TESTCASE_BUILDDIR "/holder-XXXXXX"));
+        QTemporaryDir here((fugueBuildDir() + QStringLiteral("/holder-XXXXXX")));
         QVERIFY(here.isValid());
         const QString file = here.filePath("some.lock");
         QCOMPARE(Lock::holderPid(file), qint64(0));
@@ -410,7 +411,7 @@ private slots:
         env.insert("FUGUE_TEST_GATE", gate());
         QProcess process;
         process.setProcessEnvironment(env);
-        process.start(FUGUE_FAKE_BINARY, QStringList{"run", path("flow.fugue"), "--wait"});
+        process.start(fugueFakeBinary(), QStringList{"run", path("flow.fugue"), "--wait"});
         QVERIFY(process.waitForStarted());
         QByteArray seen;
         QTRY_VERIFY_WITH_TIMEOUT((seen += process.readAllStandardError(), seen.contains("Waiting for another Fugue run to finish")), 30000);
@@ -634,7 +635,7 @@ private slots:
         m_dataHome = path("data");
         const QString module = m_dataHome + "/fugue/providers/io.example.toy";
         QDir().mkpath(module);
-        QVERIFY(QFile::copy(QStringLiteral(FUGUE_FAKE_MODULE_PROVIDER), module + "/toy"));
+        QVERIFY(QFile::copy(fugueFakeModuleProvider(), module + "/toy"));
         QFile(module + "/toy").setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         write(module + "/provider.json", "{\"manifest\": 1, \"id\": \"io.example.toy\", \"version\": \"0.1.0\", \"name\": \"Toy\", \"transport\": \"stdio\", \"start\": {\"command\": [\"./toy\", \"--stdio\"]}, \"capabilities\": [\"image.generate\"]}");
         write(path("config/fugue/providers.json"),
@@ -749,7 +750,7 @@ private slots:
     }
 
     void theShippedBinaryDoesNotKnowTheTestFakes() {
-        const Outcome o = fugue({"run", path("flow.fugue"), "--wait", "--json"}, FUGUE_BINARY);
+        const Outcome o = fugue({"run", path("flow.fugue"), "--wait", "--json"}, fugueBinary());
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("unknown_node_type"));
         QVERIFY(queued().isEmpty());

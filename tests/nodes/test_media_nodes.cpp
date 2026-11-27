@@ -17,6 +17,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
 #include "engine/registry.h"
@@ -227,7 +228,7 @@ public:
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(m_dir.path());
-        process.start(QStringLiteral(FUGUE_BINARY), args);
+        process.start(fugueBinary(), args);
         if (!process.waitForStarted())
             return -1;
         QElapsedTimer clock;

@@ -9,6 +9,7 @@
 // process and its children opened for writing, which also catches /tmp and absolute paths that a
 // before-and-after listing of one folder cannot (skipped, saying why, without strace).
 
+#include "../test_paths.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -70,9 +71,9 @@ class TestCliHomeGuard : public QObject {
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(path("work"));
         if (wrapper.isEmpty())
-            process.start(FUGUE_BINARY, args);
+            process.start(fugueBinary(), args);
         else
-            process.start(wrapper.first(), wrapper.mid(1) + QStringList{FUGUE_BINARY} + args);
+            process.start(wrapper.first(), wrapper.mid(1) + QStringList{fugueBinary()} + args);
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
             process.kill();

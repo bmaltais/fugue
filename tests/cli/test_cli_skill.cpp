@@ -14,6 +14,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "cli/args.h"
 
 namespace {
@@ -45,7 +46,7 @@ void writeFile(const QString &path, const QByteArray &bytes) {
     file.write(bytes);
 }
 
-QString sourceSkill() { return QStringLiteral(FUGUE_SOURCE_DIR "/share/skills/fugue/SKILL.md"); }
+QString sourceSkill() { return (fugueSourceDir() + QStringLiteral("/share/skills/fugue/SKILL.md")); }
 
 } // namespace
 
@@ -71,7 +72,7 @@ class TestCliSkill : public QObject {
         env.insert("HOME", home());
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(cwd.isEmpty() ? m_dir.path() : cwd);
-        process.start(FUGUE_BINARY, QStringList(args) << "--json");
+        process.start(fugueBinary(), QStringList(args) << "--json");
         process.closeWriteChannel();
         Outcome outcome;
         if (!process.waitForFinished(60000)) {
@@ -238,7 +239,7 @@ private slots:
     }
 
     void skillListsEveryErrorCodeOfTheSpec() {
-        const QString spec = QString::fromUtf8(readFile(QStringLiteral(FUGUE_SOURCE_DIR "/docs/spec.md")));
+        const QString spec = QString::fromUtf8(readFile((fugueSourceDir() + QStringLiteral("/docs/spec.md"))));
         const int from = spec.indexOf("Codes in v0.1:");
         const int to = spec.indexOf("New codes may be added", from);
         QVERIFY(from > 0 && to > from);

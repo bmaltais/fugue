@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/result_cache.h"
@@ -48,7 +49,7 @@ class TestCliCache : public QObject {
         env.insert("XDG_CONFIG_HOME", m_dir.filePath("config"));
         env.insert("HOME", m_dir.filePath("home"));
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, json ? QStringList(args) << "--json" : args);
+        process.start(fugueBinary(), json ? QStringList(args) << "--json" : args);
         process.closeWriteChannel();
         Outcome outcome;
         if (!process.waitForFinished(60000)) {

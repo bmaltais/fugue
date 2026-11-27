@@ -14,6 +14,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/mask_paint.h"
 #include "../test_shard.h"
 
@@ -90,7 +91,7 @@ class TestCliCanvasAct : public QObject {
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(path("work"));
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
             process.kill();

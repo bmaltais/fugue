@@ -18,6 +18,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/media.h"
@@ -616,12 +617,12 @@ private:
             env.remove(QString::fromLatin1(name));
         env.insert("XDG_CACHE_HOME", dir.filePath("cache"));
         env.insert("XDG_STATE_HOME", dir.filePath("state"));
-        env.insert("FUGUE_HELPER", QStringLiteral(FUGUE_FAKE_HELPER));
+        env.insert("FUGUE_HELPER", fugueFakeHelper());
         env.insert("FAKE_HELPER_LOG", log);
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(dir.path());
-        process.start(QStringLiteral(FUGUE_BINARY), args);
+        process.start(fugueBinary(), args);
         if (!process.waitForFinished(60000)) {
             process.kill();
             process.waitForFinished();

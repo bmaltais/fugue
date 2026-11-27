@@ -5,6 +5,7 @@
 
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/app_binding.h"
 #include "engine/document.h"
 #include "engine/registry.h"
@@ -17,7 +18,7 @@ class TestBundledApps : public QObject {
 
 private slots:
     void everyBundledAppBlockReadsAndChecks() {
-        const QDir root(QStringLiteral(FUGUE_SOURCE_DIR "/templates"));
+        const QDir root((fugueSourceDir() + QStringLiteral("/templates")));
         if (!root.exists("categories.json"))
             QSKIP("the templates submodule is not checked out");
         Registry registry;
