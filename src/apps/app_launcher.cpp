@@ -26,9 +26,18 @@ AppLauncher::AppLauncher(AppView *view, Workflows *workflows, QList<TemplateRoot
         };
     connect(view, &AppView::appChanged, this, &AppLauncher::refresh);
     connect(workflows, &Workflows::tabsChanged, this, &AppLauncher::refresh);
+    // The catalog moved (a fetch of new templates, a rename): the shown app is named again by the roots as they are now.
+    connect(workflows, &Workflows::templatesChanged, this, [this] {
+        if (m_fixed || m_candidate.isEmpty())
+            return;
+        m_app = resolveApp(m_candidate, this->roots(), m_registry);
+        emit changed();
+    });
     connect(workflows, &Workflows::noticeChanged, this, &AppLauncher::changed); // ready or not: Keep this app follows it
     refresh();
 }
+
+QList<TemplateRoot> AppLauncher::roots() const { return m_roots.isEmpty() ? m_workflows->templateRoots() : m_roots; }
 
 void AppLauncher::setApp(const AppRef &app) {
     m_kept.clear();
@@ -59,7 +68,7 @@ void AppLauncher::refresh() {
         return;
     m_candidate = candidate;
     m_kept.clear();
-    m_app = candidate.isEmpty() ? std::nullopt : resolveApp(candidate, m_roots, m_registry);
+    m_app = candidate.isEmpty() ? std::nullopt : resolveApp(candidate, roots(), m_registry);
     emit changed();
 }
 

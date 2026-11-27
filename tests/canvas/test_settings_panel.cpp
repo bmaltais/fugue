@@ -766,7 +766,7 @@ private slots:
                     QVERIFY(flickable && toggle);
                     auto *content = flickable->property("contentItem").value<QQuickItem *>();
                     flickable->setProperty("contentY", toggle->mapToItem(content, QPointF()).y() - 120);
-                    QTest::qWait(300);
+                    QTRY_VERIFY(!flickable->property("moving").toBool());
                     QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-general-scrolled-%2x%3.png").arg(out).arg(size.width()).arg(size.height())));
                 }
             }

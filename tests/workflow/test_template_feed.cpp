@@ -6,7 +6,9 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QLockFile>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
@@ -17,6 +19,8 @@
 #include "engine/registry.h"
 #include "engine/settings.h"
 #include "engine/template_feed.h"
+#include "apps/app_ref.h"
+#include "engine/template_feed_driver.h"
 #include "engine/templates.h"
 #include "nodes/builtin.h"
 
@@ -152,7 +156,7 @@ private slots:
         QCOMPARE(m_server.requests().last().path.startsWith("/raw/" + r.commit() + "/alpha/template.json"), true);
         QCOMPARE(result.previous, first);
         QCOMPARE(TemplateFeed::currentSha(), QString::fromLatin1(r.commit()));
-        QVERIFY(!QFileInfo(TemplateFeed::storeDir() + "/" + first).exists()); // the older copy is gone
+        QVERIFY(QFileInfo(TemplateFeed::storeDir() + "/" + first).exists()); // the previous copy stays, a scan may still read it
         QCOMPARE(read(TemplateFeed::currentRoot() + "/alpha/template.json"), about("Alpha, better"));
     }
 
@@ -180,7 +184,9 @@ private slots:
         const QString before = TemplateFeed::currentSha();
 
         r.files["alpha/template.json"] = about("Alpha, better");
-        r.served["alpha/template.json"] = about("Not what the tree says");
+        QByteArray other = about("Alpha, better");
+        other.replace("better", "bitter"); // as long as the tree says, but not the same bytes
+        r.served["alpha/template.json"] = other;
         r.serve(m_server);
         const FeedResult result = check(feed);
         QCOMPARE(result.outcome, FeedResult::Outcome::Failed);
@@ -215,6 +221,199 @@ private slots:
         QCOMPARE(result.outcome, FeedResult::Outcome::Failed);
         QVERIFY(TemplateFeed::currentRoot().isEmpty());
         QCOMPARE(rawRequests(), 0);
+    }
+
+    void rateLimitsAndRefusalsSayWhatTheyAre() {
+        freshHome();
+        TemplateFeed feed(&m_network);
+        const auto answer = [&](int status, const QList<QByteArray> &headers) {
+            m_server.on("GET", "/commits/main", [=](const fugue::test::HttpRequest &) {
+                return fugue::test::HttpResponse{status, "{}", "application/json", false, -1, headers};
+            });
+            return check(feed);
+        };
+        FeedResult result = answer(403, {"x-ratelimit-remaining: 0"});
+        QCOMPARE(result.outcome, FeedResult::Outcome::Failed);
+        QVERIFY(result.error.contains("rate limit"));
+        result = answer(429, {});
+        QVERIFY(result.error.contains("rate limit"));
+        result = answer(403, {"x-ratelimit-remaining: 12"});
+        QVERIFY(result.error.contains("403"));
+        QVERIFY(!result.error.contains("rate limit"));
+    }
+
+    void aFileLargerThanTheTreeSaysOrTheCapIsRefused() {
+        freshHome();
+        FakeRepo r = repo();
+        r.served["beta/template.json"] = about("Beta, and a lot more bytes than the tree says it has");
+        r.serve(m_server);
+        TemplateFeed feed(&m_network);
+        feed.setBundledRoot(m_dir.filePath("none")); // nothing to copy: every file is downloaded
+        FeedResult result = check(feed);
+        QCOMPARE(result.outcome, FeedResult::Outcome::Failed);
+        QVERIFY2(result.error.contains("larger than"), qPrintable(result.error));
+        QVERIFY(TemplateFeed::currentRoot().isEmpty());
+
+        r = repo();
+        r.serve(m_server);
+        TemplateFeed::setLimitsForTest(8, 1 << 20, 5000);
+        result = check(feed);
+        QVERIFY2(result.error.contains("is over"), qPrintable(result.error));
+        TemplateFeed::setLimitsForTest(1 << 20, 100, 5000);
+        QVERIFY(check(feed).error.contains("over the size"));
+        TemplateFeed::setLimitsForTest(1 << 20, 1 << 20, 2);
+        QVERIFY(check(feed).error.contains("over the size"));
+        TemplateFeed::resetLimitsForTest();
+    }
+
+    void unsafeNamesAndAFileThatIsAlsoAFolderAreRefused_data() {
+        QTest::addColumn<QString>("path");
+        QTest::newRow("absolute") << "/etc/passwd";
+        QTest::newRow("empty part") << "alpha//x";
+        QTest::newRow("colon") << "c:evil";
+        QTest::newRow("a file and a folder") << "alpha";
+    }
+    void unsafeNamesAndAFileThatIsAlsoAFolderAreRefused() {
+        QFETCH(QString, path);
+        freshHome();
+        FakeRepo r = repo();
+        r.extra.append(QJsonObject{{"path", path}, {"mode", "100644"}, {"type", "blob"}, {"sha", "0123456789012345678901234567890123456789"}, {"size", 3}});
+        r.serve(m_server);
+        TemplateFeed feed(&m_network);
+        QCOMPARE(check(feed).outcome, FeedResult::Outcome::Failed);
+        QVERIFY(TemplateFeed::currentRoot().isEmpty());
+        QCOMPARE(rawRequests(), 0);
+    }
+
+    void dotFilesAreLeftOutEvenALinkInADotFolder() {
+        freshHome();
+        FakeRepo r = repo();
+        r.files[".github/ci.yml"] = "on: push";
+        r.files[".gitignore"] = "x";
+        r.extra.append(QJsonObject{{"path", ".github/link"}, {"mode", "120000"}, {"type", "blob"}, {"sha", "0123456789012345678901234567890123456789"}, {"size", 3}});
+        r.serve(m_server);
+        TemplateFeed feed(&m_network);
+        feed.setBundledRoot(bundledLike(r));
+        const FeedResult result = check(feed);
+        QCOMPARE(result.outcome, FeedResult::Outcome::Updated);
+        QCOMPARE(result.files, 5);
+        QVERIFY(!QFileInfo::exists(TemplateFeed::currentRoot() + "/.github"));
+        QVERIFY(!QFileInfo::exists(TemplateFeed::currentRoot() + "/.gitignore"));
+    }
+
+    void aBusyLockSkipsTheUpdateQuietly() {
+        freshHome();
+        const FakeRepo r = repo();
+        r.serve(m_server);
+        QDir().mkpath(TemplateFeed::storeDir());
+        QLockFile held(TemplateFeed::storeDir() + "/.lock");
+        QVERIFY(held.tryLock(0));
+        TemplateFeed feed(&m_network);
+        const FeedResult result = check(feed);
+        QCOMPARE(result.outcome, FeedResult::Outcome::Busy);
+        QCOMPARE(m_server.requests().size(), 0);
+        QVERIFY(!TemplateFeed::status().checked.isValid()); // not a try
+        held.unlock();
+        QCOMPARE(check(feed).outcome, FeedResult::Outcome::Updated);
+    }
+
+    void thePreviousCopyIsKeptAndOlderOnesGo() {
+        freshHome();
+        FakeRepo r = repo();
+        TemplateFeed feed(&m_network);
+        feed.setBundledRoot(bundledLike(r));
+        QStringList shas;
+        for (int i = 0; i < 3; ++i) {
+            r.files["alpha/template.json"] = about("Alpha " + QString::number(i));
+            r.serve(m_server);
+            QCOMPARE(check(feed).outcome, FeedResult::Outcome::Updated);
+            shas << TemplateFeed::currentSha();
+        }
+        QVERIFY(!QFileInfo::exists(TemplateFeed::storeDir() + "/" + shas[0]));
+        QVERIFY(QFileInfo::exists(TemplateFeed::storeDir() + "/" + shas[1]));
+        QVERIFY(QFileInfo::exists(TemplateFeed::storeDir() + "/" + shas[2]));
+    }
+
+    void aFallbackSortsInTheFetchedCategoryOrderAndAnIdDeletedUpstreamIsHidden() {
+        freshHome();
+        QTemporaryDir online, bundled;
+        const auto category = [](const QString &title, const QString &category) {
+            return QJsonDocument(QJsonObject{{"title", title}, {"category", category}}).toJson();
+        };
+        write(online.path() + "/categories.json", R"({"categories": [{"id": "b", "title": "B"}, {"id": "a", "title": "A"}]})");
+        write(online.path() + "/alpha/template.json", category("Alpha", "a"));
+        write(online.path() + "/alpha/workflow.fugue", flow());
+        write(online.path() + "/beta/template.json", category("Beta", "b"));
+        write(online.path() + "/beta/workflow.fugue", flow("fugue/a-node-from-the-future"));
+        write(bundled.path() + "/categories.json", R"({"categories": [{"id": "a", "title": "A"}, {"id": "b", "title": "B"}]})");
+        write(bundled.path() + "/alpha/template.json", category("Alpha bundled", "a"));
+        write(bundled.path() + "/alpha/workflow.fugue", flow());
+        write(bundled.path() + "/beta/template.json", category("Beta bundled", "b"));
+        write(bundled.path() + "/beta/workflow.fugue", flow());
+        write(bundled.path() + "/gone/template.json", category("Gone", "a"));
+        write(bundled.path() + "/gone/workflow.fugue", flow());
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        const TemplateLibrary library({TemplateRoot{online.path(), false, false, true}, {bundled.path(), false}}, &registry);
+        QStringList ids;
+        for (const Template &t : library.list())
+            ids << t.id;
+        QCOMPARE(ids, (QStringList{"beta", "alpha"})); // the fetched order (B, then A) holds for the bundled stand-in too; "gone" is hidden
+        // Without a fetched snapshot nothing is hidden.
+        const TemplateLibrary plain({{bundled.path(), false}}, &registry);
+        QCOMPARE(plain.list().size(), 3);
+    }
+
+    void anOnlineTemplateFolderIsAnAppByItsIdNotItsPath() {
+        freshHome();
+        const FakeRepo r = repo();
+        r.serve(m_server);
+        TemplateFeed feed(&m_network);
+        feed.setBundledRoot(bundledLike(r));
+        QCOMPARE(check(feed).outcome, FeedResult::Outcome::Updated);
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        QString why;
+        const auto app = resolveApp(TemplateFeed::currentRoot() + "/alpha", {}, &registry, &why); // no live roots at all: still the id
+        QVERIFY2(app.has_value(), qPrintable(why));
+        QCOMPARE(app->ref, QString("alpha"));
+    }
+
+    void theDriverFetchesAfterItsDelayOnASwitchAndAgain() {
+        freshHome();
+        const FakeRepo r = repo();
+        r.serve(m_server);
+        TemplateFeed feed(&m_network);
+        feed.setBundledRoot(bundledLike(r));
+        bool enabled = false;
+        TemplateFeedDriver::Options options;
+        options.enabled = [&] { return enabled; };
+        options.allowed = [] { return true; };
+        options.due = [] { return true; };
+        options.startDelayMs = 20;
+        options.recheckMs = 60;
+        TemplateFeedDriver driver(&feed, options);
+        QSignalSpy roots(&driver, &TemplateFeedDriver::rootsChanged);
+        QSignalSpy checked(&driver, &TemplateFeedDriver::checked);
+        driver.start();
+        QTest::qWait(150);
+        QCOMPARE(m_server.requests().size(), 0); // switched off: never asks
+
+        enabled = true;
+        driver.settingsChanged(); // the switch turned on: roots change at once and a check starts
+        QCOMPARE(roots.size(), 1);
+        QTRY_COMPARE(checked.size(), 1);
+        QCOMPARE(roots.size(), 2); // the update is a root change too
+        QTRY_VERIFY(checked.size() >= 2); // the 6-hourly timer, here every 60 ms: the sha only
+        driver.settingsChanged(); // nothing moved
+        QCOMPARE(roots.size(), 2);
+
+        enabled = false;
+        driver.settingsChanged();
+        QCOMPARE(roots.size(), 3);
+        const int asked = int(m_server.requests().size());
+        QTest::qWait(150);
+        QCOMPARE(int(m_server.requests().size()), asked);
     }
 
     void anUnopenableOnlineTemplateLeavesTheBundledOneOfTheSameId() {

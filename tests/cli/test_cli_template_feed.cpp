@@ -29,8 +29,9 @@ class TestTemplateFeedCli : public QObject {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove("QT_QPA_PLATFORM");
         env.remove("FUGUE_TEMPLATES");
-        env.insert("FUGUE_HOME", m_dir.filePath("home"));
-        env.insert("HOME", m_dir.filePath("userhome"));
+        // A home of its own for each test function, so their order does not matter.
+        env.insert("FUGUE_HOME", m_dir.filePath(QStringLiteral("home-") + QTest::currentTestFunction()));
+        env.insert("HOME", m_dir.filePath(QStringLiteral("userhome-") + QTest::currentTestFunction()));
         env.insert("FUGUE_TEMPLATE_FEED", m_server.origin());
         if (withEnvironmentFolder)
             env.insert("FUGUE_TEMPLATES", m_dir.path());

@@ -11,6 +11,11 @@
 // and are refused unless their blob sha is the tree's. The new copy is built in a staging folder beside the store and
 // named into place as <dataDir>/templates-online/<sha>/, with a `current` file naming the sha; older sha folders go
 // after the switch. A truncated tree is refused, and so is a symlink, a submodule or a name outside the folder.
+// The store is shared: the Default session and a chosen project use <baseDataDir>/templates-online and
+// <baseStateDir>/template-feed.json (one copy, one lock); a FUGUE_HOME or --home root keeps its own, and never fetches
+// automatically (an explicit `fugue template update` works there). A QLockFile (store/.lock) is held for a whole update; a
+// second one is Busy. Under the lock, `.staging-*` folders older than an hour are swept. The previous sha folder is kept,
+// older ones go. Files unchanged from the previous fetched copy are hard-linked; those from the bundled root are copied.
 // Everything is HTTPS (plain http only to the loopback test address, below). Nothing from the feed runs: a pack
 // a template carries still goes through the install and Trust questions.
 //
@@ -26,13 +31,16 @@
 #include <QObject>
 #include <QString>
 
+#include <memory>
+
 class QNetworkAccessManager;
 class QNetworkReply;
+class QLockFile;
 
 namespace fugue {
 
 struct FeedResult {
-    enum class Outcome { Updated, Current, Failed };
+    enum class Outcome { Updated, Current, Failed, Busy }; // Busy: another process holds the store's lock; nothing was tried
     Outcome outcome = Outcome::Failed;
     QString sha;      // the commit now in use (empty when there is none)
     QString previous; // the commit in use before this check
@@ -52,9 +60,17 @@ class TemplateFeed : public QObject {
     Q_OBJECT
 public:
     explicit TemplateFeed(QNetworkAccessManager *network, QObject *parent = nullptr);
+    ~TemplateFeed() override;
 
     // $FUGUE_TEMPLATES is set: this session reads its own templates folder and never the feed.
     static bool disabledByEnvironment();
+    // Whether the window may fetch on its own: not FUGUE_TEMPLATES, the Default session or a chosen project (not a scratch
+    // FUGUE_HOME or --home root), and not a development build whose bundled folder is the build tree's link into the source
+    // checkout (the developer's submodule wins).
+    static bool automaticAllowed();
+    // Smaller caps for a test: one file, every file, the entries. resetLimitsForTest() puts the real ones back.
+    static void setLimitsForTest(qint64 maxFile, qint64 maxTotal, int maxEntries);
+    static void resetLimitsForTest();
     // The folder of the commit in use, or empty when none was fetched (or its folder is gone).
     static QString currentRoot();
     static QString currentSha();
@@ -81,7 +97,8 @@ private:
         qint64 size = 0;
         bool executable = false;
     };
-    void get(const QUrl &url, const QByteArray &accept, void (TemplateFeed::*then)());
+    void get(const QUrl &url, const QByteArray &accept, void (TemplateFeed::*then)(), qint64 limit, const QString &overLimit);
+    QByteArray answer(QNetworkReply *reply, QString *why);
     void gotSha();
     void gotTree();
     void nextDownload();
@@ -92,6 +109,8 @@ private:
 
     QNetworkAccessManager *m_network;
     QNetworkReply *m_reply = nullptr;
+    std::unique_ptr<QLockFile> m_lock;
+    QString m_overLimit; // set when a download was cut off at its size cap
     QString m_bundled;
     QString m_previous;
     QString m_sha;

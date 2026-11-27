@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <unistd.h>
 
+#include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "engine/templates.h"
 
@@ -29,9 +31,15 @@ namespace {
 
 constexpr int kStallMs = 30000;
 constexpr qint64 kEveryHours = 6;
-constexpr qint64 kMaxFile = 50LL << 20;
-constexpr qint64 kMaxTotal = 200LL << 20;
-constexpr int kMaxEntries = 5000;
+constexpr qint64 kMaxTree = 16LL << 20;
+constexpr qint64 kMaxSha = 1024;
+constexpr qint64 kStaleStagingSecs = 3600;
+struct Limits {
+    qint64 file = 50LL << 20;
+    qint64 total = 200LL << 20;
+    int entries = 5000;
+};
+Limits g_limits;
 
 QString base() {
     return QString(qEnvironmentVariable("FUGUE_TEMPLATE_FEED")).remove(QRegularExpression(QStringLiteral("/+$")));
@@ -105,11 +113,14 @@ QString blobShaOfFile(const QString &path, qint64 size) {
     return blobSha(file, size);
 }
 
-QString statusPath() { return stateDir() + QStringLiteral("/template-feed.json"); }
+// The Default session and a chosen project share one store; a scratch FUGUE_HOME or --home root has its own.
+bool shared() { return fugueHome().isEmpty() || rootIsChosenProject(); }
+QString stateFolder() { return shared() ? baseStateDir() : stateDir(); }
+QString statusPath() { return stateFolder() + QStringLiteral("/template-feed.json"); }
 QString currentPath() { return TemplateFeed::storeDir() + QStringLiteral("/current"); }
 
 void writeStatus(const QString &error, const QString &sha) {
-    QDir().mkpath(stateDir());
+    QDir().mkpath(stateFolder());
     QSaveFile file(statusPath());
     if (!file.open(QIODevice::WriteOnly))
         return;
@@ -126,11 +137,15 @@ bool holdsTemplates(const QString &root) {
     return false;
 }
 
-// A hard link when the base is on the same filesystem, else a copy.
-bool linkOrCopy(const QString &from, const QString &to) {
-    std::error_code ec;
-    std::filesystem::create_hard_link(from.toStdString(), to.toStdString(), ec);
-    return !ec || QFile::copy(from, to);
+// A hard link (from the previous fetched copy, which Fugue itself made) when it can be, else a copy. Never over a file.
+bool linkOrCopy(const QString &from, const QString &to, bool mayLink) {
+    if (mayLink) {
+        std::error_code ec;
+        std::filesystem::create_hard_link(from.toStdString(), to.toStdString(), ec);
+        if (!ec)
+            return true;
+    }
+    return QFile::copy(from, to); // QFile::copy never replaces a file
 }
 
 } // namespace
@@ -139,7 +154,16 @@ TemplateFeed::TemplateFeed(QNetworkAccessManager *network, QObject *parent) : QO
 
 bool TemplateFeed::disabledByEnvironment() { return !qEnvironmentVariable("FUGUE_TEMPLATES").isEmpty(); }
 
-QString TemplateFeed::storeDir() { return dataDir() + QStringLiteral("/templates-online"); }
+QString TemplateFeed::storeDir() { return (shared() ? baseDataDir() : dataDir()) + QStringLiteral("/templates-online"); }
+
+bool TemplateFeed::automaticAllowed() {
+    return !disabledByEnvironment() && shared() && !TemplateLibrary::bundledIsBuildTree();
+}
+
+void TemplateFeed::setLimitsForTest(qint64 maxFile, qint64 maxTotal, int maxEntries) { g_limits = {maxFile, maxTotal, maxEntries}; }
+void TemplateFeed::resetLimitsForTest() { g_limits = {}; }
+
+TemplateFeed::~TemplateFeed() = default;
 
 QString TemplateFeed::currentSha() {
     QFile file(currentPath());
@@ -169,20 +193,25 @@ bool TemplateFeed::due(const QDateTime &now) {
     return !checked.isValid() || checked > now || checked.secsTo(now) >= kEveryHours * 3600;
 }
 
-void TemplateFeed::get(const QUrl &url, const QByteArray &accept, void (TemplateFeed::*then)()) {
+void TemplateFeed::get(const QUrl &url, const QByteArray &accept, void (TemplateFeed::*then)(), qint64 limit, const QString &overLimit) {
     if (!allowed(url))
         return fail(QStringLiteral("The template address %1 is not https.").arg(url.toString()));
     QNetworkRequest request(url);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    // Redirects stay on the same host and port: GitHub's own (a renamed repo) work, and a test's loopback server cannot
+    // send Fugue elsewhere.
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
     request.setTransferTimeout(kStallMs);
     request.setHeader(QNetworkRequest::UserAgentHeader, QByteArrayLiteral("Fugue"));
     if (!accept.isEmpty())
         request.setRawHeader("Accept", accept);
+    m_overLimit.clear();
     m_reply = m_network->get(request);
     QNetworkReply *reply = m_reply;
-    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 got, qint64 total) {
-        if (got > kMaxFile || total > kMaxFile)
-            reply->abort(); // nothing here is bigger than a file's cap
+    connect(reply, &QNetworkReply::downloadProgress, this, [this, reply, limit, overLimit](qint64 got, qint64 total) {
+        if (got > limit || total > limit) {
+            m_overLimit = overLimit;
+            reply->abort();
+        }
     });
     connect(reply, &QNetworkReply::finished, this, then);
 }
@@ -193,16 +222,33 @@ void TemplateFeed::check() {
     m_busy = true;
     m_previous = currentSha();
     m_wanted.clear();
-    get(shaUrl(), "application/vnd.github.sha", &TemplateFeed::gotSha);
+    QDir().mkpath(storeDir());
+    m_lock = std::make_unique<QLockFile>(storeDir() + QStringLiteral("/.lock"));
+    m_lock->setStaleLockTime(15 * 60 * 1000);
+    if (!m_lock->tryLock(0)) {
+        m_lock.reset();
+        return done({FeedResult::Outcome::Busy, m_previous, m_previous, QStringLiteral("Another Fugue is updating the templates."), 0, 0});
+    }
+    // Staging folders a crashed update left (this process's own name is replaced when it stages).
+    const QDateTime old = QDateTime::currentDateTimeUtc().addSecs(-kStaleStagingSecs);
+    for (const QFileInfo &stale : QDir(storeDir()).entryInfoList({QStringLiteral(".staging-*")}, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot | QDir::NoSymLinks))
+        if (stale.lastModified().toUTC() < old)
+            QDir(stale.absoluteFilePath()).removeRecursively();
+    get(shaUrl(), "application/vnd.github.sha", &TemplateFeed::gotSha, kMaxSha, QStringLiteral("GitHub's answer is too long for a commit."));
 }
 
-// The reply of the step that just ran, or null after a failure was reported.
-static QByteArray answer(QNetworkReply *reply, QString *why) {
+// The body of the reply, or empty with `why` set.
+QByteArray TemplateFeed::answer(QNetworkReply *reply, QString *why) {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status == 403 || status == 429)
+    if (!m_overLimit.isEmpty()) {
+        *why = m_overLimit;
+    } else if (status == 429 || (status == 403 && reply->rawHeader("x-ratelimit-remaining") == "0")) {
         *why = QStringLiteral("GitHub's rate limit is reached; try again later.");
-    else if (reply->error() != QNetworkReply::NoError)
+    } else if (status == 403) {
+        *why = QStringLiteral("GitHub refused the request (403).");
+    } else if (reply->error() != QNetworkReply::NoError) {
         *why = QStringLiteral("GitHub could not be reached: %1.").arg(reply->errorString());
+    }
     return why->isEmpty() ? reply->readAll() : QByteArray();
 }
 
@@ -219,7 +265,7 @@ void TemplateFeed::gotSha() {
     if (sha == m_previous && !currentRoot().isEmpty())
         return done({FeedResult::Outcome::Current, sha, m_previous, {}, 0, 0});
     m_sha = sha;
-    get(treeUrl(sha), "application/vnd.github+json", &TemplateFeed::gotTree);
+    get(treeUrl(sha), "application/vnd.github+json", &TemplateFeed::gotTree, kMaxTree, QStringLiteral("GitHub's template list is too long."));
 }
 
 void TemplateFeed::gotTree() {
@@ -248,32 +294,39 @@ void TemplateFeed::gotTree() {
             continue;
         if (!safeName(path))
             return fail(QStringLiteral("The template list names %1, outside its folder.").arg(path));
+        if (leftOut(path))
+            continue; // dot files and folders, whatever they are (a link in .github too)
         if (type != QLatin1String("blob") || (mode != QLatin1String("100644") && mode != QLatin1String("100755")))
             return fail(QStringLiteral("The template list has %1, which is not a plain file.").arg(path));
-        if (leftOut(path))
-            continue;
-        const qint64 size = qint64(entry.value("size").toDouble(-1));
+        const QJsonValue sizeValue = entry.value("size");
+        const qint64 size = sizeValue.isDouble() ? sizeValue.toInteger(-1) : -1;
         const QString sha = entry.value("sha").toString();
         if (size < 0 || !isSha(sha) || names.contains(path))
             return fail(QStringLiteral("The template list is not readable at %1.").arg(path));
-        if (size > kMaxFile)
-            return fail(QStringLiteral("%1 is over %2 MB.").arg(path).arg(kMaxFile >> 20));
+        if (size > g_limits.file)
+            return fail(QStringLiteral("%1 is over %2 MB.").arg(path).arg(qMax<qint64>(1, g_limits.file >> 20)));
         total += size;
-        if (total > kMaxTotal || items.size() >= kMaxEntries)
+        if (total > g_limits.total || items.size() >= g_limits.entries)
             return fail(QStringLiteral("The templates are over the size Fugue takes."));
         names.insert(path);
         items.append({path, sha, size, mode == QLatin1String("100755")});
     }
     if (items.isEmpty())
         return fail(QStringLiteral("The template list is empty."));
+    // A name that is a file and also a folder holding files cannot be a folder of templates.
+    for (const Item &item : items)
+        for (qsizetype slash = item.path.indexOf(QLatin1Char('/')); slash > 0; slash = item.path.indexOf(QLatin1Char('/'), slash + 1))
+            if (names.contains(item.path.left(slash)))
+                return fail(QStringLiteral("The template list has %1 as a file and as a folder.").arg(item.path.left(slash)));
 
     // Stage the new copy beside the store: what the base holds unchanged is linked or copied, the rest is wanted.
-    const QString store = storeDir();
-    m_staging = store + QStringLiteral("/.staging-") + QString::number(::getpid());
+    m_staging = storeDir() + QStringLiteral("/.staging-") + QString::number(::getpid());
     QDir(m_staging).removeRecursively();
     if (!QDir().mkpath(m_staging))
         return fail(QStringLiteral("Fugue could not make %1.").arg(m_staging));
-    const QString from = !currentRoot().isEmpty() ? currentRoot() : (m_bundled.isEmpty() ? TemplateLibrary::bundledRoot() : m_bundled);
+    const QString previous = currentRoot();
+    const QString from = !previous.isEmpty() ? previous : (m_bundled.isEmpty() ? TemplateLibrary::bundledRoot() : m_bundled);
+    const bool mayLink = !previous.isEmpty(); // only from a copy Fugue made itself, never the bundled files
     m_files = int(items.size());
     m_downloaded = 0;
     for (const Item &item : items) {
@@ -283,7 +336,7 @@ void TemplateFeed::gotTree() {
             return fail(QStringLiteral("Fugue could not make a folder for %1.").arg(item.path));
         if (!source.isEmpty() && QFileInfo(source).isFile() && !QFileInfo(source).isSymLink()
             && blobShaOfFile(source, item.size) == item.sha) {
-            if (!linkOrCopy(source, target))
+            if (!linkOrCopy(source, target, mayLink))
                 return fail(QStringLiteral("Fugue could not copy %1.").arg(item.path));
         } else {
             m_wanted.append(item);
@@ -295,7 +348,9 @@ void TemplateFeed::gotTree() {
 void TemplateFeed::nextDownload() {
     if (m_wanted.isEmpty())
         return finish();
-    get(rawUrl(m_sha, m_wanted.constFirst().path), {}, &TemplateFeed::gotFile);
+    const Item &item = m_wanted.constFirst();
+    get(rawUrl(m_sha, item.path), {}, &TemplateFeed::gotFile, item.size,
+        QStringLiteral("%1 is larger than the template list says.").arg(item.path));
 }
 
 void TemplateFeed::gotFile() {
@@ -307,12 +362,12 @@ void TemplateFeed::gotFile() {
     const QByteArray bytes = answer(reply, &why);
     if (!why.isEmpty())
         return fail(why);
-    QByteArray head = "blob " + QByteArray::number(bytes.size()) + '\0';
+    const QByteArray head = "blob " + QByteArray::number(bytes.size()) + '\0';
     if (bytes.size() != item.size
         || QString::fromLatin1(QCryptographicHash::hash(head + bytes, QCryptographicHash::Sha1).toHex()) != item.sha)
         return fail(QStringLiteral("%1 is not the file the template list names; it was refused.").arg(item.path));
     QFile file(m_staging + QLatin1Char('/') + item.path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size())
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly) || file.write(bytes) != bytes.size())
         return fail(QStringLiteral("Fugue could not write %1: %2.").arg(item.path, file.errorString()));
     if (item.executable)
         file.setPermissions(file.permissions() | QFileDevice::ExeOwner | QFileDevice::ExeGroup | QFileDevice::ExeOther);
@@ -321,7 +376,7 @@ void TemplateFeed::gotFile() {
     nextDownload();
 }
 
-// Names the staged copy into place, switches `current` and drops the older folders.
+// Names the staged copy into place, switches `current`, and drops the folders older than the previous one.
 void TemplateFeed::finish() {
     if (!holdsTemplates(m_staging))
         return fail(QStringLiteral("The templates hold no templates."));
@@ -335,8 +390,9 @@ void TemplateFeed::finish() {
         QDir(target).removeRecursively();
         return fail(QStringLiteral("Fugue could not write %1.").arg(currentPath()));
     }
-    for (const QFileInfo &old : QDir(storeDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
-        if (old.fileName() != m_sha && isSha(old.fileName()))
+    // The previous one stays: a window that scanned it a moment ago may still be reading it.
+    for (const QFileInfo &old : QDir(storeDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks))
+        if (old.fileName() != m_sha && old.fileName() != m_previous && isSha(old.fileName()))
             QDir(old.absoluteFilePath()).removeRecursively();
     done({FeedResult::Outcome::Updated, m_sha, m_previous, {}, m_downloaded, m_files});
 }
@@ -352,9 +408,11 @@ void TemplateFeed::fail(const QString &why) {
 void TemplateFeed::done(FeedResult result) {
     m_busy = false;
     m_staging.clear();
+    m_lock.reset();
     if (result.outcome == FeedResult::Outcome::Failed)
         qWarning().noquote() << "templates: not updated:" << result.error;
-    writeStatus(result.error, result.sha);
+    if (result.outcome != FeedResult::Outcome::Busy)
+        writeStatus(result.error, result.sha);
     emit finished(result);
 }
 

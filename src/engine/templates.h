@@ -56,6 +56,7 @@ struct TemplateRoot {
     bool inherited = false;
     // The templates fetched from fugue-workflows on their own (engine/template_feed.h, #699): listed after the person's own,
     // before the bundled ones. A template here that this Fugue cannot open does not hide the bundled one of the same id.
+    // The fetched folder named by the store's `current` file when `path` is empty, read at each scan so no sha path is kept.
     bool online = false;
 };
 
@@ -131,6 +132,8 @@ public:
     // The templates this release ships: <prefix>/share/fugue/templates beside the running binary's bin/, else templates/
     // beside the binary; empty when there is none.
     static QString bundledRoot();
+    // The bundled folder is the build tree's `templates` link into the source checkout (a development build), not an install.
+    static bool bundledIsBuildTree();
     static QString ownFolder(); // ~/Documents/Fugue/templates; a project's: <root>/documents/templates
     // The Default project's own folder (the ordinary session's ~/Documents/Fugue/templates), from inside a project too.
     static QString defaultOwnFolder();

@@ -320,8 +320,7 @@ QList<TemplateRoot> TemplateLibrary::standardRoots() {
     if (!given.isEmpty())
         return roots << TemplateRoot{QDir::cleanPath(given), false, false};
     if (currentSettings().fetchTemplates)
-        if (const QString online = TemplateFeed::currentRoot(); !online.isEmpty())
-            roots << TemplateRoot{online, false, false, true};
+        roots << TemplateRoot{QString(), false, false, true}; // its folder is read from `current` at each scan
     if (const QString bundled = bundledRoot(); !bundled.isEmpty())
         roots << TemplateRoot{bundled, false, false};
     return roots;
@@ -335,27 +334,52 @@ QString TemplateLibrary::bundledRoot() {
     return {};
 }
 
+bool TemplateLibrary::bundledIsBuildTree() {
+    return QFileInfo(QCoreApplication::applicationDirPath() + QStringLiteral("/templates")).isSymLink()
+           && QDir::cleanPath(bundledRoot()) == QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/templates"));
+}
+
 void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
     QSet<QString> seen;
     QList<std::pair<Template, int>> found; // with its category's place
-    for (const TemplateRoot &root : m_roots) {
-        const QDir dir(root.path);
-        if (!dir.exists())
-            continue;
-        QHash<QString, std::pair<int, QString>> categories; // id -> place, title
-        if (QFileInfo(dir.filePath(QStringLiteral("categories.json"))).isFile()) {
-            const Result<QJsonObject> listed = readObject(dir.filePath(QStringLiteral("categories.json")));
-            if (!listed && problems)
-                problems->append(listed.errors());
-            if (listed) {
-                const QJsonArray array = listed->value(QStringLiteral("categories")).toArray();
-                for (qsizetype i = 0; i < array.size(); ++i) {
-                    const QJsonObject category = array.at(i).toObject();
-                    categories.insert(category.value(QStringLiteral("id")).toString(),
-                                      {int(i), category.value(QStringLiteral("title")).toString()});
-                }
+    // The fetched folder, as the store's `current` names it now (an online root without a path).
+    const auto pathOf = [](const TemplateRoot &root) { return root.online && root.path.isEmpty() ? TemplateFeed::currentRoot() : root.path; };
+    // One category order for every root that is not the person's own: the first of them that has a categories.json (the fetched one
+    // when present), so a bundled template that stands in for an unopenable fetched one sorts in the same order.
+    using Categories = QHash<QString, std::pair<int, QString>>; // id -> place, title
+    const auto readCategories = [&](const QString &folder) {
+        Categories categories;
+        const Result<QJsonObject> listed = readObject(QDir(folder).filePath(QStringLiteral("categories.json")));
+        if (!listed && problems)
+            problems->append(listed.errors());
+        if (listed) {
+            const QJsonArray array = listed->value(QStringLiteral("categories")).toArray();
+            for (qsizetype i = 0; i < array.size(); ++i) {
+                const QJsonObject category = array.at(i).toObject();
+                categories.insert(category.value(QStringLiteral("id")).toString(), {int(i), category.value(QStringLiteral("title")).toString()});
             }
         }
+        return categories;
+    };
+    Categories shared;
+    bool onlineInUse = false;
+    for (const TemplateRoot &root : m_roots) {
+        const QString path = pathOf(root);
+        if (root.online && !path.isEmpty() && QFileInfo(path).isDir())
+            onlineInUse = true;
+        if (!root.own && shared.isEmpty() && !path.isEmpty() && QFileInfo(QDir(path).filePath(QStringLiteral("categories.json"))).isFile())
+            shared = readCategories(path);
+    }
+    QSet<QString> onlineIds; // every template folder of the fetched snapshot, opening or not
+    for (const TemplateRoot &root : m_roots) {
+        const QString path = pathOf(root);
+        const QDir dir(path);
+        if (path.isEmpty() || !dir.exists())
+            continue;
+        const bool bundled = !root.own && !root.online;
+        Categories categories = shared;
+        if (root.own && QFileInfo(dir.filePath(QStringLiteral("categories.json"))).isFile())
+            categories = readCategories(path);
 
         for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot, QDir::Name)) {
             Template t;
@@ -369,6 +393,10 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 if (!hasAbout && !QFileInfo(folder.filePath(kWorkflow)).isFile())
                     continue; // not a template folder
                 t.id = entry.fileName();
+                if (root.online)
+                    onlineIds.insert(t.id);
+                else if (bundled && onlineInUse && !onlineIds.contains(t.id))
+                    continue; // deleted or renamed upstream: the fetched snapshot no longer has it
                 if (seen.contains(t.id))
                     continue; // the person's own, listed first, wins, even one that is broken
                 if (!root.online)

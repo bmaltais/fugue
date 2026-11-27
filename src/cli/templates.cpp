@@ -98,6 +98,9 @@ Reply templateUpdate(const Command &, Context &) {
         return Reply::failure(makeError("usage", QStringLiteral("FUGUE_TEMPLATES is set, so Fugue reads that folder and never fetches templates."),
                                         QStringLiteral("Unset FUGUE_TEMPLATES to fetch.")));
     const FeedResult result = TemplateFeed::checkNow();
+    if (result.outcome == FeedResult::Outcome::Busy)
+        return Reply::success(QJsonObject{{"result", "busy"}, {"commit", result.sha}},
+                              QStringLiteral("Another Fugue is updating the templates; nothing was done here."));
     if (result.outcome == FeedResult::Outcome::Failed)
         return Reply::failure(makeError("download_failed", result.error, QStringLiteral("The templates in use are unchanged.")));
     const bool updated = result.outcome == FeedResult::Outcome::Updated;
