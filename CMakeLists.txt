@@ -517,7 +517,14 @@ get_property(fugue_all_tests DIRECTORY PROPERTY TESTS)
 # about 10 s with the suite running in parallel, so 300 s leaves a slow CI runner room; the waits
 # inside a test (a fake server, a spawned `fugue`) have deadlines of their own, well under this.
 set(fugue_test_timeout_seconds 300)
+# Tests never run the real omarchy-local-ai: it surveys the tailnet and rewrites state. A stand-in that always fails comes first on
+# every test's PATH, so code that calls it (the omarchy provider's survey of a stale network.json) takes its failure path, the old file.
+set(fugue_test_bin ${CMAKE_BINARY_DIR}/test-bin)
+file(MAKE_DIRECTORY ${fugue_test_bin})
+file(WRITE ${fugue_test_bin}/omarchy-local-ai "#!/bin/sh\necho 'tests never run the real omarchy-local-ai' >&2\nexit 1\n")
+file(CHMOD ${fugue_test_bin}/omarchy-local-ai PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 foreach(test_name ${fugue_all_tests})
+  set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT_MODIFICATION PATH=path_list_prepend:${fugue_test_bin})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT ${fugue_test_timeout_seconds})
   set(test_home ${CMAKE_BINARY_DIR}/test-home/${test_name})
   file(MAKE_DIRECTORY ${test_home})

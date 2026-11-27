@@ -520,6 +520,57 @@ private slots:
         QCOMPARE(described.errors().first().message, QStringLiteral("studio is offline."));
     }
 
+    // A remote host's models come from network.json; a listing finding it old runs the survey first.
+    void aStaleNetworkJsonIsSurveyedBeforeItIsRead() {
+        Fixture fixture;
+        qint64 clock = 10 * 60 * 1000;
+        const QString file = QDir(fixture.paths.stateDir).filePath("network.json");
+        // The state of studio decides the message: "online" says it runs nothing shared, "offline" says so.
+        const auto write = [&](const QString &state, qint64 updated) {
+            writeFile(file, json(QJsonObject{{"schema", 1}, {"updated_ms", updated}, {"models", QJsonObject()},
+                                             {"hosts", QJsonObject{{"studio", QJsonObject{{"paired", true}, {"state", state}}}}}}));
+        };
+        int surveys = 0;
+        bool succeed = true;
+        ProviderInstance instance;
+        instance.name = QStringLiteral("studio");
+        instance.address = QStringLiteral("https://studio.tail1234.ts.net");
+        auto provider = fixture.provider(instance);
+        provider->setClock([&] { return clock; });
+        provider->setSurveyRunner([&](std::function<void(bool)> finished) {
+            ++surveys;
+            if (succeed)
+                write("offline", clock);
+            QTimer::singleShot(0, [finished = std::move(finished), ok = succeed] { finished(ok); });
+        });
+        const auto message = [&] {
+            return await<Description>([&](auto reply) { provider->describe(reply); }).errors().first().message;
+        };
+
+        // 1. Stale: one survey, and its rows are used.
+        write("online", 0);
+        QCOMPARE(message(), QStringLiteral("studio is offline."));
+        QCOMPARE(surveys, 1);
+
+        // 4. Another listing in the same window does not survey again, though the file is old.
+        write("online", 0);
+        QCOMPARE(message(), QStringLiteral("studio runs no model it shares with this machine."));
+        QCOMPARE(surveys, 1);
+
+        // 2. A fresh file: no survey, even in a later window.
+        clock += 10 * 60 * 1000;
+        write("online", clock - 1000);
+        QCOMPARE(message(), QStringLiteral("studio runs no model it shares with this machine."));
+        QCOMPARE(surveys, 1);
+
+        // 3. A failing survey: the old file serves.
+        clock += 10 * 60 * 1000;
+        write("online", 0);
+        succeed = false;
+        QCOMPARE(message(), QStringLiteral("studio runs no model it shares with this machine."));
+        QCOMPARE(surveys, 2);
+    }
+
     void anUnpairedHostSaysHowToPair() {
         Fixture fixture;
         ProviderInstance instance;

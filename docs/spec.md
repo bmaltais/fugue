@@ -2139,7 +2139,9 @@ omarchy-local-ai at commit 703ae0c when the provider was built):
   Fantasi's "model in use" routing.
 - A paired host is read from `network.json` in the same folder, with its own key in
   `~/.config/omarchy/agent-local/remotes/<host>.key`. Pairing itself is done with
-  `omarchy-agent-local pair <host>`.
+  `omarchy-agent-local pair <host>`. A survey lists only the models running at that moment, so a
+  listing that finds `network.json` older than 2 minutes first runs `omarchy-local-ai network --json` (output discarded)
+  (asynchronously, 10 s limit, at most once per 2 minutes, and a failure keeps the old file).
 - One preloaded model per server. Changing models goes through `omarchy-agent-local`, only with
   the user's confirmation.
 - Auth: a bearer key read from `~/.config/omarchy/agent-local/key`.
