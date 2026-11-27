@@ -50,7 +50,11 @@ Errors Registry::add(const NodeType &type) {
                      .arg(same->second.version.toString()));
 
     const bool builtin = typeNamespace(type.id) == QLatin1String("fugue");
-    for (const InputSpec &input : type.inputs) {
+    // The declared inputs and the items of each repeating input (6.1.2), which every row's inputs are made from.
+    QList<InputSpec> declared = type.inputs;
+    for (const RepeatSpec &repeat : type.repeats)
+        declared += repeat.items;
+    for (const InputSpec &input : std::as_const(declared)) {
         if (input.type.type.isAny() && !builtin)
             fail(QStringLiteral("input %1 is of type \"any\", which only built-in fugue/ nodes may use.")
                      .arg(input.name),
@@ -60,7 +64,7 @@ Errors Registry::add(const NodeType &type) {
                      .arg(input.name, input.type.type.toString()),
                  input.name);
     }
-    for (const InputSpec &input : type.inputs)
+    for (const InputSpec &input : std::as_const(declared))
         if (input.type.takesList && !builtin)
             fail(QStringLiteral("input %1 has \"takes_list\", which only built-in fugue/ nodes may use.").arg(input.name), input.name);
     for (const OutputSpec &output : type.outputs) {

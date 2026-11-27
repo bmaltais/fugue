@@ -194,6 +194,13 @@ private slots:
         big["max"] = 100;
         QVERIFY(refused(manifestWith(big), "outside 1 to 99"));
         QVERIFY(refused(manifestWith(rowsBlock(), {json("{'name': 'items', 'type': 'text'}")}), "declared more than once"));
+        // The registry checks an item's port type as any input's.
+        QJsonObject unknown = rowsBlock();
+        unknown["inputs"] = QJsonArray{json("{'name': 'thing', 'type': 'local/nothing'}")};
+        Registry registry;
+        const Errors errors = registry.addManifest(manifestWith(unknown));
+        QVERIFY(!errors.isEmpty());
+        QVERIFY2(errors.first().message.contains("no pack declares"), qPrintable(errors.first().message));
     }
 
     // A workflow with rows is an ordinary file: links and literals by the row's input name, kept byte for byte.
@@ -246,6 +253,37 @@ private slots:
         const QMap<QString, InputValue> made = good->nodes.value("apply").inputs;
         QCOMPARE(made.value("strength_2").literal(), QJsonValue(0.25));
         QCOMPARE(made.value("lora_2").handle(), lora);
+    }
+
+    // A group can expose a row's input like any other: the instance's value reaches the row and is checked as the row's.
+    void aGroupExposesARowsInput() {
+        const auto withPower = [&](double power) {
+            QJsonObject file = json(
+                "{'fugue': 1, 'graph': {'nodes': {'g': {'type': 'local/stack', 'version': '1.0.0', 'inputs': {'power': 0}}}},"
+                " 'groups': {'local/stack': {'version': '1.0.0', 'name': 'Stack',"
+                "  'inputs': [{'name': 'power', 'targets': ['apply.strength_1']}],"
+                "  'outputs': [{'name': 'model', 'from': 'apply.model'}],"
+                "  'nodes': {'models': {'type': 'fugue/load-models', 'version': '1.0.0', 'inputs': {}},"
+                "   'apply': {'type': 'fugue/apply-loras', 'version': '1.0.0', 'inputs': {'model': {'from': 'models.model'},"
+                "    'lora_1': {'resource': 'fugue/lora', 'name': 'a.safetensors'}}}}}}}");
+            QJsonObject graph = file["graph"].toObject();
+            QJsonObject nodes = graph["nodes"].toObject();
+            QJsonObject g = nodes["g"].toObject();
+            g["inputs"] = QJsonObject{{"power", power}};
+            nodes["g"] = g;
+            graph["nodes"] = nodes;
+            file["graph"] = graph;
+            CompileOptions options;
+            options.allowUnsetInputs = true;
+            options.target = QStringLiteral("g/apply");
+            return compile(*Document::fromJson(file), m_registry, options);
+        };
+        const Compilation good = withPower(0.5);
+        QVERIFY2(good, good ? "" : qPrintable(good.error().message));
+        QCOMPARE(good->nodes.value("g/apply").inputs.value("strength_1").literal(), QJsonValue(0.5));
+        const Compilation bad = withPower(9);
+        QVERIFY(!bad);
+        QCOMPARE(bad.error().code, QStringLiteral("value_out_of_range"));
     }
 
     // Every row that is on, in row order, as a chain of Apply LoRA nodes makes it: nothing downstream sees a difference.

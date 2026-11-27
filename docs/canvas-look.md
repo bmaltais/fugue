@@ -147,6 +147,7 @@ widget wells can span the node, and the outputs sit next to the header where the
 | Unwired input with a widget | a well across the row (section 4.4) |
 | Port mark | centered on the node's edge (section 5) |
 | Hover help | resting on a row or its port shows the app's tooltip after `tooltipDelay`: the label in bold, then the manifest's `description` (a group's exposed input takes its inner input's); no description, no tooltip |
+| Repeating input (spec 6.1.2, #714) | each row's inputs are ordinary rows, the key's label numbered ("LoRA 2"); under the last one the empty row of the key alone, labelled "Add <key>" ("Add LoRA"), its picker showing no value; the rows of a row whose `enabled` is off at 50% opacity, the On switch at full (ui-ergonomics.md, 2026-11-27) |
 
 ### 4.4 Widgets (spec 6.2)
 
