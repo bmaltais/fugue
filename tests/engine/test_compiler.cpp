@@ -73,6 +73,11 @@ Registry registry() {
         " 'inputs': [{'name': 'image', 'type': 'image'}],"
         " 'outputs': [{'name': 'file', 'type': 'image'}]}",
 
+        "{'manifest': 1, 'id': 'fugue/pick-image', 'version': '1.0.0', 'name': 'Pick image',"
+        " 'runtime': {'kind': 'builtin'},"
+        " 'inputs': [{'name': 'on_true', 'type': 'image', 'optional': true, 'lazy': true}],"
+        " 'outputs': [{'name': 'image', 'type': 'image'}]}",
+
         "{'manifest': 1, 'id': 'fugue/merge', 'version': '1.0.0', 'name': 'Merge',"
         " 'runtime': {'kind': 'builtin'},"
         " 'inputs': [{'name': 'images', 'type': 'image', 'list': true, 'min_items': 1, 'max_items': 3}],"
@@ -197,6 +202,7 @@ private slots:
     void sinksInsideGroupsAreDropped();
     void aSinkInsideAGroupStaysWhenANodeReadsItsOutput();
     void aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied();
+    void aMutedUpstreamOfAnUnneededViewSinkSaysNothingOfIt();
     void runToHereKeepsOnlyWhatTheTargetNeeds();
     void unknownTargetIsAUsageError();
     void providerPinsAreResolvedAndChecked();
@@ -309,7 +315,7 @@ void TestCompiler::unknownTypesAreReportedWithoutFollowOnErrors() {
     QCOMPARE(top.node, QString("gen"));
     QCOMPARE(top.hint, QString("Did you mean \"fugue/generate-image\"?"));
     // Every known type, in full: the registry's and the workflow's groups.
-    QCOMPARE(top.valid, (QJsonArray{"fugue/batch", "fugue/compare", "fugue/generate-image", "fugue/merge", "fugue/save-image",
+    QCOMPARE(top.valid, (QJsonArray{"fugue/batch", "fugue/compare", "fugue/generate-image", "fugue/merge", "fugue/pick-image", "fugue/save-image",
                                     "fugue/save-keep", "fugue/text", "io.example.tools/shrink", "local/box"}));
 }
 
@@ -838,6 +844,50 @@ void TestCompiler::aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied() {
     for (auto it = result->nodes.cbegin(); it != result->nodes.cend(); ++it)
         for (const CompiledLink &link : it->links())
             QVERIFY2(result->nodes.contains(link.from.node), qPrintable(it.key() + " reads missing " + link.from.node));
+}
+
+// #634: an inner Compare Images whose upstream is muted lands in `dropped`, and the scheduler said node.skipped for a node
+// nobody asked for. The reader, optional or lazy, is handled as before; the sink itself is not listed.
+void TestCompiler::aMutedUpstreamOfAnUnneededViewSinkSaysNothingOfIt() {
+    const char *inner =
+        "'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'mode': 'mute', 'inputs': {'prompt': 'x'}},"
+        "'cmp': {'type': 'fugue/compare', 'version': '1.0.0',"
+        "        'inputs': {'a': {'from': 'gen.image'}, 'b': {'from': 'gen.image'}}}";
+    const auto group = [&](const char *reader) {
+        return QByteArray("'local/cmp': {'version': '1.0.0', 'name': 'Cmp', 'inputs': [], 'outputs': [{'name': 'image', 'from': ")
+               + (*reader ? "'r.image'" : "'gen.image'") + "}], 'nodes': {" + inner + (*reader ? QByteArray(",") + reader : QByteArray()) + "}}";
+    };
+    const char *host =
+        "'g': {'type': 'local/cmp', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}";
+    // Read by nothing.
+    {
+        const Compilation result = compile(document(withGroups(host, group("").constData())), registry());
+        QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+        QVERIFY(!result->skipped.contains("g/cmp"));
+        QCOMPARE(result->skipped.value("g/gen"), QString("muted"));
+    }
+    // Read by an optional input: the reader is skipped as before, the sink is not named.
+    {
+        const Compilation result = compile(
+            document(withGroups(host, group("'r': {'type': 'fugue/generate-image', 'version': '1.0.0',"
+                                            " 'inputs': {'prompt': 'x', 'image': {'from': 'cmp.difference'}}}").constData())),
+            registry());
+        QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+        QVERIFY(!result->skipped.contains("g/cmp"));
+        QCOMPARE(result->skipped.value("g/r"), QString("upstream_muted"));
+    }
+    // Read by a lazy input: the reader stays and its input is let go.
+    {
+        const Compilation result = compile(
+            document(withGroups(host, group("'r': {'type': 'fugue/pick-image', 'version': '1.0.0',"
+                                            " 'inputs': {'on_true': {'from': 'cmp.difference'}}}").constData())),
+            registry());
+        QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+        QVERIFY(!result->skipped.contains("g/cmp"));
+        QVERIFY(result->nodes.contains("g/r"));
+        QCOMPARE(result->nodes.value("g/r").lazyDropped.value("on_true"), QString("upstream_muted"));
+    }
 }
 
 void TestCompiler::runToHereKeepsOnlyWhatTheTargetNeeds() {
