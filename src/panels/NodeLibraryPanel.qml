@@ -136,6 +136,7 @@ Item {
                 color: root.look.label
             }
             TapHandler {
+                gesturePolicy: TapHandler.WithinBounds
                 onTapped: {
                     root.queryEdited("")
                     field.forceActiveFocus()
@@ -270,7 +271,9 @@ Item {
             function inTrash(point) {
                 return trash.active && point.x >= trash.x && point.x <= trash.x + trash.width
             }
+            // Passive on purpose: it shares the press with the row's DragHandler (a node dragged out to the canvas).
             TapHandler {
+                gesturePolicy: TapHandler.DragThreshold
                 onTapped: eventPoint => {
                     if (row.inTrash(eventPoint.position))
                         return

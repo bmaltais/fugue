@@ -85,6 +85,10 @@ test's own temporary folder), because shards run at the same time.
    recorded did this once (#622). In a worktree run `git submodule update --init` after you merge main; a real
    rollback says `templates rollback` in a commit message. PRs from this repository start no hosted CI, so
    `bin/test` is where the guard runs.
+10. `bin/check-quick` fails a `TapHandler` in `src/**/*.qml` that names no `gesturePolicy`. The default, DragThreshold, takes
+   only a passive grab, and Qt goes on delivering the press to the handlers under it, through a modal popup too: a click on a
+   Templates card also opened the shelf's app under it (2026-11-26). A control uses `TapHandler.WithinBounds`; a named
+   `DragThreshold` is for a handler that shares its press on purpose (a row that is also dragged).
 
 ## CI
 

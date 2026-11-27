@@ -324,7 +324,9 @@ Rectangle {
                 ToolTip.delay: root.look.tooltipDelay
                 ToolTip.text: modelData.created !== "" ? qsTr("From %1, %2").arg(modelData.from).arg(modelData.created) : qsTr("From %1").arg(modelData.from)
 
+                // The row's taps stay DragThreshold (passive), named: they share the press with the row's DragHandler (reorder).
                 TapHandler {
+                    gesturePolicy: TapHandler.DragThreshold
                     acceptedButtons: Qt.LeftButton
                     acceptedModifiers: Qt.NoModifier
                     onTapped: point => {
@@ -336,16 +338,19 @@ Rectangle {
                     onDoubleTapped: point => { if (!row.onToggle(point, false)) root.startRename(row.position) }
                 }
                 TapHandler {
+                    gesturePolicy: TapHandler.DragThreshold
                     acceptedButtons: Qt.LeftButton
                     acceptedModifiers: Qt.ControlModifier
                     onTapped: point => { if (!row.onToggle(point, false)) { root.model.selectLayer(row.position, "toggle"); list.forceActiveFocus() } }
                 }
                 TapHandler {
+                    gesturePolicy: TapHandler.DragThreshold
                     acceptedButtons: Qt.LeftButton
                     acceptedModifiers: Qt.ShiftModifier
                     onTapped: point => { if (!row.onToggle(point, true)) { root.model.selectLayer(row.position, "range"); list.forceActiveFocus() } }
                 }
                 TapHandler {
+                    gesturePolicy: TapHandler.DragThreshold
                     acceptedButtons: Qt.RightButton
                     onTapped: point => {
                         if (!row.selected)
@@ -472,24 +477,30 @@ Rectangle {
                             name: "x"
                             color: root.look.error
                         }
+                        // Passive, named, as the row's: a drag that starts on the mask still moves the row.
                         TapHandler {
+                            gesturePolicy: TapHandler.DragThreshold
                             acceptedModifiers: Qt.ShiftModifier
                             onTapped: if (root.editable) root.model.setMaskEnabled([row.position], !row.modelData.maskEnabled)
                         }
                         TapHandler {
+                            gesturePolicy: TapHandler.DragThreshold
                             acceptedModifiers: Qt.NoModifier
                             onTapped: root.paintMask(row.position)
                         }
                         // Ctrl+click: the selection is this mask; with Shift it is added, with Alt taken from (Photoshop's).
                         TapHandler {
+                            gesturePolicy: TapHandler.DragThreshold
                             acceptedModifiers: Qt.ControlModifier
                             onTapped: root.selectionRequested(row.position, true, "replace")
                         }
                         TapHandler {
+                            gesturePolicy: TapHandler.DragThreshold
                             acceptedModifiers: Qt.ControlModifier | Qt.ShiftModifier
                             onTapped: root.selectionRequested(row.position, true, "add")
                         }
                         TapHandler {
+                            gesturePolicy: TapHandler.DragThreshold
                             acceptedModifiers: Qt.ControlModifier | Qt.AltModifier
                             onTapped: root.selectionRequested(row.position, true, "subtract")
                         }

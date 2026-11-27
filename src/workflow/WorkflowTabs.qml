@@ -96,6 +96,7 @@ Item {
                 readonly property color tabColor: root.colorOf(modelData.color)
                 onClicked: App.workflows.current = index
                 TapHandler {
+                    gesturePolicy: TapHandler.WithinBounds
                     acceptedButtons: Qt.RightButton
                     onTapped: (point) => root.openMenu(tabButton, point.position.x, point.position.y)
                 }

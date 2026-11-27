@@ -97,6 +97,7 @@ Item {
     }
     HoverHandler { enabled: !cell.compact; cursorShape: Qt.PointingHandCursor }
     TapHandler {
+        gesturePolicy: TapHandler.WithinBounds
         enabled: !cell.compact
         onTapped: cell.tapped()
         onDoubleTapped: cell.activated()

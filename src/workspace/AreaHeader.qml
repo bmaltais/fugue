@@ -132,6 +132,7 @@ Rectangle {
             }
         }
         TapHandler {
+            gesturePolicy: TapHandler.WithinBounds
             id: typeTap
             onTapped: header.openViews()
         }

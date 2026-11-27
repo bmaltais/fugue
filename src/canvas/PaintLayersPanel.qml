@@ -81,6 +81,7 @@ Rectangle {
                 Accessible.selected: modelData.active
 
                 TapHandler {
+                    gesturePolicy: TapHandler.WithinBounds
                     onTapped: root.painting.selectLayer(row.modelData.id)
                 }
                 // The eye: a hidden layer is dimmed, as the toolbar's own toggles are.
@@ -126,7 +127,9 @@ Rectangle {
                         text: row.modelData.name
                         color: root.look.text
                         font.pixelSize: root.look.labelSize
+                        // Passive on purpose: a click on the name also reaches the row (selects the layer); a double click renames.
                         TapHandler {
+                            gesturePolicy: TapHandler.DragThreshold
                             acceptedButtons: Qt.LeftButton
                             onDoubleTapped: {
                                 nameEdit.text = row.modelData.name

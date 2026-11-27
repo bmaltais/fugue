@@ -218,7 +218,7 @@ Popup {
                             look: root.look
                             color: root.look.label
                             font.pixelSize: 12
-                            TapHandler { onTapped: root.search.clearFilter() }
+                            TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: root.search.clearFilter() }
                         }
                     }
                 }
@@ -279,7 +279,7 @@ Popup {
                     width: ListView.view.width - 2 * root.u - (ListView.view.ScrollBar.vertical as FugueScrollBar).inset
                     height: 11 * root.u
 
-                    TapHandler { onTapped: root.accept(row.index) }
+                    TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: root.accept(row.index) }
                     HoverHandler { onHoveredChanged: if (hovered) list.currentIndex = row.index }
 
                     // A tile with the node's kind: its first output's mark on that color at 16%.

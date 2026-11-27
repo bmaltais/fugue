@@ -176,7 +176,7 @@ Item {
             activeFocusOnTab: enabled
             Keys.onReturnPressed: button.tapped()
             Keys.onSpacePressed: button.tapped()
-            TapHandler { onTapped: { button.forceActiveFocus(); button.tapped() } }
+            TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: { button.forceActiveFocus(); button.tapped() } }
             HoverHandler { cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
             // A disabled item gets no hover (#281): while off, a handler on the parent stands in, in its coordinates.
             readonly property bool tipOver: enabled ? hoverTip.hovered

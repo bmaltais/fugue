@@ -73,6 +73,6 @@ Rectangle {
             }
         }
     }
-    TapHandler { onTapped: edit.forceActiveFocus() }
+    TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: edit.forceActiveFocus() }
     readonly property alias editor: edit
 }

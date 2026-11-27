@@ -95,6 +95,7 @@ Rectangle {
             radius: strip.look.smallCorner
         }
         TapHandler {
+            gesturePolicy: TapHandler.WithinBounds
             onTapped: tab.press()
         }
         HoverHandler {

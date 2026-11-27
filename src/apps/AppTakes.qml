@@ -99,6 +99,6 @@ ListView {
             }
         }
         HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { strip.currentIndex = take.index; strip.appView.selectTake(take.index) } }
+        TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: { strip.currentIndex = take.index; strip.appView.selectTake(take.index) } }
     }
 }

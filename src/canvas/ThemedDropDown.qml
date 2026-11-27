@@ -52,7 +52,7 @@ Rectangle {
         text: drop.options.reduce((a, o) => o.text.length > a.length ? o.text : a, "") }
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { onTapped: { drop.forceActiveFocus(); drop.open() } }
+    TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: { drop.forceActiveFocus(); drop.open() } }
     ToolTip.visible: hover.hovered && !menu.opened && textWidth.advanceWidth > text.width
     ToolTip.delay: look.tooltipDelay
     ToolTip.text: currentText

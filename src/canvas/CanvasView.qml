@@ -1673,6 +1673,7 @@ Item {
                     }
                     HoverHandler { id: stepHover }
                     TapHandler {
+                        gesturePolicy: TapHandler.WithinBounds
                         onTapped: {
                             canvasData.show(stepRow.modelData.id)
                             historyList.forceActiveFocus()

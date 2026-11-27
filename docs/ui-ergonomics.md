@@ -88,6 +88,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-26 A click acts on the one control under it, never on what lies beneath (owner report; confidence high)
+
+- Control: `KitCard` (the shelf's app cards, the Templates window's cards, the Apps dialog's), the Templates window's category tabs, and every other `TapHandler` of the window (`bin/check-quick` now fails one with no `gesturePolicy`).
+- Old: these handlers used Qt's default, DragThreshold, which takes only a passive grab; Qt then hands the same press to the handlers under them, a modal popup notwithstanding. On a window just started, a click on a Templates card opened that template and the shelf's app under it too ("it also opens the app that happens to be behind the template tile"); a category tab over a shelf card opened that app.
+- New: a control's TapHandler takes the press for itself (`TapHandler.WithinBounds`, the kit's convention: KitChip, KitRow, AppRail): the click acts on the control under the pointer and nothing else; a press dragged off the control before release does nothing, as on KitChip. Rows that are also dragged (the Layers panels' rows and mask thumbnails, the Node library's rows, a paint layer's name) keep DragThreshold, named, so the row's DragHandler and the row's own tap still share their press.
+- Why: a modal window must take every click on it; the press reaching the window behind made the wrong template or app open in a tab.
+- Rules met: no control moved or resized; Floor, Gaps and Keyboard unchanged.
+
 ### 2026-11-26 The Queue is a view type of the areas (#648; owner idea, coordinator agrees, confidence high)
 
 - Control: `src/workspace/QueueArea.qml` (`queueArea`, the old `RunQueuePanel.qml` moved, its rows `queueEntry-<run>`, `queueFront-<run>`, `queueCancel-<run>`, `historyEntry-<run>`, `historyResults-<run>`, `historyFolder-<run>` unchanged); the `queue` row of the view registry (every area's view menu lists it); `panel.queue` (Alt+Q, now context `app`; View > Bars and panels row, checked while a Queue area exists); the run toolbar's queue button (`runQueueButton`, now runs `panel.queue`; its mark shows a Queue area is there).
