@@ -500,7 +500,8 @@ Error warningOf(Error error, const QString &prefix = {}) {
 }
 
 // Installs a staged pack into packsDir, replacing the installed folder when `replacing`. The
-// setup question comes before anything changes; a setup that fails puts everything back.
+// setup question comes before anything changes (declining it on an update keeps the old pack); a setup that fails
+// puts everything back.
 Result<PackAdded> install(const Staged &staged, PackSummary summary, const QString &packsDir, const QString &target,
                           const PackPrompts &prompts, bool replacing, TrustStore &trust) {
     summary.source = staged.source;
@@ -515,6 +516,14 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
             return yes.errors();
         runSetup = *yes;
         added.setupSkipped = !*yes;
+        // An update swaps in a fresh copy, which has no environment (a .venv, downloads): without its setup the
+        // pack would stop working and the old environment would be deleted with the old folder. So the old pack
+        // stays as it was (#521).
+        if (replacing && !*yes)
+            return fail(QStringLiteral("setup_declined"),
+                        QStringLiteral("%1 was not updated: the new version needs its setup run to work, and you declined it.")
+                            .arg(summary.id),
+                        QStringLiteral("The installed version and its environment are unchanged. Update again and accept the setup."));
     }
     const Errors written = writeSource(staged.folder, staged.source);
     if (hasErrors(written))
