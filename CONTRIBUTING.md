@@ -64,6 +64,9 @@ Run the window offscreen if you only want to check that it starts: `QT_QPA_PLATF
   without a window when you can; wait on conditions (`QTRY_*`, signals), never on fixed sleeps; never raise a
   timeout to make a test pass. A flaky test is fixed or deleted, never re-run until green.
 - Fix every compiler, qmllint and test warning you meet in the files you touch.
+- Do not put `//` before a `"` on a line of a multi-line raw string (`R"(...)"`) in a test class: moc emits
+  nothing and the link fails with an undefined vtable. `bin/check-quick` (run by `bin/test`) catches it; see
+  docs/testing.md. It also fails a branch that moves the `templates` submodule backwards.
 - Update the docs in the same change. [docs/spec.md](docs/spec.md) is the spec: behavior it describes is the
   behavior Fugue has, so change it when you change the behavior. A new user-visible string goes in
   `src/i18n/en.json` (the `fugue_tests` check fails if it is missing).

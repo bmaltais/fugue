@@ -29,6 +29,7 @@ if [[ ${1:-} == --changed ]]; then
     shift
   fi
 fi
+"$root/bin/check-quick" "$base" # cheap source checks (raw-string moc trap, templates gitlink), no build
 # One full build-and-test run at a time on this machine, across all worktrees and agents: several at
 # once only slow each other down. A second run waits here for the first.
 lock="${XDG_RUNTIME_DIR:-/tmp}/fugue-test.lock"
