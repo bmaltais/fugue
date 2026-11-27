@@ -859,6 +859,7 @@ private slots:
         app.model.widgets()->setModelRoots({models.path()});
         app.model.widgets()->setModelSource([](const QString &, const QStringList &,
                                                std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        app.model.widgets()->setCatalog(ModelCatalog()); // the picker's own rows, not the shipped Download rows
         QVERIFY(app.open());
         app.click(app.in("models", "text_encoder"));
         QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
@@ -926,6 +927,7 @@ private slots:
         app.model.widgets()->setModelRoots({models.path()});
         app.model.widgets()->setModelSource([](const QString &, const QStringList &,
                                                std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        app.model.widgets()->setCatalog(ModelCatalog()); // the picker's own rows, not the shipped Download rows
         QVERIFY(app.open());
         app.click(app.in("lora", "lora"));
         QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
