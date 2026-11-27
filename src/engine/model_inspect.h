@@ -25,7 +25,7 @@ namespace fugue {
 struct EngineModel {
     bool recognised = false;
     QString version; // the engine's name for it ("Qwen Image", "SDXL Inpaint"); empty when not recognised
-    int id = -1;
+    QString id; // the engine's family id ("sdxl_inpaint", "flux2_klein")
     bool isDit = false;
     bool video = false;
     bool inpaint = false;

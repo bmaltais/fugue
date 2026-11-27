@@ -1,5 +1,6 @@
 #include "engine/model_family.h"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QRegularExpression>
@@ -54,6 +55,45 @@ QString modelFamily(const QString &resource, const QString &name) {
         if (rule.kinds.contains(kind) && rule.pattern.match(name).hasMatch())
             return rule.name;
     return {};
+}
+
+QString engineFamilyName(const QString &engineName) {
+    // The engine's names are in src/model/integrations/*.cpp of stable-diffusion.cpp (`definition.name`). Matched whole, case-insensitively.
+    // Where the engine cannot tell what the table can (FLUX.2 Klein 4B from 9B, Wan 2.1 from 2.2), the name stays at the family's width.
+    static const QHash<QString, QString> names = [] {
+        QHash<QString, QString> map;
+        const auto add = [&map](const QString &family, const QStringList &engine) {
+            for (const QString &name : engine)
+                map.insert(name.toLower(), family);
+        };
+        add(QStringLiteral("SD 1.5"), {QStringLiteral("SD 1.x"), QStringLiteral("SD 1.x Inpaint"), QStringLiteral("SD 1.x Tiny UNet"),
+                                       QStringLiteral("Instruct-Pix2Pix")});
+        add(QStringLiteral("SD 2.x"), {QStringLiteral("SD 2.x"), QStringLiteral("SD 2.x Inpaint"), QStringLiteral("SD 2.x Tiny UNet")});
+        add(QStringLiteral("SDXS"), {QStringLiteral("SDXS (512-DS)"), QStringLiteral("SDXS (09)")});
+        add(QStringLiteral("SDXL"), {QStringLiteral("SDXL"), QStringLiteral("SDXL Inpaint"), QStringLiteral("SDXL Instruct-Pix2Pix"),
+                                     QStringLiteral("SDXL (Vega)"), QStringLiteral("SDXL (SSD1B)")});
+        add(QStringLiteral("Stable Video Diffusion"), {QStringLiteral("SVD")});
+        add(QStringLiteral("SD3"), {QStringLiteral("SD3.x")});
+        add(QStringLiteral("FLUX.1"), {QStringLiteral("Flux"), QStringLiteral("Flux Fill"), QStringLiteral("Flux Control")});
+        add(QStringLiteral("FLUX.2"), {QStringLiteral("Flux.2")});
+        add(QStringLiteral("FLUX.2 Klein"), {QStringLiteral("Flux.2 klein")}); // the engine does not tell 4B from 9B
+        add(QStringLiteral("FLUX.3 Klein"), {QStringLiteral("Flux.3 Image Klein")});
+        add(QStringLiteral("Flex.2"), {QStringLiteral("Flex.2")});
+        add(QStringLiteral("Chroma"), {QStringLiteral("Chroma"), QStringLiteral("Chroma Radiance")});
+        add(QStringLiteral("Wan 2.x"), {QStringLiteral("Wan 2.x")}); // 2.1 or 2.2: not in the header
+        add(QStringLiteral("Wan 2.2"), {QStringLiteral("Wan 2.2 I2V"), QStringLiteral("Wan 2.2 TI2V"), QStringLiteral("Wan 2.2 S2V")});
+        add(QStringLiteral("Qwen-Image"), {QStringLiteral("Qwen Image"), QStringLiteral("Qwen Image Layered"), QStringLiteral("Qwen Image 2.1")});
+        add(QStringLiteral("Z-Image"), {QStringLiteral("Z-Image"), QStringLiteral("Z-Image L2P")});
+        add(QStringLiteral("Krea 2"), {QStringLiteral("Krea2")});
+        add(QStringLiteral("HiDream"), {QStringLiteral("HiDream O1")});
+        add(QStringLiteral("MOSS Image"), {QStringLiteral("MOSS-Image")});
+        add(QStringLiteral("LongCat Image"), {QStringLiteral("Longcat-Image")});
+        add(QStringLiteral("ERNIE Image"), {QStringLiteral("Ernie Image")});
+        add(QStringLiteral("Fibo 2"), {QStringLiteral("Fibo-2.0")});
+        add(QStringLiteral("LTX"), {QStringLiteral("LTXAV")});
+        return map;
+    }();
+    return names.value(engineName.toLower(), engineName);
 }
 
 QStringList modelFamilies(const QJsonArray &models) {

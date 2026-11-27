@@ -546,7 +546,9 @@ private slots:
         const QString script = bench.dir.filePath("inspect.sh");
         writeFile(script, "#!/bin/sh\nshift\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\"; done\n");
         QVERIFY(QFile::setPermissions(script, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
-        const Values inputs{{"diffusion_model", Value(bench.model("fugue/diffusion-model", "diffusion_models/odd.safetensors"))}};
+        const Values inputs{{"diffusion_model", Value(bench.model("fugue/diffusion-model", "diffusion_models/odd.safetensors"))},
+                            {"text_encoder", Value(bench.model("fugue/text-encoder", "clip/Qwen3-4B.gguf"))},
+                            {"vae", Value(bench.model("fugue/vae", "vae/ae.safetensors"))}};
         const auto check = [&] { return bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs)); };
         QVERIFY(check().isEmpty()); // no local helper (the suite sets none)
         const QByteArray before = qgetenv("FUGUE_HELPER");
@@ -824,6 +826,46 @@ private slots:
         const Result<JobRequest> wide = bench.request(kTextEncode, {{"model", Value(flux1(bench, "clip_g"))}, {"prompt", Value("a fox")}});
         QVERIFY(!wide);
         QVERIFY(wide.error().message.contains("1280 wide"));
+    }
+
+    // #241: SDXL inpainting is the inpaint UNet (unet folder) used with the checkpoint it was made from, which gives the text
+    // encoders and the VAE (a separate SDXL VAE beside the inpaint UNet decodes white): the engine's model_path with diffusion_model_path.
+    void loadModelsTakesADiffusionModelWithACheckpointAndNeedsNoEncoderOrVae() {
+        Bench bench;
+        const QJsonObject unet = bench.model("fugue/diffusion-model", "unet/sdxl_inpaint.safetensors");
+        const QJsonObject checkpoint = bench.model("fugue/model", "checkpoints/sdxl_base.safetensors");
+        const QJsonObject model = bench.loaded({{"diffusion_model", unet}, {"checkpoint", checkpoint}});
+        const QJsonObject derived = model.value("derived").toObject();
+        QVERIFY(!derived.contains("text_encoder"));
+        QVERIFY(!derived.contains("vae"));
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject context = request->params.value("context").toObject();
+        QCOMPARE(context.value("model_path").toString(), Bench::modelPath("checkpoints/sdxl_base.safetensors"));
+        QCOMPARE(context.value("diffusion_model_path").toString(), Bench::modelPath("unet/sdxl_inpaint.safetensors"));
+        QVERIFY(!context.contains("llm_path"));
+        QVERIFY(!context.contains("vae_path"));
+        // The node's own check has nothing to say of it.
+        QVERIFY(bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, {{"diffusion_model", Value(unet)}, {"checkpoint", Value(checkpoint)}})).isEmpty());
+    }
+
+    void withoutACheckpointLoadModelsStillNeedsTheTextEncoderAndTheVae() {
+        Bench bench;
+        const QJsonObject parts = bench.zImage();
+        for (const QString &part : {QStringLiteral("text_encoder"), QStringLiteral("vae")}) {
+            QJsonObject less = parts;
+            less.remove(part);
+            Values inputs;
+            for (auto it = less.begin(); it != less.end(); ++it)
+                inputs.insert(it.key(), Value(it.value()));
+            const Result<Values> out = bench.run(kLoadModels, inputs);
+            QVERIFY(!out);
+            QCOMPARE(out.error().code, QStringLiteral("input_missing"));
+            QCOMPARE(out.error().input, part);
+            const Errors checked = bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs));
+            QCOMPARE(checked.size(), 1);
+            QCOMPARE(checked.first().input, part);
+        }
     }
 
     // #704: SD3's split files (diffusion model, CLIP-L, CLIP-G, T5) and Wan 2.1 image-to-video's CLIP vision model.

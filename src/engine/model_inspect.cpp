@@ -39,7 +39,7 @@ EngineModel EngineModel::fromJson(const QJsonObject &object) {
     if (!model.recognised)
         return model;
     model.version = object.value("version").toString();
-    model.id = object.value("id").toInt(-1);
+    model.id = object.value("id").toString(); // the engine's family id ("sdxl_inpaint"); a cache of an older Fugue kept a number
     model.isDit = object.value("is_dit").toBool();
     model.video = object.value("video").toBool();
     model.inpaint = object.value("inpaint").toBool();
