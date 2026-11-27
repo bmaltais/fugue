@@ -151,6 +151,10 @@ public:
     // files of Dynamic Prompt), as text that changes when they do. It goes into the cache key (10.1);
     // empty (the default) leaves the key as it was. Called on the scheduler's thread.
     virtual QString keyExtra(const Values &inputs) const { Q_UNUSED(inputs); return {}; }
+    // The same for a kernel that needs more than the inputs to say it (the model file's header, through `hashes`, `registry` and
+    // `library`: a size step, #711). Only `node`, `type`, `inputs`, `hashes`, `registry`, `library` and `roots` are set. It is
+    // what the scheduler calls; the default is keyExtra(context.inputs). Called on the scheduler's thread.
+    virtual QString keyExtraFor(const NodeContext &context) const { return keyExtra(context.inputs); }
 
     // The lazy inputs (InputSpec::lazy) the node needs, asked once every input that is not lazy has its value
     // (`ready`: those inputs, by name, as they will reach the kernel; an empty one is absent). What feeds a lazy input
@@ -188,6 +192,10 @@ public:
     // does. It goes into the cache key (10.1), so a changed template is not served from the old
     // result. Empty (the default) leaves the key as it was. Called on the scheduler's thread.
     virtual QString keyExtra(const Values &inputs) const { Q_UNUSED(inputs); return {}; }
+    // The same for a kernel that needs more than the inputs to say it (the model file's header, through `hashes`, `registry` and
+    // `library`: a size step, #711). Only `node`, `type`, `inputs`, `hashes`, `registry`, `library` and `roots` are set. It is
+    // what the scheduler calls; the default is keyExtra(context.inputs). Called on the scheduler's thread.
+    virtual QString keyExtraFor(const NodeContext &context) const { return keyExtra(context.inputs); }
 
     // The node's outputs from a finished job: file references become media
     // handles (MediaHandle::probe), and the values used (seed, model, engine)

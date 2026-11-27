@@ -833,10 +833,10 @@ private:
             m_outcome.routes.insert(n.path, NodeRoute{n.selection->instance, sendsOf(*n.type, *n.node)});
             parts.engine = n.selection->engine;
             parts.model = resourceIdentity(n.selection->model.handle);
-            parts.extra = n.providerKernel->keyExtra(n.inputs);
+            parts.extra = n.providerKernel->keyExtraFor(checkContext(n));
             n.models = {n.selection->instance + QLatin1Char('\n') + parts.model};
         } else if (n.kernel) {
-            parts.extra = n.kernel->keyExtra(n.inputs);
+            parts.extra = n.kernel->keyExtraFor(checkContext(n));
             // A pack node reads secrets that are not inputs: a hash of them is part of its key (#498).
             if (const QString secrets = packSecretsKeyPart(*n.type); !secrets.isEmpty()) {
                 parts.extra += QStringLiteral("\nsecrets:") + secrets;

@@ -56,6 +56,7 @@
 #include "nodes/denoise_cut.h"
 #include "nodes/detail_ops.h"
 #include "nodes/image_cover.h"
+#include "nodes/model_step.h"
 #include "nodes/pixel_io.h"
 #include "nodes/resample.h"
 
@@ -1215,6 +1216,9 @@ class VaeEncodeKernel : public StageKernel {
 public:
     VaeEncodeKernel() : StageKernel(QStringLiteral("latent.encode")) {}
 
+    // The size step is not an input: a model that resolves later is another size (#711).
+    QString keyExtraFor(const NodeContext &context) const override { return sizeStepKey(context); }
+
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
         const Result<ModelFiles> files = modelInput(context, selection);
         if (!files)
@@ -1223,8 +1227,8 @@ public:
         const Result<QString> file = readable(image, QDir(context.workDir).filePath(QStringLiteral("image.png")));
         if (!file)
             return file.errors();
-        // The helper scales the image to the size it is given: its own, in steps of 16.
-        const QSize size = sizeOf(image);
+        // The helper scales the image to the size it is given: its own, in the steps the model aligns to (64 for a UNet).
+        const QSize size = sizeOf(image, modelSizeStep(context, context.input(QStringLiteral("model")).json().toObject()));
         // A mask is not sent: it stays with the latent for the Sampler. It is checked here.
         if (const Value mask = context.input(QStringLiteral("mask")); !mask.isEmpty()) {
             if (!mask.isMedia() || mask.media().width() != image.width() || mask.media().height() != image.height())
@@ -1245,7 +1249,8 @@ public:
     }
 
     Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
-        const QSize size = sizeOf(context.input(QStringLiteral("image")).media());
+        const QSize size = sizeOf(context.input(QStringLiteral("image")).media(),
+                                  modelSizeStep(context, context.input(QStringLiteral("model")).json().toObject()));
         LatentMeta meta;
         meta.width = size.width();
         meta.height = size.height();
@@ -1272,8 +1277,8 @@ public:
     }
 
 private:
-    static QSize sizeOf(const MediaHandle &image) {
-        const auto step = [](int side) { return std::max(1, int(std::lround(double(side) / kSizeStep))) * kSizeStep; };
+    static QSize sizeOf(const MediaHandle &image, int sizeStep) {
+        const auto step = [sizeStep](int side) { return std::max(1, int(std::lround(double(side) / sizeStep))) * sizeStep; };
         return {step(image.width()), step(image.height())};
     }
 
@@ -1318,6 +1323,9 @@ struct DetailStep {
 // capability), keeps nothing and gives the picture back as it came.
 class DetailRegionsKernel : public StageKernel {
 public:
+    // The size step is not an input: a model that resolves later is another size (#711).
+    QString keyExtraFor(const NodeContext &context) const override { return sizeStepKey(context); }
+
     DetailRegionsKernel() : StageKernel(QStringLiteral("latent.sample")) {}
 
     // Under validate: the boxes written are one `x1 y1 x2 y2` a line. Boxes that are wired are the run's.
@@ -1547,6 +1555,7 @@ private:
         const DenoiseScale scale = mode == QLatin1String("smaller_less") ? DenoiseScale::SmallerLess
                                    : mode == QLatin1String("smaller_more") ? DenoiseScale::SmallerMore
                                                                            : DenoiseScale::Fixed;
+        const int sizeStep = modelSizeStep(context, context.input(QStringLiteral("model")).json().toObject());
         QList<DetailStep> steps;
         for (size_t i = 0; i < boxes->size(); ++i) {
             const Corners &box = boxes->at(i);
@@ -1556,7 +1565,7 @@ private:
             DetailStep step;
             step.index = int(i);
             step.crop = widenThin(*padded, target, image.width(), image.height());
-            step.size = detailSize(step.crop, target, kSizeStep);
+            step.size = detailSize(step.crop, target, sizeStep);
             step.denoise = scaledDenoise(context.input(QStringLiteral("denoise")).number(), scale,
                                          clampedArea(box, image.width(), image.height()), double(image.width()) * image.height());
             step.seed = detailSeed(seed, shift, int(i));

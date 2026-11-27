@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/crop-to-mask",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Crop to Mask",
   "description": "Cut out the part of a picture around a mask, with room around it, and resize it to about a megapixel, so a small region is redrawn at the model's full detail whatever the size of the picture. The box holds every painted pixel, grown by Padding on each side, moved inside the picture where it sticks out. The stitch output remembers where the crop came from: give it to Stitch to put the redrawn crop back.",
   "category": "Image/Mask",
@@ -29,6 +29,13 @@
       "label": "Mask"
     },
     {
+      "name": "model",
+      "type": "fugue/model",
+      "label": "Model",
+      "optional": true,
+      "description": "The model that will redraw the crop. The engine aligns a picture to the model's own step (64 for Stable Diffusion 1.x, 2.x and XL, 16 for the others), so the crop is sized to it and Stitch finds the shape it made. Unwired or unknown: the step is Multiple of."
+    },
+    {
       "name": "padding",
       "type": "number",
       "label": "Padding",
@@ -53,7 +60,7 @@
       "name": "multiple",
       "type": "number",
       "label": "Multiple of",
-      "description": "Each side of the crop is a multiple of this. 16 is the step the diffusion models work in.",
+      "description": "Each side of the crop is a multiple of this. 16 is the step the diffusion models work in. With a Model, the step it aligns to (64 for Stable Diffusion 1.x, 2.x and XL) is used when it is larger.",
       "default": 16,
       "min": 1,
       "max": 256,
