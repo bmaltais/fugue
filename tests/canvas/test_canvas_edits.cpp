@@ -62,6 +62,18 @@ QVariantMap link(CanvasModel &canvas, const QString &to) {
     return {};
 }
 
+// The names of a node's input rows on its face, in order.
+QStringList inputNames(const CanvasModel &canvas, const QString &node) {
+    QStringList names;
+    for (int i = 0; i < canvas.nodes()->rowCount(); ++i) {
+        const QModelIndex index = canvas.nodes()->index(i, 0);
+        if (canvas.nodes()->data(index, NodeList::NodeId).toString() == node)
+            for (const QVariant &port : canvas.nodes()->data(index, NodeList::Inputs).toList())
+                names << port.toMap().value("name").toString();
+    }
+    return names;
+}
+
 QString from(const CanvasModel &canvas, const QString &node, const QString &input) {
     const InputValue value = canvas.document().graph.nodes.value(node).inputs.value(input);
     return value.kind() == InputValue::Kind::Link ? value.from().toString() : QString();
@@ -761,6 +773,48 @@ private slots:
         QCOMPARE(one.value("zoom").toDouble(), 750.0 / 240);
         canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(!canvas.fitView(1000, 1000));
+    }
+
+    // #714: Apply LoRAs shows the rows it has and one empty row of a LoRA alone. Picking a LoRA in the last row makes the
+    // next; setting one to None, or taking its link away, takes its row out with its strength; each is one undo step, and
+    // the other rows keep their numbers.
+    void repeatingRowsGrowAndShrinkAsOneStepEach() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "pick": {"type": "local/missing", "version": "1.0.0", "inputs": {}},
+            "apply": {"type": "fugue/apply-loras", "version": "1.0.0",
+                      "inputs": {"lora_1": {"from": "pick.lora"}, "strength_1": 0.7}}}},
+          "layout": {"nodes": {"pick": {"pos": [0, 0]}, "apply": {"pos": [300, 0]}}}})"));
+        QCOMPARE(inputNames(canvas, "apply"), (QStringList{"model", "lora_1", "strength_1", "enabled_1", "lora_2"}));
+        const QVariantMap empty = canvas.inputPort("apply", "lora_2");
+        QCOMPARE(empty.value("label").toString(), QStringLiteral("Add LoRA"));
+        QVERIFY(empty.value("grows").toBool());
+        QCOMPARE(canvas.inputPort("apply", "lora_1").value("label").toString(), QStringLiteral("LoRA 1"));
+        const QVariantMap lora{{"resource", "fugue/lora"}, {"name", "detail.safetensors"}};
+        QCOMPARE(canvas.widgets()->setModel("apply", "lora_2", lora), QString());
+        QCOMPARE(inputNames(canvas, "apply"),
+                 (QStringList{"model", "lora_1", "strength_1", "enabled_1", "lora_2", "strength_2", "enabled_2", "lora_3"}));
+        QCOMPARE(canvas.undoStack()->count(), 1);
+        // A row turned off is drawn faded, its switch not.
+        QCOMPARE(canvas.widgets()->setValue("apply", "enabled_2", false), QString());
+        QVERIFY(canvas.inputPort("apply", "strength_2").value("rowOff").toBool());
+        QVERIFY(!canvas.inputPort("apply", "enabled_2").value("rowOff").toBool());
+        canvas.undo();
+        QVERIFY(!canvas.inputPort("apply", "strength_2").value("rowOff").toBool());
+
+        QVERIFY(canvas.disconnectInput("apply", "lora_1"));
+        QCOMPARE(inputNames(canvas, "apply"), (QStringList{"model", "lora_2", "strength_2", "enabled_2", "lora_3"}));
+        QVERIFY(!canvas.document().graph.nodes.value("apply").inputs.contains("strength_1")); // its values went with it
+        QCOMPARE(canvas.undoStack()->count(), 2);
+        canvas.undo();
+        QCOMPARE(from(canvas, "apply", "lora_1"), QStringLiteral("pick.lora"));
+        QCOMPARE(canvas.document().graph.nodes.value("apply").inputs.value("strength_1").literal(), QJsonValue(0.7));
+
+        canvas.widgets()->unset("apply", "lora_2");
+        QCOMPARE(inputNames(canvas, "apply"), (QStringList{"model", "lora_1", "strength_1", "enabled_1", "lora_2"}));
+        QCOMPARE(canvas.undoStack()->count(), 2); // the redo of the disconnect is gone, the clearing is a step of its own
+        canvas.undo();
+        QCOMPARE(inputNames(canvas, "apply").size(), 8);
     }
 };
 

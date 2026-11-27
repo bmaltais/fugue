@@ -99,6 +99,25 @@ struct PartInputs {
     QString diffusionModel, textEncoder, vae, lora, highNoise, clipL, clipG, clipVision, checkpoint;
 };
 
+// model_mismatch when the LoRA does not fit the diffusion model, by their headers; the caller says which input to blame.
+std::optional<Error> loraMisfit(const ModelShape &diffusion, const ModelShape &lora, const QString &loraName, const QString &modelName) {
+    LayerMismatch layer;
+    if (loraFits(diffusion, lora, &layer) != Fit::DoesNotFit)
+        return std::nullopt;
+    const QString why = layer.layer.isEmpty() // none of its layers is in the model
+                            ? QStringLiteral("the layers it changes are not in the model; it was made for another.")
+                        : layer.model.in == 0 // a block the model does not have
+                            ? QStringLiteral("it changes %1, a block the model does not have; it was made for a deeper one.")
+                                  .arg(layer.layer)
+                            : QStringLiteral("it changes a layer %1 to %2 wide that is %3 to %4 in the model.")
+                                  .arg(layer.lora.in)
+                                  .arg(layer.lora.out)
+                                  .arg(layer.model.in)
+                                  .arg(layer.model.out);
+    return makeError(QStringLiteral("model_mismatch"), QStringLiteral("The LoRA %1 does not fit %2: %3").arg(loraName, modelName, why),
+                     QStringLiteral("Pick another LoRA: its list shows the LoRAs that fit first."));
+}
+
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
 std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject &paths, const PartInputs &inputs,
                                    const QJsonArray &loras = {}) {
@@ -242,22 +261,13 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
     const QJsonArray steps = derived.value(QStringLiteral("apply")).toArray();
     for (qsizetype i = 0; i < steps.size() && i < loras.size(); ++i) {
         const std::optional<ModelShape> lora = shapes.of(loras.at(i).toObject().value(QStringLiteral("path")).toString());
-        LayerMismatch layer;
-        if (!lora || loraFits(*diffusion, *lora, &layer) != Fit::DoesNotFit)
+        if (!lora)
             continue;
         const QString loraName = steps.at(i).toObject().value(QStringLiteral("lora")).toObject().value(QStringLiteral("name")).toString();
-        const QString why = layer.layer.isEmpty() // none of its layers is in the model
-                                ? QStringLiteral("the layers it changes are not in the model; it was made for another.")
-                            : layer.model.in == 0 // a block the model does not have
-                                ? QStringLiteral("it changes %1, a block the model does not have; it was made for a deeper one.")
-                                      .arg(layer.layer)
-                                : QStringLiteral("it changes a layer %1 to %2 wide that is %3 to %4 in the model.")
-                                      .arg(layer.lora.in)
-                                      .arg(layer.lora.out)
-                                      .arg(layer.model.in)
-                                      .arg(layer.model.out);
-        return mismatch(inputs.lora, QStringLiteral("The LoRA %1 does not fit %2: %3").arg(loraName, name("base"), why),
-                        QStringLiteral("Pick another in Apply LoRA: its list shows the LoRAs that fit first."));
+        if (std::optional<Error> misfit = loraMisfit(*diffusion, *lora, loraName, name("base"))) {
+            misfit->input = inputs.lora;
+            return misfit;
+        }
     }
     return std::nullopt;
 }
@@ -845,6 +855,90 @@ public:
                                  {"strength", context.input(QStringLiteral("strength")).number()}});
         derived.insert(QStringLiteral("apply"), apply);
         return Values{{QStringLiteral("model"), Value(modelHandle(derived))}};
+    }
+};
+
+// Apply LoRAs (#714): Apply LoRA's step for each row that is on, in row order (its `loras` repeat: `lora_<n>`,
+// `strength_<n>`, `enabled_<n>`), so the model is the one a chain of Apply LoRA nodes makes and nothing downstream
+// changes. A row that is off, has no LoRA or a strength of 0 changes nothing and is left out of the model, so it is
+// out of every key downstream. A LoRA that does not fit the diffusion model, by the files' headers, is blamed on its
+// row's LoRA (the canvas check when the model is known, and the run), where its picker is; a file that is not here is
+// the stage's to report, as for Apply LoRA.
+class ApplyLorasKernel : public NodeKernel {
+public:
+    Errors check(const NodeContext &context) const override {
+        if (context.input(QStringLiteral("model")).isEmpty())
+            return {};
+        const std::optional<Error> misfit = firstMisfit(context, rows(context));
+        return misfit ? Errors{*misfit} : Errors{};
+    }
+
+    Result<Values> run(const NodeContext &context) override {
+        const QList<Row> on = rows(context);
+        if (const std::optional<Error> misfit = firstMisfit(context, on))
+            return *misfit;
+        QJsonObject derived = derivedOf(context.input(QStringLiteral("model")).json().toObject());
+        QJsonArray apply = derived.value(QStringLiteral("apply")).toArray();
+        for (const Row &row : on)
+            apply.append(QJsonObject{{"lora", row.lora}, {"strength", row.strength}});
+        derived.insert(QStringLiteral("apply"), apply);
+        return Values{{QStringLiteral("model"), Value(modelHandle(derived))}};
+    }
+
+private:
+    struct Row {
+        int number = 0;
+        QJsonObject lora;
+        double strength = 1;
+    };
+
+    // The rows that change the model, in row order.
+    static QList<Row> rows(const NodeContext &context) {
+        QList<Row> on;
+        if (!context.type || context.type->repeats.isEmpty())
+            return on;
+        const auto has = [&](const QString &name) { return !context.input(name).isEmpty(); };
+        for (const int number : context.type->rowsOf(0, has)) {
+            const Value enabled = context.input(NodeType::rowInputName(QStringLiteral("enabled"), number));
+            const Value strength = context.input(NodeType::rowInputName(QStringLiteral("strength"), number));
+            Row row{number, context.input(NodeType::rowInputName(QStringLiteral("lora"), number)).json().toObject(),
+                    strength.isEmpty() ? 1.0 : strength.number()};
+            if ((!enabled.isEmpty() && !enabled.json().toBool(true)) || row.lora.isEmpty() || row.strength == 0)
+                continue;
+            on << row;
+        }
+        return on;
+    }
+
+    // The first row whose LoRA does not fit the model's diffusion model, by the headers of the files found here (a check
+    // reads no file to find them, 8.9). Nothing when either is not known.
+    static std::optional<Error> firstMisfit(const NodeContext &context, const QList<Row> &on) {
+        if (on.isEmpty())
+            return std::nullopt;
+        const QJsonObject base = derivedOf(context.input(QStringLiteral("model")).json().toObject()).value(QStringLiteral("base")).toObject();
+        if (base.value(QStringLiteral("resource")).toString() == kModelType)
+            return std::nullopt; // a checkpoint: its layers are not read here
+        std::optional<ModelLibrary> own;
+        const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));
+        const auto path = [&](const QJsonObject &handle) {
+            const Result<QString> found = library.resolve(handle, *context.hashes, ModelLibrary::Hashing::RememberedOnly);
+            return found ? found.value() : QString();
+        };
+        ModelShapes &shapes = ModelShapes::shared();
+        const std::optional<ModelShape> diffusion = shapes.of(path(base));
+        if (!diffusion)
+            return std::nullopt;
+        for (const Row &row : on) {
+            const std::optional<ModelShape> lora = shapes.of(path(row.lora));
+            if (!lora)
+                continue;
+            if (std::optional<Error> misfit = loraMisfit(*diffusion, *lora, row.lora.value(QStringLiteral("name")).toString(),
+                                                         base.value(QStringLiteral("name")).toString())) {
+                misfit->input = NodeType::rowInputName(QStringLiteral("lora"), row.number);
+                return misfit;
+            }
+        }
+        return std::nullopt;
     }
 };
 
@@ -1767,6 +1861,7 @@ private:
 void addComponentKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/load-models"), std::make_shared<LoadModelsKernel>());
     kernels.add(QStringLiteral("fugue/apply-lora"), std::make_shared<ApplyLoraKernel>());
+    kernels.add(QStringLiteral("fugue/apply-loras"), std::make_shared<ApplyLorasKernel>());
     kernels.add(QStringLiteral("fugue/empty-latent"), std::make_shared<EmptyLatentKernel>());
     kernels.add(QStringLiteral("fugue/empty-video-latent"), std::make_shared<EmptyLatentKernel>(true));
     kernels.add(QStringLiteral("fugue/text-encode"), std::make_shared<TextEncodeKernel>());

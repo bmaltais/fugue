@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QQuickStyle>
+#include <QScopeGuard>
 #include <QUndoStack>
 
 #include "canvas/widget_edit.h"
@@ -946,6 +947,51 @@ private slots:
         QTRY_COMPARE(rows(), (QStringList{"# Fits klein9b.safetensors", "b-klein9b.safetensors", "# Other",
                                           "a-klein4b.safetensors (dim)", "Type a name…"}));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#714): Apply LoRAs with two rows (the second off) and its empty "Add LoRA" row, beside the chain
+    // of Apply LoRA nodes it replaces, in both node styles, dark and light, and right to left. Pictures only; nothing is asserted.
+    void applyLorasLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        const char *graph = R"({"fugue": 1,
+          "graph": {"nodes": {
+            "models": {"type": "fugue/load-models", "version": "1.0.0",
+              "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "name": "flux-2-klein-9b.safetensors"}}},
+            "one": {"type": "fugue/apply-lora", "version": "1.0.0",
+              "inputs": {"model": {"from": "models.model"}, "lora": {"resource": "fugue/lora", "name": "detail-tweaker.safetensors"},
+                         "strength": 0.8}},
+            "two": {"type": "fugue/apply-lora", "version": "1.0.0",
+              "inputs": {"model": {"from": "one.model"}, "lora": {"resource": "fugue/lora", "name": "ink-style.safetensors"}}},
+            "stack": {"type": "fugue/apply-loras", "version": "1.0.0",
+              "inputs": {"model": {"from": "models.model"},
+                         "lora_1": {"resource": "fugue/lora", "name": "detail-tweaker.safetensors"}, "strength_1": 0.8,
+                         "lora_2": {"resource": "fugue/lora", "name": "ink-style.safetensors"}, "enabled_2": false}}}},
+          "layout": {"nodes": {"models": {"pos": [20, 120]}, "one": {"pos": [330, 20]}, "two": {"pos": [620, 20]},
+                               "stack": {"pos": [330, 260]}},
+                     "view": {"center": [470, 300], "zoom": 1}}})";
+        struct Shot {
+            const char *theme;
+            const char *style;
+            const char *tag;
+            Qt::LayoutDirection direction;
+        };
+        for (const Shot &each : {Shot{"catppuccin", "compact", "compact-dark", Qt::LeftToRight},
+                                 Shot{"catppuccin-latte", "compact", "compact-light", Qt::LeftToRight},
+                                 Shot{"catppuccin", "flat", "flat-dark", Qt::LeftToRight},
+                                 Shot{"catppuccin-latte", "flat", "flat-light", Qt::LeftToRight},
+                                 Shot{"catppuccin", "compact", "compact-rtl", Qt::RightToLeft}}) {
+            const auto restore = qScopeGuard([] { QGuiApplication::setLayoutDirection(Qt::LeftToRight); });
+            App app(load(graph), {}, canvas_test::Look{each.theme, 8, each.style});
+            QVERIFY(app.open());
+            QGuiApplication::setLayoutDirection(each.direction);
+            app.window->resize(1000, 640);
+            app.workflows.dismissNotice();
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(app.window).save(QString("%1/apply-loras-%2.png").arg(out, each.tag)));
+        }
     }
 
     // By hand, against a real models folder (#85, #86): FUGUE_REAL_MODELS=<folders, ":" between>

@@ -99,6 +99,10 @@ PortMatch compatiblePort(const NodeType &type, const PortSpec &dragged, bool dra
         for (const InputSpec &in : type.inputs)
             if (compatibility(dragged, in.type) == Compatibility::Compatible)
                 return {in.name, false};
+        // A repeating input's key (6.1, #714): a new node's first row.
+        for (const RepeatSpec &repeat : type.repeats)
+            if (compatibility(dragged, repeat.items.first().type) == Compatibility::Compatible)
+                return {NodeType::rowInputName(repeat.items.first().name, 1), false};
     } else {
         for (const OutputSpec &out : type.outputs)
             if (compatibility(out.type, dragged) == Compatibility::Compatible && (!sameList || out.type.list == dragged.list))

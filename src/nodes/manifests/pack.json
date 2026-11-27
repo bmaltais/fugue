@@ -8,6 +8,7 @@
   "description": "The nodes that ship with Fugue.",
   "nodes": [
     "apply-lora",
+    "apply-loras",
     "apply-lut",
     "and",
     "blend",

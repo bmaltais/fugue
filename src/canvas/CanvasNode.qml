@@ -497,7 +497,8 @@ Item {
                     y: modelData.rowTop
                     width: node.width
                     height: modelData.rowHeight
-                    opacity: dim ? 0.25 : 1
+                    // A row of a repeating input that is turned off (#714) is faded, its On switch not.
+                    opacity: dim ? 0.25 : modelData.rowOff === true ? 0.5 : 1
 
                     // Hover help: the label in bold and the manifest's description (empty: none), then the whole value
                     // when the widget had to cut it short (a narrow node).

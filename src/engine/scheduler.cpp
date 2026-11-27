@@ -556,22 +556,22 @@ private:
     // will not run (upstream_empty, or missing_input), and nothing is asked of its lazy inputs.
     Values strictValues(NodeRun &n, bool &unknown, bool &empty) {
         Values values;
-        for (const InputSpec &spec : n.type->inputs) {
-            if (spec.lazy)
+        for (const InputSpec *spec : n.type->inputsOf(n.node->inputs)) {
+            if (spec->lazy)
                 continue;
-            const auto written = n.node->inputs.constFind(spec.name);
+            const auto written = n.node->inputs.constFind(spec->name);
             if (written != n.node->inputs.constEnd() && written->kind() == InputValue::Kind::Auto) {
                 unknown = unknown || m_dry;
                 continue;
             }
             Value value;
             if (written != n.node->inputs.constEnd() && !written->isEmpty())
-                value = resolveValue(n, spec, *written, unknown);
-            if (value.isEmpty() && !spec.defaultValue.isUndefined())
-                value = Value(spec.defaultValue);
+                value = resolveValue(n, *spec, *written, unknown);
+            if (value.isEmpty() && !spec->defaultValue.isUndefined())
+                value = Value(spec->defaultValue);
             if (!value.isEmpty())
-                values.insert(spec.name, value);
-            else if (spec.required())
+                values.insert(spec->name, value);
+            else if (spec->required())
                 empty = true;
         }
         return values;
@@ -1137,17 +1137,17 @@ private:
     ResolvedInputs resolveInputs(NodeRun &n) {
         ResolvedInputs resolved;
         n.inputs.clear();
-        for (const InputSpec &spec : n.type->inputs) {
-            if (n.declined.contains(spec.name))
+        for (const InputSpec *spec : n.type->inputsOf(n.node->inputs)) {
+            if (n.declined.contains(spec->name))
                 continue; // a lazy input the node did not ask for is not read, so it is not in the key either
-            const auto written = n.node->inputs.constFind(spec.name);
+            const auto written = n.node->inputs.constFind(spec->name);
             Value value;
             bool linked = false;
             bool thisUnknown = false;
             if (written != n.node->inputs.constEnd() && !written->isEmpty()) {
                 linked = hasLink(*written);
-                value = resolveValue(n, spec, *written, thisUnknown);
-                if (spec.type.list && !value.isList() && !value.isEmpty())
+                value = resolveValue(n, *spec, *written, thisUnknown);
+                if (spec->type.list && !value.isList() && !value.isEmpty())
                     value = Value::list({value});
             }
             if (thisUnknown) {
@@ -1156,18 +1156,18 @@ private:
                 continue;
             }
             // A linked empty list is an absent value, except on an input that takes a list as it is (a Switch side): there it is the value.
-            const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked && !spec.type.takesList);
-            if (empty && !spec.defaultValue.isUndefined()) {
-                value = Value(spec.defaultValue);
-            } else if (empty && spec.required()) {
+            const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked && !spec->type.takesList);
+            if (empty && !spec->defaultValue.isUndefined()) {
+                value = Value(spec->defaultValue);
+            } else if (empty && spec->required()) {
                 if (linked) {
                     // Linked to an output that came back empty (3.3).
                     resolved.skipReason = QStringLiteral("upstream_empty");
                     return resolved;
                 }
                 Error problem = nodeError(QStringLiteral("missing_input"),
-                                          QStringLiteral("Input %1 has no value.").arg(spec.name));
-                problem.input = spec.name;
+                                          QStringLiteral("Input %1 has no value.").arg(spec->name));
+                problem.input = spec->name;
                 resolved.problem = problem;
                 return resolved;
             } else if (empty) {
@@ -1176,41 +1176,41 @@ private:
             // The compiler checked what was typed in; a value that came by link meets the
             // same rules (range, whole number, choices) before the kernel trusts it.
             if (linked) {
-                if (const Errors bad = linkedValueProblems(spec, value); !bad.isEmpty()) {
+                if (const Errors bad = linkedValueProblems(*spec, value); !bad.isEmpty()) {
                     resolved.problem = bad.first();
                     return resolved;
                 }
             }
-            const bool pathLiteral = isPathLiteral(spec, value);
+            const bool pathLiteral = isPathLiteral(*spec, value);
             if (pathLiteral) {
-                const Result<QString> located = normalisedPath(spec, value.text(), m_options.workflow);
+                const Result<QString> located = normalisedPath(*spec, value.text(), m_options.workflow);
                 if (!located) {
                     resolved.problem = located.error();
                     return resolved;
                 }
                 value = Value(located.value());
             }
-            n.inputs.insert(spec.name, value);
+            n.inputs.insert(spec->name, value);
             // A file read by path is keyed by its content, not its path (10.1). Hashing reads
             // it, so the read roots (13.6) are checked first, cached result or not.
-            if (pathLiteral && spec.holdsInputFile() && m_options.roots) {
-                const Result<QString> readable = m_options.roots->checkRead(value.text(), spec.name);
+            if (pathLiteral && spec->holdsInputFile() && m_options.roots) {
+                const Result<QString> readable = m_options.roots->checkRead(value.text(), spec->name);
                 if (!readable) {
                     resolved.problem = readable.error();
                     return resolved;
                 }
                 // The node reads, and the key names, the path that was checked.
                 value = Value(readable.value());
-                n.inputs.insert(spec.name, value);
+                n.inputs.insert(spec->name, value);
             }
-            if (pathLiteral && spec.holdsInputFile()) {
+            if (pathLiteral && spec->holdsInputFile()) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
-                    resolved.keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
+                    resolved.keyInputs.insert(spec->name, QJsonObject{{"file", hash}});
                     continue;
                 }
             }
-            resolved.keyInputs.insert(spec.name, value.identity());
+            resolved.keyInputs.insert(spec->name, value.identity());
         }
         return resolved;
     }
@@ -1900,14 +1900,14 @@ GraphCheck checkUnusedNodes(const CompiledGraph &graph, const RunEnvironment &en
         context.type = type;
         context.hashes = environment.hashes;
         context.registry = environment.registry;
-        for (const InputSpec &spec : type->inputs) {
-            if (spec.lazy)
+        for (const InputSpec *spec : type->inputsOf(it->inputs)) {
+            if (spec->lazy)
                 continue;
-            const auto written = it->inputs.constFind(spec.name);
+            const auto written = it->inputs.constFind(spec->name);
             Value value;
             if (written == it->inputs.constEnd() || written->isEmpty()) {
-                if (!spec.defaultValue.isUndefined())
-                    value = Value(spec.defaultValue);
+                if (!spec->defaultValue.isUndefined())
+                    value = Value(spec->defaultValue);
             } else if (written->kind() == InputValue::Kind::Literal) {
                 value = Value(written->literal());
             } else if (written->kind() == InputValue::Kind::Resource) {
@@ -1916,13 +1916,13 @@ GraphCheck checkUnusedNodes(const CompiledGraph &graph, const RunEnvironment &en
             if (value.isEmpty())
                 continue;
             // A path is read as a run reads it; one that cannot be placed (an unsaved workflow's relative file) is the run's to report.
-            if (isPathLiteral(spec, value)) {
-                const Result<QString> located = normalisedPath(spec, value.text(), options.workflow);
+            if (isPathLiteral(*spec, value)) {
+                const Result<QString> located = normalisedPath(*spec, value.text(), options.workflow);
                 if (!located)
                     continue;
                 value = Value(located.value());
             }
-            context.inputs.insert(spec.name, value);
+            context.inputs.insert(spec->name, value);
         }
         for (const Error &error : kernel ? kernel->check(context) : provider->check(context))
             sortFinding(error, it.key(), found.warnings, found.checkErrors);

@@ -96,7 +96,7 @@ Rectangle {
         if (hashing.progress !== undefined)
             return qsTr("Reading model… %1%").arg(Math.floor(hashing.progress * 100))
         if (kind === "model" && (port.value === undefined || port.value === ""))
-            return port.required ? qsTr("Choose a model") : emptyModelText
+            return port.grows === true ? "" : port.required ? qsTr("Choose a model") : emptyModelText
         return port.value !== undefined ? port.value : ""
     }
     // The glyph after the value (a Lucide name): what a click at the right end opens.

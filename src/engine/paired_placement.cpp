@@ -40,7 +40,8 @@ struct Need {
 // and lists of them, else the spec's default. A link's value and a random seed are not known yet, so they are left out, as under validate.
 Values knownInputs(const NodeType &type, const CompiledNode &node) {
     Values values;
-    for (const InputSpec &spec : type.inputs) {
+    for (const InputSpec *each : type.inputsOf(node.inputs)) {
+        const InputSpec &spec = *each;
         const InputValue written = node.inputs.value(spec.name);
         Value value;
         if (written.isEmpty()) {

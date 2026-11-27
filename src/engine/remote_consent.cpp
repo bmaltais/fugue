@@ -129,7 +129,8 @@ QString consentFingerprint(const ProviderInstance &instance) {
 
 QStringList sendsOf(const NodeType &type, const CompiledNode &node) {
     bool pictures = false, masks = false, audio = false, video = false, prompts = false;
-    for (const InputSpec &spec : type.inputs) {
+    for (const InputSpec *each : type.inputsOf(node.inputs)) {
+        const InputSpec &spec = *each;
         const QString kind = spec.type.type.id;
         const InputValue written = node.inputs.value(spec.name);
         const bool linked = !written.isEmpty() && (written.kind() == InputValue::Kind::Link || written.kind() == InputValue::Kind::List);
