@@ -18,6 +18,7 @@
   "%1 does not declare a secret named %2.": "%1 does not declare a secret named %2.",
   "%1 free": "%1 free",
   "%1 GB": "%1 GB",
+  "%1 has a thousands separator or a decimal separator this language does not use; type it without grouping, as 1000 or %2.": "%1 has a thousands separator or a decimal separator this language does not use; type it without grouping, as 1000 or %2.",
   "%1 is %2": "%1 is %2",
   "%1 is above %2": "%1 is above %2",
   "%1 is at least %2": "%1 is at least %2",
@@ -36,7 +37,6 @@
   "%1 does not compile: %2": "%1 does not compile: %2",
   "%1 from %2, into %3": "%1 from %2, into %3",
   "%1 h ago": "%1 h ago",
-  "%1 has a thousands separator or two decimal separators; type it without grouping, as 1000 or 0.5.": "%1 has a thousands separator or two decimal separators; type it without grouping, as 1000 or 0.5.",
   "%1 has no setting %2.": "%1 has no setting %2.",
   "%1 images (*.%2)": "%1 images (*.%2)",
   "%1 is bound to %2 in the same place (%3)": "%1 is bound to %2 in the same place (%3)",
@@ -122,6 +122,7 @@
   "Apply": "Apply",
   "Choose what this group shows on its card: the inputs it asks for and the results it gives.": "Choose what this group shows on its card: the inputs it asks for and the results it gives.",
   "From %1 on %2": "From %1 on %2",
+  "From %1 to %2": "From %1 to %2",
   "Group inputs and outputs": "Group inputs and outputs",
   "Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.": "Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.",
   "Label on the card": "Label on the card",
@@ -2376,5 +2377,6 @@
     "one": "Open with your file",
     "other": "Open with your %n files"
   },
-  "%1 in place of %2": "%1 in place of %2"
+  "%1 in place of %2": "%1 in place of %2",
+  "“%1” is not a number: type one, as 0.5, or leave the field empty for no limit.": "“%1” is not a number: type one, as 0.5, or leave the field empty for no limit."
 }

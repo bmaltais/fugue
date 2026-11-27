@@ -5,7 +5,8 @@
 // (QLocale::decimalPoint() is ","), and is refused elsewhere, so "1,000" is never read as 1 in English. A thousands separator
 // is never accepted. One rule for every typed number of the window: the group editor's and the App builder's ranges, a node's
 // number field while it steps, a slider's typed value and the Canvas view's selection fields. QML reads it as the
-// `TypedNumber` singleton, on the default locale (Qt.locale()).
+// `TypedNumber` singleton, on the default locale (Qt.locale()); `pattern` changes with it (the Translator says so when the
+// language changes live, localeChanged()). A number too large or too small for a double ("1e999", "1e-400") is refused.
 
 #include <QLocale>
 #include <QObject>
@@ -22,10 +23,14 @@ class TypedNumber : public QObject {
     QML_ELEMENT
     QML_SINGLETON
     // For a RegularExpressionValidator: empty or a number (a partial one, "-" or "1e", is Intermediate, so not acceptable).
-    Q_PROPERTY(QRegularExpression pattern READ pattern CONSTANT)
+    Q_PROPERTY(QRegularExpression pattern READ pattern NOTIFY patternChanged)
 
 public:
-    explicit TypedNumber(QObject *parent = nullptr) : QObject(parent) {}
+    explicit TypedNumber(QObject *parent = nullptr);
+    ~TypedNumber() override;
+
+    // The default locale changed (Translator::reload): every instance says its pattern changed, so the validators follow.
+    static void localeChanged();
 
     // The value of `text` read with `locale`'s decimal point, or none when it is not a whole number by the rule above
     // (empty included).
@@ -40,6 +45,9 @@ public:
     // The value, or NaN when the text is not a number.
     Q_INVOKABLE double parse(const QString &text) const;
     Q_INVOKABLE QString normalize(const QString &text) const { return normalized(text, QLocale()); }
+
+signals:
+    void patternChanged();
 };
 
 } // namespace fugue

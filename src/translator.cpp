@@ -1,4 +1,5 @@
 #include "translator.h"
+#include "typed_number.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -175,5 +176,6 @@ void Translator::reload() {
     const QLocale locale = formatLocale(language);
     QLocale::setDefault(locale);
     QGuiApplication::setLayoutDirection(locale.textDirection());
+    fugue::TypedNumber::localeChanged(); // a typed number's decimal point follows the language (typed_number.h)
     emit changed();
 }

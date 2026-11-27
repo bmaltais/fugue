@@ -223,6 +223,28 @@ private slots:
         QCOMPARE(f.groups.groupInterface().value("outputs").toList().value(0).toMap().value("label").toString(), QString());
     }
 
+    // A range limit that is not a whole number is refused with a reason, never kept as "no limit": a comma the language no
+    // longer reads as a decimal point (the editor hands it on unchanged), a number too large or too small for a double.
+    void aRangeLimitThatIsNotANumberIsRefused() {
+        Fixture f;
+        QVERIFY(f.groups.enterGroup(f.instance));
+        QVERIFY(f.groups.exposeInput("gen", "steps"));
+        QVERIFY(f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"min", "2"}}));
+        const auto min = [&] { return f.groups.groupInterface().value("inputs").toList().last().toMap().value("min"); };
+        QCOMPARE(min().toDouble(), 2.0);
+        const int steps = f.steps();
+        for (const char *text : {"0,5", "1e999", "1e-400"}) {
+            QVERIFY2(!f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"min", text}}), text);
+            QVERIFY2(f.groups.problem().contains(text), qPrintable(f.groups.problem()));
+            QCOMPARE(min().toDouble(), 2.0);
+        }
+        QCOMPARE(f.steps(), steps);
+        // Empty is no limit; a number given as a number (the editor's other fields) is kept.
+        QVERIFY(f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"min", ""}, {"max", 40}}));
+        QVERIFY(!min().isValid());
+        QCOMPARE(f.groups.groupInterface().value("inputs").toList().last().toMap().value("max").toDouble(), 40.0);
+    }
+
     void aRefusalSetsTheProblemAndAnEditThatWorksClearsIt() {
         Fixture f;
         QSignalSpy changed(&f.groups, &GroupEdit::problemChanged);

@@ -12,6 +12,7 @@
 #include "engine/group_library.h"
 #include "engine/groups.h"
 #include "engine/registry.h"
+#include "typed_number.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -41,13 +42,6 @@ QString problemText(const Error &error) {
 }
 
 QVariant optionalNumber(const std::optional<double> &value) { return value ? QVariant(*value) : QVariant(); }
-
-std::optional<double> numberOf(const QVariant &value) {
-    bool ok = false;
-    const double number = value.toDouble(&ok);
-    return value.isValid() && !value.isNull() && value.toString() != QString() && ok ? std::optional<double>(number)
-                                                                                     : std::nullopt;
-}
 
 // "A", "A and B", "A, B and C": a list as a sentence says it.
 QString spokenList(const QStringList &items) {
@@ -548,8 +542,28 @@ bool GroupEdit::editExposedInput(const QString &name, const QVariantMap &change)
     edit.name = change.value("name").toString().trimmed();
     edit.label = change.value("label").toString().trimmed();
     edit.section = change.value("section").toString().trimmed();
-    edit.min = numberOf(change.value("min"));
-    edit.max = numberOf(change.value("max"));
+    // A range limit: a number, or empty for none. Text that is not a whole number (a comma the
+    // language no longer reads as a decimal point, "1e999") is refused, never kept as no limit.
+    QString refused;
+    const auto limit = [&](const QVariant &value) -> std::optional<double> {
+        if (!value.isValid() || value.isNull())
+            return std::nullopt;
+        if (value.typeId() == QMetaType::Double || value.typeId() == QMetaType::Int || value.typeId() == QMetaType::LongLong)
+            return value.toDouble();
+        const QString text = value.toString().trimmed();
+        if (text.isEmpty())
+            return std::nullopt;
+        const std::optional<double> number = TypedNumber::read(text, QLocale::c());
+        if (!number && refused.isEmpty())
+            refused = text;
+        return number;
+    };
+    edit.min = limit(change.value("min"));
+    edit.max = limit(change.value("max"));
+    if (!refused.isEmpty()) {
+        setProblem(tr("\u201c%1\u201d is not a number: type one, as 0.5, or leave the field empty for no limit.").arg(refused));
+        return false;
+    }
     // The default as text from the editor: a number for a number input, else the text; empty: none.
     const QString type = change.value("type").toString();
     const QString given = change.value("default").toString().trimmed();

@@ -14,6 +14,7 @@
 #include "engine/model_use.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
+#include "typed_number.h"
 
 #include <QFileInfo>
 #include <QJsonArray>
@@ -329,20 +330,19 @@ QString WidgetEdit::parse(const Target &t, const QString &text, QJsonValue *valu
             *unsetIt = true;
             return {};
         }
-        // A comma is the decimal separator in many languages; there is no grouping here. A
-        // comma before exactly three digits (1,000) or two separators (1.000,5) reads as
-        // grouping in some language, so it is refused rather than taken for another number.
-        static const QRegularExpression grouped(QStringLiteral("^[+-]?\\d+,\\d{3}$"));
-        if (number.count(',') + number.count('.') > 1 || grouped.match(number).hasMatch())
-            return tr("%1 has a thousands separator or two decimal separators; type it without grouping, "
-                      "as 1000 or 0.5.").arg(number);
-        number.replace(',', '.');
-        bool ok = false;
-        const double d = number.toDouble(&ok);
-        if (!ok || !std::isfinite(d))
-            return tr("%1 is not a number.").arg(text.trimmed());
-        *value = d;
-        return {};
+        // One rule for every typed number (typed_number.h): a point always, a comma only where the
+        // language writes the decimal point as one, never a thousands separator. Numbers in a
+        // workflow file are JSON numbers and never come through here.
+        const QLocale locale;
+        if (const std::optional<double> d = fugue::TypedNumber::read(number, locale)) {
+            *value = *d;
+            return {};
+        }
+        if (number.count(',') + number.count('.') > 1
+            || (number.contains(',') && locale.decimalPoint() != QStringLiteral(",")))
+            return tr("%1 has a thousands separator or a decimal separator this language does not use; type it "
+                      "without grouping, as 1000 or %2.").arg(number, locale.toString(0.5));
+        return tr("%1 is not a number.").arg(text.trimmed());
     }
     if (t.widget == "model") {
         const QString name = text.trimmed();
