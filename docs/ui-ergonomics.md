@@ -1458,3 +1458,16 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: selecting the node is the person's statement that they are working on its picture; the Large view and the App stage already zoom with the plain wheel. An unselected node keeps the wheel so the graph can still be panned across a Compare node.
 - Rules met: Learned place (nothing moved), Posture (selection already means "this is the one acted on").
 - Not checked by a person: a real mouse in a real window (the window test sends wheel events).
+
+### 2026-11-26 Packs page: a secret's Key row wraps its chips (#540)
+
+- Control: the Key row of a pack secret in `src/settings/PacksPage.qml` (`packSecret-*`, `packSecretSet-*`, `packSecretClear-*`); order unchanged.
+- Old: the field shrank to leave 26u for the chips, but the chips did not wrap, so on a very narrow panel Set... and Clear ran past the tray's edge.
+- New: the field and chips are one `Flow`: the field gives up width down to 30u, then Set... and Clear go under it. Always inside the tray.
+- Rules met: Floor (chips unchanged, 24px), Gaps (2u between, as before).
+
+### 2026-11-26 Dialogs that fade keep the keys of a dialog opened during the fade (#503)
+
+- Control: none visible; `src/kit/KitFocusKeep.qml` in About, the shortcuts help, Apps, node search, Projects, Settings and Templates.
+- Old: Escape on About, then F1 within the fade (~150 ms): when About's exit ended Qt gave the focus back to the window, so the help's Escape did nothing.
+- New: the help keeps the keys; the closing popup restores only when no other popup has them.

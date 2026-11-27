@@ -360,6 +360,37 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #540: at the narrowest window (640) and far below it, a secret's Key row (field, Set, Clear) stays inside the settings panel.
+    void aSecretsKeyRowStaysInsideTheTrayWhenNarrow() {
+        const QString dir = packs() + "/io.example.keyed";
+        QDir().mkpath(dir);
+        QFile pack(dir + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write(QJsonDocument(QJsonObject{{"manifest", 1}, {"id", "io.example.keyed"}, {"version", "1.0.0"}, {"name", "Keyed"}, {"nodes", QJsonArray{}},
+                                             {"settings", QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "Token 1"}}}}}).toJson());
+        pack.close();
+        QFile::remove(m_xdg.filePath("config/fugue/pack-secrets.json"));
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        QVERIFY(app.settings.packs()->setSecret("io.example.keyed", "token_1", "made-up-key-1234")); // set: the Clear chip shows too
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
+        click(app, NEED("settingsPage-packs"));
+        openFor(app, "pack-io.example.keyed", "packSecret-io.example.keyed-token_1");
+        for (const QSize size : {QSize(640, 760), QSize(380, 760), QSize(340, 760)}) {
+            app.window->resize(size);
+            QTest::qWait(300);
+            QQuickItem *frame = NEED("settingsCard");
+            const qreal right = frame->mapToScene(QPointF(frame->width(), 0)).x();
+            for (const char *name : {"packSecret-io.example.keyed-token_1", "packSecretSet-io.example.keyed-token_1", "packSecretClear-io.example.keyed-token_1"}) {
+                QQuickItem *item = NEED(name);
+                const qreal edge = item->mapToScene(QPointF(item->width(), 0)).x();
+                QVERIFY2(edge <= right + 0.5, qPrintable(QStringLiteral("%1 ends at %2, the panel at %3 (window %4 wide)").arg(name).arg(edge).arg(right).arg(size.width())));
+            }
+        }
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aPackThatDoesNotLoadShowsWhy() {
         QDir().mkpath(packs() + "/io.example.broken");
         QFile broken(packs() + "/io.example.broken/pack.json");

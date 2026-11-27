@@ -443,34 +443,43 @@ ColumnLayout {
                             look: page.look
                             label: qsTr("Key")
                             hint: keyed.modelData.set ? qsTr("Saved") : ""
-                            SettingsParts.Field {
-                                implicitWidth: Math.min(60 * page.u, page.width - 16 * page.u - 26 * page.u) // never wider than the tray, narrow or wide
-                                id: secretField
-                                objectName: "packSecret-" + keyed.key
-                                secret: true
-                                label: qsTr("Key")
-                                placeholder: keyed.modelData.set ? qsTr("Set; type a new one to replace it") : qsTr("Type it and press Enter")
-                                onCommitted: text => {
-                                    // After this handler: the list is rebuilt by the change, and this field is in it.
-                                    if (text !== "") {
-                                        const origin = keyed.modelData.set ? keyed.modelData.origin : originField.input.text
-                                        page.noteFocus()
-                                        Qt.callLater(() => page.model.setSecret(row.modelData.id, keyed.modelData.name, text, origin, row.modelData.path))
+                            Flow { // the field and its chips: the field gives up width down to 30u, then the chips go under it (#540)
+                                id: keyFlow
+                                readonly property real room: page.width - 16 * page.u // never wider than the tray, narrow or wide
+                                readonly property real chipsWidth: setChip.implicitWidth + (clearChip.visible ? clearChip.implicitWidth + spacing : 0)
+                                spacing: 2 * page.u
+                                width: Math.min(secretField.implicitWidth + spacing + chipsWidth, room)
+                                SettingsParts.Field {
+                                    implicitWidth: Math.min(60 * page.u, Math.max(keyFlow.room - keyFlow.spacing - keyFlow.chipsWidth, 30 * page.u), keyFlow.room)
+                                    id: secretField
+                                    objectName: "packSecret-" + keyed.key
+                                    secret: true
+                                    label: qsTr("Key")
+                                    placeholder: keyed.modelData.set ? qsTr("Set; type a new one to replace it") : qsTr("Type it and press Enter")
+                                    onCommitted: text => {
+                                        // After this handler: the list is rebuilt by the change, and this field is in it.
+                                        if (text !== "") {
+                                            const origin = keyed.modelData.set ? keyed.modelData.origin : originField.input.text
+                                            page.noteFocus()
+                                            Qt.callLater(() => page.model.setSecret(row.modelData.id, keyed.modelData.name, text, origin, row.modelData.path))
+                                        }
                                     }
                                 }
-                            }
-                            KitChip {
-                                objectName: "packSecretSet-" + keyed.key
-                                look: page.look
-                                text: qsTr("Set…")
-                                onTapped: secretField.commit()
-                            }
-                            KitChip {
-                                objectName: "packSecretClear-" + keyed.key
-                                look: page.look
-                                visible: keyed.modelData.set
-                                text: qsTr("Clear")
-                                onTapped: { page.noteFocus(); Qt.callLater(() => page.model.clearSecret(row.modelData.id, keyed.modelData.name, row.modelData.path)) }
+                                KitChip {
+                                    id: setChip
+                                    objectName: "packSecretSet-" + keyed.key
+                                    look: page.look
+                                    text: qsTr("Set…")
+                                    onTapped: secretField.commit()
+                                }
+                                KitChip {
+                                    id: clearChip
+                                    objectName: "packSecretClear-" + keyed.key
+                                    look: page.look
+                                    visible: keyed.modelData.set
+                                    text: qsTr("Clear")
+                                    onTapped: { page.noteFocus(); Qt.callLater(() => page.model.clearSecret(row.modelData.id, keyed.modelData.name, row.modelData.path)) }
+                                }
                             }
                         }
                     }
