@@ -42,6 +42,11 @@ Rectangle {
     property bool compact: false
     // A toggle (Compare, Snap, Show candidate): assistive tools hear it as on or off, `current` being on.
     property bool checkable: false
+    // Its place in a dialog's KitDialogButtons row: "extra", "cancel", "destructive" or "accept" (the default).
+    property string dialogRole
+    // In a dialog's row (KitDialogButtons sets it): the dialog button's one size, as KitChip's in a row (7u tall, 3u each side, the
+    // text size in Medium), and a destructive answer is the solid red (`dangerSolid`, white ink) instead of the tint.
+    property bool dialogRow: false
     signal tapped
     // An Alt+click of its own (#226: a layer's eye shows that layer alone); with it, a plain click is a click with no
     // modifier.
@@ -55,14 +60,17 @@ Rectangle {
     readonly property bool pressed: tap.pressed
     readonly property bool marked: primary || (current && accented && !toned)
     readonly property bool alarmed: danger && enabled && !marked
+    readonly property bool solidDanger: alarmed && dialogRow && !flat
     readonly property color ink: marked ? look.accentForeground
+                                : solidDanger ? look.dangerInk
                                 : flat && !current && !hovered && !activeFocus ? look.label : look.text
-    implicitWidth: Math.max(content.implicitWidth + (bordered ? 6 : 4) * look.unit, implicitHeight)
-    implicitHeight: (compact ? 6 : 7) * look.unit
+    implicitWidth: Math.max(content.implicitWidth + (bordered || dialogRow ? 6 : 4) * look.unit, implicitHeight)
+    implicitHeight: (compact && !dialogRow ? 6 : 7) * look.unit
     width: implicitWidth
     height: implicitHeight
     radius: Math.min(look.params.cornerChip * look.unit, 0.45 * height)
     color: marked ? look.accent
+         : solidDanger ? (hovered || pressed ? look.dangerSolidHover : look.dangerSolid)
          : alarmed && flat ? (hovered || pressed ? look.dangerHover : "transparent") // chrome: red only when aimed at
          : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
          : pressed ? look.menuRow
@@ -72,8 +80,12 @@ Rectangle {
          : hovered ? look.kitChipHover : look.kitChip
     // The edge: the focus ring first, then a form button's hairline, then a plain well button's hover edge.
     readonly property bool ring: activeFocus && FocusInput.keyboard // the accent ring is for the keyboard only (owner, 2026-11-25)
-    border.width: ring ? 2 : bordered && !toned ? 1 : 0
-    border.color: ring ? (alarmed ? look.error : look.accent) : look.hairlineStrong
+    // On the accent fill (the primary) the ring is the fill's ink, as KitChip's: an accent ring on the accent did not show. In a dialog's
+    // row the primary and the solid red answer have no ring of their own: the row draws one 3px outside them (KitDialogButtons), as an
+    // ink ring inside read as a smaller button on a light card (review, 2026-11-27).
+    readonly property bool ringOutside: dialogRow && (marked || solidDanger)
+    border.width: ring && !ringOutside ? 2 : bordered && !toned && !solidDanger ? 1 : 0
+    border.color: ring ? (marked ? look.accentForeground : alarmed ? look.dangerSolid : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button
@@ -104,7 +116,8 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             text: button.text
             color: button.ink
-            font.pixelSize: button.look.labelSize
+            font.pixelSize: button.dialogRow ? button.look.textSize : button.look.labelSize
+            font.weight: button.dialogRow ? Font.Medium : Font.Normal
         }
         Glyph {
             visible: button.trailingGlyph !== ""

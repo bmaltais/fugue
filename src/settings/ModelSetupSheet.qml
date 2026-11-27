@@ -412,14 +412,12 @@ Popup {
                     text: qsTr("You can change this later in Settings > Folders.")
                 }
             }
-            RowLayout {
-                Layout.fillWidth: true
+            KitDialogButtons {
                 Layout.margins: 4 * sheet.u
-                spacing: 2 * sheet.u
-                Item { Layout.fillWidth: true }
                 KitChip {
                     id: skip
                     objectName: "modelSetupSkip"
+                    dialogRole: "cancel"
                     look: sheet.look
                     bordered: true
                     text: qsTr("Skip")

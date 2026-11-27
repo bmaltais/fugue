@@ -237,6 +237,15 @@ Item {
                 }
                 KitNotice { width: parent.width; tone: "success"; title: "Downloaded 2 models." }
                 KitNotice { width: parent.width; tone: "neutral"; compact: true; title: "Showing Sky alone"; dismissTip: "Show every layer" }
+                // A dialog's actions (KitDialogButtons, docs/canvas-look.md 20.24): an extra, Cancel, Discard, Save; GNOME's order.
+                KitSection { text: "Dialog actions" }
+                KitDialogButtons {
+                    width: parent.width
+                    KitChip { text: "Save"; primary: true }
+                    KitChip { dialogRole: "destructive"; danger: true; text: "Discard" }
+                    KitChip { dialogRole: "cancel"; bordered: true; text: "Cancel" }
+                    KitChip { dialogRole: "extra"; text: "Read more" }
+                }
             }
             KitSeparator { }
             Row {

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import ".."
+import "../../kit"
 
 // The question before a catalog model is fetched (#134): what it is, its license, its size, where it comes from and where it
 // will go. Nothing is fetched until Download, which says `confirmed(id)`. `info` is a model catalog row as
@@ -59,18 +60,16 @@ Question {
             font.pixelSize: ask.look.captionSize
             wrapMode: Text.Wrap
         }
-        RowLayout {
-            Layout.alignment: Qt.AlignRight
-            spacing: 2 * ask.look.unit
+        KitDialogButtons {
             ThemedButton {
                 objectName: "downloadAskLicenseLink"
+                dialogRole: "extra"
                 flat: true
                 visible: ask.info.licenseUrl !== ""
                 text: qsTr("Read the license")
                 onClicked: Qt.openUrlExternally(ask.info.licenseUrl)
             }
-            Item { Layout.fillWidth: true }
-            ThemedButton { objectName: "downloadAskCancel"; text: qsTr("Cancel"); onClicked: ask.close() }
+            ThemedButton { objectName: "downloadAskCancel"; dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: ask.close() }
             ThemedButton {
                 objectName: "downloadAskOk"
                 text: qsTr("Download")

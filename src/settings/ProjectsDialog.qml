@@ -410,12 +410,12 @@ Popup {
                         }
                     }
                 }
-                // Back or Cancel first, the primary last at the right (docs/ui-ergonomics.md, Cohesion checklist: Order).
-                Row {
-                    Layout.alignment: Qt.AlignRight
-                    spacing: dialog.u
+                // Back or Cancel first, the primary last at the right (KitDialogButtons, docs/ui-ergonomics.md 2026-11-27).
+                KitDialogButtons {
+                    cancelOnEscape: false
                     SettingsParts.SmallButton {
                         objectName: "newProjectBack"
+                        dialogRole: "cancel"
                         text: qsTr("Back")
                         onClicked: { dialog.error = ""; dialog.view = "list" }
                     }
@@ -499,12 +499,12 @@ Popup {
                         }
                     }
                 }
-                // Back or Cancel first, the primary last at the right (docs/ui-ergonomics.md, Cohesion checklist: Order).
-                Row {
-                    Layout.alignment: Qt.AlignRight
-                    spacing: dialog.u
+                // Back or Cancel first, the primary last at the right (KitDialogButtons, docs/ui-ergonomics.md 2026-11-27).
+                KitDialogButtons {
+                    cancelOnEscape: false
                     SettingsParts.SmallButton {
                         objectName: "projectSettingsBack"
+                        dialogRole: "cancel"
                         highlighted: dialog.model.currentIsDefault
                         text: dialog.model.currentIsDefault ? qsTr("Close") : qsTr("Back")
                         onClicked: { dialog.error = ""; dialog.view = "list" }
@@ -538,12 +538,12 @@ Popup {
                     color: dialog.look.text
                     font.pixelSize: dialog.look.textSize
                 }
-                // Back or Cancel first, the primary last at the right (docs/ui-ergonomics.md, Cohesion checklist: Order).
-                Row {
-                    Layout.alignment: Qt.AlignRight
-                    spacing: dialog.u
+                // Back or Cancel first, the primary last at the right (KitDialogButtons, docs/ui-ergonomics.md 2026-11-27).
+                KitDialogButtons {
+                    cancelOnEscape: false
                     SettingsParts.SmallButton {
                         objectName: "projectBlockedCancel"
+                        dialogRole: "cancel"
                         text: qsTr("Cancel")
                         onClicked: { dialog.error = ""; dialog.view = "list" }
                     }

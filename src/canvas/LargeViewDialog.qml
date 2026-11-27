@@ -154,7 +154,9 @@ Popup {
             width: parent.width
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
-            visible: childrenRect.height > 0
+            // Shown when a footer was given. Not `childrenRect.height > 0`: a hidden holder hides its footer, whose rows (positioners and
+            // layouts skip hidden items) then measure 0 and never show it again (the Region window's info lines, 2026-11-27).
+            visible: children.length > 0
             height: childrenRect.height
         }
     }

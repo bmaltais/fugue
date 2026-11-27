@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../canvas"
+import "../kit"
 
 // The second, separate confirmation before a group is deleted from the user's library (#156). Its
 // own question, as docs/ui-ergonomics.md asks of a destructive step: an accent border, the group
@@ -60,12 +61,12 @@ Question {
             text: qsTr("Only the copy in your library is deleted. Workflows that already use it keep their own copy and still open and run. This cannot be undone.")
         }
         // Delete is the destructive one: after Cancel, with the dialog's own gap before it.
-        QuestionAnswers {
+        KitDialogButtons {
             Layout.topMargin: 2 * root.look.unit
-            spacing: 4 * root.look.unit
             ThemedButton {
                 id: cancel
                 objectName: "deleteGroupCancel"
+                dialogRole: "cancel"
                 text: qsTr("Cancel")
                 highlighted: true
                 focus: true
@@ -73,6 +74,7 @@ Question {
             }
             ThemedButton {
                 objectName: "deleteGroupConfirm"
+                dialogRole: "destructive"
                 text: qsTr("Delete")
                 danger: true
                 onClicked: {

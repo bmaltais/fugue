@@ -243,11 +243,13 @@ Question {
             }
         }
 
-        RowLayout {
-            Layout.alignment: Qt.AlignRight
-            spacing: 2 * root.look.unit
+        // Running: Hide, then Cancel batch (the danger tint, its own chunk) at the end. Finished: New batch at the start, Close (the
+        // primary) at the end.
+        // Before a run: Close, then Run (the primary).
+        KitDialogButtons {
             ThemedButton {
                 objectName: "canvasBatchCancel"
+                dialogRole: "destructive"
                 danger: true
                 visible: root.batch !== null && root.batch.busy
                 text: qsTr("Cancel batch")
@@ -256,12 +258,14 @@ Question {
             ThemedButton {
                 id: closeButton
                 objectName: "canvasBatchClose"
+                dialogRole: "cancel"
                 text: root.batch !== null && root.batch.busy ? qsTr("Hide") : qsTr("Close")
                 highlighted: root.batch !== null && root.batch.finished
                 onClicked: root.close()
             }
             ThemedButton {
                 objectName: "canvasBatchAgain"
+                dialogRole: "extra"
                 visible: root.batch !== null && root.batch.finished
                 text: qsTr("New batch")
                 onClicked: root.batch.reset()

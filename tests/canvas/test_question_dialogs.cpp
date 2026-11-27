@@ -135,7 +135,8 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // Close a tab with unsaved changes: Cancel, Discard (danger tint, its own chunk), Save (the primary, last at the right).
+    // Close a tab with unsaved changes, GNOME's order (KitDialogButtons): Cancel, Discard (danger tint, its own chunk), Save (the
+    // primary, last at the right).
     void theCloseTabQuestionTintsDiscardAndEndsOnSave() {
         App app(load(emptyDoc));
         QVERIFY(app.open());
@@ -144,18 +145,62 @@ private slots:
         QMetaObject::invokeMethod(ask, "open");
         QTRY_VERIFY(opened(app, "closeAsk"));
         const QList<QQuickItem *> answers = row(app, {"closeDiscard", "closeCancel", "closeSave"});
-        // Discard stands alone at the far side in the danger tint; Cancel, then the primary last at the right.
-        QCOMPARE(answers[0]->objectName(), QString("closeDiscard"));
-        QCOMPARE(answers[1]->objectName(), QString("closeCancel"));
+        QCOMPARE(answers[0]->objectName(), QString("closeCancel"));
+        QCOMPARE(answers[1]->objectName(), QString("closeDiscard"));
         QCOMPARE(answers[2]->objectName(), QString("closeSave"));
-        QVERIFY(answers[0]->property("danger").toBool());
-        QVERIFY(!answers[1]->property("primary").toBool() && !answers[1]->property("danger").toBool());
+        QVERIFY(answers[1]->property("danger").toBool());
+        QVERIFY(!answers[0]->property("primary").toBool() && !answers[0]->property("danger").toBool());
         QVERIFY(answers[2]->property("primary").toBool());
-        QVERIFY(sceneRect(answers[1]).left() - sceneRect(answers[0]).right()
-                > 2 * (sceneRect(answers[2]).left() - sceneRect(answers[1]).right()));
+        const qreal gap = answers[0]->parentItem()->property("spacing").toReal(); // the row's gap
+        QVERIFY(sceneRect(answers[1]).left() - sceneRect(answers[0]).right() >= 2 * gap - 0.5);
+        QVERIFY(sceneRect(answers[2]).left() - sceneRect(answers[1]).right() >= 2 * gap - 0.5);
         QVERIFY(answers[2]->hasActiveFocus()); // Enter takes the primary (D5)
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!ask->property("visible").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A question that focuses nothing itself (the group's sinks question) opens with its default focused: the arrows move between the
+    // answers and Enter presses the focused one, with no Tab first. The trust question's default is Not now: Enter never allows a pack.
+    void aQuestionOpensWithItsDefaultFocusedAndTakesKeys() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        const auto focused = [&] { return app.window->activeFocusItem() ? app.window->activeFocusItem()->objectName() : QString(); };
+        QObject *sinks = popup(app, "groupSinksAsk");
+        sinks->setProperty("sinks", QStringList{"Save image"});
+        QMetaObject::invokeMethod(sinks, "open");
+        QTRY_VERIFY(opened(app, "groupSinksAsk"));
+        QTRY_COMPARE(focused(), QString("groupSinksOutside"));
+        app.key(Qt::Key_Left);
+        QCOMPARE(focused(), QString("groupSinksInside"));
+        app.key(Qt::Key_Right);
+        QCOMPARE(focused(), QString("groupSinksOutside"));
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(!sinks->property("visible").toBool());
+
+        // A group update that takes an input away (its values and links go on every instance): Cancel is the default (D8); one that
+        // takes nothing away: Update.
+        QObject *update = popup(app, "groupUpdateAsk");
+        update->setProperty("changes", QVariantMap{{"name", "Fox"}, {"from", "1.0.0"}, {"to", "2.0.0"}, {"removedInputs", QStringList{"seed"}}});
+        QMetaObject::invokeMethod(update, "open");
+        QTRY_VERIFY(opened(app, "groupUpdateAsk"));
+        QTRY_COMPARE(focused(), QString("groupUpdateCancel"));
+        QMetaObject::invokeMethod(update, "close");
+        QTRY_VERIFY(!update->property("visible").toBool());
+        update->setProperty("changes", QVariantMap{{"name", "Fox"}, {"from", "1.0.0"}, {"to", "1.1.0"}});
+        QMetaObject::invokeMethod(update, "open");
+        QTRY_VERIFY(opened(app, "groupUpdateAsk"));
+        QTRY_COMPARE(focused(), QString("groupUpdateOk"));
+        QMetaObject::invokeMethod(update, "close");
+        QTRY_VERIFY(!update->property("visible").toBool());
+
+        QObject *trust = popup(app, "trustAsk");
+        QMetaObject::invokeMethod(trust, "open");
+        QTRY_VERIFY(opened(app, "trustAsk"));
+        QTRY_COMPARE(focused(), QString("trustLater"));
+        QVERIFY(find(app.window, "trustLater")->property("primary").toBool());
+        QVERIFY(!find(app.window, "trustAllow")->property("primary").toBool());
+        QMetaObject::invokeMethod(trust, "close");
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

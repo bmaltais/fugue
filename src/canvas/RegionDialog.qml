@@ -165,6 +165,7 @@ LargeViewDialog {
     }
 
     footer: Column {
+        width: parent ? parent.width : implicitWidth
         spacing: root.look.unit
         Text {
             objectName: "regionInfo"
@@ -191,29 +192,39 @@ LargeViewDialog {
             color: root.look.error
             font.pixelSize: root.look.labelSize
         }
-        Row {
-            spacing: 2 * root.look.unit
+        // The fields at the start, Cancel and OK at the end (KitDialogButtons). An Item of a known height, not a layout: a layout's
+        // height comes a frame late, and the picture above it was fitted again (a moved frame under a drag).
+        Item {
+            width: parent.width
+            height: Math.max(regionFields.implicitHeight, 7 * root.look.unit)
             RectangleFields {
+                id: regionFields
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
                 prefix: "region"
                 look: root.look
                 enabled: root.ready
                 values: root.live
                 onEdited: (field, text) => root.setField(field, text)
             }
-            Item { width: 2 * root.look.unit; height: 1 }
-            ViewButton {
-                objectName: "regionCancel"
-                look: root.look
-                text: qsTr("Cancel")
-                onTapped: root.close()
-            }
-            ViewButton {
-                objectName: "regionApply"
-                look: root.look
-                text: qsTr("OK") // as the Crop window's and the mask editor's: it writes and closes
-                primary: true
-                enabled: root.ready && root.info.editable === true
-                onTapped: root.apply()
+            KitDialogButtons {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                ViewButton {
+                    objectName: "regionCancel"
+                    dialogRole: "cancel"
+                    look: root.look
+                    text: qsTr("Cancel")
+                    onTapped: root.close()
+                }
+                ViewButton {
+                    objectName: "regionApply"
+                    look: root.look
+                    text: qsTr("OK") // as the Crop window's and the mask editor's: it writes and closes
+                    primary: true
+                    enabled: root.ready && root.info.editable === true
+                    onTapped: root.apply()
+                }
             }
         }
     }

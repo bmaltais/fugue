@@ -198,20 +198,26 @@ ColumnLayout {
                                     ? "\n" + qsTr("%1 already set for this pack id from another source; this pack does not get it.").arg(ask.q.secretsOtherSource.join(", ")) : "")
                                  + (ask.q.secrets && ask.q.secrets.length ? "\n" + qsTr("Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.") : "")))
             }
-            Row {
-                spacing: page.u
-                SettingsParts.SmallButton {
-                    objectName: "packYes"
-                    enabled: page.model.questionReady
-                    highlighted: true
-                    text: ask.q.kind === "setup" ? qsTr("Run it") : ask.q.kind === "remove" ? qsTr("Remove") : qsTr("Yes")
-                    onClicked: page.model.answer(true)
-                }
+            // No first, the answer that acts last at the right (KitDialogButtons); a removal is the danger tint and No the safe,
+            // highlighted answer (D8).
+            KitDialogButtons {
+                Layout.topMargin: page.u
                 SettingsParts.SmallButton {
                     objectName: "packNo"
+                    dialogRole: "cancel"
                     enabled: page.model.questionReady
+                    highlighted: ask.q.kind === "remove"
                     text: qsTr("No")
                     onClicked: page.model.answer(false)
+                }
+                SettingsParts.SmallButton {
+                    objectName: "packYes"
+                    dialogRole: ask.q.kind === "remove" ? "destructive" : "accept"
+                    enabled: page.model.questionReady
+                    highlighted: ask.q.kind !== "remove"
+                    danger: ask.q.kind === "remove"
+                    text: ask.q.kind === "setup" ? qsTr("Run it") : ask.q.kind === "remove" ? qsTr("Remove") : qsTr("Yes")
+                    onClicked: page.model.answer(true)
                 }
             }
         }

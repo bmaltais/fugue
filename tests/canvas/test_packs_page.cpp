@@ -184,9 +184,21 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // With FUGUE_SHOT_DIR (and FUGUE_SHOT_THEME, FUGUE_SHOT_TAG, FUGUE_SHOT_RTL=1) it also saves the install and the removal questions.
     void installsTrustsAndRemovesAfterEachQuestion() {
-        App app(load(emptyDoc));
+        App app(load(emptyDoc), {}, Look{qEnvironmentVariable("FUGUE_SHOT_THEME")});
         QVERIFY(app.open());
+        const QString shots = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (!shots.isEmpty() && qEnvironmentVariable("FUGUE_SHOT_RTL") == "1")
+            QGuiApplication::setLayoutDirection(Qt::RightToLeft);
+        const auto shot = [&](const QString &what) {
+            if (shots.isEmpty())
+                return;
+            app.window->resize(1000, 720);
+            QTest::qWait(350);
+            QVERIFY(test_support::grab(app.window).save(
+                QStringLiteral("%1/packs-question-%2-%3.png").arg(shots, what, qEnvironmentVariable("FUGUE_SHOT_TAG", "dark"))));
+        };
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-packs"));
@@ -197,6 +209,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists()); // nothing before the yes
         QTRY_VERIFY_WITH_TIMEOUT(NEED("packYes")->isEnabled(), 20000);
+        shot("install");
         click(app, NEED("packYes"));
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(packs() + "/io.example.tools/pack.json").isFile(), 20000);
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "pack-io.example.tools"), 20000);
@@ -218,6 +231,12 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
         QTRY_VERIFY_WITH_TIMEOUT(NEED("packYes")->isEnabled(), 20000);
+        // A removal is the danger tint and No is the safe, highlighted answer (D8); No comes first, Remove last.
+        QVERIFY(NEED("packYes")->property("danger").toBool() && !NEED("packYes")->property("primary").toBool());
+        QVERIFY(NEED("packNo")->property("primary").toBool());
+        QCOMPARE(NEED("packNo")->mapToScene(QPointF(0, 0)).x() < NEED("packYes")->mapToScene(QPointF(0, 0)).x(),
+                 QGuiApplication::layoutDirection() == Qt::LeftToRight);
+        shot("remove");
         click(app, NEED("packYes"));
         QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo(packs() + "/io.example.tools").exists(), 20000);
         QTRY_VERIFY_WITH_TIMEOUT(!find(app.window, "pack-io.example.tools"), 20000);

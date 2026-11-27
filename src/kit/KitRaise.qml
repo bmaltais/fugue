@@ -10,16 +10,25 @@ Item {
     property CanvasLook look: App.theme.look // App.theme.look unless a host gives another
     property real radius: 0
     property bool outsideOnly: false // a translucent host (a card): the shadow only below its edge, or it would darken the fill
+    // The shadow under the host's fill instead of over it, for a fill whose colour must stay as it is (the accent of a primary, the solid
+    // red): over it, the accent read as disabled (Get ready's Install, review 2026-11-27). Other raised controls keep the shadow over
+    // their fill, which their chip colours were tuned with (without it a light theme's chips melt into their group).
+    property bool under: false
     anchors.fill: parent
     enabled: false
+    // The control it raises: its parent, or the Loader's parent when it is made in one (ViewButton).
+    readonly property Item host: parent instanceof Loader ? parent.parent : parent
     Rectangle { // the soft shadow under the control
-        visible: raise.look.params.raiseShadowOffset > 0.01
+        // With `under`, a child of the host with a negative z, which is drawn before the host's own fill: only the offset below its edge
+        // shows.
+        parent: raise.under && !raise.outsideOnly && raise.host ? raise.host : raise
         x: raise.outsideOnly ? raise.radius * 0.5 : 0
         width: parent.width - 2 * x
         y: raise.outsideOnly ? parent.height - 1 : raise.look.params.raiseShadowOffset
         height: raise.outsideOnly ? 1 + 2 * raise.look.params.raiseShadowOffset : parent.height
         radius: raise.outsideOnly ? 1 : raise.radius
         color: Qt.rgba(0, 0, 0, raise.look.light ? raise.look.params.raiseShadowAlphaLight : raise.look.params.raiseShadowAlpha)
+        visible: raise.visible && raise.look.params.raiseShadowOffset > 0.01
         z: -1
     }
     Rectangle { // the light top edge

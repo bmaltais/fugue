@@ -304,10 +304,8 @@ Question {
             }
         }
 
-        RowLayout {
-            Layout.alignment: Qt.AlignRight
-            spacing: 2 * root.look.unit
-            ThemedButton { objectName: "canvasExportCancel"; text: qsTr("Cancel"); onClicked: root.close() }
+        KitDialogButtons {
+            ThemedButton { objectName: "canvasExportCancel"; dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: root.close() }
             ThemedButton {
                 id: exportButton
                 objectName: "canvasExportOk"

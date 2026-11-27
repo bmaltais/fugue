@@ -140,17 +140,18 @@ Item {
                 text: qsTr("There is unsaved work. Quit anyway?")
                 color: root.look.text
             }
-            QuestionAnswers {
-                spacing: 4 * root.u
+            KitDialogButtons {
                 ThemedButton {
                     id: quitKeep
                     objectName: "quitKeep"
+                    dialogRole: "cancel"
                     text: qsTr("Keep working")
                     highlighted: true
                     onClicked: quitAsk.close()
                 }
                 ThemedButton {
                     objectName: "quitAnyway"
+                    dialogRole: "destructive"
                     text: qsTr("Quit")
                     danger: true
                     onClicked: App.commands.quitNow()

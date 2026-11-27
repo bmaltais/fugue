@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
+import "../kit"
 
 // The question a run waits on before it sends pictures, masks, audio or prompts to a service off this machine (spec 8.2, #404): which
 // service (the instance's name and host) and what leaves, once per instance. Yes keeps the answer (until the instance is removed or
@@ -49,18 +50,20 @@ Question {
             wrapMode: Text.Wrap
             text: qsTr("Yes is remembered for each service until you remove it or change its address.")
         }
-        QuestionAnswers {
+        // No is the default, highlighted and focused (D8): Enter never sends; Yes takes a deliberate press.
+        KitDialogButtons {
             ThemedButton {
                 id: noButton
                 objectName: "remoteConsentNo"
+                dialogRole: "cancel"
                 text: qsTr("No, cancel the run")
+                highlighted: true
                 onClicked: ask.answer(false)
             }
             ThemedButton {
                 id: allowButton
                 objectName: "remoteConsentYes"
                 text: qsTr("Yes, send it")
-                highlighted: true
                 onClicked: ask.answer(true)
             }
         }

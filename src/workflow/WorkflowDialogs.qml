@@ -222,17 +222,16 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("Save the changes to %1 before closing?").arg(closeAsk.title)
             }
-            // Discard loses the changes: the danger tint, alone at the far side; Cancel, then Save (the primary) at the right.
-            QuestionAnswers {
-                leadingSpacer: false
+            // GNOME's save question: Cancel, Discard (the danger tint, its own chunk), then Save (the primary, focused) at the end.
+            KitDialogButtons {
+                ThemedButton { objectName: "closeCancel"; dialogRole: "cancel"; text: qsTr("Cancel"); onClicked: closeAsk.close() }
                 ThemedButton {
                     objectName: "closeDiscard"
+                    dialogRole: "destructive"
                     text: qsTr("Discard")
                     danger: true
                     onClicked: { closeAsk.close(); App.workflows.discardAndClose(closeAsk.index) }
                 }
-                Item { Layout.fillWidth: true }
-                ThemedButton { objectName: "closeCancel"; text: qsTr("Cancel"); onClicked: closeAsk.close() }
                 ThemedButton {
                     id: closeSave
                     objectName: "closeSave"
@@ -244,7 +243,8 @@ Item {
         }
     }
 
-    // Close all tabs with some unsaved: asked once, as Quit asks (CommandUi.qml). Keep working is the safe, highlighted answer.
+    // Close all tabs with some unsaved: asked once, as Quit asks (CommandUi.qml). Cancel is the safe answer, highlighted and focused (D8),
+    // then Discard and close all in the danger tint.
     Question {
         id: closeAllAsk
         objectName: "closeAllAsk"
@@ -260,16 +260,18 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("%n tabs have unsaved changes. Close all tabs anyway?", "", closeAllAsk.unsavedTabs)
             }
-            QuestionAnswers {
+            KitDialogButtons {
                 ThemedButton {
                     id: closeAllKeep
                     objectName: "closeAllKeep"
+                    dialogRole: "cancel"
                     text: qsTr("Cancel")
                     highlighted: true
                     onClicked: closeAllAsk.close()
                 }
                 ThemedButton {
                     objectName: "closeAllDiscard"
+                    dialogRole: "destructive"
                     text: qsTr("Discard and close all")
                     danger: true
                     onClicked: { closeAllAsk.close(); App.workflows.discardAndCloseAll() }
@@ -340,16 +342,19 @@ Item {
                           + (modelData.secrets.length > 0 ? "\n" + qsTr("Reads secrets: %1").arg(modelData.secrets.join(", ")) : "")
                 }
             }
-            QuestionAnswers {
+            // Not now is the default, highlighted and focused: Allow lets a pack's programs run as you, so it takes a deliberate
+            // press, never a stray Enter (D8).
+            KitDialogButtons {
                 ThemedButton {
                     objectName: "trustLater"
+                    dialogRole: "cancel"
                     text: qsTr("Not now")
+                    highlighted: true
                     onClicked: App.workflows.dismissPendingTrust()
                 }
                 ThemedButton {
                     objectName: "trustAllow"
                     text: qsTr("Allow")
-                    highlighted: true
                     onClicked: App.workflows.allowPendingTrust()
                 }
             }
@@ -381,10 +386,11 @@ Item {
                     text: modelData.title + (modelData.path ? "  " + modelData.path : "")
                 }
             }
-            QuestionAnswers {
-                spacing: 4 * root.look.unit // Discard is the destructive one: twice the row's gap before Recover
+            // No cancel: the question waits for one of the two (Escape does nothing). Discard is its own chunk before Recover.
+            KitDialogButtons {
                 ThemedButton {
                     objectName: "recoverDiscard"
+                    dialogRole: "destructive"
                     text: qsTr("Discard")
                     danger: true
                     onClicked: App.workflows.discardRecovery()

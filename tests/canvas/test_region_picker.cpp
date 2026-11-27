@@ -160,7 +160,9 @@ private slots:
         RegionApp r;
         QVERIFY(r.app->open());
         r.openDialog();
-        QTRY_VERIFY(r.frame().width() > 0);
+        // Wait for the layout to settle: the footer's info line comes once the canvas is read, and the picture is fitted again.
+        QRectF last;
+        QTRY_VERIFY([&] { const QRectF now = r.frame(); const bool same = now.width() > 0 && now == last; last = now; return same; }());
         const QRectF frame = r.frame();
         const qreal scale = frame.width() / 160;
         // Move it by (20, 10) pixels.

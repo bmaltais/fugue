@@ -49,6 +49,10 @@ QColor lift(const QColor &color, const QColor &against, double target = 3.0);
 struct Tokens {
     QColor canvas, dot, dotMajor, body, header, hairline, hairlineStrong, well, label, popup;
     QColor errorHeader, errorChip, selectedRow, menuRow, dangerFill, dangerHover;
+    // A dialog's destructive answer (Discard, Delete, Quit; KitDialogButtons): the theme's red itself as a solid fill, so it looks alike
+    // in light and dark themes, with the ink that reads on it best (white, or the theme's dark colour) at 4.5:1; the fill moves only when
+    // neither ink does; the hover a step stronger.
+    QColor dangerSolid, dangerSolidHover, dangerInk;
     // A bypassed node (9): the body and the header tinted with the palette's magenta, and the
     // dashed edge in it, as ComfyUI draws a bypassed node in magenta. The tint steps down
     // until the text and the labels still read at 4.5:1 on it.
@@ -137,6 +141,9 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor menuRow MEMBER m_menuRow NOTIFY changed)
     Q_PROPERTY(QColor dangerFill MEMBER m_dangerFill NOTIFY changed)
     Q_PROPERTY(QColor dangerHover MEMBER m_dangerHover NOTIFY changed)
+    Q_PROPERTY(QColor dangerSolid MEMBER m_dangerSolid NOTIFY changed)
+    Q_PROPERTY(QColor dangerSolidHover MEMBER m_dangerSolidHover NOTIFY changed)
+    Q_PROPERTY(QColor dangerInk MEMBER m_dangerInk NOTIFY changed)
     Q_PROPERTY(QColor bevel MEMBER m_bevel NOTIFY changed)
     Q_PROPERTY(QColor sheenTop MEMBER m_sheenTop NOTIFY changed)
     Q_PROPERTY(QColor sheenBottom MEMBER m_sheenBottom NOTIFY changed)
@@ -283,6 +290,7 @@ private:
     mutable QHash<QString, QVariantMap> m_roles;
 
     QColor m_canvas, m_dot, m_dotMajor, m_body, m_header, m_hairline, m_hairlineStrong, m_well, m_label, m_popup;
+    QColor m_dangerSolid, m_dangerSolidHover, m_dangerInk;
     QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_dangerFill, m_dangerHover, m_bevel, m_scrim, m_bypassBody, m_bypassHeader,
         m_bypassEdge;
     QColor m_sheenTop, m_sheenBottom, m_litTop, m_litBottom;

@@ -15,6 +15,7 @@
 #include "canvas_actions_rig.h"
 #include "canvas/canvas_batch.h"
 #include "engine/canvas_store.h"
+#include "../window_grab.h"
 
 using namespace actions_test;
 
@@ -182,11 +183,22 @@ private slots:
     }
 
     // The menu row and the dialog in the real window.
+    // With FUGUE_SHOT_DIR (and FUGUE_SHOT_THEME, FUGUE_SHOT_TAG, FUGUE_SHOT_RTL=1) it also saves the dialog running and finished.
     void theMenuRowOpensTheDialogAndItRunsABatch() {
-        Rig r;
+        Rig r(R"({"fugue": 1, "graph": {"nodes": {}}})", Look{qEnvironmentVariable("FUGUE_SHOT_THEME")});
         CanvasBatch batch(r.service.get(), r.actions.get());
         r.app.canvasBatch = &batch;
         QVERIFY(r.app.open());
+        const QString shots = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (!shots.isEmpty() && qEnvironmentVariable("FUGUE_SHOT_RTL") == "1")
+            QGuiApplication::setLayoutDirection(Qt::RightToLeft);
+        const auto shot = [&](const QString &what) {
+            if (shots.isEmpty())
+                return;
+            QTest::qWait(350);
+            QVERIFY(test_support::grab(r.app.window).save(
+                QStringLiteral("%1/canvas-batch-%2-%3.png").arg(shots, what, qEnvironmentVariable("FUGUE_SHOT_TAG", "dark"))));
+        };
         QVERIFY(r.app.commands.trigger("file.canvas-view"));
         QObject *view = nullptr;
         QTRY_VERIFY((view = r.app.window->findChild<QObject *>("canvasViewDialog")) && view->property("opened").toBool());
@@ -236,10 +248,12 @@ private slots:
         click("canvasBatchRun");
         QTRY_VERIFY(find(r.app.window, "canvasBatchResults"));
         QVERIFY(find(r.app.window, "canvasBatchCancel"));
+        shot("running");
         finishJob(r, 0);
         finishJob(r, 1);
         QTRY_VERIFY(batch.finished());
         QTRY_COMPARE(find(r.app.window, "canvasBatchSummary")->property("text").toString(), QString("2 pictures done"));
+        shot("finished");
         QVERIFY(QFile::exists(path("out-d/p1.jpg")));
         QVERIFY(QFile::exists(path("out-d/p2.jpg")));
         click("canvasBatchClose");

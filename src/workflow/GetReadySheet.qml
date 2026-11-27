@@ -453,15 +453,13 @@ Popup {
                 }
             }
 
-            // The answers: Cancel or the safe one first, the one primary last at the end (D9).
-            RowLayout {
-                Layout.fillWidth: true
+            // The answers (KitDialogButtons): Cancel (Stop while it runs) or Close first, the one primary last at the end (D9).
+            KitDialogButtons {
                 Layout.margins: 4 * sheet.look.unit
-                spacing: 2 * sheet.look.unit
-                Item { Layout.fillWidth: true }
                 KitChip {
                     id: cancel
                     objectName: "getReadyCancel"
+                    dialogRole: "cancel"
                     look: sheet.look
                     bordered: true
                     visible: sheet.phase !== "finished"
@@ -471,6 +469,7 @@ Popup {
                 KitChip {
                     id: close
                     objectName: "getReadyClose"
+                    dialogRole: "cancel"
                     look: sheet.look
                     bordered: true
                     visible: sheet.phase === "finished"

@@ -623,17 +623,18 @@ Item {
                 text: qsTr("Clear the prompt history of this project? The prompts you typed in the task bar are forgotten.")
             }
             // Keep (the safe answer, highlighted and focused), then Clear in the danger tint after the wider gap.
-            QuestionAnswers {
-                spacing: 4 * bar.u
+            KitDialogButtons {
                 ThemedButton {
                     id: keepButton
                     objectName: "canvasTaskClearKeep"
+                    dialogRole: "cancel"
                     text: qsTr("Keep")
                     highlighted: true
                     onClicked: clearAsk.close()
                 }
                 ThemedButton {
                     objectName: "canvasTaskClearYes"
+                    dialogRole: "destructive"
                     text: qsTr("Clear")
                     danger: true
                     onClicked: { clearAsk.close(); bar.actions.clearHistory() }

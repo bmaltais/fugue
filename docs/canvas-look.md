@@ -274,6 +274,7 @@ light design tools lay cards on a gray table.
 | `error-header` | `mix(header, red, .20)` | `mix(header, red, .14)` | a node in error |
 | `error-chip` | `mix(body, red, .14)` | `mix(body, red, .10)` | the error chip |
 | `danger-fill`, `danger-hover` | `mix(popup, red, k)`, k = .30 (hover .46), stepping down until `text` reads at 4.5:1 | the same | a cancel button that can act (the toolbar's Cancel, the queue rows' x): rest and hover/press; the focus ring is `error`; disabled it is the plain well at 40% |
+| `danger-solid`, `danger-solid-hover`, `danger-ink` | a red that reads as red apart from the accent (OKLCH chroma at least .04, hue 0-50 or 330-360 degrees, OKLab distance from `accent` at least .1): `red`, else `bright_red`, else a fixed red (hue 25, C .17, at `red`'s lightness held to .50-.65, then nearby lightnesses and red hues), the first that still passes once its ink is chosen; the ink is white or the theme's dark colour (`background` of a dark theme, `text` of a light one), whichever reads better, at 4.5:1; only when neither does is the fill darkened (white ink) or lightened (dark ink) in 5% steps; the hover 12% away from the ink | the same rule | a dialog's destructive answer (`dialogRole: "destructive"` in `KitDialogButtons`: Discard, Delete, Quit): a red in every theme, light and dark alike. Measured on the 23 shipped themes: 14 use their `red` (10 as it is: catppuccin #f38ba8 with its base at 7.08:1, catppuccin-latte #d20f39 with white at 5.43:1; flexoki-light, nord, rose-pine and ristretto's moved a step), solitude its `bright_red` #de6145, eight the fixed red (hackerman, last-horizon, vantablack #e45d58; lumon #c74845; lupine #cd4745; miasma, white #b02a2d; ristretto #e56374, its accent a red itself); the label 4.54 to 7.08, the hover 5.17 to 7.86. Its focus ring is the row's, 2px of `error` 3px outside it. Toolbars and rows keep `danger-fill` |
 | `selected-row` | `mix(body, accent, .16)` | `mix(body, accent, .12)` | search highlight |
 | `frame-<role>` | `mix(canvas, role, .10)` | `mix(canvas, role, .12)` | frame fill (opaque) |
 | `frame-<role>-edge` | `mix(canvas, role, .35)` | same | frame edge |
@@ -806,6 +807,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Single-line text field | `src/canvas/ThemedTextField.qml` | Built (20.6): a Templates `TextField` on a `KitWell`, 7u, 2.5u in, a plain placeholder; `framed: false` for a field that is its popup |
 | Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7); `KitChip.toned` tints a chip that is on with the panel's tone |
 | Notice: a tone, a title, a body or lines, actions, copy, dismiss | `KitNotice` | Built (20.23): every notice of the window; `Banner` is gone |
+| A dialog's actions: one row at the bottom right, GNOME's order, arrows, Enter and Escape | `KitDialogButtons` | Built (20.24): every question, sheet and form dialog; `QuestionAnswers` is gone |
 | Copy button for an error message | `KitCopyButton` | Built: a 6u round `KitChip` with the `copy` glyph, a check for `durCopied` after a press; `copyText` is the whole message with details and ids |
 | Toggle | `KitToggle` | Built (20.8, 20.11) |
 | Segmented chooser | `KitSegmented` | Built (20.9) |
@@ -907,7 +909,7 @@ numbers win (20.15). A field on a plain panel is never glass. Frost 0 or no back
 
 | Element | Recipe |
 | --- | --- |
-| Raised chip (plain panel) | `kit-chip` fill (group mixed 10% toward fg), hover `kit-chip-hover` (17%), pressed `menuRow`, 100 ms color; `KitRaise`: top edge white 7% (light 60%), 1px soft shadow black 28% (light 10%); 7u tall, radius 2.5u or a pill; `current` uses `selectedRow`, never the accent |
+| Raised chip (plain panel) | `kit-chip` fill (group mixed 10% toward fg), hover `kit-chip-hover` (17%), pressed `menuRow`, 100 ms color; `KitRaise`: top edge white 7% (light 60%), 1px soft shadow black 28% (light 10%), over the fill, except on a primary's accent or the solid red (`under`: drawn beneath the fill, 2026-11-27); 7u tall, radius 2.5u or a pill; `current` uses `selectedRow`, never the accent |
 | Border handle (`AreaHandle`) | hit area the gap and 1u into each card, at least 4u, full length, split cursor at once; no line along the border (panes keep their 1px `hairline` divider); a grip pill 1u x 8u centred in the gap in `label` at 35% (light 45%), 70% under the pointer or dragged, over `durColor`; Tab's focus (not a press's) makes it the accent and 12u long; no grip on a border shorter than 24u (owner, 2026-11-25: "no white drag bar", "a visual cue when such a space can be dragged") |
 | Row stacking (`KitRow`) | when the label (at least 16u of it, or all of a shorter one) and the controls do not fit side by side, the label goes above and the controls under it at the start, 1.5u apart; margins stay the row's own (owner, 2026-11-25: Run again sat off centre in a narrow panel) |
 | Slider snap (`KitSlider.snap`) | a drag within 1.5u of a multiple of `snap` lands on it; keys and a typed value are exact; the App view gives whole ranges of 512 or more a snap of 64, of 128 or more 16 |
@@ -1297,4 +1299,21 @@ takes Tab, else the window. It mirrors right to left with the application. The n
 Measured contrast on the tone tints (derive.py's derivation, every shipped theme): the text at least 4.5:1 everywhere (catppuccin-latte
 5.59 to 6.31, tokyo-night 4.61 to 4.84); the glyph's ink at least 3:1 everywhere (catppuccin-latte 4.75 to 5.67, tokyo-night 4.09 to
 4.98); the tier badge's label on `kitChip` as the kit's (5.98 catppuccin-latte, 4.64 tokyo-night).
+
+### 20.24 KitDialogButtons: a dialog's one row of actions (Built, 2026-11-27)
+
+`src/kit/KitDialogButtons.qml`. Decision, the order and default of every dialog, and the references (GNOME HIG and libadwaita's
+`AdwAlertDialog`, Apple's HIG Alerts, KDE's order through Qt's `QDialogButtonBox::KdeLayout`, and why GNOME's): docs/ui-ergonomics.md,
+2026-11-27. No look of its own: its children are the window's buttons (`ThemedButton`/`ViewButton`, or `KitChip` in the kit's sheets).
+
+| Part | Rule |
+| --- | --- |
+| Roles | each child's `dialogRole`: `extra`, `cancel`, `destructive`, `accept` (the default) |
+| Order | extras at the start, a stretch, Cancel, the destructive answer, the acting answers with the primary last: the bottom right; right to left it mirrors |
+| Gaps | 2u between buttons; 4u around a destructive answer (before it after Cancel, after it before an acting answer); the stretch keeps the extras at least 4u away |
+| Default | `defaultButton`, else the visible `primary` one; in a question about a loss that is the safe answer (D8) |
+| Size | every button of the row the same: 7u tall, 3u each side of its label, the text size in Medium, whether it is a `ViewButton` (the questions) or a `KitChip` (the sheets): the row sets their `dialogRow`; a button outside a dialog row keeps its own size |
+| Destructive | the solid red, `danger-solid` with `danger-ink` (6.1), not the `danger-fill` tint the toolbars keep |
+| Keys | Left and Right move the focus as seen and stop at the ends; Tab follows the same order; Enter or Space press the focused button (the keyboard's 2px ring on its edge; the primary's and the solid red answer's is the row's, 2px of accent or error 3px outside it, one item per row); Escape in the row presses Cancel (`cancelOnEscape: false` where Escape closes more, Projects). A `Question` focuses the default when it opens with nothing focused, forgets the answers' focus when it closes, and adds Enter with no button or text field focused (the default) and Escape anywhere in it (Cancel); another host calls `pressDefault()` and `pressCancel()` |
+| Buttons | children with a `dialogRole` (ViewButton, ThemedButton, KitChip); a change of role moves the button, other children stay at the start; a `dimmed` chip is skipped by the keys |
 
