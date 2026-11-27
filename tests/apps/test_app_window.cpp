@@ -12,6 +12,7 @@
 #include <QQuickStyle>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../canvas/canvas_app.h"
 #include "apps/app_shelf.h"
 #include "apps/app_takes.h"
@@ -176,7 +177,7 @@ private slots:
     void anAppTemplateOpensAsTheAppAndOpenInGraphIsItsWorkflow() {
         App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
         Rig rig(app);
-        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        app.workflows.setTemplateRoots({{(fugueSourceDir() + QStringLiteral("/tests/apps/templates")), false}});
         QVERIFY(app.open());
         QVariantMap card;
         for (const QVariant &entry : app.workflows.templates())
@@ -200,7 +201,7 @@ private slots:
     // A shipped template's own sample shows in the picture well (the dropdown names it, the well draws it). Opening a template takes
     // the sample into the inputs folder (#376), so the well's file is that copy; it must load.
     void aShippedTemplateShowsItsSampleInThePictureWell() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         if (!QFileInfo::exists(root + "/image-upscale/workflow.fugue"))
             QSKIP("the templates submodule is not checked out");
         for (const auto &[id, stem] : {std::pair{"image-upscale", "ramen"}, std::pair{"flux2-klein-9b-da-restore", "reading-nook"}}) {
@@ -265,7 +266,7 @@ private slots:
     void theRailOpensTheShelfAndTheLibraryAndANewTabOverAnAppLandsOnTheShelf() {
         App app(load(appWorkflow));
         Rig rig(app);
-        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        app.workflows.setTemplateRoots({{(fugueSourceDir() + QStringLiteral("/tests/apps/templates")), false}});
         QVERIFY(app.open());
         QTRY_VERIFY(find(app.window, "appRail"));
         QCOMPARE(app.workflows.count(), 1);
@@ -539,7 +540,7 @@ private slots:
         QVERIFY(app.open());
         QTemporaryDir appFolder, pictures;
         QDir(appFolder.path()).mkpath("inputs");
-        QVERIFY(QImage(QStringLiteral(FUGUE_SOURCE_DIR "/templates/flux2-klein-9b-da-restore/inputs/reading-nook.jpg")).save(appFolder.filePath("inputs/sample.png")));
+        QVERIFY(QImage((fugueSourceDir() + QStringLiteral("/templates/flux2-klein-9b-da-restore/inputs/reading-nook.jpg"))).save(appFolder.filePath("inputs/sample.png")));
         QFile workflow(appFolder.filePath("workflow.fugue"));
         QVERIFY(workflow.open(QIODevice::WriteOnly));
         workflow.write(lookApp);
@@ -620,7 +621,7 @@ private slots:
         QDir().mkpath(out);
         App app(load(lookApp), {}, Look{themeName, 12});
         Rig rig(app);
-        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        app.workflows.setTemplateRoots({{(fugueSourceDir() + QStringLiteral("/tests/apps/templates")), false}});
         QVERIFY(app.open());
         for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
             const QStringList kv = part.split('=');
@@ -637,9 +638,9 @@ private slots:
                     pale.setPixelColor(x, y, QColor::fromHsv(40 + x * 40 / pale.width(), 25, 235 + 20 * y / pale.height()));
             QVERIFY(pale.save(appFolder.filePath("preview.png")));
         } else {
-            QVERIFY(QFile::copy(QStringLiteral(FUGUE_SOURCE_DIR "/templates/flux2-klein-9b-da-restore/preview.webp"), appFolder.filePath("preview.webp")));
+            QVERIFY(QFile::copy((fugueSourceDir() + QStringLiteral("/templates/flux2-klein-9b-da-restore/preview.webp")), appFolder.filePath("preview.webp")));
         }
-        QVERIFY(QImage(QStringLiteral(FUGUE_SOURCE_DIR "/templates/flux2-klein-9b-da-restore/inputs/reading-nook.jpg")).save(appFolder.filePath("inputs/sample.png")));
+        QVERIFY(QImage((fugueSourceDir() + QStringLiteral("/templates/flux2-klein-9b-da-restore/inputs/reading-nook.jpg"))).save(appFolder.filePath("inputs/sample.png")));
         QFile workflow(appFolder.filePath("workflow.fugue"));
         QVERIFY(workflow.open(QIODevice::WriteOnly));
         workflow.write(lookApp);
@@ -732,7 +733,7 @@ private slots:
     void thePanelWorksByKeysAlone() {
         App app(load(lookApp));
         Rig rig(app);
-        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}});
+        app.workflows.setTemplateRoots({{(fugueSourceDir() + QStringLiteral("/tests/apps/templates")), false}});
         QVERIFY(app.open());
         QQuickItem *first = find(app.window, "appImageChoose-image");
         QVERIFY(first);

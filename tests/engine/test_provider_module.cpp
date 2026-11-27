@@ -16,6 +16,7 @@
 
 #include <csignal>
 
+#include "../test_paths.h"
 #include "engine/provider_module.h"
 #include "engine/providers.h"
 #include "provider_support.h"
@@ -55,7 +56,7 @@ class TestProviderModule : public QObject {
         if (withProgram) {
             const QString program = QDir(folder).filePath("toy");
             QFile::remove(program);
-            QFile::copy(QStringLiteral(FUGUE_FAKE_MODULE_PROVIDER), program);
+            QFile::copy(fugueFakeModuleProvider(), program);
             QFile(program).setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         }
         QJsonObject full = manifest;
@@ -324,7 +325,7 @@ private slots:
         const quint16 port = finder.serverPort();
         finder.close();
         QProcess server;
-        server.start(FUGUE_FAKE_MODULE_PROVIDER, {"--http", QString::number(port)});
+        server.start(fugueFakeModuleProvider(), {"--http", QString::number(port)});
         QVERIFY(server.waitForStarted());
         QTest::qWait(300);
 

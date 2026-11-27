@@ -19,6 +19,7 @@
 
 #include <atomic>
 
+#include "../test_paths.h"
 #include "canvas_app.h"
 #include "../disk_pack.h"
 #include "../test_home_guard.h"
@@ -1743,7 +1744,7 @@ private slots:
 
     // A frozen node (10.4) shows frozen, between runs and after one.
     void aFrozenNodeShowsFrozen() {
-        QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/examples/demo.fugue"));
+        QFile file((fugueSourceDir() + QStringLiteral("/examples/demo.fugue")));
         QVERIFY(file.open(QIODevice::ReadOnly));
         RunApp r(file.readAll());
         QVERIFY(r.app.open());
@@ -1998,7 +1999,7 @@ echo '{"outputs": {"text": "painted"}}'
 
     // The demo workflow that ships (examples/demo.fugue) runs from the window: CPU nodes only.
     void theDemoRuns() {
-        QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/examples/demo.fugue"));
+        QFile file((fugueSourceDir() + QStringLiteral("/examples/demo.fugue")));
         QVERIFY(file.open(QIODevice::ReadOnly));
         RunApp r(file.readAll());
         QVERIFY(r.app.open());

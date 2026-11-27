@@ -6,6 +6,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "apps/app_ref.h"
 #include "apps/launcher_entries.h"
 
@@ -98,7 +99,7 @@ private slots:
 
     void anEntryNamesAnAppThatItsWindowMustResolve() {
         // The same words as `fugue app info`: an id of the catalog, a folder, a file; a file that exists wins over an id.
-        const QList<TemplateRoot> roots{{QStringLiteral(FUGUE_SOURCE_DIR "/tests/apps/templates"), false}};
+        const QList<TemplateRoot> roots{{(fugueSourceDir() + QStringLiteral("/tests/apps/templates")), false}};
         QString why;
         const auto byId = resolveApp("test-app", roots, nullptr, &why);
         QVERIFY2(byId, qPrintable(why));
@@ -106,12 +107,12 @@ private slots:
         QCOMPARE(byId->ref, QStringLiteral("test-app"));
         QVERIFY(byId->templ.has_value());
 
-        const auto byFolder = resolveApp(FUGUE_SOURCE_DIR "/tests/apps/templates/test-app", roots, nullptr, &why);
+        const auto byFolder = resolveApp((fugueSourceDir() + QStringLiteral("/tests/apps/templates/test-app")), roots, nullptr, &why);
         QVERIFY2(byFolder, qPrintable(why));
         QCOMPARE(byFolder->ref, QStringLiteral("test-app")); // the catalog has that folder: its id names it
         QCOMPARE(byFolder->kind, AppRef::Kind::Template);
 
-        const auto byFile = resolveApp(FUGUE_SOURCE_DIR "/tests/apps/templates/test-app/workflow.fugue", roots, nullptr, &why);
+        const auto byFile = resolveApp((fugueSourceDir() + QStringLiteral("/tests/apps/templates/test-app/workflow.fugue")), roots, nullptr, &why);
         QVERIFY2(byFile, qPrintable(why));
         QCOMPARE(byFile->kind, AppRef::Kind::Workflow);
         QVERIFY(byFile->ref.endsWith("/workflow.fugue"));

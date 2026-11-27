@@ -17,6 +17,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
@@ -65,7 +66,7 @@ class TestBasicCli : public QObject {
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(workingDirectory.isEmpty() ? m_dir.path() : workingDirectory);
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(60000)) {
             process.kill();

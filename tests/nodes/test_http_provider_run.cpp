@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../engine/fake_http.h"
 
 using fugue::test::FakeHttpServer;
@@ -85,7 +86,7 @@ private slots:
             QProcess process;
             process.setProcessEnvironment(env);
             process.setWorkingDirectory(dir.path());
-            process.start(QStringLiteral(FUGUE_BINARY), args);
+            process.start(fugueBinary(), args);
             if (!process.waitForStarted())
                 return -1;
             QElapsedTimer clock;

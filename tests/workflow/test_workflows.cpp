@@ -21,6 +21,7 @@
 
 #include <sys/stat.h>
 
+#include "../test_paths.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
@@ -922,7 +923,7 @@ private slots:
 
     void theDemoWorkflowLoadsCleanAndCompiles() {
         Fixture f;
-        const QString demo = QStringLiteral(FUGUE_SOURCE_DIR "/examples/demo.fugue");
+        const QString demo = (fugueSourceDir() + QStringLiteral("/examples/demo.fugue"));
         QVERIFY(f.workflows->openPath(demo));
         QVERIFY(f.workflows->notice().isEmpty());
         QVERIFY(f.workflows->pendingTrust().isEmpty());

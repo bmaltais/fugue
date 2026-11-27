@@ -23,6 +23,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
@@ -171,11 +172,11 @@ class TestKeepUnchanged : public QObject {
             env.remove(QString::fromLatin1(name));
         env.insert("XDG_CACHE_HOME", dir.filePath("cache"));
         env.insert("XDG_STATE_HOME", dir.filePath("state"));
-        env.insert("FUGUE_HELPER", QStringLiteral(FUGUE_FAKE_HELPER));
+        env.insert("FUGUE_HELPER", fugueFakeHelper());
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(dir.path());
-        process.start(QStringLiteral(FUGUE_BINARY), {"run", path, "--to", "keep/paste", "--wait", "--json"});
+        process.start(fugueBinary(), {"run", path, "--to", "keep/paste", "--wait", "--json"});
         if (!process.waitForFinished(120000)) {
             process.kill();
             process.waitForFinished();

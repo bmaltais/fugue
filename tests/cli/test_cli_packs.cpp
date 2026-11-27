@@ -2,6 +2,7 @@
 // With no terminal each command fails with `needs_confirmation` and changes nothing; the
 // terminal path is driven through `script`, which gives the program a pseudo-terminal.
 
+#include "../test_paths.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -67,7 +68,7 @@ class TestCliPacks : public QObject {
     Outcome fugue(const QStringList &args) const {
         QProcess process;
         process.setProcessEnvironment(environment());
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         process.closeWriteChannel();
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
@@ -83,7 +84,7 @@ class TestCliPacks : public QObject {
 
     // On a pseudo-terminal, typing `typed`. Returns what the program showed.
     QString atTerminal(const QStringList &args, const QByteArray &typed, int *exitCode) const {
-        QString command = shellQuote(FUGUE_BINARY);
+        QString command = shellQuote(fugueBinary());
         for (const QString &arg : args)
             command += " " + shellQuote(arg);
         QProcess process;

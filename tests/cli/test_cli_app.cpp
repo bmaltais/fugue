@@ -16,6 +16,7 @@
 #include <QTcpSocket>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/share_package.h"
 
 namespace {
@@ -169,7 +170,7 @@ class TestCliApp : public QObject {
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(path("work"));
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(60000)) {
             process.kill();
@@ -249,7 +250,7 @@ private slots:
 
         // validate: the node's own warning (a missing model is a warning there) carries the same words.
         // The bundled Z-Image Turbo template is a graph that reaches the model; its files are not here, but the INT8 one has same weights.
-        QVERIFY(QFile::copy(QString(FUGUE_SOURCE_DIR) + "/templates/z-image-turbo/workflow.fugue", path("work/zit.fugue")));
+        QVERIFY(QFile::copy(fugueSourceDir() + "/templates/z-image-turbo/workflow.fugue", path("work/zit.fugue")));
         const Outcome checked = fugue({"validate", "zit.fugue", "--no-use-on-disk", "--json"});
         QCOMPARE(checked.exitCode, 0);
         QStringList hints;
@@ -488,7 +489,7 @@ private slots:
         template_("draws", "Draws", kDraws, "true");
         const QString module = path("root/data/fugue/providers/io.example.toy");
         QVERIFY(QDir().mkpath(module));
-        QVERIFY(QFile::copy(QStringLiteral(FUGUE_FAKE_MODULE_PROVIDER), module + "/toy"));
+        QVERIFY(QFile::copy(fugueFakeModuleProvider(), module + "/toy"));
         QFile(module + "/toy").setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         write(module + "/provider.json", "{\"manifest\": 1, \"id\": \"io.example.toy\", \"version\": \"0.1.0\", \"name\": \"Toy\", \"transport\": \"stdio\","
                                          " \"start\": {\"command\": [\"./toy\", \"--stdio\"]}, \"capabilities\": [\"image.generate\"]}");

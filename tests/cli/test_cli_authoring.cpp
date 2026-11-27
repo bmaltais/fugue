@@ -1,6 +1,7 @@
 // `fugue node new` and `fugue node test` (spec 6.11) as the real binary, and the example pack
 // of the user docs (examples/packs), which must pass its own tests.
 
+#include "../test_paths.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -38,7 +39,7 @@ class TestCliAuthoring : public QObject {
         env.insert("HOME", m_dir.filePath("home"));
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(cwd);
-        process.start(FUGUE_BINARY, QStringList(args) << "--json");
+        process.start(fugueBinary(), QStringList(args) << "--json");
         process.closeWriteChannel();
         Outcome outcome;
         if (!process.waitForFinished(60000)) {
@@ -141,7 +142,7 @@ private slots:
     }
 
     void theExamplePackPassesItsTests() {
-        const QString pack = QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs/io.github.bmaltais.fugue-example");
+        const QString pack = (fugueSourceDir() + QStringLiteral("/examples/packs/io.github.bmaltais.fugue-example"));
         const Outcome tested = fugue({"node", "test", pack}, work("example"));
         QVERIFY2(tested.exitCode == 0, tested.out.constData());
         // The persistent node's program lives across both cases.

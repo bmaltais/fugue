@@ -28,6 +28,7 @@
 
 #include <vips/vips8>
 
+#include "../test_paths.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
@@ -667,11 +668,11 @@ private:
         // Its own cache and runs; the models are in the data folder this test wrote them to.
         env.insert("XDG_CACHE_HOME", bench.dir.filePath("cache"));
         env.insert("XDG_STATE_HOME", bench.dir.filePath("state"));
-        env.insert("FUGUE_HELPER", QStringLiteral(FUGUE_FAKE_HELPER));
+        env.insert("FUGUE_HELPER", fugueFakeHelper());
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(bench.dir.path()); // inside the write roots (13.6)
-        process.start(QStringLiteral(FUGUE_BINARY), args);
+        process.start(fugueBinary(), args);
         if (!process.waitForFinished(120000)) {
             process.kill();
             process.waitForFinished();

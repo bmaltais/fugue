@@ -2,6 +2,7 @@
 // candidates as the first-run setup, only in the places named with --only (so no real drive is ever searched), and changes nothing.
 // The finder's rules (caps, links, mounts) are tested in tests/engine/test_model_folder_finder.cpp.
 
+#include "../test_paths.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -46,7 +47,7 @@ class TestCliModelFolders : public QObject {
         env.insert("XDG_CONFIG_HOME", m_dir.filePath("config"));
         env.insert("HOME", home());
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, QStringList{"model", "find-folders"} << args << "--json");
+        process.start(fugueBinary(), QStringList{"model", "find-folders"} << args << "--json");
         process.closeWriteChannel();
         if (!process.waitForFinished(60000)) {
             process.kill();

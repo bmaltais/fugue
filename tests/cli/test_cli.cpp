@@ -20,6 +20,7 @@
 #include <QScopeGuard>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../engine/fake_http.h"
 #include "cli/args.h"
 #include "engine/document.h"
@@ -157,7 +158,7 @@ class TestCli : public QObject {
         file.write(bytes);
     }
 
-    Outcome fugue(const QStringList &args, const QString &binary = FUGUE_FAKE_BINARY) const {
+    Outcome fugue(const QStringList &args, const QString &binary = fugueFakeBinary()) const {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove("QT_QPA_PLATFORM");
         env.remove("DISPLAY");
@@ -382,8 +383,8 @@ private slots:
     }
 
     void helpAndVersionPrintAndExitZero() {
-        QVERIFY(fugue({"--help"}, FUGUE_BINARY).out.contains("usage: fugue"));
-        QCOMPARE(fugue({"--version"}, FUGUE_BINARY).exitCode, 0);
+        QVERIFY(fugue({"--help"}, fugueBinary()).out.contains("usage: fugue"));
+        QCOMPARE(fugue({"--version"}, fugueBinary()).exitCode, 0);
     }
 
     void aFileArgumentOpensTheWindowAndACommandWordStaysTheCommandLine() {
@@ -412,7 +413,7 @@ private slots:
 
     void noDisplayNeeded() {
         // initTestCase's env has no display and no QT_QPA_PLATFORM; this must not abort.
-        const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY);
+        const Outcome o = fugue({"node", "list", "--json"}, fugueBinary());
         QCOMPARE(o.exitCode, 0);
         QVERIFY2(!o.err.contains("xcb") && !o.err.contains("platform plugin"), o.err.constData());
     }
@@ -467,7 +468,7 @@ private slots:
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("nowhere"));
         process.setProcessEnvironment(env);
-        process.start(FUGUE_FAKE_BINARY, {"node", "list", "--json"});
+        process.start(fugueFakeBinary(), {"node", "list", "--json"});
         QVERIFY(process.waitForFinished(20000));
         const QJsonObject json = QJsonDocument::fromJson(process.readAllStandardOutput()).object();
         QCOMPARE(json.value("data").toObject().value("nodes").toArray().size(), 0);
@@ -475,7 +476,7 @@ private slots:
 
     // The manifest folder is a test hook; the app people install does not have it.
     void theShippedBinaryLoadsNoNodeTypesFromTheEnvironment() {
-        const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY); // FUGUE_NODE_MANIFESTS is set
+        const Outcome o = fugue({"node", "list", "--json"}, fugueBinary()); // FUGUE_NODE_MANIFESTS is set
         QCOMPARE(o.exitCode, 0);
         const QStringList listed = ids(o.json().value("data").toObject().value("nodes").toArray());
         QVERIFY(!listed.contains("fugue/shout")); // a test fake, from the folder
@@ -487,9 +488,9 @@ private slots:
     void theShippedBinaryKnowsTheBuiltInNodes() {
         write(m_dir.filePath("text.fugue"), flow("\"t\": {\"type\": \"fugue/text\", \"version\": \"1.0.0\", "
                                        "\"inputs\": {\"text\": \"hello\"}}"));
-        const Outcome o = fugue({"validate", m_dir.filePath("text.fugue"), "--json"}, FUGUE_BINARY);
+        const Outcome o = fugue({"validate", m_dir.filePath("text.fugue"), "--json"}, fugueBinary());
         QVERIFY2(!o.out.contains("unknown_node_type"), o.out.constData());
-        const Outcome list = fugue({"node", "list", "--json"}, FUGUE_BINARY);
+        const Outcome list = fugue({"node", "list", "--json"}, fugueBinary());
         QVERIFY2(ids(list.json().value("data").toObject().value("nodes").toArray()).contains("fugue/text"),
                  list.out.constData());
     }
@@ -500,14 +501,14 @@ private slots:
               flow("\"m\": {\"type\": \"fugue/solid-mask\", \"version\": \"1.0.0\", \"inputs\": {}}, "
                    "\"p\": {\"type\": \"fugue/pad\", \"version\": \"1.2.0\", \"inputs\": "
                    "{\"image\": {\"from\": \"m.mask\"}, \"fill\": \"gray\", \"blur\": 7}}"));
-        Outcome o = fugue({"validate", m_dir.filePath("pad.fugue"), "--json"}, FUGUE_BINARY);
+        Outcome o = fugue({"validate", m_dir.filePath("pad.fugue"), "--json"}, fugueBinary());
         const QJsonArray unused = o.json().value("data").toObject().value("nodes").toObject().value("p").toObject().value("not_used").toArray();
         QVERIFY2(unused.size() == 1, o.out.constData());
         QCOMPARE(unused.at(0).toObject().value("input").toString(), QString("blur"));
         QCOMPARE(unused.at(0).toObject().value("why").toString(), QString("Applies only when Fill is edge-blur."));
-        o = fugue({"validate", m_dir.filePath("pad.fugue")}, FUGUE_BINARY);
+        o = fugue({"validate", m_dir.filePath("pad.fugue")}, fugueBinary());
         QVERIFY2(o.out.contains("not used: blur: Applies only when Fill is edge-blur."), o.out.constData());
-        o = fugue({"workflow", "describe", m_dir.filePath("pad.fugue")}, FUGUE_BINARY);
+        o = fugue({"workflow", "describe", m_dir.filePath("pad.fugue")}, fugueBinary());
         QVERIFY2(o.out.contains("not used p.blur: Applies only when Fill is edge-blur."), o.out.constData());
     }
 
@@ -772,7 +773,7 @@ private slots:
         // omarchy-local-ai's state on a paired machine (tests/engine/data/omarchy): the paired
         // host lab is offline, so its image model is listed as unavailable with why. studio is
         // asked on a port where nothing listens, so it lists nothing.
-        const QString data = FUGUE_SOURCE_DIR "/tests/engine/data/omarchy/";
+        const QString data = (fugueSourceDir() + QStringLiteral("/tests/engine/data/omarchy/"));
         const QString state = m_dir.filePath("home/.local/state/omarchy/agent-local");
         const QString config = m_dir.filePath("home/.config/omarchy/agent-local");
         for (const char *name : {"status.json", "network.json"}) {

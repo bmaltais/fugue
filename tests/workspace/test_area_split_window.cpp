@@ -16,6 +16,7 @@
 
 #include <thread>
 
+#include "../test_paths.h"
 #include "../canvas/canvas_app.h"
 #include "../window_grab.h"
 #include "engine/canvas_store.h"
@@ -532,7 +533,7 @@ private slots:
         QVERIFY(app.open());
         Template chosen;
         chosen.id = chosen.title = "z-image-turbo";
-        chosen.folder = QStringLiteral(FUGUE_SOURCE_DIR "/templates/z-image-turbo");
+        chosen.folder = (fugueSourceDir() + QStringLiteral("/templates/z-image-turbo"));
         chosen.workflow = chosen.folder + "/workflow.fugue";
         QVERIFY(app.workflows.openTemplate(chosen));
         QTRY_VERIFY(host(app) && find(app.window, "canvasArea"));

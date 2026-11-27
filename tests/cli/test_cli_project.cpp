@@ -3,6 +3,7 @@
 // registry is the test's own ~/.config/fugue/projects.json and a path that ignores a project's root lands
 // in the empty HOME where the test sees it. The engine side is tests/engine/test_project.cpp.
 
+#include "../test_paths.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -58,7 +59,7 @@ class TestCliProject : public QObject {
         QProcess process;
         process.setProcessEnvironment(env);
         process.setWorkingDirectory(path("work"));
-        process.start(FUGUE_BINARY, args);
+        process.start(fugueBinary(), args);
         Outcome outcome;
         if (!process.waitForFinished(120000)) {
             process.kill();

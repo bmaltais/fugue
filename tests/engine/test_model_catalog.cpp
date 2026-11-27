@@ -9,6 +9,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "engine/file_hashes.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
@@ -165,7 +166,7 @@ private slots:
 
     void theExamplePacksCatalogsAreValidAndNameTheirLicences() {
         QTemporaryDir empty;
-        const ModelCatalog catalog = ModelCatalog::load(empty.path(), {QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs")});
+        const ModelCatalog catalog = ModelCatalog::load(empty.path(), {(fugueSourceDir() + QStringLiteral("/examples/packs"))});
         QVERIFY2(catalog.problems().isEmpty(), qPrintable(catalog.problems().join("\n")));
         struct Expected { const char *type, *license, *extension; int least; };
         // Remove Background (BiRefNet, MIT), Segment by Points or Box (SAM 2.1 bundles, Apache-2.0) and Remove Object

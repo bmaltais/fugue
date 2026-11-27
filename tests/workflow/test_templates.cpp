@@ -19,6 +19,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "apps/app_ref.h"
 #include "apps/app_view.h"
 #include "apps/app_view_destination.h"
@@ -2562,7 +2563,7 @@ private slots:
     // Fugue lists every one with nothing wrong, each compiles and opens with every node known,
     // and each model it names has a source and a size.
     void theBundledTemplatesAreWholeAndCompile() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
@@ -2612,7 +2613,7 @@ private slots:
     // (the video and upscale ones came with a later pointer; a checkout left on an older one, or
     // an empty folder, must fail here with the fix, not later with a puzzling count).
     void theBundledTemplatesAreTheOnesFugueExpects() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         const QString fix = QStringLiteral("; the templates submodule is stale, run: git submodule update --init templates");
 
@@ -2652,7 +2653,7 @@ private slots:
     // The generative fill template (#210, spec 14.5): Canvas Region, a Klein inpaint and Canvas Write
     // that lands its result on the canvas as a layer, in plain nodes (no group), with no canvas chosen.
     void theGenerativeFillTemplateFillsACanvasRegionAndLandsALayer() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
@@ -2675,7 +2676,7 @@ private slots:
     // seam map, Klein 4B, colours matched back to the original, resized back, saved; in plain nodes, loading the sample
     // collage and its mask from inputs/.
     void theHarmonizeImageTemplateMakesACollageOneWithASeamMap() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
@@ -2704,7 +2705,7 @@ private slots:
 
     // Refine, Remove and Expand (#231 slices 5 and 7): canvas actions in the Canvas category, each with a preview.
     void theRefineRemoveAndExpandTemplatesAreCanvasActions() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
         for (const char *id : {"refine", "remove", "expand", "upscale", "upscale-no-model"}) {
@@ -2718,7 +2719,7 @@ private slots:
     // The video to video template (#130): VAE Encode Video makes the start latent of a clip that
     // ships beside the template, and the Sampler 1.2.0 redraws it by Denoise, in plain nodes.
     void theVideoToVideoTemplateRedrawsAClipByDenoise() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
@@ -2742,7 +2743,7 @@ private slots:
     // beside the picture (an input file, as a picture is), and the settings that a group or a node
     // leaves without a default set for Klein: 4 steps, guidance 1.
     void theMaskTemplatesCarryTheirMaskAndSetStepsAndGuidance() {
-        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        const QString root = (fugueSourceDir() + QStringLiteral("/templates"));
         QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);

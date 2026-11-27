@@ -19,6 +19,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/registry.h"
@@ -359,7 +360,7 @@ private slots:
     // A moving preview plays only while it is wanted, is stopped (not decoding, not drawing) when it is not, is not even opened until
     // it is first wanted, and never plays under reduced motion (the poster stays). The budget of docs/canvas-look.md 20.17.
     void aMovingPictureOnlyPlaysWhileItIsWanted() {
-        const QString clip = QStringLiteral(FUGUE_SOURCE_DIR "/templates/remove-background/preview.webm");
+        const QString clip = (fugueSourceDir() + QStringLiteral("/templates/remove-background/preview.webm"));
         if (!QFileInfo::exists(clip))
             QSKIP("the templates submodule has no preview.webm (git submodule update --init templates)");
         Shell shell(dir.filePath("video"), "tokyo-night");
@@ -433,7 +434,7 @@ private slots:
         QDir().mkpath(folder);
         const QString scene = dir.filePath("scene.png");
         writeScene(scene);
-        QFile gallery(QStringLiteral(FUGUE_SOURCE_DIR "/tests/kit/KitGallery.qml"));
+        QFile gallery((fugueSourceDir() + QStringLiteral("/tests/kit/KitGallery.qml")));
         QVERIFY(gallery.open(QIODevice::ReadOnly));
         const QByteArray body = gallery.readAll();
         Shell shell(dir.filePath("shot-" + tag), theme);

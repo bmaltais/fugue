@@ -4,6 +4,7 @@
 // per item name, sorted. test_area_window compares the default window with the file; test_area_split_window
 // compares the window after a split and a close with it.
 
+#include "../test_paths.h"
 #include <QFile>
 #include <QMap>
 #include <QQuickItem>
@@ -44,7 +45,7 @@ inline QString describe(QQuickItem *content) {
 
 // The file, without its comments.
 inline QString expected() {
-    QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/tests/workspace/data/default-window.txt"));
+    QFile file((fugueSourceDir() + QStringLiteral("/tests/workspace/data/default-window.txt")));
     if (!file.open(QIODevice::ReadOnly))
         return {};
     QString text;

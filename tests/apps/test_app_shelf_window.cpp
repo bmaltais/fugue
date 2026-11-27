@@ -10,6 +10,7 @@
 #include <QQuickStyle>
 #include <QtTest>
 
+#include "../test_paths.h"
 #include "../canvas/canvas_app.h"
 #include "apps/app_shelf.h"
 #include "apps/app_window.h"
@@ -413,7 +414,7 @@ private slots:
         QDir().mkpath(out);
         App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"), {}, Look{themeName, 12});
         Rig rig(app);
-        app.workflows.setTemplateRoots({{QStringLiteral(FUGUE_SOURCE_DIR "/templates"), false}});
+        app.workflows.setTemplateRoots({{(fugueSourceDir() + QStringLiteral("/templates")), false}});
         QVERIFY(app.open());
         for (const QString &part : qEnvironmentVariable("FUGUE_SHOT_LOOK").split(';', Qt::SkipEmptyParts)) {
             const QStringList kv = part.split('=');
