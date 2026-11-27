@@ -47,6 +47,8 @@ QQuickItem *find(QQuickWindow *window, const QString &name) {
 
 QPoint centerOf(QQuickItem *item) { return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint(); }
 
+QString textOf(QQuickItem *item) { return item->property("text").toString(); }
+
 bool panelOpen(QQuickWindow *window) {
     QObject *panel = window->findChild<QObject *>("settingsPanel");
     return panel && panel->property("opened").toBool();
@@ -202,8 +204,10 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(app.registry.nodeType("io.example.tools/tool"), 20000);
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
 
+        QCOMPARE(textOf(NEED("packState-io.example.tools")), QString("not trusted")); // no "inherited," on an own pack (#541)
         click(app, NEED("packTrust-io.example.tools"));
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
+        QVERIFY(!textOf(NEED("packQuestionDetail")).contains("Inherited from Default")); // the warning is for inherited packs only
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
         QTRY_VERIFY_WITH_TIMEOUT(NEED("packYes")->isEnabled(), 20000);
         click(app, NEED("packYes"));

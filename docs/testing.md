@@ -74,6 +74,17 @@ test's own temporary folder), because shards run at the same time.
    that moves a list's rows), and wait on state. ctest runs with `QV4_GC_TIMELIMIT=100000` (CMakeLists.txt): Qt's sliced
    GC under load made a Question read its theme as null in 1 run in 50 (the Question now reads `App.theme.look` directly, #320; the setting stays for other components).
 7. A change that adds more than about 2 s to the suite says so in its PR body.
+8. The moc trap (#617): moc reads a raw string literal as code. In a `.cpp` with `Q_OBJECT` (a test class), a raw
+   string that spans lines and has a line with `//` before a `"` (a URL in JSON, `"source": "https://..."`) makes
+   moc treat the rest of the line as a comment: it prints "No relevant classes found", emits nothing, and the link
+   fails with "undefined reference to vtable". Put the URL on the string's last line, build it in pieces
+   (`QStringLiteral("https:") + "//..."`), or write the text to a file. `bin/check-quick` finds this in under a
+   second (no build) and `bin/test` runs it first, so it fails with the file and line.
+9. `bin/check-quick` also fails a branch that moves the `templates` submodule backwards (#641): the new commit
+   must contain `origin/main`'s (`git merge-base --is-ancestor`). A stale submodule checkout that a `git commit -a`
+   recorded did this once (#622). In a worktree run `git submodule update --init` after you merge main; a real
+   rollback says `templates rollback` in a commit message. PRs from this repository start no hosted CI, so
+   `bin/test` is where the guard runs.
 
 ## CI
 
