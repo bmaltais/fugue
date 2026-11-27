@@ -40,6 +40,7 @@ public:
 
     // `entries` is where the entries go (a test gives a scratch folder); `spawn` starts a new Fugue with these arguments (the
     // default starts this program, detached).
+    // `roots` empty: the templates are looked up through the roots Workflows has now (they change when new templates are fetched).
     AppLauncher(AppView *view, Workflows *workflows, QList<TemplateRoot> roots, const Registry *registry, LauncherEntries entries = LauncherEntries(),
                 Spawn spawn = {}, QObject *parent = nullptr);
 
@@ -66,6 +67,7 @@ signals:
 
 private:
     void refresh();
+    QList<TemplateRoot> roots() const;
     // What the entry is for: the kept app's id once kept, else the app's own ref.
     QString refOf() const { return m_kept.isEmpty() ? m_app->ref : m_kept; }
 

@@ -333,6 +333,20 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === "general"
+                        title: qsTr("Get new templates")
+                        key: "fetch_templates"
+                        origin: panel.model.origins["fetch_templates"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("fetch_templates"))
+                        note: qsTr("Fugue looks for new and fixed templates from time to time and keeps them beside the ones that came with it, so they arrive without a new release. Off: only the bundled templates and your own. A template this Fugue cannot open yet never hides the bundled one. %1").arg(panel.model.templatesStatus)
+                        head: SettingsParts.Toggle {
+                            objectName: "fetchTemplates"
+                            text: qsTr("Get new templates")
+                            on: panel.model.fetchTemplates
+                            onToggled: value => panel.apply(panel.model.set("fetch_templates", value))
+                        }
+                    }
+                    SettingsParts.Setting {
+                        visible: panel.page === "general"
                         title: qsTr("Language")
                         key: "language"
                         origin: panel.model.origins["language"] ?? ""

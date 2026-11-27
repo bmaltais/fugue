@@ -1159,6 +1159,11 @@ void Workflows::loadHostModels() {
     });
 }
 
+void Workflows::refreshTemplateRoots() {
+    m_templateRoots = TemplateLibrary::standardRoots();
+    emit templatesChanged();
+}
+
 QList<Template> Workflows::templateList() const {
     return TemplateLibrary(m_templateRoots, m_registry).list();
 }

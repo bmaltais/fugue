@@ -4,6 +4,7 @@
 #include <QFileInfo>
 
 #include "engine/share_package.h"
+#include "engine/template_feed.h"
 #include "workflow/workflows.h"
 
 namespace fugue {
@@ -40,7 +41,10 @@ std::optional<AppRef> resolveApp(const QString &ref, const QList<TemplateRoot> &
         const std::optional<Template> listed = TemplateLibrary(roots, registry).find(found->id);
         AppRef out;
         out.kind = AppRef::Kind::Template;
-        out.ref = listed && QFileInfo(listed->folder).canonicalFilePath() == QFileInfo(folder).canonicalFilePath() ? listed->id : folder;
+        // A folder of the fetched store is named by its id, never by its path: the next update removes that folder.
+        const QString store = QFileInfo(TemplateFeed::storeDir()).canonicalFilePath();
+        const bool fetched = !store.isEmpty() && QFileInfo(folder).canonicalFilePath().startsWith(store + QLatin1Char('/'));
+        out.ref = fetched || (listed && QFileInfo(listed->folder).canonicalFilePath() == QFileInfo(folder).canonicalFilePath()) ? found->id : folder;
         out.file = found->workflow;
         out.preview = found->preview;
         out.templ = found;

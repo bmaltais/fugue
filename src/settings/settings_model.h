@@ -78,6 +78,10 @@ class SettingsModel : public QObject {
     Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
     // Reopen the last session's saved tabs at start (#212): on unless turned off; the window follows it live.
     Q_PROPERTY(bool restoreTabs READ restoreTabs NOTIFY changed)
+    // Fetch new templates from fugue-workflows on its own (#699): on unless turned off. templatesStatus is the
+    // "Last checked" line, or the last error.
+    Q_PROPERTY(bool fetchTemplates READ fetchTemplates NOTIFY changed)
+    Q_PROPERTY(QString templatesStatus READ templatesStatus NOTIFY changed)
     // The cache limits (#141): GB of results and of previews (0: no limit), runs kept past a week.
     Q_PROPERTY(double cacheResultsGb READ cacheResultsGb NOTIFY changed)
     Q_PROPERTY(double cacheThumbnailsGb READ cacheThumbnailsGb NOTIFY changed)
@@ -165,6 +169,10 @@ public:
     QString nodeStyle() const { return m_effective.settings.nodeStyle; }
     bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
     bool restoreTabs() const { return m_effective.settings.restoreTabs; }
+    bool fetchTemplates() const { return m_effective.settings.fetchTemplates; }
+    QString templatesStatus() const;
+    // The feed finished a try (or was never run): the status line reads again.
+    void templatesChecked() { emit changed(); }
     QVariantMap origins() const;
     QStringList inheritedModelPaths() const;
     QString downloadFolder() const;

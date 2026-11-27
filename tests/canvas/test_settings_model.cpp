@@ -253,6 +253,18 @@ private slots:
         QVERIFY(!readJsonObject(settingsFile()).value().contains("picture_mode"));
     }
 
+    // Get new templates (#699): on by default, like Reopen tabs; off is written, on again takes the key out.
+    void fetchTemplatesIsOnByDefaultAndPersists() {
+        SettingsModel model(settingsFile());
+        QVERIFY(model.fetchTemplates());
+        QCOMPARE(model.set("fetch_templates", false), QString());
+        QVERIFY(!SettingsModel(settingsFile()).fetchTemplates());
+        QVERIFY(!model.set("fetch_templates", "no").isEmpty());
+        QCOMPARE(model.set("fetch_templates", true), QString());
+        QVERIFY(!readJsonObject(settingsFile()).value().contains("fetch_templates"));
+        QVERIFY(!model.templatesStatus().isEmpty());
+    }
+
     // Reopen tabs at start (#212): on by default; off is written (the default is on), on again takes the key out.
     void restoreTabsIsOnByDefaultAndPersists() {
         SettingsModel model;

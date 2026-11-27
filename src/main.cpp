@@ -12,6 +12,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTemporaryDir>
+#include <QNetworkAccessManager>
 #include <QTimer>
 #include <QUrl>
 
@@ -32,6 +33,8 @@
 #include "engine/pack_loader.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/template_feed.h"
+#include "engine/template_feed_driver.h"
 #include "engine/trust_store.h"
 #include "node_type_reloads.h"
 #include "engine/fugue_home.h"
@@ -190,7 +193,7 @@ int main(int argc, char *argv[]) {
                            return fugue::kernelRequirement(*capabilityKernels, type, inputs);
                        });
     // Add to launcher and Open in Fugue, in both windows' App view (#398).
-    fugue::AppLauncher appLauncher(&appView, &workflows, fugue::TemplateLibrary::standardRoots(), &registry);
+    fugue::AppLauncher appLauncher(&appView, &workflows, {}, &registry);
     QObject::connect(&appLauncher, &fugue::AppLauncher::notice, &workflows, &fugue::Workflows::notify);
     if (appArgument) // closing an app's window never asks about unsaved work: it has none of its own
         commands.setHandler(QStringLiteral("app.quit"), [] { QCoreApplication::quit(); });
@@ -292,6 +295,16 @@ int main(int argc, char *argv[]) {
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::dropRecoveryCopies);
     }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &workspace, &fugue::Workspace::flush);
+    // New templates without a release (#699): the driver checks once after the window shows, every 6 hours, and when the switch is
+    // turned on; Browse templates and the apps list read again when the roots change.
+    QNetworkAccessManager feedNetwork;
+    fugue::TemplateFeed templateFeed(&feedNetwork);
+    fugue::TemplateFeedDriver feedDriver(&templateFeed, {[&appSettings] { return appSettings.fetchTemplates(); }});
+    QObject::connect(&feedDriver, &fugue::TemplateFeedDriver::rootsChanged, &workflows, &fugue::Workflows::refreshTemplateRoots);
+    QObject::connect(&feedDriver, &fugue::TemplateFeedDriver::checked, &appSettings, [&appSettings] { appSettings.templatesChecked(); });
+    QObject::connect(&appSettings, &fugue::SettingsModel::changed, &feedDriver, &fugue::TemplateFeedDriver::settingsChanged);
+    if (!appArgument)
+        feedDriver.start();
     // The first time, in the Default session, with no model folder yet: ask, before searching anything (#619).
     if (!appArgument)
         QTimer::singleShot(0, appSettings.modelSetup(), [&appSettings] { appSettings.modelSetup()->maybeOffer(); });

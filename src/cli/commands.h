@@ -63,6 +63,7 @@ Reply compileWorkflow(const Command &command, Context &context);
 Reply workflowNew(const Command &command, Context &context);
 Reply workflowFromTemplate(const Command &command, Context &context); // workflow new --template
 Reply templateList(const Command &command, Context &context);
+Reply templateUpdate(const Command &command, Context &context);
 Reply workflowDescribe(const Command &command, Context &context);
 Reply workflowExport(const Command &command, Context &context);
 Reply runsList(const Command &command, Context &context);
