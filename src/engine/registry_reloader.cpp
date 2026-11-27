@@ -46,6 +46,8 @@ void RegistryReloader::setTrustFile(const QString &path) {
 // written back when a pack loads (a pack trusted before they were kept, #497), and that write must not reload the packs again,
 // nor disturb a run that is reading them.
 QString RegistryReloader::trustStamp() const {
+    if (m_trustFile.isEmpty()) // no trust file is watched (a test, an app window)
+        return QString();
     QFile file(m_trustFile);
     if (!file.open(QIODevice::ReadOnly))
         return QString();
