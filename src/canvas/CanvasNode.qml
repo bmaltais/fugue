@@ -642,7 +642,8 @@ Item {
                         compare: node.compare
                         viewState: node.compareView
                         look: node.look
-                        wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
+                        // Selected: the wheel zooms the picture, with or without a key; not selected, a plain wheel moves the canvas (#437)
+                        wheelModifiers: node.selected ? Qt.KeyboardModifierMask : Qt.AltModifier
                         zoomChips: true // Fit and 100% on hover (#420)
                         onPressed: {
                             node.canvasModel.select([node.nodeId])

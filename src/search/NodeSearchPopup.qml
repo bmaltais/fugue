@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../kit"
 
 // Node search (spec 12.8, docs/canvas-look.md 12): a query field over a list of results, each
 // with its category, ports and version. Every decision (ranking, filtering by the dragged
@@ -51,6 +52,7 @@ Popup {
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
     }
+    KitFocusKeep { popup: root }
     transformOrigin: rightToLeft ? Popup.TopRight : Popup.TopLeft
 
     // The search's state is the model's; the popup follows it.

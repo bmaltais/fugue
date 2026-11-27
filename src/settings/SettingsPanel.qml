@@ -47,6 +47,7 @@ Popup {
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
     }
+    KitFocusKeep { id: keep; popup: panel }
     // What had the focus before: Escape gives it back (the window's canvas, a menu's button).
     property Item opener: null
     onAboutToShow: {
@@ -59,7 +60,7 @@ Popup {
         if (tab)
             tab.forceActiveFocus()
     }
-    onClosed: if (opener) opener.forceActiveFocus()
+    onClosed: if (opener && !keep.elsewhere) opener.forceActiveFocus()
 
     // Scrolls the page so `item` (a card whose title has 5u of room above it) starts with its title 3u under the top, as far as the
     // page allows: a service just added, below the fold, shows from its title and no sliver of the group before it.

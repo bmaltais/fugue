@@ -74,6 +74,7 @@ Popup {
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
     }
+    KitFocusKeep { popup: dialog }
     onAboutToShow: reset()
     // The first useful control of the list takes the keys; Tab walks New, Open folder and Project settings, Escape closes.
     onOpened: if (dialog.view === "list") newButton.forceActiveFocus()
