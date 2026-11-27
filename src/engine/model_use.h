@@ -24,6 +24,8 @@
 #include <QMap>
 #include <QString>
 
+#include <functional>
+
 #include "engine/model_library.h"
 #include "engine/model_recommend.h"
 
@@ -70,8 +72,10 @@ QJsonObject useHandle(const OnDiskUse &use, const QString &hash);
 using Uses = QMap<QString, QJsonObject>;
 
 // The uses with their hashes read (a file's hash is remembered, so only a file never hashed is read: call it off the window's
-// thread). A file that cannot be read has no entry.
-Uses resolveUses(const QList<OnDiskUse> &uses, FileHashes &hashes);
+// thread). A file that cannot be read has no entry. `progress` is told as a file is read, with the file's path first (a command
+// line says that it is reading).
+using UseProgress = std::function<void(const QString &path, qint64 done, qint64 total)>;
+Uses resolveUses(const QList<OnDiskUse> &uses, FileHashes &hashes, const UseProgress &progress = {});
 
 // `value` with every handle whose hash is a key of `uses` replaced, wherever it is nested (a derived model's parts).
 QJsonValue withUses(const QJsonValue &value, const Uses &uses);

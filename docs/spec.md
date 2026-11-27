@@ -2762,6 +2762,13 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
   stdout instead (the line is not written to the run's `events.jsonl`). `N` is the active run's process, else the holder of the engine or
   GPU lock (read from `/proc/locks`); without one the message ends after `finish…`, and the event has no `pid`.
   `runs events --follow` does not say it. `fugue validate` runs nothing and takes neither lock, so it never waits for one.
+  The one thing it can wait for is another process's hold on the hash store's lock (`hashes.json.lock`, a `QLockFile`), when a file it
+  swapped in by `--use-on-disk` (the default, [2.5](#25-resource-handles)) is saved to the store, and a file never hashed is read whole first
+  (#625). After a second it says so on stderr: `Waiting for another Fugue (pid N) to finish reading model hashes…`, and
+  `Reading <file> to tell it is the model (once; the hash is remembered)…`; with `--json` each is `{"event":"waiting","for":"model_hash_cache","pid":N}`
+  or `{"event":"waiting","for":"model_hashes","file":…}` on stderr (stdout stays the one envelope). The wait ends after 10 seconds in all (the
+  store is a memo and its holder writes in milliseconds, so one that is longer is stuck): validate goes on, with a warning on stderr
+  that the hashes were not saved.
 - A process that holds the lock is alive, so an active entry is dead exactly when someone else
   can take the lock. A waiting entry is dead when the process id it records is not that run's
   worker; a process id alone is not trusted, because ids are reused.
