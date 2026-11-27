@@ -23,6 +23,7 @@
 #include "engine/edge_fill.h"
 #include "engine/mask_ops.h"
 #include "engine/vips.h"
+#include "nodes/picture_sizes.h"
 #include "nodes/pixel_io.h"
 #include "nodes/resample.h"
 
@@ -30,12 +31,21 @@ namespace fugue::nodes {
 
 namespace {
 
+namespace ps = picturesize;
+
+// The size a node's `image` input has before a run, when it is linked to a picture of a known size.
+std::optional<QSize> inputSize(const NodeContext &context, const char *input = "image") {
+    const auto found = context.inputSizes.constFind(QString::fromLatin1(input));
+    return found == context.inputSizes.constEnd() ? std::nullopt : std::optional<QSize>(found.value());
+}
+
+PictureSizes imageSize(const std::optional<QSize> &size) { return ps::imageSizes(size); }
+
 // The largest side Resize makes, as its manifest's `max` (the scheduler checks that first).
-constexpr int kMaxSide = 16384;
+constexpr int kMaxSide = ps::kMaxSide;
 constexpr int kMaxBlur = 512; // Pad's blur, as its manifest's `max`
 
-// `side` scaled by to / from, rounded half to even (Python's round()), and at least 1.
-int scaled(int side, int to, int from) { return std::max(1, int(std::nearbyint(double(side) * to / from))); }
+using ps::scaled;
 
 // The width x height part of `in` whose top left corner is (x, y); it lies inside `in`.
 Pixels region(const Pixels &in, int x, int y, int width, int height) {
@@ -82,6 +92,27 @@ Pixels centerCrop(const Pixels &in, int width, int height) {
 
 class ResizeKernel : public NodeKernel {
 public:
+    // Under validate (and for the size shown before a run): the size of the result, from Resize's own rule.
+    std::optional<QSize> predicted(const NodeContext &context) const {
+        const std::optional<QSize> in = inputSize(context);
+        const std::optional<int> width = ps::wholeInput(context, "width"), height = ps::wholeInput(context, "height");
+        const QString fit = context.input("fit").text();
+        if (!in || !width || !height || *width < 0 || *height < 0 || *width > kMaxSide || *height > kMaxSide)
+            return std::nullopt; // not known yet, or a side the manifest's range already refuses
+        return ps::resize(*in, *width, *height, fit);
+    }
+
+    PictureSizes outputSizes(const NodeContext &context) const override { return imageSize(predicted(context)); }
+
+    Errors check(const NodeContext &context) const override {
+        const std::optional<QSize> size = predicted(context);
+        // Both sides 0 leave the picture as it is, whatever its size: run() passes it through, so there is nothing to refuse.
+        if (!size || !ps::tooBig(*size) || (ps::wholeInput(context, "width") == 0 && ps::wholeInput(context, "height") == 0))
+            return {};
+        return {ps::tooBigError(ps::wholeInput(context, "width").value_or(0) > 0 ? QStringLiteral("width") : QStringLiteral("height"),
+                                QStringLiteral("This size"), *size)};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
@@ -99,22 +130,12 @@ public:
         const QString fit = context.input("fit").text();
         if (width == 0 && height == 0)
             return Values{{"image", context.input("image")}};
-        if (width == 0)
-            width = scaled(in.width, height, in.height);
-        else if (height == 0)
-            height = scaled(in.height, width, in.width);
-
-        if (fit == "contain") {
-            // Fit inside the box: the side that limits takes the box's size exactly.
-            if (double(width) / in.width <= double(height) / in.height)
-                height = std::min(height, scaled(in.height, width, in.width));
-            else
-                width = std::min(width, scaled(in.width, height, in.height));
-            return imageOutput(resample(in, width, height, *method));
-        }
+        const QSize out = ps::resize(QSize(in.width, in.height), width, height, fit);
+        if (ps::tooBig(out))
+            return ps::tooBigError(width > 0 ? QStringLiteral("width") : QStringLiteral("height"), QStringLiteral("This size"), out);
         if (fit == "cover")
-            return imageOutput(resample(centerCrop(in, width, height), width, height, *method));
-        return imageOutput(resample(in, width, height, *method));
+            return imageOutput(resample(centerCrop(in, out.width(), out.height()), out.width(), out.height(), *method));
+        return imageOutput(resample(in, out.width(), out.height(), *method));
     }
 };
 
@@ -123,6 +144,23 @@ public:
 // by the rounding. ComfyUI fails on a side that rounds to 0; here it becomes one multiple.
 class ResizeMegapixelsKernel : public NodeKernel {
 public:
+    std::optional<QSize> predicted(const NodeContext &context) const {
+        const std::optional<QSize> in = inputSize(context);
+        const std::optional<double> megapixels = ps::numberInput(context, "megapixels");
+        const std::optional<int> multiple = ps::wholeInput(context, "multiple");
+        if (!in || !megapixels || !multiple)
+            return std::nullopt;
+        return ps::megapixels(*in, *megapixels, *multiple);
+    }
+
+    PictureSizes outputSizes(const NodeContext &context) const override { return imageSize(predicted(context)); }
+
+    Errors check(const NodeContext &context) const override {
+        const std::optional<QSize> size = predicted(context);
+        if (!size || !ps::tooBig(*size))
+            return {};
+        return {ps::tooBigError(QStringLiteral("megapixels"), QStringLiteral("This many megapixels"), *size)};
+    }
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
@@ -133,17 +171,12 @@ public:
         const Pixels &in = loaded.value();
         const double megapixels = context.input("megapixels").number();
         const int multiple = std::max(1, toInt(context.input("multiple")));
-        const double total = megapixels * 1024 * 1024;
-        const double scale = std::sqrt(total / (double(in.width) * in.height));
-        const double width = std::nearbyint(in.width * scale / multiple) * multiple;
-        const double height = std::nearbyint(in.height * scale / multiple) * multiple;
-        for (const auto &[side, value] : {std::pair{"width", width}, std::pair{"height", height}})
-            if (!(value <= kMaxSide))
-                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("megapixels"),
-                                      QStringLiteral("%1 megapixels makes a %2 of %3, above %4.")
-                                          .arg(megapixels).arg(QString::fromLatin1(side)).arg(value).arg(kMaxSide));
-        const int w = width < 1 ? multiple : int(width);
-        const int h = height < 1 ? multiple : int(height);
+        const QSize size = ps::megapixels(QSize(in.width, in.height), megapixels, multiple);
+        if (ps::tooBig(size))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("megapixels"),
+                                  QStringLiteral("%1 megapixels makes a picture of %2 x %3, above %4 on a side.")
+                                      .arg(megapixels).arg(size.width()).arg(size.height()).arg(kMaxSide));
+        const int w = size.width(), h = size.height();
         const Result<Values> image = imageOutput(resample(in, w, h, *method));
         if (!image.ok())
             return image;
@@ -158,6 +191,21 @@ public:
 // to even. The kernel is Resize's `resample`, so the two give the same pixels for the same size.
 class UpscaleImageKernel : public NodeKernel {
 public:
+    std::optional<QSize> predicted(const NodeContext &context) const {
+        const std::optional<QSize> in = inputSize(context);
+        const std::optional<double> scale = ps::numberInput(context, "scale");
+        return in && scale ? std::optional<QSize>(ps::upscale(*in, *scale)) : std::nullopt;
+    }
+
+    PictureSizes outputSizes(const NodeContext &context) const override { return imageSize(predicted(context)); }
+
+    Errors check(const NodeContext &context) const override {
+        const std::optional<QSize> size = predicted(context);
+        if (!size || !ps::tooBig(*size))
+            return {};
+        return {ps::tooBigError(QStringLiteral("scale"), QStringLiteral("This scale"), *size)};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
@@ -167,14 +215,12 @@ public:
             return method.errors();
         const Pixels &in = loaded.value();
         const double scale = context.input("scale").number();
-        const double width = std::max(1.0, std::nearbyint(in.width * scale));
-        const double height = std::max(1.0, std::nearbyint(in.height * scale));
-        for (const auto &[side, value] : {std::pair{"width", width}, std::pair{"height", height}})
-            if (!(value <= kMaxSide))
-                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("scale"),
-                                      QStringLiteral("A scale of %1 makes a %2 of %3, above %4.")
-                                          .arg(scale).arg(QString::fromLatin1(side)).arg(value).arg(kMaxSide));
-        const int w = int(width), h = int(height);
+        const QSize size = ps::upscale(QSize(in.width, in.height), scale);
+        if (ps::tooBig(size))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("scale"),
+                                  QStringLiteral("A scale of %1 makes a picture of %2 x %3, above %4 on a side.")
+                                      .arg(scale).arg(size.width()).arg(size.height()).arg(kMaxSide));
+        const int w = size.width(), h = size.height();
         const Result<Values> image = imageOutput(resample(in, w, h, *method));
         if (!image.ok())
             return image;
@@ -187,6 +233,13 @@ public:
 
 class CropKernel : public NodeKernel {
 public:
+    PictureSizes outputSizes(const NodeContext &context) const override {
+        const std::optional<QSize> in = inputSize(context);
+        const std::optional<int> x = ps::wholeInput(context, "x"), y = ps::wholeInput(context, "y");
+        const std::optional<int> width = ps::wholeInput(context, "width"), height = ps::wholeInput(context, "height");
+        return in && x && y && width && height ? imageSize(ps::crop(*in, *x, *y, *width, *height)) : PictureSizes();
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
@@ -196,13 +249,12 @@ public:
         // Also held at 0, which the manifest's minimum already asks for.
         const int x = std::clamp(toInt(context.input("x")), 0, in.width - 1);
         const int y = std::clamp(toInt(context.input("y")), 0, in.height - 1);
-        const int width = std::min(std::max(toInt(context.input("width")), 1), in.width - x);
-        const int height = std::min(std::max(toInt(context.input("height")), 1), in.height - y);
-        return imageOutput(region(in, x, y, width, height));
+        const QSize size = ps::crop(QSize(in.width, in.height), x, y, toInt(context.input("width")), toInt(context.input("height")));
+        return imageOutput(region(in, x, y, size.width(), size.height()));
     }
 };
 
-class BrightnessContrastKernel : public NodeKernel {
+class BrightnessContrastKernel : public ps::SameSizeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
@@ -439,7 +491,35 @@ public:
         };
         const std::optional<Error> conflict = padConflict(known("target_width"), known("target_height"),
                                                           {known("left"), known("top"), known("right"), known("bottom")});
-        return conflict ? Errors{*conflict} : Errors{};
+        if (conflict)
+            return Errors{*conflict};
+        const std::optional<QSize> size = predicted(context);
+        if (!size || !ps::tooBig(*size))
+            return {};
+        return {ps::tooBigError(QStringLiteral("left"), QStringLiteral("This padding"), *size)};
+    }
+
+    // The padded size, when every number is known, in range, and the target and the sides do not disagree.
+    std::optional<QSize> predicted(const NodeContext &context) const {
+        const std::optional<QSize> in = inputSize(context);
+        std::optional<int> numbers[6];
+        const char *names[6] = {"left", "top", "right", "bottom", "target_width", "target_height"};
+        for (int i = 0; i < 6; ++i) {
+            numbers[i] = ps::wholeInput(context, names[i]);
+            if (!numbers[i] || *numbers[i] < 0 || *numbers[i] > kMaxSide)
+                return std::nullopt;
+        }
+        if (!in || padConflict(numbers[4], numbers[5], {numbers[0], numbers[1], numbers[2], numbers[3]}))
+            return std::nullopt;
+        return ps::pad(*in, *numbers[0], *numbers[1], *numbers[2], *numbers[3], *numbers[4], *numbers[5]);
+    }
+
+    PictureSizes outputSizes(const NodeContext &context) const override {
+        const std::optional<QSize> size = predicted(context);
+        if (!size || ps::tooBig(*size))
+            return {};
+        // The mask output is the padded picture's size too.
+        return {{QStringLiteral("image"), *size}, {QStringLiteral("mask"), *size}};
     }
 
     Result<Values> run(const NodeContext &context) override {
@@ -559,6 +639,14 @@ public:
 // ComfyUI's ImageRotate: torch.rot90(k, dims=[2, 1]) turns clockwise.
 class RotateKernel : public NodeKernel {
 public:
+    PictureSizes outputSizes(const NodeContext &context) const override {
+        const std::optional<QSize> in = inputSize(context);
+        const QString rotation = context.input("rotation").text();
+        if (!in || rotation.isEmpty())
+            return {};
+        return imageSize(rotation.startsWith(QLatin1String("90")) || rotation.startsWith(QLatin1String("270")) ? in->transposed() : *in);
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
@@ -592,7 +680,7 @@ public:
     }
 };
 
-class FlipKernel : public NodeKernel {
+class FlipKernel : public ps::SameSizeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
@@ -609,7 +697,7 @@ public:
     }
 };
 
-class InvertKernel : public NodeKernel {
+class InvertKernel : public ps::SameSizeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
@@ -686,7 +774,7 @@ Result<int> radiusOf(const NodeContext &context) {
 }
 
 // ComfyUI's Blur (ImageBlur): every channel, alpha too.
-class BlurKernel : public NodeKernel {
+class BlurKernel : public ps::SameSizeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
@@ -703,7 +791,7 @@ public:
 };
 
 // ComfyUI's Sharpen (ImageSharpen), `amount` being its `alpha`; Fugue leaves an alpha channel alone.
-class SharpenKernel : public NodeKernel {
+class SharpenKernel : public ps::SameSizeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
@@ -788,6 +876,13 @@ public:
 
 class SolidMaskKernel : public NodeKernel {
 public:
+    PictureSizes outputSizes(const NodeContext &context) const override {
+        const std::optional<int> width = ps::wholeInput(context, "width"), height = ps::wholeInput(context, "height");
+        if (!width || !height || *width < 1 || *height < 1 || *width > kMaxSide || *height > kMaxSide)
+            return {};
+        return {{QStringLiteral("mask"), QSize(*width, *height)}};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const int width = toInt(context.input("width"));
         const int height = toInt(context.input("height"));

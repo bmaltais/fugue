@@ -45,6 +45,8 @@
 // once, so per-run state belongs in locals, not members.
 
 #include <QJsonObject>
+#include <QMap>
+#include <QSize>
 #include <QString>
 
 #include <functional>
@@ -65,6 +67,9 @@ class FileHashes;
 class ModelLibrary;
 class Registry;
 class ResidentModels;
+
+// The pixel size of the pictures (or latents) a node's ports carry, by port name, when it is known before a run (#601).
+using PictureSizes = QMap<QString, QSize>;
 
 struct NodeContext {
     QString node;                   // path id
@@ -116,6 +121,10 @@ struct NodeContext {
     // RunOptions::roots; none means not limited. Load Image and Save Image check them.
     std::optional<FileRoots> roots;
 
+    // Under validate only: the size of the picture on each linked input whose size is known before a run, by input name: what
+    // the node upstream made (cached), or what its own outputSizes() predicted. An input not in it has no known size.
+    PictureSizes inputSizes;
+
     // The input's value, or an Empty value when it has none.
     Value input(const QString &name) const { return inputs.value(name); }
 };
@@ -128,9 +137,15 @@ public:
     // Under validate (the canvas check, `fugue validate`): what a run of these inputs would fail
     // on and can be told cheaply, with no model loaded and no file hashed, as errors naming
     // the node and, when it has one, the input. `fugue validate` lists them as warnings; the canvas shows them
-    // as the node's error after an edit, with no run (#600). Only `node`, `type`, `inputs`, `hashes` and
-    // `registry` are set, and an input not known yet is absent. Called on the scheduler's thread.
+    // as the node's error after an edit, with no run (#600). Only `node`, `type`, `inputs`, `inputSizes`, `hashes`, `registry`,
+    // `library` and `roots` are set, and an input not known yet is absent. Called on the scheduler's thread.
     virtual Errors check(const NodeContext &context) const;
+
+    // Under validate (the canvas check): the size of each picture or latent output this node would make, by output name, worked out
+    // from its written values (`inputs`) and the sizes of its linked pictures (`inputSizes`), with no pixel read and nothing
+    // loaded: pure and cheap, like check(). Leave out an output whose size is not known; nothing is shown for it, never a guess.
+    // The same context as check() has, plus `inputSizes`. Called on the scheduler's thread. The default knows none.
+    virtual PictureSizes outputSizes(const NodeContext &context) const;
 
     // What else decides the answer that is not an input: files the kernel reads itself (the wildcard
     // files of Dynamic Prompt), as text that changes when they do. It goes into the cache key (10.1);

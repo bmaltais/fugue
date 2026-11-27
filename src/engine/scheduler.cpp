@@ -104,6 +104,8 @@ struct NodeRun {
     std::shared_ptr<NodeKernel> kernel;
     std::shared_ptr<ProviderKernel> providerKernel;
 
+    PictureSizes sizes; // under validate: what the kernel predicts of its outputs' pictures (#601); not for a cached node
+
     Phase phase = Phase::Waiting;
     NodeState state = NodeState::Stale;
     QString reason; // why it was skipped
@@ -788,6 +790,8 @@ private:
         // known, so that validate reports them (8.5) for a node with a randomized seed
         // or an input linked to a node that has not run.
         std::optional<Errors> hostGone; // set when only the cache may serve this node, with the error of the host being gone
+        if (m_dry)
+            predictSizes(n);
         if (n.providerKernel) {
             if (m_dry)
                 warnFromKernel(n);
@@ -933,10 +937,20 @@ private:
         return selection;
     }
 
-    // What the node's kernel can tell before a run (NodeKernel::check), kept as errors in `checkErrors` (#600). A provider
-    // node's kernel is asked too, before a provider is chosen: its written values are wrong whoever serves it. A missing model
-    // file stays a warning, as warnMissingModels reports one (Get ready can fetch it), and so does a finding the kernel calls one.
-    void warnFromKernel(const NodeRun &n) {
+    // The size of the picture `source` made, when known before a run: its real result when it is done (cached), else what its
+    // kernel predicted (#601).
+    std::optional<QSize> sizeFrom(const PortRef &source) const {
+        const NodeRun &from = *m_nodes.constFind(source.node);
+        const Value value = from.outputs.value(source.port);
+        if (value.isMedia() && value.media().type() == MediaType::Image && value.media().width() > 0)
+            return QSize(value.media().width(), value.media().height());
+        if (const auto predicted = from.sizes.constFind(source.port); predicted != from.sizes.constEnd())
+            return predicted.value();
+        return std::nullopt;
+    }
+
+    // What a kernel is told under validate: the node's known inputs, and the sizes of the pictures linked to it.
+    NodeContext checkContext(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
         context.type = n.type;
@@ -944,6 +958,26 @@ private:
         context.hashes = m_env.hashes;
         context.registry = m_env.registry;
         context.library = m_env.registry ? &library() : nullptr;
+        context.roots = m_options.roots; // a kernel that reads a file for its answer keeps to the folders a run may read (13.6)
+        for (const CompiledLink &link : n.node->links())
+            if (link.item < 0)
+                if (const std::optional<QSize> size = sizeFrom(link.from))
+                    context.inputSizes.insert(link.input, *size);
+        return context;
+    }
+
+    // Under validate: what the node's kernel says of the sizes it would make, kept for the nodes downstream and the canvas (#601).
+    void predictSizes(NodeRun &n) {
+        if (!n.kernel)
+            return;
+        n.sizes = n.kernel->outputSizes(checkContext(n));
+    }
+
+    // What the node's kernel can tell before a run (NodeKernel::check), kept as errors in `checkErrors` (#600). A provider
+    // node's kernel is asked too, before a provider is chosen: its written values are wrong whoever serves it. A missing model
+    // file stays a warning, as warnMissingModels reports one (Get ready can fetch it), and so does a finding the kernel calls one.
+    void warnFromKernel(const NodeRun &n) {
+        NodeContext context = checkContext(n);
         for (const Error &error : n.providerKernel ? n.providerKernel->check(context) : n.kernel->check(context))
             sortFinding(error, n.path, m_outcome.errors, m_outcome.checkErrors);
     }
@@ -1727,6 +1761,8 @@ private:
                 m_outcome.keys.insert(path, n.key);
             if (!n.outputs.isEmpty())
                 m_outcome.outputs.insert(path, n.outputs);
+            if (!n.sizes.isEmpty())
+                m_outcome.sizes.insert(path, n.sizes);
             anyError = anyError || n.state == NodeState::Error;
             anyCancelled = anyCancelled || (n.state == NodeState::Skipped && n.reason == QLatin1String("cancelled"));
         }
@@ -1906,6 +1942,7 @@ GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environm
     check.routes = scheduler.outcome().routes;
     check.warnings = scheduler.outcome().errors;
     check.checkErrors = scheduler.outcome().checkErrors;
+    check.sizes = scheduler.outcome().sizes;
     if (!check.aborted) {
         const GraphCheck unused = checkUnusedNodes(graph, environment, options);
         check.warnings += unused.warnings;

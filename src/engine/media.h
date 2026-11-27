@@ -20,6 +20,7 @@
 #include <optional>
 
 #include <QJsonObject>
+#include <QSize>
 #include <QString>
 
 #include <vips/vips8>
@@ -77,6 +78,10 @@ public:
     // file, so a folder or file swapped for a link after the folder was opened cannot make this
     // report another file. The handle's path is `dir.path()/leaf`, as downstream nodes read by path.
     static Result<MediaHandle> probeIn(MediaType type, const FolderFd &dir, const QString &leaf, FileHashes &hashes);
+
+    // The size an image file is seen at (an EXIF turn applied), from its header alone: nothing is decoded and the file is not
+    // hashed. None when it is not an image libvips reads. For the canvas check's predicted sizes (#601).
+    static std::optional<QSize> imageHeaderSize(const QString &path);
 
     // The serialized form of 2.4. fromJson needs an absolute path and a
     // sha256 hash, and fails with invalid_document otherwise. toJson writes

@@ -97,6 +97,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Checked by `test_canvas_widgets` (`aNarrowNodesChoiceListFitsItsEntriesAtScreenScale`: a 120px node at 50%, the list wider than twice the field on screen, at scale 1, no row cut); pictures with `FUGUE_SHOT_DIR` (`aNarrowNodesModelListLook`, 100% and 50%).
 - Rules met: Floor (rows unchanged, 24px), Posture (a transient list may be wider than its field; the canvas keeps its density, the node is not widened), Keyboard (Up, Down, Home, End, Enter, Escape and typing unchanged), Right-to-left (unchanged: placement.js keeps it on screen), Tokens (sizes in `u`, the scroll bar's breadth).
 
+### 2026-11-27 A size known before a run shows in the header's meta, quieter than a measured one (#601; confidence medium-high)
+
+- Control: the header meta caption of `CanvasNode.qml` (`predictedSize` role, from `CanvasRuns::onChecked` / `CanvasModel::setRunState`).
+- Old: a picture's size ("1024 × 1024") appeared only in the thumbnail's info chip, once a run (or, for Load Image, the picked file) had made a picture.
+- New: while a node has no measured size, the caption says the size the dry check worked out from the picture upstream (Load Image's header, Resize, Resize to Megapixels, Crop, Pad, Rotate, Flip, Blur, Sharpen, Invert, Brightness and Contrast, Upscale Image, Solid Mask, the latent nodes with a width and height): the label colour, in italics, caption size, the place the time of a run takes. It never shows a guess: an unknown size shows nothing. A node with a result keeps its measure in the chip, and its time in the caption; a stale node whose last result is another size shows the new one, and the caption gives way to the title when they do not both fit.
+- Why the header and not the chip: a latent or a mask has no picture slot; the caption is the one place a node with a picture or without has, it adds no item (a group's card gets no size), and it sits where the state is already read. The italics and the missing black chip are what make it "not measured".
+- Rules met: Floor (not a control: no press target), Gaps and Learned place (nothing moved: the caption's slot is the existing one), Gestalt (the size sits with the state it describes). Out-of-range sizes are the node's error, shown as #600's are.
+
 ### 2026-11-26 A click acts on the one control under it, never on what lies beneath (owner report; confidence high)
 
 - Control: `KitCard` (the shelf's app cards, the Templates window's cards, the Apps dialog's), the Templates window's category tabs, and every other `TapHandler` of the window (`bin/check-quick` now fails one with no `gesturePolicy`).

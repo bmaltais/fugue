@@ -784,6 +784,20 @@ private slots:
         QCOMPARE(canvas.comments().first().toMap().value("text").toString(), QString("keep me"));
     }
 
+    // #601: a size known before a run is a role of its own, quieter than the measured one; a result leaves it to the chip.
+    void aPredictedSizeIsItsOwnRole() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        QCOMPARE(node(canvas, "gen").value("predictedSize").toString(), QString());
+        canvas.setRunState("gen", {{"state", "stale"}, {"predictedSize", "1024 × 768"}});
+        QCOMPARE(node(canvas, "gen").value("predictedSize").toString(), QString("1024 × 768"));
+        QCOMPARE(node(canvas, "gen").value("thumbnailInfo").toString(), QString());
+        canvas.setRunState("gen", {{"state", "cached"}, {"thumbnail", "file:///tmp/x.png"}, {"thumbnailAspect", 0.75},
+                                   {"thumbnailInfo", "1024 × 768"}});
+        QCOMPARE(node(canvas, "gen").value("predictedSize").toString(), QString());
+        QCOMPARE(node(canvas, "gen").value("thumbnailInfo").toString(), QString("1024 × 768"));
+    }
+
     // #19 fills these from a run; with no run they are empty, so a node never run shows no state.
     void runStateIsEmptyUntilARunSetsIt() {
         CanvasModel canvas(&m_registry);

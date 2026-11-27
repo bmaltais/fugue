@@ -770,6 +770,14 @@ private:
                     for (const ProviderInstance &instance : instances)
                         if (instance.name == route->instance && placementOf(instance) == Placement::OffMachine)
                             node.insert("runsOn", QStringLiteral("%1 (%2)").arg(instance.name, hostOf(instance)));
+                // The size its picture will have, known before a run (#601): {"<output>": [width, height]}.
+                const auto sizes = graphCheck.sizes.constFind(it.key());
+                if (sizes != graphCheck.sizes.cend()) {
+                    QJsonObject sized;
+                    for (auto size = sizes->cbegin(); size != sizes->cend(); ++size)
+                        sized.insert(size.key(), QJsonArray{size->width(), size->height()});
+                    node.insert("sizes", sized);
+                }
                 nodes.insert(it.key(), node);
             }
             for (auto it = compilation->skipped.begin(); it != compilation->skipped.end(); ++it)

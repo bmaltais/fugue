@@ -1281,6 +1281,63 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
+    // #601: the size of a picture is known as soon as the file is picked, from its header, and flows on through the nodes
+    // that change it, with no run; an edit moves it, and a size out of range is the node's error.
+    void aPicturesSizeShowsOnItsNodesBeforeARun() {
+        static const QByteArray graph = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "src": {"type": "fugue/load-image", "version": "1.0.0"},
+    "rz": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "src.image"}, "width": 32, "height": 0}},
+    "up": {"type": "fugue/upscale-image", "version": "1.0.0", "inputs": {"image": {"from": "rz.image"}, "scale": 2}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "up.image"}}}
+  }},
+  "layout": {"nodes": {"src": {"pos": [0, 0]}, "rz": {"pos": [300, 0]}, "up": {"pos": [600, 0]}, "show": {"pos": [900, 0]}}}
+})";
+        QTemporaryDir files;
+        QFile picture(files.filePath("a.png"));
+        QVERIFY(picture.open(QIODevice::WriteOnly));
+        picture.write(png(64, 48));
+        picture.close();
+        RunApp r(graph);
+        QVERIFY(r.app.open());
+        QVERIFY(r.role("rz", NodeList::PredictedSize).toString().isEmpty()); // no file yet: nothing is guessed
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QVERIFY(r.app.model.widgets()->setText("src", "file", picture.fileName()).isEmpty());
+        QTRY_COMPARE(r.role("rz", NodeList::PredictedSize).toString(), QStringLiteral("32 \u00d7 24"));
+        QCOMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("64 \u00d7 48"));
+        QCOMPARE(r.state("up"), QStringLiteral("stale"));
+        // An edit moves it, at the next check.
+        checked.clear();
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 40).isEmpty());
+        QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("80 \u00d7 60"));
+        QVERIFY(r.jobs().isEmpty()); // no run
+        QVERIFY(r.app.warnings.isEmpty());
+
+        // A size out of range is the node's error, with no run, and no size is shown for it.
+        checked.clear();
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 16000).isEmpty()); // 16000 x 12000, doubled by "up"
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("up"), QStringLiteral("error"));
+        QVERIFY2(r.role("up", NodeList::Error).toString().contains("16384"), qPrintable(r.role("up", NodeList::Error).toString()));
+        QVERIFY(r.role("up", NodeList::PredictedSize).toString().isEmpty());
+        QVERIFY(r.jobs().isEmpty());
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 40).isEmpty());
+        QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("80 \u00d7 60"));
+
+        // After a run, an edit makes the node stale: its chip still says the last result's size, and the caption the new one.
+        QVERIFY(r.app.commands.trigger("view.picture-all")); // every node shows its picture, so its chip
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QTRY_COMPARE(r.role("up", NodeList::ThumbnailInfo).toString(), QStringLiteral("80 \u00d7 60"));
+        QVERIFY(r.role("up", NodeList::PredictedSize).toString().isEmpty()); // measured: nothing to add
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 64).isEmpty());
+        QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("128 \u00d7 96"));
+        QCOMPARE(r.role("up", NodeList::ThumbnailInfo).toString(), QStringLiteral("80 \u00d7 60"));
+    }
+
     // #600: a kernel's own check() error (Expression's formula that does not parse) shows on its node
     // after a committed edit, without a run, and goes when the value is fixed.
     void aKernelsCheckErrorShowsOnItsNodeWithoutARun() {

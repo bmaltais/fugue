@@ -6,6 +6,10 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include "engine/atomic_file.h"
 #include "engine/file_hashes.h"
@@ -103,6 +107,43 @@ Result<vips::VImage> MediaHandle::image() const {
     } catch (const vips::VError &error) {
         return vipsError(error, QStringLiteral("media_unreadable"));
     }
+}
+
+std::optional<QSize> MediaHandle::imageHeaderSize(const QString &path) {
+    // A regular file only: a FIFO or a device (a shared workflow can name /dev/stdin) would block the open, and the check with it.
+    const QFileInfo info(path);
+    if (!info.isFile())
+        return std::nullopt;
+    // Remembered by file, size and modification time, as FileHashes does: the check asks after every edit, and reading some
+    // headers (svg, pdf, heif) is not cheap. A file that is not a picture is remembered too.
+    struct Header {
+        qint64 bytes = 0;
+        qint64 modified = 0;
+        std::optional<QSize> size;
+    };
+    static QMutex mutex;
+    static QHash<QString, Header> memo;
+    const QString key = info.canonicalFilePath();
+    const qint64 bytes = info.size(), modified = info.lastModified().toMSecsSinceEpoch();
+    {
+        const QMutexLocker lock(&mutex);
+        if (const auto found = memo.constFind(key); found != memo.constEnd() && found->bytes == bytes && found->modified == modified)
+            return found->size;
+    }
+    std::optional<QSize> size;
+    if (initVips()) {
+        try {
+            const VImage image = VImage::new_from_file(fileName(path).constData());
+            const bool turned = orientationOf(image) >= 5 && orientationOf(image) <= 8;
+            size = turned ? QSize(image.height(), image.width()) : QSize(image.width(), image.height());
+        } catch (const vips::VError &) {
+        }
+    }
+    const QMutexLocker lock(&mutex);
+    if (memo.size() > 512)
+        memo.clear();
+    memo.insert(key, Header{bytes, modified, size});
+    return size;
 }
 
 Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &hashes, const QString &shown, const QString &shownHash) {

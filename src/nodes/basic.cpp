@@ -48,6 +48,25 @@ public:
         return errors;
     }
 
+    // The picture's size from the file's header (#601): nothing is decoded or hashed. A file that is not there, or not a
+    // picture, has none (check() says so). Load Image only: a video's size is for ffprobe, which a check does not start.
+    PictureSizes outputSizes(const NodeContext &context) const override {
+        if (m_type != MediaType::Image)
+            return {};
+        const Value file = context.input("file");
+        if (file.isEmpty() || file.text().isEmpty())
+            return {};
+        QString path = file.text();
+        if (context.roots) { // a run would refuse a file outside the read roots, so a check does not open it
+            const Result<QString> readable = context.roots->checkRead(path, QStringLiteral("file"));
+            if (!readable)
+                return {};
+            path = readable.value();
+        }
+        const std::optional<QSize> size = MediaHandle::imageHeaderSize(path);
+        return size ? PictureSizes{{QStringLiteral("image"), *size}, {QStringLiteral("mask"), *size}} : PictureSizes();
+    }
+
     Result<Values> run(const NodeContext &context) override {
         // The scheduler has expanded "~" (paths.h), so the file is the one the key was made from.
         QString file = context.input("file").text();

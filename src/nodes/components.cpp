@@ -736,6 +736,14 @@ class EmptyLatentKernel : public NodeKernel {
 public:
     explicit EmptyLatentKernel(bool video = false) : m_video(video) {}
 
+    // The picture it will make, for the size shown before a run (#601).
+    PictureSizes outputSizes(const NodeContext &context) const override {
+        const Value width = context.input(QStringLiteral("width")), height = context.input(QStringLiteral("height"));
+        if (width.isEmpty() || height.isEmpty())
+            return {};
+        return {{QStringLiteral("latent"), QSize(int(width.number()), int(height.number()))}};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         LatentMeta size;
         size.width = int(context.input(QStringLiteral("width")).number());

@@ -4,6 +4,7 @@ namespace fugue {
 
 NodeKernel::~NodeKernel() = default;
 Errors NodeKernel::check(const NodeContext &) const { return {}; }
+PictureSizes NodeKernel::outputSizes(const NodeContext &) const { return {}; }
 QStringList NodeKernel::lazyInputs(const NodeType &type, const Values &) const {
     QStringList all;
     for (const InputSpec &input : type.inputs)
