@@ -2336,8 +2336,6 @@
   "Delete the partial download (%1)": "Delete the partial download (%1)",
   "Paused": "Paused",
   "Resume": "Resume",
-  "The download keeps what it had: Try again resumes it.": "The download keeps what it had: Try again resumes it.",
-  "partial, will resume": "partial, will resume",
   "another source": "another source",
   "in place of": "in place of",
   "Your file: %1": "Your file: %1",
