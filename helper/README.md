@@ -120,7 +120,7 @@ fugue-helper-cuda --serve-http --listen 100.x.y.z --port 8765 --key-file ~/.conf
 
 `fugue-helper.service` is a systemd user unit for it. The key is the first line of the key file,
 trimmed; the helper refuses to start with no key file, an empty one, or one that group or others can
-read (mode 0600). Bind to the tailnet address, not `0.0.0.0`. The key travels in clear over `http`: use it only inside a tunnel such as the tailnet. Anyone who has the key can make the host read any file under its `--models` folders by name (a hash check tells whether a file equals a given one) and use its disk and memory for what they send; keep the key as secret as a password. `helper/smoke-http.sh <binary>` checks
+read (mode 0600). Bind to the tailnet address, not `0.0.0.0`. The key travels in clear over `http`: use it only inside a tunnel such as the tailnet. Anyone who has the key can make the host read any file under its `--models` folders by name (a hash check tells whether a file equals a given one) and use its disk and memory for what they send; keep the key as secret as a password. Paths are checked with symlinks resolved: a link under a models folder that points outside it is refused (by path and by handle), so link no model out of the folders. A request's `context` may carry only the model files (`model_path`, `diffusion_model_path`, `high_noise_diffusion_model_path`, `vae_path`, `taesd_path`, `llm_path`, `clip_l_path`, `clip_g_path`, `clip_vision_path`, `t5xxl_path`, `controlnet_path`, `tokenizer`) and `sage_attn`; any other key is refused with 400. `helper/smoke-http.sh <binary>` checks
 auth, `describe` and the error paths with `curl`.
 
 Every request carries `Authorization: Bearer <key>`, else 401. JSON bodies up to 512 MB. Errors are

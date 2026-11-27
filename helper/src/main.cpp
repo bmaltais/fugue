@@ -1153,21 +1153,29 @@ class Models {
 public:
     // `hashFile`: where the hashes of the model files are kept between runs (empty: not kept).
     explicit Models(const std::vector<fs::path> &roots, fs::path hashFile = {}) : m_hashFile(std::move(hashFile)) {
-        for (const fs::path &root : roots)
+        for (const fs::path &root : roots) {
             m_roots.push_back(fs::absolute(root).lexically_normal());
+            std::error_code ec;
+            m_canonRoots.push_back(fs::weakly_canonical(m_roots.back(), ec));
+        }
         scan();
         loadHashes();
     }
 
     const std::vector<fs::path> &roots() const { return m_roots; }
 
-    // A path given as a string is used only inside a root: no other host file is read.
+    // A path given as a string is used only inside a root: no other host file is read. Symlinks are
+    // resolved first (a link under a root that points out of it is outside); a path that does not exist
+    // yet is checked through its closest existing parent.
     bool inside(const fs::path &path) const {
         if (path.empty() || !path.is_absolute())
             return false;
-        const fs::path normal = path.lexically_normal();
-        for (const fs::path &root : m_roots) {
-            const fs::path rel = normal.lexically_relative(root);
+        std::error_code ec;
+        const fs::path canonical = fs::weakly_canonical(path, ec);
+        if (ec || canonical.empty())
+            return false;
+        for (const fs::path &root : m_canonRoots) {
+            const fs::path rel = canonical.lexically_relative(root);
             if (!rel.empty() && *rel.begin() != ".." && rel != ".")
                 return true;
         }
@@ -1278,8 +1286,10 @@ private:
     // Every file the handle's name can mean, best match first, without repeats.
     std::vector<std::string> look(const fs::path &name, const std::string &key, std::optional<uintmax_t> size) const {
         std::vector<std::string> found;
-        auto add = [&found](const fs::path &path) {
+        auto add = [this, &found](const fs::path &path) {
             const std::string text = path.string();
+            if (!inside(path)) // a link under a root that leads out of it is no model of this host's
+                return;
             if (std::find(found.begin(), found.end(), text) == found.end())
                 found.push_back(text);
         };
@@ -1398,6 +1408,7 @@ private:
     }
 
     std::vector<fs::path> m_roots;
+    std::vector<fs::path> m_canonRoots; // m_roots with symlinks resolved
     std::vector<Entry> m_files;
     std::mutex m_mutex;
     fs::path m_hashFile;
@@ -1671,6 +1682,19 @@ private:
         return path;
     }
 
+    // The context options a remote client may set (#545): the model files, by handle or by a path inside the
+    // roots, and the one switch Fugue sends. Any other key is refused, so a client cannot reach an engine
+    // option that opens a host file or a network connection (rpc_servers, ...).
+    static bool contextKeyAllowed(const std::string &key) {
+        static const std::set<std::string> allowed{
+            "model_path",       "diffusion_model_path", "high_noise_diffusion_model_path", "vae_path",
+            "taesd_path",       "llm_path",             "clip_l_path",                     "clip_g_path",
+            "clip_vision_path", "t5xxl_path",           "controlnet_path",                 "tokenizer",
+            "sage_attn",
+        };
+        return allowed.count(key) != 0;
+    }
+
     // The request over HTTP made ready for submit(): paths only inside the roots, handles
     // resolved, input data written into a work dir of the job.
     json submitHttp(const json &body) {
@@ -1684,15 +1708,19 @@ private:
         if (!params.is_object())
             fail("input_invalid", "\"params\" is not an object");
         for (auto &[key, value] : params.items()) {
-            if (key == "context" && value.is_object()) {
-                for (auto &[ckey, cvalue] : value.items())
-                    if ((ckey.size() > 5 && ckey.compare(ckey.size() - 5, 5, "_path") == 0) || ckey == "tokenizer")
-                    {
+            if (key == "context" && !value.is_object())
+                fail("input_invalid", "\"context\" is not an object");
+            if (key == "context") {
+                for (auto &[ckey, cvalue] : value.items()) {
+                    if (!contextKeyAllowed(ckey))
+                        fail("input_invalid", "context option \"" + ckey + "\" is not one a remote client may set");
+                    if ((ckey.size() > 5 && ckey.compare(ckey.size() - 5, 5, "_path") == 0) || ckey == "tokenizer") {
                         cvalue = modelValue(ckey, cvalue, used, "/context/" + ckey, pending);
                         if (ckey == "tokenizer" && cvalue.is_string())
                             if (const std::string why = fugue_helper::tokenizerPathError(cvalue.get<std::string>()); !why.empty())
                                 fail("input_invalid", why);
                     }
+                }
             } else if (key == "loras" && value.is_array()) {
                 size_t index = 0;
                 for (json &lora : value) {
