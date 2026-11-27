@@ -276,7 +276,7 @@ set(fugue_test_shards
     test_side_panels_window=4 test_basic_cli=3 test_canvas_window=3
     test_chrome_window=3 test_canvas_look=2 test_canvas_widgets=2 test_canvas_editing=2 test_canvas_mask_editor=2 test_packs_page=2 test_omarchy_provider=2 test_projects_window=2 test_area_split_window=2 test_canvas_layers_window=2 test_app_window=3 test_http_provider=2)
 # The tests' own sources are compiled at FUGUE_TEST_OPT instead of the build type's -O3: a test spends its time waiting
-# and in the libraries (compiled as usual), and -O1 compiles about twice as fast. Empty keeps the build type's flags.
+# and in the libraries (compiled as usual), and -O1 compiles faster (measured in workbench fugue/build-speed.md). Empty keeps the build type's flags.
 set(FUGUE_TEST_OPT "-O1" CACHE STRING "Optimization flag for the tests' own sources (empty: the build type's)")
 
 # What every test executable links, compiled once (not once per test): the scratch HOME and XDG folders
