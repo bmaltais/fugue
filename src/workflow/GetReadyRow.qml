@@ -41,6 +41,9 @@ Rectangle {
     property string choiceName: qsTr("Use my file or download: %1").arg(title)
     property bool choiceLocked: false
     signal choiceMoved(bool useDisk)
+    // A kept `.part` of this download (not while it runs): the open row offers to delete it.
+    property bool canDeletePartial: false
+    signal deletePartialRequested
 
     readonly property bool expandable: more !== ""
     readonly property real u: look.unit
@@ -185,6 +188,15 @@ Rectangle {
             wrapMode: Text.Wrap
             color: row.look.label
             font.pixelSize: row.look.labelSize
+        }
+        KitChip {
+            objectName: "getReadyDeletePartial-" + row.title
+            visible: row.open && row.canDeletePartial
+            Layout.leftMargin: 6 * row.u
+            Layout.topMargin: 0.5 * row.u
+            look: row.look
+            text: qsTr("Delete partial download")
+            onTapped: row.deletePartialRequested()
         }
         RowLayout {
             visible: row.error !== ""

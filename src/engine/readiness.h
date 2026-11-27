@@ -198,6 +198,10 @@ struct ReadinessRun {
 struct ReadinessOutcome {
     bool ok = false;
     bool cancelled = false;
+    // What a stop interrupted (only with `cancelled`): a download (its part is kept), an install (undone), a setup (may be half made).
+    bool stoppedDownload = false;
+    bool stoppedInstall = false;
+    bool stoppedSetup = false;
     int failedRow = -1;
     int done = 0;       // rows finished
     bool packsChanged = false; // a pack was installed or trusted: the node types are to be read again

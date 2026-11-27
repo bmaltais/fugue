@@ -243,7 +243,7 @@ Popup {
                                 glyph: modelData.choice === "disk" ? "check" : "download"
                                 title: modelData.name
                                 trailing: modelData.choice === "disk" ? qsTr("on disk") : modelData.size
-                                subtitle: [modelData.license, modelData.typeFrom, modelData.partial === true ? qsTr("partial, will resume") : ""].filter(t => t !== "").join(" · ")
+                                subtitle: [modelData.license, modelData.typeFrom, modelData.partial === true ? qsTr("partial, will resume") + (modelData.partialText !== "" ? ": " + modelData.partialText : "") : ""].filter(t => t !== "").join(" · ")
                                 more: qsTr("From: %1").arg(modelData.host) + "\n"
                                       + (modelData.license !== "" ? qsTr("Licence: %1").arg(modelData.license) + "\n" : "")
                                       + qsTr("Into: %1").arg(modelData.folder)
@@ -261,6 +261,8 @@ Popup {
                                 downloadText: modelData.sizeKnown ? qsTr("Download %1").arg(modelData.size) : qsTr("Download")
                                 choiceLocked: sheet.view.busy === true
                                 onChoiceMoved: useDisk => sheet.sheetModel.setChoice(modelData.hash, useDisk)
+                                canDeletePartial: modelData.partial === true && !running
+                                onDeletePartialRequested: sheet.sheetModel.deletePartial(modelData.hash)
                             }
                         }
                     }
@@ -415,13 +417,13 @@ Popup {
                         objectName: "getReadyMessage"
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        color: sheet.view.ok ? sheet.look.text : sheet.look.error
+                        color: sheet.view.ok || sheet.view.stopped ? sheet.look.text : sheet.look.error
                         font.pixelSize: sheet.look.textSize
-                        text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Try again; it lists only what is left.").arg(sheet.view.retry.join(", ")))
+                        text: sheet.view.message + (sheet.phase !== "finished" || sheet.view.ok || sheet.view.stopped || sheet.view.retry.length === 0 ? "" : " " + qsTr("Not done: %1. Try again; it lists only what is left.").arg(sheet.view.retry.join(", ")))
                     }
                     KitCopyButton {
                         objectName: "getReadyMessageCopy"
-                        visible: !sheet.view.ok // only a message that is an error
+                        visible: !sheet.view.ok && !sheet.view.stopped // only a message that is an error
                         look: sheet.look
                         Layout.alignment: Qt.AlignTop
                         copyText: readyMessage.text

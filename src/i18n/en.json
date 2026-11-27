@@ -262,7 +262,10 @@
   "Source": "Source",
   "Start blank": "Start blank",
   "Stop": "Stop",
-  "Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.": "Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.",
+  "Stopped.": "Stopped.",
+  "The download keeps what it had: Try again resumes it.": "The download keeps what it had: Try again resumes it.",
+  "The install that was running is undone.": "The install that was running is undone.",
+  "The setup that was running may have to be run again.": "The setup that was running may have to be run again.",
   "Strong: thick frosted glass.": "Strong: thick frosted glass.",
   "Switch this workflow between its App view and the graph": "Switch this workflow between its App view and the graph",
   "The grid's spacing in canvas pixels (%1)": "The grid's spacing in canvas pixels (%1)",
@@ -2320,5 +2323,6 @@
   "Only if another branch is chosen": "Only if another branch is chosen",
   "Used only if a Switch takes its other branch.": "Used only if a Switch takes its other branch.",
   "Download or not now: %1": "Download or not now: %1",
-  "only if another branch is chosen": "only if another branch is chosen"
+  "only if another branch is chosen": "only if another branch is chosen",
+  "Delete partial download": "Delete partial download"
 }

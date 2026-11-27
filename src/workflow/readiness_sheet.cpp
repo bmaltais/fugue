@@ -1,7 +1,9 @@
 #include "workflow/readiness_sheet.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QJsonArray>
 #include <QMetaObject>
 #include <QPointer>
@@ -134,8 +136,31 @@ ReadinessPlan ReadinessSheet::currentPlan() const { return buildPlan(false); }
 void ReadinessSheet::refreshPartial() {
     m_partial.clear();
     for (const ReadinessModel &m : std::as_const(m_plan.models))
-        if (!m.deferred && QFileInfo(m.target.path + QStringLiteral(".part")).size() > 0)
-            m_partial.insert(m.target.path);
+        if (const QFileInfo part(m.target.path + QStringLiteral(".part")); !m.deferred && part.isFile() && !part.isSymLink() && part.size() > 0)
+            m_partial.insert(m.target.path, part.size());
+}
+
+void ReadinessSheet::deletePartial(const QString &hash) {
+    for (int i = 0; i < m_plan.models.size(); ++i) {
+        const ReadinessModel &m = m_plan.models.at(i);
+        if (m.deferred || m.entry.value(QStringLiteral("hash")).toString() != hash)
+            continue;
+        const int row = int(m_plan.packs.size()) + i;
+        if (m_phase == QLatin1String("running") && m_states.value(row) == RowState::Running)
+            return; // that download runs
+        const QString path = m.target.path + QStringLiteral(".part");
+        // Another Fugue may be downloading it: the part's lock is its writer's.
+        QLockFile lock(path + QStringLiteral(".lock"));
+        lock.setStaleLockTime(0);
+        if (!lock.tryLock(0))
+            return;
+        if (const QFileInfo info(path); info.isFile() || info.isSymLink())
+            QFile::remove(path); // a link goes itself, never what it points to
+        lock.unlock();
+        refreshPartial();
+        publish();
+        return;
+    }
 }
 
 void ReadinessSheet::rebuild() {
@@ -268,6 +293,7 @@ void ReadinessSheet::say(const QString &message) {
     if (!m_open || m_thread || m_phase != QLatin1String("review"))
         return;
     m_message = message;
+    m_stopped = false;
     m_ok = false;
     publish();
 }
@@ -295,6 +321,7 @@ void ReadinessSheet::show() {
     m_phase = QStringLiteral("review");
     m_message.clear();
     m_retry.clear();
+    m_stopped = false;
     m_ok = false;
     m_open = true;
     publish();
@@ -497,6 +524,7 @@ void ReadinessSheet::setRow(int row, RowState state, const QString &detail) {
 void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
     m_phase = QStringLiteral("finished");
     m_ok = outcome.ok && m_plan.problems.isEmpty();
+    m_stopped = outcome.cancelled && !outcome.ok;
     m_retry = outcome.retry;
     if (outcome.ok && !m_plan.problems.isEmpty())
         m_message = tr("Done, but not everything could be made ready: the lines above say what is left.");
@@ -505,7 +533,17 @@ void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
     else if (!outcome.cancelled && outcome.failedRow < 0)
         m_message = tr("Some rows were skipped, so it is not everything: they are listed below.");
     else if (outcome.cancelled)
-        m_message = tr("Stopped. An install that was running is undone, a download keeps what it had and resumes, and a setup that was running may have to be run again. What is not done yet is listed below.");
+    {
+        // What the stop did, only for what was running; the rows say what is not done.
+        QStringList said{tr("Stopped.")};
+        if (outcome.stoppedDownload)
+            said << tr("The download keeps what it had: Try again resumes it.");
+        if (outcome.stoppedInstall)
+            said << tr("The install that was running is undone.");
+        if (outcome.stoppedSetup)
+            said << tr("The setup that was running may have to be run again.");
+        m_message = said.join(QLatin1Char(' '));
+    }
     else {
         QStringList lines;
         for (const Error &error : outcome.errors)
@@ -604,6 +642,7 @@ void ReadinessSheet::publish() {
             state = QStringLiteral("reading");
             fraction = m_reading.value(hash).toInt() >= 0 ? m_reading.value(hash).toInt() / 100.0 : -1;
         }
+        const bool partial = !m.deferred && !disk && state != QLatin1String("running") && state != QLatin1String("reading") && state != QLatin1String("done") && m_partial.contains(m.target.path);
         models << QVariantMap{{"hash", hash},
                               {"use", m_offers.value(hash)},
                               {"choice", m_offers.contains(hash) ? (disk ? QStringLiteral("disk") : QStringLiteral("download")) : QString()},
@@ -612,7 +651,10 @@ void ReadinessSheet::publish() {
                               {"folder", m.deferred ? tr("its folder, once the pack is installed") : m.folder},
                               {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},
                               // A download that stopped keeps its `.part`, and the next one resumes it (#418).
-                              {"partial", !m.deferred && !disk && state != QLatin1String("running") && state != QLatin1String("done") && m_partial.contains(m.target.path)},
+                              {"partial", partial},
+                              {"partialText", !partial ? QString()
+                                              : m.size > 0 ? tr("%1 of %2").arg(ModelDownloads::sizeText(m_partial.value(m.target.path)), ModelDownloads::sizeText(m.size))
+                                                           : ModelDownloads::sizeText(m_partial.value(m.target.path))},
                               {"state", state}, {"detail", m_rowErrors.value(hash, m_details.value(row))},
                               {"error", m_rowErrors.value(hash)},
                               {"fraction", fraction}};
@@ -643,6 +685,7 @@ void ReadinessSheet::publish() {
     view["question"] = m_question;
     view["ok"] = m_ok;
     view["message"] = m_message;
+    view["stopped"] = m_stopped; // the message is a plain note, not an error
     view["retry"] = m_retry;
     m_view = view;
     emit changed();

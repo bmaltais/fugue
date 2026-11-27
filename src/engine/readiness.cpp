@@ -491,6 +491,15 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
     const auto stopAt = [&](int index, const Errors &errors, bool cancelled) {
         outcome.failedRow = index;
         outcome.cancelled = cancelled;
+        if (cancelled && states[index] == RowState::Running) {
+            if (index >= plan.packs.size()) {
+                outcome.stoppedDownload = true;
+            } else {
+                const ReadinessPack &pack = plan.packs.at(index);
+                outcome.stoppedInstall = pack.installs();
+                outcome.stoppedSetup = pack.hasEnvironment();
+            }
+        }
         outcome.errors += errors;
         const QString detail = errors.isEmpty() ? QString() : errors.first().message;
         finish(index, cancelled ? RowState::Skipped : RowState::Failed, detail);
@@ -505,6 +514,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             break;
         }
         const ReadinessPack &row = plan.packs.at(i);
+        states[i] = RowState::Running;
         report.row(i, RowState::Running);
         bool refused = false;
         PackSummary shown = row.pack; // what the yes covers for this row
@@ -593,6 +603,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
                 stopAt(i, Errors{makeError(QStringLiteral("cancelled"), QStringLiteral("Stopped: the pack %1 is installed but not trusted.").arg(row.pack.id),
                                            QStringLiteral("Get ready again to trust it."))}, true);
                 outcome.packsChanged = true;
+                outcome.stoppedInstall = outcome.stoppedSetup = false; // the install finished and stays
                 break;
             }
             if (row.installs()) {
@@ -689,7 +700,7 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             QEventLoop loop;
             Errors failed;
             bool arrived = false;
-            QObject::connect(&queue, &DownloadQueue::started, &loop, [&](int) { report.row(row, RowState::Running); });
+            QObject::connect(&queue, &DownloadQueue::started, &loop, [&](int) { states[row] = RowState::Running; report.row(row, RowState::Running); });
             // The queue says so for every chunk the network hands over (thousands a second on a fast line): the
             // observer hears it at most every kProgressMs, and once at the end.
             QElapsedTimer told;

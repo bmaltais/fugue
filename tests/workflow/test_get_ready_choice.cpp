@@ -11,6 +11,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "../engine/fake_http.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "translator.h"
@@ -111,6 +112,44 @@ private slots:
         rig.sheet.refresh();
         QVERIFY(rig.row(0).value("partial").toBool());
         part.remove();
+    }
+
+    // Owner, 2026-11-27: Stop keeps what a download had. The row says "partial, will resume" with its size, the message is a plain note
+    // (not an error), and Delete partial download removes the part (never through a link) and the row stops saying so.
+    void aStopKeepsThePartAndItCanBeDeleted() {
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        server.on("GET", "/stop-model.safetensors", [](const fugue::test::HttpRequest &) {
+            fugue::test::HttpResponse response{200, QByteArray(300000, 'x'), "application/octet-stream"};
+            response.cutAfter = 70000; // a break; the retry waits 2 s, and the person stops
+            return response;
+        });
+        QJsonObject wanted = model("stop-model.safetensors", hashA, 300000);
+        wanted["source"] = QString::fromLatin1(server.origin() + "/stop-model.safetensors");
+        Rig rig({}, {wanted});
+        rig.sheet.show();
+        const QString part = rig.row(0).value("folder").toString() + "/stop-model.safetensors.part";
+        QFile::remove(part);
+        rig.sheet.refresh();
+        rig.sheet.start();
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(part).size() >= 70000, 10000);
+        QVERIFY(!rig.row(0).value("partial").toBool()); // it runs: no flag, and no delete
+        rig.sheet.deletePartial(hashA);
+        QVERIFY(QFileInfo::exists(part));
+        rig.sheet.cancel();
+        QVERIFY(rig.sheet.waitIdle(30000));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.sheet.phase(), QString("finished"), 10000);
+        QVERIFY(QFileInfo(part).size() >= 70000);
+        QVERIFY(rig.row(0).value("partial").toBool());
+        QVERIFY(rig.row(0).value("partialText").toString().contains(" of ")); // "70 KB of 300 KB"
+        QVERIFY(rig.view().value("stopped").toBool()); // a note, not an error
+        QVERIFY(!rig.view().value("ok").toBool());
+        QVERIFY(rig.view().value("message").toString().startsWith("Stopped. The download keeps what it had"));
+        QVERIFY(!rig.view().value("message").toString().contains("install"));
+        QVERIFY(!rig.view().value("message").toString().contains("setup"));
+        rig.sheet.deletePartial(hashA);
+        QVERIFY(!QFileInfo::exists(part));
+        QVERIFY(!rig.row(0).value("partial").toBool());
     }
 
     // #594: a model only another branch needs is listed apart, "Not now" by default (the yes downloads nothing of it, and with nothing
