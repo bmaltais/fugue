@@ -7,6 +7,7 @@ namespace fugue {
 const QString ViewRegistry::kGraph = QStringLiteral("graph");
 const QString ViewRegistry::kCanvas = QStringLiteral("canvas");
 const QString ViewRegistry::kApp = QStringLiteral("app");
+const QString ViewRegistry::kQueue = QStringLiteral("queue");
 
 ViewRegistry::ViewRegistry(QObject *parent) : QObject(parent) {
     // The node graph: today's whole window body. The window declares it itself (Main.qml), so its area
@@ -21,6 +22,11 @@ ViewRegistry::ViewRegistry(QObject *parent) : QObject(parent) {
     // window. Wide enough for the rail, a stage and the input panel at its least width (80u, 40% of 800).
     add({kApp, QT_TRANSLATE_NOOP("View", "App"), QStringLiteral("layout-template"), QUrl(QStringLiteral("qrc:/apps/AppArea.qml")),
          QSizeF(800, 360), Multiplicity::OnePerWindow});
+    // The run queue (#648, Blender's Timeline and Info editors): QueueArea.qml over App.runQueue, the runs going and waiting and the
+    // last that ended, one area in the window (the queue is the window's, not an area's). Wide enough for a row's name and its
+    // buttons, tall enough for a heading and two rows.
+    add({kQueue, QT_TRANSLATE_NOOP("View", "Queue"), QStringLiteral("list-ordered"), QUrl(QStringLiteral("qrc:/workspace/QueueArea.qml")),
+         QSizeF(280, 120), Multiplicity::OnePerWindow});
 }
 
 void ViewRegistry::add(const ViewType &type) {

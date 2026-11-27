@@ -210,6 +210,40 @@ private slots:
 
     // #647: the one area may show the App with no Graph anywhere: Ctrl+V still reaches the App, the Graph's commands are off, and
     // picking Graph there shows the Graph (not the tab's App page).
+    // Alt+Q (#648): from the App's area the App stays the active one, so Ctrl+Enter and Escape still go to the app; from the Graph's area
+    // the Queue takes the keyboard.
+    void altQLeavesTheAppActiveAndFromTheGraphTheQueueTakesTheKeyboard() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        // The window's one area shows the App (it needs 800 px, so a Graph beside it would not leave room for the Queue's split).
+        QVERIFY(app.workspace.showView(1, "app"));
+        QTRY_VERIFY(find(app.window, "appPage"));
+        QTRY_VERIFY(rig.view.shown());
+        QTRY_VERIFY(app.workspace.bodySize().height() > 0); // the window has told the layout its size: a split can be judged
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(find(app.window, "queueArea"));
+        QCOMPARE(app.workspace.viewOf(app.workspace.active()), QString("app"));
+        QVERIFY(rig.view.shown()); // Ctrl+Enter and Escape still go to the app
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(!find(app.window, "queueArea"));
+        QVERIFY(rig.view.shown());
+        // From the Graph's area the Queue is the active one and has the keyboard.
+        QVERIFY(app.workspace.showView(1, "graph"));
+        QTRY_VERIFY(!find(app.window, "areaHost"));
+        app.key(Qt::Key_Q, Qt::AltModifier);
+        QTRY_VERIFY(find(app.window, "queueArea"));
+        QCOMPARE(app.workspace.active(), app.workspace.queueArea());
+        QTRY_VERIFY(app.window->activeFocusItem());
+        QQuickItem *focus = app.window->activeFocusItem();
+        while (focus && focus != find(app.window, "queueArea"))
+            focus = focus->parentItem();
+        QVERIFY(focus);
+        QVERIFY(!rig.view.shown());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     void aOneAreaAppWindowPastesIntoTheAppAndGivesTheGraphBack() {
         App app(load(appWorkflow));
         Rig rig(app);

@@ -68,9 +68,6 @@ class CanvasRuns : public QObject {
     Q_PROPERTY(QVariantList errors READ errors NOTIFY errorsChanged)
     // How the last run of the shown workflow ended: "", "ok", "failed" or "cancelled".
     Q_PROPERTY(QString lastStatus READ lastStatus NOTIFY errorsChanged)
-    // True while something that is not the canvas holds the keys the `run` context owns (the queue
-    // panel has the focus, and Escape closes it): run.cancel's keys sleep until it is false again.
-    Q_PROPERTY(bool yieldKeys READ yieldKeys WRITE setYieldKeys NOTIFY yieldKeysChanged)
     // The question a run waits on before it sends data to a service off this machine (8.2, #404): {run, services: [{instance, host,
     // text}]} (text: "pictures and prompts"), empty when none waits. The window shows it as a Question; answerRemote answers it.
     Q_PROPERTY(QVariantMap remoteQuestion READ remoteQuestion NOTIFY remoteQuestionChanged)
@@ -100,8 +97,6 @@ public:
     // Yes keeps the answer for the services asked about and the run goes on; no cancels it. The next waiting question, if any, shows.
     Q_INVOKABLE void answerRemote(bool allow);
     static constexpr int maxBatch = 99;
-    bool yieldKeys() const { return m_yieldKeys; }
-    void setYieldKeys(bool yield);
     int batch() const { return m_batch; }
     void setBatch(int batch);
 
@@ -112,7 +107,7 @@ public:
     Q_INVOKABLE QString runToSelected();
     Q_INVOKABLE void cancel();
     // Shows the results of a run that ended on the nodes of the shown workflow, as they were when it
-    // ended (the queue panel's history): `workflow` is the file the run started from. False,
+    // ended (the Queue area's history): `workflow` is the file the run started from. False,
     // and nothing shown, when that is not the file of the shown tab (a run's node ids mean
     // something only in its own workflow) or the tab is not a saved one.
     Q_INVOKABLE bool showResults(const QString &run, const QString &workflow);
@@ -146,7 +141,6 @@ public:
 signals:
     void changed();
     void batchChanged();
-    void yieldKeysChanged();
     void progressChanged();
     void runningNodesChanged();
     void errorsChanged();
@@ -262,7 +256,6 @@ private:
     QStringList m_order;
     QSet<QString> m_first; // the waiting runs started ahead of the queue (they keep their order)
     int m_batch = 1;
-    bool m_yieldKeys = false;
     QString m_active;
     QString m_activeNode;
     QString m_activeNodePath;

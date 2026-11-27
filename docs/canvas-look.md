@@ -553,8 +553,8 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   open. Chunks are 3u apart, 1u inside one; the grip is two columns of dots in `label` (the accent
   with the focus), then the batch count (−, ×N in `tnum`, +), Run and its arrow, Cancel, the queue button
   with the number of runs. A 2px accent bar along the lower edge shows the progress of the node going.
-- **Run queue panel** (#60): `popup` fill, `hairline` edge, corner `min(R, 14)`, level 3 shadow, 96u wide,
-  at most 80u tall (it scrolls), hung 2u under the toolbar, or over it where there is more room there, centered on the bar and kept inside the canvas.
+- **Queue area** (#60, an area view since #648): the area's own `popup` ground (no card, no shadow), its rows filling the area's width,
+  scrolling in the area's height, 2u inset.
   Section headings in `label`, caption size, DemiBold, with a hairline between the two sections. A row is
   9u: a 5u mark (a spinning `loader-circle` in the accent for the run going, the queue position in
   `label` for a waiting one; for a finished one `check`, `circle-x` in `error`, or `ban`), the name at label size

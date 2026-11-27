@@ -18,6 +18,12 @@
 // that does not validate) gives the default layout, is kept beside as `workspaces.json.bad`, and the window's
 // notice line says so once. A layout without the Graph stays without it; a second Graph area shows a Canvas.
 //
+// The Queue is a view of its own (#648, spec 12.16): one per window, like the Graph. panel.queue (Alt+Q, context `app`) toggles it:
+// with no Queue area it splits the active area along its bottom and shows the Queue there (a share of kQueueShare of the area,
+// never under the Queue's minimum), refused with a message when the area is too small; with one it closes that area (the only
+// area, if it is the Queue, shows the Graph again). The keyboard goes to the new Queue and it becomes the active area, except
+// when the area split shows the App (its keys follow the active area): see queueOpened.
+//
 // Commands (context `app`): area.split-row (Ctrl+\), area.split-column (Ctrl+Alt+\), area.close (Ctrl+Alt+W),
 // area.view-graph (Ctrl+Alt+G), area.view-canvas (Ctrl+Alt+C), each on the active area, and view.reset-layout.
 
@@ -50,6 +56,8 @@ class Workspace : public QObject {
     Q_PROPERTY(int active READ active WRITE setActive NOTIFY activeChanged)
     // The area showing the Graph, or 0 when none does (the Graph is hidden).
     Q_PROPERTY(int graphArea READ graphArea NOTIFY changed)
+    // The area showing the Queue, or 0 when none does.
+    Q_PROPERTY(int queueArea READ queueArea NOTIFY changed)
     Q_PROPERTY(fugue::ViewRegistry *views READ views CONSTANT)
     // The size the window gives the areas, set by the window: a split that would not fit it is refused. Empty
     // (no window): every split fits.
@@ -58,6 +66,8 @@ class Workspace : public QObject {
 public:
     static constexpr int kSaveDelayMs = 400;
     static constexpr qint64 kMaxFileSize = 1 << 20;
+    // How much of the active area's height panel.queue gives the Queue.
+    static constexpr double kQueueShare = 0.3;
 
     // `path` is the file the layout is kept in (empty: not kept).
     explicit Workspace(QString path = {}, QObject *parent = nullptr);
@@ -75,6 +85,7 @@ public:
     int active() const { return m_active; }
     void setActive(int id);
     int graphArea() const;
+    int queueArea() const { return areaOf(ViewRegistry::kQueue); }
     ViewRegistry *views() { return &m_views; }
     QSizeF bodySize() const { return m_bodySize; }
     void setBodySize(const QSizeF &size);
@@ -106,6 +117,9 @@ public:
     // the App is brought to the active area (or the next one when that is the Graph's) unless some area shows it; the Graph is brought
     // to the active area when that shows the App. False when nothing changed.
     Q_INVOKABLE bool requestApp(bool app);
+    // panel.queue: closes the Queue's area, or splits the active area along its bottom and shows the Queue in the new part. False when
+    // nothing changed; a split that does not fit says so on `message`.
+    Q_INVOKABLE bool toggleQueue();
     // Moves the border after child `border` of the branch at `path` (child indexes from the root) by `delta`
     // pixels along a branch `length` pixels long, each side kept at its views' minimum.
     Q_INVOKABLE bool resizeBorder(const QVariantList &path, int border, double delta, double length);
@@ -124,6 +138,9 @@ signals:
     void changed();
     void activeChanged();
     void bodySizeChanged();
+    // panel.queue made the Queue's area `area`; `focus`: the keyboard goes to it (it became the active area), false when the area it
+    // was split from shows the App, which stays the active one. The window gives the Queue's view the focus.
+    void queueOpened(int area, bool focus);
     // A line for the window's notice line (a layout that could not be read).
     void message(const QString &text);
 

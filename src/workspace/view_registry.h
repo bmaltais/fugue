@@ -44,9 +44,10 @@ public:
     static const QString kGraph;
     static const QString kCanvas;
     static const QString kApp;
+    static const QString kQueue;
     static constexpr QSizeF kPlaceholderMinimum{160, 120};
 
-    // The built-in types: the Graph, the Canvas and the App.
+    // The built-in types: the Graph, the Canvas, the App and the Queue.
     explicit ViewRegistry(QObject *parent = nullptr);
 
     // Adds a type, or replaces the one of its id (a test's own views).

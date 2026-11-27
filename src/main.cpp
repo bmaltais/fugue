@@ -169,12 +169,11 @@ int main(int argc, char *argv[]) {
     fugue::RunService runService(runSetup);
     fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
     runs.registerCommands(commands);
-    // The run toolbar's state and the queue panel's list (#60): the same queue the CLI's runs are in.
+    // The run toolbar's state and the Queue area's list (#60): the same queue the CLI's runs are in.
     // Which bars and panels are shown (#129): each registers with this, and the Bars and panels menu, focus
     // mode and the file that remembers it are its.
     fugue::ChromeVisibility chrome(fugue::stateDir() + "/chrome.json");
     fugue::RunBar runBar(&runs, fugue::stateDir() + "/run-bar.json", &chrome);
-    runBar.registerCommands(commands);
     fugue::RunQueue runQueue({}, &runService);
     // The Canvas view's task bar (#231): the bundled actions, queued through the same runs.
     fugue::CanvasActions canvasActions(&runService, &registry, &workflows);
@@ -235,8 +234,12 @@ int main(int argc, char *argv[]) {
     // made so it opens as it was left; a layout that cannot be read is said on the notice line.
     fugue::Workspace workspace(fugue::stateDir() + "/workspaces.json");
     QObject::connect(&workspace, &fugue::Workspace::message, &workflows, &fugue::Workflows::notify);
-    workspace.registerCommands(commands);
-    workspace.restore();
+    // An app's own window (`--app`) has no areas: it neither reads the shared layout nor gets the area commands and panel.queue, so it
+    // cannot change or write workspaces.json.
+    if (!appArgument) {
+        workspace.registerCommands(commands);
+        workspace.restore();
+    }
 
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,

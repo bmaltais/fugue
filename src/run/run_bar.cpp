@@ -5,7 +5,6 @@
 
 #include <QJsonObject>
 
-#include "commands/command_registry.h"
 #include "engine/json.h"
 #include "panels/chrome_visibility.h"
 #include "run/canvas_runs.h"
@@ -56,30 +55,10 @@ void RunBar::setPlace(const QPointF &place) {
     emit placeChanged();
 }
 
-void RunBar::setQueueOpen(bool open) {
-    if (open == m_queueOpen)
-        return;
-    m_queueOpen = open;
-    emit queueOpenChanged();
-}
-
 void RunBar::save() const {
     if (m_path.isEmpty())
         return;
     writeJsonFile(m_path, QJsonObject{{"place", QJsonObject{{"x", m_place.x()}, {"y", m_place.y()}}}, {"batch", m_runs ? m_runs->batch() : 1}});
-}
-
-void RunBar::registerCommands(CommandRegistry &commands) {
-    // view.toggle-run-toolbar is the registry's (panels/chrome_commands.h).
-    // Opening the panel shows the toolbar it hangs from.
-    commands.setHandler("panel.queue", [this] {
-        if (!m_queueOpen)
-            setVisible(true);
-        setQueueOpen(!m_queueOpen);
-        if (m_queueOpen)
-            emit queueFocusRequested();
-    });
-    commands.setCheckedWhen("panel.queue", [this] { return m_queueOpen; });
 }
 
 } // namespace fugue
