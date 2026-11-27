@@ -5,8 +5,8 @@ import Fugue
 import "../kit"
 import "../kit/KitTone.js" as KitTone
 
-// The window's one button (docs/ui-ergonomics.md D4): a large view's bar and footer (#62, #73), the run toolbar and
-// queue panel (#60), the Canvas view, and through thin aliases the settings' SmallButton (SettingsParts.qml) and the
+// The window's one button (docs/ui-ergonomics.md D4): a large view's bar and footer (#62, #73), the run toolbar and the
+// Queue area (#60), the Canvas view, and through thin aliases the settings' SmallButton (SettingsParts.qml) and the
 // area header's buttons (AreaHeader.qml). 7u = 28px tall, above the 24px floor, a label on the well color.
 //
 // Variants, which combine:

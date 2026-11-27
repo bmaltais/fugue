@@ -192,7 +192,7 @@ struct RunApp {
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
         app.runs = runs.get();
-        // The run toolbar and the queue panel, as main() makes them, with the test's own folders.
+        // The run toolbar and the Queue area, as main() makes them, with the test's own folders.
         bar = std::make_unique<fugue::RunBar>(runs.get(), root + "/run-bar.json", &app.chrome);
         queue = std::make_unique<fugue::RunQueue>(fugue::RunQueuePaths{root + "/runs", root + "/queue", root + "/engine.lock"},
                                                   service.get());
@@ -1802,7 +1802,7 @@ echo '{"outputs": {"text": "painted"}}'
         QVERIFY(r.app.warnings.isEmpty());
     }
 
-    // ---- The run toolbar and the queue panel (#60) ----
+    // ---- The run toolbar and the Queue area (#60) ----
 
     static void click(const RunApp &r, QQuickItem *target) {
         QVERIFY(target);

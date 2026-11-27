@@ -54,12 +54,11 @@ AreaView {
         // The change handlers above only hear later changes: the rows it is made with are taken here.
         entryIds = same(entryIds, entries)
         historyIds = same(historyIds, history)
-        if (App.runQueue)
-            App.runQueue.watching = true
     }
-    Component.onDestruction: {
-        if (App.runQueue)
-            App.runQueue.watching = false
+    // The first control that can be pressed, for a Queue opened from the keys (the window's `watching` follows the layout, Main.qml).
+    function focusFirst() {
+        forceActiveFocus()
+        step(true)
     }
 
     function clock(seconds) {

@@ -597,6 +597,22 @@ ApplicationWindow {
             onPlaceRequested: place => App.runBar.place = place
         }
     }
+    // The queue reads the going run's events and the history while a Queue area is in the layout, whatever view object shows it (a swap
+    // of areas makes the new view before the old one goes).
+    Binding {
+        when: App.runQueue !== null
+        target: App.runQueue
+        property: "watching"
+        value: App.workspace !== null && App.workspace.queueArea > 0
+    }
+    // Alt+Q made a Queue area: it takes the keyboard unless the area it was split from shows the App.
+    Connections {
+        target: App.workspace
+        function onQueueOpened(area, focus) {
+            if (focus)
+                (areas.viewOf(area) as QueueArea)?.focusFirst()
+        }
+    }
     // What a finished row of the Queue area asks for (#133): its results, shown by showRunResults.
     Connections {
         target: App.runQueue

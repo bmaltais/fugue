@@ -59,6 +59,12 @@ int countNamed(QQuickItem *from, const QString &name) {
 }
 
 QPoint centerOf(QQuickItem *item) { return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint(); }
+bool isInside(QQuickItem *item, QQuickItem *ancestor) {
+    for (; item; item = item->parentItem())
+        if (item == ancestor)
+            return true;
+    return false;
+}
 QRectF sceneRect(QQuickItem *item) { return QRectF(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height())); }
 
 const char *blank = R"({"fugue": 1, "graph": {"nodes": {}}})";
@@ -293,6 +299,19 @@ private slots:
         QTRY_VERIFY(host(app) && find(app.window, "queueArea"));
         QCOMPARE(app.workspace.viewOf(2), QString("queue"));
         QTRY_VERIFY(find(app.window, "queueEntry-cli-waiting"));
+        QVERIFY(runQueue.watching());
+        // From the Graph's area the keyboard goes to the Queue (its first control), which is the active area.
+        QCOMPARE(app.workspace.active(), 2);
+        QTRY_VERIFY(isInside(app.window->activeFocusItem(), find(app.window, "queueArea")));
+        // The Queue moving to another area (the two trade) keeps the queue read: the new view is made before the old one goes.
+        QVERIFY(app.workspace.showView(1, "queue"));
+        QTRY_COMPARE(app.workspace.queueArea(), 1);
+        QTRY_VERIFY(find(app.window, "queueEntry-cli-waiting"));
+        settle();
+        QVERIFY(runQueue.watching());
+        QVERIFY(app.workspace.showView(2, "queue")); // and back
+        QTRY_COMPARE(app.workspace.queueArea(), 2);
+        settle();
         QVERIFY(runQueue.watching());
         settle();
         // Below the Graph, about 30% of the body, and its header says Queue.

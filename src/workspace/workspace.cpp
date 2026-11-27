@@ -303,8 +303,13 @@ bool Workspace::toggleQueue() {
         emit message(QCoreApplication::translate("Workspace", "There is no room for the Queue under this area. Make the window bigger or close an area."));
         return false;
     }
+    // The keyboard goes to the Queue, unless the area split shows the App: the App's keys (Ctrl+Enter, Escape) follow the active
+    // area (AppView::shown), so that area stays active and the Queue takes no focus.
+    const bool focus = m_tree.area(id)->view != ViewRegistry::kApp;
     commit(next);
-    setActive(made);
+    if (focus)
+        setActive(made);
+    emit queueOpened(made, focus);
     return true;
 }
 

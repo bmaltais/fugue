@@ -107,7 +107,7 @@ public:
     Q_INVOKABLE QString runToSelected();
     Q_INVOKABLE void cancel();
     // Shows the results of a run that ended on the nodes of the shown workflow, as they were when it
-    // ended (the queue panel's history): `workflow` is the file the run started from. False,
+    // ended (the Queue area's history): `workflow` is the file the run started from. False,
     // and nothing shown, when that is not the file of the shown tab (a run's node ids mean
     // something only in its own workflow) or the tab is not a saved one.
     Q_INVOKABLE bool showResults(const QString &run, const QString &workflow);

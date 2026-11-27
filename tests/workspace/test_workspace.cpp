@@ -152,11 +152,15 @@ private slots:
         w.registerCommands(commands);
         QCOMPARE(commands.keys("panel.queue"), QStringList({"Alt+Q"}));
         QSignalSpy message(&w, &Workspace::message);
+        QSignalSpy opened(&w, &Workspace::queueOpened);
         w.setBodySize(QSizeF(1000, 800));
         QVERIFY(w.toggleQueue());
         QCOMPARE(w.count(), 2);
         QCOMPARE(w.queueArea(), 2);
-        QCOMPARE(w.active(), 2);
+        QCOMPARE(w.active(), 2); // the keyboard goes to the Queue
+        QCOMPARE(opened.count(), 1);
+        QCOMPARE(opened.first().at(0).toInt(), 2);
+        QVERIFY(opened.first().at(1).toBool());
         const AreaTree::Node &branch = w.areaTree().root();
         QCOMPARE(int(branch.axis), int(AreaAxis::Column));
         QCOMPARE(branch.children[0].area.view, QString("graph")); // the Queue is below
@@ -192,6 +196,24 @@ private slots:
         QCOMPARE(w.viewOf(w.areaTree().areaIds().first()), QString("queue"));
         QVERIFY(w.toggleQueue());
         QCOMPARE(w.graphArea(), w.areaTree().areaIds().first());
+    }
+
+    // The App's keys (Ctrl+Enter, Escape) follow the active area (AppView::shown): splitting the App's area leaves it active and
+    // asks for no focus for the Queue.
+    void splittingTheAppsAreaKeepsTheAppActive() {
+        Workspace w;
+        w.splitArea(1, "row");
+        QVERIFY(w.showView(2, "app"));
+        QCOMPARE(w.active(), 2);
+        QSignalSpy opened(&w, &Workspace::queueOpened);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.viewOf(w.queueArea()), QString("queue"));
+        QCOMPARE(w.active(), 2);
+        QCOMPARE(w.viewOf(w.active()), QString("app"));
+        QCOMPARE(opened.count(), 1);
+        QVERIFY(!opened.first().at(1).toBool());
+        QVERIFY(w.toggleQueue()); // closes
+        QCOMPARE(w.active(), 2);
     }
 
     void panelQueueSaysSoWhenTheAreaIsTooSmallToSplit() {

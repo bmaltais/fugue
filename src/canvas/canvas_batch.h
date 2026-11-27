@@ -3,7 +3,7 @@
 // The Canvas view's Batch… dialog's backend (#250), App.canvasBatch in QML: a canvas action over a folder of pictures,
 // run in the background through the window's RunService. The steps are engine/canvas_batch.h's (the same as `fugue
 // canvas batch`): batchPrepare imports a picture as a canvas and binds the action to it, a run of the bound workflow
-// goes through the queue (it waits for the one GPU like any run, and shows in the queue panel), and batchFinish exports
+// goes through the queue (it waits for the one GPU like any run, and shows in the Queue area), and batchFinish exports
 // the head the run left. One picture at a time; the window stays free.
 //
 // start() begins; `results` lists every picture with its status ("waiting", "running", "ok", "failed", "cancelled"),

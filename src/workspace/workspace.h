@@ -21,7 +21,8 @@
 // The Queue is a view of its own (#648, spec 12.16): one per window, like the Graph. panel.queue (Alt+Q, context `app`) toggles it:
 // with no Queue area it splits the active area along its bottom and shows the Queue there (a share of kQueueShare of the area,
 // never under the Queue's minimum), refused with a message when the area is too small; with one it closes that area (the only
-// area, if it is the Queue, shows the Graph again).
+// area, if it is the Queue, shows the Graph again). The keyboard goes to the new Queue and it becomes the active area, except
+// when the area split shows the App (its keys follow the active area): see queueOpened.
 //
 // Commands (context `app`): area.split-row (Ctrl+\), area.split-column (Ctrl+Alt+\), area.close (Ctrl+Alt+W),
 // area.view-graph (Ctrl+Alt+G), area.view-canvas (Ctrl+Alt+C), each on the active area, and view.reset-layout.
@@ -137,6 +138,9 @@ signals:
     void changed();
     void activeChanged();
     void bodySizeChanged();
+    // panel.queue made the Queue's area `area`; `focus`: the keyboard goes to it (it became the active area), false when the area it
+    // was split from shows the App, which stays the active one. The window gives the Queue's view the focus.
+    void queueOpened(int area, bool focus);
     // A line for the window's notice line (a layout that could not be read).
     void message(const QString &text);
 

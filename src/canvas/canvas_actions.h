@@ -8,7 +8,7 @@
 // shown canvas, the full hash of the head that was shown, the selection (a rectangle, or a Quick Mask selection stored
 // by content: storeSelection()), the prompt and a seed (random unless one is given), with Canvas Region's padding and
 // scale from the router (engine/canvas_router.h); then it queues the copy through RunService as an ordinary run (the
-// queue panel lists it under the action's file name, it is cancelled the same way and waits for the one GPU). CanvasRuns
+// Queue area lists it under the action's file name, it is cancelled the same way and waits for the one GPU). CanvasRuns
 // ignores these runs: they belong to no tab. "auto" lets the router pick the action from the selection and the prompt;
 // in this slice only Generative fill exists, so a route to another action says so in words.
 //
