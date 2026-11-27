@@ -165,7 +165,8 @@ bool ModelSetup::maybeOffer() {
     return true;
 }
 
-QString ModelSetup::ownRoot() const { return ModelLibrary::roots(currentSettings()).value(0); }
+// Read once when the sheet opens (settings.json is read from disk by currentSettings()); asked often while it is open.
+QString ModelSetup::ownRoot() const { return m_open ? m_ownRoot : ModelLibrary::roots(currentSettings()).value(0); }
 
 void ModelSetup::show(bool firstRun) {
     if (m_open)
@@ -183,6 +184,7 @@ void ModelSetup::show(bool firstRun) {
     m_message.clear();
     // A rerun starts from the download folder the person has: it is kept unless they choose another.
     const Settings settings = currentSettings();
+    m_ownRoot = ModelLibrary::roots(settings).value(0);
     m_downloadChosen = !settings.downloadFolder.isEmpty();
     m_download = m_settings->downloadFolder();
     m_envNow = env();
@@ -611,6 +613,10 @@ bool ModelSetup::inLeftOffPlace(const QString &path) const {
 }
 
 qint64 ModelSetup::freeSpace(const QString &path) const {
+    // The sheet reads the hint as it opens, while every place is still ticked and a folder may lead into one the person is about to leave
+    // off: nothing but Fugue's own folder is asked until the places are confirmed (the search).
+    if (m_phase == QLatin1String("consent") && path != ownRoot())
+        return -1;
     if (inLeftOffPlace(path))
         return -1; // unknown, no I/O
     // A folder the search found to lead into a place left off (a link) is never asked about either, whatever its path says.
