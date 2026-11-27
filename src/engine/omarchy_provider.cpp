@@ -56,7 +56,8 @@ constexpr int kChatTransferTimeoutMs = 300 * 1000;
 // lists the models running at that moment (a unit that is restarting is missing). A listing finding
 // the file older than this runs the survey itself, at most once per window.
 constexpr qint64 kSurveyFreshMs = 2 * 60 * 1000;
-// `omarchy-local-ai network --write` asks every online host over the tailnet; it takes seconds.
+// `omarchy-local-ai network --json` asks every online host over the tailnet and rewrites network.json (its listing is
+// thrown away: the file is what is read); it takes seconds. `--json`, not the hidden `--write`, which is not part of its interface.
 constexpr int kSurveyTimeoutMs = 10 * 1000;
 
 
@@ -308,16 +309,15 @@ void OmarchyProvider::runSurvey(std::function<void(bool)> finished) {
             report(false);
     });
     connect(timer, &QTimer::timeout, process, [process] { process->kill(); });
-    process->start(QStringLiteral("omarchy-local-ai"), {QStringLiteral("network"), QStringLiteral("--write")});
+    process->setStandardOutputFile(QProcess::nullDevice());
+    process->setStandardErrorFile(QProcess::nullDevice());
+    process->start(QStringLiteral("omarchy-local-ai"), {QStringLiteral("network"), QStringLiteral("--json")});
     timer->start(kSurveyTimeoutMs);
 }
 
 // True when a remote listing should run the survey before it reads network.json.
 bool OmarchyProvider::surveyDue() const {
     if (m_instance.address.isEmpty())
-        return false;
-    // The real command writes the real state: only for the real state folder, or an injected runner.
-    if (!m_surveyRunner && m_paths.stateDir != OmarchyPaths::standard().stateDir)
         return false;
     const Result<QJsonObject> network = readJsonObject(QDir(m_paths.stateDir).filePath("network.json"));
     if (!network) // none means no paired host: today's message; unreadable is said by discover()

@@ -79,8 +79,8 @@ public:
     void setClock(std::function<qint64()> msecs) { m_clock = std::move(msecs); }
 
     // How a remote host's stale network.json is refreshed: runs the tailnet survey and calls back
-    // with whether it succeeded. Unset, `omarchy-local-ai network --write` runs (only on the real
-    // state folder). For tests.
+    // with whether it succeeded. Unset, `omarchy-local-ai network --json` runs (the tests'
+    // PATH has a stand-in that fails). For tests.
     void setSurveyRunner(std::function<void(std::function<void(bool)>)> runner) { m_surveyRunner = std::move(runner); }
 
 private:
