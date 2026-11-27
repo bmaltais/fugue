@@ -430,12 +430,12 @@ private slots:
         QTest::qWait(100);
         QQuickItem *tab = find(app.window, "tab-0");
         QVERIFY(tab);
-        const QPoint on = tab->mapToScene(QPointF(tab->width() / 4, tab->height() / 2)).toPoint();
+        const QPoint on = tab->mapToScene(QPointF(tab->width() / 2, tab->height() / 2)).toPoint();
         QTest::mouseClick(app.window, Qt::LeftButton, {}, on);
         QCOMPARE(app.workflows.current(), 0);
-        QVERIFY(!isOpen(app.window, "tabRenamePopup-0"));
+        QVERIFY(!find(app.window, "tabRenameField-0"));
         QTest::mouseDClick(app.window, Qt::LeftButton, {}, on);
-        QTRY_VERIFY(isOpen(app.window, "tabRenamePopup-0"));
+        QTRY_VERIFY(find(app.window, "tabRenameField-0")); // the popup is in the window overlay
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

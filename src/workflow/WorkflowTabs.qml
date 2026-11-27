@@ -96,7 +96,7 @@ Item {
                 readonly property color tabColor: root.colorOf(modelData.color)
                 onClicked: App.workflows.current = index
                 // A double click renames, as a sheet tab in Excel or Google Sheets does; the two clicks have made the tab current.
-                onDoubleClicked: tabButton.rename()
+                onDoubleClicked: { tabButton.rename() }
                 function rename() {
                     renameField.text = tabButton.modelData.title
                     renamePopup.open()

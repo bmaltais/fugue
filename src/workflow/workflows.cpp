@@ -1738,8 +1738,9 @@ void Workflows::closeAllTabs() {
 
 // As the last tab's close does: removeTab leaves one fresh, empty workflow, and drops each tab's recovery copy.
 void Workflows::discardAndCloseAll() {
-    while (count() > 0)
+    while (count() > 1)
         removeTab(count() - 1);
+    removeTab(0);
 }
 
 void Workflows::discardAndClose(int index) { removeTab(index); }
