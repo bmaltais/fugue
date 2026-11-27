@@ -194,7 +194,7 @@ ColumnLayout {
         }
         HoverHandler { id: wellHover }
         // A click only focuses the well (Ctrl+V pastes there); the Browse button is the one way to the file picker.
-        TapHandler { onTapped: well.forceActiveFocus() }
+        TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: well.forceActiveFocus() }
         // Takes the picture away; the well is empty, and Run says what it needs.
         KitChip {
             objectName: "appImageRemove-" + root.field.key

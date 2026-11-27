@@ -106,7 +106,7 @@ Rectangle {
                     font.pixelSize: sheet.look.textSize
                     font.underline: link !== "" && sourceHover.hovered
                     HoverHandler { id: sourceHover; cursorShape: sourceLine.link !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                    TapHandler { enabled: sourceLine.link !== ""; onTapped: Qt.openUrlExternally(sourceLine.link) }
+                    TapHandler { gesturePolicy: TapHandler.WithinBounds; enabled: sourceLine.link !== ""; onTapped: Qt.openUrlExternally(sourceLine.link) }
                 }
                 Text {
                     objectName: "templateDetailsFacts"

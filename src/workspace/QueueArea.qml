@@ -305,7 +305,7 @@ AreaView {
                     }
                     HoverHandler { id: hoverDone }
                     // A click on the row shows what the run made.
-                    TapHandler { onTapped: App.runQueue.showResults(done.modelData) }
+                    TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: App.runQueue.showResults(done.modelData) }
                     Glyph {
                         id: outcome
                         x: panel.u + (5 * panel.u - width) / 2

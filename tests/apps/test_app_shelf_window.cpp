@@ -569,6 +569,79 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // A click in the Templates window acts there and nothing else (owner, 2026-11-26: "it also opens the app that happens to be
+    // behind the template tile"). A window just started, on the shelf; the side strip's Templates tab opens the window over it, as
+    // a person does. A category tab, then a card, each over another app's card on the shelf under it, is clicked: the tab only
+    // filters, the card opens its own template, and the shelf's card under them never opens. Each app has a category of its own,
+    // so the tabs reach down over the shelf's first row.
+    void aClickInTheTemplatesWindowOpensNothingOnTheShelfUnderIt() {
+        QTemporaryDir root;
+        for (int i = 0; i < 6; ++i) {
+            makeApp(root.path(), QString("app-%1").arg(i), QString("App %1").arg(i), false);
+            write(root.path() + QString("/app-%1/template.json").arg(i),
+                  QJsonObject{{"title", QString("App %1").arg(i)}, {"category", QString("kind-%1").arg(i)},
+                              {"app", QJsonObject{{"title", QString("App %1").arg(i)}, {"summary", "Does it"}}}});
+        }
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        Rig rig(app);
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QVERIFY(app.open());
+        rig.shelf.setLanding(app.workflows.nothingOpen());
+        QTRY_VERIFY(find(app.window, "appCard-app-5"));
+        test_support::grab(app.window); // laid out
+        QList<QRectF> shelf;
+        for (int i = 0; i < 6; ++i) {
+            QQuickItem *card = find(app.window, QString("appCard-app-%1").arg(i));
+            QVERIFY(card);
+            shelf << card->mapRectToScene(QRectF(QPointF(), card->size()));
+        }
+        // The middle of the first of these items that lies over a shelf card other than `own`'s, or a null point.
+        const auto overTheShelf = [&](const QString &pattern, int *index) {
+            for (int i = 0; i < 6; ++i) {
+                QQuickItem *item = find(app.window, pattern.arg(i));
+                if (!item)
+                    continue;
+                const QPointF middle = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
+                for (int j = 0; j < shelf.size(); ++j)
+                    if (j != i && shelf[j].contains(middle)) {
+                        *index = i;
+                        return middle.toPoint();
+                    }
+            }
+            return QPoint();
+        };
+
+        tap(app.window, "sideTab-templates");
+        QObject *dialog = nullptr;
+        QTRY_VERIFY((dialog = app.window->findChild<QObject *>("templatesDialog")) && dialog->property("opened").toBool());
+        QTRY_VERIFY(find(app.window, "templateCard-app-0"));
+        QTRY_VERIFY(find(app.window, "templatesCategory-kind-5"));
+        test_support::grab(app.window);
+
+        int kind = -1;
+        const QPoint tabAt = overTheShelf(QStringLiteral("templatesCategory-kind-%1"), &kind);
+        QVERIFY2(!tabAt.isNull(), "a category tab lies over an app's card");
+        QTest::mouseMove(app.window, tabAt);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, tabAt);
+        QTRY_COMPARE(dialog->property("category").toString(), QString("kind-%1").arg(kind));
+        QTest::qWait(50); // a stray tap opens at once (Workflows::openTemplateWithFiles)
+        QVERIFY(app.workflows.nothingOpen());
+        QVERIFY(dialog->property("opened").toBool());
+        dialog->setProperty("category", QString()); // every card again
+        test_support::grab(app.window);
+
+        int chosen = -1;
+        const QPoint cardAt = overTheShelf(QStringLiteral("templateCard-app-%1"), &chosen);
+        QVERIFY2(!cardAt.isNull(), "a template card lies over another app's card");
+        QTest::mouseMove(app.window, cardAt);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, cardAt);
+        QTRY_VERIFY(!dialog->property("visible").toBool()); // the fade has ended
+        QTest::qWait(50);
+        QCOMPARE(app.workflows.count(), 1);
+        QCOMPARE(app.workflows.tabs().first().toMap().value("title").toString(), QString("App %1").arg(chosen));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // The App | Graph switch in its four states (owner 2026-11-25): which segment is chosen, what pressing the other does, and that
     // Ctrl+Alt+A (view.toggle-app) does the same.
     void theSwitchIsAlwaysThereAndTheOtherSegmentDoesWhatTheStateNeeds() {

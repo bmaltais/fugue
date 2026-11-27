@@ -29,5 +29,7 @@ Rectangle {
     KitRaise { look: card.look; radius: card.radius; outsideOnly: card.glass }
     Item { id: holder; anchors.fill: parent }
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { onTapped: card.tapped() }
+    // WithinBounds takes the press for this card alone: a passive grab (the default DragThreshold) lets the press go on to
+    // a handler under the card too, through a modal popup, so a Templates card also opened the shelf's app under it.
+    TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: card.tapped() }
 }

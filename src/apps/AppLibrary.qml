@@ -173,6 +173,6 @@ Popup {
             color: pop.look.label
             font.pixelSize: pop.look.captionSize
         }
-        TapHandler { onTapped: tile.tapped() }
+        TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: tile.tapped() }
     }
 }

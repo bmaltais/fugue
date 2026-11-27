@@ -12,6 +12,10 @@ set -euo pipefail
 # 2. templates submodule (#641): a branch must not move the `templates` gitlink to a commit that does not
 #    contain the one on the base (origin/main): a stale submodule checkout committed with `git commit -a`
 #    rolled it back once (#622). A deliberate rollback says so with "templates rollback" in a commit message.
+# 3. TapHandler policy: every TapHandler in src/**/*.qml names its gesturePolicy. The default, DragThreshold, takes only a
+#    passive grab, so the press goes on to the handlers under it as well, a modal popup notwithstanding: a Templates card
+#    also opened the shelf's app under it (owner, 2026-11-26). WithinBounds (or ReleaseWithinBounds) keeps the press for the
+#    one control; DragThreshold, named, is for a handler that shares its press on purpose (a row that is also dragged).
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 base=${1:-origin/main}
@@ -29,7 +33,7 @@ if ((${#files[@]})); then
     }' "${files[@]}" || true)
   if [[ -n $hits ]]; then
     echo "bin/check-quick: a raw string line with // before a double quote in a file moc reads (moc then emits nothing, #617):" >&2
-    echo "$hits" | sed 's/^/  /' >&2
+    echo "  ${hits//$'\n'/$'\n'  }" >&2
     echo "  Move the // to the string's last line or build it in pieces; see docs/testing.md." >&2
     failed=1
   fi
@@ -59,4 +63,21 @@ if git rev-parse --verify -q "$base" >/dev/null && [[ -e templates/.git ]] ; the
     fi
   fi
 fi
+mapfile -t qml < <(git ls-files -co --exclude-standard -- 'src/*.qml' 2>/dev/null || true)
+if ((${#qml[@]})); then
+  hits=$(perl -0777 -ne '
+    while (/\bTapHandler\s*\{/g) {
+      my ($start, $i, $depth) = ($-[0], pos($_), 1);
+      while ($depth && $i < length) { my $c = substr($_, $i++, 1); $depth++ if $c eq "{"; $depth-- if $c eq "}"; }
+      print "$ARGV:", 1 + (substr($_, 0, $start) =~ tr/\n//), "\n" unless substr($_, $start, $i - $start) =~ /\bgesturePolicy\s*:/;
+      pos($_) = $start + 1;
+    }' "${qml[@]}" 2>/dev/null || true)
+  if [[ -n $hits ]]; then
+    echo "bin/check-quick: a TapHandler with no gesturePolicy (the default passes the press on to what is under it too):" >&2
+    echo "  ${hits//$'\n'/$'\n'  }" >&2
+    echo "  Name it: TapHandler.WithinBounds for a control, TapHandler.DragThreshold only to share the press on purpose." >&2
+    failed=1
+  fi
+fi
+
 exit $failed

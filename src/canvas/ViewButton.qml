@@ -122,6 +122,7 @@ Rectangle {
         onTapped: button.tapped()
     }
     TapHandler {
+        gesturePolicy: TapHandler.WithinBounds
         enabled: button.altAction
         acceptedModifiers: Qt.AltModifier
         onTapped: button.altTapped()

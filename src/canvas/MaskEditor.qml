@@ -215,7 +215,7 @@ LargeViewDialog {
                 Keys.onReturnPressed: root.pickColor()
                 Keys.onSpacePressed: root.pickColor()
             }
-            TapHandler { onTapped: root.pickColor() }
+            TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: root.pickColor() }
             HoverHandler { id: swatchHover; cursorShape: Qt.PointingHandCursor }
             ToolTip.visible: swatchHover.hovered
             ToolTip.delay: root.look.tooltipDelay

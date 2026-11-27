@@ -259,7 +259,7 @@ Popup {
                         Keys.onUpPressed: if (index > 0) dialog.category = dialog.categories[index - 1].id
                         Keys.onDownPressed: if (index < dialog.categories.length - 1) dialog.category = dialog.categories[index + 1].id
                         HoverHandler { id: tabHover }
-                        TapHandler { onTapped: dialog.category = tab.modelData.id }
+                        TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: dialog.category = tab.modelData.id }
                         Text {
                             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 2 * dialog.u
                                       right: parent.right; rightMargin: 2 * dialog.u }

@@ -184,7 +184,7 @@ Popup {
                         Keys.onUpPressed: if (index > 0) panel.page = panel.pages[index - 1].id
                         Keys.onDownPressed: if (index < panel.pages.length - 1) panel.page = panel.pages[index + 1].id
                         HoverHandler { id: tabHover }
-                        TapHandler { onTapped: { panel.page = tab.pageId; panel.error = "" } }
+                        TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: { panel.page = tab.pageId; panel.error = "" } }
                         Text {
                             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 2 * panel.u }
                             text: tab.modelData.title

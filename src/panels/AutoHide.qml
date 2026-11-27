@@ -140,6 +140,7 @@ Item {
         }
         HoverHandler { id: edgeHover }
         TapHandler {
+            gesturePolicy: TapHandler.WithinBounds
             onTapped: {
                 root.byTouch = true
                 root.reveal()

@@ -311,6 +311,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
             }
             TapHandler {
+                gesturePolicy: TapHandler.WithinBounds
                 enabled: row.pressable
                 onTapped: eventPoint => {
                     // The close button is its own target.
