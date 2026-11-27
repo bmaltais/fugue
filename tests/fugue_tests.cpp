@@ -11,6 +11,8 @@
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QTemporaryDir>
+#include <QTimer>
+#include <QCoreApplication>
 #include <QtTest>
 #include <cmath>
 
@@ -405,6 +407,29 @@ private slots:
         QTRY_COMPARE(theme.textSize(), 18);
         QVERIFY(write(dir.path() + "/shell.toml", "[font]\nbase-size = 400\n"));
         QTRY_COMPARE(theme.textSize(), 14);
+    }
+
+    // The folders above the theme's change all the time (the temporary folder of a busy machine, ~/.config): a reload
+    // waiting for quiet there never came (2026-11-27, the flake of themeFollowsTheDesktopTextSize under a full suite).
+    void themeReloadsWhileItsParentFolderKeepsChanging() {
+        QTemporaryDir dir;
+        Theme theme(dir.path());
+        const QString noise = QFileInfo(dir.path()).absolutePath() + "/fugue-noise-" + QString::number(QCoreApplication::applicationPid());
+        QTimer churn;
+        bool present = false;
+        QObject::connect(&churn, &QTimer::timeout, &churn, [&] {
+            if (present)
+                QFile::remove(noise);
+            else
+                write(noise, "x");
+            present = !present;
+        });
+        churn.start(10);
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/shell.toml", "[font]\nbase-size = 14\n"));
+        QTRY_COMPARE(theme.textSize(), 14);
+        churn.stop();
+        QFile::remove(noise);
     }
 
     void themeHasSemanticTokens() {
