@@ -1035,7 +1035,7 @@ private slots:
             QTest::qWait(i == 0 ? 50 : 20); // each arrives while the one before is being checked
         }
         QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
-        QTest::qWait(1500); // the others reach the question
+        QTRY_COMPARE_WITH_TIMEOUT(r.service->askedRuns(), 4, 10000); // every run has joined the one question
         r.runs->answerRemote(true);
         QTRY_COMPARE(queued, ids);
         for (const QString &id : ids)

@@ -358,6 +358,14 @@ public:
 
     // The person's answer: yes keeps what was shown (the fingerprints kept with the question, not what the registry holds now) and
     // starts every run of the question in order; no ends them as cancelled. A yes that cannot be kept fails the runs and says so.
+    // How many runs wait on an off-machine question now (tests: every run has joined before the answer).
+    int askedRuns() const {
+        int count = 0;
+        for (const Asking &asking : m_askings)
+            count += int(asking.runs.size());
+        return count;
+    }
+
     void answerRemote(const QString &id, bool allow) {
         int found = -1;
         for (int i = 0; i < m_askings.size() && found < 0; ++i)
@@ -873,6 +881,12 @@ void RunService::replay(const QString &run) {
 
 void RunService::reloadNodeTypes() {
     m_worker->reloadNodeTypes(); // thread-safe: see RunThread::reloadNodeTypes
+}
+
+int RunService::askedRuns() const {
+    int count = 0;
+    QMetaObject::invokeMethod(m_worker, [this, &count] { count = m_worker->askedRuns(); }, Qt::BlockingQueuedConnection);
+    return count;
 }
 
 void RunService::onRunThread(const std::function<void()> &call) {

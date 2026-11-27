@@ -359,6 +359,21 @@ private slots:
         QVERIFY(!m_view->isApp());
     }
 
+    // In a split the graph is edited beside the App area: going into the App area takes the edits (the document is asked for once),
+    // and staying in it, or the one-area window, asks for nothing more.
+    void goingIntoTheAppAreaOfASplitTakesTheGraphsEdits() {
+        m_view->show("a", load(workflow()), {});
+        QSignalSpy wanted(m_view.get(), &AppView::documentWanted);
+        m_view->setAreas(true, false); // the graph's area is active
+        QCOMPARE(wanted.size(), 0);
+        m_view->setAreas(true, true); // into the App area
+        QCOMPARE(wanted.size(), 1);
+        m_view->setAreas(true, true);
+        QCOMPARE(wanted.size(), 1);
+        m_view->setAreas(false, false); // back to one area
+        QCOMPARE(wanted.size(), 1);
+    }
+
     void anInputWhoseNodeWasDeletedIsLeftOutAndNothingIsMadeUp() {
         QJsonObject json = workflow();
         QJsonObject graph = json.value("graph").toObject();

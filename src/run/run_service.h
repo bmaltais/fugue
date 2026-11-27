@@ -128,6 +128,9 @@ public:
     // The folder the run folders are in (RunSetup::runsRoot, else the user's): what History and the App view's takes read.
     QString runsRoot() const { return m_runsRoot; }
 
+    // How many runs wait on an off-machine question (the runs a yes or a no will answer).
+    int askedRuns() const;
+
     // Calls `call` on the run thread and waits for it (tests: a FakeProvider lives there).
     void onRunThread(const std::function<void()> &call);
 

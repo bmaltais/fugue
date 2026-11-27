@@ -951,10 +951,15 @@ void AppView::setAreas(bool split, bool appActive) {
     if (m_split == split && m_areaApp == appActive)
         return;
     const bool was = shown();
+    const bool cameIn = split && appActive && !(m_split && m_areaApp);
     m_split = split;
     m_areaApp = appActive;
     if (was != shown())
         emit shownChanged();
+    // In a split the graph is edited beside the App area; going into that area takes those edits into the form, as switching to
+    // the App view does in one area (showApp). Not on every graph edit: the form is never rebuilt under the person's typing.
+    if (cameIn)
+        emit documentWanted();
 }
 
 void AppView::openInGraph() {
