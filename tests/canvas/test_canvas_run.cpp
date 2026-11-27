@@ -1514,6 +1514,39 @@ private slots:
         QVERIFY(!r.role("gen", NodeList::Thumbnail).toString().isEmpty()); // the last image stays
     }
 
+    // #604: after a run, a changed widget marks exactly its node and what reads it (the cache keys decide), the text encode's side
+    // stays cached; undoing the change clears the marks again. The marks are the header's stale glyph (canvas-look 9): no new item.
+    void anEditMarksOnlyItsNodeAndDownstreamAndUndoClearsThem() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_COMPARE(checked.size(), 1);
+        const QStringList all{"words", "gen", "show", "grp", "show2"};
+        for (const QString &node : all)
+            QCOMPARE(r.state(node), QStringLiteral("cached"));
+
+        r.app.model.widgets()->setValue("gen", "seed", 6);
+        QTRY_COMPARE(checked.size(), 2); // after the edit pause: the existing check, nothing new
+        QCOMPARE(r.state("words"), QStringLiteral("cached"));
+        QCOMPARE(r.state("gen"), QStringLiteral("stale"));
+        QCOMPARE(r.state("show"), QStringLiteral("stale"));
+        QCOMPARE(r.state("grp"), QStringLiteral("cached"));
+        QCOMPARE(r.state("show2"), QStringLiteral("cached"));
+
+        r.app.model.undoStack()->undo();
+        QTRY_COMPARE(checked.size(), 3);
+        for (const QString &node : all)
+            QCOMPARE(r.state(node), QStringLiteral("cached"));
+    }
+
     // Escape while a run is going cancels it (12.4): the provider's job is cancelled, the
     // node that was running would run again.
     void escapeCancelsTheRun() {
