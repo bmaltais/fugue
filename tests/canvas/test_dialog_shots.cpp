@@ -149,6 +149,8 @@ private slots:
         popup(app, "quitAsk", "quit");
         popup(app, "closeAsk", "close-tab", {{"title", "fox-pass.fugue"}});
         popup(app, "closeAllAsk", "close-all", {{"unsavedTabs", 3}});
+        if (qEnvironmentVariable("FUGUE_SHOT_ONLY") == "red") // FUGUE_SHOT_ONLY=red: the destructive answers alone, for a theme's red
+            return;
         popup(app, "trustAsk", "trust");
         {
             // With a pack in its list: the Repeater shows what App.workflows.pendingTrust would.
@@ -266,6 +268,22 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(templates, "showDetails", Q_ARG(QVariant, "text-to-image"), Q_ARG(QVariant, QVariant())));
         QTest::qWait(600);
         save(app, "template-details");
+        {
+            // Opened with the person's files: the template's own download is the extra at the row's start.
+            QQuickItem *sheet = app.window->findChild<QQuickItem *>("templateDetails");
+            QVERIFY(sheet);
+            QVariantMap shown = sheet->property("template").toMap();
+            shown["opensWithFiles"] = true;
+            shown["ownDownloadSize"] = "8.4 GB";
+            shown["onDisk"] = QVariantList{QVariantMap{{"file", "z_image_turbo_bf16.safetensors"}}};
+            sheet->setProperty("template", shown);
+            QTest::qWait(300);
+            save(app, "template-details-files");
+            app.window->resize(560, 720);
+            QTest::qWait(300);
+            save(app, "template-details-files-narrow");
+            app.window->resize(1000, 720);
+        }
         QVERIFY(QMetaObject::invokeMethod(templates, "close"));
         QTRY_VERIFY(!templates->property("visible").toBool());
 
@@ -318,6 +336,10 @@ private slots:
         QVERIFY(app.commands.trigger("app.edit"));
         QTRY_VERIFY(named(app, "appBuilderDialog")->property("opened").toBool());
         save(app, "app-builder-edit");
+        app.window->resize(560, 720); // narrow: no label is squeezed, the row keeps its order
+        QTest::qWait(300);
+        save(app, "app-builder-edit-narrow");
+        app.window->resize(1000, 720);
         QVERIFY(QMetaObject::invokeMethod(named(app, "appBuilderDialog"), "close"));
         QTRY_VERIFY(!named(app, "appBuilderDialog")->property("visible").toBool());
 

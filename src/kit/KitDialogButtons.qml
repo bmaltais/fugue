@@ -97,8 +97,10 @@ RowLayout {
             if (!helpers.includes(children[i]) && children[i]["dialogRole"] !== undefined)
                 found.push(children[i])
         }
+        own.watched = own.watched.filter(b => b !== null && b !== undefined) // a destroyed button reads as null
         for (const b of found) {
             b["dialogRow"] = true // the dialog button's one size, and the solid red for a destructive answer
+            b.Layout.minimumWidth = Qt.binding(() => b.implicitWidth) // a narrow row never squeezes a label
             if (!own.watched.includes(b)) {
                 own.watched = own.watched.concat([b])
                 b["dialogRoleChanged"].connect(row.schedule)

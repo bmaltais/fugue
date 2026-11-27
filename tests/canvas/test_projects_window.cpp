@@ -595,6 +595,10 @@ private slots:
         app.commands.trigger("file.projects");
         QTRY_VERIFY(open(app.window, "projectsDialog"));
         shot(app, "projects-list");
+        // A row's inline question: Keep (a highlighted SmallButton outside a dialog row) and Remove from list.
+        click(app, NEED("projectRemove-1"));
+        shot(app, "projects-list-remove");
+        click(app, NEED("projectRemoveNo-1"));
         click(app, NEED("projectNew"));
         type(app, NEED("newProjectName"), "client");
         shot(app, "projects-new");

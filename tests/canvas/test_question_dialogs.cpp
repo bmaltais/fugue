@@ -178,6 +178,22 @@ private slots:
         app.key(Qt::Key_Return);
         QTRY_VERIFY(!sinks->property("visible").toBool());
 
+        // A group update that takes an input away (its values and links go on every instance): Cancel is the default (D8); one that
+        // takes nothing away: Update.
+        QObject *update = popup(app, "groupUpdateAsk");
+        update->setProperty("changes", QVariantMap{{"name", "Fox"}, {"from", "1.0.0"}, {"to", "2.0.0"}, {"removedInputs", QStringList{"seed"}}});
+        QMetaObject::invokeMethod(update, "open");
+        QTRY_VERIFY(opened(app, "groupUpdateAsk"));
+        QTRY_COMPARE(focused(), QString("groupUpdateCancel"));
+        QMetaObject::invokeMethod(update, "close");
+        QTRY_VERIFY(!update->property("visible").toBool());
+        update->setProperty("changes", QVariantMap{{"name", "Fox"}, {"from", "1.0.0"}, {"to", "1.1.0"}});
+        QMetaObject::invokeMethod(update, "open");
+        QTRY_VERIFY(opened(app, "groupUpdateAsk"));
+        QTRY_COMPARE(focused(), QString("groupUpdateOk"));
+        QMetaObject::invokeMethod(update, "close");
+        QTRY_VERIFY(!update->property("visible").toBool());
+
         QObject *trust = popup(app, "trustAsk");
         QMetaObject::invokeMethod(trust, "open");
         QTRY_VERIFY(opened(app, "trustAsk"));

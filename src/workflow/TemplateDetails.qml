@@ -247,7 +247,7 @@ Rectangle {
                 visible: sheet.withFiles && sheet.template.ownDownloadSize !== ""
                 text: qsTr("Download the template's own files (%1)…").arg(sheet.template.ownDownloadSize)
                 // A narrow sheet cuts the label, never Cancel and Open: the whole label is in the tip.
-                maxTextWidth: Math.max(12 * sheet.u, actionRow.width - cancelButton.width - openButton.width - 12 * sheet.u)
+                maxTextWidth: Math.max(12 * sheet.u, actionRow.width - cancelButton.width - openButton.width - 13 * sheet.u)
                 tip: qsTr("%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.").arg(text)
                 onTapped: sheet.downloadOwn()
             }

@@ -209,27 +209,64 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (contrast(fg, t.dangerHover) >= 4.5)
             break;
     }
-    // A dialog's destructive answer: the theme's red itself as a solid fill, so it looks alike in light and dark themes, with the ink
+    // A dialog's destructive answer: the theme's red as a solid fill, so it looks alike in light and dark themes, with the ink
     // that reads on it best: white, or the theme's dark colour (the background of a dark theme, the text of a light one), at 4.5:1. Only
     // when neither reaches it is the fill darkened (white ink) or lightened (dark ink) in 5% steps, whichever needs fewer. The hover
     // is a step stronger: 12% away from the ink.
     {
+        // The red itself, when it reads as red and apart from the accent: some chroma (tabColors' floor), an OKLCH hue within 0-50 or
+        // 330-360 degrees and an OKLab distance of .1 from the accent; else the theme's bright red by the same test; else a fixed red
+        // at the theme red's lightness held to .50-.65 (hackerman's green red, vantablack's and solitude's grey ones, white's black).
+        const auto readsRed = [&](const QColor &c) {
+            if (!c.isValid())
+                return false;
+            const Oklch o = oklch(c);
+            return o.C >= minChroma && (o.h <= 50 || o.h >= 330) && deltaE(c, accent) >= .1;
+        };
+        // The fill and its ink for a red: the red itself with the ink that reads better (white, or the theme's dark colour) at 4.5:1;
+        // only when neither does, the red darkened (white ink) or lightened (dark ink) in 5% steps, whichever needs fewer.
         const QColor white(Qt::white);
         const QColor dark = light ? fg : bg;
-        const bool whiteInk = contrast(white, red) >= contrast(dark, red);
-        t.dangerInk = whiteInk ? white : dark;
-        t.dangerSolid = red;
-        if (contrast(t.dangerInk, red) < 4.5) {
-            QColor darker = red, lighter = red;
-            int down = 0, up = 0;
-            while (down < 20 && contrast(white, darker) < 4.5)
-                darker = mix(red, QColor(Qt::black), ++down * .05);
-            while (up < 20 && contrast(dark, lighter) < 4.5)
-                lighter = mix(red, QColor(Qt::white), ++up * .05);
-            const bool goDark = contrast(white, darker) >= 4.5 && (down <= up || contrast(dark, lighter) < 4.5);
-            t.dangerInk = goDark ? white : dark;
-            t.dangerSolid = goDark ? darker : lighter;
+        const auto filled = [&](const QColor &base) {
+            const bool whiteInk = contrast(white, base) >= contrast(dark, base);
+            QColor ink = whiteInk ? white : dark, fill = base;
+            if (contrast(ink, base) < 4.5) {
+                QColor darker = base, lighter = base;
+                int down = 0, up = 0;
+                while (down < 20 && contrast(white, darker) < 4.5)
+                    darker = mix(base, QColor(Qt::black), ++down * .05);
+                while (up < 20 && contrast(dark, lighter) < 4.5)
+                    lighter = mix(base, QColor(Qt::white), ++up * .05);
+                const bool goDark = contrast(white, darker) >= 4.5 && (down <= up || contrast(dark, lighter) < 4.5);
+                ink = goDark ? white : dark;
+                fill = goDark ? darker : lighter;
+            }
+            return std::pair{fill, ink};
+        };
+        // The theme's red, else its bright red, else a fixed red (hue 25, C .17, at the theme red's lightness held to .50-.65, then the
+        // nearby lightnesses and red hues): the first whose fill, once its ink is chosen, still reads as red apart from the accent.
+        QList<QColor> bases{colors.value("red"), colors.value("bright_red")};
+        const double L0 = std::clamp(oklch(colors.value("red")).L, .50, .65);
+        for (const double L : {L0, .50, .55, .60, .65})
+            for (const double h : {25., 15., 35., 5., 45., 355.})
+                bases << fromOklch(L, .17, h);
+        std::pair<QColor, QColor> chosen = filled(bases.at(2));
+        double farthest = -1;
+        for (const QColor &base : bases) {
+            if (!base.isValid())
+                continue;
+            const auto made = filled(base);
+            if (readsRed(made.first)) {
+                chosen = made;
+                break;
+            }
+            if (const double apart = deltaE(made.first, accent); oklch(made.first).C >= minChroma && apart > farthest) {
+                farthest = apart;
+                chosen = made;
+            }
         }
+        t.dangerSolid = chosen.first;
+        t.dangerInk = chosen.second;
         t.dangerSolidHover = mix(t.dangerSolid, t.dangerInk == white ? QColor(Qt::black) : QColor(Qt::white), .12);
     }
     // The sheen: the least alpha of light (the text on dark themes, white on light ones) that

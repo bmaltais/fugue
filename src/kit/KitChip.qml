@@ -80,9 +80,7 @@ Rectangle {
     Accessible.onPressAction: chip.tapped()
     Behavior on color { ColorAnimation { duration: chip.look.params.durColor; easing.type: Easing.OutCubic } }
 
-    // Not on the accent fill or the solid red, as ViewButton (`raised`): the raise's shadow sits over the fill and dimmed the accent of a
-    // primary until it read as disabled (Get ready's Install in a dark theme, review 2026-11-27).
-    KitRaise { look: chip.look; radius: chip.radius; visible: !chip.glass && !chip.primary && !chip.solidDanger }
+    KitRaise { look: chip.look; radius: chip.radius; visible: !chip.glass; under: chip.primary || chip.solidDanger }
     Loader {
         id: glassLoader
         anchors.fill: parent

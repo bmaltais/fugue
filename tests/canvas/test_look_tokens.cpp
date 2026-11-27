@@ -275,6 +275,11 @@ private slots:
         // more, in light and dark themes.
         QVERIFY(t.dangerInk == QColor(Qt::white) || t.dangerInk == (read.light ? colors.value("foreground") : colors.value("background")));
         QVERIFY2(look::contrast(t.dangerInk, t.dangerSolid) >= 4.5, qPrintable(t.dangerSolid.name()));
+        // ... and it reads as red, apart from the accent: a red hue, some chroma, at least .1 from the accent in OKLab.
+        const look::Oklch danger = look::oklch(t.dangerSolid);
+        QVERIFY2(danger.h <= 50 || danger.h >= 330, qPrintable(QStringLiteral("%1 hue %2").arg(t.dangerSolid.name()).arg(danger.h)));
+        QVERIFY2(danger.C >= .04, qPrintable(QStringLiteral("%1 chroma %2").arg(t.dangerSolid.name()).arg(danger.C)));
+        QVERIFY2(look::deltaE(t.dangerSolid, colors.value("accent")) >= .1, qPrintable(t.dangerSolid.name()));
         QVERIFY2(look::contrast(t.dangerInk, t.dangerSolidHover) >= 4.5, qPrintable(t.dangerSolidHover.name()));
         for (const QColor &port : look::portColors(colors, read.light, t)) {
             QVERIFY2(look::contrast(port, t.body) >= 2.99, qPrintable(port.name()));

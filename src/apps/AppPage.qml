@@ -473,7 +473,7 @@ Rectangle {
                     Keys.onEnterPressed: run.tapped()
                     Keys.onSpacePressed: run.tapped()
                     onTapped: page.appView.run()
-                    KitRaise { look: page.look; radius: run.radius; visible: run.enabled }
+                    KitRaise { look: page.look; radius: run.radius; visible: run.enabled; under: true } // the accent stays the accent
                     Row {
                         anchors.centerIn: parent
                         spacing: 2 * page.u

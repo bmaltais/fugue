@@ -88,8 +88,12 @@ Popup {
         if (at && contentItem.Window.activeFocusItem !== contentItem)
             return // something inside has the focus: a field, an answer
         const answers = dialogButtons(false)
-        const answer = answers ? answers["defaultAction"]() : null
-        if (answer && answers["usable"](answer))
+        if (!answers)
+            return
+        let answer = answers["defaultAction"]()
+        if (!answer || !answers["usable"](answer)) // the default cannot act (Run before the batch is ready): the cancel answer
+            answer = answers["buttons"].find(b => answers["usable"](b) && answers["roleOf"](b) === "cancel") ?? null
+        if (answer)
             answer.forceActiveFocus(Qt.TabFocusReason)
     }
     // The KitDialogButtons row of the question (the first one, depth first), or null.
