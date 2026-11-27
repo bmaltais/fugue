@@ -126,6 +126,36 @@ void writeQuantSafetensors(const QString &path, const QList<std::pair<QString, Q
         qFatal("cannot write %s", qPrintable(path));
 }
 
+// A safetensors file from a header fixture of tests/engine/data/krea2: the real file's tensor names, shapes and
+// dtypes (trimmed to the first two blocks), the .comfy_quant tensors with their real payload, and no weights.
+void writeFixture(const QString &path, const char *name) {
+    QFile in(QFINDTESTDATA(QStringLiteral("data/krea2/") + QString::fromUtf8(name) + QStringLiteral(".json")));
+    if (!in.open(QIODevice::ReadOnly))
+        qFatal("no fixture %s", name);
+    const QJsonObject doc = QJsonDocument::fromJson(in.readAll()).object();
+    QJsonObject header{{"__metadata__", QJsonObject{{"format", "pt"}}}};
+    const QByteArray payload = doc.value("payload").toString().toUtf8();
+    QByteArray data;
+    const QJsonObject tensors = doc.value("tensors").toObject();
+    for (auto it = tensors.begin(); it != tensors.end(); ++it)
+        header.insert(it.key(), QJsonObject{{"dtype", it.value().toArray().at(0).toString()},
+                                            {"shape", it.value().toArray().at(1)},
+                                            {"data_offsets", QJsonArray{0, 0}}});
+    for (const QJsonValue layer : doc.value("quant").toArray()) {
+        header.insert(layer.toString(), QJsonObject{{"dtype", "U8"},
+                                                    {"shape", QJsonArray{payload.size()}},
+                                                    {"data_offsets", QJsonArray{data.size(), data.size() + payload.size()}}});
+        data += payload;
+    }
+    const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+    QByteArray out(8, '\0');
+    const quint64 size = quint64(json.size());
+    std::memcpy(out.data(), &size, 8);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(out + json + data) < 0)
+        qFatal("cannot write %s", qPrintable(path));
+}
+
 QByteArray quantFormat(const char *format) { return QByteArray("{\"format\": \"") + format + "\"}"; }
 
 ModelShape shape(const QString &path) {
@@ -606,6 +636,42 @@ private slots:
         QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen3vl.safetensors"))), Fit::Fits);
         QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen35.safetensors"))), Fit::DoesNotFit);
         QCOMPARE(loadableTextEncoderFits(v1, shape(file("qwen25vl.safetensors"))), Fit::Fits);
+    }
+
+    // Krea 2 (#684), from the real headers of Comfy-Org/Krea-2 (pinned commit in the fixtures): the diffusion model is found by
+    // txtfusion.projector, reads Qwen3-VL 4B (2560 wide) and the Wan VAE; INT8 ConvRot loads, ComfyUI's fp8 does not.
+    void krea2AndItsQwen3VlEncoderReadFromTheirHeaders() {
+        writeFixture(file("krea2_turbo_int8_convrot.safetensors"), "krea2_turbo_int8_convrot");
+        writeFixture(file("qwen3vl_4b_int8_convrot.safetensors"), "qwen3vl_4b_int8_convrot");
+        writeFixture(file("qwen3vl_4b_fp8_scaled.safetensors"), "qwen3vl_4b_fp8_scaled");
+        writeSafetensors(file("qwen_image_vae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{384, 16, 3, 3, 3}}});
+        const ModelShape krea = shape(file("krea2_turbo_int8_convrot.safetensors"));
+        QCOMPARE(krea.kind, std::optional<ModelKind>(ModelKind::DiffusionModel));
+        QCOMPARE(krea.textKind, std::optional<TextKind>(TextKind::Llm));
+        QCOMPARE(krea.textWidth, std::optional<int>(2560)); // txtmlp.1
+        QCOMPARE(krea.latentChannels, std::optional<int>(16)); // first: 64 = 2x2 patches of 16
+        QCOMPARE(krea.hidden, std::optional<int>(6144));
+        QCOMPARE(krea.videoVae, std::optional<bool>(true));
+        QCOMPARE(krea.llmFamily, QStringLiteral("qwen3"));
+        QVERIFY(krea.unloadable.isEmpty()); // int8_tensorwise
+        QVERIFY(!krea.layers.isEmpty()); // what a LoRA may change: the blocks and the txtfusion blocks
+        QVERIFY(krea.layers.contains(layerKey(QStringLiteral("blocks.0.attn.wq"))));
+        QVERIFY(krea.layers.contains(layerKey(QStringLiteral("txtfusion.refiner_blocks.1.mlp.up"))));
+        QCOMPARE(krea.layers.value(layerKey(QStringLiteral("blocks.0.mlp.down"))), (ModelShape::Widths{16384, 6144}));
+
+        const ModelShape encoder = shape(file("qwen3vl_4b_int8_convrot.safetensors"));
+        QCOMPARE(encoder.kind, std::optional<ModelKind>(ModelKind::TextEncoder));
+        QCOMPARE(encoder.hiddenSize, std::optional<int>(2560));
+        QCOMPARE(encoder.llmFamily, QStringLiteral("qwen3"));
+        QVERIFY(encoder.unloadable.isEmpty());
+        QCOMPARE(loadableTextEncoderFits(krea, encoder), Fit::Fits);
+        QCOMPARE(vaeFits(krea, shape(file("qwen_image_vae.safetensors"))), Fit::Fits);
+
+        // ComfyUI's fp8 encoder is still refused, with the format named.
+        const ModelShape fp8 = shape(file("qwen3vl_4b_fp8_scaled.safetensors"));
+        QCOMPARE(fp8.hiddenSize, std::optional<int>(2560));
+        QCOMPARE(fp8.unloadable, QStringLiteral("ComfyUI float8_e4m3fn quantization"));
+        QCOMPARE(loadableTextEncoderFits(krea, fp8), Fit::DoesNotFit);
     }
 
     void aShapeIsReadAgainOnlyWhenTheFileChanges() {
