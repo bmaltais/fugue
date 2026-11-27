@@ -14,6 +14,11 @@ mkdir -p "$work/models/vae" "$work/models/tokenizers" "$work/models/tokenizers/a
 head -c 1000 /dev/zero > "$work/models/vae/small.safetensors"
 echo '{"v": 1}' > "$work/models/tokenizers/tok.json"
 cp "$work/models/tokenizers/tok.json" "$work/models/tokenizers/a=b/tok.json"
+# A link under a root that leads out of it, and an outside file the link points to.
+mkdir -p "$work/outside"
+head -c 1000 /dev/zero > "$work/outside/stolen.safetensors"
+ln -s "$work/outside/stolen.safetensors" "$work/models/vae/link.safetensors"
+ln -s "$work/outside" "$work/models/outdir"
 echo "secret-key" > "$work/key"
 mkdir -p "$work/tmp"
 export TMPDIR="$work/tmp" # the helper's job folders are made here
@@ -66,6 +71,19 @@ check "a tokenizer path outside the roots: 400" 400 "$(code "${auth[@]}" -X POST
 check "a tokenizer name with ..: 400" 400 "$(code "${auth[@]}" -X POST -d "$(tok '{"name":"../key"}')" "$url/submit")"
 check "a tokenizer handle in tokenizers/ is accepted" 200 "$(code "${auth[@]}" -X POST -d "$(tok '{"name":"tok.json"}')" "$url/submit")"
 check "a tokenizer path with = is refused: 400" 400 "$(code "${auth[@]}" -X POST -d "$(tok "\"$work/models/tokenizers/a=b/tok.json\"")" "$url/submit")"
+# The context options a client may set are listed (#545): any other key is refused, a path or not.
+ctx() { echo "{\"capability\":\"text.encode\",\"params\":{\"context\":$1}}"; }
+check "an unknown context key: 400" 400 "$(code "${auth[@]}" -X POST -d "$(ctx '{"rpc_servers":"10.0.0.1:50052"}')" "$url/submit")"
+check "an unknown _path context key: 400" 400 "$(code "${auth[@]}" -X POST -d "$(ctx '{"photo_maker_path":"/etc/passwd"}')" "$url/submit")"
+check "the unknown key is named" 1 "$(curl -s "${auth[@]}" -X POST -d "$(ctx '{"rpc_servers":"x"}')" "$url/submit" | python3 -c 'import json,sys; print(int("rpc_servers" in json.load(sys.stdin)["error"]["message"]))')"
+check "a context that is not an object: 400" 400 "$(code "${auth[@]}" -X POST -d "$(ctx '"x"')" "$url/submit")"
+check "an allowed switch is accepted" 200 "$(code "${auth[@]}" -X POST -d "$(ctx '{"sage_attn":false}')" "$url/submit")"
+# A link under a root that points outside it is outside: by path, through a linked folder, and by handle.
+link() { echo "{\"capability\":\"latent.decode\",\"params\":{\"context\":{\"vae_path\":$1}}}"; }
+check "a symlink out of the root, by path: 400" 400 "$(code "${auth[@]}" -X POST -d "$(link "\"$work/models/vae/link.safetensors\"")" "$url/submit")"
+check "a path through a linked folder: 400" 400 "$(code "${auth[@]}" -X POST -d "$(link "\"$work/models/outdir/stolen.safetensors\"")" "$url/submit")"
+check "a symlink out of the root, by handle: 400" 400 "$(code "${auth[@]}" -X POST -d "$(link '{"name":"link.safetensors"}')" "$url/submit")"
+check "a file of the root, by path" 200 "$(code "${auth[@]}" -X POST -d "$(link "\"$work/models/vae/small.safetensors\"")" "$url/submit")"
 check "unknown job: 404" 404 "$(code "${auth[@]}" -X POST -d '{"job":"99"}' "$url/status")"
 check "a result file of no job: 404" 404 "$(code "${auth[@]}" "$url/result/99/0")"
 check "shutdown does nothing" "{}" "$(curl -s "${auth[@]}" -X POST -d '{}' "$url/shutdown")"
