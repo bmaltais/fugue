@@ -546,7 +546,7 @@ void Workflows::startUses(const QStringList &hashes, int token, bool automatic, 
                     // go only when the tab is not shown: with the sheet open the person's choice stands until they act.
                     const bool tabOpen = std::any_of(m_tabs.begin(), m_tabs.end(), [&ask](const Tab &t) { return t.id == ask.tab; });
                     const bool shown = m_current >= 0 && m_tabs[size_t(m_current)].id == ask.tab;
-                    if (tabOpen && (m_readiness->isOpen() || (!ask.inApp && !shown))) {
+                    if (tabOpen && (m_readiness->isOpen() || !shown)) {
                         for (const QString &hash : std::as_const(chosenHashes)) {
                             if (shown)
                                 markTried(ask.tab, hash); // the person's choice holds in both views
