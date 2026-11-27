@@ -257,7 +257,8 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     connect(this, &Workflows::currentChanged, this, [this] {
         const QString shown = m_current < 0 ? QString() : m_tabs[size_t(m_current)].id;
         if (!m_noticeLines.isEmpty() && m_noticeTab != shown) {
-            m_tabSwaps.insert(m_noticeTab, SwapNotice{m_noticeTitle, m_noticeLines, m_notice});
+            if (!m_noticeTab.isEmpty()) // empty: its tab was closed, so nothing is kept
+                m_tabSwaps.insert(m_noticeTab, SwapNotice{m_noticeTitle, m_noticeLines, m_notice});
             showMissing();
         }
         if (const auto it = m_tabSwaps.constFind(shown); it != m_tabSwaps.constEnd() && (m_notice.isEmpty() || m_notice == m_missingNotice)) {
@@ -269,7 +270,12 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
         if (m_choice->hasRecord())
             emit noticeChanged(); // the banner's Undo belongs to the tab it was opened in
     });
-    connect(this, &Workflows::tabClosed, this, [this](const QString &id) { m_tabSwaps.remove(id); });
+    connect(this, &Workflows::tabClosed, this, [this](const QString &id) {
+        m_tabSwaps.remove(id);
+        // The shown tab closing: its banner is not kept for it (tabClosed comes before currentChanged would store it).
+        if (id == m_noticeTab)
+            m_noticeTab.clear();
+    });
     connect(m_canvas, &CanvasModel::edited, this, [this] {
         if (m_choice->hasRecord())
             emit noticeChanged(); // an edit ends the banner's Undo
