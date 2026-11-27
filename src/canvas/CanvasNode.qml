@@ -181,6 +181,7 @@ Item {
                                               ? formatSeconds(node.seconds)
                                             : node.runState === "frozen" ? qsTr("Frozen")
                                             : node.runState === "skipped" ? qsTr("Skipped")
+                                            : node.runState === "error" ? ""
                                             : node.predictedSize
             function formatSeconds(s) {
                 return s < 10 ? qsTr("%1 s").arg(s.toFixed(1)) : s < 60 ? qsTr("%1 s").arg(Math.round(s))
@@ -934,8 +935,16 @@ Item {
                         x: node.width - width - (face.compact && face.full ? face.padX + 14 + face.u : 2.5 * face.u)
                         y: ((node.collapsed ? node.height : node.canvasModel.headerHeight) - height) / 2
                         spacing: face.u
+                        // A size known before a run gives way to the title: it shows only when the title in full, the size and the
+                        // other meta (warnings, pin, state glyph; estimated, so this never waits on meta.width) fit the header.
+                        // Implicit widths only, so it does not loop with the title's elision.
+                        readonly property real otherWidth: (node.warnings.length > 0 ? 10 + face.u : 0)
+                            + ((node.warnings.length > 0 ? 1 : 0) + (node.pinned ? 1 : 0) + (face.stateGlyph !== "" ? 1 : 0)) * (14 + face.u)
+                        readonly property bool sizeFits: titleText.implicitWidth + captionText.implicitWidth + otherWidth + 4 * face.u
+                            <= node.width - titleText.x - 2.5 * face.u - (face.compact && face.full ? 14 + face.u : 0)
                         Text {
-                            visible: text !== ""
+                            id: captionText
+                            visible: text !== "" && (face.caption !== node.predictedSize || meta.sizeFits)
                             anchors.verticalCenter: parent.verticalCenter
                             text: face.caption
                             color: face.frozen ? node.look.text : node.look.label

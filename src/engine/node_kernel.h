@@ -137,8 +137,8 @@ public:
     // Under validate (the canvas check, `fugue validate`): what a run of these inputs would fail
     // on and can be told cheaply, with no model loaded and no file hashed, as errors naming
     // the node and, when it has one, the input. `fugue validate` lists them as warnings; the canvas shows them
-    // as the node's error after an edit, with no run (#600). Only `node`, `type`, `inputs`, `hashes` and
-    // `registry` are set, and an input not known yet is absent. Called on the scheduler's thread.
+    // as the node's error after an edit, with no run (#600). Only `node`, `type`, `inputs`, `inputSizes`, `hashes`, `registry`,
+    // `library` and `roots` are set, and an input not known yet is absent. Called on the scheduler's thread.
     virtual Errors check(const NodeContext &context) const;
 
     // Under validate (the canvas check): the size of each picture or latent output this node would make, by output name, worked out

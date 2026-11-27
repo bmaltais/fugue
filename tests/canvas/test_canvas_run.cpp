@@ -1313,6 +1313,29 @@ private slots:
         QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("80 \u00d7 60"));
         QVERIFY(r.jobs().isEmpty()); // no run
         QVERIFY(r.app.warnings.isEmpty());
+
+        // A size out of range is the node's error, with no run, and no size is shown for it.
+        checked.clear();
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 16000).isEmpty()); // 16000 x 12000, doubled by "up"
+        QTRY_VERIFY(checked.size() >= 1);
+        QTRY_COMPARE(r.state("up"), QStringLiteral("error"));
+        QVERIFY2(r.role("up", NodeList::Error).toString().contains("16384"), qPrintable(r.role("up", NodeList::Error).toString()));
+        QVERIFY(r.role("up", NodeList::PredictedSize).toString().isEmpty());
+        QVERIFY(r.jobs().isEmpty());
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 40).isEmpty());
+        QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("80 \u00d7 60"));
+
+        // After a run, an edit makes the node stale: its chip still says the last result's size, and the caption the new one.
+        QVERIFY(r.app.commands.trigger("view.picture-all")); // every node shows its picture, so its chip
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QTRY_COMPARE(r.role("up", NodeList::ThumbnailInfo).toString(), QStringLiteral("80 \u00d7 60"));
+        QVERIFY(r.role("up", NodeList::PredictedSize).toString().isEmpty()); // measured: nothing to add
+        QVERIFY(r.app.model.widgets()->setValue("rz", "width", 64).isEmpty());
+        QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("128 \u00d7 96"));
+        QCOMPARE(r.role("up", NodeList::ThumbnailInfo).toString(), QStringLiteral("80 \u00d7 60"));
     }
 
     // #600: a kernel's own check() error (Expression's formula that does not parse) shows on its node

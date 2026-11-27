@@ -39,9 +39,7 @@ std::optional<QSize> inputSize(const NodeContext &context, const char *input = "
     return found == context.inputSizes.constEnd() ? std::nullopt : std::optional<QSize>(found.value());
 }
 
-PictureSizes imageSize(const std::optional<QSize> &size) {
-    return size && !ps::tooBig(*size) ? PictureSizes{{QStringLiteral("image"), *size}} : PictureSizes();
-}
+PictureSizes imageSize(const std::optional<QSize> &size) { return ps::imageSizes(size); }
 
 // The largest side Resize makes, as its manifest's `max` (the scheduler checks that first).
 constexpr int kMaxSide = ps::kMaxSide;
@@ -108,7 +106,8 @@ public:
 
     Errors check(const NodeContext &context) const override {
         const std::optional<QSize> size = predicted(context);
-        if (!size || !ps::tooBig(*size))
+        // Both sides 0 leave the picture as it is, whatever its size: run() passes it through, so there is nothing to refuse.
+        if (!size || !ps::tooBig(*size) || (ps::wholeInput(context, "width") == 0 && ps::wholeInput(context, "height") == 0))
             return {};
         return {ps::tooBigError(ps::wholeInput(context, "width").value_or(0) > 0 ? QStringLiteral("width") : QStringLiteral("height"),
                                 QStringLiteral("This size"), *size)};
@@ -132,6 +131,8 @@ public:
         if (width == 0 && height == 0)
             return Values{{"image", context.input("image")}};
         const QSize out = ps::resize(QSize(in.width, in.height), width, height, fit);
+        if (ps::tooBig(out))
+            return ps::tooBigError(width > 0 ? QStringLiteral("width") : QStringLiteral("height"), QStringLiteral("This size"), out);
         if (fit == "cover")
             return imageOutput(resample(centerCrop(in, out.width(), out.height()), out.width(), out.height(), *method));
         return imageOutput(resample(in, out.width(), out.height(), *method));

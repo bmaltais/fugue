@@ -4,8 +4,12 @@
 // values and the size of the linked picture) and then as a run does. The guard is that the two agree: a size shown
 // before a run must be the size the run makes, whatever the node's rule (Resize's contain, Pad's target, ...).
 
+#include <QElapsedTimer>
+#include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <sys/stat.h>
 
 #include <vips/vips8>
 
@@ -104,6 +108,8 @@ private slots:
     }
 
     void rotateFlipAndTheSameSizeNodesAgree() {
+        agree("fugue/sharpen", {{"radius", 1}, {"sigma", 1.0}, {"amount", 1.0}}, 30, 20);
+        agree("fugue/brightness-contrast", {{"brightness", 0.1}, {"contrast", 1.2}}, 30, 20);
         agree("fugue/rotate", {{"rotation", QString("90 degrees")}}, 30, 20);
         agree("fugue/rotate", {{"rotation", QString("180 degrees")}}, 30, 20);
         agree("fugue/rotate", {{"rotation", QString("none")}}, 30, 20);
@@ -120,6 +126,56 @@ private slots:
         QVERIFY(predict("fugue/pad", {{"left", 1}, {"top", 0}, {"right", 0}, {"bottom", 0}, {"target_width", 10}, {"target_height", 0}},
                         QSize(8, 8)).isEmpty()); // a target of one side only: the node's own error, no size
         QVERIFY(predict("fugue/blur", {}, QSize()).isEmpty());
+    }
+
+    // The check refuses what the run refuses, and only that: a Resize of 0 x 0 passes any picture through, a side derived past
+    // the limit fails in both.
+    void resizeCheckAndRunRefuseTheSameValues() {
+        struct Case {
+            int width, height, inWidth, inHeight;
+            bool refused;
+        };
+        for (const Case &c : {Case{0, 0, 17000, 2, false}, Case{0, 16000, 1000, 100, true}, Case{100, 0, 200, 100, false},
+                              Case{16000, 0, 100, 1000, true}}) {
+            const Values inputs{{"width", c.width}, {"height", c.height}, {"fit", QString("stretch")}, {"method", QString("nearest")}};
+            NodeContext context;
+            context.node = "n";
+            context.inputs = inputs;
+            context.inputSizes.insert("image", QSize(c.inWidth, c.inHeight));
+            const bool flagged = !m_kernels.node("fugue/resize")->check(context).isEmpty();
+            const bool failed = made("fugue/resize", inputs, c.inWidth, c.inHeight).isEmpty();
+            QVERIFY2(flagged == c.refused && failed == c.refused, qPrintable(QString("%1 x %2 on %3 x %4").arg(c.width).arg(c.height).arg(c.inWidth).arg(c.inHeight)));
+        }
+    }
+
+    // A FIFO or a device named as the file is not opened: the check returns at once instead of waiting for a writer.
+    void aFifoIsNotOpened() {
+        QTemporaryDir dir;
+        const QByteArray fifo = QFile::encodeName(dir.filePath("pipe.png"));
+        QCOMPARE(mkfifo(fifo.constData(), 0600), 0);
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(!MediaHandle::imageHeaderSize(dir.filePath("pipe.png")));
+        QVERIFY(!MediaHandle::imageHeaderSize("/dev/null"));
+        QVERIFY(timer.elapsed() < 2000);
+    }
+
+    // An EXIF turn of a quarter swaps the sides: the size is the one the picture is seen at, as the run's handle says.
+    void anExifTurnIsApplied() {
+        QTemporaryDir dir;
+        FileHashes hashes(dir.filePath("hashes.json"));
+        for (const int orientation : {1, 5, 6, 7, 8}) {
+            const QString file = dir.filePath(QString("o%1.jpg").arg(orientation));
+            vips::VImage image = pictureOf(40, 20).image().value().cast(VIPS_FORMAT_UCHAR);
+            image = image.copy();
+            image.set("orientation", orientation);
+            image.jpegsave(QFile::encodeName(file).constData());
+            const Result<MediaHandle> probed = MediaHandle::probe(MediaType::Image, file, hashes);
+            QVERIFY(probed.ok());
+            QCOMPARE(MediaHandle::imageHeaderSize(file), std::optional<QSize>(QSize(probed->width(), probed->height())));
+            if (orientation >= 5)
+                QCOMPARE(MediaHandle::imageHeaderSize(file), std::optional<QSize>(QSize(20, 40)));
+        }
     }
 
     // A size past 16384 on a side is the node's early error, not a size to show.
@@ -144,7 +200,7 @@ private slots:
         QCOMPARE(m_kernels.node("fugue/resize")->check(context).size(), 1);
     }
 
-    void loadImageReadsOnlyTheHeaderAndEmptyLatentsAndSolidMasksKnowTheirNumbers() {
+    void loadImageKnowsItsFilesSizeAndEmptyLatentsAndSolidMasksKnowTheirNumbers() {
         QTemporaryDir dir;
         FileHashes hashes(dir.filePath("hashes.json"));
         const Result<MediaHandle> saved = pictureOf(37, 21).saved(dir.path(), "a", hashes);
@@ -157,8 +213,18 @@ private slots:
         QCOMPARE(loaded.value("image"), QSize(37, 21));
         context.inputs = {{"file", dir.filePath("gone.png")}};
         QVERIFY(m_kernels.node("fugue/load-image")->outputSizes(context).isEmpty());
-        context.inputs = {{"file", dir.filePath("a.png") + "x"}};
+        // Bytes that are not a picture: no size (and, remembered, not read again until the file changes).
+        QFile junk(dir.filePath("junk.png"));
+        QVERIFY(junk.open(QIODevice::WriteOnly));
+        junk.write("this is not a picture");
+        junk.close();
+        context.inputs = {{"file", junk.fileName()}};
         QVERIFY(m_kernels.node("fugue/load-image")->outputSizes(context).isEmpty());
+        QVERIFY(!MediaHandle::imageHeaderSize(junk.fileName()));
+        // The file is replaced by a picture: the memo follows its size and time.
+        QVERIFY(QFile::remove(junk.fileName()));
+        QVERIFY(QFile::copy(file, junk.fileName()));
+        QCOMPARE(MediaHandle::imageHeaderSize(junk.fileName()), std::optional<QSize>(QSize(37, 21)));
 
         context.inputs = {{"width", 832}, {"height", 1216}};
         QCOMPARE(m_kernels.node("fugue/empty-latent")->outputSizes(context).value("latent"), QSize(832, 1216));

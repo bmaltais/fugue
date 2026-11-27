@@ -35,6 +35,9 @@ bool tooBig(QSize size);
 // The error a size past kMaxSide is, on `input` (value_out_of_range); the words say what made it.
 Error tooBigError(const QString &input, const QString &what, QSize size);
 
+// The "image" output of this size, or none when it is not known or past kMaxSide: the one rule for what is shown.
+PictureSizes imageSizes(const std::optional<QSize> &size);
+
 // A number input written (not linked and not yet known: none) as a whole number.
 std::optional<int> wholeInput(const NodeContext &context, const char *name);
 std::optional<double> numberInput(const NodeContext &context, const char *name);

@@ -474,22 +474,24 @@ Glyphs are [Lucide](https://lucide.dev) icons (ISC license), bundled as a subset
 | Cached (default) | `hairline` | `header` | `check`, `label` | time taken (`6.2 s`) | 1 | the quiet case: most nodes look like this |
 | Hover | `hairline-strong` | | | | 1 | widget port marks appear |
 | Selected | 2 px `accent` ring outside a 2 px gap, its outer corner `r + 4` (0 when `r` is 0) | | | | 1 | shadow level 2 (level 4 while dragged); attached wires highlight |
-| Stale (would run) | `hairline` | | `refresh-cw`, `label` | none | 1 | |
+| Stale (would run) | `hairline` | | `refresh-cw`, `label` | none, or the predicted size (italic) | 1 | |
 | Running | `accent`, its opacity pulsing 1 to 0.45 | progress bar | `loader-circle`, rotating | percent | 1 | dots travel the incoming wires |
 | Frozen | `hairline` | | `snowflake`, `text` | "Frozen" | 1 | |
 | Error | 1 px `error` | `error-header` | `triangle-alert`, `error` | | 1 | error chip under the node (4.7) |
 | Bypassed | dashed `bypass-edge` | `bypass-header` | `corner-down-right` | "Bypassed" | 1 (body `bypass-body`) | the node tinted magenta; a dashed line in the type color from the input to the output it feeds (spec 3.5) |
 | Muted | `hairline` | | `ban` | "Muted" | 0.4 | the whole node faded, untinted; its outgoing wires 0.4 |
-
-A size known before a run (#601): a node with no measured size, and no other caption, says the size of its picture in its header's meta, `label`
-colour in italics at caption size (`1024 × 1024`), as it was worked out by the dry check from the pictures upstream and the node's own numbers. A
-measured size is the black chip on the picture (4.6); a result's time takes the caption's place. An unknown size shows nothing.
 | Skipped | `hairline` | | `skip-forward` | "Skipped" | 0.6 | an upstream node is muted |
 | Missing type | dashed `error` | title in `error`: the type id | `circle-help` | | 1 | ports kept from the file; a body line "Not installed. Find it in packs…" (spec 11.6) |
 | Warning | | | `triangle-alert`, `label`, with a count | | 1 | hovering the count and triangle shows the warnings in one card of the canvas (`popup`, a `hairline-strong` edge); a click keeps it up until a click elsewhere, Esc or a change of level; its text can be selected and copied (#72) |
 | Pinned | | | `pin`, `label` | | 1 | |
 | Collapsed | | header only, corner `r` all round | | | 1 | width fits the title plus 24u (kind mark, meta, padding), at most 60u; one port mark at each end |
 | Group (a node type) | `hairline` | layers glyph for the kind mark | `layers` | | 1 | a second card offset (1u, 1u) behind it; a caption row "4 nodes · Tab to enter" |
+
+A size known before a run (#601): a node with no other caption says the size of its picture (or latent, or mask) in its header's meta, `label`
+colour in italics at caption size (`1024 × 1024`), as the dry check worked it out from the pictures upstream and the node's own numbers. It shows
+where the chip does not say it: no measured size, a chip that measures the node's input (Crop, Paint Mask), or a stale node whose last result is
+another size (an edit moved it). A measured size is the black chip on the picture (4.6); a result's time takes the caption's place; an error and
+an unknown size show nothing. It gives way to the title: it is hidden when the title in full, the size and the other meta do not fit the header.
 
 **Bypassed and muted** (owner feedback 2026-11-19). ComfyUI's litegraph draws a bypassed node
 (mode 4) in magenta (`#FF00FF`) at alpha 0.2 and a muted one (mode 2, "Never") at alpha 0.4, so

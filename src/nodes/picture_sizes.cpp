@@ -10,7 +10,7 @@ namespace fugue::nodes::picturesize {
 namespace {
 
 // A computed side as a whole number that cannot overflow: far past kMaxSide it only has to stay past it.
-int side(double value) { return int(std::min(value, 1e9)); }
+int side(double value) { return std::isfinite(value) ? int(std::min(value, 1e9)) : kMaxSide + 1; }
 
 } // namespace
 
@@ -42,6 +42,8 @@ QSize megapixels(QSize in, double megapixels, int multiple) {
 }
 
 QSize upscale(QSize in, double scale) {
+    if (!std::isfinite(scale))
+        return {kMaxSide + 1, kMaxSide + 1};
     return {side(std::max(1.0, std::nearbyint(in.width() * scale))), side(std::max(1.0, std::nearbyint(in.height() * scale)))};
 }
 
@@ -75,9 +77,13 @@ std::optional<double> numberInput(const NodeContext &context, const char *name) 
     return value.isEmpty() ? std::nullopt : std::optional<double>(value.number());
 }
 
+PictureSizes imageSizes(const std::optional<QSize> &size) {
+    return size && !tooBig(*size) ? PictureSizes{{QStringLiteral("image"), *size}} : PictureSizes();
+}
+
 PictureSizes SameSizeKernel::outputSizes(const NodeContext &context) const {
     const auto size = context.inputSizes.constFind(QStringLiteral("image"));
-    return size == context.inputSizes.constEnd() ? PictureSizes() : PictureSizes{{QStringLiteral("image"), size.value()}};
+    return size == context.inputSizes.constEnd() ? PictureSizes() : imageSizes(size.value());
 }
 
 } // namespace fugue::nodes::picturesize

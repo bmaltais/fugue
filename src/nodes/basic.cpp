@@ -56,7 +56,14 @@ public:
         const Value file = context.input("file");
         if (file.isEmpty() || file.text().isEmpty())
             return {};
-        const std::optional<QSize> size = MediaHandle::imageHeaderSize(file.text());
+        QString path = file.text();
+        if (context.roots) { // a run would refuse a file outside the read roots, so a check does not open it
+            const Result<QString> readable = context.roots->checkRead(path, QStringLiteral("file"));
+            if (!readable)
+                return {};
+            path = readable.value();
+        }
+        const std::optional<QSize> size = MediaHandle::imageHeaderSize(path);
         return size ? PictureSizes{{QStringLiteral("image"), *size}, {QStringLiteral("mask"), *size}} : PictureSizes();
     }
 

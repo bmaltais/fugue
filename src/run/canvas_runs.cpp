@@ -442,9 +442,14 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         compare.insert("labelB", info.labelB);
         state.insert("compare", compare);
     }
-    // A size known before a run (#601) shows only while no measured one does: the picture's chip is the measure.
-    if (!view.predictedSize.isEmpty() && !state.contains("thumbnailInfo"))
-        state.insert("predictedSize", view.predictedSize);
+    // A size known before a run (#601) shows where the chip does not already say it: no measured size, a chip that measures the
+    // node's input (Crop, Paint Mask), or a node that would run again whose last result is another size (an edit moved it).
+    if (!view.predictedSize.isEmpty()) {
+        const QString measured = state.value("thumbnailInfo").toString();
+        const bool stale = aggregate(view) == QLatin1String("stale");
+        if (measured.isEmpty() || info.followsInput() || (stale && measured != view.predictedSize))
+            state.insert("predictedSize", view.predictedSize);
+    }
     // While a node runs, what its slot shows is the last run's, at half strength, until this
     // run's preview comes.
     if (state.contains("thumbnail") && aggregate(view) == QLatin1String("running") && !view.live)

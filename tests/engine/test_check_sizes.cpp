@@ -7,6 +7,10 @@
 
 #include <QtTest>
 
+#include <vips/vips8>
+
+#include "engine/media.h"
+#include "engine/vips.h"
 #include "scheduler_support.h"
 
 using namespace fugue;
@@ -46,12 +50,35 @@ private:
     const bool m_halves;
 };
 
+// Makes a real picture of 10 x 6 and says it will be 99 x 99: once it is cached, what is downstream reads the real size.
+class PhotoKernel : public NodeKernel {
+public:
+    explicit PhotoKernel(World *world) : m_world(world) {}
+    Result<Values> run(const NodeContext &context) override {
+        const std::vector<unsigned char> pixels(10 * 6 * 3, 128);
+        const vips::VImage image = vips::VImage::new_from_memory_copy(pixels.data(), pixels.size(), 10, 6, 3, VIPS_FORMAT_UCHAR);
+        const Result<MediaHandle> handle = MediaHandle::fromImage(image);
+        if (!handle)
+            return handle.errors();
+        const Result<MediaHandle> saved = handle->saved(context.workDir, "photo", *m_world->hashes);
+        if (!saved)
+            return saved.errors();
+        return Values{{"pic", Value(saved.value())}};
+    }
+    PictureSizes outputSizes(const NodeContext &) const override { return {{"pic", QSize(99, 99)}}; }
+
+private:
+    World *m_world;
+};
+
 void addTypes(World &world) {
+    world.type("fugue/photo", "'inputs': [], 'outputs': [{'name': 'pic', 'type': 'image'}]", nullptr);
+    world.kernels.add("fugue/photo", std::make_shared<PhotoKernel>(&world));
     world.type("fugue/pic",
                "'inputs': [{'name': 'w', 'type': 'number', 'optional': true}, {'name': 'h', 'type': 'number', 'optional': true}],"
                "'outputs': [{'name': 'pic', 'type': 'text'}]",
                nullptr);
-    world.type("fugue/halve", "'inputs': [{'name': 'in', 'type': 'text'}], 'outputs': [{'name': 'pic', 'type': 'text'}]", nullptr);
+    world.type("fugue/halve", "'inputs': [{'name': 'in', 'type': 'any'}], 'outputs': [{'name': 'pic', 'type': 'text'}]", nullptr);
     world.kernels.add("fugue/pic", std::make_shared<SizeKernel>(false));
     world.kernels.add("fugue/halve", std::make_shared<SizeKernel>(true));
 }
@@ -102,6 +129,22 @@ private slots:
         for (const Error &error : check.checkErrors)
             where << error.node + ":" + error.input + ":" + error.code;
         QCOMPARE(where, (QStringList{"b:in:value_out_of_range", "c:in:value_out_of_range"}));
+    }
+
+    // What a cached node made is the truth: the size downstream is worked from the real picture, not from the prediction.
+    void aCachedPicturesRealSizeBeatsItsPrediction() {
+        World world;
+        initVips();
+        addTypes(world);
+        const QJsonObject nodes{{"p", node("fugue/photo", {})},
+                                {"h", node("fugue/halve", {{"in", from("p.pic")}})},
+                                {"s", node("fugue/save", {{"value", from("h.pic")}})}};
+        GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.sizes.value("h").value("pic"), QSize(49, 49)); // from the prediction while nothing is cached
+        world.run(world.graph(nodes));
+        check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.states.value("p"), NodeState::Cached);
+        QCOMPARE(check.sizes.value("h").value("pic"), QSize(5, 3)); // 10 x 6 halved
     }
 
     // After a run the nodes are cached; the sizes are still there, and a change of the source's size moves every one after it.
