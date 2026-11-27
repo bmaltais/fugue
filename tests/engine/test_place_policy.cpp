@@ -64,6 +64,20 @@ private slots:
         QCOMPARE(waiting.freeBytes("/anything", [](const QString &) { return qint64(1); }), qint64(-1));
     }
 
+    void ownRootBehindALinkKeepsItsFreeSpaceBeforeTheSearch() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = QDir(dir.path()).canonicalPath();
+        QVERIFY(QDir().mkpath(root + "/var/home/x"));
+        QVERIFY(QFile::link(root + "/var/home", root + "/home"));
+        const QString own = root + "/home/x/models"; // /home -> /var/home
+        const PlacePolicy waiting = PlacePolicy::unconfirmed({}, own);
+        QVERIFY(waiting.mayTouch(own));
+        QVERIFY(waiting.mayTouch(root + "/var/home/x/models/a"));
+        QCOMPARE(waiting.freeBytes(own, [](const QString &) { return qint64(9); }), qint64(9));
+        QVERIFY(!waiting.mayTouch(root + "/var/other"));
+    }
+
     void networkAndAutofsAreBlocked() {
         FinderEnv env;
         env.networkMounts = {"/net", "/auto"};

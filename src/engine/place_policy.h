@@ -55,11 +55,14 @@ private:
     };
     void addPlace(const FinderLocation &place, bool ticked);
     bool blocked(const QString &path, bool traversal) const;
+    void setOwnRoot(const QString &ownRoot, const FinderEnv &env);
+    bool isOwn(const QString &path, bool traversal) const; // Fugue's own folder, as written or as resolved, or (traversal) on the way to it
 
     QList<Scope> m_scopes; // every place's scopes and whether the place is ticked
     QStringList m_network; // mounts
     QStringList m_autofs;
     QString m_ownRoot;
+    QString m_ownResolved; // its links resolved (empty when the same)
     bool m_unconfirmed = false;
     std::function<void(const QString &)> m_touched;
 };

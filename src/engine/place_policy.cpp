@@ -31,7 +31,7 @@ PlacePolicy::PlacePolicy(const FinderEnv &env) : m_network(env.networkMounts), m
 PlacePolicy::PlacePolicy(const QList<FinderLocation> &ticked, const QList<FinderLocation> &offered, const FinderEnv &env,
                          const QString &ownRoot)
     : PlacePolicy(env) {
-    m_ownRoot = ownRoot;
+    setOwnRoot(ownRoot, env);
     // Only a place that was offered and left off is a place to keep out of; one that was never listed (it does not exist) is not.
     QSet<QString> tickedIds;
     for (const FinderLocation &place : ticked) {
@@ -54,9 +54,30 @@ PlacePolicy PlacePolicy::fromUnticked(const QList<FinderLocation> &offered, cons
 
 PlacePolicy PlacePolicy::unconfirmed(const FinderEnv &env, const QString &ownRoot) {
     PlacePolicy policy(env);
-    policy.m_ownRoot = ownRoot;
+    policy.setOwnRoot(ownRoot, env);
     policy.m_unconfirmed = true;
     return policy;
+}
+
+// Fugue's own folder as written and as its links resolve (the home behind a link: /home -> /var/home): both are always allowed. Its links
+// are read with the network rule alone, never the places.
+void PlacePolicy::setOwnRoot(const QString &ownRoot, const FinderEnv &env) {
+    m_ownRoot = ownRoot;
+    m_ownResolved.clear();
+    if (ownRoot.isEmpty())
+        return;
+    FinderEnv quiet = env;
+    quiet.touched = nullptr;
+    m_ownResolved = PlacePolicy(quiet).resolve(ownRoot);
+    if (m_ownResolved == m_ownRoot)
+        m_ownResolved.clear();
+}
+
+bool PlacePolicy::isOwn(const QString &path, bool traversal) const {
+    for (const QString &own : {m_ownRoot, m_ownResolved})
+        if (!own.isEmpty() && (under(path, own) || (traversal && own.startsWith(path + QLatin1Char('/')))))
+            return true;
+    return false;
 }
 
 // A place is kept as written and as resolved: the walk goes by resolved paths, and a home behind a link (/home -> /var/home) or a link
@@ -80,7 +101,7 @@ bool PlacePolicy::mayTouch(const QString &path, bool traversal) const { return !
 bool PlacePolicy::blocked(const QString &path, bool traversal) const {
     if (isNetwork(path))
         return true;
-    if (!m_ownRoot.isEmpty() && (under(path, m_ownRoot) || (traversal && m_ownRoot.startsWith(path + QLatin1Char('/')))))
+    if (isOwn(path, traversal))
         return false; // a folder that only leads to it may be passed by name
     if (m_unconfirmed)
         return true;
@@ -154,7 +175,7 @@ qint64 PlacePolicy::freeBytes(const QString &path, const std::function<qint64(co
     while (!dir.isEmpty() && !QFileInfo(dir).isDir()) {
         const QString parent = QFileInfo(dir).absolutePath();
         // Fugue's own folder may not exist yet: its parents are asked about by name only for it.
-        const bool ownParent = !m_ownRoot.isEmpty() && m_ownRoot.startsWith(parent + QLatin1Char('/'));
+        const bool ownParent = isOwn(parent, true);
         if (parent == dir || (!ownParent && !mayTouch(parent)))
             return -1;
         dir = parent;

@@ -139,6 +139,7 @@ private:
         bool inherited = false;
         bool writable = true;
         bool busy = false;  // being counted on the worker
+        bool picked = false; // the person's own pick (Add a folder)
         QString kind;       // "layout", a type id, or "" (not told: the person chooses)
     };
 
@@ -159,6 +160,7 @@ private:
     QList<FinderLocation> tickedLocations() const;
     qint64 freeSpace(const QString &path) const;
     void refreshPolicy();
+    bool downloadChoice(const Row &row) const;
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
@@ -169,6 +171,7 @@ private:
     bool m_envSet = false;
     std::function<qint64(const QString &)> m_free;
     mutable QHash<QString, qint64> m_freeCache;
+    mutable QHash<QString, bool> m_choiceCache; // by row path: cleared when the policy is rebuilt
     bool m_open = false;
     bool m_firstRun = false;
     QString m_phase = QStringLiteral("consent");

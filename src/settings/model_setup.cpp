@@ -238,6 +238,8 @@ ModelSetup::FinderJob ModelSetup::makeJob() const {
 // The one rule for what the sheet may touch, rebuilt whenever a tick or the phase changes. Until the places are confirmed (the search),
 // the sheet reads its hints as it opens with every place still ticked: only Fugue's own folder may be touched then.
 void ModelSetup::refreshPolicy() {
+    m_freeCache.clear(); // an answer kept under another policy may be -1 for a place that is open now
+    m_choiceCache.clear();
     m_policy = m_phase == QLatin1String("consent") ? PlacePolicy::unconfirmed(m_envNow, m_ownRoot)
                                                     : PlacePolicy::fromUnticked(m_locations, m_unticked, m_envNow, m_ownRoot);
 }
@@ -400,9 +402,11 @@ QString ModelSetup::addFolder(const QVariant &value) {
         path = QDir::cleanPath(QDir::homePath() + QLatin1Char('/') + path); // typed without a leading / or ~: from the home folder
     // The person's own pick, one stat, component by component: a network or automount (or a link into one) is taken as a folder
     // without a stat, and is listed, not counted.
-    const FinderEnv now = env();
+    // The mounts as they are now (a share mounted while the sheet is open), as the worker will see them.
+    m_envNow = env();
+    refreshPolicy();
     const bool network = m_policy.isNetwork(path);
-    const QString real = network ? path : m_policy.resolve(path); // empty: a link leads into a network or automount, or a place left off
+    const QString real = network ? path : finderResolve(path, m_envNow); // empty: a link leads into a network or automount
     if (path.isEmpty() || (!network && !real.isEmpty() && !QFileInfo(real).isDir()))
         return tr("%1 is not a folder.").arg(tilde(path));
     for (const Row &row : std::as_const(m_rows))
@@ -430,6 +434,7 @@ QString ModelSetup::addFolder(const QVariant &value) {
     row.found.tool = QStringLiteral("Model folder");
     row.on = true;
     row.busy = true;
+    row.picked = true;
     m_rows.append(row);
     FinderJob job = makeJob();
     job.offered.clear(); // the person chose this folder: no place is left off for it
@@ -558,7 +563,7 @@ QString ModelSetup::defaultDownload() const {
     QString best = ownRoot();
     qint64 biggest = -1;
     for (const Row &row : m_rows) {
-        if (row.inherited || !row.on || row.busy || !m_policy.mayBeDownloadChoice(row.path) || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
+        if (row.inherited || !row.on || row.busy || !downloadChoice(row) || !row.writable || row.kind != ModelLibrary::kLayout || row.found.tool == QLatin1String("InvokeAI"))
             continue;
         if (slowToWriteTo(row))
             continue; // a network or removable drive is a choice the person makes, never the default
@@ -590,6 +595,10 @@ bool ModelSetup::slowToWriteTo(const Row &row) const {
 qint64 ModelSetup::freeSpace(const QString &path) const {
     if (!m_policy.mayTouch(path))
         return -1;
+    // A folder the search found to lead into a place left off (the worker saw the mounts as they were then) is never asked about either.
+    for (const Row &row : m_rows)
+        if (row.found.leftOff && (row.path == path || row.found.canonical == path))
+            return -1;
     const auto it = m_freeCache.constFind(path);
     if (it != m_freeCache.constEnd())
         return it.value();
@@ -614,7 +623,7 @@ QVariantList ModelSetup::choices() const {
     list.append(entry(own, ReadinessSheet::rootTitle(own, own)));
     QList<const Row *> picked;
     for (const Row &row : m_rows)
-        if (!row.inherited && row.on && m_policy.mayBeDownloadChoice(row.path) && row.writable && row.kind == ModelLibrary::kLayout && row.found.tool != QLatin1String("InvokeAI"))
+        if (!row.inherited && row.on && downloadChoice(row) && row.writable && row.kind == ModelLibrary::kLayout && row.found.tool != QLatin1String("InvokeAI"))
             picked << &row;
     std::stable_sort(picked.begin(), picked.end(), [](const Row *a, const Row *b) { return a->found.size > b->found.size; });
     for (const Row *row : std::as_const(picked))
@@ -622,11 +631,25 @@ QVariantList ModelSetup::choices() const {
     // The download folder the person has (set in Settings or by the CLI) that is not one of these rows is kept, not replaced.
     if (m_downloadChosen && m_download != own) {
         const bool listed = std::any_of(list.begin(), list.end(), [this](const QVariant &c) { return c.toMap().value("value").toString() == m_download; });
-        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && (!r.on || !m_policy.mayBeDownloadChoice(r.path)); });
+        const bool leftOff = std::any_of(m_rows.begin(), m_rows.end(), [this](const Row &r) { return r.path == m_download && (!r.on || !downloadChoice(r)); });
         if (!listed && !leftOff) // its row is on but not a layout (a single-kind root), or it has none: still the person's choice
             list.append(entry(m_download, tilde(m_download)));
     }
     return list;
+}
+
+// Whether a row's folder may be offered as the downloads' folder. A folder the search found left off is never; the person's own pick
+// may lie in a place left off (it is theirs), but a link of it into one is not followed. Asked once for each row and policy.
+bool ModelSetup::downloadChoice(const Row &row) const {
+    if (row.found.leftOff)
+        return false;
+    const QString key = row.path + (row.picked ? QStringLiteral("\n1") : QStringLiteral("\n0"));
+    const auto it = m_choiceCache.constFind(key);
+    if (it != m_choiceCache.constEnd())
+        return it.value();
+    const bool ok = (row.picked && m_policy.inLeftOffPlace(row.path)) || m_policy.mayBeDownloadChoice(row.path);
+    m_choiceCache.insert(key, ok);
+    return ok;
 }
 
 // What the dropdown shows: the person's choice while it is still offered, else the default.

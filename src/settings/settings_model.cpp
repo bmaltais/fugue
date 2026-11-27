@@ -423,11 +423,9 @@ QVariantMap SettingsModel::applyModelSetup(const QVariantList &folders, const QS
     QSet<QString> rootPaths; // as written: a folder that is one already needs no stat
     for (const QString &root : ModelLibrary::roots(m_effective.settings)) {
         rootPaths.insert(root);
-        if (!policy.mayTouch(root)) { // in a place the person left off, or a network: nothing is stat'd there
-            roots.insert(root);
-            continue;
-        }
-        roots.insert(QFileInfo(root).canonicalFilePath().isEmpty() ? root : QFileInfo(root).canonicalFilePath());
+        // By the link texts only, never a stat: a root in a place left off, on a network, or behind a link into one is kept as written.
+        const QString real = policy.resolve(root);
+        roots.insert(real.isEmpty() ? root : real);
     }
     QStringList list = m_file.settings.modelPaths;
     for (const QString &path : m_effective.settings.inheritedModelPaths)
