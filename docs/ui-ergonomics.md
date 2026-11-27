@@ -96,6 +96,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Convention: Steam and download managers pause and resume, with a separate remove; the Hugging Face CLI resumes a partial file. The delete sits in the opened row, not on the row's face, so a row stays one tap target and the destructive choice needs a second step; it is the only one that touches a file, and the partial is the person's to throw away.
 - Rules met: Destructive (a deliberate chip inside the opened row, never next to Install; the part is only what the person stopped), Words ("Delete partial download" names the thing), Keyboard (Tab reaches the chip when the row is open), Floor (the raised chip's size), Right-to-left (unchanged).
 
+### 2026-11-27 Close all tabs and double-click to rename a tab (owner requests; confidence medium-high)
+
+- Control: `src/workflow/WorkflowTabs.qml` (a tab), `src/workflow/WorkflowDialogs.qml` (`closeAllAsk`), the tab menu and File menu in `menus.cpp`.
+- Old: the tab menu had Close and Close other tabs only; a double click on a tab did nothing, Rename… was in the menu alone.
+- New: **Close all tabs…** (`tab.close-all`) last in the tab menu and after Close other tabs in File, no default shortcut (none of the references has one that does not clash with Ctrl+W or Ctrl+Q). With unsaved tabs one question, Cancel (the safe, focused answer) then Discard and close all (danger); the window ends as after the last tab's close, one new workflow. A double click on a tab opens the rename popup of Rename…; the single click and the close button are unchanged.
+- Convention: Excel and Google Sheets rename a sheet tab on double click, Figma a page, Blender a data name; the "…" says the command may ask.
+- Rules met: Floor (no new control, the tab keeps its height), Learned place (Close all beside Close others, close items last), Keyboard (Cancel focused; Enter and Escape keep everything; Rename… still opens the popup from the menu), Right-to-left (the question mirrors as `closeAsk` does).
+- Checked by `test_workflows` (close all) and `test_menus` (menu item, double click opens `tabRenamePopup`).
+
 ### 2026-11-27 A list is sized for its entries, not for the field that opened it (owner report; confidence high)
 
 - Control: `src/canvas/widgets/WidgetMenu.qml` (every widget and window menu: a node's choice, seed, canvas and model lists, `ThemedDropDown`, the App view's choice, picture and model inputs, the area view menu, the Canvas view's and task bar's menus, the layers panel's, the shelf card menu); the closed model field (`InputWidget.qml`); a widget row's tooltip (`CanvasNode.qml`).

@@ -272,6 +272,10 @@ public:
     Q_INVOKABLE bool renameTab(int index, const QString &name);
     Q_INVOKABLE void duplicateTab(int index);
     Q_INVOKABLE void closeOtherTabs(int index);
+    // Close all tabs: asks once (closeAllConfirmationRequested, with how many have unsaved content) when any has;
+    // discardAndCloseAll is the answer "close anyway". The window is left as after the last tab's close: one new workflow.
+    Q_INVOKABLE void closeAllTabs();
+    Q_INVOKABLE void discardAndCloseAll();
     Q_INVOKABLE void discardAndClose(int index);
     Q_INVOKABLE void saveAndClose(int index);
     // The file picker or the question was cancelled.
@@ -391,6 +395,7 @@ signals:
     void exportCompiledRequested();
     void packInstallRequested(const QString &source, const QString &ref);
     void closeConfirmationRequested(int index, const QString &title);
+    void closeAllConfirmationRequested(int unsavedTabs);
     // The tab menu's Rename and Tab color (the tab shows its own field and swatches).
     void tabRenameRequested(int index);
     void tabColorRequested(int index);

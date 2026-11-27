@@ -419,6 +419,26 @@ private slots:
         QTRY_COMPARE(app.model.nodeTitle("c"), QStringLiteral("Far away"));
     }
 
+    // A double click on a tab opens the rename popup, as Rename... does; a single click only makes it current.
+    void aDoubleClickOnATabOpensItsRenamePopup() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.workflows.newWorkflow();
+        QTRY_COMPARE(app.workflows.tabs().size(), 2);
+        QTest::qWait(100);
+        QQuickItem *tab = find(app.window, "tab-0");
+        QVERIFY(tab);
+        const QPoint on = tab->mapToScene(QPointF(tab->width() / 4, tab->height() / 2)).toPoint();
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, on);
+        QCOMPARE(app.workflows.current(), 0);
+        QVERIFY(!isOpen(app.window, "tabRenamePopup-0"));
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, on);
+        QTRY_VERIFY(isOpen(app.window, "tabRenamePopup-0"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #59: a right click on a workflow tab opens its menu; Close other tabs closes the rest, Duplicate copies.
     void theTabMenuDuplicatesAndClosesTheOthers() {
         App app(load(framed));
@@ -434,7 +454,7 @@ private slots:
         QTest::mouseClick(app.window, Qt::RightButton, {}, tab->mapToScene(QPointF(tab->width() / 2, tab->height() / 2)).toPoint());
         QTRY_VERIFY(isOpen(app.window, "tabMenuPopup"));
         QCOMPARE(app.workflows.current(), 1); // the tab is current first
-        for (const char *id : {"file.rename", "file.duplicate", "file.tab-color", "file.save", "file.close", "file.close-others"})
+        for (const char *id : {"file.rename", "file.duplicate", "tab.close-all", "file.tab-color", "file.save", "file.close", "file.close-others"})
             QVERIFY2(find(app.window, QString("menuItem-") + id), id);
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-file.close-others")));
         QTRY_COMPARE(app.workflows.tabs().size(), 1);

@@ -1725,6 +1725,23 @@ void Workflows::closeOtherTabs(int index) {
         setNotice(tr("Kept %n tabs with unsaved changes.", nullptr, kept));
 }
 
+void Workflows::closeAllTabs() {
+    refreshUnsaved();
+    int unsavedTabs = 0;
+    for (const Tab &tab : m_tabs)
+        unsavedTabs += tab.unsaved ? 1 : 0;
+    if (unsavedTabs > 0)
+        emit closeAllConfirmationRequested(unsavedTabs);
+    else
+        discardAndCloseAll();
+}
+
+// As the last tab's close does: removeTab leaves one fresh, empty workflow, and drops each tab's recovery copy.
+void Workflows::discardAndCloseAll() {
+    while (count() > 0)
+        removeTab(count() - 1);
+}
+
 void Workflows::discardAndClose(int index) { removeTab(index); }
 
 void Workflows::saveAndClose(int index) {
@@ -1914,6 +1931,8 @@ void registerFileCommands(CommandRegistry &registry, Workflows &workflows) {
               QT_TRANSLATE_NOOP("Command", "Duplicate"), [&workflows] { workflows.duplicateTab(workflows.current()); });
     onCurrent("file.close-others", QT_TRANSLATE_NOOP("Command", "Close the other workflows"),
               QT_TRANSLATE_NOOP("Command", "Close other tabs"), [&workflows] { workflows.closeOtherTabs(workflows.current()); });
+    onCurrent("tab.close-all", QT_TRANSLATE_NOOP("Command", "Close every tab (asks once if some have unsaved changes)"),
+              QT_TRANSLATE_NOOP("Command", "Close all tabs…"), [&workflows] { workflows.closeAllTabs(); });
     onCurrent("file.tab-color", QT_TRANSLATE_NOOP("Command", "Pick the tab's color"),
               QT_TRANSLATE_NOOP("Command", "Tab color…"), [&workflows] { emit workflows.tabColorRequested(workflows.current()); });
     registry.setEnabledWhen("file.close-others", [&workflows] { return workflows.count() > 1; });

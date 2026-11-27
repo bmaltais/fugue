@@ -107,7 +107,7 @@ QVariantList bar() {
                 {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), command("app.show-all"), command("app.make"), ifOn("app.edit"), command("file.projects"), command("canvas.new"), command("canvas.paste-new"), command("file.canvas-view"), separator(),
                  command("file.save"), command("file.save-as"), command("file.rename"), command("file.duplicate"),
                  command("file.export-share"), command("file.export-compiled"), separator(), command("file.close"),
-                 command("file.close-others"), command("app.quit")}),
+                 command("file.close-others"), command("tab.close-all"), command("app.quit")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Edit"),
                 {command("edit.undo"), command("edit.redo"), separator(), command("edit.copy"), command("edit.paste"),
                  separator(), command("edit.clear"), separator(), command("cache.clear-previews"), separator(),
@@ -202,7 +202,7 @@ QVariantList canvasView() {
 QVariantList tab() {
     return {command("file.rename"), command("file.duplicate"), command("file.tab-color"), separator(),
             command("file.save"), command("file.save-as"), command("file.export-share"), separator(),
-            command("file.close"), command("file.close-others")};
+            command("file.close"), command("file.close-others"), command("tab.close-all")};
 }
 
 // Right-click on empty canvas: what adds to it, then the view.

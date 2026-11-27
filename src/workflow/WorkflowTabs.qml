@@ -14,7 +14,7 @@ import "../canvas"
 // tokens, the bar's recessed strip with the current tab raised in the node body's fill. Each tab has
 // its own color (App.workflows.tabs[i].color, an index into look.tabColors): a bar along its top
 // (2px, 4px on the current tab), and a light wash of it behind the tab. A right click makes the tab
-// current and opens its menu (#59, menus.h "tab": rename, duplicate, color, save, close, close others),
+// current and opens its menu (#59, menus.h "tab": rename, duplicate, color, save, close, close others, close all),
 // built from the command registry, so every item is a command that acts on the current tab.
 Item {
     id: root
@@ -95,6 +95,12 @@ Item {
                 x: (root.rightToLeft ? strip.width - (index + 1) * width + root.scroll : index * width - root.scroll)
                 readonly property color tabColor: root.colorOf(modelData.color)
                 onClicked: App.workflows.current = index
+                // A double click renames, as a sheet tab in Excel or Google Sheets does; the two clicks have made the tab current.
+                onDoubleClicked: tabButton.rename()
+                function rename() {
+                    renameField.text = tabButton.modelData.title
+                    renamePopup.open()
+                }
                 TapHandler {
                     gesturePolicy: TapHandler.WithinBounds
                     acceptedButtons: Qt.RightButton
@@ -104,10 +110,8 @@ Item {
                     target: App.workflows
                     function onTabColorRequested(index) { if (index === tabButton.index) colorPopup.open() }
                     function onTabRenameRequested(index) {
-                        if (index !== tabButton.index)
-                            return
-                        renameField.text = tabButton.modelData.title
-                        renamePopup.open()
+                        if (index === tabButton.index)
+                            tabButton.rename()
                     }
                 }
                 Popup {
