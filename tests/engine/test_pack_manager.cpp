@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -520,6 +521,68 @@ private slots:
         QVERIFY(QProcess::execute("touch", {"-d", past.toString(Qt::ISODate), packs() + "/.staging-old"}) == 0);
         QVERIFY(addPack(makePack(source(), "io.example.tools", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
         QCOMPARE(leftovers(), QStringList{"io.example.tools"});
+    }
+    // #418: a stop kills the setup, and that is a stop, not a failed setup; nothing of the pack stays.
+    void aStoppedSetupIsCancelledAndLeavesNothing() {
+        const QString marker = m_dir.path() + "/setup-started";
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "touch '" + marker + "'; sleep 30"}}};
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.cancelled = [&] { return QFileInfo::exists(marker); };
+        const Result<PackAdded> added = addPack(makePack(source(), "io.example.tools", "1.0.0", false, setup), {}, packs(), trustStore(), prompts);
+        QVERIFY(!added.ok());
+        QCOMPARE(added.error().code, QString("cancelled"));
+        QVERIFY(leftovers().isEmpty());
+        // An update that is stopped puts the old version back.
+        QFile::remove(marker);
+        QVERIFY(addPack(makePack(source(), "io.example.tools", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        makePack(source(), "io.example.tools", "1.0.1", false, setup);
+        const Result<QList<PackAdded>> updated = updatePacks("io.example.tools", {}, packs(), trustStore(), prompts);
+        QCOMPARE(updated.error().code, QString("cancelled"));
+        QCOMPARE(summarizePack(packs() + "/io.example.tools")->version, QString("1.0.0"));
+        QCOMPARE(leftovers(), QStringList{"io.example.tools"});
+    }
+
+    // #418: a staging folder goes by its owner's pid, not by time: a live owner's slow clone stays, a dead one's goes, and a
+    // link is never followed.
+    void staleFoldersAreAgedByTheirOwner() {
+        QProcess finished;
+        finished.start("true");
+        QVERIFY(finished.waitForFinished(10000));
+        const qint64 dead = 4194000; // above pid_max on a default kernel
+        const auto old = [&](const QString &name) {
+            QDir().mkpath(packs() + "/" + name + "/work");
+            QVERIFY(QProcess::execute("touch", {"-d", "2 hours ago", packs() + "/" + name}) == 0);
+        };
+        const QString mine = QString(".staging-%1-aaaaaaaaaaaa").arg(QCoreApplication::applicationPid());
+        const QString gone = QString(".staging-%1-bbbbbbbbbbbb").arg(dead);
+        const QString goneOld = QString(".old-%1-cccccccccccc").arg(dead);
+        old(mine);
+        old(gone);
+        old(goneOld);
+        old(".staging-legacy");
+        QTemporaryDir outside;
+        write(outside.path() + "/keep", "x");
+        QVERIFY(QFile::link(outside.path(), packs() + "/.staging-" + QString::number(dead) + "-dddddddddddd"));
+        QVERIFY(addPack(makePack(source(), "io.example.tools", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(QFileInfo(packs() + "/" + mine + "/work").isDir()); // alive, however old
+        QVERIFY(!QFileInfo::exists(packs() + "/" + gone));
+        QVERIFY(!QFileInfo::exists(packs() + "/" + goneOld));
+        QVERIFY(!QFileInfo::exists(packs() + "/.staging-legacy")); // no pid to ask: by time, as before
+        QVERIFY(QFileInfo(outside.path() + "/keep").isFile()); // the link's target is untouched
+    }
+
+    // #418: one command at a time changes the packs folder.
+    void aPackIsNotChangedWhileAnotherCommandHoldsTheLock() {
+        QVERIFY(addPack(makePack(source(), "io.example.tools", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        {
+            QLockFile held(packs() + "/.packs.lock");
+            held.setStaleLockTime(0);
+            QVERIFY(held.tryLock());
+            QCOMPARE(removePack("io.example.tools", packs(), trustStore(), answering(Answer::Yes)).error().code, QString("pack_busy"));
+            QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
+        }
+        QVERIFY(removePack("io.example.tools", packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(leftovers().isEmpty());
     }
 };
 

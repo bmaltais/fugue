@@ -1,3 +1,4 @@
+#include "cli/canvas_run.h"
 #include "cli/commands.h"
 
 #include <QFile>
@@ -82,7 +83,10 @@ Answer prompt(const PackSummary &pack, const QString &question, bool showPack = 
 }
 
 PackPrompts terminalPrompts(Context &context) {
+    // Ctrl-C ends a git clone or a setup and cleans up after it, instead of killing the command in the middle of a change (#418).
+    installStopHandlers();
     PackPrompts prompts;
+    prompts.cancelled = [] { return stopRequested(); };
     prompts.install = [](const PackSummary &pack) {
         return prompt(pack, pack.oldVersion.isEmpty() ? QStringLiteral("Install this pack?") : QStringLiteral("Update to this version?"));
     };
@@ -250,6 +254,8 @@ Reply prepare(const ReadinessRequest &request, Context &context, const QString &
     FileHashes &hashes = stores.hashes;
     TrustStore &trust = stores.trust;
     ReadinessEnv env = stores.envFor(context);
+    installStopHandlers(); // Ctrl-C stops the run between steps and ends a setup cleanly (#418)
+    env.prompts.cancelled = [] { return stopRequested(); };
     env.prompts.log = [&context](const QString &line) { context.log(QStringLiteral("  ") + line); };
     const ReadinessPlan plan = buildReadinessPlan(request, env); // reads folders only: no network before the yes
     // Problems are not "ready": what cannot be done is said and the exit is non-zero.
@@ -281,6 +287,7 @@ Reply prepare(const ReadinessRequest &request, Context &context, const QString &
         return Reply::failure(makeError(QStringLiteral("cancelled"), QStringLiteral("Nothing was changed.")));
     ReadinessRun run{packsDir(), &trust, &hashes};
     run.log = env.prompts.log;
+    run.cancelled = [] { return stopRequested(); };
     run.allowMore = [](const PackSummary &pack, const QStringList &permissions) {
         say(QStringLiteral("  %1 also wants %2 access.").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", "))));
         return yesNo(QStringLiteral("Allow it? (no skips this pack)")) == Answer::Yes;

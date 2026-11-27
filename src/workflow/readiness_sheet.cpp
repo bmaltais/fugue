@@ -1,6 +1,7 @@
 #include "workflow/readiness_sheet.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QMetaObject>
 #include <QPointer>
@@ -599,6 +600,9 @@ void ReadinessSheet::publish() {
                               {"host", m.host}, {"license", m.license}, {"licenseUrl", m.licenseUrl},
                               {"folder", m.deferred ? tr("its folder, once the pack is installed") : m.folder},
                               {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},
+                              // A download that stopped keeps its `.part`, and the next one resumes it (#418).
+                              {"partial", !m.deferred && !disk && state != QLatin1String("running") && state != QLatin1String("done")
+                                              && QFileInfo(m.target.path + QStringLiteral(".part")).size() > 0},
                               {"state", state}, {"detail", m_rowErrors.value(hash, m_details.value(row))},
                               {"error", m_rowErrors.value(hash)},
                               {"fraction", fraction}};

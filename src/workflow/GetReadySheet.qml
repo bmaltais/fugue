@@ -243,7 +243,7 @@ Popup {
                                 glyph: modelData.choice === "disk" ? "check" : "download"
                                 title: modelData.name
                                 trailing: modelData.choice === "disk" ? qsTr("on disk") : modelData.size
-                                subtitle: [modelData.license, modelData.typeFrom].filter(t => t !== "").join(" · ")
+                                subtitle: [modelData.license, modelData.typeFrom, modelData.partial === true ? qsTr("partial, will resume") : ""].filter(t => t !== "").join(" · ")
                                 more: qsTr("From: %1").arg(modelData.host) + "\n"
                                       + (modelData.license !== "" ? qsTr("Licence: %1").arg(modelData.license) + "\n" : "")
                                       + qsTr("Into: %1").arg(modelData.folder)
