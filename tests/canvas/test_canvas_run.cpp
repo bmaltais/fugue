@@ -990,6 +990,86 @@ private slots:
         QVERIFY(QDir(r.app.dir.path() + "/queue").entryList(QDir::Files | QDir::NoDotAndDotDot).isEmpty());
     }
 
+    // #505: a run that joins an open question may send kinds of data the first run's words do not list: the question says the union
+    // while it is open.
+    void aJoinedRunsDataIsListedInTheOpenQuestion() {
+        // Two runs of one service: the first has no prompt to send (blank), the second has one.
+        const auto graph = [](const QString &prompt) {
+            return QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+                "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "%1", "seed": 5}},
+                "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "gen.image"}}}}}})")
+                .arg(prompt).toUtf8();
+        };
+        RunApp r(graph({}), true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        fugue::RunRequest quiet, written;
+        quiet.document = load(graph({}));
+        written.document = load(graph("a cat"));
+        r.service->start(quiet);
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        const auto text = [&] { return r.runs->remoteQuestion().value("services").toList().first().toMap().value("text").toString(); };
+        QCOMPARE(text(), QStringLiteral("its inputs"));
+        r.service->start(written); // the same service, so it joins the question the first one asked
+        QTRY_COMPARE(text(), QStringLiteral("prompts"));
+        r.runs->answerRemote(false);
+        QTRY_VERIFY(r.runs->remoteQuestion().isEmpty());
+    }
+
+    // #505: the runs of one question start in the order they were clicked, even when a run's check was cut short by one that came
+    // after it and the others joined the question first.
+    void theRunsOfOneQuestionStartInTheOrderTheyWereClicked() {
+        RunApp r(kGraph, true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        QStringList queued;
+        connect(r.service.get(), &RunService::event, this, [&](const QString &run, const QJsonObject &event) {
+            if (event.value("event").toString() == QLatin1String("run.queued"))
+                queued << run;
+        });
+        fugue::RunRequest request;
+        request.document = r.app.model.document();
+        QStringList ids;
+        for (int i = 0; i < 4; ++i) {
+            ids << r.service->start(request);
+            QTest::qWait(i == 0 ? 50 : 20); // each arrives while the one before is being checked
+        }
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        QTest::qWait(1500); // the others reach the question
+        r.runs->answerRemote(true);
+        QTRY_COMPARE(queued, ids);
+        for (const QString &id : ids)
+            r.service->cancel(id);
+    }
+
+    // #505: a cancel that arrives while that very run is being checked is not dropped: the run ends as cancelled and asks nothing.
+    void aCancelDuringTheRunsOwnOffMachineCheckEndsIt() {
+        RunApp r(kGraph, true, imageDescription(), {}, "https://api.example.com/v1");
+        QVERIFY(r.app.open());
+        QTRY_COMPARE(r.runs->runsOn(), QStringLiteral("Cloud (api.example.com)"));
+        QStringList queued, cancelled;
+        QSignalSpy asked(r.service.get(), &RunService::remoteConsentNeeded);
+        connect(r.service.get(), &RunService::event, this, [&](const QString &run, const QJsonObject &event) {
+            if (event.value("event").toString() == QLatin1String("run.queued"))
+                queued << run;
+            else if (event.value("event").toString() == QLatin1String("run.done") && event.value("status").toString() == QLatin1String("cancelled"))
+                cancelled << run;
+        });
+        fugue::RunRequest request;
+        request.document = r.app.model.document();
+        const QString id = r.service->start(request);
+        QTest::qWait(50); // its check waits on the slow provider's describe
+        r.service->cancel(id);
+        QTRY_COMPARE_WITH_TIMEOUT(cancelled, QStringList{id}, 5000);
+        QTest::qWait(400);
+        QVERIFY(asked.isEmpty() && queued.isEmpty() && r.jobs().isEmpty());
+        QCOMPARE(cancelled.size(), 1);
+        // The service goes on: the next run asks as before.
+        r.service->start(request);
+        QTRY_VERIFY(!r.runs->remoteQuestion().isEmpty());
+        r.runs->answerRemote(false);
+    }
+
     // Ctrl+Enter runs the shown workflow: progress shows on the running node, a finished
     // node shows cached with its time, values and thumbnail, a failure inside a group shows
     // on the group's node with the inner node's path id, and its downstream is skipped.

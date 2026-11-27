@@ -1,5 +1,6 @@
 #include "run/run_service.h"
 
+#include <algorithm>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -277,11 +278,20 @@ public:
         CheckAbort abort;
         m_checking = true;
         m_checkAbort = &abort;
+        m_checkingRun = id;
         const GraphCheck check = checkGraph(graph, environment, options, &abort);
+        m_checkingRun.clear();
         m_checkAbort = nullptr;
         m_checking = false;
-        if (m_quitting)
-            return Consent::Asked; // shutdown has ended what waited; nothing is written
+        const bool cancelledMeanwhile = m_cancelledInCheck.remove(id);
+        if (m_quitting || cancelledMeanwhile) {
+            // The window closed, or the person cancelled this very run, while its check was under way: it ends as cancelled (no folder
+            // was made for it), which is what shutdown() says for the runs that waited.
+            emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+            if (!m_quitting)
+                QTimer::singleShot(0, this, [this] { settleAfterCheck(); });
+            return Consent::Asked;
+        }
         // What arrived during the check starts after this run, one by one from the event loop, never nested in this call.
         QTimer::singleShot(0, this, [this] { settleAfterCheck(); });
         if (check.aborted) {
@@ -307,12 +317,41 @@ public:
         for (Asking &asking : m_askings) {
             if (asking.fingerprints == fingerprints) { // the same question is up: this run is covered by its answer
                 asking.runs.append({id, request});
+                if (unionOfSends(asking.services, services)) // it may send kinds of data the first run's words do not list
+                    emit remoteConsentNeeded(asking.runs.first().id, asking.services); // the open question says them now
                 return Consent::Asked;
             }
         }
         m_askings.append(Asking{{{id, request}}, fingerprints, services});
         emit remoteConsentNeeded(id, services);
         return Consent::Asked;
+    }
+
+    // Adds to `have` the kinds of data `more` sends to each service (same instances), in the order first met, and says its text again.
+    // True when anything was added.
+    static bool unionOfSends(QJsonArray &have, const QJsonArray &more) {
+        bool changed = false;
+        for (int i = 0; i < have.size() && i < more.size(); ++i) {
+            QJsonObject service = have.at(i).toObject();
+            if (service.value("instance") != more.at(i).toObject().value("instance"))
+                continue;
+            QStringList sends;
+            for (const QJsonValue &kind : service.value("sends").toArray())
+                sends << kind.toString();
+            const int before = int(sends.size());
+            for (const QJsonValue &kind : more.at(i).toObject().value("sends").toArray())
+                if (!sends.contains(kind.toString()))
+                    sends << kind.toString();
+            if (sends.size() == before)
+                continue;
+            static const QStringList kinds{"pictures", "masks", "audio", "video", "prompts"}; // the order sendsOf lists them in
+            std::stable_sort(sends.begin(), sends.end(), [](const QString &x, const QString &y) { return kinds.indexOf(x) < kinds.indexOf(y); });
+            service.insert("sends", QJsonArray::fromStringList(sends));
+            service.insert("text", sendsText(sends));
+            have.replace(i, service);
+            changed = true;
+        }
+        return changed;
     }
 
     QString consentPath() const { return m_setup.consentPath.isEmpty() ? RemoteConsent::defaultPath() : m_setup.consentPath; }
@@ -342,11 +381,21 @@ public:
                 emit event(run.id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Failed)}, {"errors", toJson(failed)}});
             return;
         }
-        for (const Parked &run : asking.runs)
+        // In the order the runs were clicked (their ids sort that way), not the order they reached the question: a run whose check was
+        // cut short joins after the ones that arrived meanwhile.
+        QList<Parked> runs = asking.runs;
+        std::stable_sort(runs.begin(), runs.end(), [](const Parked &a, const Parked &b) { return a.id < b.id; });
+        for (const Parked &run : std::as_const(runs))
             start(run.id, run.request, true);
     }
 
     void cancel(const QString &id) {
+        if (m_checking && m_checkingRun == id) { // its own check is under way: it ends the run when it returns
+            m_cancelledInCheck.insert(id);
+            if (m_checkAbort)
+                m_checkAbort->abort();
+            return;
+        }
         for (int i = 0; i < m_askings.size(); ++i) {
             Asking &asking = m_askings[i];
             for (int j = 0; j < asking.runs.size(); ++j) {
@@ -763,6 +812,8 @@ private:
     QList<Asking> m_askings;
     bool m_checking = false;
     CheckAbort *m_checkAbort = nullptr; // the check under way's, while m_checking
+    QString m_checkingRun;              // the run askRemote's check is for, while it is under way
+    QSet<QString> m_cancelledInCheck;   // runs cancelled during that check
     QElapsedTimer m_pruned;
     bool m_quitting = false;
     RunRequest m_check;

@@ -94,6 +94,14 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     connect(m_service, &RunService::event, this, &CanvasRuns::onEvent);
     connect(m_service, &RunService::checked, this, &CanvasRuns::onChecked);
     connect(m_service, &RunService::remoteConsentNeeded, this, [this](const QString &run, const QJsonArray &services) {
+        // The same run asked again: the question it is in changed what it says (a joined run sends more kinds of data).
+        for (auto &ask : m_remoteAsks)
+            if (ask.first == run) {
+                ask.second = services;
+                if (&ask == &m_remoteAsks.first())
+                    emit remoteQuestionChanged();
+                return;
+            }
         m_remoteAsks.append({run, services});
         if (m_remoteAsks.size() == 1)
             emit remoteQuestionChanged();
