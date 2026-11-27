@@ -85,7 +85,7 @@ Rectangle {
     // ink ring inside read as a smaller button on a light card (review, 2026-11-27).
     readonly property bool ringOutside: dialogRow && (marked || solidDanger)
     border.width: ring && !ringOutside ? 2 : bordered && !toned && !solidDanger ? 1 : 0
-    border.color: ring ? (marked ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
+    border.color: ring ? (marked ? look.accentForeground : alarmed ? look.dangerSolid : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button

@@ -63,7 +63,7 @@ RowLayout {
             radius: (target ? target.radius : 0) + 3
             color: "transparent"
             border.width: 2
-            border.color: target && target.solidDanger === true ? App.theme.look.error : App.theme.look.accent
+            border.color: target && target.solidDanger === true ? App.theme.look.dangerSolid : App.theme.look.accent
         }
     }
 
