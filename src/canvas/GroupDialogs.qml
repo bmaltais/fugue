@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../kit"
+import "../apps"
 
 // What groups and Frames ask (spec 5): whether Make group leaves the selected sinks outside
 // (5.5), a Frame's new title (5.1), and the interface editor of the group shown (5.4): its
@@ -459,17 +460,20 @@ Item {
                                         color: root.look.label
                                         text: qsTr("Drives %1").arg(inputRow.modelData.targets.join(", "))
                                     }
-                                    ComboBox {
+                                    AppChoice {
                                         id: alsoDrive
+                                        objectName: "exposedAlsoDrive" + inputRow.index
+                                        look: root.look
                                         readonly property var candidates: editor.visible ? root.model.groups.exposeCandidates(inputRow.modelData.name) : []
                                         visible: candidates.length > 0
-                                        model: [qsTr("Also drive…")].concat(candidates.map(c => c.title))
-                                        onActivated: index => {
-                                            if (index > 0) {
-                                                const c = candidates[index - 1]
+                                        label: qsTr("Also drive another input")
+                                        value: ""
+                                        options: [{value: "", text: qsTr("Also drive…")}].concat(candidates.map((c, i) => ({value: String(i), text: c.title})))
+                                        onPicked: v => {
+                                            if (v !== "") {
+                                                const c = candidates[Number(v)]
                                                 root.model.groups.exposeInput(c.node, c.input, inputRow.modelData.name)
                                             }
-                                            currentIndex = 0
                                         }
                                     }
                                     GlyphButton {

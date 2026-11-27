@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Fugue
 import "../menu"
 import "../canvas"
+import "../canvas/widgets"
 import "../kit"
 
 // The "Get ready" sheet (spec 6.6, 8.9, 11.10; #379, #464): what the shown workflow needs (packs to install and trust, their
@@ -84,28 +85,25 @@ Popup {
         fileMode: PortalFileDialog.Directory
         onAccepted: sheet.sheetModel.pickDestination(selectedFolder)
     }
-    Menu {
+    // The model folders to download to: the ones found (the chosen one checked), then picking one or finding more. A WidgetMenu
+    // (modal list: arrows move, Enter picks, Escape closes); a value is an absolute folder path, or "pick" or "find" for the actions.
+    WidgetMenu {
         id: destinationMenu
         objectName: "getReadyDestinations"
-        Repeater {
-            model: sheet.view.destinations
-            MenuItem {
-                required property var modelData
-                text: modelData.title
-                checkable: true
-                checked: modelData.path === sheet.view.destination
-                onTriggered: sheet.sheetModel.changeDestination(modelData.path)
-            }
-        }
-        MenuItem {
-            objectName: "getReadyPickFolder"
-            text: qsTr("Pick a folder…")
-            onTriggered: destinationPicker.open()
-        }
-        MenuItem {
-            objectName: "getReadyFindFolders"
-            text: qsTr("Find model folders…")
-            onTriggered: App.settings.modelSetup.show(false)
+        look: sheet.look
+        parent: Overlay.overlay
+        width: Math.max(change.width, 32 * sheet.look.unit)
+        entries: (sheet.view.destinations || []).map(d => ({text: d.title, value: d.path, checked: d.path === sheet.view.destination}))
+                 .concat([{separator: true, enabled: false},
+                          {text: qsTr("Pick a folder…"), value: "pick"},
+                          {text: qsTr("Find model folders…"), value: "find"}])
+        onPicked: v => {
+            if (v === "pick")
+                destinationPicker.open()
+            else if (v === "find")
+                App.settings.modelSetup.show(false)
+            else
+                sheet.sheetModel.changeDestination(v)
         }
     }
 
@@ -339,7 +337,13 @@ Popup {
                         look: sheet.look
                         visible: sheet.phase === "review"
                         text: qsTr("Change model folder…")
-                        onTapped: destinationMenu.popup()
+                        onTapped: {
+                            const at = change.mapToItem(Overlay.overlay, 0, change.height)
+                            destinationMenu.wantX = at.x
+                            destinationMenu.wantY = at.y
+                            destinationMenu.anchorHeight = change.height
+                            destinationMenu.open()
+                        }
                     }
                 }
             }
