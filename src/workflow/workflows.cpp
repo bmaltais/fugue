@@ -823,6 +823,15 @@ bool Workflows::openWithUses(const Template &chosen, const QList<OnDiskUse> &use
             clearReading(wanted);
             // A Get ready sheet for another tab may be up (it is modal): the tab opens after it, so the sheet's tab is not changed under it.
             // The caller's `opened` (which view to show) runs when the tab exists, not when the open was asked.
+            if (m_latestOpen != key) {
+                // Another template or file was opened while these files were read: the person moved on, so this one does not pop up
+                // now. The hashes are remembered, so opening it again is at once.
+                if (m_notice.startsWith(tr("Reading your file… %1%").section(QStringLiteral(" %1"), 0, 0)))
+                    setNotice({});
+                if (opened)
+                    opened(false);
+                return;
+            }
             after([this, chosen, uses, resolved, failed, opened] {
                 const bool done = finishOpenWithUses(chosen, uses, resolved, failed);
                 if (opened)
@@ -1087,6 +1096,7 @@ void Workflows::newWorkflow() { addTab(Document(), {}, {}, false, false); }
 // --- open ---
 
 bool Workflows::openPath(const QString &pathOrUrl) {
+    m_latestOpen = QStringLiteral("path:") + pathOrUrl;
     const QString path = toPath(pathOrUrl);
     const QFileInfo info(path);
     if (info.isFile()) {
@@ -1542,6 +1552,7 @@ bool Workflows::openTemplateByIdThen(const QString &id, std::function<void(bool)
 }
 
 bool Workflows::openTemplateWithFiles(const Template &chosen, std::function<void(bool)> opened) {
+    m_latestOpen = QStringLiteral("open:") + chosen.id;
     // Ready only through the files the person has: it opens with them, no sheet (UI design 2026-11-26).
     // "Use my file" (the setting, #618): whatever is covered is used, and Get ready opens for the rest. "Ask me": only when all of it is.
     if (const QList<OnDiskUse> uses = coveringUses(chosen, autoUseOn()); !uses.isEmpty())

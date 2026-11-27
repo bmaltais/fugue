@@ -545,6 +545,9 @@ private:
     mutable QByteArray m_onDiskKey;
     mutable QElapsedTimer m_onDiskAge;
     QSet<QString> m_hashing; // the targets whose chosen file is being read ("use:<tab> <hashes>", "open:<template>")
+    // The open the person asked for last ("open:<template>" or "path:<file>"). A template whose files are still being read opens only
+    // if it is still the last one asked for: a slow first read must not pop a tab up over the one opened meanwhile.
+    QString m_latestOpen;
     Uses m_openUses; // the files a template opens with (openTemplateWithWhatYouHave)
     // The asks waiting on one read of files, by its target: a sheet's request ids, how many others asked, and whether nobody is left.
     // One ask for a file to be used, with everything its completion needs, taken when it was asked: nothing is read again later.
