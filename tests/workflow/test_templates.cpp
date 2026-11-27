@@ -20,6 +20,8 @@
 #include <QtTest>
 
 #include "apps/app_ref.h"
+#include "apps/app_view.h"
+#include "apps/app_view_destination.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
@@ -36,10 +38,12 @@
 #include "menu/menu_commands.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
+#include "run/run_service.h"
 #include "theme.h"
 #include "translator.h"
 #include "workflow/workflows.h"
 #include "../engine/fake_http.h"
+#include "../fake_app_destination.h"
 #include "../window_grab.h"
 
 using namespace fugue;
@@ -1603,11 +1607,8 @@ private slots:
         QVERIFY(workflows.openTemplateForDownload("zit"));
         bool appShown = true;
         int taken = 0;
-        workflows.setAppShown([&appShown](const QString &) { return appShown; });
-        workflows.setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
-            ++taken;
-            return true;
-        });
+        FakeAppDestination appView([&appShown] { return appShown; }, taken);
+        workflows.setAppDestination(&appView);
         const int steps = canvas.undoStack()->count();
         workflows.useOnDisk({hash});
         appShown = false; // the person switches to the graph while the file is read
@@ -1776,13 +1777,9 @@ private slots:
             locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
             Workflows workflows(&canvas, &f.registry, &commands, locations);
             int taken = 0;
-            if (mode == QLatin1String("app")) {
-                workflows.setAppShown([](const QString &) { return true; });
-                workflows.setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
-                    ++taken;
-                    return true;
-                });
-            }
+            FakeAppDestination appView([] { return true; }, taken);
+            if (mode == QLatin1String("app"))
+                workflows.setAppDestination(&appView);
             QVERIFY(workflows.openPath(path));
             const auto handle = [&] { return canvas.document().graph.nodes.value("models").inputs.value("diffusion_model").handle(); };
             if (mode == QLatin1String("ask")) {
@@ -2003,11 +2000,8 @@ private slots:
         UseRig rig;
         bool inApp = true;
         int taken = 0;
-        rig.workflows->setAppShown([&inApp](const QString &) { return inApp; });
-        rig.workflows->setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
-            ++taken;
-            return true;
-        });
+        FakeAppDestination appView([&inApp] { return inApp; }, taken);
+        rig.workflows->setAppDestination(&appView);
         QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
         QTRY_COMPARE(taken, 1);
         QTRY_VERIFY(!rig.workflows->hashingUses());
@@ -2023,11 +2017,8 @@ private slots:
     void anAppViewReadEndingOnAnotherTabIsRetriedWhenItIsShown() {
         UseRig rig;
         int taken = 0;
-        rig.workflows->setAppShown([](const QString &) { return true; });
-        rig.workflows->setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
-            ++taken;
-            return true;
-        });
+        FakeAppDestination appView([] { return true; }, taken);
+        rig.workflows->setAppDestination(&appView);
         QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
         const int a = rig.workflows->current();
         QVERIFY(rig.workflows->openPath(rig.plain("b.fugue"))); // a is read while b is shown
@@ -2058,8 +2049,9 @@ private slots:
             UseRig rig;
             rig.makeZit();
             bool inApp = true; // an app template opens in the App view
-            rig.workflows->setAppShown([&inApp](const QString &) { return inApp; });
-            rig.workflows->setUseTaker([](const QString &, const QList<OnDiskUse> &, const Uses &) { return true; });
+            int ignored = 0;
+            FakeAppDestination appView([&inApp] { return inApp; }, ignored);
+            rig.workflows->setAppDestination(&appView);
             if (mode == QLatin1String("download")) {
                 QVERIFY(rig.workflows->openTemplateForDownload("zit"));
                 rig.workflows->readiness()->cancel(); // the download goes on (nothing here starts one): the sheet is closed
@@ -2084,11 +2076,8 @@ private slots:
         UseRig rig;
         bool inApp = false;
         int taken = 0;
-        rig.workflows->setAppShown([&inApp](const QString &) { return inApp; });
-        rig.workflows->setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
-            ++taken;
-            return true;
-        });
+        FakeAppDestination appView([&inApp] { return inApp; }, taken);
+        rig.workflows->setAppDestination(&appView);
         QVERIFY(rig.workflows->openPath(rig.write("a.fugue")));
         QVERIFY(rig.workflows->hashingUses());
         inApp = true; // the person goes to the App view during the read
@@ -2205,11 +2194,8 @@ private slots:
         QVERIFY(workflows.openTemplateForDownload("zit"));
         bool inApp = false;
         int taken = 0;
-        workflows.setAppShown([&inApp](const QString &) { return inApp; });
-        workflows.setUseTaker([&taken](const QString &, const QList<OnDiskUse> &, const Uses &) {
-            ++taken;
-            return true;
-        });
+        FakeAppDestination appView([&inApp] { return inApp; }, taken);
+        workflows.setAppDestination(&appView);
         const int steps = canvas.undoStack()->count();
         workflows.useOnDisk({hash}, 7); // the sheet's ask, in the graph
         workflows.cancelUses(7);        // cancelled while the file is read
@@ -2784,6 +2770,42 @@ private slots:
         const Document outpaint = Document::loadFile(library.find("outpaint")->workflow).value();
         QCOMPARE(outpaint.graph.nodes.value("pad").inputs.value("left").literal().toInt(), 256);
         QCOMPARE(outpaint.graph.nodes.value("pad").inputs.value("right").literal().toInt(), 256);
+    }
+    // The real App view (not a fake) as the second destination of the real Workflows (Model choice, spec 2.5): a file chosen in the App view
+    // is the app's own (its form holds it, the tab's workflow is not written), Workflows judges the tab by it, and Undo puts it back.
+    void theRealAppViewTakesTheChoiceAndWorkflowsJudgesTheTabByIt() {
+        UseRig rig;
+        QVERIFY(changeSetting(settingsPath(), "use_on_disk", "ask").isEmpty());
+        QJsonObject json = QJsonDocument::fromJson(readFile(rig.write("app.fugue"))).object();
+        json.insert("app", QJsonObject{{"format", 1},
+                                       {"title", "Z"},
+                                       {"inputs", QJsonArray{QJsonObject{{"role", "model"}, {"targets", QJsonArray{"models.diffusion_model"}}}}},
+                                       {"outputs", QJsonArray{}}});
+        writeJson(rig.work.filePath("app.fugue"), json);
+        AppView view([](const RunRequest &) { return QStringLiteral("run1"); }, [](const QString &) {}, &rig.f.registry);
+        AppViewDestination destination(view);
+        rig.workflows->setAppDestination(&destination);
+        QObject::connect(&view, &AppView::usesChanged, rig.workflows.get(), &Workflows::usesChanged);
+        QVERIFY(rig.workflows->openPath(rig.work.filePath("app.fugue")));
+        const QString tab = rig.workflows->tabs().at(rig.workflows->current()).toMap().value("id").toString();
+        view.show(tab, rig.canvas.document(), rig.work.filePath("app.fugue"));
+        QVERIFY(view.shown());
+        QVERIFY(rig.workflows->missingSomething());
+        QVERIFY(!rig.workflows->onDiskOffer(rig.hash).isEmpty());
+
+        rig.workflows->useOnDisk({rig.hash});
+        QVERIFY(rig.workflows->hashingUses());
+        QTRY_VERIFY(!rig.workflows->hashingUses());
+        QCOMPARE(view.usesList().size(), 1);
+        QVERIFY(!rig.swapped()); // the workflow is never written by the App view's choice
+        QVERIFY(view.valueOf("model").toMap().value("hash").toString() != rig.hash); // the form holds the file
+        QVERIFY(!rig.workflows->missingSomething()); // Workflows judges the tab by what the App view holds
+        QVERIFY(rig.workflows->onDiskOffer(rig.hash).isEmpty());
+
+        view.undoUse(rig.hash);
+        QVERIFY(view.usesList().isEmpty());
+        QCOMPARE(view.valueOf("model").toMap().value("hash").toString(), rig.hash);
+        QVERIFY(rig.workflows->missingSomething()); // back to the template's file
     }
 };
 

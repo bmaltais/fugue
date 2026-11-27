@@ -25,6 +25,7 @@
 #include "engine/registry.h"
 #include "engine/templates.h"
 #include "workflow/image_inputs.h"
+#include "workflow/model_choice.h"
 #include "workflow/model_downloads.h"
 #include "workflow/model_picker.h"
 #include "workflow/readiness_sheet.h"
@@ -320,16 +321,10 @@ public:
     // download offers that file too. engine/model_use.h decides (findOnDisk); this applies it, so they never disagree.
     //
     // The file chosen is applied where the shown workflow is edited: in the graph, to the document as one undo step (the file is
-    // saved only when the person saves); in the App view, to the app's own state (`setUseTaker`: AppView keeps it with the form's
-    // values and the app's workflow is never written). `setUsesProvider` gives back what the App view keeps, so the Get ready plan,
-    // the banner and the Needs panel leave those models out.
-    using UsesProvider = std::function<Uses(const QString &tab)>;
-    using UseTaker = std::function<bool(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved)>;
-    void setUsesProvider(UsesProvider provider) { m_usesProvider = std::move(provider); }
-    void setUseTaker(UseTaker taker) { m_useTaker = std::move(taker); }
-    // Whether the App view of `tab` is what shows: asked when a file is chosen, so that choice goes where it was made.
-    using AppShown = std::function<bool(const QString &tab)>;
-    void setAppShown(AppShown shown) { m_appShown = std::move(shown); }
+    // saved only when the person saves); in the App view, to the app's own state (its ChoiceDestination, `setAppDestination`: AppView
+    // keeps it with the form's values and the app's workflow is never written). It also gives back what the App view keeps, so the Get
+    // ready plan, the banner and the Needs panel leave those models out. The rules are in ModelChoice (model_choice.h).
+    void setAppDestination(ChoiceDestination *app);
     // For a missing model of the shown workflow (by its hash): {same, file, path, tier, size, otherSource,
     // recommended}; empty when no file of the same weights is here.
     Q_INVOKABLE QVariantMap onDiskOffer(const QString &hash) const;
@@ -340,7 +335,7 @@ public:
     Q_INVOKABLE void useOnDisk(const QStringList &hashes, int token = 0);
     // The person left the Get ready sheet while its files were read: that request's result is not applied.
     void cancelUses(int token);
-    QVariantMap reading() const { return m_reading; }
+    QVariantMap reading() const { return m_choice->reading(); }
     bool noticeUndoable() const;
     // Undo of the banner: the template's own models back in the tab that was opened with the person's files.
     Q_INVOKABLE void undoNotice();
@@ -349,7 +344,7 @@ public:
     // Opens the template with its missing models set to the files on disk (the template itself is unchanged); the files' hashes are
     // read first. False when there is no such template or nothing to use.
     Q_INVOKABLE bool openTemplateWithWhatYouHave(const QString &id);
-    bool hashingUses() const { return !m_hashing.isEmpty(); }
+    bool hashingUses() const { return m_choice->hashing(); }
     // What the App view keeps changed: the banner, the Get ready list and the Needs panel look again.
     void usesChanged();
     // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
@@ -438,24 +433,15 @@ private:
     // The missing models of the shown workflow that have a file of the same weights on disk, kept for a moment (the Needs panel and
     // the Get ready sheet ask for each row).
     const QList<OnDiskUse> &onDiskNow() const;
-    bool applyUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, bool announce = false);
     // The uses that make `chosen` ready and nothing else is missing (no pack to get): what a card click opens with. Empty otherwise.
     // The files a template opens with: with "Ask me" only when they cover every missing model, else (partial) whatever is covered (#618).
     QList<OnDiskUse> coveringUses(const Template &chosen, bool partial = false) const;
     // The setting use_on_disk is "use" (the default): the file is used by itself and said, instead of asked about.
     bool autoUseOn() const;
-    // Uses the files for the shown tab's missing models that have one, once per tab and model (a file that could not be read is not
-    // asked again, nor one the person took back with Undo). True when a read was started: the Get ready sheet waits for its result.
-    bool autoUse(bool cheap = false, bool offer = false);
-    void markTried(const QString &tab, const QString &hash);
-    static QString autoKey(const QString &tab, bool inApp, const QString &hash);
-    // An automatic read for the shown tab is going on: the Get ready sheet waits for it.
-    bool autoPending() const;
-    void startUses(const QStringList &hashes, int token, bool automatic, bool offer = false);
-    // The notice naming each file used in place of a model, with Undo for the graph's document (`before` is the document as it was).
-    void announceUses(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, bool inApp, const Document &before);
+    // The one place an open is asked for (a file, a template, a template with the person's files): the open asked for last wins.
+    void beginOpen(const QString &key);
     bool openWithUses(const Template &chosen, const QList<OnDiskUse> &uses, std::function<void(bool)> opened);
-    bool finishOpenWithUses(const Template &chosen, const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed);
+    ChoiceFacts choiceFacts() const;
     // Runs `what` now, or when the Get ready sheet has closed.
     void after(std::function<void()> what);
     // `replace`: a file at `path` may be replaced (the dialog asked, or it is the tab's own).
@@ -466,14 +452,6 @@ private:
     bool isPristine(int index) const;
     QString untitledName() const;
     void setNotice(const QString &text);
-    // Reads the hash of each file of `uses` in turn on the worker; `done` gets the handles resolved and the names of the files that
-    // could not be read.
-    // `progress` is told the file of a use and the percent read as it goes (only while a file is really read).
-    void hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done,
-                  std::function<void(const OnDiskUse &, int)> progress = {});
-    void setReading(const QStringList &hashes, int percent);
-    void clearReading(const QStringList &hashes);
-    void setHashing(const QString &key, bool on);
     void analyze(const Document &document, const QString &title);
     // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
     void offerReadiness();
@@ -538,48 +516,12 @@ private:
     Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;
     ModelWorkers m_work; // reads the hash of a file chosen in place of a missing model (#605)
-    UsesProvider m_usesProvider;
-    UseTaker m_useTaker;
-    AppShown m_appShown;
+    std::unique_ptr<GraphDestination> m_graphDestination;
+    std::unique_ptr<ModelChoice> m_choice; // after m_work: it is gone before the worker stops
     mutable QList<OnDiskUse> m_onDisk; // onDiskNow()'s answer
     mutable QByteArray m_onDiskKey;
     mutable QElapsedTimer m_onDiskAge;
-    QSet<QString> m_hashing; // the targets whose chosen file is being read ("use:<tab> <hashes>", "open:<template>")
-    // The open the person asked for last ("open:<template>" or "path:<file>"). A template whose files are still being read opens only
-    // if it is still the last one asked for: a slow first read must not pop a tab up over the one opened meanwhile.
-    QString m_latestOpen;
     Uses m_openUses; // the files a template opens with (openTemplateWithWhatYouHave)
-    // The asks waiting on one read of files, by its target: a sheet's request ids, how many others asked, and whether nobody is left.
-    // One ask for a file to be used, with everything its completion needs, taken when it was asked: nothing is read again later.
-    struct UseAsk {
-        int token = 0;     // a sheet's request id, or 0
-        QString tab;       // the tab it is for
-        bool inApp = false; // the App view's state (true) or the graph's document (false)
-        QList<OnDiskUse> chosen;
-        bool automatic = false; // the setting's "Use my file" asked, not a person: the result is announced, with Undo (#618)
-        bool offer = false;     // an automatic read started by opening a tab: its end may open Get ready (offerReadiness)
-    };
-    struct UseJob {
-        QStringList wanted;
-        QList<UseAsk> asks;
-        bool cancelled = false;
-    };
-    QHash<QString, UseJob> m_useJobs;
-    QVariantMap m_reading; // reading()
-    // What Undo of the banner puts back: the tab opened with files, and the file handle -> the template's own handle.
-    struct OpenedWith {
-        QString tab;
-        int undoIndex = 0; // the tab's undo index just after the open: Undo is offered while it is unchanged
-        struct Change {
-            QVariantList path;
-            QJsonValue original, applied;
-        };
-        QList<Change> changes;
-    };
-    OpenedWith m_openedWith;
-    QHash<QString, QByteArray> m_autoIdle; // tab -> its models when autoUse() found nothing to do
-    QSet<QString> m_autoTried; // "<tab> <a|g> <hash>" (the App view or the graph) of every model autoUse() asked for
-    bool m_opening = false;    // a template is opening with its files: autoUse() leaves it alone
     QList<std::function<void()>> m_afterSheet;
     ReadinessSheet *m_readiness;
     QString m_readyTabId; // the tab the Get ready sheet was opened for

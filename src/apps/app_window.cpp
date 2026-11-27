@@ -10,6 +10,7 @@
 #include "apps/app_launcher.h"
 #include "apps/app_shelf.h"
 #include "canvas/canvas_model.h"
+#include "apps/app_view_destination.h"
 #include "commands/command_registry.h"
 #include "engine/providers.h"
 #include "engine/paired_placement.h"
@@ -112,12 +113,10 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
     needs->setUseSource([&workflows](const QString &hash) { return workflows.onDiskOffer(hash); });
     QObject::connect(needs, &NeedsModel::useRequested, &workflows, [&workflows](const QStringList &hashes) { workflows.useOnDisk(hashes); });
     QObject::connect(&workflows, &Workflows::readingChanged, needs, [&workflows, needs] { needs->setReading(workflows.reading()); });
-    workflows.setUsesProvider([&view](const QString &tab) { return view.usesInForce(tab); });
-    workflows.setAppShown([&view](const QString &tab) { return view.shown() && view.tab() == tab; });
-    workflows.setUseTaker([&view](const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved) {
-        view.takeUses(tab, chosen, resolved);
-        return true;
-    });
+    // The App view is the second destination of a choice (workflow/model_choice.h); it lives as long as the view does.
+    const auto destination = std::make_shared<AppViewDestination>(view);
+    QObject::connect(&view, &QObject::destroyed, &workflows, [destination] {});
+    workflows.setAppDestination(destination.get());
     QObject::connect(&view, &AppView::usesChanged, &workflows, &Workflows::usesChanged);
     QObject::connect(&workflows, &Workflows::usesApplied, needs, &NeedsModel::refreshSoon);
     QObject::connect(&workflows, &Workflows::noticeChanged, needs, &NeedsModel::refreshSoon);
