@@ -186,7 +186,8 @@ private slots:
         QCOMPARE(layered.find("shared")->title, QString("From own pack"));
         // Without `packs` the Default's packs' catalogs stay out.
         enterProject({}, "p/closed");
-        QVERIFY(ModelCatalog::load({}, {}).find("only-default-pack") == nullptr);
+        const ModelCatalog closed = ModelCatalog::load({}, {});
+        QVERIFY(closed.find("only-default-pack") == nullptr);
     }
 
     void aProjectWithoutInheritsSeesNoPacksOfTheDefault() {

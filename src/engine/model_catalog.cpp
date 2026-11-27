@@ -178,7 +178,7 @@ QList<CatalogModel> ModelCatalog::forType(const QString &resource) const {
     return out;
 }
 
-const CatalogModel *ModelCatalog::find(const QString &id) const {
+const CatalogModel *ModelCatalog::find(const QString &id) const & {
     for (const CatalogModel &model : m_models)
         if (model.id == id)
             return &model;

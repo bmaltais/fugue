@@ -450,7 +450,8 @@ QJsonArray withCompanions(const QJsonArray &models, const ModelLibrary &library,
         if (tokenizer.isEmpty() || listed.contains(tokenizer.value(QStringLiteral("hash")).toString()))
             continue;
         listed.insert(tokenizer.value(QStringLiteral("hash")).toString());
-        if (const CatalogModel *known = ModelCatalog::load().find(QStringLiteral("qwen3.5-tokenizer"))) {
+        const ModelCatalog catalog = ModelCatalog::load(); // kept: `known` points into it
+        if (const CatalogModel *known = catalog.find(QStringLiteral("qwen3.5-tokenizer"))) {
             tokenizer.insert(QStringLiteral("source"), known->url);
             tokenizer.insert(QStringLiteral("size"), double(known->size));
         }

@@ -69,7 +69,10 @@ public:
 
     // The entries, in the order the files list them, for one resource type.
     QList<CatalogModel> forType(const QString &resource) const;
-    const CatalogModel *find(const QString &id) const;
+    // A pointer into this catalog: not on a temporary one (`ModelCatalog::load().find(id)` left a dangling pointer
+    // that a later read freed twice, a test then stuck in Qt's crash handler, 2026-11-27).
+    const CatalogModel *find(const QString &id) const &;
+    const CatalogModel *find(const QString &id) const && = delete;
     const QList<CatalogModel> &all() const { return m_models; }
     // What was left out, one sentence each, naming the file and the model.
     const QStringList &problems() const { return m_problems; }

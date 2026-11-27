@@ -116,6 +116,23 @@ private slots:
         QVERIFY(catalog.forType("fugue/lora").isEmpty());
     }
 
+    void theKrea2FilesCarryTheirLicenceForGetReady() {
+        // Get ready reads a model's licence from the catalog by hash (readiness.cpp); the Krea-2 templates depend on it.
+        QTemporaryDir empty;
+        const ModelCatalog catalog = ModelCatalog::load(empty.path());
+        QVERIFY2(catalog.problems().isEmpty(), qPrintable(catalog.problems().join("\n")));
+        for (const char *id : {"krea2-turbo-int8", "krea2-style-reference-lora"}) {
+            const CatalogModel *model = catalog.find(id);
+            QVERIFY2(model, id);
+            QCOMPARE(model->license, QString("Krea 2 Community License"));
+            QVERIFY2(model->licenseUrl.startsWith("https://krea.ai/"), id);
+            QCOMPARE(model->sha256.size(), 64);
+        }
+        QCOMPARE(catalog.find("krea2-turbo-int8")->resource, QString("fugue/diffusion-model"));
+        QVERIFY(catalog.find("qwen3vl-4b-int8"));
+        QVERIFY(catalog.find("qwen-image-vae"));
+    }
+
     void theCatalogsFugueShipsAreValidAndHaveVerifiedFields() {
         QTemporaryDir empty;
         const ModelCatalog catalog = ModelCatalog::load(empty.path());
@@ -161,7 +178,8 @@ private slots:
         QVERIFY(catalog.find("only"));
         QCOMPARE(catalog.find("frompack")->file, QString("u.onnx"));
         QVERIFY(catalog.find("realesrgan-x4plus")); // Fugue's own still there
-        QVERIFY(!ModelCatalog::load(user.path()).find("only")); // no pack paths: none read
+        const ModelCatalog withoutPacks = ModelCatalog::load(user.path());
+        QVERIFY(!withoutPacks.find("only")); // no pack paths: none read
     }
 
     void theExamplePacksCatalogsAreValidAndNameTheirLicences() {

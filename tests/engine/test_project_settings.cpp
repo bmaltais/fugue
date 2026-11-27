@@ -360,7 +360,8 @@ private slots:
         enterProject({}, "p/closed");
         // A project that does not inherit `models` has only its own entries.
         QDir(dataDir() + "/catalog").removeRecursively();
-        QVERIFY(ModelCatalog::load({}, {}).find("only-default") == nullptr);
+        const ModelCatalog closed = ModelCatalog::load({}, {});
+        QVERIFY(closed.find("only-default") == nullptr);
     }
 
     // Keybindings
