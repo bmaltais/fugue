@@ -113,10 +113,21 @@ private slots:
         QVERIFY(!rig.view().value("empty").toBool());
         QVERIFY(rig.view().value("hasDownloads").toBool());
         QCOMPARE(rig.view().value("headline").toString(), QString("Fugue will download 1 model, 2.0 GB."));
+        QVERIFY(rig.sheet.currentPlan().models.isEmpty()); // the Needs panel's plan: a sheet's choice never makes it a need
         rig.sheet.setOptional(hashA, false);
         QVERIFY(rig.view().value("empty").toBool());
         rig.sheet.show(); // a new look starts from Not now again
         QVERIFY(!rig.view().value("optionalModels").toList().at(0).toMap().value("on").toBool());
+    }
+
+    // A required model that cannot be had, beside an optional one: the headline says so, never "Nothing is needed to run".
+    void anOptionalModelBesideAnUnobtainableOneSaysTheProblem() {
+        QJsonObject nowhere = model("gone.gguf", hashB, 1.0e9);
+        nowhere.remove("source");
+        Rig rig({}, {nowhere});
+        rig.optional = QJsonArray{model("other-branch.gguf", hashA, 2.0e9)};
+        rig.sheet.show();
+        QVERIFY(rig.view().value("headline").toString() != QString("Nothing is needed to run. Models only another branch uses can be downloaded below."));
     }
 
     // Check 2: Download chosen, the headline and the totals are the download's, the primary is Install and the destination is shown.

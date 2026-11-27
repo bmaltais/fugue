@@ -123,6 +123,7 @@ private:
     // The models still to download do not fit where they go (the files to use take no room).
     bool lowSpaceNow() const;
     ReadinessPlan buildPlan() const;
+    ReadinessPlan buildPlan(bool withChoices) const;
     // The model folders as the settings have them, with a folder picked here and the one chosen, not yet written.
     ModelLibrary library() const;
     // Writes the folder choice (a picked model folder, download_folder) at the yes.

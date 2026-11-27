@@ -107,7 +107,11 @@ ModelLibrary ReadinessSheet::library() const {
     return library;
 }
 
-ReadinessPlan ReadinessSheet::buildPlan() const {
+ReadinessPlan ReadinessSheet::buildPlan() const { return buildPlan(true); }
+
+// `withChoices`: the optional models the person turned on in the open sheet count as wanted. The Needs panel reads the plan with
+// none of them: a choice made in a sheet that was closed without its yes must not change what the panel says it needs.
+ReadinessPlan ReadinessSheet::buildPlan(bool withChoices) const {
     FileHashes hashes(FileHashes::defaultPath());
     TrustStore trust(m_trustPath);
     const ModelCatalog catalog = ModelCatalog::load();
@@ -118,11 +122,12 @@ ReadinessPlan ReadinessSheet::buildPlan() const {
     env.packsDir = packsDir();
     env.catalog = &catalog;
     ReadinessRequest request = m_request();
-    request.optionalChosen = m_optionalOn;
+    if (withChoices)
+        request.optionalChosen = m_optionalOn;
     return buildReadinessPlan(request, env);
 }
 
-ReadinessPlan ReadinessSheet::currentPlan() const { return buildPlan(); }
+ReadinessPlan ReadinessSheet::currentPlan() const { return buildPlan(false); }
 
 void ReadinessSheet::rebuild() {
     m_ownRoot = library().roots().value(0);
@@ -539,7 +544,7 @@ void ReadinessSheet::publish() {
                                     : tr("download %n models", nullptr, downloads));
     if (uses > 0 && !onlyUses)
         parts << tr("use %n files you already have", nullptr, uses);
-    const bool onlyOptional = parts.isEmpty() && downloads == 0 && uses == 0 && !m_plan.optionalModels.isEmpty();
+    const bool onlyOptional = parts.isEmpty() && downloads == 0 && uses == 0 && m_plan.problems.isEmpty() && !m_plan.optionalModels.isEmpty();
     view["headline"] = onlyOptional ? tr("Nothing is needed to run. Models only another branch uses can be downloaded below.")
                        : onlyUses ? tr("Nothing to download: Fugue will use %n files you already have.", nullptr, uses)
                        : parts.isEmpty() ? (m_plan.problems.isEmpty() ? tr("There is nothing to get ready.") : tr("Nothing here can be made ready from this machine."))
