@@ -901,7 +901,11 @@ with an id and a version, and it appears in node search.
   never ids: "Sets Model on Encode and Sample", "From Image on Picture" (`GroupEdit::groupInterface`,
   `sets` and `comesFrom`). The name links and `--set` use, the section, the default, the range,
   the choices and the type sit under the row's Details; the group's id and version in the name's
-  tooltip. Every change is one undo step at once; Done closes. Keys: Tab in reading order (the
+  tooltip. Every change is one undo step at once; Done closes. A row's button or Alt+Up and Alt+Down first keep
+  what the focused field holds, as its own undo step before the action's, and only a whole value (a
+  half-typed number such as "-" is left as it is). A range field takes empty (no limit) or a typed
+  number (docs/ui-ergonomics.md "Typed numbers": a comma is a decimal point only where the language
+  writes one, never a thousands separator). Keys: Tab in reading order (the
   focus stays where it was when the rows are made again after an edit), Up and Down between the
   rows' labels, Alt+Up and Alt+Down move a row, Escape closes (docs/ui-ergonomics.md, 2026-11-27).
 - An exposed input or output whose inner node is deleted leaves the face, and every instance
@@ -4117,7 +4121,7 @@ canvas model's `appBuilder`); `apps/AppBuilderDialog.qml` only draws it.
   `pruneApp` does everywhere).
 - **What it holds** (the group interface editor's rules, 5.4, where they fit): the **title** (required), **description** and **Opens in**
   (`defaultView`: App or Graph); the **inputs** in the form's order, each with a label (the placeholder is the name the form would
-  say), **Advanced** (the one section the form folds), a range for a number (the placeholder is the target's own), a default, the inner
+  say), **Advanced** (the one section the form folds), a range for a number (the placeholder is the target's own; empty is no limit, a typed number as docs/ui-ergonomics.md "Typed numbers" reads it), a default, the inner
   inputs it sets and **Also set…** (one input drives several of one type, never of two types), Move up and Move down (Alt+Up and
   Alt+Down in a row) and a button to stop asking for it; the **outputs**, each with an optional label and the same ordering. Not in the
   builder (kept as the block has them): choices and their numbers, `optional`, `fallback`, other section names. The role is guessed

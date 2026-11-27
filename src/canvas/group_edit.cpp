@@ -408,7 +408,9 @@ bool GroupEdit::removeExposedInput(const QString &name) {
     for (const GroupInput &exposed : definition->inputs) {
         if (exposed.name != name)
             continue;
-        for (const PortRef &target : exposed.targets) {
+        // A copy: each step replaces `whole`, which `definition` points into.
+        const QList<PortRef> targets = exposed.targets;
+        for (const PortRef &target : targets) {
             const Result<Document> done = fugue::unexposeInput(whole, group, target);
             if (done)
                 whole = *done;
@@ -417,6 +419,7 @@ bool GroupEdit::removeExposedInput(const QString &name) {
         m_canvas->commitWhole(whole, tr("Stop exposing"));
         return true;
     }
+    setProblem(tr("The group has no exposed input %1.").arg(name));
     return false;
 }
 

@@ -64,10 +64,10 @@ Item {
     }
     function clamp(v) { return Math.max(Math.min(from, to), Math.min(Math.max(from, to), v)) }
     function nudge(steps) { moved(clamp(value + steps * step)) }
-    // A typed value: a number (a comma as the decimal point too, the suffix optional), in the range and on the steps; anything
-    // else changes nothing.
+    // A typed value: a number (TypedNumber: a comma is the decimal point only where the language writes one; the suffix
+    // optional), in the range and on the steps; anything else changes nothing.
     function typed(text) {
-        const n = parseFloat(String(text).replace(suffix, "").replace(",", ".").trim())
+        const n = TypedNumber.parse(String(text).replace(suffix, ""))
         if (isNaN(n))
             return
         const v = clamp(n / displayScale)

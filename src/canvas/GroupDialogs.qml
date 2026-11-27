@@ -286,6 +286,16 @@ Item {
         heading: qsTr("Group inputs and outputs")
         subheading: qsTr("Choose what this group shows on its card: the inputs it asks for and the results it gives.")
         tone: "dusk"
+        // Centred when it opens; then its top stays where it is, so a row under the pointer does not move when Details open or a
+        // row is added: it grows downwards, and up only when it would leave the window.
+        parent: Overlay.overlay
+        anchors.centerIn: undefined
+        property real openedTop: -1 // where its top was once it had opened and was laid out; -1 while centred
+        readonly property real centredTop: ((parent ? parent.height : 0) - height) / 2
+        x: Math.round(((parent ? parent.width : 0) - width) / 2)
+        y: Math.round(openedTop < 0 ? centredTop
+                      : Math.max(6 * App.theme.look.unit, Math.min(openedTop, (parent ? parent.height : 0) - height - 6 * App.theme.look.unit)))
+        onClosed: openedTop = -1
         width: Math.min((Overlay.overlay ? Overlay.overlay.width : 760) - 12 * App.theme.look.unit, 720)
         // As tall as what it holds (a one-row group is a short dialog), up to the window less its margins or 720px; the list scrolls
         // past that.
@@ -311,12 +321,12 @@ Item {
             if (name !== "")
                 Qt.callLater(refocus, name)
         }
-        // A range's field: empty (no limit) or a number, written with a point or a comma; `number` gives it with a point, as the
-        // range is stored and shown (String(0.5) is "0.5" in every language), so a comma-decimal locale types what it knows.
+        // A range's field: empty (no limit) or a typed number (TypedNumber: a comma is a decimal point only where the language
+        // writes one); `number` gives it with a point, as the range is stored and shown.
         readonly property RegularExpressionValidator rangeValidator: RegularExpressionValidator {
-            regularExpression: /^$|^-?(\d+([.,]\d*)?|[.,]\d+)([eE][-+]?\d+)?$/
+            regularExpression: TypedNumber.pattern
         }
-        function number(text) { return text.replace(",", ".") }
+        function number(text) { return TypedNumber.normalize(text) }
         // Whether a field's text is a change to keep: not while the rows are made again (a field that goes then would keep its
         // text a second time, against the row it showed).
         function keeps(text, current) {
@@ -332,7 +342,8 @@ Item {
             try {
                 if (commit) {
                     const item = editor.contentItem.Window.activeFocusItem
-                    if (item && inside(item) && item instanceof ThemedTextField)
+                    // Only what the field would keep on its own: a half-typed number ("-", "1e") is not saved as no limit.
+                    if (item && inside(item) && item instanceof ThemedTextField && item.acceptableInput)
                         item.editingFinished()
                 }
                 done = action()
@@ -383,14 +394,21 @@ Item {
         }
         // Moves a row and keeps the focus on the moved row's `control` ("Label", "Up" or "Down"); a button that cannot act at the new
         // place (Move up on the first row) hands it to the other one.
-        function move(output, name, to, control) {
+        // The row at `index` as the group has it now: after the focused field was kept, which may have renamed it (a Name typed
+        // under Details), so an action never uses a name the row no longer has.
+        function rowNow(output, index) {
+            const now = root.model.groups.groupInterface()
+            return ((output ? now.outputs : now.inputs) || [])[index]
+        }
+        function move(output, index, to, control) {
             const count = ((output ? face.outputs : face.inputs) || []).length
             if (to < 0 || to >= count)
                 return
             const shown = control === "Up" && to === 0 ? "Down" : control === "Down" && to === count - 1 ? "Up" : control
             act(() => {
+                const row = rowNow(output, index)
                 focusAfter = (output ? "exposedOutput" : "exposed") + shown + to
-                if (!root.model.groups.moveExposed(output, name, to))
+                if (!row || !root.model.groups.moveExposed(output, row.name, to))
                     focusAfter = ""
             }, true)
         }
@@ -400,10 +418,10 @@ Item {
             const rows = (output ? face.outputs : face.inputs) || []
             const prefix = output ? "exposedOutputRemove" : "exposedRemove"
             act(() => {
+                const row = rowNow(output, index)
                 focusAfter = index + 1 < rows.length ? prefix + index : index > 0 ? prefix + (index - 1)
                            : output ? "groupAddOutput" : "groupAddInput"
-                const done = output ? root.model.groups.unexposeOutput(rows[index].name)
-                                    : root.model.groups.removeExposedInput(rows[index].name)
+                const done = row && (output ? root.model.groups.unexposeOutput(row.name) : root.model.groups.removeExposedInput(row.name))
                 if (!done)
                     focusAfter = ""
             }, true)
@@ -412,6 +430,7 @@ Item {
             details = ({}) // each opening starts with every row's Details shut
             reload()
             nameField.forceActiveFocus()
+            Qt.callLater(() => { if (editor.visible) editor.openedTop = editor.centredTop })
         }
         Connections {
             target: root.model
@@ -509,7 +528,7 @@ Item {
                     return
                 const step = event.key === Qt.Key_Up ? -1 : 1
                 if (event.modifiers & Qt.AltModifier)
-                    editor.move(false, modelData.name, index + step, "Label")
+                    editor.move(false, index, index + step, "Label")
                 else
                     editor.refocus("exposedLabel" + (index + step))
                 event.accepted = true
@@ -551,14 +570,14 @@ Item {
                         glyph: "chevron-up"
                         tip: qsTr("Move up (Alt+Up)")
                         enabled: inputRow.index > 0
-                        onTapped: editor.move(false, inputRow.modelData.name, inputRow.index - 1, "Up")
+                        onTapped: editor.move(false, inputRow.index, inputRow.index - 1, "Up")
                     }
                     RowButton {
                         objectName: "exposedDown" + inputRow.index
                         glyph: "chevron-down"
                         tip: qsTr("Move down (Alt+Down)")
                         enabled: inputRow.index < inputRow.count - 1
-                        onTapped: editor.move(false, inputRow.modelData.name, inputRow.index + 1, "Down")
+                        onTapped: editor.move(false, inputRow.index, inputRow.index + 1, "Down")
                     }
                     RowButton {
                         objectName: "exposedRemove" + inputRow.index
@@ -582,7 +601,15 @@ Item {
                         text: qsTr("Also set…")
                         tip: qsTr("One input of the card that sets another inner input of the same type too")
                         choices: editor.visible ? root.model.groups.exposeCandidates(inputRow.modelData.name) : []
-                        onChosen: i => editor.act(() => root.model.groups.exposeInput(choices[i].node, choices[i].input, inputRow.modelData.name), true)
+                        onChosen: i => {
+                            const picked = choices[i]
+                            const index = inputRow.index
+                            editor.act(() => {
+                                const row = editor.rowNow(false, index)
+                                if (row)
+                                    root.model.groups.exposeInput(picked.node, picked.input, row.name)
+                            }, true)
+                        }
                     }
                 }
                 Loader { // the Details, made only while open
@@ -702,7 +729,7 @@ Item {
                     return
                 const step = event.key === Qt.Key_Up ? -1 : 1
                 if (event.modifiers & Qt.AltModifier)
-                    editor.move(true, modelData.name, index + step, "Label")
+                    editor.move(true, index, index + step, "Label")
                 else
                     editor.refocus("exposedOutputLabel" + (index + step))
                 event.accepted = true
@@ -745,14 +772,14 @@ Item {
                         glyph: "chevron-up"
                         tip: qsTr("Move up (Alt+Up)")
                         enabled: outputRow.index > 0
-                        onTapped: editor.move(true, outputRow.modelData.name, outputRow.index - 1, "Up")
+                        onTapped: editor.move(true, outputRow.index, outputRow.index - 1, "Up")
                     }
                     RowButton {
                         objectName: "exposedOutputDown" + outputRow.index
                         glyph: "chevron-down"
                         tip: qsTr("Move down (Alt+Down)")
                         enabled: outputRow.index < outputRow.count - 1
-                        onTapped: editor.move(true, outputRow.modelData.name, outputRow.index + 1, "Down")
+                        onTapped: editor.move(true, outputRow.index, outputRow.index + 1, "Down")
                     }
                     RowButton {
                         objectName: "exposedOutputRemove" + outputRow.index

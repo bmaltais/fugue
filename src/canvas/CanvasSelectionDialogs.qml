@@ -43,12 +43,14 @@ Item {
         moveYField.text = "0"
         transformAsk.open()
     }
-    function number(field, fallback) {
-        const v = Number(field.text.replace(",", "."))
-        return isNaN(v) ? fallback : v
+    // A typed number (TypedNumber: a comma is a decimal point only where the language writes one), kept in `bottom` to `top`
+    // and to one decimal, as the fields' old DoubleValidator kept it; empty or not a number is `fallback`.
+    function number(field, fallback, bottom, top) {
+        const v = TypedNumber.parse(field.text)
+        return isNaN(v) ? fallback : Math.max(bottom, Math.min(top, Math.round(v * 10) / 10))
     }
     function answerModify() {
-        const amount = Math.round(number(amountField, 0))
+        const amount = Math.round(number(amountField, 0, 0, 250))
         if (amount < 1)
             return
         last[kind] = amount
@@ -56,9 +58,10 @@ Item {
         modifyAsked(kind, amount)
     }
     function answerTransform() {
-        const scale = Math.max(1, number(scaleField, 100)) / 100
+        const scale = number(scaleField, 100, 1, 1000) / 100
         transformAsk.close()
-        transformAsked(number(moveXField, 0), number(moveYField, 0), scale, scale, number(turnField, 0))
+        transformAsked(number(moveXField, 0, -99999, 99999), number(moveYField, 0, -99999, 99999), scale, scale,
+                       number(turnField, 0, -360, 360))
     }
 
     Question {
@@ -120,7 +123,7 @@ Item {
                     id: scaleField
                     objectName: "canvasTransformScale"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: 1; top: 1000; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
                     onAccepted: transformOk.clicked()
                 }
@@ -130,7 +133,7 @@ Item {
                     id: turnField
                     objectName: "canvasTransformRotate"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: -360; top: 360; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
                     onAccepted: transformOk.clicked()
                 }
@@ -140,7 +143,7 @@ Item {
                     id: moveXField
                     objectName: "canvasTransformMoveX"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: -99999; top: 99999; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
                     onAccepted: transformOk.clicked()
                 }
@@ -150,7 +153,7 @@ Item {
                     id: moveYField
                     objectName: "canvasTransformMoveY"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: -99999; top: 99999; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
                     onAccepted: transformOk.clicked()
                 }

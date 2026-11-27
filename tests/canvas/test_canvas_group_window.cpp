@@ -482,6 +482,50 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A row action keeps only what a field would keep on its own: a Name just typed under Details is saved first and the
+    // button acts on the row under its new name; a half-typed number ("-") is not saved as "no limit".
+    void aRowActionKeepsOnlyWhatTheFieldWouldKeep() {
+        App app(load(kModelGraph));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.model.select({"encode", "sample", "picture"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        QVERIFY(app.commands.trigger("group.interface"));
+        QTRY_VERIFY(app.model.inGroup());
+        QVERIFY(app.model.groups()->exposeInput("sample", "seed"));
+        QVERIFY(app.model.groups()->editExposedInput("seed", {{"name", "seed"}, {"type", "number"}, {"min", "0"}}));
+        const auto inputs = [&] { return app.model.groups()->groupInterface().value("inputs").toList(); };
+        const auto press = [&](const char *name) {
+            QQuickItem *button = nullptr;
+            QTRY_VERIFY((button = item(app.window->contentItem(), name)) && button->isVisible());
+            QTest::mouseClick(app.window, Qt::LeftButton, {}, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        };
+        const auto typeInto = [&](const char *name, const QByteArray &text) {
+            QQuickItem *field = nullptr;
+            QTRY_VERIFY((field = item(app.window->contentItem(), name)) && field->isVisible());
+            field->forceActiveFocus();
+            QVERIFY(QMetaObject::invokeMethod(field, "selectAll"));
+            for (const char letter : text)
+                QTest::keyClick(app.window, letter);
+        };
+        QObject *editor = app.window->findChild<QObject *>("groupInterfaceEditor");
+        QTRY_VERIFY(editor && editor->property("opened").toBool());
+        QTest::qWait(300); // laid out, and its top edge fixed
+        press("exposedDetails1");
+        typeInto("exposedName1", "noise");
+        press("exposedUp1");
+        QTRY_COMPARE(inputs().value(0).toMap().value("name").toString(), QStringLiteral("noise"));
+
+        // Its Details stay open under the new name, on its new place.
+        typeInto("exposedMin0", "-");
+        press("exposedDown0");
+        QTRY_COMPARE(inputs().value(1).toMap().value("name").toString(), QStringLiteral("noise"));
+        QCOMPARE(inputs().value(1).toMap().value("min").toDouble(), 0.0); // kept, not cleared
+        QVERIFY(inputs().value(1).toMap().value("min").isValid());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // FUGUE_SHOT_DIR=<folder>: the interface editor of a group like the owner's (one model input that sets two nodes, one image
     // output), then with several inputs, dark, light and right to left, and the tab rename popup. Pictures only; nothing is
     // asserted.
