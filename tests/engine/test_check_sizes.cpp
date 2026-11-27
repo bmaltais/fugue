@@ -145,6 +145,8 @@ private slots:
         check = checkGraph(world.graph(nodes), world.environment());
         QCOMPARE(check.states.value("p"), NodeState::Cached);
         QCOMPARE(check.sizes.value("h").value("pic"), QSize(5, 3)); // 10 x 6 halved
+        // The cached node itself reports its real picture, not what it predicted (#671).
+        QCOMPARE(check.sizes.value("p").value("pic"), QSize(10, 6));
     }
 
     // After a run the nodes are cached; the sizes are still there, and a change of the source's size moves every one after it.

@@ -1751,6 +1751,18 @@ private:
         emitEvent(withShown(event, n.shown));
     }
 
+    // The sizes the check reports for a node: its kernel's prediction, but the real size of a picture the node already has (a cached
+    // or frozen result is the truth, and the prediction can differ from it: #671).
+    PictureSizes shownSizes(const NodeRun &n) const {
+        PictureSizes sizes = n.sizes;
+        if (m_dry)
+            for (auto output = n.outputs.cbegin(); output != n.outputs.cend(); ++output)
+                if (const Value &value = output.value();
+                    value.isMedia() && value.media().type() == MediaType::Image && value.media().width() > 0)
+                    sizes.insert(output.key(), QSize(value.media().width(), value.media().height()));
+        return sizes;
+    }
+
     void finish() {
         bool anyError = false;
         bool anyCancelled = false;
@@ -1761,8 +1773,8 @@ private:
                 m_outcome.keys.insert(path, n.key);
             if (!n.outputs.isEmpty())
                 m_outcome.outputs.insert(path, n.outputs);
-            if (!n.sizes.isEmpty())
-                m_outcome.sizes.insert(path, n.sizes);
+            if (const PictureSizes sizes = shownSizes(n); !sizes.isEmpty())
+                m_outcome.sizes.insert(path, sizes);
             anyError = anyError || n.state == NodeState::Error;
             anyCancelled = anyCancelled || (n.state == NodeState::Skipped && n.reason == QLatin1String("cancelled"));
         }

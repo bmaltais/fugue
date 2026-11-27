@@ -936,10 +936,11 @@ Item {
                         y: ((node.collapsed ? node.height : node.canvasModel.headerHeight) - height) / 2
                         spacing: face.u
                         // A size known before a run gives way to the title: it shows only when the title in full, the size and the
-                        // other meta (warnings, pin, state glyph; estimated, so this never waits on meta.width) fit the header.
-                        // Implicit widths only, so it does not loop with the title's elision.
-                        readonly property real otherWidth: (node.warnings.length > 0 ? 10 + face.u : 0)
-                            + ((node.warnings.length > 0 ? 1 : 0) + (node.pinned ? 1 : 0) + (face.stateGlyph !== "" ? 1 : 0)) * (14 + face.u)
+                        // other meta (warnings, pin, state glyph, each with the row's spacing) fit the header. Their real implicit
+                        // widths, none of which depends on this row's width, so it does not loop with the title's elision.
+                        readonly property real otherWidth: (warningsLoader.active ? warningsLoader.width + face.u : 0)
+                            + (node.pinned ? pinMark.implicitWidth + face.u : 0)
+                            + (face.stateGlyph !== "" ? stateMark.implicitWidth + face.u : 0)
                         readonly property bool sizeFits: titleText.implicitWidth + captionText.implicitWidth + otherWidth + 4 * face.u
                             <= node.width - titleText.x - 2.5 * face.u - (face.compact && face.full ? 14 + face.u : 0)
                         Text {
@@ -956,6 +957,7 @@ Item {
                         // Warnings: a count and the triangle, in the label color. Hovered, they
                         // show the warnings; a click keeps them up (#72; the canvas's one card).
                         Loader {
+                            id: warningsLoader
                             // Made only while the node has warnings: no items for the others.
                             active: node.warnings.length > 0
                             visible: active
@@ -1011,6 +1013,7 @@ Item {
                             }
                         }
                         Glyph {
+                            id: pinMark
                             visible: node.pinned
                             anchors.verticalCenter: parent.verticalCenter
                             name: "pin"

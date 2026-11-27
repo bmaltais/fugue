@@ -1351,6 +1351,12 @@ private slots:
         QVERIFY(r.app.model.widgets()->setValue("rz", "width", 64).isEmpty());
         QTRY_COMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("128 \u00d7 96"));
         QCOMPARE(r.role("up", NodeList::ThumbnailInfo).toString(), QStringLiteral("80 \u00d7 60"));
+        // Where the node shows no picture (so no chip), the stale node says the size its next run makes, not the last one's (#671).
+        QVERIFY(r.app.commands.trigger("view.picture-sinks"));
+        QTRY_COMPARE(r.role("up", NodeList::ThumbnailInfo).toString(), QString());
+        QCOMPARE(r.role("up", NodeList::PredictedSize).toString(), QStringLiteral("128 \u00d7 96"));
+        // A cached node is not predicted at all: the check reports the size it really has (#671), which is the chip's.
+        QCOMPARE(r.role("src", NodeList::PredictedSize).toString(), QString());
     }
 
     // #600: a kernel's own check() error (Expression's formula that does not parse) shows on its node
