@@ -24,6 +24,7 @@ Compilation compileForRun(const Document &document, Registry &registry, const Ru
     }
     CompileOptions options;
     options.target = request.target;
+    options.from = request.from;
     options.provider = request.provider;
     options.entered = request.entered;
     if (setup.registerProviders)

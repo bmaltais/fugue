@@ -88,7 +88,7 @@ private slots:
         CommandRegistry registry;
         fugue::registerDefaultCommands(registry);
         QVERIFY2(registry.problems().isEmpty(), qPrintable(registry.problems().join('\n')));
-        for (const char *id : {"run.start", "run.start-first", "run.to-here", "run.cancel", "file.new", "file.open",
+        for (const char *id : {"run.start", "run.start-first", "run.to-here", "run.from-here", "run.cancel", "file.new", "file.open",
                                "file.save", "file.save-as", "file.close", "app.quit", "app.shortcuts", "app.settings",
                                "edit.undo", "edit.redo", "edit.copy", "edit.paste", "edit.paste-connected", "edit.clone",
                                "edit.delete", "edit.select-all", "edit.rename", "node.bypass", "node.mute",

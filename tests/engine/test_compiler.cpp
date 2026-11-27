@@ -204,6 +204,7 @@ private slots:
     void aSinkThatWritesInsideAGroupIsDroppedAndItsReadersEmptied();
     void aMutedUpstreamOfAnUnneededViewSinkSaysNothingOfIt();
     void runToHereKeepsOnlyWhatTheTargetNeeds();
+    void runFromHereKeepsTheSinksAfterTheNode();
     void unknownTargetIsAUsageError();
     void providerPinsAreResolvedAndChecked();
     void nodesOfUntrustedPacksFailAtTheInstalledVersion();
@@ -901,6 +902,36 @@ void TestCompiler::runToHereKeepsOnlyWhatTheTargetNeeds() {
     QCOMPARE(result->toJson().value("target").toString(), QString("g7/gen"));
     QCOMPARE(result->skipped.value("save"), QString("not_part_of_output"));
     QVERIFY(result->sinks().isEmpty());
+}
+
+void TestCompiler::runFromHereKeepsTheSinksAfterTheNode() {
+    // a feeds b, which feeds sink p1; a also feeds c, which feeds sink p2 (not after b); d feeds p3 alone.
+    const Document doc = document(
+        "{'fugue': 1, 'graph': {'nodes': {"
+        "'a': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'x'}},"
+        "'b': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': {'from': 'a.text'}}},"
+        "'p1': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'b.image'}}},"
+        "'c': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': {'from': 'a.text'}}},"
+        "'p2': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'c.image'}}}}}}");
+    CompileOptions options;
+    options.from = "b";
+    const Compilation result = compile(doc, registry(), options);
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY2(result.problems().isEmpty(), qPrintable(dump(result.problems()))); // no warning for what was left out
+    QCOMPARE(result->nodes.keys(), (QStringList{"a", "b", "p1"}));
+    QCOMPARE(result->sinks(), QStringList{"p1"});
+    QCOMPARE(result->from, QString("b"));
+    QVERIFY(result->target.isEmpty());
+    QCOMPARE(result->skipped.value("p2"), QString("not_part_of_output"));
+    QCOMPARE(CompiledGraph::fromJson(result->toJson())->from, QString("b"));
+
+    // No sink after the node: it is the end point, as Run to here.
+    options.from = "c";
+    const Compilation node = compile(doc, registry(), options);
+    QVERIFY2(node.ok(), qPrintable(dump(node.problems())));
+    QCOMPARE(node->nodes.keys(), (QStringList{"a", "c", "p2"}));
+    options.from = "gone";
+    QCOMPARE(compile(doc, registry(), options).problems().first().code, QString("usage"));
 }
 
 void TestCompiler::unknownTargetIsAUsageError() {

@@ -94,6 +94,9 @@ struct CompiledGraph {
     // their own values (#600). Never run and not in toJson.
     QMap<QString, CompiledNode> unused;
     QString target; // for "run to here": the path id the run stops at, or empty
+    // For "run from here" (3.4): the path id the run starts at, or empty. The graph keeps it, the sinks downstream of it and what
+    // they need; with no sink downstream it is the end point, as a target would be.
+    QString from;
 
     // --- dependencies, for the scheduler ---
 
@@ -114,7 +117,7 @@ struct CompiledGraph {
 
     // --- JSON (4.8) ---
 
-    // {"fugue-compiled": 1, "source", "nodes", "skipped", "target"?}. Each
+    // {"fugue-compiled": 1, "source", "nodes", "skipped", "target"?, "from"?}. Each
     // node has `type`, `version`, `inputs`, and `sink`, `provider` and
     // `frozen` only when set. Write it with writeJson (RunFolder::writeCompiled).
     QJsonObject toJson() const;
@@ -129,6 +132,10 @@ struct CompileOptions {
     // are kept, and no sink is added. A path id that is not a node of the
     // flattened graph is the error `usage`.
     QString target;
+    // "Run from here" (3.4): a path id. Kept are it, every sink that is a descendant of it, and what those need; no other
+    // sink. Demanded itself, so it runs even when no sink follows. A path id that is not a node that runs is the error
+    // `usage`, as for `target`. Both set is not meaningful: target wins.
+    QString from;
     // The canvas's entered group instance (5.5), as a path id ("g7", "g7/inner3"): while the
     // user is inside it, its own sinks work (not those of groups nested in it).
     QString entered;

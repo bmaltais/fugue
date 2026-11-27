@@ -175,6 +175,7 @@ QList<QPair<const char *, const char *>> menuLabels() {
         {"panel.queue", QT_TRANSLATE_NOOP("Command", "Run queue")},
         {"run.start-first", QT_TRANSLATE_NOOP("Command", "Run first in the queue")},
         {"run.to-here", QT_TRANSLATE_NOOP("Command", "Run to here")},
+        {"run.from-here", QT_TRANSLATE_NOOP("Command", "Run from here")},
         {"run.cancel", QT_TRANSLATE_NOOP("Command", "Cancel run")},
     };
 }
@@ -258,6 +259,7 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     });
     // Run to here runs up to one node (spec 12.4); with several selected it would do nothing.
     registry.setEnabledWhen("run.to-here", [model] { return model->selectedIds().size() == 1; });
+    registry.setEnabledWhen("run.from-here", [model] { return model->selectedIds().size() == 1; });
     for (const char *id : {"edit.select-all", "edit.clear", "view.fit", "run.start", "run.start-first",
                            "file.export-share", "file.export-compiled"})
         registry.setEnabledWhen(QString::fromLatin1(id), hasNodes);

@@ -1502,7 +1502,8 @@ FocusScope {
                 Repeater {
                     // Always there: Bypass, Frame, Delete (off when they cannot act), the colors and
                     // the menu; the rest only where they apply.
-                    model: [{command: "run.to-here", glyph: "play"},
+                    model: [{command: "run.to-here", glyph: "arrow-right-to-line"},
+                            {command: "run.from-here", glyph: "arrow-right-from-line"},
                             {command: "node.bypass", glyph: "corner-down-right"},
                             {command: "colors", glyph: "palette"}, {command: "frame.make", glyph: "frame"},
                             {command: "group.enter", glyph: "log-in"}, {command: "node.open-image", glyph: "image"},

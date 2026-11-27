@@ -184,6 +184,7 @@ void CanvasRuns::registerCommands(CommandRegistry &commands) {
     commands.setHandler(QStringLiteral("run.start"), [this] { start(false); });
     commands.setHandler(QStringLiteral("run.start-first"), [this] { start(true); });
     commands.setHandler(QStringLiteral("run.to-here"), [this] { runToSelected(); });
+    commands.setHandler(QStringLiteral("run.from-here"), [this] { runFromSelected(); });
     commands.setHandler(QStringLiteral("run.cancel"), [this] { cancel(); });
     setContext();
 }
@@ -199,13 +200,18 @@ QString CanvasRuns::runToSelected() {
     return selected.size() == 1 ? startRun(keyFor(selected.first()), false) : QString();
 }
 
-QString CanvasRuns::startRun(const QString &target, bool first) {
+QString CanvasRuns::runFromSelected() {
+    const QStringList selected = m_canvas->selectedIds();
+    return selected.size() == 1 ? startRun({}, false, keyFor(selected.first())) : QString();
+}
+
+QString CanvasRuns::startRun(const QString &target, bool first, const QString &from) {
     const QString tab = currentTab();
     if (tab.isEmpty())
         return {};
     QString firstId;
     for (int i = 0; i < m_batch; ++i) {
-        const QString id = startOne(tab, target, first);
+        const QString id = startOne(tab, target, first, from);
         if (firstId.isEmpty())
             firstId = id;
     }
@@ -236,9 +242,17 @@ bool CanvasRuns::showResults(const QString &run, const QString &workflow) {
     return true;
 }
 
-QString CanvasRuns::startOne(const QString &tab, const QString &target, bool first) {
+QString CanvasRuns::startOne(const QString &tab, const QString &target, bool first, const QString &from) {
     RunRequest request;
-    request.document = m_canvas->document();
+    // Run from here: the run's copy has the seeds before the node as their shown results; the canvas's document stays as it is.
+    QSet<QString> held;
+    if (from.isEmpty()) {
+        request.document = m_canvas->document();
+    } else {
+        const QString row = rowFor(from);
+        request.document = m_canvas->widgets()->holdUpstream(row, &held);
+    }
+    request.from = from;
     request.workflow = m_workflows->pathOf(m_workflows->current());
     request.target = target;
     request.entered = m_canvas->scopePath();
@@ -246,7 +260,7 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     request.noPictures = noPictures();
     const QString id = m_service->start(request);
     // The run has the numbers shown; the next one gets the next (spec 6.2).
-    m_canvas->widgets()->advanceSeeds();
+    m_canvas->widgets()->advanceSeedsExcept(held);
     // The run is newer than any edit so far, the seeds' own included: the check after it
     // keeps the run's errors (they go with the next edit). A check due from an edit before
     // the run cleared them when it landed after a short run.

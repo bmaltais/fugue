@@ -369,13 +369,15 @@ private slots:
         App app(load(framed));
         QVERIFY(app.open());
         QVERIFY(!find(app.window, "selectionToolbar"));
+        for (const char *id : {"run.to-here", "run.from-here"}) // the two run buttons show once a handler is there
+            app.commands.setHandler(QLatin1String(id), [] {});
         app.model.select({"c"});
         QQuickItem *bar = nullptr;
         QTRY_VERIFY((bar = find(app.window, "selectionToolbar")) != nullptr);
         // Above the node, inside the window.
         const QRectF node = app.model.nodeRect("c");
         QVERIFY(bar->mapToScene(QPointF(0, bar->height())).y() <= app.screen(node.x(), node.y()).y());
-        for (const char *button : {"toolbar-node.bypass", "toolbar-colors", "toolbar-edit.delete", "toolbar-more"})
+        for (const char *button : {"toolbar-run.to-here", "toolbar-run.from-here", "toolbar-node.bypass", "toolbar-colors", "toolbar-edit.delete", "toolbar-more"})
             QVERIFY2(find(app.window, button), button);
         QVERIFY(!find(app.window, "toolbar-group.enter")); // not a group
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("toolbar-node.bypass")));
@@ -484,13 +486,15 @@ private slots:
     void commandsAreOnOnlyWhenTheyCanAct() {
         App app(load(framed));
         QVERIFY(app.open());
-        for (const char *id : {"run.to-here", "run.start", "run.start-first", "file.export-share", "file.export-compiled"})
+        for (const char *id : {"run.to-here", "run.from-here", "run.start", "run.start-first", "file.export-share", "file.export-compiled"})
             if (!app.commands.isEnabled(QLatin1String(id)) && !app.commands.entry(QLatin1String(id)).value("available").toBool())
                 app.commands.setHandler(QLatin1String(id), [] {});
         app.model.select({"a"});
         QVERIFY(app.commands.isEnabled("run.to-here"));
+        QVERIFY(app.commands.isEnabled("run.from-here"));
         app.model.select({"a", "b"});
         QVERIFY(!app.commands.isEnabled("run.to-here"));
+        QVERIFY(!app.commands.isEnabled("run.from-here"));
         for (const char *id : {"run.start", "run.start-first", "file.export-share", "file.export-compiled"})
             QVERIFY2(app.commands.isEnabled(QLatin1String(id)), id);
         app.model.selectAll();

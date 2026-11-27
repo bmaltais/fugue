@@ -30,6 +30,7 @@ QList<Row> defaultRows() {
         {"run.start-first", QT_TRANSLATE_NOOP("Command", "Run, ahead of the queue"), {"Ctrl+Shift+Return"}, {}, "app", same},
         {"run.to-here", QT_TRANSLATE_NOOP("Command", "Run to the selected node"), {"Shift+Return"}, {}, "app", "added"},
         {"run.cancel", QT_TRANSLATE_NOOP("Command", "Cancel the run"), {"Ctrl+Alt+Return", "Escape"}, {}, "run", "Escape added"},
+        {"run.from-here", QT_TRANSLATE_NOOP("Command", "Run from the selected node"), {}, {}, "app", "added"},
         {"file.new", QT_TRANSLATE_NOOP("Command", "New workflow"), {"Ctrl+N"}, {}, "app", "added"},
         {"file.open", QT_TRANSLATE_NOOP("Command", "Open"), {"Ctrl+O"}, {}, "app", same},
         {"file.save", QT_TRANSLATE_NOOP("Command", "Save"), {"Ctrl+S"}, {}, "app", same},

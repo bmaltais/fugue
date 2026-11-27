@@ -94,6 +94,21 @@ const QByteArray kChain = R"({
   "layout": {"nodes": {"words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "rz": {"pos": [600, 0]}, "show": {"pos": [900, 0]}}}
 })";
 
+// Run from here (#701): a Generate Image, two Resizes of its picture, each shown by a Preview.
+const QByteArray kBranches = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a cat"}},
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "words.text"}, "seed": 5}},
+    "rz": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}, "width": 160, "height": 120}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz.image"}}},
+    "rz2": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}, "width": 80, "height": 60}},
+    "show2": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz2.image"}}}
+  }},
+  "layout": {"nodes": {"words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "rz": {"pos": [600, 0]}, "show": {"pos": [900, 0]},
+                       "rz2": {"pos": [600, 300]}, "show2": {"pos": [900, 300]}}}
+})";
+
 QByteArray png(int width, int height) {
     QImage image(width, height, QImage::Format_RGB32);
     image.fill(Qt::darkCyan);
@@ -1664,6 +1679,60 @@ private slots:
         QVERIFY(r.state("show") != QLatin1String("cached") && r.state("show") != QLatin1String("running"));
         r.runs->checkNow();
         QTRY_COMPARE(r.state("show"), QStringLiteral("stale"));
+    }
+
+    // Run from here (#701): the nodes before the selected one are held as the shown result had them, so they are cache hits; the
+    // selected node and the sinks after it run, a sink beside them does not, and the canvas's own seed is left as it was.
+    void runFromHereHoldsARandomSeedUpstreamAndRunsOnlyWhatFollows() {
+        RunApp r(kBranches);
+        QVERIFY(r.app.open());
+        r.app.model.widgets()->setSeedMode("gen", "seed", "random");
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QVERIFY(!r.runs->start().isEmpty());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QTRY_COMPARE(r.state("show2"), QStringLiteral("cached"));
+        // Both Resizes change; only the one at the selection, and what follows it, is run.
+        r.app.model.widgets()->setValue("rz", "width", 100);
+        r.app.model.widgets()->setValue("rz2", "width", 90);
+        r.app.model.select({"rz"});
+        QVERIFY(!r.runs->runFromSelected().isEmpty());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(finished.last().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), 1); // gen was a cache hit: its random seed was held, not drawn again
+        QCOMPARE(r.app.model.widgets()->seedMode("gen", "seed"), QStringLiteral("random")); // the canvas document is as it was
+        QTRY_COMPARE(r.state("rz"), QStringLiteral("cached"));
+        QTRY_COMPARE(r.state("show"), QStringLiteral("cached"));
+        r.runs->checkNow();
+        QTRY_COMPARE(r.state("rz2"), QStringLiteral("stale")); // not downstream: it did not run
+        QCOMPARE(r.state("show2"), QStringLiteral("stale"));
+    }
+
+    // The increment seeds that were held are not advanced by the run; the ones after the node are.
+    void runFromHereLeavesAHeldIncrementSeedWhereItWas() {
+        RunApp r(kBranches);
+        QVERIFY(r.app.open());
+        r.app.model.widgets()->setSeedMode("gen", "seed", "increment");
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QVERIFY(!r.runs->start().isEmpty());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QTRY_COMPARE(r.state("show"), QStringLiteral("cached"));
+        QCOMPARE(r.app.model.widgets()->value("gen", "seed").toInt(), 6); // used 5, shows the next
+        r.app.model.widgets()->setValue("rz", "width", 100);
+        r.app.model.select({"rz"});
+        QVERIFY(!r.runs->runFromSelected().isEmpty());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(r.jobs().size(), 1); // seed 5 again: gen is a cache hit
+        QCOMPARE(r.app.model.widgets()->value("gen", "seed").toInt(), 6); // not advanced
+        // Run to here on the same node still takes the seed shown.
+        QVERIFY(!r.runs->runToSelected().isEmpty());
+        QTRY_COMPARE(r.jobs().size(), 2);
+        QCOMPARE(r.app.model.widgets()->value("gen", "seed").toInt(), 7);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
     }
 
     // A run of the window waits in the queue the CLI's workers share, behind theirs.
