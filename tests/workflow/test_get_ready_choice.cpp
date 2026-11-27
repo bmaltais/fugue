@@ -98,16 +98,19 @@ private slots:
     void aKeptPartIsShownAsPartial() {
         Rig rig({}, {model("part-model.safetensors", hashA, 2.0e9)});
         rig.sheet.show();
-        QVERIFY(!rig.row(0).value("partial").toBool());
         const QString folder = rig.row(0).value("folder").toString();
         QVERIFY(QDir::isAbsolutePath(folder));
-        QDir().mkpath(folder);
         QFile part(folder + "/part-model.safetensors.part");
+        part.remove(); // the test home outlives a run
+        rig.sheet.refresh();
+        QVERIFY(!rig.row(0).value("partial").toBool());
+        QDir().mkpath(folder);
         QVERIFY(part.open(QIODevice::WriteOnly));
         part.write("half");
         part.close();
         rig.sheet.refresh();
         QVERIFY(rig.row(0).value("partial").toBool());
+        part.remove();
     }
 
     // #594: a model only another branch needs is listed apart, "Not now" by default (the yes downloads nothing of it, and with nothing

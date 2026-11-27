@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QTextStream>
 
+#include <poll.h>
 #include <unistd.h>
 
 #include <memory>
@@ -68,6 +69,14 @@ Answer yesNo(const QString &question) {
     err << question << " [y/N] ";
     err.flush();
     static QTextStream in(stdin); // one reader: a second would lose what the first buffered
+    // Wait for the line in slices: a Ctrl-C or a TERM ends the wait (the read would retry after the signal), and counts as no.
+    for (;;) {
+        if (stopRequested())
+            return Answer::No;
+        pollfd fd{STDIN_FILENO, POLLIN, 0};
+        if (poll(&fd, 1, 100) > 0)
+            break;
+    }
     const QString line = in.readLine().trimmed().toLower();
     if (line == QLatin1String("y") || line == QLatin1String("yes"))
         return Answer::Yes;

@@ -516,8 +516,7 @@ private slots:
     void leftoversOfAnInterruptedInstallAreCleanedUp() {
         QDir().mkpath(packs() + "/.staging-old/work");
         const QDateTime past = QDateTime::currentDateTime().addSecs(-3600);
-        QFile marker(packs() + "/.staging-old");
-        QVERIFY(QFile(packs() + "/.staging-old").exists() || QFileInfo(packs() + "/.staging-old").isDir());
+        QVERIFY(QFileInfo(packs() + "/.staging-old").isDir());
         QVERIFY(QProcess::execute("touch", {"-d", past.toString(Qt::ISODate), packs() + "/.staging-old"}) == 0);
         QVERIFY(addPack(makePack(source(), "io.example.tools", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
         QCOMPARE(leftovers(), QStringList{"io.example.tools"});
@@ -542,33 +541,88 @@ private slots:
         QCOMPARE(leftovers(), QStringList{"io.example.tools"});
     }
 
+    // The pid no process has: the kernel's limit is never handed out.
+    static qint64 deadPid() { return QString::fromUtf8(readAll("/proc/sys/kernel/pid_max")).trimmed().toLongLong(); }
+    static void makeOld(const QString &dir) { QVERIFY(QProcess::execute("touch", {"-d", "2 hours ago", dir}) == 0); }
+
     // #418: a staging folder goes by its owner's pid, not by time: a live owner's slow clone stays, a dead one's goes, and a
     // link is never followed.
     void staleFoldersAreAgedByTheirOwner() {
-        QProcess finished;
-        finished.start("true");
-        QVERIFY(finished.waitForFinished(10000));
-        const qint64 dead = 4194000; // above pid_max on a default kernel
-        const auto old = [&](const QString &name) {
+        const qint64 dead = deadPid();
+        QVERIFY(dead > 0);
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        const QString mine = QString(".staging-%1-%2-aaaaaaaaaaaa").arg(QCoreApplication::applicationPid()).arg(now);
+        const QString gone = QString(".staging-%1-%2-bbbbbbbbbbbb").arg(dead).arg(now);
+        for (const QString &name : {mine, gone, QString(".staging-legacy")}) {
             QDir().mkpath(packs() + "/" + name + "/work");
-            QVERIFY(QProcess::execute("touch", {"-d", "2 hours ago", packs() + "/" + name}) == 0);
-        };
-        const QString mine = QString(".staging-%1-aaaaaaaaaaaa").arg(QCoreApplication::applicationPid());
-        const QString gone = QString(".staging-%1-bbbbbbbbbbbb").arg(dead);
-        const QString goneOld = QString(".old-%1-cccccccccccc").arg(dead);
-        old(mine);
-        old(gone);
-        old(goneOld);
-        old(".staging-legacy");
+            makeOld(packs() + "/" + name);
+        }
         QTemporaryDir outside;
         write(outside.path() + "/keep", "x");
-        QVERIFY(QFile::link(outside.path(), packs() + "/.staging-" + QString::number(dead) + "-dddddddddddd"));
+        QVERIFY(QFile::link(outside.path(), packs() + QString("/.staging-%1-%2-dddddddddddd").arg(dead).arg(now)));
         QVERIFY(addPack(makePack(source(), "io.example.tools", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
         QVERIFY(QFileInfo(packs() + "/" + mine + "/work").isDir()); // alive, however old
         QVERIFY(!QFileInfo::exists(packs() + "/" + gone));
-        QVERIFY(!QFileInfo::exists(packs() + "/" + goneOld));
         QVERIFY(!QFileInfo::exists(packs() + "/.staging-legacy")); // no pid to ask: by time, as before
         QVERIFY(QFileInfo(outside.path() + "/keep").isFile()); // the link's target is untouched
+    }
+
+    // #418: an update killed mid-way leaves the old pack in `.old-<pid>-<random>-<folder>`: the sweep puts it back, or deletes it
+    // only when the new copy is whole; a live owner's backup is kept whatever its age.
+    void aDeadOwnersBackupComesBackUnlessTheNewCopyIsWhole() {
+        const QString id = "io.example.tools";
+        const QString dead = QString(".old-%1-aaaaaaaaaaaa-%2").arg(deadPid()).arg(id);
+        const QString live = QString(".old-%1-bbbbbbbbbbbb-%2").arg(QCoreApplication::applicationPid()).arg(id);
+        const QJsonObject setup{{"command", QJsonArray{"true"}}};
+        const auto sweep = [&] { // any stage sweeps
+            const QString other = makePack(source(), "io.example.other", "1.0.0");
+            QVERIFY(addPack(other, {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+            QVERIFY(removePack("io.example.other", packs(), trustStore(), answering(Answer::Yes)).ok());
+        };
+        // The target is missing: the old pack comes back.
+        makePack(packs(), dead, "1.0.0"); // the folder is named dead; the pack inside says id
+        QDir(packs() + "/" + dead).removeRecursively();
+        makePack(source(), id, "1.0.0");
+        QVERIFY(QDir().rename(source() + "/" + id, packs() + "/" + dead));
+        makeOld(packs() + "/" + dead);
+        sweep();
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        QVERIFY(!QFileInfo::exists(packs() + "/" + dead));
+        // The target is a new copy whose setup never finished (no marker): the old pack replaces it.
+        QDir(packs() + "/" + id).removeRecursively();
+        makePack(packs(), id, "1.0.0");
+        QVERIFY(QDir().rename(packs() + "/" + id, packs() + "/" + dead));
+        makePack(packs(), id, "1.1.0", false, setup);
+        sweep();
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        // The target is whole (no setup): the backup is deleted.
+        QDir(packs() + "/" + id).removeRecursively();
+        makePack(packs(), id, "1.1.0");
+        makePack(packs(), dead, "1.0.0");
+        sweep();
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.1.0"));
+        QVERIFY(!QFileInfo::exists(packs() + "/" + dead));
+        // A live owner's backup stays, however old its folder is.
+        makePack(packs(), live, "1.0.0");
+        makeOld(packs() + "/" + live);
+        sweep();
+        QVERIFY(QFileInfo(packs() + "/" + live + "/pack.json").isFile());
+    }
+
+    // #418: the half-made folder is moved aside, not deleted first: one that cannot be deleted (a 0555 folder a setup made) no
+    // longer costs the old pack.
+    void anUpdateStoppedWithALockedFolderStillGetsTheOldPackBack() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        const QString marker = m_dir.path() + "/setup-started";
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir d && touch d/f && chmod 555 d && touch '" + marker + "' && sleep 30"}}};
+        makePack(source(), id, "1.0.1", false, setup);
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.cancelled = [&] { return QFileInfo::exists(marker); };
+        QCOMPARE(updatePacks(id, {}, packs(), trustStore(), prompts).error().code, QString("cancelled"));
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        QVERIFY(!QFileInfo::exists(packs() + "/" + id + "/d"));
+        QProcess::execute("chmod", {"-R", "u+w", packs()}); // so the scratch folder can go
     }
 
     // #418: one command at a time changes the packs folder.
@@ -578,7 +632,11 @@ private slots:
             QLockFile held(packs() + "/.packs.lock");
             held.setStaleLockTime(0);
             QVERIFY(held.tryLock());
-            QCOMPARE(removePack("io.example.tools", packs(), trustStore(), answering(Answer::Yes)).error().code, QString("pack_busy"));
+            PackPrompts prompts = answering(Answer::Yes);
+            prompts.lockWaitMs = 50;
+            const Result<PackSummary> busy = removePack("io.example.tools", packs(), trustStore(), prompts);
+            QCOMPARE(busy.error().code, QString("pack_busy"));
+            QVERIFY(busy.error().message.contains(QString::number(QCoreApplication::applicationPid())));
             QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
         }
         QVERIFY(removePack("io.example.tools", packs(), trustStore(), answering(Answer::Yes)).ok());

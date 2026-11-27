@@ -132,6 +132,7 @@ private:
     void publish();
     // A download's progress: the view is made again at most every kProgressMs (each change rebuilds the sheet's rows in QML).
     void publishSoon();
+    void refreshPartial();
     void setRow(int row, RowState state, const QString &detail);
     void ended(const ReadinessOutcome &outcome);
 
@@ -155,6 +156,7 @@ private:
     QStringList m_retry;
     bool m_ok = false;
     QList<RowState> m_states;
+    QSet<QString> m_partial; // target paths with a kept `.part` (#418)
     QStringList m_details;
     QList<double> m_fractions;
     QVariantMap m_view;

@@ -27,7 +27,13 @@ namespace {
 
 std::atomic<bool> g_stop{false};
 
-void onSignal(int) { g_stop.store(true); }
+// The first signal asks to stop; a second one means the wait is too long for the person, and ends the process as the signal would.
+void onSignal(int number) {
+    if (g_stop.exchange(true)) {
+        ::signal(number, SIG_DFL);
+        ::raise(number);
+    }
+}
 
 Error usageProblem(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("usage"), message, hint); }
 

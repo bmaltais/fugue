@@ -70,6 +70,8 @@ struct PackPrompts {
     std::function<bool()> cancelled;
     // A git clone above this many bytes is refused (0: no limit). A pack is a few files.
     qint64 maxCloneBytes = 0;
+    // How long a change waits for the packs folder's lock, held by another command (#418); then `pack_busy`.
+    int lockWaitMs = 2000;
     // Brings a git source into `workFolder` (an empty folder) and returns the commit it is at; null runs git. For tests, so
     // nothing reaches a network.
     std::function<Result<QString>(const PackSource &, const QString &workFolder)> fetch;
