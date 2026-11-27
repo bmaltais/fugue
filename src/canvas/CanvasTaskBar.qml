@@ -404,20 +404,9 @@ Item {
                     rightPadding: historyButton.width + bar.u
                     font.pixelSize: bar.look.labelSize
                     color: bar.look.text
-                    // The hint is drawn here, not as Material's placeholder, which floats it over the field once focused.
-                    Text {
-                        objectName: "canvasTaskPromptHint"
-                        x: promptField.leftPadding
-                        width: promptField.width - promptField.leftPadding - promptField.rightPadding
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: promptField.text === "" && promptField.preeditText === ""
-                        elide: Text.ElideRight
-                        color: bar.look.label
-                        font.pixelSize: bar.look.labelSize
-                        text: bar.boundsAction ? qsTr("Describe the scene, or leave empty")
-                            : bar.current.hasPrompt === false ? qsTr("No prompt needed: press Generate")
-                            : bar.selection === null ? qsTr("Select an area first") : qsTr("Describe what to put in the selection")
-                    }
+                    placeholderText: bar.boundsAction ? qsTr("Describe the scene, or leave empty")
+                        : bar.current.hasPrompt === false ? qsTr("No prompt needed: press Generate")
+                        : bar.selection === null ? qsTr("Select an area first") : qsTr("Describe what to put in the selection")
                     maximumLength: 2000
                     Accessible.name: qsTr("Prompt")
                     background: Rectangle {

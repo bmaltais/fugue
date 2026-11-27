@@ -17,7 +17,8 @@
 # #509 (2026-11-27): the notices' dismiss buttons (keymapNoticeDismiss, workflowNoticeDismiss) are the kit's ViewButton in place of a stock ToolButton with a Glyph: three items more each, and two more names. (The Batch and Export dialogs' KitProgress are not in the default window.)
 # #616 (UI design 2026-11-26): the workflow notice holds a Loader for Undo (a template opened with the person's files), made only while that line shows: one item more.
 # 2026-11-27 (notices): the workflow and keymap notices are KitNotice, whose card, buttons and lines are made only while it shows (a hidden notice is two items): 23 items fewer, and their dismiss buttons are not there while hidden.
-items 257
+# 2026-11-27, group editor: the group notice's dismiss is the kit's ViewButton in place of a stock ToolButton with a Glyph, as #509 did for the other notices: three items more.
+items 260
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 appViewSwitch 1

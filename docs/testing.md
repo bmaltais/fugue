@@ -90,6 +90,19 @@ test's own temporary folder), because shards run at the same time.
    Templates card also opened the shelf's app under it (2026-11-26). A control uses `TapHandler.WithinBounds`; a named
    `DragThreshold` is for a handler that shares its press on purpose (a row that is also dragged).
 
+## Moving to a new Qt
+
+Fugue needs Qt 6.12 (CMakeLists.txt; [aarch64-ci.md](aarch64-ci.md) and [appimage.md](appimage.md) say why and where it
+comes from). Before moving the minimum or the AppImage's pinned Qt, check what the code takes from Qt's private QML modules,
+which Qt may change without notice, then run the whole suite and look at the pictures that cover them:
+
+- `src/canvas/ThemedTextField.qml` imports `QtQuick.Controls.impl` for `PlaceholderText` (the field's placeholder, which
+  mirrors right to left) and `QtQuick.Controls.Material.impl` for `TextEditingContextMenu` (its right-click cut, copy and
+  paste, Qt 6.11 and later). Checked by `qmllint`, `test_canvas_group_window` (`selectedTextReadsInEveryField`, the shots of
+  `theInterfaceEditorLook`) and a right-click on any field.
+- Qt 6.12.1 does not draw a clipped custom-node item ([ui-ergonomics.md](ui-ergonomics.md), the mask layers): a newer Qt may,
+  and the parent-clips workaround can then go.
+
 ## CI
 
 The full suite runs locally (`bin/test`) before every merge by the owner and agents, so a hosted run repeats that

@@ -143,6 +143,108 @@ private slots:
         QVERIFY(f.groups.exposeCandidates("nothing").isEmpty());
     }
 
+    // The editor says what an exposed port does in words, with the inner nodes' titles and the ports' labels, and lists
+    // what is left to add.
+    void theInterfaceSaysWhatEachPortSetsInWords() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas{&registry};
+        GroupEdit &groups = *canvas.groups();
+        const Result<Document> loaded = Document::load(QByteArray(R"({"fugue": 1,
+          "graph": {"nodes": {
+            "loader": {"type": "fugue/load-models", "version": "1.2.0", "inputs": {}},
+            "encode": {"type": "fugue/text-encode", "version": "1.2.0", "inputs": {"model": {"from": "loader.model"}}},
+            "sample": {"type": "fugue/sampler", "version": "1.5.0",
+                       "inputs": {"model": {"from": "loader.model"}, "conditioning": {"from": "encode.conditioning"}}},
+            "picture": {"type": "fugue/vae-decode", "version": "1.0.0", "inputs": {"latent": {"from": "sample.latent"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "picture.image"}}}}},
+          "layout": {"nodes": {"loader": {"pos": [0, 0]}, "encode": {"pos": [300, 0], "title": "Encode"},
+                               "sample": {"pos": [600, 0], "title": "Sample"}, "picture": {"pos": [900, 0], "title": "Picture"},
+                               "save": {"pos": [1200, 0]}}}})"));
+        QVERIFY(loaded.ok());
+        canvas.setDocument(loaded.value());
+        canvas.select({"encode", "sample", "picture"});
+        const QString instance = groups.makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(groups.problem()));
+        QVERIFY(groups.enterGroup(instance));
+
+        QVariantMap face = groups.groupInterface();
+        QCOMPARE(face.value("inputs").toList().value(0).toMap().value("sets").toString(),
+                 QStringLiteral("Sets Model on Encode and Sample"));
+        const QVariantMap output = face.value("outputs").toList().value(0).toMap();
+        QCOMPARE(output.value("comesFrom").toString(), QStringLiteral("From Image on Picture"));
+        QCOMPARE(output.value("fromNode").toString(), QStringLiteral("picture"));
+        // With no label of its own a port shows the inner one, as the card does.
+        QCOMPARE(face.value("inputs").toList().value(0).toMap().value("shown").toString(), QStringLiteral("Model"));
+        QCOMPARE(output.value("shown").toString(), QStringLiteral("Image"));
+
+        // Two labels on one node: each says where it goes.
+        QVERIFY(groups.exposeInput("sample", "seed"));
+        QVERIFY2(groups.exposeInput("sample", "variation_seed", "seed"), qPrintable(groups.problem()));
+        face = groups.groupInterface();
+        QCOMPARE(face.value("inputs").toList().value(1).toMap().value("sets").toString(),
+                 QStringLiteral("Sets Seed on Sample and Variation seed on Sample"));
+
+        // What is left to add: never a port exposed already.
+        QStringList inputs, outputs;
+        for (const QVariant &choice : groups.exposeChoices(false)) {
+            const QVariantMap map = choice.toMap();
+            inputs << map.value("node").toString() + "." + map.value("port").toString();
+            if (inputs.last() == "sample.steps")
+                QCOMPARE(map.value("title").toString(), QStringLiteral("Sample \u203a Steps"));
+        }
+        for (const QVariant &choice : groups.exposeChoices(true))
+            outputs << choice.toMap().value("node").toString() + "." + choice.toMap().value("port").toString();
+        QVERIFY(inputs.contains("sample.steps"));
+        for (const char *exposed : {"encode.model", "sample.model", "sample.seed", "sample.variation_seed"})
+            QVERIFY2(!inputs.contains(exposed), exposed);
+        QVERIFY(outputs.contains("sample.latent"));
+        QVERIFY(!outputs.contains("picture.image"));
+    }
+
+    // The editor relabels the shown group's output, also one that comes from a group nested in it: never the nested
+    // group's own definition (whose instances are elsewhere too).
+    void relabelingAnOutputFromANestedGroupChangesTheShownGroupOnly() {
+        Fixture f; // gen is a group (inner)
+        const QString inner = f.canvas.document().graph.nodes.value(f.instance).type;
+        f.canvas.select({"prompt", f.instance});
+        const QString outer = f.groups.makeGroup();
+        QVERIFY2(!outer.isEmpty(), qPrintable(f.groups.problem()));
+        QVERIFY(f.groups.enterGroup(outer));
+        const QVariantMap output = f.groups.groupInterface().value("outputs").toList().value(0).toMap();
+        QCOMPARE(output.value("fromNode").toString(), f.instance);
+        QVERIFY2(f.groups.relabelExposedOutput(output.value("name").toString(), "Picture"), qPrintable(f.groups.problem()));
+        const QVariantMap after = f.groups.groupInterface().value("outputs").toList().value(0).toMap();
+        QCOMPARE(after.value("label").toString(), QStringLiteral("Picture"));
+        QCOMPARE(after.value("shown").toString(), QStringLiteral("Picture"));
+        for (const GroupOutput &port : f.canvas.document().groups.value(inner).outputs)
+            QVERIFY2(port.label.isEmpty(), qPrintable(port.label)); // the nested group is untouched
+        QVERIFY(f.groups.relabelExposedOutput(output.value("name").toString(), "")); // empty: the inner label again
+        QCOMPARE(f.groups.groupInterface().value("outputs").toList().value(0).toMap().value("label").toString(), QString());
+    }
+
+    // A range limit that is not a whole number is refused with a reason, never kept as "no limit": a comma the language no
+    // longer reads as a decimal point (the editor hands it on unchanged), a number too large or too small for a double.
+    void aRangeLimitThatIsNotANumberIsRefused() {
+        Fixture f;
+        QVERIFY(f.groups.enterGroup(f.instance));
+        QVERIFY(f.groups.exposeInput("gen", "steps"));
+        QVERIFY(f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"min", "2"}}));
+        const auto min = [&] { return f.groups.groupInterface().value("inputs").toList().last().toMap().value("min"); };
+        QCOMPARE(min().toDouble(), 2.0);
+        const int steps = f.steps();
+        for (const char *text : {"0,5", "1e999", "1e-400"}) {
+            QVERIFY2(!f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"min", text}}), text);
+            QVERIFY2(f.groups.problem().contains(text), qPrintable(f.groups.problem()));
+            QCOMPARE(min().toDouble(), 2.0);
+        }
+        QCOMPARE(f.steps(), steps);
+        // Empty is no limit; a number given as a number (the editor's other fields) is kept.
+        QVERIFY(f.groups.editExposedInput("steps", {{"name", "steps"}, {"type", "number"}, {"min", ""}, {"max", 40}}));
+        QVERIFY(!min().isValid());
+        QCOMPARE(f.groups.groupInterface().value("inputs").toList().last().toMap().value("max").toDouble(), 40.0);
+    }
+
     void aRefusalSetsTheProblemAndAnEditThatWorksClearsIt() {
         Fixture f;
         QSignalSpy changed(&f.groups, &GroupEdit::problemChanged);

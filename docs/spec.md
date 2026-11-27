@@ -894,6 +894,20 @@ with an id and a version, and it appears in node search.
   and outputs, sets labels, sections, ranges, defaults and choices (a subset of the inner input's),
   reorders them and adds inner inputs of the same type to an exposed input. Renaming an exposed
   input or output renames it on every instance, and in the face of every group around it.
+  It also exposes: **Add an input…** and **Add an output…** list the inner ports not exposed yet
+  (node title, then the port's label), as Expose on the group does from a port. Each row shows
+  the label on the card (its placeholder what the card shows when there is none, the inner port's label; an
+  output's label is the shown group's face label, #72) and says what it does with the inner nodes' titles and the ports' labels,
+  never ids: "Sets Model on Encode and Sample", "From Image on Picture" (`GroupEdit::groupInterface`,
+  `sets` and `comesFrom`). The name links and `--set` use, the section, the default, the range,
+  the choices and the type sit under the row's Details; the group's id and version in the name's
+  tooltip. Every change is one undo step at once; Done closes. A row's button or Alt+Up and Alt+Down first keep
+  what the focused field holds, as its own undo step before the action's, and only a whole value (a
+  half-typed number such as "-" is left as it is). A range field takes empty (no limit) or a typed
+  number (docs/ui-ergonomics.md "Typed numbers": a comma is a decimal point only where the language
+  writes one, never a thousands separator). Keys: Tab in reading order (the
+  focus stays where it was when the rows are made again after an edit), Up and Down between the
+  rows' labels, Alt+Up and Alt+Down move a row, Escape closes (docs/ui-ergonomics.md, 2026-11-27).
 - An exposed input or output whose inner node is deleted leaves the face, and every instance
   loses its value or links for it; a group around it that exposed that port loses it too, outwards
   through every level.
@@ -4107,7 +4121,7 @@ canvas model's `appBuilder`); `apps/AppBuilderDialog.qml` only draws it.
   `pruneApp` does everywhere).
 - **What it holds** (the group interface editor's rules, 5.4, where they fit): the **title** (required), **description** and **Opens in**
   (`defaultView`: App or Graph); the **inputs** in the form's order, each with a label (the placeholder is the name the form would
-  say), **Advanced** (the one section the form folds), a range for a number (the placeholder is the target's own), a default, the inner
+  say), **Advanced** (the one section the form folds), a range for a number (the placeholder is the target's own; empty is no limit, a typed number as docs/ui-ergonomics.md "Typed numbers" reads it), a default, the inner
   inputs it sets and **Also set…** (one input drives several of one type, never of two types), Move up and Move down (Alt+Up and
   Alt+Down in a row) and a button to stop asking for it; the **outputs**, each with an optional label and the same ordering. Not in the
   builder (kept as the block has them): choices and their numbers, `optional`, `fallback`, other section names. The role is guessed
@@ -5284,7 +5298,7 @@ Building M2 made these further choices.
 | The engine's reasons stay English for now: a widget's bubble shows checkLiteral's message (`must be at most 12`) as the CLI and agents get it, untranslated, since translating the engine's errors would make their text differ between the window and the JSON the CLI prints; the window's own words, the keymap file's problems included, are translated | 12.11, 6.2 | medium |
 | A color widget's value is checked by the engine (#rrggbb or #rrggbbaa, `type_mismatch` otherwise), for literals, defaults and runs alike | 6.2 | high |
 | One undo step per field visit: each valid text is in the document as it is typed (so a save meanwhile has it), and Enter, Tab or leaving the field ends the step, as does any other edit that begins meanwhile (a command such as Ctrl+B, an undo), so the two stay separate steps; Escape puts a one-line field back, while in a multiline field (Enter is a new line there) it ends the edit and keeps the text, so a prompt is never lost to a key. A drag (spin scrub, slider) is one step; a chevron, toggle, choice or picked file is one each | 6.2, 12.11 | medium-high |
-| Numbers: a dot or a comma as the decimal point (a comma before exactly three digits, as in 1,000, or two separators, as in 1.000,5, is refused as grouping rather than read as another number); empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
+| Numbers: typed as docs/ui-ergonomics.md "Typed numbers" says (2026-11-27, `TypedNumber`, the same rule as every other typed number): a dot is always the decimal point, a comma only where the language writes the decimal point as one (it was any comma, with 1,000 and 1.000,5 refused as grouping); a thousands separator never; a number a double cannot hold is refused. Numbers in a workflow file are JSON numbers and are not read this way, so saved workflows load as before; empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
 | Text: empty is the empty text, except an optional input with no default (a file, a folder), where it unsets | 6.2 | medium |
 | Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number takes the seed of the result the node shows (the run's value on the output of the same name, "Seed used"), else draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
 | The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type (for the node type's capabilities, 8.4), with their state; then the input type's files on disk (8.9), by folder (#76). A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |

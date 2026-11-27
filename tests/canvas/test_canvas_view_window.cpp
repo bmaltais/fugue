@@ -1045,8 +1045,19 @@ private slots:
         // Transform: move 10 right and 20 down.
         viaMenu(app, "Select", "canvas-view.selection-transform");
         QTRY_VERIFY(find(app.window, "canvasTransformMoveX"));
-        find(app.window, "canvasTransformMoveX")->setProperty("text", "10");
+        // Out of range or half-typed: Apply waits, and Enter in another field does not apply (never a silent clamp).
+        QQuickItem *apply = find(app.window, "canvasTransformOk");
+        find(app.window, "canvasTransformScale")->setProperty("text", "5000");
+        QTRY_VERIFY(!apply->isEnabled());
+        find(app.window, "canvasTransformScale")->setProperty("text", "100");
+        find(app.window, "canvasTransformMoveX")->setProperty("text", "-");
+        QVERIFY(!apply->isEnabled());
+        find(app.window, "canvasTransformMoveY")->forceActiveFocus();
         find(app.window, "canvasTransformMoveY")->setProperty("text", "20");
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QVERIFY(app.window->findChild<QObject *>("canvasTransformAsk")->property("visible").toBool());
+        find(app.window, "canvasTransformMoveX")->setProperty("text", "10");
+        QTRY_VERIFY(apply->isEnabled());
         click(app, "canvasTransformOk");
         QTRY_COMPARE(valueAt(105, 140), 255);
         QCOMPARE(valueAt(104, 140), 0);

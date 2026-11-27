@@ -43,10 +43,20 @@ Item {
         moveYField.text = "0"
         transformAsk.open()
     }
+    // A field's typed number (TypedNumber: a comma is a decimal point only where the language writes one) rounded to one
+    // decimal, as the fields' old DoubleValidator allowed; empty or not a number is `fallback`. Apply and Enter wait until
+    // every field is `inRange`, so nothing here is clamped.
     function number(field, fallback) {
-        const v = Number(field.text.replace(",", "."))
-        return isNaN(v) ? fallback : v
+        const v = TypedNumber.parse(field.text)
+        return isNaN(v) ? fallback : Math.round(v * 10) / 10
     }
+    // Whether a field holds a whole number from `bottom` to `top` (empty or half-typed is not).
+    function inRange(field, bottom, top) {
+        const v = TypedNumber.parse(field.text)
+        return !isNaN(v) && v >= bottom && v <= top
+    }
+    readonly property bool transformReady: inRange(scaleField, 1, 1000) && inRange(turnField, -360, 360)
+                                           && inRange(moveXField, -99999, 99999) && inRange(moveYField, -99999, 99999)
     function answerModify() {
         const amount = Math.round(number(amountField, 0))
         if (amount < 1)
@@ -56,7 +66,9 @@ Item {
         modifyAsked(kind, amount)
     }
     function answerTransform() {
-        const scale = Math.max(1, number(scaleField, 100)) / 100
+        if (!transformReady)
+            return
+        const scale = number(scaleField, 100) / 100
         transformAsk.close()
         transformAsked(number(moveXField, 0), number(moveYField, 0), scale, scale, number(turnField, 0))
     }
@@ -79,7 +91,7 @@ Item {
                     inputMethodHints: Qt.ImhDigitsOnly
                     validator: IntValidator { bottom: 1; top: 250 }
                     selectByMouse: true
-                    onAccepted: modifyOk.clicked()
+                    onAccepted: if (modifyOk.enabled) root.answerModify()
                 }
                 Label { text: qsTr("pixels") }
             }
@@ -120,9 +132,16 @@ Item {
                     id: scaleField
                     objectName: "canvasTransformScale"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: 1; top: 1000; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
-                    onAccepted: transformOk.clicked()
+                    // Out of range or half-typed: the text in the error colour, and Apply waits.
+                    readonly property bool ready: root.inRange(scaleField, 1, 1000)
+                    color: ready ? root.look.text : root.look.error
+                    ToolTip.text: qsTr("From %1 to %2").arg(1).arg(1000)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: root.look.tooltipDelay
+                    Accessible.description: ToolTip.text
+                    onAccepted: root.answerTransform() // only when every field is ready
                 }
                 Label { text: "%" }
                 Label { text: qsTr("Rotate") }
@@ -130,9 +149,16 @@ Item {
                     id: turnField
                     objectName: "canvasTransformRotate"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: -360; top: 360; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
-                    onAccepted: transformOk.clicked()
+                    // Out of range or half-typed: the text in the error colour, and Apply waits.
+                    readonly property bool ready: root.inRange(turnField, -360, 360)
+                    color: ready ? root.look.text : root.look.error
+                    ToolTip.text: qsTr("From %1 to %2").arg(-360).arg(360)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: root.look.tooltipDelay
+                    Accessible.description: ToolTip.text
+                    onAccepted: root.answerTransform() // only when every field is ready
                 }
                 Label { text: qsTr("degrees") }
                 Label { text: qsTr("Move right") }
@@ -140,9 +166,16 @@ Item {
                     id: moveXField
                     objectName: "canvasTransformMoveX"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: -99999; top: 99999; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
-                    onAccepted: transformOk.clicked()
+                    // Out of range or half-typed: the text in the error colour, and Apply waits.
+                    readonly property bool ready: root.inRange(moveXField, -99999, 99999)
+                    color: ready ? root.look.text : root.look.error
+                    ToolTip.text: qsTr("From %1 to %2").arg(-99999).arg(99999)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: root.look.tooltipDelay
+                    Accessible.description: ToolTip.text
+                    onAccepted: root.answerTransform() // only when every field is ready
                 }
                 Label { text: qsTr("pixels") }
                 Label { text: qsTr("Move down") }
@@ -150,9 +183,16 @@ Item {
                     id: moveYField
                     objectName: "canvasTransformMoveY"
                     Layout.preferredWidth: 16 * root.u
-                    validator: DoubleValidator { bottom: -99999; top: 99999; decimals: 1; notation: DoubleValidator.StandardNotation }
+                    validator: RegularExpressionValidator { regularExpression: TypedNumber.pattern }
                     selectByMouse: true
-                    onAccepted: transformOk.clicked()
+                    // Out of range or half-typed: the text in the error colour, and Apply waits.
+                    readonly property bool ready: root.inRange(moveYField, -99999, 99999)
+                    color: ready ? root.look.text : root.look.error
+                    ToolTip.text: qsTr("From %1 to %2").arg(-99999).arg(99999)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: root.look.tooltipDelay
+                    Accessible.description: ToolTip.text
+                    onAccepted: root.answerTransform() // only when every field is ready
                 }
                 Label { text: qsTr("pixels") }
             }
@@ -169,7 +209,7 @@ Item {
                     objectName: "canvasTransformOk"
                     text: qsTr("Apply")
                     highlighted: true
-                    enabled: scaleField.acceptableInput && turnField.acceptableInput && moveXField.acceptableInput && moveYField.acceptableInput
+                    enabled: root.transformReady
                     onClicked: root.answerTransform()
                 }
             }

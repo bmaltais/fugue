@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QScopeGuard>
 #include <QtTest>
 #include <QUndoStack>
 
@@ -111,19 +112,24 @@ private slots:
         QVERIFY(!f.edits.setText("all", "count", "lots").isEmpty());
         QCOMPARE(f.stored("all", "count"), QJsonValue(12));
         QCOMPARE(f.steps(), 1);
-        // A comma works as the decimal separator too; spaces around do not matter.
-        QCOMPARE(f.edits.setText("all", "amount", " 0,25 "), QString());
+        // Typed numbers follow one rule (typed_number.h): a point always; a comma only where the language writes the
+        // decimal point as one; never a thousands separator. Spaces around do not matter.
+        const QLocale before;
+        const auto restore = qScopeGuard([&] { QLocale::setDefault(before); });
+        QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+        QVERIFY(f.edits.setText("all", "amount", " 0,25 ").contains("separator")); // never 25, never 0.25 in English
+        QCOMPARE(f.edits.setText("all", "amount", " 0.25 "), QString());
         QCOMPARE(f.stored("all", "amount"), QJsonValue(0.25));
-        // A comma before three digits reads as a thousands separator, so it is refused, not
-        // taken for 1; so is a number with both separators.
         for (const char *grouped : {"1,000", "12,500", "1.000,5", "1,000.5"}) {
             const QString why = f.edits.setText("all", "count", grouped);
             QVERIFY2(why.contains("separator"), qPrintable(QString::fromLatin1(grouped) + ": " + why));
         }
         QCOMPARE(f.stored("all", "count"), QJsonValue(12));
+        QLocale::setDefault(QLocale(QLocale::Danish, QLocale::Denmark));
         QCOMPARE(f.edits.check("all", "amount", "0,5"), QString());
+        QVERIFY(f.edits.setText("all", "count", "1.000,5").contains("separator"));
         // The same value again is no step.
-        QCOMPARE(f.edits.setText("all", "amount", "0.25"), QString());
+        QCOMPARE(f.edits.setText("all", "amount", "0,25"), QString());
         QCOMPARE(f.steps(), 2);
         f.canvas.undo();
         QCOMPARE(f.stored("all", "amount"), QJsonValue(QJsonValue::Undefined));

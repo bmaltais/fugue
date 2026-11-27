@@ -1,4 +1,5 @@
 import QtQuick
+import Fugue
 
 // A widget's one-line field while it is typed into (spin, slider, seed, line, file, folder,
 // color, a model's name). Each valid text is in the document as it is typed, and the whole
@@ -78,8 +79,8 @@ Rectangle {
             event.accepted = false
             return
         }
-        const typed = Number(input.text.trim().replace(",", "."))
-        const from = input.text.trim() !== "" && !isNaN(typed) ? typed : host.number
+        const typed = TypedNumber.parse(input.text) // NaN for empty or not a number (TypedNumber's one rule)
+        const from = !isNaN(typed) ? typed : host.number
         input.text = host.edits.numberText(host.edits.stepped(host.nodeId, host.name, from, steps))
         host.error = host.edits.preview(input.text)
     }
