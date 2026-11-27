@@ -1213,7 +1213,7 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole (no setup, or its marker
   `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped), deleting the others only
   then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
-  at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` (after a Stop or a failure) as "partial, will resume: 412 MB of 850 MB", and its open row offers **Delete partial download**. A stop's message is a plain note, not an error: it names a download (kept, Try again resumes it), an install (undone) or a setup (may be run again) only when that was running.
+  at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` (after a Stop or a failure) as **Paused**, "412 MB of 850 MB", with a trash button on the row (**Delete the partial download**); the headline counts what is left ("download 2 models, 967 MB left") and the retry button says **Resume** while a part is kept. A stop's message is a plain note, not an error: it names a download ("Downloads keep what they had."), an install (undone) or a setup (may be run again) only when that was running.
 - A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
   offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by
   this same question and trusted by the same one ([6.7](#67-trust)), never silently, and what
@@ -2416,7 +2416,7 @@ it as a module folder and run it with no code of its own in Fugue.
   A mismatch, or a size other than `requires` records, deletes the part
   (`download_mismatch`). A break is taken up again with a Range request (five times, the wait
   doubling from 2 s; 60 s of silence is a break); a part an earlier Fugue left is hashed and
-  resumed; a Stop (Cancel) keeps the part too (an empty one goes), so the next download goes on from it, and Get ready's row of a model with a kept part offers **Delete partial download** (only a regular file, never through a link, not while it runs). Free space is checked once the size is known. Files come one
+  resumed; a Stop (Cancel) keeps the part too (an empty one goes), so the next download goes on from it, and Get ready's row of a model with a kept part offers a trash button, **Delete the partial download** (only a regular file, never through a link, not while it runs). Free space is checked once the size is known. Files come one
   after another. Any https source is safe to take, since a wrong file is never kept.
 - Catalog (#134): Fugue ships lists of models a person can fetch, for any resource type
   (`src/catalog/*.json`, compiled in; then the catalogs of installed packs, `<pack folder>/catalog/*.json` under the pack

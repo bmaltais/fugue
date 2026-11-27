@@ -242,8 +242,8 @@ Popup {
                                 look: sheet.look
                                 glyph: modelData.choice === "disk" ? "check" : "download"
                                 title: modelData.name
-                                trailing: modelData.choice === "disk" ? qsTr("on disk") : modelData.size
-                                subtitle: [modelData.license, modelData.typeFrom, modelData.partial === true ? qsTr("partial, will resume") + (modelData.partialText !== "" ? ": " + modelData.partialText : "") : ""].filter(t => t !== "").join(" · ")
+                                trailing: modelData.choice === "disk" ? qsTr("on disk") : modelData.partial === true && modelData.partialText !== "" ? modelData.partialText : modelData.size
+                                subtitle: [modelData.license, modelData.typeFrom].filter(t => t !== "").join(" · ")
                                 more: qsTr("From: %1").arg(modelData.host) + "\n"
                                       + (modelData.license !== "" ? qsTr("Licence: %1").arg(modelData.license) + "\n" : "")
                                       + qsTr("Into: %1").arg(modelData.folder)
@@ -252,6 +252,7 @@ Popup {
                                 fraction: modelData.fraction
                                 stateText: modelData.state === "reading" ? qsTr("Reading your file…") + (modelData.fraction >= 0 ? " " + Math.round(modelData.fraction * 100) + "%" : "")
                                            : modelData.state === "running" && modelData.fraction >= 0 ? Math.round(modelData.fraction * 100) + "%"
+                                           : modelData.paused === true ? qsTr("Paused")
                                            : sheet.stateText(modelData.state)
                                 failed: modelData.state === "failed" || modelData.error !== ""
                                 error: failed ? modelData.detail : ""
@@ -262,6 +263,7 @@ Popup {
                                 choiceLocked: sheet.view.busy === true
                                 onChoiceMoved: useDisk => sheet.sheetModel.setChoice(modelData.hash, useDisk)
                                 canDeletePartial: modelData.partial === true && !running
+                                deleteTip: qsTr("Delete the partial download (%1)").arg(modelData.partialSize)
                                 onDeletePartialRequested: sheet.sheetModel.deletePartial(modelData.hash)
                             }
                         }
@@ -480,7 +482,7 @@ Popup {
                     look: sheet.look
                     bordered: true
                     visible: sheet.phase === "finished" && !sheet.view.ok
-                    text: qsTr("Try again")
+                    text: sheet.view.resumes === true ? qsTr("Resume") : qsTr("Try again")
                     onTapped: sheet.sheetModel.show()
                 }
                 KitChip {
