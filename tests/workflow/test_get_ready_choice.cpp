@@ -114,7 +114,7 @@ private slots:
         part.remove();
     }
 
-    // Owner, 2026-11-27: Stop keeps what a download had. The row says "partial, will resume" with its size, the message is a plain note
+    // Owner, 2026-11-27: Stop keeps what a download had. The row says Paused with its size, the retry says Resume and the headline counts what is left, the message is a plain note
     // (not an error), and Delete partial download removes the part (never through a link) and the row stops saying so.
     void aStopKeepsThePartAndItCanBeDeleted() {
         fugue::test::FakeHttpServer server;
@@ -134,6 +134,8 @@ private slots:
         rig.sheet.start();
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(part).size() >= 70000, 10000);
         QVERIFY(!rig.row(0).value("partial").toBool()); // it runs: no flag, and no delete
+        const QString before = rig.view().value("headline").toString();
+        QVERIFY(!rig.view().value("resumes").toBool());
         rig.sheet.deletePartial(hashA);
         QVERIFY(QFileInfo::exists(part));
         rig.sheet.cancel();
@@ -142,14 +144,22 @@ private slots:
         QVERIFY(QFileInfo(part).size() >= 70000);
         QVERIFY(rig.row(0).value("partial").toBool());
         QVERIFY(rig.row(0).value("partialText").toString().contains(" of ")); // "70 KB of 300 KB"
+        QVERIFY(rig.row(0).value("paused").toBool()); // the row says Paused, not "Not done"
+        QVERIFY(!rig.row(0).value("partialSize").toString().isEmpty()); // the trash button's tooltip
+        QVERIFY(rig.view().value("resumes").toBool()); // the retry button says Resume
+        QVERIFY(rig.view().value("headline").toString().contains(" left.")); // what is left, not the whole size
+        QVERIFY(rig.view().value("headline").toString() != before);
         QVERIFY(rig.view().value("stopped").toBool()); // a note, not an error
         QVERIFY(!rig.view().value("ok").toBool());
-        QVERIFY(rig.view().value("message").toString().startsWith("Stopped. The download keeps what it had"));
+        QVERIFY(rig.view().value("message").toString().startsWith("Stopped. Downloads keep what they had."));
         QVERIFY(!rig.view().value("message").toString().contains("install"));
         QVERIFY(!rig.view().value("message").toString().contains("setup"));
         rig.sheet.deletePartial(hashA);
         QVERIFY(!QFileInfo::exists(part));
         QVERIFY(!rig.row(0).value("partial").toBool());
+        QVERIFY(!rig.row(0).value("paused").toBool()); // back to "Not done"
+        QVERIFY(!rig.view().value("resumes").toBool()); // and the retry says Try again
+        QCOMPARE(rig.view().value("headline").toString(), before);
     }
 
     // #594: a model only another branch needs is listed apart, "Not now" by default (the yes downloads nothing of it, and with nothing

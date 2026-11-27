@@ -147,6 +147,10 @@
     "one": "download %n model",
     "other": "download %n models"
   },
+  "download %n models, %1 left": {
+    "one": "download %n model, %1 left",
+    "other": "download %n models, %1 left"
+  },
   "download %n models, %1": {
     "one": "download %n model, %1",
     "other": "download %n models, %1"
@@ -263,7 +267,7 @@
   "Start blank": "Start blank",
   "Stop": "Stop",
   "Stopped.": "Stopped.",
-  "The download keeps what it had: Try again resumes it.": "The download keeps what it had: Try again resumes it.",
+  "Downloads keep what they had.": "Downloads keep what they had.",
   "The install that was running is undone.": "The install that was running is undone.",
   "The setup that was running may have to be run again.": "The setup that was running may have to be run again.",
   "Strong: thick frosted glass.": "Strong: thick frosted glass.",
@@ -894,7 +898,6 @@
   "type from %1": "type from %1",
   "on %1 if it has it": "on %1 if it has it",
   "type from a pack in this list": "type from a pack in this list",
-  "partial, will resume": "partial, will resume",
   "Take this run out of the queue": "Take this run out of the queue",
   "Takes %1": "Takes %1",
   "Templates": "Templates",
@@ -2331,5 +2334,7 @@
   "Used only if a Switch takes its other branch.": "Used only if a Switch takes its other branch.",
   "Download or not now: %1": "Download or not now: %1",
   "only if another branch is chosen": "only if another branch is chosen",
-  "Delete partial download": "Delete partial download"
+  "Delete the partial download (%1)": "Delete the partial download (%1)",
+  "Paused": "Paused",
+  "Resume": "Resume"
 }

@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import Fugue
 import "../canvas"
 import "../kit"
+import "../panels"
 
 // One row of the Get ready sheet (#379, #464), a row of a KitGroup (hairline above unless it is the first, the quiet hover of a list row): a kind glyph, the name, what it takes on the right (size, or the word for its
 // state while it runs), a quieter line under the name (licence, source, "type from <pack>"), a thin bar while it
@@ -41,8 +42,9 @@ Rectangle {
     property string choiceName: qsTr("Use my file or download: %1").arg(title)
     property bool choiceLocked: false
     signal choiceMoved(bool useDisk)
-    // A kept `.part` of this download (not while it runs): the open row offers to delete it.
+    // A kept `.part` of this download (not while it runs): the row's trash button deletes it, with `deleteTip` as its tooltip and name.
     property bool canDeletePartial: false
+    property string deleteTip
     signal deletePartialRequested
 
     readonly property bool expandable: more !== ""
@@ -113,6 +115,17 @@ Rectangle {
                 text: row.trailing
                 color: row.look.label
                 font.pixelSize: row.look.textSize
+            }
+            RowTrashButton {
+                objectName: "getReadyDeletePartial-" + row.title
+                visible: row.canDeletePartial
+                look: row.look
+                label: row.deleteTip
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: row.deletePartialRequested()
+                ToolTip.visible: hovered
+                ToolTip.delay: row.look.tooltipDelay
+                ToolTip.text: row.deleteTip
             }
             Glyph {
                 // Reserved even when the row has nothing to open, so every size sits on one edge.
@@ -188,15 +201,6 @@ Rectangle {
             wrapMode: Text.Wrap
             color: row.look.label
             font.pixelSize: row.look.labelSize
-        }
-        KitChip {
-            objectName: "getReadyDeletePartial-" + row.title
-            visible: row.open && row.canDeletePartial
-            Layout.leftMargin: 6 * row.u
-            Layout.topMargin: 0.5 * row.u
-            look: row.look
-            text: qsTr("Delete partial download")
-            onTapped: row.deletePartialRequested()
         }
         RowLayout {
             visible: row.error !== ""

@@ -537,7 +537,7 @@ void ReadinessSheet::ended(const ReadinessOutcome &outcome) {
         // What the stop did, only for what was running; the rows say what is not done.
         QStringList said{tr("Stopped.")};
         if (outcome.stoppedDownload)
-            said << tr("The download keeps what it had: Try again resumes it.");
+            said << tr("Downloads keep what they had.");
         if (outcome.stoppedInstall)
             said << tr("The install that was running is undone.");
         if (outcome.stoppedSetup)
@@ -588,10 +588,20 @@ void ReadinessSheet::publish() {
     const qint64 downloadBytes = downloadBytesNow(&downloads, &unknownSize);
     const int uses = int(m_plan.models.size()) - downloads;
     const bool onlyUses = parts.isEmpty() && downloads == 0 && uses > 0;
-    if (downloads > 0)
-        parts << (downloadBytes > 0 ? tr("download %n models, %1", nullptr, downloads)
-                                          .arg((unknownSize ? tr("at least ") : QString()) + ModelDownloads::sizeText(downloadBytes))
-                                    : tr("download %n models", nullptr, downloads));
+    // Kept `.part` files shorten what is left (a stop, a failure, an earlier session): the headline counts that, and the primary says Resume.
+    int paused = 0;
+    qint64 keptBytes = 0;
+    for (const ReadinessModel &m : m_plan.models)
+        if (!usesFile(m) && !m.deferred && m_partial.contains(m.target.path)) {
+            ++paused;
+            keptBytes += m.size >= 0 ? std::min<qint64>(m.size, m_partial.value(m.target.path)) : 0;
+        }
+    if (downloads > 0) {
+        const QString size = (unknownSize ? tr("at least ") : QString()) + ModelDownloads::sizeText(downloadBytes - keptBytes);
+        parts << (downloadBytes <= 0 ? tr("download %n models", nullptr, downloads)
+                  : paused > 0 ? tr("download %n models, %1 left", nullptr, downloads).arg(size)
+                               : tr("download %n models, %1", nullptr, downloads).arg(size));
+    }
     if (uses > 0 && !onlyUses)
         parts << tr("use %n files you already have", nullptr, uses);
     const bool onlyOptional = parts.isEmpty() && downloads == 0 && uses == 0 && m_plan.problems.isEmpty() && !m_plan.optionalModels.isEmpty();
@@ -600,6 +610,7 @@ void ReadinessSheet::publish() {
                        : parts.isEmpty() ? (m_plan.problems.isEmpty() ? tr("There is nothing to get ready.") : tr("Nothing here can be made ready from this machine."))
                                          : tr("Fugue will %1.").arg(joinParts(parts));
     view["hasDownloads"] = downloads > 0;
+    view["resumes"] = paused > 0; // the retry button says Resume while a kept part is left
     view["usesCount"] = uses;
     view["busy"] = m_usesPending;
     // The one primary: Install while anything is installed, trusted, set up or downloaded; "Use my file" when only the person's files are left.
@@ -652,6 +663,8 @@ void ReadinessSheet::publish() {
                               {"typeFrom", !m.deferred ? QString() : m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom)},
                               // A download that stopped keeps its `.part`, and the next one resumes it (#418).
                               {"partial", partial},
+                              {"paused", partial && state != QLatin1String("failed")}, // the row's word: Paused, not "Not done"
+                              {"partialSize", partial ? ModelDownloads::sizeText(m_partial.value(m.target.path)) : QString()},
                               {"partialText", !partial ? QString()
                                               : m.size > 0 ? tr("%1 of %2").arg(ModelDownloads::sizeText(m_partial.value(m.target.path)), ModelDownloads::sizeText(m.size))
                                                            : ModelDownloads::sizeText(m_partial.value(m.target.path))},
