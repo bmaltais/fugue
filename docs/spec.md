@@ -1558,8 +1558,9 @@ A provider instance is a configured use of a provider module, stored in
     The question opens with the focus on No, so a stray Enter or Escape never sends anything; Yes takes Enter only after Tab moves
     the focus to it. The run waits (same run id, nothing queued, nothing sent) for the
     answer; No ends it as cancelled. Several services of one run are one question with a row each; a yes covers each of them. The runs of one batch that
-    need the same answer share one question (a batch of N asks once; yes starts all N in the order they were made, no cancels
-    all). A yes records the services as they were shown (their type and address when the question was made), and a yes that
+    need the same answer share one question (a batch of N asks once; yes starts all N in the order they were clicked, no cancels
+    all). A run that joins an open question may send more kinds of data than the first: the question lists the union and says it again
+    while open. A run cancelled while its own check is under way, or still being checked when the window closes, ends as cancelled. A yes records the services as they were shown (their type and address when the question was made), and a yes that
     cannot be written fails the runs and says so.
   - **Remembered.** A yes is kept in `remote-consent.json` beside `trust.json` in the state folder of the root (so per project,
     0600), `{"instances": {"<name>": "<type>|<address>"}}`. Removing the instance, or changing its address or type, forgets it:

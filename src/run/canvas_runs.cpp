@@ -93,8 +93,23 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     });
     connect(m_service, &RunService::event, this, &CanvasRuns::onEvent);
     connect(m_service, &RunService::checked, this, &CanvasRuns::onChecked);
-    connect(m_service, &RunService::remoteConsentNeeded, this, [this](const QString &run, const QJsonArray &services) {
-        m_remoteAsks.append({run, services});
+    connect(m_service, &RunService::remoteConsentNeeded, this, [this](const QString &run, const QJsonArray &services, int revision) {
+        // The same run asked again: the question it is in changed what it says (a joined run sends more kinds of data), or the run
+        // thread refused a yes given to an older one.
+        for (auto &ask : m_remoteAsks)
+            if (ask.run == run) {
+                ask.services = services;
+                ask.revision = revision;
+                if (&ask == &m_remoteAsks.first())
+                    emit remoteQuestionChanged();
+                return;
+            }
+        // A question already answered at this revision or a newer one is settled on the run thread: a late copy of it (sent before
+        // the answer arrived there) must not come back as a question whose Yes and No do nothing. A refused yes is re-asked with a
+        // higher revision, so it still shows.
+        if (const auto it = m_answeredRevision.constFind(run); it != m_answeredRevision.constEnd() && revision <= it.value())
+            return;
+        m_remoteAsks.append({run, services, revision});
         if (m_remoteAsks.size() == 1)
             emit remoteQuestionChanged();
     });
@@ -102,8 +117,9 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     connect(m_service, &RunService::event, this, [this](const QString &run, const QJsonObject &event) {
         if (event.value("event").toString() != QLatin1String("run.done"))
             return;
-        const bool first = !m_remoteAsks.isEmpty() && m_remoteAsks.first().first == run;
-        m_remoteAsks.removeIf([&](const auto &ask) { return ask.first == run; });
+        m_answeredRevision.remove(run);
+        const bool first = !m_remoteAsks.isEmpty() && m_remoteAsks.first().run == run;
+        m_remoteAsks.removeIf([&](const auto &ask) { return ask.run == run; });
         if (first)
             emit remoteQuestionChanged();
     });
@@ -1132,15 +1148,16 @@ void CanvasRuns::noteRunsOn() {
 QVariantMap CanvasRuns::remoteQuestion() const {
     if (m_remoteAsks.isEmpty())
         return {};
-    return {{"run", m_remoteAsks.first().first}, {"services", m_remoteAsks.first().second.toVariantList()}};
+    return {{"run", m_remoteAsks.first().run}, {"services", m_remoteAsks.first().services.toVariantList()}};
 }
 
 void CanvasRuns::answerRemote(bool allow) {
     if (m_remoteAsks.isEmpty())
         return;
-    const QString run = m_remoteAsks.takeFirst().first;
+    const RemoteAsk ask = m_remoteAsks.takeFirst();
+    m_answeredRevision.insert(ask.run, ask.revision);
     emit remoteQuestionChanged();
-    m_service->answerRemote(run, allow);
+    m_service->answerRemote(ask.run, allow, ask.revision);
 }
 
 } // namespace fugue

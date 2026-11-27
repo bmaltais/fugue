@@ -161,6 +161,7 @@ private:
     QVariantList foldersToWrite(int *left) const;
 
     SettingsModel *m_settings;
+    QString m_ownRoot; // Fugue's own models folder, read when the sheet opens
     Finder m_finder;
     bool m_inline = false;
     FinderEnv m_env;

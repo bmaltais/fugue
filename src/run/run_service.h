@@ -111,7 +111,8 @@ public:
     QString start(const RunRequest &request);
     void cancel(const QString &run);
     // The person's answer to remoteConsentNeeded for a run: yes keeps it (per instance) and the run goes on, no cancels the run.
-    void answerRemote(const QString &run, bool allow);
+    // `revision` is the one remoteConsentNeeded gave: a yes for a question that has changed since starts nothing and asks again.
+    void answerRemote(const QString &run, bool allow, int revision);
     // The state of every node, answered by checked() with the same ticket. A newer request
     // replaces one not made yet.
     void check(const RunRequest &request, int ticket);
@@ -127,6 +128,9 @@ public:
     void replay(const QString &run);
     // The folder the run folders are in (RunSetup::runsRoot, else the user's): what History and the App view's takes read.
     QString runsRoot() const { return m_runsRoot; }
+
+    // Tests; blocks on the run thread. How many runs wait on an off-machine question (the runs a yes or a no will answer).
+    int askedRuns() const;
 
     // Calls `call` on the run thread and waits for it (tests: a FakeProvider lives there).
     void onRunThread(const std::function<void()> &call);
@@ -147,7 +151,7 @@ signals:
     void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
     // A run would send data off this machine to services the person has not allowed (8.2, #404): `services` is
     // [{"instance", "host", "sends": [..], "text"}]. The run waits (no folder, not queued) for answerRemote.
-    void remoteConsentNeeded(const QString &run, const QJsonArray &services);
+    void remoteConsentNeeded(const QString &run, const QJsonArray &services, int revision);
 
 private:
     QString m_runsRoot;
