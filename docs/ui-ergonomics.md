@@ -88,6 +88,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-27 Alt+Q shows the Queue where it was hidden (owner bug report; medium-high confidence)
+
+- Control: `panel.queue` (Alt+Q), `Workspace::toggleQueue` (`src/workspace/workspace.cpp`). No new control.
+- Bug: hiding the Queue closed its area and forgot it, so showing it again always made the default bottom split, even when it had been side by side.
+- Decision: closing the Queue remembers its place: the axis, which side of its neighbour, its share of the two areas' room together, and the neighbour's area id (the first area of the neighbour when that is a split). Showing it splits that area the same way. When the area is gone, or the result would not fit the window, it opens at the default (30% below the active area). Never shown means the default. One memory per window, kept as `queuePlace` in the layout file while the layout is not the default; a hidden Queue that leaves the default one-area window has no file, so that memory lasts for the session only. Reset layout forgets it.
+- Convention: Blender restores a maximized area to where it was (Ctrl+Space toggles), but closing an area (Join, Close) keeps nothing; the Queue here toggles like the maximize, so it restores like it (read from Blender's manual in memory, not re-fetched; nothing copied). Differs: Blender has no one key that opens an area of a given type.
+- Confidence: medium-high that the file is the right home (it is the layout's own, and a stale id is checked on use).
+
 ### 2026-11-27 A stopped download keeps its part; the row can delete it (owner decision; confidence high)
 
 - Control: Get ready's model row (`GetReadyRow.qml`, `GetReadySheet.qml`) and its message line.

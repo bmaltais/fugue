@@ -30,6 +30,21 @@ void writeFile(const QString &path, const QByteArray &bytes) {
 
 QString root(const Workspace &w) { return QJsonDocument(w.areaTree().toJson()).toJson(QJsonDocument::Compact); }
 
+// The layout with every share to nine places (a close and a split give a share back to within rounding) and no area ids.
+QString shape(const Workspace &w) {
+    static const QRegularExpression number(R"(\d+\.\d+)");
+    // Area ids too: a new area takes the next free id.
+    const QString text = root(w).replace(QRegularExpression(R"("area":\d+)"), QStringLiteral("area"));
+    QString out;
+    qsizetype last = 0;
+    for (auto it = number.globalMatch(text); it.hasNext();) {
+        const QRegularExpressionMatch match = it.next();
+        out += text.mid(last, match.capturedStart() - last) + QString::number(match.captured().toDouble(), 'f', 9);
+        last = match.capturedEnd();
+    }
+    return out + text.mid(last);
+}
+
 } // namespace
 
 class TestWorkspace : public QObject {
@@ -173,7 +188,8 @@ private slots:
         QCOMPARE(w.queueArea(), 0);
         QCOMPARE(root(w), root(Workspace()));
         QVERIFY(!commands.entry("panel.queue").value("checked").toBool());
-        // A short area gives the Queue its minimum height (120 of 300 px), not 30%.
+        // A short area gives the Queue its minimum height (120 of 300 px), not 30% (a Queue never shown there before).
+        w.reset();
         w.setBodySize(QSizeF(1000, 300));
         QVERIFY(w.toggleQueue());
         QVERIFY(qAbs(w.areaTree().root().children[1].size - 0.4) < 1e-9);
@@ -214,6 +230,83 @@ private slots:
         QVERIFY(!opened.first().at(1).toBool());
         QVERIFY(w.toggleQueue()); // closes
         QCOMPARE(w.active(), 2);
+    }
+
+    // Hiding the Queue remembers its place (axis, side, share, neighbour) and showing it puts it back there.
+    void panelQueueComesBackWhereItWasSideBySide() {
+        Workspace w;
+        w.splitArea(1, "row");
+        QVERIFY(w.showView(2, "queue"));
+        w.resizeBorder({}, 0, -100, 1000); // Graph 0.4, Queue 0.6
+        const QString before = shape(w);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.queueArea(), 0);
+        QCOMPARE(w.count(), 1);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(shape(w), before);
+        // On the start side too, inside a branch of three, beside an area that is not the first.
+        QVERIFY(w.closeArea(2));
+        w.splitArea(1, "row");
+        w.splitArea(2, "row");
+        QVERIFY(w.showView(2, "queue"));
+        w.resizeBorder({}, 0, -200, 1000);
+        const QString three = shape(w);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.count(), 2);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(shape(w), three);
+    }
+
+    void panelQueueComesBackAsABottomSplitToo() {
+        Workspace w;
+        w.setBodySize(QSizeF(1000, 800));
+        w.splitArea(1, "column");
+        QVERIFY(w.showView(2, "queue"));
+        w.resizeBorder({}, 0, -160, 800);
+        const QString before = shape(w);
+        QVERIFY(w.toggleQueue());
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(shape(w), before);
+    }
+
+    void panelQueueNeverShownOpensAtTheDefaultAndAGoneNeighbourFallsBack() {
+        Workspace w;
+        w.splitArea(1, "row"); // area 2 is a Canvas, the Graph is active
+        w.setActive(1);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(int(w.areaTree().root().children[0].axis), int(AreaAxis::Column)); // the default: below the active area
+        // Queue to the right of area 2 (inside the first area's place), then its neighbour goes.
+        QVERIFY(w.closeArea(w.queueArea()));
+        w.splitArea(2, "row");
+        QVERIFY(w.showView(3, "queue"));
+        QVERIFY(w.toggleQueue()); // remembers area 2
+        QVERIFY(w.closeArea(2));
+        w.setActive(1);
+        QVERIFY(w.toggleQueue());
+        QCOMPARE(w.viewOf(w.queueArea()), QString("queue"));
+        const AreaTree::Node &branch = w.areaTree().root();
+        QCOMPARE(int(branch.axis), int(AreaAxis::Column));
+        QVERIFY(qAbs(branch.children[1].size - Workspace::kQueueShare) < 1e-9);
+    }
+
+    void panelQueueRemembersItsPlaceInTheLayoutFile() {
+        {
+            Workspace w(file());
+            w.splitArea(1, "row");
+            w.splitArea(1, "column"); // so hiding the Queue leaves a layout that is kept
+            QVERIFY(w.showView(2, "queue"));
+            w.resizeBorder({}, 0, -100, 1000);
+            QVERIFY(w.toggleQueue());
+        }
+        Workspace again(file());
+        again.restore();
+        QCOMPARE(again.queueArea(), 0);
+        const QString hidden = shape(again);
+        QVERIFY(again.toggleQueue());
+        QVERIFY(again.queueArea() > 0);
+        QVERIFY(again.toggleQueue());
+        QCOMPARE(shape(again), hidden);
+        QVERIFY(!readFile(file()).isEmpty());
     }
 
     void panelQueueSaysSoWhenTheAreaIsTooSmallToSplit() {
