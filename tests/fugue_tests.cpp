@@ -10,6 +10,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QRegularExpression>
+#include "test_home_sweep.h"
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QCoreApplication>
@@ -430,6 +431,54 @@ private slots:
         QTRY_COMPARE(theme.textSize(), 14);
         churn.stop();
         QFile::remove(noise);
+    }
+
+    // The homes a killed test left in /tmp are removed by the next test to start (tests/test_home_sweep.h).
+    void sweepRemovesTheHomesOfDeadOwnersOnly() {
+        QTemporaryDir root;
+        const std::string base = root.path().toStdString();
+        const std::string prefix = "fugue-test-home-";
+        auto makeHome = [&](const QString &name, const QByteArray &owner) {
+            const QString home = root.filePath(QString::fromStdString(prefix) + name);
+            [&] { QVERIFY(QDir().mkpath(home + "/.config/x")); }();
+            if (!owner.isEmpty())
+                write(home + "/.owner", owner);
+            write(home + "/.config/x/file", "x");
+            return home;
+        };
+        const QString live = makeHome("live", QByteArray::fromStdString(test_home_sweep::ownerRecord()));
+        const QString dead = makeHome("dead", "999999999 5\n");
+        // This process's pid with another start time: the pid was reused.
+        const QString reused = makeHome("reused", QByteArray::number(qint64(::getpid())) + " 1\n");
+        const QString unowned = makeHome("unowned", "");
+        const QString garbage = makeHome("garbage", "not a record");
+        const QString other = root.filePath("other-folder");
+        QVERIFY(QDir().mkpath(other));
+        // A link to a folder that must survive: the sweep never follows it.
+        QTemporaryDir outside;
+        QVERIFY(write(outside.filePath("keep"), "x"));
+        QVERIFY(QFile::link(outside.path(), root.filePath(QString::fromStdString(prefix) + "link")));
+
+        test_home_sweep::sweep(base);
+        QVERIFY(QFileInfo::exists(live));
+        QVERIFY(!QFileInfo::exists(dead));
+        QVERIFY(!QFileInfo::exists(reused));
+        QVERIFY(QFileInfo::exists(unowned)); // no record: left alone while young
+        QVERIFY(QFileInfo::exists(garbage));
+        QVERIFY(QFileInfo::exists(other));
+        QVERIFY(QFileInfo::exists(outside.filePath("keep")));
+        QVERIFY(QFileInfo(root.filePath(QString::fromStdString(prefix) + "link")).isSymLink());
+
+        // With no record and older than a day, it goes.
+        test_home_sweep::sweep(base, prefix, std::time(nullptr) + 2 * 24 * 60 * 60);
+        QVERIFY(!QFileInfo::exists(unowned));
+        QVERIFY(!QFileInfo::exists(garbage));
+        QVERIFY(QFileInfo::exists(live)); // alive still wins over age
+        QVERIFY(QFileInfo::exists(outside.filePath("keep")));
+        // claim() writes the record the sweep reads back as alive.
+        QVERIFY(QDir().mkpath(root.filePath("claimed")));
+        test_home_sweep::claim(root.filePath("claimed").toStdString());
+        QVERIFY(test_home_sweep::ownerOf(root.filePath("claimed").toStdString()) == test_home_sweep::Owner::Alive);
     }
 
     void themeHasSemanticTokens() {

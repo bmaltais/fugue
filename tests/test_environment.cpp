@@ -15,6 +15,11 @@
 // test's. Run with a HOME of the caller's, an XDG folder still naming the owner's own goes
 // under that HOME. Under ctest HOME and the XDG folders are the test's already and nothing
 // changes here.
+//
+// A test that is killed never removes its home, so each home names its owner (.owner: pid and start time) and the next
+// test to start removes the homes of dead owners (test_home_sweep.h).
+
+#include "test_home_sweep.h"
 
 #include <QByteArray>
 #include <QtGlobal>
@@ -59,10 +64,13 @@ void isolateFromTheOwnersFiles() {
     const std::string ownerHome = owner->pw_dir;
     const char *home = std::getenv("HOME");
     if (!home || !*home || samePath(home, ownerHome)) {
+        // First the homes of runs that died (killed by a timeout or a crash, so they never removed theirs).
+        test_home_sweep::sweep(std::filesystem::temp_directory_path().string());
         std::string made = (std::filesystem::temp_directory_path() / "fugue-test-home-XXXXXX").string();
         if (!::mkdtemp(made.data()))
             qFatal("cannot make a home for the test under %s", made.c_str());
         g_home = made;
+        test_home_sweep::claim(g_home);
         std::atexit(removeHome);
         qputenv("HOME", QByteArray::fromStdString(g_home));
         for (const XdgFolder &folder : kXdgFolders)
