@@ -899,21 +899,40 @@ void Compiler::checkNode(Scope *scope, const QString &id, Flat &flat, bool face)
         }
     }
 
-    for (const InputSpec &spec : type.inputs) {
-        if (values.contains(spec.name)) {
-            checkValue(flat, spec, values.value(spec.name));
+    // The rows of a repeating input that are there come with the declared inputs (6.1, #714).
+    const QList<const InputSpec *> specs = type.inputsWhere([&values](const QString &name) {
+        const auto found = values.constFind(name);
+        return found != values.constEnd() && !found->value.isEmpty();
+    });
+    for (const InputSpec *spec : specs) {
+        if (values.contains(spec->name)) {
+            checkValue(flat, *spec, values.value(spec->name));
             continue;
         }
-        if (face || !spec.required() || m_options.allowUnsetInputs)
+        if (face || !spec->required() || m_options.allowUnsetInputs)
             continue;
         Error error = nodeError(QStringLiteral("missing_input"), flat.path,
-                                QStringLiteral("Input %1 of %2 is required and not set.").arg(spec.name, flat.path));
-        error.input = spec.name;
-        if (const auto exposed = exposedAt(scope, id, spec.name))
+                                QStringLiteral("Input %1 of %2 is required and not set.").arg(spec->name, flat.path));
+        error.input = spec->name;
+        if (const auto exposed = exposedAt(scope, id, spec->name))
             error.hint = QStringLiteral("Set exposed input %1 on %2.").arg(exposed->second, exposed->first);
         else
-            error.hint = QStringLiteral("Give it a value or link an output of type %1.").arg(spec.type.toString());
+            error.hint = QStringLiteral("Give it a value or link an output of type %1.").arg(spec->type.toString());
         fail(error);
+    }
+    // A value in a row that is not there (its key has none) is not used: said, not refused.
+    if (face || type.repeats.isEmpty())
+        return;
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        const std::optional<RowInput> row = type.rowInput(it.key());
+        if (!row || row->item == 0 || specs.contains(type.input(it.key())))
+            continue;
+        const QString key = NodeType::rowInputName(type.repeats.at(row->repeat).items.first().name, row->row);
+        Error error = nodeError(QStringLiteral("unknown_input"), flat.path,
+                                QStringLiteral("Input %1 of %2 is not used: its row has no %3.").arg(it.key(), flat.path, key));
+        error.input = it.key();
+        error.hint = QStringLiteral("Set %1, or remove %2.").arg(key, it.key());
+        warn(error);
     }
 }
 

@@ -160,16 +160,16 @@ Errors runCase(CommandKernel &kernel, const NodeType &type, const Case &test, Fi
             return {caseError(value.error().code, type, test, QStringLiteral("input \"%1\": %2").arg(it.key(), value.error().message))};
         inputs.insert(it.key(), value.value());
     }
-    for (const InputSpec &spec : type.inputs) {
-        if (inputs.contains(spec.name))
+    for (const InputSpec *spec : type.inputsOf(inputs)) {
+        if (inputs.contains(spec->name))
             continue;
-        if (spec.defaultValue.isUndefined()) {
-            if (spec.required())
-                return {caseError("missing_input", type, test, QStringLiteral("input \"%1\" has no value and no default.").arg(spec.name),
+        if (spec->defaultValue.isUndefined()) {
+            if (spec->required())
+                return {caseError("missing_input", type, test, QStringLiteral("input \"%1\" has no value and no default.").arg(spec->name),
                                   "Give it in this case's \"inputs\" in test.json.")};
             continue;
         }
-        inputs.insert(spec.name, Value(spec.defaultValue));
+        inputs.insert(spec->name, Value(spec->defaultValue));
     }
 
     const QString workDir = workRoot + "/" + QString::number(qHash(test.name)) + "-" + QString::number(progress.size());

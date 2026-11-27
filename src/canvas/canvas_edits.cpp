@@ -443,6 +443,26 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
         emit reroutesChanged();
 }
 
+// A repeating input's row whose key was cleared or unlinked (#714) is taken out with the same edit: the values of its
+// other items go, so the face shows it no more and the file keeps nothing that is not used. Other rows keep their numbers.
+void CanvasModel::dropEmptyRows(Document &document) const {
+    if (!m_registry)
+        return;
+    for (Node &node : document.graph.nodes) {
+        const NodeType *type = m_registry->nodeTypeFor(node.type, node.version.major);
+        if (!type || type->repeats.isEmpty())
+            continue;
+        for (auto it = node.inputs.begin(); it != node.inputs.end();) {
+            const std::optional<RowInput> at = type->rowInput(it.key());
+            const QString key = at ? NodeType::rowInputName(type->repeats.at(at->repeat).items.first().name, at->row) : QString();
+            if (at && at->item > 0 && node.inputs.value(key).isEmpty())
+                it = node.inputs.erase(it);
+            else
+                ++it;
+        }
+    }
+}
+
 // --- edit bounds and the undo stack ---------------------------------------------
 
 void CanvasModel::beginEdit() {
@@ -474,6 +494,7 @@ void CanvasModel::commit(const Document &document, const QString &text) {
     for (const NodeRow &row : m_rows)
         order << row.id;
     Document made = document;
+    dropEmptyRows(made);
     followReroutes(m_document, made);
     restore({m_scope.isEmpty() ? made : merged(made), order}, false);
     endEdit(text);

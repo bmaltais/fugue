@@ -427,7 +427,11 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
     // placeholder), and outputs other nodes link from: kept as ports of unknown type, so
     // every link has its ends and nothing in the file is hidden. Such an input shows its
     // value read-only: with no spec there is nothing to check a typed value against.
+    const NodeType *installed = m_registry && !row.missing ? m_registry->nodeTypeFor(node.type, node.version.major) : nullptr;
     for (auto it = node.inputs.cbegin(); it != node.inputs.cend(); ++it) {
+        // The value of a row that is not there (a file written by hand): not used, and not shown unless it is a link.
+        if (installed && installed->rowInput(it.key()) && linksIn(it.value()).isEmpty())
+            continue;
         if (std::none_of(row.inputs.begin(), row.inputs.end(), [&](const Port &p) { return p.name == it.key(); })) {
             Port port;
             port.name = port.label = it.key();
@@ -540,8 +544,35 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         row.title = type->name;
         row.category = type->category.section(QLatin1Char('/'), 0, 0);
         row.specs = type->inputs;
-        for (const InputSpec &spec : type->inputs)
-            row.inputs.push_back(fromInput(spec, spec.name, {}));
+        // A repeating input (6.1, #714): its rows that are there, then one empty row, of its key alone: filling it makes
+        // the next one. Rows are listed by number and keep their gaps.
+        const auto has = [&node](const QString &name) { return !node.inputs.value(name).isEmpty(); };
+        QHash<int, QString> nextKey; // by repeat
+        for (int r = 0; r < type->repeats.size(); ++r) {
+            const QList<int> rows = type->rowsOf(r, has);
+            const int next = rows.isEmpty() ? 1 : rows.last() + 1;
+            if (next <= type->repeats.at(r).max)
+                nextKey.insert(r, NodeType::rowInputName(type->repeats.at(r).items.first().name, next));
+        }
+        const auto shown = [&](const QString &name) { return has(name) || nextKey.values().contains(name); };
+        for (const InputSpec *spec : type->inputsWhere(shown)) {
+            const std::optional<RowInput> at = type->rowInput(spec->name);
+            const bool empty = at && nextKey.value(at->repeat) == NodeType::rowInputName(type->repeats.at(at->repeat).items.first().name, at->row);
+            if (empty && at->item > 0)
+                continue; // the empty row shows its key only
+            QString label;
+            if (empty) { // "Add LoRA"
+                const InputSpec &key = type->repeats.at(at->repeat).items.first();
+                label = tr("Add %1").arg(key.label.isEmpty() ? key.name : key.label);
+            }
+            Port port = fromInput(*spec, spec->name, label);
+            port.grows = empty;
+            if (at && !empty && type->repeats.at(at->repeat).items.at(at->item).name != QLatin1String("enabled")) {
+                const InputValue enabled = node.inputs.value(NodeType::rowInputName(QStringLiteral("enabled"), at->row));
+                port.rowOff = enabled.kind() == InputValue::Kind::Literal && enabled.literal() == QJsonValue(false);
+            }
+            row.inputs.push_back(port);
+        }
         for (const OutputSpec &spec : type->outputs)
             row.outputs.push_back(fromOutput(spec, spec.name));
         return;
@@ -904,7 +935,9 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"required", port.required},
                     {"hidden", port.hidden},
                     {"notUsed", port.notUsed},
-                    {"sharesRow", port.sharesRow}};
+                    {"sharesRow", port.sharesRow},
+                    {"grows", port.grows},
+                    {"rowOff", port.rowOff}};
     if (!port.description.isEmpty())
         map.insert("description", port.description);
     if (!port.role.isEmpty())

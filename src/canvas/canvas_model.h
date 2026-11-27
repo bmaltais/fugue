@@ -766,6 +766,10 @@ private:
         // Compact (#476): an output and a socket-only input on one row (the board's card): this port's row is shared, the output
         // with the input at its left. Never set in Flat.
         bool sharesRow = false;
+        // The empty last row of a repeating input (#714), its key alone: filling it adds the next row.
+        bool grows = false;
+        // An input of a row its `enabled` item turns off (#714): drawn faded, as the row does nothing.
+        bool rowOff = false;
     };
     // Stacking order of nodes that overlap: raised when a node is selected or moved, not saved.
     QHash<QString, int> m_stack;
@@ -871,6 +875,8 @@ private:
     QRectF boundsOf(const QStringList &ids) const;
 
     void rebuildLinks();
+    // Takes out the rows of repeating inputs whose key has no value (#714): every edit does, in commit().
+    void dropEmptyRows(fugue::Document &document) const;
     void layOut(NodeRow &row) const;
     qreal autoWidth(const NodeRow &row, const fugue::Node &node) const;
     // layOut again and emit what changed (plus `roles`); the node's wires follow.

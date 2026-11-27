@@ -18,6 +18,16 @@ namespace {
 const QString invalidDocument = QStringLiteral("invalid_document");
 constexpr double maxSafeInteger = 9007199254740992.0; // 2^53 (spec 2.1)
 
+// `<item>_<row>`, the row a whole number from 1 with no leading zero: the item and the row, or nothing.
+std::optional<std::pair<QString, int>> splitRowName(const QString &name) {
+    static const QRegularExpression form(QStringLiteral("^(.+)_([1-9][0-9]{0,8})$"));
+    const QRegularExpressionMatch match = form.match(name);
+    if (!match.hasMatch())
+        return std::nullopt;
+    return std::pair<QString, int>{match.captured(1), match.captured(2).toInt()};
+}
+
+
 // A literal as JSON, for messages.
 QString shown(const QJsonValue &value) {
     if (value.isUndefined())
@@ -291,6 +301,55 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     return input;
 }
 
+// A repeating group of inputs (6.1, #714): {"repeat": <name>, "label", "max", "inputs": [<item inputs>]}. An item is an
+// input as any other, except that it is not a list or lazy, holds no input file (a file, mask or paint widget) and is no
+// seed (the code that reads those walks the declared inputs only), has no
+// `shown_when` and no `over`, and its name does not end in `_<number>`; the first item, the row's key, has no default
+// (a row is there when its key has a value).
+std::optional<RepeatSpec> readRepeat(Reader &r, const QJsonObject &o, int position) {
+    RepeatSpec repeat;
+    repeat.position = position;
+    const int before = r.count();
+    repeat.name = o.value("repeat").toString();
+    if (!isPortName(repeat.name)) {
+        r.fail(QStringLiteral("a repeating input needs a \"repeat\" name matching [a-z][a-z0-9_]*, not %1.").arg(shown(o.value("repeat"))));
+        return std::nullopt;
+    }
+    const QString where = QStringLiteral("repeating input ") + repeat.name;
+    r.string(o, "label", repeat.label, where);
+    std::optional<int> max;
+    r.count(o, "max", max, where, {});
+    if (max && (*max < 1 || *max > kMaxRepeatRows))
+        r.fail(where + QStringLiteral(" has a \"max\" outside 1 to %1.").arg(kMaxRepeatRows));
+    else if (max)
+        repeat.max = *max;
+    r.unknownFields(o, {"repeat", "label", "max", "inputs"}, where);
+    const QJsonArray items = o.value("inputs").toArray();
+    if (!o.value("inputs").isArray() || items.isEmpty())
+        r.fail(where + QStringLiteral(" needs \"inputs\": the inputs of one row, at least one."));
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        const std::optional<InputSpec> item = readInput(r, items.at(i), int(i));
+        if (!item)
+            continue;
+        const QString at = where + QStringLiteral(" has the input ") + item->name + QStringLiteral(", which ");
+        if (splitRowName(item->name))
+            r.fail(at + QStringLiteral("ends in _ and a number, as the inputs of its rows do."), item->name);
+        if (item->type.list || item->lazy)
+            r.fail(at + QStringLiteral("is a list or lazy; a row's input takes one value, always read."), item->name);
+        if (item->holdsInputFile() || item->widget() == QLatin1String("seed"))
+            r.fail(at + QStringLiteral("holds an input file or a seed; a row's input cannot."), item->name);
+        if (!item->shownWhen.isEmpty() || !item->over.isEmpty())
+            r.fail(at + QStringLiteral("has \"shown_when\" or \"over\"; a row's input cannot."), item->name);
+        if (i == 0 && !item->defaultValue.isUndefined())
+            r.fail(at + QStringLiteral("is the row's key and cannot have a default: a row is there when its key has a value."),
+                   item->name);
+        repeat.items << *item;
+    }
+    if (r.count() != before)
+        return std::nullopt;
+    return repeat;
+}
+
 std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int index) {
     OutputSpec output;
     const QString at = QStringLiteral("output %1").arg(index + 1);
@@ -368,6 +427,34 @@ void putIfTrue(QJsonObject &o, const char *key, bool value) {
         o.insert(QLatin1String(key), true);
 }
 
+QJsonObject inputJson(const InputSpec &input) {
+    QJsonObject i{{"name", input.name}, {"type", input.type.type.toString()}};
+    putIfTrue(i, "list", input.type.list);
+    putIf(i, "label", input.label);
+    putIf(i, "description", input.description);
+    if (!input.defaultValue.isUndefined())
+        i.insert("default", input.defaultValue);
+    putIfTrue(i, "optional", input.optional);
+    putIfTrue(i, "lazy", input.lazy);
+    putIfTrue(i, "takes_list", input.type.takesList);
+    putIf(i, "min_items", input.minItems);
+    putIf(i, "max_items", input.maxItems);
+    putIf(i, "min", input.min);
+    putIf(i, "max", input.max);
+    putIf(i, "step", input.step);
+    putIfTrue(i, "integer", input.integer);
+    if (input.choices)
+        i.insert("choices", QJsonArray::fromStringList(*input.choices));
+    putIf(i, "widget", input.widgetName);
+    putIf(i, "section", input.section);
+    putIfTrue(i, "advanced", input.advanced);
+    putIf(i, "role", input.role);
+    putIf(i, "over", input.over);
+    if (!input.shownWhen.isEmpty())
+        i.insert("shown_when", input.shownWhen.raw);
+    return i;
+}
+
 } // namespace
 
 bool InputSpec::required() const {
@@ -396,7 +483,74 @@ const InputSpec *NodeType::input(const QString &name) const {
     for (const InputSpec &each : inputs)
         if (each.name == name)
             return &each;
-    return nullptr;
+    if (repeats.isEmpty())
+        return nullptr;
+    const std::optional<RowInput> at = rowInput(name);
+    return at ? rowSpec(at->repeat, at->row, at->item) : nullptr;
+}
+
+QString NodeType::rowInputName(const QString &item, int row) { return item + QLatin1Char('_') + QString::number(row); }
+
+std::optional<RowInput> NodeType::rowInput(const QString &name) const {
+    const std::optional<std::pair<QString, int>> split = splitRowName(name);
+    if (!split)
+        return std::nullopt;
+    for (int r = 0; r < repeats.size(); ++r) {
+        const RepeatSpec &repeat = repeats.at(r);
+        if (split->second > repeat.max)
+            continue;
+        for (int i = 0; i < repeat.items.size(); ++i)
+            if (repeat.items.at(i).name == split->first)
+                return RowInput{r, split->second, i};
+    }
+    return std::nullopt;
+}
+
+const InputSpec *NodeType::rowSpec(int repeat, int row, int item) const {
+    if (repeat < 0 || repeat >= repeats.size())
+        return nullptr;
+    qsizetype offset = 0;
+    for (int r = 0; r < repeat; ++r)
+        offset += qsizetype(repeats.at(r).max) * repeats.at(r).items.size();
+    const RepeatSpec &spec = repeats.at(repeat);
+    if (row < 1 || row > spec.max || item < 0 || item >= spec.items.size())
+        return nullptr;
+    const qsizetype at = offset + qsizetype(row - 1) * spec.items.size() + item;
+    return at < rowInputs.size() ? &rowInputs.at(at) : nullptr;
+}
+
+QList<int> NodeType::rowsOf(int repeat, const std::function<bool(const QString &)> &hasValue) const {
+    QList<int> rows;
+    if (repeat < 0 || repeat >= repeats.size())
+        return rows;
+    const RepeatSpec &spec = repeats.at(repeat);
+    for (int row = 1; row <= spec.max; ++row)
+        if (hasValue(rowInputName(spec.items.first().name, row)))
+            rows << row;
+    return rows;
+}
+
+QList<const InputSpec *> NodeType::inputsWhere(const std::function<bool(const QString &)> &hasValue) const {
+    QList<const InputSpec *> list;
+    list.reserve(inputs.size());
+    const auto addRows = [&](int position) {
+        for (int r = 0; r < repeats.size(); ++r) {
+            if (repeats.at(r).position != position)
+                continue;
+            for (const int row : rowsOf(r, hasValue))
+                for (int item = 0; item < repeats.at(r).items.size(); ++item)
+                    if (const InputSpec *spec = rowSpec(r, row, item))
+                        list << spec;
+        }
+    };
+    for (int i = 0; i < inputs.size(); ++i) {
+        if (!repeats.isEmpty())
+            addRows(i);
+        list << &inputs.at(i);
+    }
+    if (!repeats.isEmpty())
+        addRows(int(inputs.size()));
+    return list;
 }
 
 const OutputSpec *NodeType::output(const QString &name) const {
@@ -481,14 +635,44 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
     if (!inputs.isArray())
         r.fail(QStringLiteral("\"inputs\" must be a list (it may be empty)."));
     const QJsonArray inputList = inputs.toArray();
-    for (qsizetype i = 0; i < inputList.size(); ++i) {
-        const std::optional<InputSpec> input = readInput(r, inputList.at(i), int(i));
-        const QString inputName = inputList.at(i).toObject().value("name").toString();
+    const auto declare = [&](const QString &inputName) {
         if (isPortName(inputName) && seen.contains(inputName))
             r.fail(QStringLiteral("input %1 is declared more than once.").arg(inputName), inputName);
         seen.insert(inputName);
+    };
+    for (qsizetype i = 0; i < inputList.size(); ++i) {
+        if (inputList.at(i).isObject() && inputList.at(i).toObject().contains("repeat")) {
+            const std::optional<RepeatSpec> repeat = readRepeat(r, inputList.at(i).toObject(), int(type.inputs.size()));
+            if (!repeat)
+                continue;
+            declare(repeat->name);
+            for (const InputSpec &item : repeat->items)
+                declare(item.name);
+            type.repeats << *repeat;
+            continue;
+        }
+        const std::optional<InputSpec> input = readInput(r, inputList.at(i), int(i));
+        declare(inputList.at(i).toObject().value("name").toString());
         if (input)
             type.inputs << *input;
+    }
+    // A declared input named like a row's input (`lora_2`) would be two inputs at once.
+    for (const RepeatSpec &repeat : std::as_const(type.repeats))
+        for (const InputSpec &item : repeat.items)
+            for (const InputSpec &input : std::as_const(type.inputs))
+                if (const auto split = splitRowName(input.name); split && split->first == item.name)
+                    r.fail(QStringLiteral("input %1 has the name of a row of the repeating input %2.").arg(input.name, item.name),
+                           input.name);
+    for (int i = 0; i < type.repeats.size(); ++i) {
+        const RepeatSpec &repeat = type.repeats.at(i);
+        for (int row = 1; row <= repeat.max; ++row)
+            for (int item = 0; item < repeat.items.size(); ++item) {
+                InputSpec spec = repeat.items.at(item);
+                spec.name = NodeType::rowInputName(spec.name, row);
+                const QString label = spec.label.isEmpty() ? repeat.items.at(item).name : spec.label;
+                spec.label = item == 0 ? QStringLiteral("%1 %2").arg(label).arg(row) : label;
+                type.rowInputs << spec;
+            }
     }
 
     // A mask is painted over an image input of the same node.
@@ -575,33 +759,26 @@ QJsonObject NodeType::toJson() const {
         o.insert("capabilities", capabilities);
 
     QJsonArray inputList;
-    for (const InputSpec &input : inputs) {
-        QJsonObject i{{"name", input.name}, {"type", input.type.type.toString()}};
-        putIfTrue(i, "list", input.type.list);
-        putIf(i, "label", input.label);
-        putIf(i, "description", input.description);
-        if (!input.defaultValue.isUndefined())
-            i.insert("default", input.defaultValue);
-        putIfTrue(i, "optional", input.optional);
-        putIfTrue(i, "lazy", input.lazy);
-        putIfTrue(i, "takes_list", input.type.takesList);
-        putIf(i, "min_items", input.minItems);
-        putIf(i, "max_items", input.maxItems);
-        putIf(i, "min", input.min);
-        putIf(i, "max", input.max);
-        putIf(i, "step", input.step);
-        putIfTrue(i, "integer", input.integer);
-        if (input.choices)
-            i.insert("choices", QJsonArray::fromStringList(*input.choices));
-        putIf(i, "widget", input.widgetName);
-        putIf(i, "section", input.section);
-        putIfTrue(i, "advanced", input.advanced);
-        putIf(i, "role", input.role);
-        putIf(i, "over", input.over);
-        if (!input.shownWhen.isEmpty())
-            i.insert("shown_when", input.shownWhen.raw);
-        inputList << i;
+    const auto addRepeats = [&](qsizetype position) {
+        for (const RepeatSpec &repeat : repeats) {
+            if (repeat.position != position)
+                continue;
+            QJsonObject block{{"repeat", repeat.name}};
+            putIf(block, "label", repeat.label);
+            if (repeat.max != kMaxRepeatRows)
+                block.insert("max", repeat.max);
+            QJsonArray items;
+            for (const InputSpec &item : repeat.items)
+                items << inputJson(item);
+            block.insert("inputs", items);
+            inputList << block;
+        }
+    };
+    for (qsizetype at = 0; at < inputs.size(); ++at) {
+        addRepeats(at);
+        inputList << inputJson(inputs.at(at));
     }
+    addRepeats(inputs.size());
     o.insert("inputs", inputList);
 
     QJsonArray outputList;

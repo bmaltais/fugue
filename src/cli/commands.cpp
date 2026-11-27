@@ -101,6 +101,9 @@ Reply nodeList(const Command &command, Context &context) {
             bool uses = false;
             for (const InputSpec &input : type->inputs)
                 uses = uses || input.type.type == *filter;
+            for (const RepeatSpec &repeat : type->repeats)
+                for (const InputSpec &input : repeat.items)
+                    uses = uses || input.type.type == *filter;
             for (const OutputSpec &output : type->outputs)
                 uses = uses || output.type.type == *filter;
             if (!uses)

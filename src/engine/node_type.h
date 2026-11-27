@@ -20,6 +20,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <optional>
 
 namespace fugue {
@@ -85,6 +86,29 @@ struct OutputSpec {
     QStringList follows;
 };
 
+// The most rows a repeating group of inputs takes, and the highest row number (6.1, #714).
+inline constexpr int kMaxRepeatRows = 99;
+
+// A repeating group of inputs (6.1, #714): rows of the same item inputs, each row's inputs named
+// `<item>_<row>` with the row counted from 1 (Apply LoRAs' `lora_1`, `strength_1`, `enabled_1`). The
+// first item is the row's key: a row is there when its key has a value (a literal or a link), and every
+// other item of a row that is not there is not used. Rows are not renumbered: a row taken out leaves a
+// gap, so a link, a `--set` or a group's exposed input naming `lora_3` keeps meaning the same row.
+struct RepeatSpec {
+    QString name;  // [a-z][a-z0-9_]*: the block's name ("loras"); never an input's
+    QString label; // display text
+    int position = 0; // the rows come after this many of the type's declared inputs
+    int max = kMaxRepeatRows; // the most rows, and the highest row number
+    QList<InputSpec> items;   // the template; items.first() is the key
+};
+
+// A row input's place (NodeType::rowInput).
+struct RowInput {
+    int repeat = 0; // index in NodeType::repeats
+    int row = 0;    // from 1
+    int item = 0;   // index in RepeatSpec::items
+};
+
 struct NodeType {
     QString id; // "<pack id>/<name>"
     Version version;
@@ -121,11 +145,36 @@ struct NodeType {
     QJsonObject runtime; // has at least "kind"
     QJsonObject needs;   // 6.3, raw
     QJsonValue capabilities = QJsonValue::Undefined; // 8.1, raw
-    QList<InputSpec> inputs;
+    QList<InputSpec> inputs; // the declared inputs; the rows of `repeats` are not among them
     QList<OutputSpec> outputs;
+    // Repeating groups of inputs (6.1, #714), and every row's inputs made from them (row 1's items, row 2's, ... up to
+    // each group's `max`), so input() gives a row's input a spec of its own name. Made by fromJson; not in toJson.
+    QList<RepeatSpec> repeats;
+    QList<InputSpec> rowInputs;
 
+    // A declared input, or a row's input (`lora_2`); null for a name the type does not have.
     const InputSpec *input(const QString &name) const;
     const OutputSpec *output(const QString &name) const;
+
+    // `<item>_<row>`.
+    static QString rowInputName(const QString &item, int row);
+    // Where a row's input sits, or nothing for a name that is not one (a declared input, a row past `max`).
+    std::optional<RowInput> rowInput(const QString &name) const;
+    // The input `item` of row `row` of repeat `repeat`, or null past its `max`.
+    const InputSpec *rowSpec(int repeat, int row, int item) const;
+    // The rows of a repeat that are there: those whose key has a value, by `hasValue` (true when the named input holds one), in
+    // row order.
+    QList<int> rowsOf(int repeat, const std::function<bool(const QString &)> &hasValue) const;
+    // The inputs a node of this type has (3.2): the declared ones with, at each repeat's place, every item of the rows that
+    // are there, in row order. A type with no repeats gives its declared inputs. Every loop over a node's input values reads
+    // this, not `inputs`, so a row's values count as any input's.
+    QList<const InputSpec *> inputsWhere(const std::function<bool(const QString &)> &hasValue) const;
+    template <typename Map> QList<const InputSpec *> inputsOf(const Map &values) const {
+        return inputsWhere([&values](const QString &name) {
+            const auto found = values.constFind(name);
+            return found != values.constEnd() && !found->isEmpty();
+        });
+    }
 
     // Parses a node.json manifest. Every problem found is reported (the
     // code is `invalid_document`, or the literal codes for a default that

@@ -691,7 +691,7 @@ the group's `default`, then to the inner input's own value. Behavior is specifie
   after each run it starts ([6.2](#62-widgets)), and `picture` (`show` or `hide`: the node's own choice of showing its picture, over the picture mode, [12.7](#127-inspection)).
 - `frames`: Frames ([5.1](#51-frame)).
 - `links`: reroute points, keyed by the target `<node id>.<input name>`, with `#<index>` added
-  for an item of a list input (`merge.images#1`).
+  for an item of a list input (`merge.images#1`). A row of a repeating input is an input of its own (`apply.lora_2`, 6.1.2).
 - `comments`: free text notes on the canvas.
 - `view`: the last viewport. A workflow with none (a template, a file written by hand) is
   fitted to its nodes as it opens, as Fit does (12.4), so it never opens at 100% with nodes cut
@@ -1048,6 +1048,9 @@ search, versions, groups, caching, the canvas and workflows treat all tiers alik
 | `over` | For widget `mask` or `paint`: the image input it is painted over. |
 | `shown_when` | A condition on the node's other inputs; the face hides the row while it does not hold ([6.1.1](#611-rows-that-do-not-apply-shown_when)). |
 
+An entry of `inputs` may instead be a **repeating input**, `{"repeat": <name>, "label", "max", "inputs": [...]}`: rows of the same
+inputs, as many as the node is given ([6.1.2](#612-repeating-inputs-repeat-714)).
+
 **Output fields**: `name`, `type`, `label`, `description`, `list`, `optional`, `role`, and `carries`, `carries_when` ([6.1.1](#611-rows-that-do-not-apply-shown_when)).
 
 #### 6.1.1 Rows that do not apply (`shown_when`)
@@ -1084,6 +1087,47 @@ Built-in manifests that use it: Pad (`blur` only with Fill edge-blur; `featherin
 (`denoise_mode` only with Denoise below 1; `soft_mask` only when the latent comes from a masked VAE Encode), the song nodes'
 `lyrics` unless Instrumental, Canvas Region's `x`, `y`, `width` and `height` without a Mask, and Generate Image's `strength`
 with a start image.
+
+#### 6.1.2 Repeating inputs (`repeat`, #714)
+
+A node can take a growing number of rows of the same inputs, such as one LoRA and its strength per row in Apply LoRAs, instead of a
+fixed count of numbered inputs.
+
+```json
+{"repeat": "loras", "label": "LoRAs", "inputs": [
+  {"name": "lora", "type": "fugue/lora", "label": "LoRA", "optional": true},
+  {"name": "strength", "type": "number", "default": 1, "min": -4, "max": 4, "step": 0.05},
+  {"name": "enabled", "type": "boolean", "label": "On", "default": true}
+]}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `repeat` | The block's name, `[a-z][a-z0-9_]*`, unique among the node's input names. |
+| `label` | Display text. |
+| `max` | The most rows, and the highest row number: 1 to 99, default 99. |
+| `inputs` | The inputs of one row, at least one, with the input fields above. The first is the row's **key**. |
+
+- **Names.** Row *n*'s inputs are `<item>_<n>`, *n* from 1 (`lora_1`, `strength_1`, `enabled_1`, `lora_2`, ...): ordinary input
+  names, so a row's input is linked, set, exposed by a group, checked and reported like any other (`apply.lora_2`; `fugue run --set
+  apply.strength_2=0.5`; a `layout.links` key `apply.lora_2`). The `#<index>` of a list item (4.5) is a different, 0-based thing.
+- **A row is there when its key has a value** (a literal or a link). The other inputs of a row that is not there are not used:
+  the compiler warns `unknown_input` ("its row has no lora_5"), and the kernel never sees them. A row's other inputs take their
+  defaults like any input. Rows keep their numbers: taking row 2 out leaves a gap, so `lora_3`, wherever it is named (a link, a
+  group's exposed input, a `--set` in a script), still means the same row. A row past `max` is `unknown_input`.
+- **Where.** The rows sit at the block's place among the inputs, in row order, for the face, `fugue workflow describe` and the
+  kernel (`NodeType::inputsOf`).
+- **What an item cannot be:** a list, lazy, a file, mask, paint or seed widget (the code that reads those walks the declared
+  inputs), or have `shown_when` or `over`; its name does not end in `_<number>`; the key has no default. A declared input named
+  like a row's input (`lora_2` beside the item `lora`) is refused.
+- **On and off.** A boolean item named `enabled` turns its row off: the face fades the row's other inputs. What off means is the
+  kernel's (Apply LoRAs leaves the row out).
+- **The face.** The node shows its rows and one empty row of the key alone, labelled "Add <key label>" ("Add LoRA"). Filling it
+  (picking a LoRA, or linking one) makes the next empty row; setting a row's key back to None, or taking its link away, takes the
+  row out with its other values. Each is one undo step (the canvas drops the values of a row with no key in every edit).
+- **Versions.** A workflow stores rows as ordinary inputs, so a file with rows is format 1. A Fugue from before #714 reads a
+  `repeat` entry as an input with no name and no type and refuses the manifest, so a node type that uses it is not installed
+  there: the node opens as the placeholder of 3.6, keeping its rows' values and links, and does not run.
 
 ### 6.2 Widgets
 
@@ -4594,7 +4638,10 @@ The mask ports of Pad (`mask`), Grow Mask, Invert Mask, Image to Mask and Solid 
 The spike passed ([spikes/02](spikes/02-sdcpp-split.md)). Shipped (#79), each stage a job of the
 helper's stage capabilities: Load Models (diffusion model, text encoder and VAE picked from disk,
 one `fugue/model`, [2.6](#26-data-values-latents-and-conditioning)), Apply LoRA (strength,
-stacking; the result is a derived handle, [2.5](#25-resource-handles)), Text Encode (prompt and
+stacking; the result is a derived handle, [2.5](#25-resource-handles)), Apply LoRAs (#714: one node with a row per LoRA,
+each with its strength and an On switch, [6.1.2](#612-repeating-inputs-repeat-714); every row that is on, has a LoRA and a
+strength other than 0 is Apply LoRA's step in row order, so the model is the one a chain of Apply LoRA makes, and a row that is
+off is in no key downstream; a LoRA that does not fit the diffusion model is `model_mismatch` on its row's `lora_<n>`), Text Encode (prompt and
 negative prompt, one conditioning; optional reference pictures for an edit, #88), Empty Latent, Sampler (seed, steps, guidance, sampler,
 scheduler, denoise, and the advanced optional flow shift, Sampler 1.3.0, #341), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
 pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
@@ -5634,6 +5681,7 @@ Building M4 made these further choices.
 | Privacy consent (#404, 2026-11-25; decided without the owner, each to confirm; reviewed and changed the same day: placement by the address really used, a fugue-helper judged by address, the question opens on No). (1) Three placements: this machine, an own host (paired omarchy and fugue-helper hosts, and any address `isLocalHost` accepts: private, link-local, CGNAT, `.local`, `.internal`) and off-machine (everything else); only off-machine asks. A LAN or tailnet box counts as the person's own because they typed its address in and the `http` provider already trusts the same zone; a stricter rule would ask for every home server. (2) The question comes from the check (stale nodes routed to the instance), before anything is queued, with the run's id kept, so no new id reaches the run bar, the App view or the batch; a node the check could not route (an input it does not know yet) is caught by the scheduler's refusal at the node, which fails it with `consent_needed` before the job is submitted. (3) One question per run with a row per service, one yes for all; the yes is per instance and kept in `remote-consent.json` next to `trust.json` (the root's state folder, 0600) with the instance's type and address, so a changed address asks again; removal prunes it. (4) CLI: `--allow-remote <instance>` is for that run only and remembers nothing (a script's flag is not a standing decision); a yes given in the window is honoured by the CLI of the same root. (5) A network pack's trust already names `network`, so it is not asked again. (6) What leaves is read from the node type's inputs that are written: image (masks when `role: mask`), audio, video, and text that is not a choice, for the nodes routed there; numbers and choices are settings, not listed. Cost and which instance is chosen are #403 and #405, not this | 8.2, 12.17 | medium-high |
 | Canvas layers (#226, 2026-11-22; decided without the owner, each to confirm). (1) A layer mask belongs to its layer (a one-channel `MaskPaint` in the layer, `LayerInfo::hasMask`, `maskEnabled`), not a Mask-kind layer linked by id: it then moves, is duplicated and is deleted with its layer with no ordering rule to keep, the tree stores it inside the layer record, and the mask brush can still paint it (the same buffer type). Mask-kind layers stay the paint window's selection-like masks. Medium-high. (2) `.ora`: a masked layer's `src` is baked (alpha times mask) so Krita, GIMP and MyPaint show the right picture, and Fugue's raw pixels and mask ride as `fugue:raw` and `fugue:mask` entries; rejected: a sibling layer with `svg:dst-in` in an isolated group (Fugue reads no groups, and GIMP's handling of dst-in is unknown), a hidden sibling mask layer (other programs would show the unblended crop). Medium. (3) The blend mode is stored as the `.ora` composite-op string itself (empty for src-over), so an op Fugue does not draw round-trips unchanged; Add is `svg:plus` drawn as Addition [U]. Medium-high. (4) New tree keys (`blend`, `mask`, `origin`) are written only when not default, so every existing tree keeps its hash. High. (5) A layer's origin (producer, time) is in the tree, so it follows renames, moves and duplicates; the cost: two Writes of the same pixels have different tree hashes (cache keys use the revision, so nothing depends on that). Medium. (6) Layer edits are tree edits only (no pixel read or written), only on the head, one revision per edit even for a selection of layers; `fugue canvas layer set` with several properties makes one revision each. Medium-high. (7) Undo is the head moved to its parent, and the revision it leaves is marked `undone` so it never shows as a candidate (the new-result banner would otherwise pop it); redo is the newest undone child of the head, found in the store, so the command line and the window share it. Any head can be undone. Medium-high. (8) Canvas Write's layer is the whole redrawn crop with the blend as its layer mask by default (Photoshop's Generative Fill), `bake` keeps the old placement; the name comes from the first `prompt` upstream in the workflow as run, else `Fill n`, and `Fill` (the old default) counts as "no name given". Medium. (9) Canvas Region's `layer` reads a layer's own pixels (no opacity, blend or mask); empty is the composite. Medium. (10) The panel is a new outliner-style component, not PaintLayersPanel (that one is bound to PaintLayer and has the eye at the left); it reuses ViewButton, ThemedTextField, WidgetMenu and the look. Opacity is a new `DragNumberField` (InputWidget's scrub is bound to WidgetEdit). Medium-high. (11) Keys: a new `canvas-layers` context, the most specific, on only while the pointer is over the panel or its list has the focus, so the region's document undo on the picture is not taken; Ctrl+Z there is the canvas's. Solo has no key (Alt+H would clash with the Help menu's mnemonic). Medium. (12) Taken from Blender: outliner rows with toggles at the right, Ctrl/Shift multi-select, F2 and double-click rename, hover-owned keys (H, X/Delete, Ctrl+D), drag-number fields (drag, click to type, double-click to reset, Ctrl to snap), Alt+click solo as a view state. Left out for now: the render toggle, groups (the model has `depth`; lock and groups came later, see 13), Alt+H unhide-all, the number field's arrow buttons, box select in the list, Blender's Ctrl+click on the eye to isolate (Alt+click is Photoshop's and is what was asked). Photoshop kept: the mask thumbnail beside the layer's, Shift+click to disable it, a current layer always. (13, 2026-11-23, each to confirm) Lock is Photoshop's "lock all" as a layer property (`LayerRecord::locked`, stored as `"locked": true` only when set, so no existing tree changes its hash; an `.ora` carries it as `fugue:locked`; a `.psd` has no place for it here and drops it): a locked layer refuses what changes its pixels or takes it out of the stack (delete, merge as either side, flatten, move or transform, a mask paint, replace or delete, ungrouping a locked group) and nothing else, in the store (`applyLayerEdit`, `applyPixelEdit`, `transformedTree`) so the command line and the window share it; the panel disables the controls instead of waiting for the refusal; a duplicate of a locked layer is locked; rejected: locking opacity, blend and visibility too (Photoshop's separate "lock position/pixels/transparency" is three more states, and showing or fading a layer is not a destructive edit). Medium. (14) "Generate reads this layer only" is a view state of the Canvas view (`CanvasViewModel::regionLayer`, as Show alone), sent as the Layer input of the action's Canvas Region by name (`ActionBinding::layer`); an action that fixes its own Layer keeps it when none is chosen; a name two layers share reads the top one, so only that one can be chosen. Medium-high. | 14.4, 14.5, 12.4, 13.1 | medium |
 | HTTP Request (#406) is a command node in a first-party pack that declares `network` (not a built-in, which the trusted `fugue` pack would run with no prompt): Python 3 standard library, no setup. Inputs `a` to `d` fill `{a}` to `{d}` (fixed names, because a manifest has a fixed port list); a JSON body is parsed first and placeholders fill its strings, so a value cannot break the JSON; a status of 400 or more is an output, `fail_on_error_status` makes it an error; redirects are not followed; the JSON path is dotted keys, `[n]`, `[-n]` and `["key"]` only; `{secret:NAME}` is the header and URL-path syntax of #402 ([6.13](#613-http-request-first-party-pack)), filled only for the origin the person set the key for; the node is a sink so a webhook with nothing downstream still runs; errors keep the node's own codes (the engine reports them as `node_failed`), with the hint in the message | 6.13, 6.3, 7.2 | medium-high |
+| Repeating inputs and Apply LoRAs (#714, 2026-11-27; decided without the owner, each to confirm). What ComfyUI does, read from its sources (comfyanonymous/ComfyUI master a14e815, Comfy-Org/ComfyUI_frontend main 21a0257, rgthree/rgthree-comfy main bc48c6a): the V3 schema's `io.Autogrow` (`comfy_api/latest/_io.py`) repeats ONE socket, named prefix plus a 0-based number (`image0`, up to 100), given to the node as a dict with gaps; the frontend (`src/core/graph/widgets/dynamicWidgets.ts`) shows the linked sockets plus one spare, adds one when the last is linked and packs the rest down when one is unlinked. A row of several inputs is the internal, "unstable" `_DynamicGroup` (keys `<group>.<i>.<field>`, at most 20 rows, a list of dicts): core's LoRA stack (`comfy_extras/nodes_lora_stack.py`, `LoadLoraModel`) rows are a LoRA choice, a strength (default 1, -100 to 100, step 0.01) and `enabled`, skipping a row with no LoRA, off, or strength 0, applied in order; the frontend has an "Add" button and a remove control per row, and renumbers. rgthree's Power Lora Loader (`py/power_lora_loader.py`, `src_web/comfyui/power_lora_loader.ts`) draws one line per row (a toggle, the LoRA, the strength with - and +, 0.05 a step), "+ Add Lora" picks a LoRA before the row is made, a right-click moves a row up or down or removes it, a header switch turns all on or off; rows are widgets, so a LoRA cannot be linked in. Fugue: (1) rows are ordinary inputs named `<item>_<n>` from 1 (not list items, `lora#1`): links, `--set`, groups, widgets, the picker's fit order and errors already address inputs by name, and a list item has no widget and cannot be exposed or `--set` (confidence medium-high; an Opus consult chose the same). (2) Rows are never renumbered, unlike both: a gap keeps every reference to a row valid (a group's exposed `lora_3`, a script's `--set`) (medium-high). (3) A row grows from the last one being filled, as Autogrow, and its LoRA can be linked, unlike rgthree; the empty row reads "Add LoRA" as their buttons do (medium-high). (4) One face row per input (LoRA, Strength, On: Fugue's rows are one control each, canvas-look 4.3) rather than rgthree's single line; a row that is off is faded. No move up or down and no all-on switch yet: a row's order is its number (medium). (5) A row at strength 0 is left out, as core's stack does, so it is in no key (high). (6) Strength keeps Apply LoRA's range, -4 to 4, step 0.05 (high). (7) The canvas drops the values of a row whose key was cleared in the same edit, so the face never shows a half row (medium-high). | 6.1.2, 14.3 | medium-high |
 
 ## Appendix B: issue to section map
 
@@ -5712,3 +5760,4 @@ Building M4 made these further choices.
 | #396 Apps docs and tests | 4.10, [docs/apps.md](apps.md), GLOSSARY |
 | #406 HTTP Request node in a first-party network pack | 6.13, Appendix A |
 | #402 secrets for pack nodes | 6.4, 6.4.1, 6.7, 7.2, 6.13 |
+| #714 repeating inputs, Apply LoRAs | 6.1, 6.1.2, 4.5, 14.3, Appendix A |

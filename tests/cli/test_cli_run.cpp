@@ -291,6 +291,20 @@ private slots:
         QCOMPARE(wrong.firstCode(), QString("type_mismatch"));
     }
 
+    // #714: a row of a repeating input is an input of its own name, so --set reaches it and the error names it.
+    void setReachesARowOfARepeatingInput() {
+        write(path("rows.fugue"),
+              flow(node("load", "fugue/load-models") + ","
+                   + node("apply", "fugue/apply-loras",
+                          "{\"model\": {\"from\": \"load.model\"}, \"lora_1\": {\"resource\": \"fugue/lora\", \"name\": \"a.safetensors\"}}")));
+        const Outcome o = fugue({"run", path("rows.fugue"), "--set", "apply.strength_1=9", "--json"}, fugueBinary());
+        QCOMPARE(o.exitCode, 1);
+        QStringList found;
+        for (const QJsonValue error : o.json().value("errors").toArray())
+            found << error.toObject().value("code").toString() + " " + error.toObject().value("input").toString();
+        QVERIFY2(found.contains("value_out_of_range strength_1"), qPrintable(found.join(", ")));
+    }
+
     void queueRunsOneAtATimeAndFirstGoesAheadOfWaitingRuns() {
         const QString a = start("hold.fugue");
         QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 45000);

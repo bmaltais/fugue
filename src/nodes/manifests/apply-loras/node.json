@@ -1,0 +1,23 @@
+{
+  "manifest": 1,
+  "id": "fugue/apply-loras",
+  "version": "1.0.0",
+  "name": "Apply LoRAs",
+  "description": "The model with LoRAs applied, each at its own strength, in row order. Pick a LoRA in the last row and a new row appears; set one back to None to take its row out. Wire the result to both Text Encode and Sampler.",
+  "category": "Diffusion",
+  "keywords": ["lora", "loras", "stack", "loader", "power lora", "style", "fine-tune", "adapter"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"},
+    {"repeat": "loras", "label": "LoRAs", "inputs": [
+      {"name": "lora", "type": "fugue/lora", "label": "LoRA", "optional": true},
+      {"name": "strength", "type": "number", "label": "Strength", "default": 1, "min": -4, "max": 4, "step": 0.05,
+       "description": "How strongly the LoRA changes the model: 0 not at all, 1 as trained."},
+      {"name": "enabled", "type": "boolean", "label": "On", "default": true,
+       "description": "Off leaves the LoRA out without losing its row."}
+    ]}
+  ],
+  "outputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"}
+  ]
+}
