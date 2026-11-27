@@ -44,12 +44,15 @@ Item {
             anchors.centerIn: parent
             spacing: 1.5 * pill.u
             Glyph {
+                id: pillMark
                 anchors.verticalCenter: parent.verticalCenter
                 look: pill.look
                 name: pill.runs.busy ? "loader-circle" : "triangle-alert"
                 color: pill.runs.busy ? pill.look.accent : pill.look.error
                 RotationAnimator on rotation {
                     running: pill.runs.running
+                    // A stopped animator leaves the angle it reached: the warning that follows would stay tilted.
+                    onRunningChanged: if (!running) pillMark.rotation = 0
                     loops: Animation.Infinite
                     from: 0
                     to: 360

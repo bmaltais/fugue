@@ -1604,6 +1604,26 @@ private slots:
             QCOMPARE(r.state(node), QStringLiteral("cached"));
     }
 
+    // The header's state mark spins while a node runs; the check that follows stands upright (the owner saw each finished
+    // node's check tilted at the angle its spinner stopped at).
+    void theStateMarkStandsUprightAfterItsSpinnerStops() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QQuickItem *mark = named(r, "node-gen")->findChild<QQuickItem *>("nodeStateGlyph");
+        QVERIFY(mark);
+        QTRY_COMPARE(mark->property("name").toString(), QStringLiteral("loader-circle"));
+        QTest::qWait(250); // the spinner turns part of a circle
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QTRY_COMPARE(mark->property("name").toString(), QStringLiteral("check"));
+        QCOMPARE(mark->rotation(), 0.0);
+    }
+
     // Escape while a run is going cancels it (12.4): the provider's job is cancelled, the
     // node that was running would run again.
     void escapeCancelsTheRun() {
