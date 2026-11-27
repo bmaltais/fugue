@@ -9,7 +9,7 @@
 // matches; the hash is then remembered (engine/file_hashes), so the model is found at once. A
 // mismatch deletes the part. A break (the connection dropped, a silent server) is taken up
 // again with a Range request, a few times; a part left by an earlier Fugue is read and hashed,
-// then resumed the same way. Cancel deletes the part.
+// then resumed the same way. Cancel keeps the part.
 //
 // http is taken only to this machine (a loopback address): nothing it sends leaves it. A
 // redirect is followed only to what a source may be, and never from https to http. A lock beside
@@ -88,7 +88,7 @@ public:
     void setStallTimeout(int ms) { m_stallMs = ms; }
 
     void start();
-    // Stops it and deletes the part; finished() comes with `cancelled`.
+    // Stops it and keeps the part (an empty one goes), for a later download to resume; finished() comes with `cancelled`.
     void cancel();
 
 signals:
@@ -142,7 +142,7 @@ public:
 
     // Adds files at the end; one already queued (by its path) is not added twice. Starts when idle.
     void add(const QList<DownloadTarget> &targets);
-    // Stops the file being fetched (its part is deleted) and drops the rest.
+    // Stops the file being fetched (its part is kept) and drops the rest.
     void cancel();
 
     bool busy() const { return m_running; }

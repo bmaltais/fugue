@@ -414,7 +414,7 @@ private slots:
         QVERIFY(QFileInfo::exists(m_root.filePath("loras/m.safetensors.part")));
     }
 
-    void cancelStopsAndDeletesThePart() {
+    void cancelWithNothingReceivedLeavesNoPart() {
         m_server->on("GET", "/m.safetensors", [&](const HttpRequest &) {
             HttpResponse response;
             response.hold = true;
@@ -431,6 +431,39 @@ private slots:
         QVERIFY(!QFileInfo::exists(m_root.filePath("loras/m.safetensors.part")));
         QTest::qWait(50);
         QCOMPARE(finished.size(), 1); // once
+    }
+
+    // Owner, 2026-11-27: a stop keeps what arrived, and the next download resumes it with a Range request.
+    void cancelKeepsWhatArrivedAndALaterDownloadResumesIt() {
+        const QByteArray bytes = modelBytes();
+        int asked = 0;
+        m_server->on("GET", "/m.safetensors", [&](const HttpRequest &request) {
+            HttpResponse response = ranged(request, bytes);
+            if (++asked == 1)
+                response.cutAfter = 70000; // the connection drops; the retry waits long, and the person stops
+            return response;
+        });
+        const QString part = m_root.filePath("loras/m.safetensors.part");
+        {
+            ModelDownload download(target(bytes), &m_network, m_hashes.get());
+            download.setRetries(3, 60000);
+            QSignalSpy finished(&download, &ModelDownload::finished);
+            download.start();
+            QTRY_VERIFY(download.received() > 0);
+            QTest::qWait(50); // the break itself
+            download.cancel();
+            QCOMPARE(finished.size(), 1);
+            QCOMPARE(finished.first().first().value<Errors>().first().code, QStringLiteral("cancelled"));
+        }
+        const qint64 kept = QFileInfo(part).size();
+        QVERIFY(kept > 0);
+        QVERIFY(!QFileInfo::exists(part + ".lock"));
+        QVERIFY(!QFileInfo::exists(m_root.filePath("loras/m.safetensors")));
+        ModelDownload again(target(bytes), &m_network, m_hashes.get());
+        const Errors errors = runToEnd(again);
+        QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        QCOMPARE(readFile(m_root.filePath("loras/m.safetensors")), bytes);
+        QCOMPARE(m_server->requests().last().headers.value("range"), "bytes=" + QByteArray::number(kept) + "-");
     }
 
     // ---- several ----

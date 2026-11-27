@@ -88,6 +88,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-27 A stopped download keeps its part; the row can delete it (owner decision; confidence high)
+
+- Control: Get ready's model row (`GetReadyRow.qml`, `GetReadySheet.qml`) and its message line.
+- Old: Stop deleted the `.part`; the stop message was long error-red text saying a download "keeps what it had", which was false.
+- New: a row with a kept part says "partial, will resume: 412 MB of 850 MB" (the size so far, and the full size when it is known). Opening the row (the chevron, as every row) shows **Delete partial download**, a raised chip, hidden while that download runs; it removes the part (a regular file only, never through a link) and the row stops saying partial. The stop message is a plain note in the text colour, no copy button and no "Not done" list (the rows show that): "Stopped. The download keeps what it had: Try again resumes it." Install and setup sentences appear only when one was running. A real failure stays red.
+- Convention: Steam and download managers pause and resume, with a separate remove; the Hugging Face CLI resumes a partial file. The delete sits in the opened row, not on the row's face, so a row stays one tap target and the destructive choice needs a second step; it is the only one that touches a file, and the partial is the person's to throw away.
+- Rules met: Destructive (a deliberate chip inside the opened row, never next to Install; the part is only what the person stopped), Words ("Delete partial download" names the thing), Keyboard (Tab reaches the chip when the row is open), Floor (the raised chip's size), Right-to-left (unchanged).
+
 ### 2026-11-27 A list is sized for its entries, not for the field that opened it (owner report; confidence high)
 
 - Control: `src/canvas/widgets/WidgetMenu.qml` (every widget and window menu: a node's choice, seed, canvas and model lists, `ThemedDropDown`, the App view's choice, picture and model inputs, the area view menu, the Canvas view's and task bar's menus, the layers panel's, the shelf card menu); the closed model field (`InputWidget.qml`); a widget row's tooltip (`CanvasNode.qml`).

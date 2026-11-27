@@ -1213,8 +1213,7 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole (no setup, or its marker
   `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped), deleting the others only
   then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
-  at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` as "partial,
-  will resume".
+  at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` (after a Stop or a failure) as "partial, will resume: 412 MB of 850 MB", and its open row offers **Delete partial download**. A stop's message is a plain note, not an error: it names a download (kept, Try again resumes it), an install (undone) or a setup (may be run again) only when that was running.
 - A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
   offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by
   this same question and trusted by the same one ([6.7](#67-trust)), never silently, and what
@@ -2417,7 +2416,7 @@ it as a module folder and run it with no code of its own in Fugue.
   A mismatch, or a size other than `requires` records, deletes the part
   (`download_mismatch`). A break is taken up again with a Range request (five times, the wait
   doubling from 2 s; 60 s of silence is a break); a part an earlier Fugue left is hashed and
-  resumed; Cancel deletes the part. Free space is checked once the size is known. Files come one
+  resumed; a Stop (Cancel) keeps the part too (an empty one goes), so the next download goes on from it, and Get ready's row of a model with a kept part offers **Delete partial download** (only a regular file, never through a link, not while it runs). Free space is checked once the size is known. Files come one
   after another. Any https source is safe to take, since a wrong file is never kept.
 - Catalog (#134): Fugue ships lists of models a person can fetch, for any resource type
   (`src/catalog/*.json`, compiled in; then the catalogs of installed packs, `<pack folder>/catalog/*.json` under the pack
@@ -5437,7 +5436,7 @@ Building M4 made these further choices.
 | A template's sources are exact: each URL's file has the recorded sha256 (Hugging Face's LFS oid). The FLUX.2 Klein 9B templates name unsloth's current Q8 file, not the older build first checked on the 3090, whose bytes only unofficial mirrors still hold (owner, 2026-11-20) | 11.10 | high |
 | A model's source is, in order: the creator's own repo, then Comfy-Org, then another publisher, and an 8-bit file (fp8, INT8, Q8_0) where one fits a 24 GB card. Every URL is pinned to a commit. The Qwen3 text encoders come from Qwen's own GGUFs (the same weights as unsloth's; the file is named `qwen3/…` so it never meets unsloth's file of the same name), Klein 4B from BFL's fp8, and Z-Image Turbo from Comfy-Org's INT8. The rest stay with the next source down: BFL's Klein 9B repos are gated, the 8-bit Qwen-Image-Edit 2511 (20.5 GB) and Wan 2.2 (2 × 14.3 GB) don't fit without offload, and the depth and Grounding DINO creators publish no ONNX (owner, 2026-11-25) | 11.10 | high |
 | Model downloads (#89, the owner reversed "no downloads"): any https source, not ComfyUI's allowlist of Hugging Face and Civitai, since the file is kept only when its hash is the handle's; ComfyUI's download list trusts the name and checks no hash by default. http is taken only to this machine, where nothing leaves it | 8.9 | high |
-| A cancelled download deletes its part; a break or a quit keeps it, and the next download of that file goes on from it after hashing what is there. A browser's cancel deletes too; a part kept after a cancel would hold many GB nobody asked for | 8.9 | medium-high |
+| A stopped download keeps its part, as a break or a quit does, and the next download of that file goes on from it after hashing what is there; the person deletes a kept part from its Get ready row (owner, 2026-11-27, reversing "a cancel deletes", which a browser does; Steam and download managers pause and resume, Hugging Face's CLI resumes) | 8.9 | high |
 | Downloads run one file after another, not side by side: the first model is usable while the rest arrive, and one bar tells it. The banner shows one button for all of a workflow's missing models ("Download 3 models, 19.4 GB"), not one per model as #89 first said, and a choice of folder only when more than one can take them | 8.9, 12.10 | medium-high |
 | `requires.models` may record each model's `size` (#89), for the button's total and an early stop when a source serves another size; the total shows only when every model records one | 4.3, 8.9 | medium-high |
 | After a download Fugue says what arrived, or what failed with its hint; after a cancel the banner names what is still missing, with its button again | 12.10 | medium |

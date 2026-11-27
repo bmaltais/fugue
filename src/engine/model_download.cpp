@@ -408,9 +408,11 @@ void ModelDownload::cancel() {
     m_stopHashing = true;
     dropReply();
     if (m_hasher)
-        m_hasher->wait(); // its file is the part, removed below
+        m_hasher->wait(); // it reads the part: wait before the part is closed
     m_part.close();
-    QFile::remove(partPath());
+    // A stop keeps what arrived, so the next download resumes it (owner, 2026-11-27); a part with nothing in it is not worth keeping.
+    if (QFileInfo(partPath()).size() == 0)
+        QFile::remove(partPath());
     end({makeError(QStringLiteral("cancelled"), QStringLiteral("The download of %1 was cancelled.").arg(m_target.fileName()))});
 }
 

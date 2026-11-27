@@ -84,6 +84,8 @@ public:
     Q_INVOKABLE void start();
     // Stops a run (the rows not done stay undone); closes a review.
     Q_INVOKABLE void cancel();
+    // Removes the kept `.part` of the model with this hash (a regular file only, never through a link), unless it is being downloaded.
+    Q_INVOKABLE void deletePartial(const QString &hash);
     Q_INVOKABLE void close();
     // Models go into `root`, one of the choices. Only the list changes: the settings are written at the yes, not before.
     Q_INVOKABLE void changeDestination(const QString &root);
@@ -156,7 +158,8 @@ private:
     QStringList m_retry;
     bool m_ok = false;
     QList<RowState> m_states;
-    QSet<QString> m_partial; // target paths with a kept `.part` (#418)
+    QHash<QString, qint64> m_partial; // target path -> bytes of a kept `.part` (#418)
+    bool m_stopped = false; // the run ended on the person's Stop: a neutral message, not an error
     QStringList m_details;
     QList<double> m_fractions;
     QVariantMap m_view;
