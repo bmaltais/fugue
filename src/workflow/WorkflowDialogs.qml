@@ -126,103 +126,79 @@ Item {
         }
     }
 
-    // What went wrong, or what the opened workflow lacks; its missing models' Download button
-    // (#89), and the models downloading.
-    Banner {
+    // What went wrong, or what the opened workflow lacks, with its Get ready… button (#379); a template opened with the person's files
+    // in place of its models, one line per file with Undo (#616); and the models downloading. One KitNotice (docs/canvas-look.md 20.23).
+    KitNotice {
         id: notice
         objectName: "workflowNotice"
         readonly property var downloads: App.workflows.downloads
+        readonly property bool swapped: App.workflows.noticeLines.length > 0
         visible: App.workflows.notice.length > 0 || downloads.busy
         look: root.look
-        tone: App.workflows.getReadyOffer || downloads.busy ? "moss" : "slate" // what a workflow lacks and its downloads are Get ready's area
+        // A swap is the attention tone (Fugue changed the workflow's models on its own; the files differ, Undo is there while nothing
+        // else changed); what a workflow lacks and its downloads are Get ready's, info; a failure is an error's words but no error tone
+        // here, because the same line also says plain things ("Exported ...").
+        tone: swapped ? "attention" : App.workflows.getReadyOffer || downloads.busy ? "info" : "neutral"
+        title: swapped ? App.workflows.noticeTitle : App.workflows.notice
+        lines: App.workflows.noticeLines
+        copyText: App.workflows.notice
+        copyName: "noticeCopy"
+        dismissible: App.workflows.notice.length > 0
+        returnFocus: root.canvasView
+        onDismissed: App.workflows.dismissNotice()
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 * root.look.unit; leftMargin: root.noticeInset + 2 * root.look.unit }
-        ColumnLayout {
-            id: noticeColumn
-            width: parent.width
-            spacing: 16 // two chunks: the line and its button, then the download under way
-            LayoutMirroring.enabled: root.rightToLeft
-            LayoutMirroring.childrenInherit: true
+        actions: Component {
             RowLayout {
-                id: noticeRow
-                Layout.fillWidth: true
-                visible: App.workflows.notice.length > 0
-                spacing: 8
-                Label {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    color: root.look.text
-                    text: App.workflows.notice
-                }
-                Loader { // made only while a notice shows: the window keeps few items (#5)
-                    Layout.alignment: Qt.AlignTop
-                    active: App.workflows.notice.length > 0
-                    sourceComponent: KitCopyButton {
-                        objectName: "noticeCopy"
-                        look: root.look
-                        copyText: App.workflows.notice
-                    }
-                }
+                spacing: 2 * root.look.unit
                 // One button for everything the workflow lacks (#379): packs, their trust and environments, and models,
                 // asked once on the sheet, with where models go.
-                Loader {
-                    active: App.workflows.getReadyOffer // made only when shown: the window keeps few items (#5)
-                    sourceComponent: ThemedButton {
-                        objectName: "getReady"
-                        highlighted: true
-                        text: qsTr("Get ready…")
-                        onClicked: App.workflows.readiness.show()
-                    }
+                ThemedButton {
+                    objectName: "getReady"
+                    visible: App.workflows.getReadyOffer
+                    highlighted: true
+                    text: qsTr("Get ready…")
+                    onClicked: App.workflows.readiness.show()
                 }
-                // A template opened with the person's files in place of its models: Undo puts its own models back.
-                Loader {
-                    active: App.workflows.noticeUndoable
-                    sourceComponent: ThemedButton {
-                        objectName: "noticeUndo"
-                        text: qsTr("Undo")
-                        onClicked: App.workflows.undoNotice()
-                    }
-                }
-                ViewButton {
-                    objectName: "workflowNoticeDismiss"
-                    look: root.look
-                    glyph: "x" // the Lucide x every other close and dismiss draws (canvas-look 16)
-                    flat: true
-                    tip: qsTr("Dismiss")
-                    onTapped: App.workflows.dismissNotice()
+                // A template opened with the person's files in place of its models: Undo puts its own models back, all of them.
+                ThemedButton {
+                    objectName: "noticeUndo"
+                    visible: App.workflows.noticeUndoable
+                    text: qsTr("Undo")
+                    onClicked: App.workflows.undoNotice()
                 }
             }
-            Loader {
-                Layout.fillWidth: true
-                active: notice.downloads.busy
-                sourceComponent: RowLayout {
-                    objectName: "downloadProgress"
-                    spacing: 8
-                    Label {
-                        color: root.look.text
-                        text: qsTr("Downloading %1").arg(notice.downloads.label)
-                        elide: Text.ElideMiddle
-                        Layout.maximumWidth: noticeColumn.width / 2
-                    }
-                    KitProgress {
-                        objectName: "downloadProgressBar"
-                        look: root.look
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
-                        indeterminate: notice.downloads.fraction < 0
-                        value: Math.max(0, notice.downloads.fraction)
-                        text: qsTr("Download progress")
-                    }
-                    Label {
-                        color: root.look.label
-                        text: notice.downloads.progressText
-                    }
-                    ThemedButton {
-                        objectName: "downloadCancel"
-                        danger: true
-                        Layout.leftMargin: 8 // Destructive: twice the row's gap before it
-                        text: qsTr("Cancel")
-                        onClicked: notice.downloads.cancel()
-                    }
+        }
+        extra: notice.downloads.busy ? downloadRow : null
+        Component {
+            id: downloadRow
+            RowLayout {
+                objectName: "downloadProgress"
+                spacing: 8
+                Label {
+                    color: root.look.text
+                    text: qsTr("Downloading %1").arg(notice.downloads.label)
+                    elide: Text.ElideMiddle
+                    Layout.maximumWidth: notice.width / 2
+                }
+                KitProgress {
+                    objectName: "downloadProgressBar"
+                    look: root.look
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
+                    indeterminate: notice.downloads.fraction < 0
+                    value: Math.max(0, notice.downloads.fraction)
+                    text: qsTr("Download progress")
+                }
+                Label {
+                    color: root.look.label
+                    text: notice.downloads.progressText
+                }
+                ThemedButton {
+                    objectName: "downloadCancel"
+                    danger: true
+                    Layout.leftMargin: 8 // Destructive: twice the row's gap before it
+                    text: qsTr("Cancel")
+                    onClicked: notice.downloads.cancel()
                 }
             }
         }

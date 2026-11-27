@@ -2090,7 +2090,7 @@ Item {
     }
     // A run's layer landed on the Head while the view was on it (the normal flow, #228): the view went along; a short
     // notice says what came, with Undo (the layers panel's: the Head back one step) and a close. No decision to take.
-    Banner {
+    KitNotice {
         id: headToast
         objectName: "canvasViewHeadToast"
         anchors.left: pictureView.left
@@ -2100,49 +2100,26 @@ Item {
         anchors.bottomMargin: 8 * root.u
         visible: canvasData.headNotice !== "" && pictureView.visible
         look: root.look
+        tone: "neutral" // a result came, as asked: nothing to decide
+        title: canvasData.headNotice
+        titleName: "canvasViewHeadToastText"
+        dismissTip: qsTr("Close")
+        dismissName: "canvasViewHeadToastClose"
+        onDismissed: canvasData.clearHeadNotice()
         Timer {
             running: headToast.visible
             interval: 10000
             onTriggered: canvasData.clearHeadNotice()
         }
-        Item {
-            width: parent.width
-            height: toastUndo.height
-            Text {
-                objectName: "canvasViewHeadToastText"
-                anchors.left: parent.left
-                anchors.right: toastUndo.left
-                anchors.rightMargin: 2 * root.u
-                anchors.verticalCenter: parent.verticalCenter
-                elide: Text.ElideRight
-                color: root.look.text
-                font.pixelSize: root.look.labelSize
-                text: canvasData.headNotice
-            }
+        actions: Component {
             ViewButton {
-                id: toastUndo
                 objectName: "canvasViewHeadToastUndo"
-                anchors.right: toastClose.left
-                anchors.rightMargin: root.u
-                anchors.verticalCenter: parent.verticalCenter
                 look: root.look
                 glyph: "undo-2"
                 text: qsTr("Undo")
                 enabled: canvasData.canUndo
                 tip: qsTr("Take the canvas back one step (%1)").arg((App.commands.entry("canvas-layers.undo").keys ?? []).join(", "))
                 onTapped: canvasData.undo()
-            }
-            ViewButton {
-                id: toastClose
-                objectName: "canvasViewHeadToastClose"
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                look: root.look
-                glyph: "x"
-                flat: true
-                compact: true
-                tip: qsTr("Close")
-                onTapped: canvasData.clearHeadNotice()
             }
         }
     }
@@ -2252,26 +2229,20 @@ Item {
         spacing: root.u
         // The followed Canvas Region reads another canvas, or a linked one: said plainly, with what can be done about it
         // (never a dead end in the error color).
-        Banner {
+        KitNotice {
             objectName: "canvasViewCanvasMismatch"
             width: parent.width
             visible: canvasData.followNode !== "" && (canvasData.region.problem === "otherCanvas" || canvasData.region.problem === "linked")
             look: root.look
-            Column {
-                width: parent.width
-                spacing: root.u
-                Text {
-                    objectName: "canvasViewCanvasMismatchText"
-                    width: parent.width
-                    wrapMode: Text.Wrap
-                    color: root.look.text
-                    font.pixelSize: root.look.labelSize
-                    text: canvasData.region.reason ?? ""
-                }
+            tone: "attention" // the region reads elsewhere: a person must choose, but nothing failed
+            title: canvasData.region.reason ?? ""
+            titleName: "canvasViewCanvasMismatchText"
+            dismissible: false // a state of the node, gone when the node reads the canvas shown
+            extra: canvasData.region.problem === "otherCanvas" ? mismatchActions : null
+            Component {
+                id: mismatchActions
                 Flow {
-                    width: parent.width
                     spacing: root.u
-                    visible: canvasData.region.problem === "otherCanvas"
                     ViewButton {
                         objectName: "canvasViewShowNodeCanvas"
                         look: root.look

@@ -216,6 +216,40 @@ private slots:
         }
     }
 
+    // FUGUE_SHOT_DIR=<folder> [FUGUE_SHOT_THEME=<omarchy theme>] [FUGUE_SHOT_TAG=<tag>]: the window's notice with two swaps of "Use my
+    // file", as the owner saw it (2026-11-27). Pictures only; nothing is asserted.
+    void theSwapNoticeLooks() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        const QString theme = qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night"));
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG", QStringLiteral("shot"));
+        QTemporaryDir root;
+        makeApp(root.path(), "shot-app", "Shot app");
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"), {}, Look{theme});
+        Rig rig(app, root.path());
+        QVERIFY(app.workflows.openPath(root.path() + "/shot-app/workflow.fugue"));
+        rig.view.showApp();
+        QVERIFY(app.open());
+        app.window->resize(1000, 640);
+        OnDiskUse qwen, flux;
+        qwen.wanted = QJsonObject{{"resource", "fugue/text-encoder"}, {"name", "qwen3/Qwen3-4B-Q8_0.gguf"}};
+        qwen.match.name = "Qwen3-4B-Q8_0.gguf";
+        qwen.match.path = "/models/text_encoders/Qwen3-4B-Q8_0.gguf";
+        qwen.match.tier = "Q8_0";
+        qwen.match.otherSource = true;
+        flux.wanted = QJsonObject{{"resource", "fugue/diffusion-model"}, {"name", "flux-2-klein-4b-fp8.safetensors"}};
+        flux.match.name = "flux-2-klein-4b.safetensors";
+        flux.match.path = "/models/diffusion_models/flux-2-klein-4b.safetensors";
+        flux.match.tier = "full-precision";
+        app.workflows.notifySwaps(swapNotice(SwapKind::Opened, {qwen, flux})); // the owner's two swaps (2026-11-27)
+        QTRY_VERIFY(find(app.window, "appNotice"));
+        QTest::qWait(500);
+        QVERIFY(test_support::grab(app.window).save(QString("%1/swap-notice-app-window-%2-%3.png").arg(out, theme, tag)));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // `fugue --app x.fugueapp` (#394): the bundle opens as the app, and once it is ready "Keep this app" puts it in the person's
     // apps (their templates folder) and the launcher; the bundle itself is left where it was.
     void aBundleIsKeptIntoTheAppsAndTheLauncher() {

@@ -804,6 +804,7 @@ QT_QUICK_BACKEND=rhi build/test_kit shots`); every new or changed element is add
 | Section title, group, row, separator | `KitSection`, `KitGroup`, `KitRow`, `KitSeparator` | Built (group fill and border adapt to the tint, 20.5) |
 | Recessed field, smoked mode | `KitWell` | Built (numbers to align, 20.6) |
 | Raised look, chip, frosted mode, glass | `KitRaise`, `KitChip`, `KitFrost` | Built (frost numbers to align, 20.7); `KitChip.toned` tints a chip that is on with the panel's tone |
+| Notice: a tone, a title, a body or lines, actions, copy, dismiss | `KitNotice` | Built (20.23): every notice of the window; `Banner` is gone |
 | Copy button for an error message | `KitCopyButton` | Built: a 6u round `KitChip` with the `copy` glyph, a check for `durCopied` after a press; `copyText` is the whole message with details and ids |
 | Toggle | `KitToggle` | Built (20.8, 20.11) |
 | Segmented chooser | `KitSegmented` | Built (20.9) |
@@ -1246,7 +1247,7 @@ compositor draws their outline (Hyprland rounds it itself); the full Fugue windo
 | Shortcuts help (`?`): slate `KitHero` with its close, the filter a Tab stop | Built |
 | Canvas dialogs (New canvas, Layer properties, Transform selection, selection modify, Batch) and the export dialog: a sea (export: slate) `KitHero` through `Question.heading`; a plain question keeps the quiet slate card, no header | Built (`Question` puts the hero at the top of its background and makes room with `topPadding`; a popup has no header slot) |
 | Large view, Canvas view, paint window (`LargeViewDialog.tone`: ember, sea for the Canvas and the paint window): a soft fade of the tone behind the bar, not a hero | Built (a 60px hero would cost a working window its picture) |
-| Notices: `Banner` is a calm `KitPanel` card with a `tone` (slate; moss for Get ready, downloads and the helper offer); the workflow notice, the helper notice, the Canvas view's toast and its banners | Built (objectNames and behaviour unchanged) |
+| Notices: one `KitNotice` (20.23) with a tone (info, attention, error, success, neutral); the workflow notice, the app window's, the helper offer, the keymap's problems, the Canvas view's toast and its canvas mismatch, the layers panel's view states | Built (objectNames kept; the inner parts are made while shown) |
 | Layers panels (`CanvasLayersPanel`, `PaintLayersPanel`): a `KitGroup` fill and corner in the sea tone, rows with the chip corner and the tone as selection, hover `kitChipHover`, the caption's tone fade | Built |
 
 A shape paints the outside of each card's corners in the window colour over its content (no clipped layer: the canvas is untouched);
@@ -1262,7 +1263,28 @@ a light theme read 4.1:1 and 4.25:1 (a step darker), and the two corner settings
 
 | Left | Why |
 | --- | --- |
-| The notice bar of an app's own window is a full-width strip in Calm (the in-window notices are cards) | the app window has no card margin; it shares `Banner` with a square variant. A pass of its own |
 | Frosted chips over a light picture in a header rely on `PictureLuma` and were measured only on the shipped pictures | no failing picture found |
 | The system file dialogs (open, save, export) are the desktop's | not Fugue's to style |
 | Real-GPU grabs of Flat were taken on the owner's own theme (a scratch `HOME` hid the project settings from the settings reader) and Settings and shortcuts could not be opened by keys headless | offscreen grabs cover them in both themes |
+
+### 20.23 KitNotice: one notice, five tones (Built, 2026-11-27)
+
+`src/kit/KitNotice.qml`, in `tests/kit/KitGallery.qml` ("Notices"). What happened, or what needs a look, said once in a quiet card. Decision and
+references: docs/ui-ergonomics.md, 2026-11-27.
+
+| Part | Look |
+| --- | --- |
+| Card | `look.role(<tone colour>).tint` fill (the tone's tint, stepped down until the text reads on it at 4.5:1), a 1px `frameEdge` edge, the group corner (none in Panes); 3u by 2u inside (2u by 1u compact) |
+| Tones | info `blue`, attention `yellow`, error the theme's `red` (`error`), success `green`, neutral `muted` (the label colour): Omarchy palette names, so light and dark themes follow; no colour of its own |
+| Glyph | 14px Lucide, the tone's `frameTitle` ink: info `info`, attention `triangle-alert`, error `circle-x`, success `check`; neutral none |
+| Head | glyph, title (text size; DemiBold when a body or lines follow), `actions` (a Component: Undo, Get ready…), the copy button (`copyText`), the × (`dismissible`, its tip `dismissTip`); the first line is the buttons' 7u and every part centres on it |
+| Body | label size, the text colour, wrapped, under the title |
+| Lines | strings, or swaps of "Use my file" `{mine, theirs, minePath, tier}` as a small table: your file (Medium), "in place of" (label colour, label size), the template's file, the tier as a `KitBadge`; the two name columns are as wide as their longest name and shared out when narrower, cut in the middle, the whole name and your file's path in a tooltip; under 24u a name, the chip goes under the names |
+| Extra | a Component under the lines (the download under way, the canvas mismatch's buttons), indented with the lines |
+| Compact | one line, caption size, a 6u × (the layers panel's "Showing Sky alone") |
+
+A hidden notice is two items (the root and a Loader): everything else is made while it shows. It is an `AlertMessage` for screen readers
+(the title as its name, title, body and lines as its description) and is announced (`Accessible.announce`) when it shows or its words
+change. Tab reaches its buttons; Escape inside it dismisses it and gives the focus to `returnFocus` (or the window). It mirrors right to
+left with the application. The notice never hides itself: `dismissed()` is the host's.
+

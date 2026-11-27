@@ -217,6 +217,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
         m_work.hash(this, path, std::move(progress), std::move(done));
     };
     host.say = [this](const QString &text) { setNotice(text); };
+    host.sayChoice = [this](const SwapNotice &swaps) { setNotice(swaps.text, swaps.title, swaps.lines); };
     host.saying = [this] { return m_notice; };
     host.sayInSheet = [this](const QString &text) { m_readiness->say(text); };
     host.changed = [this](bool force) {
@@ -294,7 +295,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
             setNotice(m_missingNotice.isEmpty() ? tr("Downloaded %n models.", nullptr, arrived) : m_missingNotice);
         emit noticeChanged(); // the offer, with the same line
     });
-    connect(m_images, &ImageInputs::message, this, &Workflows::setNotice);
+    connect(m_images, &ImageInputs::message, this, [this](const QString &text) { setNotice(text); });
     m_timer.setInterval(locations.recoveryIntervalMs);
     connect(&m_timer, &QTimer::timeout, this, &Workflows::writeRecoveryCopies);
     m_timer.start();
@@ -369,10 +370,12 @@ QUrl Workflows::suggestedFolder() const {
     return QUrl::fromLocalFile(QFileInfo(fugue).isDir() ? fugue : (documents.isEmpty() ? QDir::homePath() : documents));
 }
 
-void Workflows::setNotice(const QString &text) {
-    if (m_notice == text)
+void Workflows::setNotice(const QString &text, const QString &title, const QVariantList &lines) {
+    if (m_notice == text && m_noticeTitle == title && m_noticeLines == lines)
         return;
     m_notice = text;
+    m_noticeTitle = text.isEmpty() ? QString() : title;
+    m_noticeLines = text.isEmpty() ? QVariantList() : lines;
     emit noticeChanged();
 }
 

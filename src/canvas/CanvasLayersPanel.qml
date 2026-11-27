@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "widgets"
+import "../kit"
 
 // The layers of the canvas a Canvas view shows (#226, spec 14.5), as an outliner: compact rows top first, each with a
 // thumbnail, a second one for its layer mask, the name and the eye at the right; under the list the selected layer's
@@ -638,71 +639,29 @@ Rectangle {
                     }
                 }
             }
-            // A notice with its action, in the window's one notice look (Banner.qml), not an accent tint.
-            Banner {
+            // A view state with its way back, in the window's one notice look (KitNotice, compact and neutral), not an accent tint.
+            KitNotice {
                 objectName: "canvasLayersSolo"
                 visible: root.model.solo >= 0
                 width: parent.width
                 look: root.look
-                Item {
-                    width: parent.width
-                    height: soloEnd.height
-                    Text {
-                        anchors.left: parent.left
-                        anchors.right: soloEnd.left
-                        anchors.rightMargin: root.u
-                        anchors.verticalCenter: parent.verticalCenter
-                        elide: Text.ElideRight
-                        color: root.look.text
-                        font.pixelSize: root.look.captionSize
-                        text: qsTr("Showing %1 alone").arg(root.rows.find(r => r.position === root.model.solo)?.name ?? "")
-                    }
-                    ViewButton {
-                        id: soloEnd
-                        objectName: "canvasLayersSoloEnd"
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        look: root.look
-                        glyph: "x"
-                        flat: true
-                        compact: true
-                        tip: qsTr("Show every layer")
-                        onTapped: root.model.solo = -1
-                    }
-                }
+                compact: true
+                title: qsTr("Showing %1 alone").arg(root.rows.find(r => r.position === root.model.solo)?.name ?? "")
+                dismissTip: qsTr("Show every layer")
+                dismissName: "canvasLayersSoloEnd"
+                onDismissed: root.model.solo = -1
             }
             // Which layer Generate reads (#226): a view state like Show alone, so a notice with its way back.
-            Banner {
+            KitNotice {
                 objectName: "canvasLayersRegion"
                 visible: root.model.regionLayer !== ""
                 width: parent.width
                 look: root.look
-                Item {
-                    width: parent.width
-                    height: regionEnd.height
-                    Text {
-                        anchors.left: parent.left
-                        anchors.right: regionEnd.left
-                        anchors.rightMargin: root.u
-                        anchors.verticalCenter: parent.verticalCenter
-                        elide: Text.ElideRight
-                        color: root.look.text
-                        font.pixelSize: root.look.captionSize
-                        text: qsTr("Generate reads %1 only").arg(root.model.regionLayer)
-                    }
-                    ViewButton {
-                        id: regionEnd
-                        objectName: "canvasLayersRegionEnd"
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        look: root.look
-                        glyph: "x"
-                        flat: true
-                        compact: true
-                        tip: qsTr("Generate reads the whole picture again")
-                        onTapped: root.model.setRegionLayer(-1)
-                    }
-                }
+                compact: true
+                title: qsTr("Generate reads %1 only").arg(root.model.regionLayer)
+                dismissTip: qsTr("Generate reads the whole picture again")
+                dismissName: "canvasLayersRegionEnd"
+                onDismissed: root.model.setRegionLayer(-1)
             }
             DragNumberField {
                 objectName: "canvasLayerOpacity"

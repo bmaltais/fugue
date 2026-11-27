@@ -78,6 +78,20 @@ private:
     std::function<QString()> m_shownTab;
 };
 
+// The banner of a swap (spec 2.5, "Use my file"; docs/ui-ergonomics.md 2026-11-27): a short title, one line per file put in place of a
+// template's or workflow's model, and the whole text. `text` is what Workflows::notice holds and what the banner's copy button copies:
+// one sentence per swap, nothing left out. Each line is {mine, theirs, minePath, tier}: the person's file, the model it stands in for,
+// where the person's file is, and the quiet chip ("same model · Q8_0 · another source").
+struct SwapNotice {
+    QString title;
+    QVariantList lines;
+    QString text;
+    bool isEmpty() const { return lines.isEmpty(); }
+};
+// Opened: a template opened with the person's files. Used: a tab already open took them (Get ready, the Needs panel, the setting).
+enum class SwapKind { Opened, Used };
+SwapNotice swapNotice(SwapKind kind, const QList<OnDiskUse> &applied);
+
 // What the module reads of its owner, taken at one moment (a fact is read again where an earlier step may have changed it).
 struct ChoiceFacts {
     QString shownTab;       // empty: no tab
@@ -96,6 +110,7 @@ struct ChoiceHost {
     // Reads `path`'s hash on the worker: progress(percent) as it goes, done(hash) at the end ("" when unreadable).
     std::function<void(const QString &path, std::function<void(int)> progress, std::function<void(const QString &)> done)> hash;
     std::function<void(const QString &)> say;          // the banner
+    std::function<void(const SwapNotice &)> sayChoice; // the banner of a swap, in lines (unset: `say` gets its text)
     std::function<QString()> saying;                   // the banner's text now
     std::function<void(const QString &)> sayInSheet;   // the Get ready sheet's own line
     std::function<void(bool force)> changed;           // the models a tab has changed: forget the on-disk facts, read the banner's again
@@ -170,6 +185,7 @@ private:
     void start(const QStringList &hashes, int token, Source source);
     bool apply(const QString &tab, const QList<OnDiskUse> &chosen, const Uses &resolved, ChoiceView view, bool announce);
     void announce(const QString &tab, ChoiceView view, const QList<OnDiskUse> &chosen, const Uses &resolved, const ChoiceRecord &record);
+    void sayChoice(const SwapNotice &notice);
     bool finishOpen(const QList<OnDiskUse> &uses, const Uses &resolved, const QStringList &failed, const std::function<bool(const Uses &)> &openIt,
                     const QString &original);
     void hashUses(const QList<OnDiskUse> &uses, std::function<void(const Uses &, const QStringList &)> done,

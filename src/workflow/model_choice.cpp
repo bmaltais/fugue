@@ -430,16 +430,49 @@ bool ModelChoice::check(Check kind) {
     return true;
 }
 
+SwapNotice swapNotice(SwapKind kind, const QList<OnDiskUse> &applied) {
+    SwapNotice notice;
+    if (applied.isEmpty())
+        return notice;
+    const int count = int(applied.size());
+    notice.title = kind == SwapKind::Opened ? ModelChoice::tr("Opened with your %n files", nullptr, count) : ModelChoice::tr("Using your %n files", nullptr, count);
+    QStringList sentences;
+    for (const OnDiskUse &use : applied) {
+        const QString theirs = use.wanted.value(QStringLiteral("name")).toString();
+        QStringList tier{ModelChoice::tr("same model")};
+        if (!use.match.tier.isEmpty())
+            tier << use.match.tier;
+        if (use.match.otherSource)
+            tier << ModelChoice::tr("another source");
+        notice.lines.append(QVariantMap{{QStringLiteral("mine"), use.match.name},
+                                        {QStringLiteral("theirs"), theirs},
+                                        {QStringLiteral("minePath"), use.match.path},
+                                        {QStringLiteral("tier"), tier.join(QStringLiteral(" · "))}});
+        sentences << (kind == SwapKind::Opened ? ModelChoice::tr("Opened with your file %1 in place of %2 (%3).")
+                                               : ModelChoice::tr("Used your file %1 in place of %2 (%3)."))
+                         .arg(use.match.name, theirs, use.sameModelText());
+    }
+    notice.text = sentences.join(QLatin1Char('\n'));
+    return notice;
+}
+
+void ModelChoice::sayChoice(const SwapNotice &notice) {
+    if (m_host.sayChoice)
+        m_host.sayChoice(notice);
+    else
+        m_host.say(notice.text);
+}
+
 void ModelChoice::announce(const QString &tab, ChoiceView view, const QList<OnDiskUse> &chosen, const Uses &resolved, const ChoiceRecord &record) {
-    QStringList lines;
+    QList<OnDiskUse> applied;
     for (const OnDiskUse &use : chosen)
         if (resolved.contains(hashOf(use)))
-            lines << tr("Used your file %1 in place of %2 (%3).").arg(use.match.name, use.wanted.value(QStringLiteral("name")).toString(), use.sameModelText());
-    if (lines.isEmpty())
+            applied << use;
+    if (applied.isEmpty())
         return;
     if (m_host.facts().shownTab != tab)
         return; // not the tab shown: its line would stand on another tab's banner
-    m_host.say(lines.join(QLatin1Char(' ')));
+    sayChoice(swapNotice(SwapKind::Used, applied));
     if (view == ChoiceView::Graph || m_record.tab == tab)
         m_record = {}; // another tab's Undo is left alone by an App-view swap
     if (view == ChoiceView::Graph)
@@ -505,14 +538,14 @@ bool ModelChoice::finishOpen(const QList<OnDiskUse> &uses, const Uses &resolved,
     tab = m_host.facts().shownTab;
     if (!opened || resolved.isEmpty() || tab.isEmpty())
         return opened;
-    QStringList lines;
+    QList<OnDiskUse> applied;
     for (const OnDiskUse &use : uses)
         if (resolved.contains(hashOf(use)))
-            lines << tr("Opened with your file %1 in place of %2 (%3).").arg(use.match.name, use.wanted.value(QStringLiteral("name")).toString(), use.sameModelText());
+            applied << use;
     if (!failed.isEmpty())
         return true; // the failure line stays the banner's
     const Result<Document> before = Document::loadFile(original);
-    m_host.say(lines.join(QLatin1Char(' ')));
+    sayChoice(swapNotice(SwapKind::Opened, applied));
     m_record = m_graph.took(tab, before ? &before.value() : nullptr);
     emit recordChanged();
     return true;
