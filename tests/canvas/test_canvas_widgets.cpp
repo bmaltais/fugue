@@ -372,6 +372,71 @@ private slots:
         QCOMPARE(app.steps(), 1);
     }
 
+    // A narrow node at half zoom: its choice list is sized for its entries, not for the field, and drawn at screen scale,
+    // so every entry reads whole (owner: "it is impossible to read the items because the text is cut out").
+    void aNarrowNodesChoiceListFitsItsEntriesAtScreenScale() {
+        WidgetApp app(R"({"fugue": 1,
+          "graph": {"nodes": {"pick": {"type": "io.example.widgets/long", "version": "1.0.0"}}},
+          "layout": {"nodes": {"pick": {"pos": [40, 40], "size": [120, 0]}}, "view": {"center": [480, 340], "zoom": 0.5}}})");
+        QVERIFY(app.open());
+        QQuickItem *field = app.widget("pick", "sampler");
+        QVERIFY(field);
+        const qreal fieldOnScreen = field->mapToScene(QPointF(field->width(), 0)).x() - field->mapToScene(QPointF(0, 0)).x();
+        app.click(app.in("pick", "sampler"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        QQuickItem *list = canvas_test::item(app.window->contentItem(), "widgetMenuList");
+        QVERIFY(list);
+        app.window->grabWindow(); // lays the rows out
+        // Not bound to the field: much wider than it, and at scale 1 in the window whatever the canvas zoom.
+        const qreal width = menu->property("width").toReal();
+        QVERIFY2(width > 2 * fieldOnScreen, qPrintable(QString("menu %1, field %2").arg(width).arg(fieldOnScreen)));
+        QCOMPARE(list->mapToScene(QPointF(100, 0)).x() - list->mapToScene(QPointF(0, 0)).x(), 100.0);
+        int rows = 0;
+        QList<QQuickItem *> todo{list};
+        while (!todo.isEmpty()) {
+            QQuickItem *at = todo.takeFirst();
+            if (at->objectName() == "widgetMenuText" && at->isVisible()) {
+                ++rows;
+                QVERIFY2(!at->property("truncated").toBool(), qPrintable(at->property("text").toString()));
+            }
+            todo << at->childItems();
+        }
+        QCOMPARE(rows, 3);
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.popup("widgetMenu"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // FUGUE_SHOT_DIR=<folder>: a narrow node's model list open, at 100% and 50% zoom. Pictures only; nothing is asserted.
+    void aNarrowNodesModelListLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        QTemporaryDir models;
+        for (const char *name : {"flux1-dev-kontext-Q4_K_M.gguf", "flux1-dev-kontext-Q8_0.gguf",
+                                 "qwen-image-edit-2509-fp8_e4m3fn_scaled.safetensors", "hidream_i1_full_fp16.safetensors",
+                                 "wan2.2_i2v_low_noise_14B_Q4_K_S.gguf"})
+            QVERIFY(test::writeFixtureFile(models.filePath(QString("image-model/") + name), QByteArray(1000, 'm')));
+        for (const char *zoom : {"1", "0.5"}) {
+            const QByteArray graph = QByteArray(R"({"fugue": 1,
+              "graph": {"nodes": {"all": {"type": "io.example.widgets/all", "version": "1.0.0",
+                "inputs": {"model": {"resource": "fugue/image-model", "name": "qwen-image-edit-2509-fp8_e4m3fn_scaled.safetensors"}}}}},
+              "layout": {"nodes": {"all": {"pos": [40, 40], "size": [170, 0]}}, "view": {"center": [480, 340], "zoom": )")
+                                     + zoom + "}}}";
+            WidgetApp app(graph.constData());
+            app.model.widgets()->setModelRoots({models.path()});
+            app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                                   std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+            QVERIFY(app.open());
+            app.click(app.in("all", "model"));
+            QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+            QTest::qWait(150);
+            QVERIFY(test_support::grab(app.window).save(QString("%1/narrow-model-list-%2.png").arg(out, zoom)));
+        }
+    }
+
     void fileAndFolderTakeTypedPathsAndThePicker() {
         WidgetApp app;
         QVERIFY(app.open());

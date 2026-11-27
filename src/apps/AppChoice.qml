@@ -36,7 +36,7 @@ KitDropdown {
         objectName: "choiceMenu"
         look: chip.look
         parent: Overlay.overlay
-        width: Math.max(chip.width, 24 * chip.look.unit)
+        anchorWidth: Math.max(chip.width, 24 * chip.look.unit)
         entries: chip.options.map(o => ({text: o.text, value: o.value, checked: o.value === chip.value}))
         onPicked: v => { chip.picked(v); chip.forceActiveFocus() }
     }

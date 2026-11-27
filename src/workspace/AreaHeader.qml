@@ -56,11 +56,8 @@ Rectangle {
             text: choice.name, value: choice.id, checked: choice.current, enabled: choice.enabled || choice.current,
             detail: choice.moves ? qsTr("moves here") : ""}))
         const at = typeButton.mapToItem(Overlay.overlay, 0, typeButton.height)
-        const menu = menuComponent.createObject(header, {wantX: at.x, wantY: at.y, width: Math.max(typeButton.width, 40 * u),
+        const menu = menuComponent.createObject(header, {wantX: at.x, wantY: at.y, anchorWidth: Math.max(typeButton.width, 40 * u),
                                                          anchorHeight: typeButton.height, entries: entries}) as WidgetMenu
-        // Never narrower than its rows: at the button's width the note ("moves here") left no room for the view's
-        // name, so the menu read as that note twice (owner, 2026-11-26).
-        menu.width = Math.max(menu.width, menu.implicitWidth)
         // The default one-area window has one App mechanism, the window's App | Graph switch (view.toggle-app: the App view, or
         // Make app... for a plain graph), so App in the Graph's menu there does that instead of making an App area (#647).
         menu.picked.connect(value => {

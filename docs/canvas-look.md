@@ -165,7 +165,9 @@ in `text`, Medium, elided.
 | `file`, `folder` | the path elided in the middle, a folder glyph |
 | `color` | `#rrggbb` and a 12 px swatch |
 | `seed` | value and a dice glyph (click: randomize, increment, fixed menu) |
-| Model picker (resource inputs) | a model glyph, the model's name, a chevron |
+| Model picker (resource inputs) | a model glyph, the model's name elided in the middle (its quantization and extension kept), a chevron |
+
+A value cut short shows whole in its row's tooltip. The list a widget opens is sized for its entries, not for the field, and drawn at screen scale at any zoom (`WidgetMenu`; docs/ui-ergonomics.md, 2026-11-27).
 
 ### 4.5 Output values (spec 12.7)
 

@@ -111,7 +111,7 @@ ColumnLayout {
                 parent: Overlay.overlay
                 searchable: true
                 wordStart: true
-                width: Math.min(Math.max(drop.width, 36 * root.look.unit), Overlay.overlay ? Overlay.overlay.width - 4 * root.look.unit : 400)
+                anchorWidth: Math.max(drop.width, 36 * root.look.unit)
                 entries: root.entries
                 onPicked: v => { root.pick(v); drop.forceActiveFocus() }
             }

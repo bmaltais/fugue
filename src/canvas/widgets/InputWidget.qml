@@ -78,6 +78,8 @@ Rectangle {
     readonly property var canvasRow: kind === "canvas" && canvasId !== "" && edits.canvasesRevision >= 0
                                      ? edits.canvasRow(canvasId) : ({})
     readonly property bool canvasMissing: kind === "canvas" && canvasId !== "" && !linked && canvasRow.id === undefined
+    // The value shown is cut short (the node is narrow): the row's tooltip says it whole (CanvasNode.qml).
+    readonly property bool valueCut: valueLabel.visible && valueLabel.truncated
     readonly property string valueText: {
         if (linked)
             return edits.source(nodeId, name)
@@ -160,7 +162,10 @@ Rectangle {
         maximumLineCount: root.tall ? Math.max(1, Math.floor(height / 16)) : 1
         lineHeightMode: root.tall ? Text.FixedHeight : Text.ProportionalHeight
         lineHeight: root.tall ? 16 : 1
-        elide: root.kind === "file" || root.kind === "folder" ? Text.ElideMiddle : Text.ElideRight
+        // A path or a model's file name keeps its end (the file, Q4_K_M, fp8, .gguf) on a narrow node; the row's tooltip
+        // shows the whole text (`valueCut`).
+        elide: root.kind === "file" || root.kind === "folder" || root.kind === "model" && root.literal !== undefined
+               ? Text.ElideMiddle : Text.ElideRight
         textFormat: Text.PlainText
         color: root.hashing.error !== undefined || root.canvasMissing ? root.look.error
                : root.linked || root.isDefault || root.kind === "model" && root.literal === undefined

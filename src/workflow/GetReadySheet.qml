@@ -92,7 +92,8 @@ Popup {
         objectName: "getReadyDestinations"
         look: sheet.look
         parent: Overlay.overlay
-        width: Math.max(change.width, 32 * sheet.look.unit)
+        anchorWidth: change.width
+        elide: Text.ElideMiddle // a folder path keeps its end
         entries: (sheet.view.destinations || []).map(d => ({text: d.title, value: d.path, checked: d.path === sheet.view.destination}))
                  .concat([{separator: true, enabled: false},
                           {text: qsTr("Pick a folder…"), value: "pick"},

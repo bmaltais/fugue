@@ -209,7 +209,7 @@ Item {
     }
     function openMenu(button: Item, entries, picked, wide: real, name: string) {
         const at = button.mapToItem(Overlay.overlay, 0, button.height)
-        const menu = menuComponent.createObject(bar, {wantX: at.x, wantY: at.y, width: Math.max(button.width, wide * u), anchorHeight: button.height,
+        const menu = menuComponent.createObject(bar, {wantX: at.x, wantY: at.y, anchorWidth: Math.max(button.width, wide * u), anchorHeight: button.height,
                                                       entries: entries, searchable: entries.length > 12}) as WidgetMenu
         menu.objectName = name
         menu.picked.connect(picked)

@@ -80,7 +80,7 @@ KitDropdown {
         appView.requestModels(field.key)
         const at = root.mapToItem(Overlay.overlay, 0, root.height)
         const end = root.mapToItem(Overlay.overlay, root.width, 0)
-        const menu = menuComponent.createObject(root, { wantX: at.x, wantY: at.y, width: Math.max(end.x - at.x, 160),
+        const menu = menuComponent.createObject(root, { wantX: at.x, wantY: at.y, anchorWidth: end.x - at.x, elide: Text.ElideMiddle,
                                                          anchorHeight: root.height, entries: root.entries() }) as WidgetMenu
         menu.open()
     }

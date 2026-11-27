@@ -856,7 +856,7 @@ Item {
     }
     function openMenu(button, entries, picked, wide) {
         const at = button.mapToItem(Overlay.overlay, 0, button.height)
-        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y, width: Math.max(button.width, (wide ?? 40) * u),
+        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y, anchorWidth: Math.max(button.width, (wide ?? 40) * u),
                                                        anchorHeight: button.height, entries: entries, searchable: entries.length > 12}) as WidgetMenu
         menu.picked.connect(picked)
         menu.open()
@@ -883,7 +883,7 @@ Item {
         const anchor = frame ?? regionLayer
         const x = frame ? frame.fx : 0, y = frame ? frame.fy + frame.fh : 0
         const at = anchor.mapToItem(Overlay.overlay, x, y)
-        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y + u, width: 56 * u, anchorHeight: 0,
+        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y + u, anchorWidth: 56 * u, anchorHeight: 0,
                                                        entries: [{heading: true, enabled: false, text: qsTr("Which Canvas Region is it for?")}]
                                                                 .concat(regionsHere.map(node => ({text: node.name, value: node.id})))}) as WidgetMenu
         menu.objectName = "canvasViewRegionChooser"

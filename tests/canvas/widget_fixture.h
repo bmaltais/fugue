@@ -32,11 +32,24 @@ inline const char *manifest = R"({
   "outputs": [{"name": "image", "type": "image", "label": "Image"}]
 })";
 
+// A node with one choice of long entries, for the list a narrow node opens.
+inline const char *longChoices = R"({
+  "manifest": 1, "id": "io.example.widgets/long", "version": "1.0.0", "name": "Long choices",
+  "runtime": {"kind": "command", "entry": "./long.sh"},
+  "inputs": [
+    {"name": "sampler", "type": "text", "label": "Sampler", "default": "dpmpp_2m_sde_gpu_karras_exponential",
+     "choices": ["dpmpp_2m_sde_gpu_karras_exponential", "euler_ancestral_cfg_pp_beta_scheduler", "uni_pc_bh2_linear_quadratic"]}
+  ],
+  "outputs": [{"name": "image", "type": "image", "label": "Image"}]
+})";
+
 // Call after the built-in node types are in (they declare fugue/image-model).
 inline void addWidgetType(fugue::Registry &registry) {
-    const fugue::Errors errors = registry.addManifest(QJsonDocument::fromJson(manifest).object());
-    if (!errors.isEmpty())
-        qFatal("widget fixture: %s", qPrintable(errors.first().message));
+    for (const char *text : {manifest, longChoices}) {
+        const fugue::Errors errors = registry.addManifest(QJsonDocument::fromJson(text).object());
+        if (!errors.isEmpty())
+            qFatal("widget fixture: %s", qPrintable(errors.first().message));
+    }
 }
 
 // A model a provider offers, as the model picker's source lists it.

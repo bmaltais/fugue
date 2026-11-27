@@ -48,8 +48,6 @@ Rectangle {
     }
 
     TextMetrics { id: textWidth; font.pixelSize: drop.look.textSize; text: drop.currentText }
-    TextMetrics { id: longest; font.pixelSize: drop.look.labelSize
-        text: drop.options.reduce((a, o) => o.text.length > a.length ? o.text : a, "") }
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: { drop.forceActiveFocus(); drop.open() } }
@@ -83,8 +81,8 @@ Rectangle {
         searchable: drop.searchable
         wordStart: true
         nothingMatches: qsTr("Nothing matches “%1”")
-        // Wide enough to read the longest entry whole (the check, the text and the row's padding), never wider than the window.
-        width: Math.min(Math.max(drop.width, longest.advanceWidth + 8 + 12 + 6 + 8 + 2 + 12), Overlay.overlay ? Overlay.overlay.width - 4 * drop.look.unit : 400)
+        // At least the field, wide enough for the longest entry, never wider than the window (WidgetMenu's rule).
+        anchorWidth: drop.width
         entries: drop.options.map(o => ({ text: o.text, value: o.value, checked: o.value === drop.value, dim: o.dim === true }))
         onPicked: v => { drop.picked(v); drop.forceActiveFocus() }
     }
