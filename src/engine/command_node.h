@@ -34,11 +34,16 @@
 
 namespace fugue {
 
-// A hash of what a command node runs: its node.json and its entry file. The loader keeps it in
+// A hash of what a command node runs: its node.json, its entry file and the pack.json beside its folder. The loader keeps it in
 // NodeType::seal and the runner compares before every run, so a pack that is updated or edited
 // on disk after it was loaded (and trusted, 6.7) does not run until it is loaded again. Other
 // files of the node are not covered. Empty when a file cannot be read.
 QString nodeSeal(const QString &dir, const QString &entry);
+
+// What a node's cache key holds for the secrets its pack reads (#498): a hash of the stored values and the origins
+// the runner would hand it now, never a value; empty when the pack declares none or none is set. A changed key or
+// origin changes the key, so a deterministic node does not serve a result made with the old one.
+QString packSecretsKeyPart(const NodeType &type);
 
 // The resident-model key of a node type's persistent program, "program:<type id>"; empty for a
 // type whose program is not one (not persistent, or no `needs.gpu`). A node of the type keeps

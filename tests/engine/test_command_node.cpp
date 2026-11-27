@@ -836,6 +836,56 @@ wait
         QVERIFY2(changed.error().message.contains("changed on disk"), qPrintable(changed.error().message));
     }
 
+    // #497: the pack.json beside the node's folder declares its secrets, so editing it counts as a change.
+    void aPackJsonChangedOnDiskSinceItWasLoadedIsNotRun() {
+        Node node = makeNode(m_root.path(), "packsealed", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        {
+            QFile manifest(node.dir + "/node.json");
+            QVERIFY(manifest.open(QIODevice::WriteOnly));
+            manifest.write("{}");
+            QFile pack(m_root.path() + "/pack.json");
+            QVERIFY(pack.open(QIODevice::WriteOnly));
+            pack.write("{\"id\": \"io.github.test.tools\"}");
+        }
+        const QString without = nodeSeal(node.dir, "./run.sh");
+        node.type.seal = without;
+        CommandKernel kernel(kGraceMs);
+        QVERIFY(kernel.run(contextFor(node)).ok());
+
+        QFile pack(m_root.path() + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write("{\"id\": \"io.github.test.tools\", \"settings\": []}");
+        pack.close();
+        QVERIFY(nodeSeal(node.dir, "./run.sh") != without);
+        const Result<Values> changed = kernel.run(contextFor(node));
+        QVERIFY(!changed.ok());
+        QVERIFY2(changed.error().message.contains("changed on disk"), qPrintable(changed.error().message));
+        QVERIFY(QFile::remove(m_root.path() + "/pack.json"));
+    }
+
+    // #498: what a pack node reads from the secret store is part of its cache key, as a hash and never a value.
+    void thePackSecretsAreInTheKeyPartAsAHashOnly() {
+        const QString first = "made-up-key-1357";
+        Node node = makeNode(m_root.path(), "keypart", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        QVERIFY(packSecretsKeyPart(node.type).isEmpty()); // declares none
+        node.type.packSecrets = {"token_1"};
+        PackSecretStore store;
+        QVERIFY(store.clear("io.github.test.tools", "token_1").isEmpty());
+        QVERIFY(packSecretsKeyPart(node.type).isEmpty()); // none set
+        QVERIFY(store.set("io.github.test.tools", "token_1", first, "https://api.example.com").isEmpty());
+        const QString one = packSecretsKeyPart(node.type);
+        QVERIFY(!one.isEmpty());
+        QVERIFY(!one.contains(first));
+        QCOMPARE(packSecretsKeyPart(node.type), one); // stable
+        QVERIFY(store.set("io.github.test.tools", "token_1", "made-up-key-2468", "https://api.example.com").isEmpty());
+        QVERIFY(packSecretsKeyPart(node.type) != one); // another value
+        QVERIFY(store.set("io.github.test.tools", "token_1", first, "https://other.example.com").isEmpty());
+        QVERIFY(packSecretsKeyPart(node.type) != one); // another origin
+        QVERIFY(store.set("io.github.test.tools", "token_1", first, "https://api.example.com").isEmpty());
+        QCOMPARE(packSecretsKeyPart(node.type), one);
+        QVERIFY(store.clear("io.github.test.tools", "token_1").isEmpty());
+    }
+
     void shuttingDownEndsARunInFlightAndRefusesNewOnes() {
         const Node node = makeNode(m_root.path(), "persshut", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);

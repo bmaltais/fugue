@@ -735,7 +735,13 @@ Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
 
 QString nodeSeal(const QString &dir, const QString &entry) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    for (const QString &name : {QStringLiteral("node.json"), entry}) {
+    // The pack's own pack.json (beside the node's folder) too: it declares the secrets the runner hands over (#497).
+    // A node outside a pack folder has none, and then only its own files count.
+    const QString packJson = QFileInfo(QFileInfo(dir).canonicalFilePath() + QStringLiteral("/../pack.json")).canonicalFilePath();
+    QStringList names{QStringLiteral("node.json"), entry};
+    if (!packJson.isEmpty())
+        names << packJson;
+    for (const QString &name : names) {
         // A file that does not exist has no canonical path; QFile would warn about an empty name.
         const QString path = name.isEmpty() ? QString() : QFileInfo(QDir(dir).absoluteFilePath(name)).canonicalFilePath();
         QFile file(path);
@@ -743,6 +749,24 @@ QString nodeSeal(const QString &dir, const QString &entry) {
             return {};
         hash.addData(file.readAll());
         hash.addData(QByteArrayView("\0", 1));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+QString packSecretsKeyPart(const NodeType &type) {
+    if (type.packSecrets.isEmpty())
+        return {};
+    const Result<QMap<QString, StoredSecret>> stored = secretsFor(type);
+    if (!stored)
+        return QStringLiteral("unreadable"); // the run fails on it; the key only has to differ from a good store's
+    if (stored->isEmpty())
+        return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (auto it = stored->cbegin(); it != stored->cend(); ++it) { // a QMap: sorted by name
+        for (const QString &part : {it.key(), it.value().value, it.value().origin}) {
+            hash.addData(part.toUtf8());
+            hash.addData(QByteArrayView("\0", 1));
+        }
     }
     return QString::fromLatin1(hash.result().toHex());
 }

@@ -826,6 +826,9 @@ private:
             n.models = {n.selection->instance + QLatin1Char('\n') + parts.model};
         } else if (n.kernel) {
             parts.extra = n.kernel->keyExtra(n.inputs);
+            // A pack node reads secrets that are not inputs: a hash of them is part of its key (#498).
+            if (const QString secrets = packSecretsKeyPart(*n.type); !secrets.isEmpty())
+                parts.extra += QStringLiteral("\nsecrets:") + secrets;
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
             // Its own persistent program, which holds memory between runs (7.3).
