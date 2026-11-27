@@ -6,6 +6,8 @@
 #include <QPointer>
 #include <QUrl>
 
+#include <algorithm>
+
 #include "engine/file_hashes.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
@@ -45,6 +47,14 @@ QString packSummaryLine(const ReadinessPack &row, const QString &from) {
 
 // How often a download's progress changes the view at most.
 constexpr int kProgressMs = 200;
+
+// An optional model's row (#594): the sheet lists it apart, with "Not now | Download <size>" as its choice.
+QVariantMap optionalView(const ReadinessModel &m, bool on, const QString &state, double fraction, const QString &detail) {
+    return QVariantMap{{"hash", m.entry.value(QStringLiteral("hash")).toString()},
+                       {"name", m.name}, {"size", m.size >= 0 ? ModelDownloads::sizeText(m.size) : ReadinessSheet::tr("size not recorded")},
+                       {"sizeKnown", m.size >= 0}, {"host", m.host}, {"license", m.license}, {"folder", m.deferred ? ReadinessSheet::tr("its folder, once the pack is installed") : m.folder},
+                       {"on", on}, {"state", state}, {"fraction", fraction}, {"detail", detail}};
+}
 
 QString joinParts(const QStringList &parts) {
     if (parts.size() < 2)
@@ -107,7 +117,9 @@ ReadinessPlan ReadinessSheet::buildPlan() const {
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
-    return buildReadinessPlan(m_request(), env);
+    ReadinessRequest request = m_request();
+    request.optionalChosen = m_optionalOn;
+    return buildReadinessPlan(request, env);
 }
 
 ReadinessPlan ReadinessSheet::currentPlan() const { return buildPlan(); }
@@ -121,6 +133,8 @@ void ReadinessSheet::rebuild() {
     // The files of the same weights: each model that has one starts on "Use my file" (the sheet is the explicit yes; nothing happens before it).
     m_offers.clear();
     for (const ReadinessModel &m : m_plan.models) {
+        if (m.optional)
+            continue; // the person asked for the download: no second question
         const QString hash = m.entry.value(QStringLiteral("hash")).toString();
         const QVariantMap offer = m_useSource && !hash.isEmpty() ? m_useSource(hash) : QVariantMap();
         if (offer.isEmpty())
@@ -173,6 +187,18 @@ void ReadinessSheet::setChoice(const QString &hash, bool useDisk) {
         m_useDisk.remove(hash);
     m_rowErrors.remove(hash);
     m_message.clear(); // a failure said for the choice before this one
+    publish();
+}
+
+void ReadinessSheet::setOptional(const QString &hash, bool on) {
+    if (m_phase != QLatin1String("review") || !m_open || m_usesPending || hash.isEmpty() || m_optionalOn.contains(hash) == on)
+        return;
+    if (on)
+        m_optionalOn.insert(hash);
+    else
+        m_optionalOn.remove(hash);
+    m_message.clear();
+    rebuild();
     publish();
 }
 
@@ -245,6 +271,7 @@ void ReadinessSheet::show() {
     m_picked.clear();
     m_question.clear();
     m_useDisk.clear();
+    m_optionalOn.clear();
     m_seenOffers.clear();
     m_rowErrors.clear();
     m_usesPending = false;
@@ -512,7 +539,9 @@ void ReadinessSheet::publish() {
                                     : tr("download %n models", nullptr, downloads));
     if (uses > 0 && !onlyUses)
         parts << tr("use %n files you already have", nullptr, uses);
-    view["headline"] = onlyUses ? tr("Nothing to download: Fugue will use %n files you already have.", nullptr, uses)
+    const bool onlyOptional = parts.isEmpty() && downloads == 0 && uses == 0 && !m_plan.optionalModels.isEmpty();
+    view["headline"] = onlyOptional ? tr("Nothing is needed to run. Models only another branch uses can be downloaded below.")
+                       : onlyUses ? tr("Nothing to download: Fugue will use %n files you already have.", nullptr, uses)
                        : parts.isEmpty() ? (m_plan.problems.isEmpty() ? tr("There is nothing to get ready.") : tr("Nothing here can be made ready from this machine."))
                                          : tr("Fugue will %1.").arg(joinParts(parts));
     view["hasDownloads"] = downloads > 0;
@@ -541,9 +570,14 @@ void ReadinessSheet::publish() {
     }
     view["packs"] = packs;
     QVariantList models;
+    QVariantList optionalRows;
     for (int i = 0; i < m_plan.models.size(); ++i) {
         const ReadinessModel &m = m_plan.models.at(i);
         const int row = int(m_plan.packs.size()) + i;
+        if (m.optional) { // chosen (#594): listed in its own section, where it can be turned off again
+            optionalRows << optionalView(m, true, stateName(m_states.value(row)), m_fractions.value(row), m_details.value(row));
+            continue;
+        }
         const QString hash = m.entry.value(QStringLiteral("hash")).toString();
         const bool reading = m_reading.contains(hash);
         const bool disk = m_useDisk.contains(hash);
@@ -565,6 +599,12 @@ void ReadinessSheet::publish() {
                               {"fraction", fraction}};
     }
     view["models"] = models;
+    for (const ReadinessModel &m : m_plan.optionalModels)
+        optionalRows << optionalView(m, false, QStringLiteral("waiting"), 0, QString());
+    std::sort(optionalRows.begin(), optionalRows.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value("name").toString() < b.toMap().value("name").toString();
+    });
+    view["optionalModels"] = optionalRows;
     const QString &own = m_ownRoot; // not the settings again for every progress step
     view["destination"] = m_plan.destination;
     view["destinationTitle"] = rootTitle(m_plan.destination, own);
@@ -580,7 +620,7 @@ void ReadinessSheet::publish() {
     for (const Error &problem : m_plan.problems)
         problems << (problem.hint.isEmpty() ? problem.message : problem.message + QLatin1Char(' ') + problem.hint);
     view["problems"] = problems;
-    view["empty"] = m_plan.empty();
+    view["empty"] = m_plan.empty(); // nothing to run: the optional models alone are not what Install does
     view["question"] = m_question;
     view["ok"] = m_ok;
     view["message"] = m_message;

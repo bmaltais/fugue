@@ -30,4 +30,8 @@ QSet<QString> conditionalModelHashes(const Document &document, const Registry &r
 // Document::models() without those: the models a run is refused on, which Get ready fetches and the Needs panel and `app run` ask for.
 QJsonArray modelsToHave(const Document &document, const Registry &registry);
 
+// The other part of Document::models(): the models only conditional nodes hold. They stop nothing; Get ready and the Needs panel offer
+// them as optional rows, "only if that branch is chosen" (#594). `modelsToHave` and these are disjoint and together are the document's.
+QJsonArray optionalModels(const Document &document, const Registry &registry);
+
 } // namespace fugue

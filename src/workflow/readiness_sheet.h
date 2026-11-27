@@ -66,6 +66,9 @@ public:
     // The choice of the model with this hash: its file (true) or its download. Only while reviewing; the failure said for an earlier
     // try goes away with it.
     Q_INVOKABLE void setChoice(const QString &hash, bool useDisk);
+    // A model only a Switch's lazy side needs (#594) is listed apart and downloaded only when the person chose it here (`on`); the choice
+    // acts at the yes, like the others. Only while reviewing.
+    Q_INVOKABLE void setOptional(const QString &hash, bool on);
     // The same choice for every model that has a file of its own (the template details' "Download <size>…").
     void chooseAll(bool useDisk);
     // The window's reading of the chosen files, per wanted model: hash -> percent (-1 unknown). A row says "Reading your file…".
@@ -137,6 +140,7 @@ private:
     UseSource m_useSource;
     QHash<QString, QVariantMap> m_offers; // by the missing model's hash, as rebuild() found them
     QSet<QString> m_useDisk;              // the models set to Use my file
+    QSet<QString> m_optionalOn;           // the optional models (#594) the person chose to download
     QSet<QString> m_seenOffers;           // those that were offered: a model offered for the first time starts on its file
     QHash<QString, QString> m_rowErrors;  // a file that could not be read, by hash
     QVariantMap m_reading;

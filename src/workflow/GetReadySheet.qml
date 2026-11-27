@@ -265,6 +265,45 @@ Popup {
                             }
                         }
                     }
+                    // Models only another branch of a Switch needs (#594): they block nothing, so each waits for its own "Download".
+                    KitSection {
+                        look: sheet.look
+                        visible: sheet.view.optionalModels.length > 0
+                        text: qsTr("Only if another branch is chosen")
+                    }
+                    KitGroup {
+                        look: sheet.look
+                        visible: sheet.view.optionalModels.length > 0
+                        Repeater {
+                            model: sheet.view.optionalModels
+                            GetReadyRow {
+                                required property var modelData
+                                readonly property string key: "optional:" + modelData.name
+                                objectName: "getReadyOptional-" + modelData.name
+                                look: sheet.look
+                                glyph: modelData.on ? "download" : "box"
+                                title: modelData.name
+                                trailing: modelData.size
+                                subtitle: modelData.license
+                                more: qsTr("From: %1").arg(modelData.host) + "\n" + qsTr("Into: %1").arg(modelData.folder)
+                                open: sheet.expanded[key] === true
+                                running: modelData.state === "running"
+                                fraction: modelData.fraction
+                                stateText: modelData.state === "running" && modelData.fraction >= 0 ? Math.round(modelData.fraction * 100) + "%"
+                                           : modelData.on ? sheet.stateText(modelData.state) : ""
+                                failed: modelData.state === "failed"
+                                error: failed ? modelData.detail : ""
+                                onToggled: sheet.toggle(key)
+                                choice: modelData.on ? "download" : "disk"
+                                useLine: qsTr("Used only if a Switch takes its other branch.")
+                                firstText: qsTr("Not now")
+                                choiceName: qsTr("Download or not now: %1").arg(modelData.name)
+                                downloadText: modelData.sizeKnown ? qsTr("Download %1").arg(modelData.size) : qsTr("Download")
+                                choiceLocked: sheet.phase !== "review"
+                                onChoiceMoved: first => sheet.sheetModel.setOptional(modelData.hash, !first)
+                            }
+                        }
+                    }
                 }
             }
 

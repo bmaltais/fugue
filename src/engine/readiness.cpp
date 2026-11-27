@@ -61,6 +61,7 @@ ReadinessRequest requestFor(const Document &document, const Registry &registry, 
                             const QString &baseFolder) {
     ReadinessRequest request;
     request.models = modelsToHave(document, registry); // not a model only a Switch's lazy side holds (#557)
+    request.optionalModels = optionalModels(document, registry); // offered apart (#594)
     const QStringList needed = packsNeeded(document, registry);
     const QJsonObject recorded = document.requirements.value(QStringLiteral("packs")).toObject();
     for (const PackUse &use : TrustStore::packsUsed(document, registry)) {
@@ -181,6 +182,9 @@ QStringList ReadinessPlan::lines() const {
         if (lowSpace())
             out << QStringLiteral("  There is not enough free space there for the download; change Settings > Folders > Download models into.");
     }
+    for (const ReadinessModel &m : optionalModels)
+        out << QStringLiteral("  Optional model, only if a Switch's other branch is chosen: %1 (%2) from %3")
+                   .arg(m.name, m.size >= 0 ? sizeText(m.size) : QStringLiteral("size not recorded"), m.host);
     for (const Error &p : problems)
         out << QStringLiteral("  Cannot do: %1").arg(p.message);
     return out;
@@ -204,10 +208,18 @@ QJsonObject ReadinessPlan::toJson() const {
         modelRows.append(QJsonObject{{"name", m.name}, {"resource", m.resource}, {"license", m.license}, {"host", m.host},
                                      {"size", m.size >= 0 ? QJsonValue(double(m.size)) : QJsonValue()}, {"folder", m.folder}, {"path", m.target.path},
                                      {"type_from", m.typeFrom}, {"deferred", m.deferred}});
-    return QJsonObject{{"headline", headline()}, {"packs", packRows}, {"models", modelRows}, {"destination", destination},
-                       {"download_bytes", double(downloadBytes)}, {"unknown_sizes", unknownSizes},
-                       {"environment_bytes", double(environmentBytes)}, {"free_bytes", double(freeBytes)},
-                       {"low_space", lowSpace()}, {"problems", fugue::toJson(problems)}};
+    QJsonObject json{{"headline", headline()}, {"packs", packRows}, {"models", modelRows}, {"destination", destination},
+                     {"download_bytes", double(downloadBytes)}, {"unknown_sizes", unknownSizes},
+                     {"environment_bytes", double(environmentBytes)}, {"free_bytes", double(freeBytes)},
+                     {"low_space", lowSpace()}, {"problems", fugue::toJson(problems)}};
+    if (!optionalModels.isEmpty()) { // only a Switch's other branch needs them (#594)
+        QJsonArray optionalRows;
+        for (const ReadinessModel &m : optionalModels)
+            optionalRows.append(QJsonObject{{"name", m.name}, {"resource", m.resource}, {"license", m.license}, {"host", m.host},
+                                            {"size", m.size >= 0 ? QJsonValue(double(m.size)) : QJsonValue()}, {"folder", m.folder}});
+        json.insert("optional_models", optionalRows);
+    }
+    return json;
 }
 
 namespace {
@@ -352,58 +364,74 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
     library.fitDownloadRoot(types);
     plan.destination = library.downloadRoot();
     plan.destinations = library.downloadRoots(types);
-    for (const MissingModel &model : library.missing(request.models, hashes)) {
-        const QString name = model.handle.value(QStringLiteral("name")).toString();
-        if (model.source.isEmpty()) {
-            plan.problems << problem(QStringLiteral("model_missing"), QStringLiteral("The model %1 has no source to download from.").arg(name),
-                                     QStringLiteral("Put it in %1.").arg(model.folder));
-            plan.unobtainable << model.handle;
-            continue;
-        }
-        ReadinessModel row;
-        row.name = name;
-        row.resource = model.handle.value(QStringLiteral("resource")).toString();
-        row.size = model.size;
-        row.entry = entryOf(request.models, model);
-        // Its type is declared by a pack this plan installs: nothing to plan until that pack is in (#418).
-        if (const std::optional<QString> from = typeFromPack(plan, row.resource, library)) {
-            row.deferred = true;
-            row.typeFrom = *from;
-            row.host = QUrl(model.source).host();
-        } else {
-            const Result<DownloadTarget> target = planDownload(library, model);
-            if (!target) {
-                for (Error e : target.errors()) {
-                    e.severity = Error::Severity::Warning;
-                    plan.problems << e;
-                }
+    // One row per missing model, from `entries`. An optional model (#594) that cannot be got (no source, no place) is left out
+    // quietly: nothing is lost by it, so there is no problem to report; one the person chose is a row like the others.
+    const auto addRows = [&](const QJsonArray &entries, bool optional) {
+        for (const MissingModel &model : library.missing(entries, hashes)) {
+            const QString name = model.handle.value(QStringLiteral("name")).toString();
+            const bool chosen = !optional || request.optionalChosen.contains(model.handle.value(QStringLiteral("hash")).toString());
+            if (model.source.isEmpty()) {
+                if (optional)
+                    continue;
+                plan.problems << problem(QStringLiteral("model_missing"), QStringLiteral("The model %1 has no source to download from.").arg(name),
+                                         QStringLiteral("Put it in %1.").arg(model.folder));
                 plan.unobtainable << model.handle;
                 continue;
             }
-            row.host = target->source.host();
-            row.target = *target;
-            row.folder = QFileInfo(target->path).absolutePath();
-        }
-        if (env.catalog) {
-            QString hash = model.handle.value(QStringLiteral("hash")).toString();
-            if (hash.startsWith(QLatin1String("sha256:")))
-                hash = hash.mid(7);
-            for (const CatalogModel &entry : env.catalog->all())
-                if (!hash.isEmpty() && entry.sha256 == hash) {
-                    row.license = entry.license;
-                    row.licenseUrl = entry.licenseUrl;
-                    break;
+            ReadinessModel row;
+            row.name = name;
+            row.resource = model.handle.value(QStringLiteral("resource")).toString();
+            row.size = model.size;
+            row.entry = entryOf(entries, model);
+            row.optional = optional;
+            // Its type is declared by a pack this plan installs: nothing to plan until that pack is in (#418).
+            if (const std::optional<QString> from = typeFromPack(plan, row.resource, library)) {
+                row.deferred = true;
+                row.typeFrom = *from;
+                row.host = QUrl(model.source).host();
+            } else {
+                const Result<DownloadTarget> target = planDownload(library, model);
+                if (!target) {
+                    if (optional)
+                        continue;
+                    for (Error e : target.errors()) {
+                        e.severity = Error::Severity::Warning;
+                        plan.problems << e;
+                    }
+                    plan.unobtainable << model.handle;
+                    continue;
                 }
+                row.host = target->source.host();
+                row.target = *target;
+                row.folder = QFileInfo(target->path).absolutePath();
+            }
+            if (env.catalog) {
+                QString hash = model.handle.value(QStringLiteral("hash")).toString();
+                if (hash.startsWith(QLatin1String("sha256:")))
+                    hash = hash.mid(7);
+                for (const CatalogModel &entry : env.catalog->all())
+                    if (!hash.isEmpty() && entry.sha256 == hash) {
+                        row.license = entry.license;
+                        row.licenseUrl = entry.licenseUrl;
+                        break;
+                    }
+            }
+            if (!chosen) {
+                plan.optionalModels.append(row);
+                continue;
+            }
+            if (row.size >= 0)
+                plan.downloadBytes += row.size;
+            else
+                ++plan.unknownSizes;
+            plan.models.append(row);
         }
-        if (row.size >= 0)
-            plan.downloadBytes += row.size;
-        else
-            ++plan.unknownSizes;
-        plan.models.append(row);
-    }
+    };
+    addRows(request.models, false);
+    addRows(request.optionalModels, true);
     plan.registry = env.registry;
     plan.library = std::make_shared<ModelLibrary>(library);
-    if (!plan.models.isEmpty())
+    if (!plan.models.isEmpty() || !plan.optionalModels.isEmpty())
         plan.freeBytes = env.freeSpace ? env.freeSpace(plan.destination) : freeAt(plan.destination);
     return plan;
 }
