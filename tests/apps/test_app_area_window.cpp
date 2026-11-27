@@ -220,8 +220,8 @@ private slots:
         QVERIFY(app.workspace.showView(1, "app"));
         QTRY_VERIFY(find(app.window, "appPage"));
         QTRY_VERIFY(rig.view.shown());
+        QTRY_VERIFY(app.workspace.bodySize().height() > 0); // the window has told the layout its size: a split can be judged
         app.key(Qt::Key_Q, Qt::AltModifier);
-        QTest::qWait(300);
         QTRY_VERIFY(find(app.window, "queueArea"));
         QCOMPARE(app.workspace.viewOf(app.workspace.active()), QString("app"));
         QVERIFY(rig.view.shown()); // Ctrl+Enter and Escape still go to the app
