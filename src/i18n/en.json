@@ -147,6 +147,10 @@
     "one": "download %n model",
     "other": "download %n models"
   },
+  "download %n models, %1 left": {
+    "one": "download %n model, %1 left",
+    "other": "download %n models, %1 left"
+  },
   "download %n models, %1": {
     "one": "download %n model, %1",
     "other": "download %n models, %1"
@@ -263,7 +267,7 @@
   "Start blank": "Start blank",
   "Stop": "Stop",
   "Stopped.": "Stopped.",
-  "The download keeps what it had: Try again resumes it.": "The download keeps what it had: Try again resumes it.",
+  "Downloads keep what they had.": "Downloads keep what they had.",
   "The install that was running is undone.": "The install that was running is undone.",
   "The setup that was running may have to be run again.": "The setup that was running may have to be run again.",
   "Strong: thick frosted glass.": "Strong: thick frosted glass.",
@@ -894,7 +898,6 @@
   "type from %1": "type from %1",
   "on %1 if it has it": "on %1 if it has it",
   "type from a pack in this list": "type from a pack in this list",
-  "partial, will resume": "partial, will resume",
   "Take this run out of the queue": "Take this run out of the queue",
   "Takes %1": "Takes %1",
   "Templates": "Templates",
@@ -1022,6 +1025,13 @@
   "%1 copy": "%1 copy",
   "A workflow's name cannot hold a slash.": "A workflow's name cannot hold a slash.",
   "Close other tabs": "Close other tabs",
+  "Close all tabs…": "Close all tabs…",
+  "Close every tab (asks once if some have unsaved changes)": "Close every tab (asks once if some have unsaved changes)",
+  "Discard and close all": "Discard and close all",
+  "%n tabs have unsaved changes. Close all tabs anyway?": {
+    "one": "%n tab has unsaved changes. Close all tabs anyway?",
+    "other": "%n tabs have unsaved changes. Close all tabs anyway?"
+  },
   "Close the other workflows": "Close the other workflows",
   "Copy %1": "Copy %1",
   "Could not rename %1 to %2.": "Could not rename %1 to %2.",
@@ -2326,6 +2336,8 @@
   "Delete the partial download (%1)": "Delete the partial download (%1)",
   "Paused": "Paused",
   "Resume": "Resume",
+  "The download keeps what it had: Try again resumes it.": "The download keeps what it had: Try again resumes it.",
+  "partial, will resume": "partial, will resume",
   "another source": "another source",
   "in place of": "in place of",
   "Your file: %1": "Your file: %1",
