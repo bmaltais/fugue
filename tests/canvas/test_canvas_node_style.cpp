@@ -169,6 +169,56 @@ private slots:
         QCOMPARE(node(canvas, "gen").value("nodeWidth").toDouble(), 240.0);
     }
 
+    // #476: in Compact an output shares its row with a socket-only input (a picture in, a picture out), so the card is a row shorter;
+    // an input with a widget keeps its own row, and Flat keeps one row per port.
+    void anOutputSharesItsRowWithASocketOnlyInputInCompact() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        const Result<Document> loaded = Document::load(R"({"fugue": 1, "graph": {"nodes": {
+            "blur": {"type": "fugue/blur", "version": "1.0.0", "inputs": {}}}},
+          "layout": {"nodes": {"blur": {"pos": [0, 0]}}}})");
+        QVERIFY(loaded.ok());
+        canvas.setDocument(loaded.value());
+        const QVariantMap flat = node(canvas, "blur");
+        QVERIFY(port(flat, "inputs", "image").value("rowTop").toDouble() > port(flat, "outputs", "image").value("rowTop").toDouble());
+        QVERIFY(!port(flat, "inputs", "image").value("sharesRow").toBool());
+
+        canvas.setNodeStyle("compact");
+        const QVariantMap compact = node(canvas, "blur");
+        const QVariantMap in = port(compact, "inputs", "image"), out = port(compact, "outputs", "image");
+        QVERIFY(in.value("sharesRow").toBool() && out.value("sharesRow").toBool());
+        QCOMPARE(in.value("rowTop").toDouble(), out.value("rowTop").toDouble());
+        QCOMPARE(in.value("y").toDouble(), out.value("y").toDouble());
+        // The first value input comes right under the shared row, and the node is a row shorter than one row per port would be.
+        for (const QVariant &p : compact.value("inputs").toList()) {
+            const QVariantMap input = p.toMap();
+            if (input.value("widget").toBool() && !input.value("hidden").toBool()) {
+                QCOMPARE(input.value("rowTop").toDouble(), out.value("rowTop").toDouble() + 26.0);
+                QVERIFY(!input.value("sharesRow").toBool());
+                break;
+            }
+        }
+        canvas.setNodeStyle("flat");
+        QCOMPARE(node(canvas, "blur").value("nodeHeight").toDouble(), flat.value("nodeHeight").toDouble());
+        QVERIFY(!port(node(canvas, "blur"), "inputs", "image").value("sharesRow").toBool());
+    }
+
+    // #476: the model says each node's top-level category, which colours the Compact header's dot.
+    void aNodeSaysItsTopLevelCategory() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        const Result<Document> loaded = Document::load(R"({"fugue": 1, "graph": {"nodes": {
+            "blur": {"type": "fugue/blur", "version": "1.0.0", "inputs": {}},
+            "gone": {"type": "io.example.nothing/here", "version": "1.0.0", "inputs": {}}}},
+          "layout": {"nodes": {"blur": {"pos": [0, 0]}, "gone": {"pos": [300, 0]}}}})");
+        QVERIFY(loaded.ok());
+        canvas.setDocument(loaded.value());
+        QCOMPARE(node(canvas, "blur").value("category").toString(), QString("Image"));
+        QCOMPARE(node(canvas, "gone").value("category").toString(), QString());
+    }
+
     // A node of the file's own size keeps it in both styles; the style writes nothing into the document.
     void theStyleChangesNoDocument() {
         Registry registry;

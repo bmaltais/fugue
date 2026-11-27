@@ -376,6 +376,31 @@ private slots:
         }
     }
 
+    // The Compact header's category dot (docs/canvas-look.md 20.14, #476): each top-level category has its own colour, which reads on
+    // the card at 3:1 in a dark and a light theme; the level under the top ("Image/Adjust") shares it, and a category with none is
+    // transparent (the caller draws its kind mark).
+    void categoryDotsReadOnTheCardAndDiffer_data() {
+        QTest::addColumn<bool>("light");
+        QTest::newRow("dark") << false;
+        QTest::newRow("light") << true;
+    }
+    void categoryDotsReadOnTheCardAndDiffer() {
+        QFETCH(bool, light);
+        CanvasLook canvasLook;
+        canvasLook.update(light ? flexokiLight : ethereal, light, look::Corners{12, 12}, 12);
+        QList<QColor> seen;
+        for (const QString category : {"Image", "Basic", "Diffusion", "Text", "Generate", "Video"}) {
+            const QColor dot = canvasLook.categoryColor(category);
+            QVERIFY2(dot.alpha() == 255, qPrintable(category));
+            QVERIFY2(look::contrast(dot, canvasLook.property("body").value<QColor>()) >= 2.99, qPrintable(category));
+            QVERIFY2(!seen.contains(dot), qPrintable(category));
+            seen << dot;
+        }
+        QCOMPARE(canvasLook.categoryColor("Image/Adjust"), canvasLook.categoryColor("Image"));
+        QCOMPARE(canvasLook.categoryColor("io.example.tools").alpha(), 0);
+        QCOMPARE(canvasLook.categoryColor("").alpha(), 0);
+    }
+
     // The shadows (docs/canvas-look.md 7): a tight contact shadow and a soft ambient one, cast
     // downward; a selected node (level 2) sits higher, so its shadow is darker and reaches
     // further than a node at rest, and a node being dragged (level 4) higher still. On a dark theme the shadow is strong enough to read

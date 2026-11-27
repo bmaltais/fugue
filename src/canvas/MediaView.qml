@@ -29,6 +29,8 @@ Item {
     property string kind: "video"
     property string label
     property bool expandable: false
+    // The picture's corner: the thumbnail's by default; the Compact node card gives the well's (docs/canvas-look.md 20.14).
+    property real corner: look.thumbCorner
     property bool autoPlay: false
     property bool muted: false
     // 0 to 1; a change of it unmutes.
@@ -94,7 +96,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: view.look.thumbCorner
+        radius: view.corner
         color: view.look.well
     }
     // The picture of a video: made only for a video, so a sound costs no scene graph item for it.
@@ -131,7 +133,7 @@ Item {
     }
     Rectangle {
         anchors.fill: parent
-        radius: view.look.thumbCorner
+        radius: view.corner
         color: "transparent"
         border.width: 1
         border.color: view.look.light ? Qt.rgba(0, 0, 0, 0.1) : Qt.rgba(1, 1, 1, 0.1)
@@ -145,7 +147,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: view.barHeight
-        radius: view.look.thumbCorner
+        radius: view.corner
         color: Qt.rgba(0, 0, 0, 0.6)
 
         component BarButton: Item {

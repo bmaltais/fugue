@@ -89,6 +89,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Pinned: return row.pinned;
     case ThumbnailRect: return row.thumbnail;
     case UpdateAvailable: return m_canvas->updateAvailable(row.id);
+    case Category: return row.category;
     case GroupSize: return row.groupSize;
     case NewerMajor: return m_canvas->newerMajor(row.id);
     case Stack: return m_canvas->m_stack.value(row.id, 0);
@@ -128,7 +129,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {PredictedSize, "predictedSize"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}, {LiveFrame, "liveFrame"}, {LiveAspect, "liveAspect"},
             {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
-            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}, {Stack, "stack"},
+            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {Category, "category"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}, {Stack, "stack"},
             {ErrorDetail, "errorDetail"}, {ErrorPack, "errorPack"}, {RunsOn, "runsOn"}};
 }
 
@@ -537,6 +538,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
     }
     if (const NodeType *type = m_registry ? m_registry->nodeTypeFor(node.type, node.version.major) : nullptr) {
         row.title = type->name;
+        row.category = type->category.section(QLatin1Char('/'), 0, 0);
         row.specs = type->inputs;
         for (const InputSpec &spec : type->inputs)
             row.inputs.push_back(fromInput(spec, spec.name, {}));
@@ -645,12 +647,38 @@ void CanvasModel::layOut(NodeRow &row) const {
             port.y = top + m_rowHeight / 2;
             top += height;
         };
-        for (Port &port : row.outputs)
+        // Compact: an output shares its row with the next socket-only input (a picture in, a picture out: the board puts them on
+        // one line), so the card is a row shorter for each pair. Only a plain input with no widget, no section and no
+        // `shown_when` pairs, so its row never gains a control or vanishes. Flat keeps one row per port.
+        for (Port &port : row.inputs)
+            port.sharesRow = false;
+        for (Port &port : row.outputs) {
+            port.sharesRow = false;
             place(port, m_rowHeight);
+        }
+        if (m_compact) {
+            size_t next = 0;
+            for (Port *laid : laidOut) {
+                if (next >= row.outputs.size())
+                    break;
+                if (laid->widget || laid->advanced || !laid->section.isEmpty() || notUsed.contains(laid->name))
+                    continue;
+                Port &output = row.outputs[next++];
+                output.sharesRow = laid->sharesRow = true;
+                laid->rowTop = output.rowTop;
+                laid->rowHeight = output.rowHeight;
+                laid->y = output.y;
+                laid->headerTop = -1;
+                laid->header.clear();
+                laid->hidden = laid->notUsed = false;
+            }
+        }
         Port *grows = nullptr;
         QString section;
         for (Port *laid : laidOut) {
             Port &port = *laid;
+            if (port.sharesRow)
+                continue; // already on its output's row
             const InputValue value = node.inputs.value(port.name);
             // A section starts with its header row; Advanced stays folded unless open or linked.
             const QString portSection = port.advanced && port.section.isEmpty() ? QString::fromLatin1(kAdvancedSection) : port.section;
@@ -717,7 +745,7 @@ void CanvasModel::layOut(NodeRow &row) const {
             bool below = false;
             for (Port *laid : laidOut) {
                 Port &port = *laid;
-                if (below) {
+                if (below && !port.sharesRow) {
                     port.rowTop += extra;
                     port.y += extra;
                     if (port.headerTop >= 0)
@@ -875,7 +903,8 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"widgetType", port.widgetType},
                     {"required", port.required},
                     {"hidden", port.hidden},
-                    {"notUsed", port.notUsed}};
+                    {"notUsed", port.notUsed},
+                    {"sharesRow", port.sharesRow}};
     if (!port.description.isEmpty())
         map.insert("description", port.description);
     if (!port.role.isEmpty())

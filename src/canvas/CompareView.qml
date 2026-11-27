@@ -61,6 +61,10 @@ Item {
     property bool showSize: true   // the size notice when the sizes agree (the Canvas view says it in its status line); a mismatch is always said
     property int wheelModifiers: Qt.NoModifier // held to zoom with the wheel (the node's face asks for Alt)
     property color background: look.well
+    // A rounded frame (the Compact node card, #476): the corners are cut in `cornerColor`, the colour behind the view. 0: square, as
+    // the large views. On the software renderer, which has no shaders, the corners stay square.
+    property real cornerRadius: 0
+    property color cornerColor: "transparent"
 
     readonly property var modes: ["slider", "slider_horizontal", "side_by_side", "flip", "difference"]
     readonly property bool single: mode === "single"
@@ -172,6 +176,16 @@ Item {
         clip: true
 
         Rectangle { anchors.fill: parent; color: view.background }
+        ShaderEffect {
+            objectName: "viewCorners"
+            z: 10
+            visible: view.cornerRadius > 0 && GraphicsInfo.api !== GraphicsInfo.Software
+            anchors.fill: parent
+            readonly property size size: Qt.size(width, height)
+            readonly property real radius: view.cornerRadius
+            readonly property color cornerColor: view.cornerColor
+            fragmentShader: "qrc:/canvas/shaders/corners.frag.qsb"
+        }
 
         // The image of a Layer: A's frame, smooth down to the file's own pixels, then nearest-neighbour.
         component Picture: Image {

@@ -1111,11 +1111,11 @@ widget type draws in both (one window test per style for the widget set, not per
 | Part | Compact recipe (board "Nodes") |
 | --- | --- |
 | Card | width 56u (224px) by default (the board's 204 to 244px; a size in the file wins), radius 3u (12px, `cornerGroup`), fill `#222226` (group fill: `kit-group` over the canvas), 1px border `#34343a`, shadow 0 8px 22px black 35% |
-| Header | 7u (28px), padding 0 10px, a 2u (8px) dot in the node's category color, name 13px weight 600, a 14px fold chevron in `label`; 1px hairline below (`#2f2f35`) |
-| Rows | 6.5u (26px); label left 12px `label`; control right; a 1px hairline inset 10px between groups of rows |
+| Header | 7u (28px), padding 0 10px, a 2u (8px) dot in the node's category color (built, #476: `CanvasLook::categoryColor`, below), name 13px weight 600, a 14px fold chevron in `label`; 1px hairline below (`#2f2f35`) |
+| Rows | 6.5u (26px); label left 12px `label`; control right; a 1px hairline inset 10px between groups of rows; an output and a socket-only input share one row (built, #476, below) |
 | Controls | value chip or dropdown: a `KitWell` at 20px, radius 6px, 12px text (fillable is recessed; the board draws a flat chip, the epic's rule wins); seed + mode: a well and a `KitChip`; slider: a compact `KitSlider` (4px rail, 14px thumb, value 18px wide); toggle: 32 x 18px pill with a 14px knob |
 | Ports | 10px dots (2.5u) on the card's edge, 6px outside it, aligned with their row, in the port type's color (section 6.2), a 2px ring in the canvas color; wires in the type's color, 2.5px, soft curves |
-| Pictures | previews inside the card (Load Image 70px, Save Image 118px high), radius 8px, with a size badge (20px high, pill, black 55%, 11px text, bottom right) |
+| Pictures | previews inside the card (Load Image 70px, Save Image 118px high), radius 8px, with a size badge (20px high, pill, black 55%, 11px text, bottom right); every viewer on the face (Mask, Crop, Compare, Media) has the same corner (built, #476, below) |
 | Running | the header takes a faint Dusk tint (radials of lilac 35% at (15%, 0) and rose 30% at (85%, 0), 60% x 160%), a 2px accent progress line along its bottom edge and a 11px percentage |
 | Selected | the border becomes the accent and a 3px ring of accent at 18% |
 | Frost 0 | no change: cards are opaque; Panel colour does not apply to cards |
@@ -1130,6 +1130,23 @@ the undo stack. Everything the style draws reads `look.params`: the card's radiu
 and the slider's tone `toggleOnTop` and `sliderFill` (Colour; the tone is Dusk's glass, or the accent when `controlColour` is `accent`),
 the separators `rowSeparators`, the border `borders`, the shadow the look's level 1 (2 when selected). A node's text is the interface font
 at 12px (labels, values) and 13px (the title), never the serif.
+
+**Follow-ups of #466 (built, #476).** (1) *Shared rows.* In Compact an output shares its row with an input that has no widget, no section and no
+`shown_when` (a picture in, a picture out; the board's line): the k-th output takes the k-th such input in the laid-out order, the input
+at the left edge and the output at the right, each label capped at half the card. The pair's rows have the same `rowTop` and `y`
+(`Port::sharesRow`, also a key of the port's map), so the wires, the hit tests and a drag keep reading the port's own `y`; the
+separator under the outputs shows only while some input is below it. A node is a row shorter for each pair; the sizes in a file win as
+before. Flat is one row per port, unchanged. Hover help on a shared row follows the pointer's half. (2) *The category dot.* The dot is the
+node type's top-level category (`Image/Adjust` is Image; the model's `category` role), a round 8px dot in a header tone moved only in
+lightness to read at 3:1 on the card (`CanvasLook::categoryColor`, `lift`): Image sea, Basic slate, Diffusion dusk, Text moss, Generate
+ember, Video dusk's rose. A node with no category of these (a pack's own, a placeholder) keeps the kind mark (the first output's shape and
+colour); the port dots on the card's edge carry the types either way. (3) *Viewers.* Mask's picture is a Thumbnail and takes `compact`;
+Crop and Compare cut the corner with `corners.frag` (`CompareView.cornerRadius`, `cornerColor`: the card's fill outside a rounded
+rectangle, one item; a Qt clip is a rectangle) and Media's `corner`; all read `face.pictureCorner`, the Thumbnail's recipe
+(`cornerWell`, at most a fifth of the picture's short side). On the software renderer the corners stay square, as a thumbnail's.
+(4) *The missing wire* of #466's real-GPU look-shot of `examples/demo.fugue` at 40% is not explained: the wires are one `Shape` per link
+with no culling (`FugueCanvas.qml`, the `wires` Repeater), and a hidden-sway look-shot of a graph of eight nodes and seven wires at 40%
+(2026-11-27) drew every wire. If it shows again, capture the zoom and the scene before anything else.
 
 The face does not instance `KitToggle`, `KitSlider` or `KitWell`: they take their own presses (the canvas takes the presses of a node, and a
 node's widget has one mouse area that serves every kind), carry a halo or extra items, and a graph of 300 nodes counts its items
