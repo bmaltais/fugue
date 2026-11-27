@@ -287,17 +287,63 @@ Item {
         subheading: qsTr("Choose what this group shows on its card: the inputs it asks for and the results it gives.")
         tone: "dusk"
         width: Math.min((Overlay.overlay ? Overlay.overlay.width : 760) - 12 * App.theme.look.unit, 720)
-        height: Math.min((Overlay.overlay ? Overlay.overlay.height : 680) - 12 * App.theme.look.unit, 720)
+        // As tall as what it holds (a one-row group is a short dialog), up to the window less its margins or 720px; the list scrolls
+        // past that.
+        height: Math.min((Overlay.overlay ? Overlay.overlay.height : 680) - 12 * App.theme.look.unit, 720,
+                         topPadding + bottomPadding + editorBody.implicitHeight)
         property var face: ({})
         property var details: ({}) // the rows whose Details are open, by "in:<name>" or "out:<name>"; kept across reloads
         property string focusAfter: "" // the control to focus once the rows are made again (a moved row's)
+        property bool holding: false // an action runs: the rows are made again once, after it
+        property bool reloadWanted: false
+        property bool reloading: false // the rows are being made again: a field that goes now keeps nothing
         function reload() {
+            if (holding) {
+                reloadWanted = true
+                return
+            }
             const focused = editor.contentItem.Window.activeFocusItem
             const name = focusAfter !== "" ? focusAfter : (focused && inside(focused) ? focused.objectName : "")
             focusAfter = ""
+            reloading = true
             face = root.model.groups.groupInterface()
+            reloading = false
             if (name !== "")
                 Qt.callLater(refocus, name)
+        }
+        // A range's field: empty (no limit) or a number, written with a point or a comma; `number` gives it with a point, as the
+        // range is stored and shown (String(0.5) is "0.5" in every language), so a comma-decimal locale types what it knows.
+        readonly property RegularExpressionValidator rangeValidator: RegularExpressionValidator {
+            regularExpression: /^$|^-?(\d+([.,]\d*)?|[.,]\d+)([eE][-+]?\d+)?$/
+        }
+        function number(text) { return text.replace(",", ".") }
+        // Whether a field's text is a change to keep: not while the rows are made again (a field that goes then would keep its
+        // text a second time, against the row it showed).
+        function keeps(text, current) {
+            return !reloading && text !== (current === undefined || current === null ? "" : String(current))
+        }
+        // Runs an edit; the rows are made again once, after it. A row's button or key (`commit`) first keeps what the focused
+        // field holds: a button takes no focus, and Alt+Down moves the row with the cursor still in the field.
+        function act(action, commit) {
+            if (holding)
+                return action()
+            holding = true
+            let done = false
+            try {
+                if (commit) {
+                    const item = editor.contentItem.Window.activeFocusItem
+                    if (item && inside(item) && item instanceof ThemedTextField)
+                        item.editingFinished()
+                }
+                done = action()
+            } finally {
+                holding = false
+            }
+            if (reloadWanted) {
+                reloadWanted = false
+                reload()
+            }
+            return done
         }
         function inside(item) {
             for (let at = item; at; at = at.parent)
@@ -319,6 +365,8 @@ Item {
             const item = find(editor.contentItem, name)
             if (item)
                 item.forceActiveFocus()
+            else if (!inside(editor.contentItem.Window.activeFocusItem))
+                nameField.forceActiveFocus() // the control went with its row: the focus stays in the editor
         }
         function toggleDetails(key) {
             const next = Object.assign({}, details)
@@ -340,9 +388,25 @@ Item {
             if (to < 0 || to >= count)
                 return
             const shown = control === "Up" && to === 0 ? "Down" : control === "Down" && to === count - 1 ? "Up" : control
-            focusAfter = (output ? "exposedOutput" : "exposed") + shown + to
-            if (!root.model.groups.moveExposed(output, name, to))
-                focusAfter = ""
+            act(() => {
+                focusAfter = (output ? "exposedOutput" : "exposed") + shown + to
+                if (!root.model.groups.moveExposed(output, name, to))
+                    focusAfter = ""
+            }, true)
+        }
+        // Stops exposing a row; the focus goes to the same button of the row that takes its place, else of the row above, else
+        // to the section's Add button.
+        function remove(output, index) {
+            const rows = (output ? face.outputs : face.inputs) || []
+            const prefix = output ? "exposedOutputRemove" : "exposedRemove"
+            act(() => {
+                focusAfter = index + 1 < rows.length ? prefix + index : index > 0 ? prefix + (index - 1)
+                           : output ? "groupAddOutput" : "groupAddInput"
+                const done = output ? root.model.groups.unexposeOutput(rows[index].name)
+                                    : root.model.groups.removeExposedInput(rows[index].name)
+                if (!done)
+                    focusAfter = ""
+            }, true)
         }
         onOpened: {
             details = ({}) // each opening starts with every row's Details shut
@@ -387,7 +451,8 @@ Item {
             visible: choices.length > 0
             onTapped: {
                 const at = add.mapToItem(Overlay.overlay, 0, add.height)
-                addMenu.wantX = at.x
+                // Right to left the menu's end meets the button's end.
+                addMenu.wantX = root.rightToLeft ? at.x + add.width - addMenu.width : at.x
                 addMenu.wantY = at.y
                 addMenu.anchorHeight = add.height
                 addMenu.open()
@@ -426,12 +491,17 @@ Item {
             function change(key, value) {
                 const next = {name: modelData.name, label: modelData.label, section: modelData.section,
                               min: modelData.min, max: modelData.max, type: modelData.type,
-                              default: modelData.default === undefined ? "" : String(modelData.default),
-                              choices: modelData.choices}
+                              default: shown("default"), choices: modelData.choices}
                 next[key] = value
-                if (key === "name")
-                    editor.renameDetails(inputRow.key, "in:" + value.trim())
-                root.model.groups.editExposedInput(modelData.name, next)
+                const from = inputRow.key
+                const index = inputRow.index
+                editor.act(() => {
+                    // A new name re-keys the open Details only once it is taken; a refused one leaves the field as typed.
+                    if (root.model.groups.editExposedInput(modelData.name, next) && key === "name") {
+                        editor.renameDetails(from, "in:" + value.trim())
+                        editor.focusAfter = "exposedName" + index
+                    }
+                }, false)
             }
             // Up and Down go to the label above or below; with Alt they move the row.
             function rowKeys(event) {
@@ -458,19 +528,19 @@ Item {
                         objectName: "exposedLabel" + inputRow.index
                         Layout.fillWidth: true
                         text: inputRow.modelData.label
-                        placeholderText: inputRow.modelData.name
+                        placeholderText: inputRow.modelData.shown
                         Accessible.name: qsTr("Label on the card")
-                        ToolTip.text: qsTr("The name on the group's card; empty shows %1").arg(inputRow.modelData.name)
+                        ToolTip.text: qsTr("The name on the group's card; empty shows %1").arg(inputRow.modelData.shown)
                         ToolTip.visible: hovered && !activeFocus
                         ToolTip.delay: root.look.tooltipDelay
                         Keys.onPressed: event => inputRow.rowKeys(event)
-                        onEditingFinished: if (text !== inputRow.modelData.label) inputRow.change("label", text)
+                        onEditingFinished: if (editor.keeps(text, inputRow.modelData.label)) inputRow.change("label", text)
                     }
                     RowButton {
                         objectName: "exposedDetails" + inputRow.index
                         text: qsTr("Details")
                         trailingGlyph: inputRow.open ? "chevron-up" : "chevron-down"
-                        tip: qsTr("Name, section, default and range")
+                        tip: qsTr("Name, section, default, range, choices and type")
                         checkable: true
                         current: inputRow.open
                         accented: false
@@ -494,7 +564,7 @@ Item {
                         objectName: "exposedRemove" + inputRow.index
                         glyph: "x"
                         tip: qsTr("Stop exposing")
-                        onTapped: root.model.groups.removeExposedInput(inputRow.modelData.name)
+                        onTapped: editor.remove(false, inputRow.index)
                     }
                 }
                 RowLayout {
@@ -512,7 +582,7 @@ Item {
                         text: qsTr("Also set…")
                         tip: qsTr("One input of the card that sets another inner input of the same type too")
                         choices: editor.visible ? root.model.groups.exposeCandidates(inputRow.modelData.name) : []
-                        onChosen: i => root.model.groups.exposeInput(choices[i].node, choices[i].input, inputRow.modelData.name)
+                        onChosen: i => editor.act(() => root.model.groups.exposeInput(choices[i].node, choices[i].input, inputRow.modelData.name), true)
                     }
                 }
                 Loader { // the Details, made only while open
@@ -532,7 +602,7 @@ Item {
                                 Layout.preferredWidth: 35 * root.look.unit
                                 text: inputRow.modelData.name
                                 Accessible.name: qsTr("Name")
-                                onEditingFinished: if (text !== inputRow.modelData.name) inputRow.change("name", text)
+                                onEditingFinished: if (editor.keeps(text, inputRow.modelData.name)) inputRow.change("name", text)
                             }
                             Quiet {
                                 Layout.fillWidth: true
@@ -549,7 +619,7 @@ Item {
                                 text: inputRow.modelData.section
                                 placeholderText: qsTr("None")
                                 Accessible.name: qsTr("Section")
-                                onEditingFinished: if (text !== inputRow.modelData.section) inputRow.change("section", text)
+                                onEditingFinished: if (editor.keeps(text, inputRow.modelData.section)) inputRow.change("section", text)
                             }
                             Quiet {
                                 Layout.fillWidth: true
@@ -563,7 +633,7 @@ Item {
                             text: inputRow.shown("default")
                             placeholderText: qsTr("The inner value")
                             Accessible.name: qsTr("Default")
-                            onEditingFinished: if (text !== inputRow.shown("default")) inputRow.change("default", text)
+                            onEditingFinished: if (editor.keeps(text, inputRow.shown("default"))) inputRow.change("default", text)
                         }
                         DetailLabel {
                             visible: inputRow.modelData.type === "number"
@@ -578,8 +648,8 @@ Item {
                                 text: inputRow.shown("min")
                                 placeholderText: qsTr("min")
                                 Accessible.name: qsTr("Smallest value")
-                                validator: DoubleValidator {}
-                                onEditingFinished: if (text !== inputRow.shown("min")) inputRow.change("min", text)
+                                validator: editor.rangeValidator
+                                onEditingFinished: if (editor.keeps(editor.number(text), inputRow.shown("min"))) inputRow.change("min", editor.number(text))
                             }
                             ThemedTextField {
                                 objectName: "exposedMax" + inputRow.index
@@ -587,8 +657,8 @@ Item {
                                 text: inputRow.shown("max")
                                 placeholderText: qsTr("max")
                                 Accessible.name: qsTr("Largest value")
-                                validator: DoubleValidator {}
-                                onEditingFinished: if (text !== inputRow.shown("max")) inputRow.change("max", text)
+                                validator: editor.rangeValidator
+                                onEditingFinished: if (editor.keeps(editor.number(text), inputRow.shown("max"))) inputRow.change("max", editor.number(text))
                             }
                         }
                         DetailLabel {
@@ -603,7 +673,7 @@ Item {
                             text: inputRow.modelData.choices
                             placeholderText: inputRow.modelData.innerChoices
                             Accessible.name: qsTr("Choices")
-                            onEditingFinished: if (text !== inputRow.modelData.choices) inputRow.change("choices", text)
+                            onEditingFinished: if (editor.keeps(text, inputRow.modelData.choices)) inputRow.change("choices", text)
                         }
                         DetailLabel { text: qsTr("Type") }
                         Quiet {
@@ -651,14 +721,14 @@ Item {
                         objectName: "exposedOutputLabel" + outputRow.index
                         Layout.fillWidth: true
                         text: outputRow.modelData.label
-                        placeholderText: outputRow.modelData.name
+                        placeholderText: outputRow.modelData.shown
                         Accessible.name: qsTr("Label on the card")
-                        ToolTip.text: qsTr("The name on the group's card; empty shows %1").arg(outputRow.modelData.name)
+                        ToolTip.text: qsTr("The name on the group's card; empty shows %1").arg(outputRow.modelData.shown)
                         ToolTip.visible: hovered && !activeFocus
                         ToolTip.delay: root.look.tooltipDelay
                         Keys.onPressed: event => outputRow.rowKeys(event)
-                        onEditingFinished: if (text !== outputRow.modelData.label)
-                                               root.model.groups.renamePort(outputRow.modelData.fromNode, outputRow.modelData.fromPort, true, text)
+                        onEditingFinished: if (editor.keeps(text, outputRow.modelData.label))
+                                               editor.act(() => root.model.groups.relabelExposedOutput(outputRow.modelData.name, text), false)
                     }
                     RowButton {
                         objectName: "exposedOutputDetails" + outputRow.index
@@ -688,7 +758,7 @@ Item {
                         objectName: "exposedOutputRemove" + outputRow.index
                         glyph: "x"
                         tip: qsTr("Stop exposing")
-                        onTapped: root.model.groups.unexposeOutput(outputRow.modelData.name)
+                        onTapped: editor.remove(true, outputRow.index)
                     }
                 }
                 Quiet {
@@ -713,9 +783,17 @@ Item {
                                 Layout.preferredWidth: 35 * root.look.unit
                                 text: outputRow.modelData.name
                                 Accessible.name: qsTr("Name")
-                                onEditingFinished: if (text !== outputRow.modelData.name) {
-                                    editor.renameDetails(outputRow.key, "out:" + text.trim())
-                                    root.model.groups.renameExposedOutput(outputRow.modelData.name, text)
+                                onEditingFinished: if (editor.keeps(text, outputRow.modelData.name)) {
+                                    const from = outputRow.key
+                                    const index = outputRow.index
+                                    const name = outputRow.modelData.name
+                                    const typed = text
+                                    editor.act(() => {
+                                        if (root.model.groups.renameExposedOutput(name, typed)) {
+                                            editor.renameDetails(from, "out:" + typed.trim())
+                                            editor.focusAfter = "exposedOutputName" + index
+                                        }
+                                    }, false)
                                 }
                             }
                             Quiet {
@@ -734,6 +812,7 @@ Item {
         }
 
         ColumnLayout {
+            id: editorBody
             anchors.fill: parent
             spacing: 3 * root.look.unit
 
@@ -763,7 +842,7 @@ Item {
                                 ToolTip.text: tipText
                                 ToolTip.visible: hovered && !activeFocus
                                 ToolTip.delay: root.look.tooltipDelay
-                                onEditingFinished: if (text !== editor.face.name) root.model.groups.renameGroup(text)
+                                onEditingFinished: if (editor.keeps(text, editor.face.name)) editor.act(() => root.model.groups.renameGroup(text), false)
                             }
                         }
                     }
@@ -781,7 +860,7 @@ Item {
                             text: qsTr("Add an input…")
                             tip: qsTr("Show one more inner input on the card")
                             choices: editor.visible && editor.face ? root.model.groups.exposeChoices(false) : [] // made again with each reload
-                            onChosen: i => root.model.groups.exposeInput(choices[i].node, choices[i].port)
+                            onChosen: i => editor.act(() => root.model.groups.exposeInput(choices[i].node, choices[i].port), true)
                         }
                     }
                     Item { width: 1; height: root.look.unit }
@@ -814,7 +893,7 @@ Item {
                             text: qsTr("Add an output…")
                             tip: qsTr("Show one more inner output on the card")
                             choices: editor.visible && editor.face ? root.model.groups.exposeChoices(true) : [] // made again with each reload
-                            onChosen: i => root.model.groups.exposeOutput(choices[i].node, choices[i].port)
+                            onChosen: i => editor.act(() => root.model.groups.exposeOutput(choices[i].node, choices[i].port), true)
                         }
                     }
                     Item { width: 1; height: root.look.unit }

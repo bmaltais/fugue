@@ -129,7 +129,7 @@
   "Move down (Alt+Down)": "Move down (Alt+Down)",
   "Move up (Alt+Up)": "Move up (Alt+Up)",
   "Name and type": "Name and type",
-  "Name, section, default and range": "Name, section, default and range",
+  "Name, section, default, range, choices and type": "Name, section, default, range, choices and type",
   "No inputs yet: the card asks for nothing. Use Add an input…, or right-click an input inside the group and choose Expose on the group.": "No inputs yet: the card asks for nothing. Use Add an input…, or right-click an input inside the group and choose Expose on the group.",
   "No outputs yet: nothing leaves the group. Use Add an output…, or right-click an output inside the group and choose Expose on the group.": "No outputs yet: nothing leaves the group. Use Add an output…, or right-click an output inside the group and choose Expose on the group.",
   "No, cancel the run": "No, cancel the run",

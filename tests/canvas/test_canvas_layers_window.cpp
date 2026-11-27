@@ -383,24 +383,36 @@ private slots:
         const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
         if (dir.isEmpty())
             QSKIP("FUGUE_SHOT_DIR is not set");
-        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
-        QVERIFY(app.open());
-        openDialog(app);
-        click(app, "canvasLayer-1");
-        click(app, "canvasLayer-0", Qt::ControlModifier);
-        QTest::qWait(400);
-        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers.png"));
-        click(app, "canvasLayer-1", {}, Qt::RightButton);
-        QTRY_VERIFY(menu(app) && menu(app)->property("opened").toBool());
-        QTest::qWait(300);
-        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers-menu.png"));
-        QTest::keyClick(app.window, Qt::Key_Escape);
-        QVERIFY(QMetaObject::invokeMethod(model(app), "groupLayers", Q_ARG(QVariantList, (QVariantList{1, 2}))));
-        QTRY_VERIFY(find(app.window, "canvasLayerArrow-1"));
-        click(app, "canvasLayerArrow-1");
-        QTRY_VERIFY(find(app.window, "canvasLayerEye-2"));
-        QTest::qWait(400);
-        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers-tree.png"));
+        // A layer's rename field, dark and light (the kit's text field over the panel's rows), before the tree below groups the layers.
+        for (const auto &[theme, tag] : {std::pair{"catppuccin", "dark"}, std::pair{"catppuccin-latte", "light"}}) {
+            App themed(load(R"({"fugue": 1, "graph": {"nodes": {}}})"), {}, Look{theme, 8});
+            QVERIFY(themed.open());
+            openDialog(themed);
+            QTest::mouseDClick(themed.window, Qt::LeftButton, {}, settled(themed.window, "canvasLayerName-2"));
+            QTRY_VERIFY(find(themed.window, "canvasLayerRename"));
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(themed.window).save(QString("%1/canvas-layers-rename-%2.png").arg(QString::fromLocal8Bit(dir), tag)));
+        }
+        {
+            App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+            QVERIFY(app.open());
+            openDialog(app);
+            click(app, "canvasLayer-1");
+            click(app, "canvasLayer-0", Qt::ControlModifier);
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers.png"));
+            click(app, "canvasLayer-1", {}, Qt::RightButton);
+            QTRY_VERIFY(menu(app) && menu(app)->property("opened").toBool());
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers-menu.png"));
+            QTest::keyClick(app.window, Qt::Key_Escape);
+            QVERIFY(QMetaObject::invokeMethod(model(app), "groupLayers", Q_ARG(QVariantList, (QVariantList{1, 2}))));
+            QTRY_VERIFY(find(app.window, "canvasLayerArrow-1"));
+            click(app, "canvasLayerArrow-1");
+            QTRY_VERIFY(find(app.window, "canvasLayerEye-2"));
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers-tree.png"));
+        }
     }
 };
 

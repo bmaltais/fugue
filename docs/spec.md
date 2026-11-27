@@ -896,8 +896,8 @@ with an id and a version, and it appears in node search.
   input or output renames it on every instance, and in the face of every group around it.
   It also exposes: **Add an input…** and **Add an output…** list the inner ports not exposed yet
   (node title, then the port's label), as Expose on the group does from a port. Each row shows
-  the label on the card (its placeholder the name shown when there is none; an output's label is
-  its face label, #72) and says what it does with the inner nodes' titles and the ports' labels,
+  the label on the card (its placeholder what the card shows when there is none, the inner port's label; an
+  output's label is the shown group's face label, #72) and says what it does with the inner nodes' titles and the ports' labels,
   never ids: "Sets Model on Encode and Sample", "From Image on Picture" (`GroupEdit::groupInterface`,
   `sets` and `comesFrom`). The name links and `--set` use, the section, the default, the range,
   the choices and the type sit under the row's Details; the group's id and version in the name's

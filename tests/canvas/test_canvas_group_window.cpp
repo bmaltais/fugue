@@ -6,6 +6,8 @@
 #include <QDir>
 #include <QFont>
 #include <QQuickStyle>
+#include <QScopeGuard>
+#include <QUndoStack>
 
 #include <functional>
 #include <QtTest>
@@ -266,7 +268,7 @@ private slots:
         QQuickItem *root = app.window->contentItem();
         while (root->parentItem())
             root = root->parentItem();
-        // The editor opens with Material's fade: its fields are there once it has.
+        // The editor's fields are there once it has opened.
         QTRY_VERIFY((fields = 0, walk(root), fields >= 3));
         fields = 0;
         walk(root);
@@ -434,15 +436,46 @@ private slots:
         const auto inputs = [&] { return app.model.groups()->groupInterface().value("inputs").toList(); };
         QTRY_COMPARE(inputs().value(0).toMap().value("label").toString(), QStringLiteral("Base model"));
         QTRY_COMPARE(focused(), QStringLiteral("exposedDetails0"));
-        app.key(Qt::Key_Down); // to the next row's label
-        QTRY_COMPARE(focused(), QStringLiteral("exposedDetails0")); // Down on a button does nothing
+        app.key(Qt::Key_Down); // Up and Down move between labels only: on a button they do nothing
+        QTRY_COMPARE(focused(), QStringLiteral("exposedDetails0"));
         app.key(Qt::Key_Tab, Qt::ShiftModifier);
         QTRY_COMPARE(focused(), QStringLiteral("exposedLabel0"));
+
+        // Text typed and not yet kept is kept once before a row moves: by Alt+Down at once, or by a click on a row button
+        // (which takes no focus).
+        const int steps = app.model.undoStack()->count();
+        app.key(Qt::Key_End);
+        for (const char letter : QByteArray(" two"))
+            QTest::keyClick(app.window, letter);
         app.key(Qt::Key_Down, Qt::AltModifier);
         QTRY_COMPARE(inputs().value(1).toMap().value("name").toString(), QStringLiteral("model"));
         QTRY_COMPARE(focused(), QStringLiteral("exposedLabel1"));
+        QCOMPARE(inputs().value(1).toMap().value("label").toString(), QStringLiteral("Base model two"));
+        QCOMPARE(app.model.undoStack()->count(), steps + 2); // the label, then the move
+        QTest::keyClick(app.window, '!');
+        QQuickItem *up = item(app.window->contentItem(), "exposedUp1");
+        QVERIFY(up);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, up->mapToScene(QPointF(up->width() / 2, up->height() / 2)).toPoint());
+        QTRY_COMPARE(inputs().value(0).toMap().value("name").toString(), QStringLiteral("model"));
+        QCOMPARE(inputs().value(0).toMap().value("label").toString(), QStringLiteral("Base model two!"));
+        QCOMPARE(app.model.undoStack()->count(), steps + 4);
+        QTRY_COMPARE(focused(), QStringLiteral("exposedDown0")); // Move up cannot act on the first row: its neighbour has it
+        app.key(Qt::Key_Tab, Qt::ShiftModifier); // past Move up, which cannot act here
+        QTRY_COMPARE(focused(), QStringLiteral("exposedDetails0"));
+        app.key(Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_COMPARE(focused(), QStringLiteral("exposedLabel0"));
+        app.key(Qt::Key_Down);
+        QTRY_COMPARE(focused(), QStringLiteral("exposedLabel1"));
         app.key(Qt::Key_Up);
         QTRY_COMPARE(focused(), QStringLiteral("exposedLabel0"));
+
+        // Removing the last row by keys leaves the focus in the editor, so Escape still closes it.
+        QQuickItem *remove = item(app.window->contentItem(), "exposedRemove1");
+        QVERIFY(remove);
+        remove->forceActiveFocus();
+        app.key(Qt::Key_Return);
+        QTRY_COMPARE(inputs().size(), 1);
+        QTRY_VERIFY(!focused().isEmpty());
         QObject *editor = app.window->findChild<QObject *>("groupInterfaceEditor");
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!editor->property("visible").toBool());
@@ -450,15 +483,25 @@ private slots:
     }
 
     // FUGUE_SHOT_DIR=<folder>: the interface editor of a group like the owner's (one model input that sets two nodes, one image
-    // output), then with several inputs, dark and light, and the tab rename popup. Pictures only; nothing is asserted.
+    // output), then with several inputs, dark, light and right to left, and the tab rename popup. Pictures only; nothing is
+    // asserted.
     void theInterfaceEditorLook() {
         const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
         if (out.isEmpty())
             QSKIP("set FUGUE_SHOT_DIR to take the pictures");
         QDir().mkpath(out);
-        for (const auto &[theme, tag] : {std::pair{"catppuccin", "dark"}, std::pair{"catppuccin-latte", "light"}}) {
-            App app(load(kModelGraph), {}, Look{theme, 8});
+        struct Shot {
+            const char *theme;
+            const char *tag;
+            Qt::LayoutDirection direction;
+        };
+        for (const Shot &each : {Shot{"catppuccin", "dark", Qt::LeftToRight}, Shot{"catppuccin-latte", "light", Qt::LeftToRight},
+                                 Shot{"catppuccin", "rtl", Qt::RightToLeft}}) {
+            const QString tag = each.tag;
+            const auto restore = qScopeGuard([] { QGuiApplication::setLayoutDirection(Qt::LeftToRight); });
+            App app(load(kModelGraph), {}, Look{each.theme, 8});
             QVERIFY(app.open());
+            QGuiApplication::setLayoutDirection(each.direction); // after open: the window's translator sets it from the language
             app.window->resize(1100, 760);
             app.workflows.dismissPendingTrust();
             app.workflows.dismissNotice();

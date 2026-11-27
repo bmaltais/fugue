@@ -86,9 +86,10 @@ public:
     // Each edit is one undo step on the whole workflow, so instances elsewhere follow.
 
     // {id, name, version, inputs: [{name, label, section, min, max, default, choices, innerChoices,
-    // targets: ["node.input"], sets, type}], outputs: [{name, label, from, fromNode, fromPort,
-    // comesFrom, type}]}; empty at the top. `sets` and `comesFrom` say it in words, with the inner
-    // nodes' titles and the ports' labels: "Sets Model on Encode and Sample", "From Image on Picture".
+    // targets: ["node.input"], sets, shown, type}], outputs: [{name, label, from, fromNode, fromPort,
+    // comesFrom, shown, type}]}; empty at the top. `sets` and `comesFrom` say it in words, with the
+    // inner nodes' titles and the ports' labels: "Sets Model on Encode and Sample", "From Image on
+    // Picture"; `shown` is what the card shows for the port (its label, else the inner one's).
     Q_INVOKABLE QVariantMap groupInterface() const;
     // The inner inputs (or outputs) of the group shown that are not exposed yet, in the canvas's
     // order, as [{node, port, title: "<node title> > <port label>"}]: the editor's Add lists.
@@ -108,6 +109,10 @@ public:
     Q_INVOKABLE QVariantList exposeCandidates(const QString &name) const;
     Q_INVOKABLE bool editExposedInput(const QString &name, const QVariantMap &change);
     Q_INVOKABLE bool renameExposedOutput(const QString &name, const QString &newName);
+    // Sets the label the shown group's face gives its exposed output `name` (empty: the inner
+    // port's). Unlike renamePort with the inner port, it never reaches into a nested group's
+    // definition when the output comes from a group instance inside. One undo step.
+    Q_INVOKABLE bool relabelExposedOutput(const QString &name, const QString &label);
     Q_INVOKABLE bool moveExposed(bool output, const QString &name, int to);
     Q_INVOKABLE bool renameGroup(const QString &name);
     // A port a rename can relabel (#72): on a group card, or an inner port the group shown

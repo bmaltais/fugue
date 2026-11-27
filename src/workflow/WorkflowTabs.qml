@@ -128,7 +128,7 @@ Item {
                         id: renameField
                         objectName: "tabRenameField-" + tabButton.index
                         implicitWidth: 40 * root.look.unit
-                        implicitHeight: 6 * root.look.unit
+                        implicitHeight: Math.max(6 * root.look.unit, contentHeight + topPadding + bottomPadding)
                         leftPadding: root.look.unit // with the popup's padding the text sits 3u in, as a menu row's
                         rightPadding: root.look.unit
                         framed: false

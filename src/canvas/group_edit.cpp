@@ -335,6 +335,14 @@ bool GroupEdit::unexposeOutput(const QString &name) {
         tr("Stop exposing"));
 }
 
+bool GroupEdit::relabelExposedOutput(const QString &name, const QString &label) {
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return relabelExposed(whole, group, true, name, label.trimmed());
+        },
+        tr("Rename output"));
+}
+
 QVariantMap GroupEdit::portToRename(const QString &node, const QString &port, bool output) const {
     QString group, name;
     if (m_canvas->isGroup(node)) { // a port of a group card, at this level
@@ -511,6 +519,7 @@ QVariantMap GroupEdit::groupInterface() const {
                                                    : QString()},
                                   {"targets", targets},
                                   {"sets", setsText(input.targets)},
+                                  {"shown", spec && !spec->label.isEmpty() ? spec->label : input.name},
                                   {"type", spec ? spec->type.toString() : QString()}});
     }
     for (const GroupOutput &output : group->outputs) {
@@ -521,6 +530,7 @@ QVariantMap GroupEdit::groupInterface() const {
                                    {"fromNode", output.from.node},
                                    {"fromPort", output.from.port},
                                    {"comesFrom", comesFromText(output.from)},
+                                   {"shown", spec && !spec->label.isEmpty() ? spec->label : output.name},
                                    {"type", spec ? spec->type.toString() : QString()}});
     }
     return {{"id", id},

@@ -219,8 +219,9 @@ Item {
                         Layout.preferredWidth: 20 * root.look.unit
                         text: row.modelData.min
                         placeholder: (row.modelData.innerMin !== "" ? row.modelData.innerMin : qsTr("min"))
-                        validator: DoubleValidator {}
-                        onEditingFinished: if (text !== row.modelData.min) root.builder.editInput(row.key, {min: text})
+                        // Empty clears the limit (DoubleValidator never accepted an empty field); a comma reads as a point.
+                        validator: RegularExpressionValidator { regularExpression: /^$|^-?(\d+([.,]\d*)?|[.,]\d+)([eE][-+]?\d+)?$/ }
+                        onEditingFinished: if (text.replace(",", ".") !== row.modelData.min) root.builder.editInput(row.key, {min: text.replace(",", ".")})
                         onAccepted: dialog.apply(false)
                     }
                     AppField {
@@ -229,8 +230,9 @@ Item {
                         Layout.preferredWidth: 20 * root.look.unit
                         text: row.modelData.max
                         placeholder: (row.modelData.innerMax !== "" ? row.modelData.innerMax : qsTr("max"))
-                        validator: DoubleValidator {}
-                        onEditingFinished: if (text !== row.modelData.max) root.builder.editInput(row.key, {max: text})
+                        // Empty clears the limit (DoubleValidator never accepted an empty field); a comma reads as a point.
+                        validator: RegularExpressionValidator { regularExpression: /^$|^-?(\d+([.,]\d*)?|[.,]\d+)([eE][-+]?\d+)?$/ }
+                        onEditingFinished: if (text.replace(",", ".") !== row.modelData.max) root.builder.editInput(row.key, {max: text.replace(",", ".")})
                         onAccepted: dialog.apply(false)
                     }
                     Item { Layout.fillWidth: true }

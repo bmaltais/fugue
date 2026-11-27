@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.impl
 import QtQuick.Controls.Material.impl
 import QtQuick.Templates as T
 import Fugue
@@ -23,15 +24,16 @@ T.TextField {
     leftPadding: 2.5 * App.theme.look.unit
     rightPadding: 2.5 * App.theme.look.unit
     verticalAlignment: TextInput.AlignVCenter
-    color: enabled ? App.theme.look.text : App.theme.look.label
+    color: App.theme.look.text
     placeholderTextColor: App.theme.look.label
     selectionColor: App.theme.look.accent
     selectedTextColor: App.theme.look.accentForeground
-    opacity: enabled ? 1 : 0.6
+    opacity: enabled ? 1 : 0.5 // disabled: the field and its text dim once, as AppField does
 
     ContextMenu.menu: TextEditingContextMenu { editor: control } // cut, copy, paste on a right-click, as Material's field had
 
-    Text {
+    // Qt's own placeholder text (as the Basic style's field): it follows the field's alignment, mirrored once in right to left.
+    PlaceholderText {
         id: placeholder
         x: control.leftPadding
         y: control.topPadding
@@ -41,7 +43,6 @@ T.TextField {
         font: control.font
         color: control.placeholderTextColor
         verticalAlignment: control.verticalAlignment
-        horizontalAlignment: control.effectiveHorizontalAlignment
         elide: Text.ElideRight
         renderType: control.renderType
         visible: control.length === 0 && control.preeditText === ""

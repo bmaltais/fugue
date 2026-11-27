@@ -174,6 +174,9 @@ private slots:
         const QVariantMap output = face.value("outputs").toList().value(0).toMap();
         QCOMPARE(output.value("comesFrom").toString(), QStringLiteral("From Image on Picture"));
         QCOMPARE(output.value("fromNode").toString(), QStringLiteral("picture"));
+        // With no label of its own a port shows the inner one, as the card does.
+        QCOMPARE(face.value("inputs").toList().value(0).toMap().value("shown").toString(), QStringLiteral("Model"));
+        QCOMPARE(output.value("shown").toString(), QStringLiteral("Image"));
 
         // Two labels on one node: each says where it goes.
         QVERIFY(groups.exposeInput("sample", "seed"));
@@ -197,6 +200,27 @@ private slots:
             QVERIFY2(!inputs.contains(exposed), exposed);
         QVERIFY(outputs.contains("sample.latent"));
         QVERIFY(!outputs.contains("picture.image"));
+    }
+
+    // The editor relabels the shown group's output, also one that comes from a group nested in it: never the nested
+    // group's own definition (whose instances are elsewhere too).
+    void relabelingAnOutputFromANestedGroupChangesTheShownGroupOnly() {
+        Fixture f; // gen is a group (inner)
+        const QString inner = f.canvas.document().graph.nodes.value(f.instance).type;
+        f.canvas.select({"prompt", f.instance});
+        const QString outer = f.groups.makeGroup();
+        QVERIFY2(!outer.isEmpty(), qPrintable(f.groups.problem()));
+        QVERIFY(f.groups.enterGroup(outer));
+        const QVariantMap output = f.groups.groupInterface().value("outputs").toList().value(0).toMap();
+        QCOMPARE(output.value("fromNode").toString(), f.instance);
+        QVERIFY2(f.groups.relabelExposedOutput(output.value("name").toString(), "Picture"), qPrintable(f.groups.problem()));
+        const QVariantMap after = f.groups.groupInterface().value("outputs").toList().value(0).toMap();
+        QCOMPARE(after.value("label").toString(), QStringLiteral("Picture"));
+        QCOMPARE(after.value("shown").toString(), QStringLiteral("Picture"));
+        for (const GroupOutput &port : f.canvas.document().groups.value(inner).outputs)
+            QVERIFY2(port.label.isEmpty(), qPrintable(port.label)); // the nested group is untouched
+        QVERIFY(f.groups.relabelExposedOutput(output.value("name").toString(), "")); // empty: the inner label again
+        QCOMPARE(f.groups.groupInterface().value("outputs").toList().value(0).toMap().value("label").toString(), QString());
     }
 
     void aRefusalSetsTheProblemAndAnEditThatWorksClearsIt() {
