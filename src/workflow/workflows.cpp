@@ -217,7 +217,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
         m_work.hash(this, path, std::move(progress), std::move(done));
     };
     host.say = [this](const QString &text) { setNotice(text); };
-    host.sayChoice = [this](const SwapNotice &swaps) { setNotice(swaps.text, swaps.title, swaps.lines); };
+    host.sayChoice = [this](const SwapNotice &swaps) { notifySwaps(swaps); };
     host.saying = [this] { return m_notice; };
     host.sayInSheet = [this](const QString &text) { m_readiness->say(text); };
     host.changed = [this](bool force) {
@@ -225,10 +225,8 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
         refreshMissing(force);
     };
     host.endReading = [this] {
-        m_notice.clear();
+        setNotice({});
         setNotice(m_missingNotice);
-        if (m_missingNotice.isEmpty())
-            emit noticeChanged(); // the line is gone, whatever replaces it
     };
     host.offerSheet = [this] { offerReadiness(); };
     host.later = [this](std::function<void()> what) { after(std::move(what)); };
@@ -254,11 +252,24 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     connect(this, &Workflows::usesApplied, m_readiness, &ReadinessSheet::refresh);
     connect(this, &Workflows::readingChanged, m_readiness, [this] { m_readiness->setReading(m_choice->reading()); });
     connect(this, &Workflows::usesFinished, m_readiness, &ReadinessSheet::usesFinished);
-    // The banner's Undo belongs to the tab it was opened in.
+    // A swap's banner belongs to the tab it is about (docs/ui-ergonomics.md 2026-11-27): another tab shown puts it aside, with its
+    // Undo, and shows that tab's own line; back on its tab it comes back, unless another line took its place meanwhile.
     connect(this, &Workflows::currentChanged, this, [this] {
+        const QString shown = m_current < 0 ? QString() : m_tabs[size_t(m_current)].id;
+        if (!m_noticeLines.isEmpty() && m_noticeTab != shown) {
+            m_tabSwaps.insert(m_noticeTab, SwapNotice{m_noticeTitle, m_noticeLines, m_notice});
+            showMissing();
+        }
+        if (const auto it = m_tabSwaps.constFind(shown); it != m_tabSwaps.constEnd() && (m_notice.isEmpty() || m_notice == m_missingNotice)) {
+            const SwapNotice swaps = *it;
+            m_tabSwaps.erase(it);
+            setNotice(swaps.text, swaps.title, swaps.lines);
+            m_noticeTab = shown;
+        }
         if (m_choice->hasRecord())
-            emit noticeChanged();
+            emit noticeChanged(); // the banner's Undo belongs to the tab it was opened in
     });
+    connect(this, &Workflows::tabClosed, this, [this](const QString &id) { m_tabSwaps.remove(id); });
     connect(m_canvas, &CanvasModel::edited, this, [this] {
         if (m_choice->hasRecord())
             emit noticeChanged(); // an edit ends the banner's Undo
@@ -376,7 +387,16 @@ void Workflows::setNotice(const QString &text, const QString &title, const QVari
     m_notice = text;
     m_noticeTitle = text.isEmpty() ? QString() : title;
     m_noticeLines = text.isEmpty() ? QVariantList() : lines;
+    if (m_noticeLines.isEmpty())
+        m_noticeTab.clear();
     emit noticeChanged();
+}
+
+void Workflows::showMissing() {
+    if (m_current < 0)
+        return setNotice({});
+    m_missingNotice = missingNotice(shownDocument(), m_tabs[size_t(m_current)].title, &m_offer);
+    setNotice(m_missingNotice);
 }
 
 void Workflows::dismissNotice() { setNotice({}); }
@@ -986,6 +1006,7 @@ QVariantList Workflows::templates() const {
     const ModelSpeeds speeds;
     const ModelLibrary models = ModelLibrary::current(m_registry);
     const ModelCatalog catalog = ModelCatalog::load();
+    const bool useCovered = autoUseOn(); // "Use my file": a template partly covered opens with the files it has
     QVariantList out;
     for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
         QVariantList missing;
@@ -1101,6 +1122,8 @@ QVariantList Workflows::templates() const {
                                {"downloadSize", downloadSize(uncovered)},
                                {"ownDownloadSize", downloadSize(coveredModels)}, // what the template's own models would fetch, for the details' Download
                                {"opensWithFiles", !absent.isEmpty() && uncovered.isEmpty() && t.neededPacks.isEmpty()},
+                               // Open puts the person's files in (coveringUses): all of them with "Use my file", only a full cover with "Ask me".
+                               {"opensUsingFiles", !onDisk.isEmpty() && (useCovered || (uncovered.isEmpty() && t.neededPacks.isEmpty()))},
                                {"neededPacks", t.neededPacks},
                                {"status", status.join(QStringLiteral(" · "))}});
     }

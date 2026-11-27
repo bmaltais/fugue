@@ -164,6 +164,11 @@ private slots:
         QVERIFY(sentences.at(1).startsWith(QStringLiteral("Opened with your file mine-flux-2-klein-4b-fp8.safetensors in place of")));
 
         QCOMPARE(swapNotice(SwapKind::Used, {other, plain}).title, QStringLiteral("Using your 2 files"));
+        OnDiskUse sameFile = plain; // a second model the same file of the person's stands in for: one file, two lines
+        sameFile.wanted.insert("name", QStringLiteral("flux-2-klein-4b-Q8_0.gguf"));
+        const SwapNotice oneFile = swapNotice(SwapKind::Opened, {plain, sameFile});
+        QCOMPARE(oneFile.title, QStringLiteral("Opened with your file"));
+        QCOMPARE(oneFile.lines.size(), 2);
         QVERIFY(swapNotice(SwapKind::Used, {plain}).text.startsWith(QStringLiteral("Used your file")));
         QVERIFY(swapNotice(SwapKind::Opened, {}).isEmpty());
         QCoreApplication::removeTranslator(&translator);

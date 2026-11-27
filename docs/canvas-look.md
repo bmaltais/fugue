@@ -1279,12 +1279,19 @@ references: docs/ui-ergonomics.md, 2026-11-27.
 | Glyph | 14px Lucide, the tone's `frameTitle` ink: info `info`, attention `triangle-alert`, error `circle-x`, success `check`; neutral none |
 | Head | glyph, title (text size; DemiBold when a body or lines follow), `actions` (a Component: Undo, Get ready…), the copy button (`copyText`), the × (`dismissible`, its tip `dismissTip`); the first line is the buttons' 7u and every part centres on it |
 | Body | label size, the text colour, wrapped, under the title |
-| Lines | strings, or swaps of "Use my file" `{mine, theirs, minePath, tier}` as a small table: your file (Medium), "in place of" (label colour, label size), the template's file, the tier as a `KitBadge`; the two name columns are as wide as their longest name and shared out when narrower, cut in the middle, the whole name and your file's path in a tooltip; under 24u a name, the chip goes under the names |
+| Lines | strings, or swaps of "Use my file" `{mine, theirs, minePath, tier}` as a small table: your file (Medium), "in place of" (the text colour at label size: the label colour reads under 4.5:1 on 11 of the 115 tone tints of Omarchy's shipped themes, as low as 4.33 on tokyo-night's info), the template's file, the tier as a `KitBadge`; the rows are made again only when the lines really change (a new list for the same lines keeps the tooltips); the two name columns are as wide as their longest name and shared out when narrower, cut in the middle, the whole name and your file's path in a tooltip; under 24u a name, the chip goes under the names |
 | Extra | a Component under the lines (the download under way, the canvas mismatch's buttons), indented with the lines |
 | Compact | one line, caption size, a 6u × (the layers panel's "Showing Sky alone") |
 
 A hidden notice is two items (the root and a Loader): everything else is made while it shows. It is an `AlertMessage` for screen readers
-(the title as its name, title, body and lines as its description) and is announced (`Accessible.announce`) when it shows or its words
-change. Tab reaches its buttons; Escape inside it dismisses it and gives the focus to `returnFocus` (or the window). It mirrors right to
-left with the application. The notice never hides itself: `dismissed()` is the host's.
+(the title as its name, title, body and lines as its description) and is announced (`Accessible.announce`, through the card) once per
+message: when its words come while it shows, or it shows with words not yet heard; not again when a panel above it opens on the same
+words, and not on a change of words while `announceChanges` is off (the workflow notice turns it off while a file is read, so "Reading
+your file… 42%" is said once). Tab reaches its buttons; Escape inside it takes the key before the window's shortcuts (Escape is also
+Cancel the run and Leave the group) and dismisses it; the focus goes to `returnFocus` when it is shown, else the nearest item above that
+takes Tab, else the window. It mirrors right to left with the application. The notice never hides itself: `dismissed()` is the host's.
+
+Measured contrast on the tone tints (derive.py's derivation, every shipped theme): the text at least 4.5:1 everywhere (catppuccin-latte
+5.59 to 6.31, tokyo-night 4.61 to 4.84); the glyph's ink at least 3:1 everywhere (catppuccin-latte 4.75 to 5.67, tokyo-night 4.09 to
+4.98); the tier badge's label on `kitChip` as the kit's (5.98 catppuccin-latte, 4.64 tokyo-night).
 

@@ -2344,7 +2344,7 @@
   "Opens with your %1 (%2)": "Opens with your %1 (%2)",
   "Your file": "Your file",
   "Download the template's own files (%1)…": "Download the template's own files (%1)…",
-  "The exact files the template was made with, in place of yours: Get ready shows what it fetches before anything starts": "The exact files the template was made with, in place of yours: Get ready shows what it fetches before anything starts",
+  "%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.": "%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.",
   "Opened with your %n files": {
     "one": "Opened with your file",
     "other": "Opened with your %n files"
@@ -2356,5 +2356,6 @@
   "Open with your %n files": {
     "one": "Open with your file",
     "other": "Open with your %n files"
-  }
+  },
+  "%1 in place of %2": "%1 in place of %2"
 }

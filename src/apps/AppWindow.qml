@@ -105,6 +105,7 @@ ApplicationWindow {
         title: swapped ? App.workflows.noticeTitle : App.workflows.notice
         lines: App.workflows.noticeLines
         copyText: App.workflows.notice
+        announceChanges: !App.workflows.hashingUses // "Reading your file… 42%" is said once, not at every percent
         onDismissed: App.workflows.dismissNotice()
         actions: Component {
             Row {

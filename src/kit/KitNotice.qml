@@ -10,8 +10,9 @@ import "../canvas"
 // helper's offer, the keymap's problems, the Canvas view's toast and notes, the layers panel's view states, the app window's line.
 //
 //  - `tone`: info (blue), attention (yellow), error (red), success (green), neutral (the label colour). The card is the tone's quiet
-//    surface and edge and the glyph its ink, from the theme's role tokens (look.role: `frame`, `frameEdge`, `frameTitle`, derived from
-//    the Omarchy palette and stepped until the ink reads at 4.5:1, light and dark); never a colour of its own. Neutral has no glyph.
+//    surface and edge and the glyph its ink, from the theme's role tokens (look.role: `tint`, stepped until the text reads on it at
+//    4.5:1, `frameEdge` and `frameTitle`, derived from the Omarchy palette, light and dark); never a colour of its own. Every word on
+//    it is in the text colour (the label colour reads under 4.5:1 on some dark tints). Neutral has no glyph.
 //  - `title`: one short line. `body`: an optional paragraph under it. `lines`: an optional list under it, each a string or a swap of
 //    "Use my file" ({mine, theirs, minePath, tier}: the person's file, then the model it stands in for, then a quiet chip with the
 //    tier), drawn as a small table whose names are cut in the middle, the whole name in a tooltip.
@@ -21,9 +22,11 @@ import "../canvas"
 //    `dismissed()` is the host's to act on: the notice never hides itself.
 //  - `compact`: one line at caption size, for a view state in a narrow panel ("Showing Sky alone").
 //
-// Screen readers hear it as an alert (Accessible.AlertMessage, its title and body), and it is announced when it shows or its words
-// change. Tab reaches its buttons in reading order; Escape, while the focus is inside it, dismisses it and gives the focus back to
-// `returnFocus` (or the window), so the keyboard is never left on a card that went away. It mirrors right to left with the window.
+// Screen readers hear it as an alert (Accessible.AlertMessage, its title and body), announced once when its words come, not again
+// when a panel above it opens again; `announceChanges: false` (a percent going up) keeps a change of words quiet. Tab reaches its
+// buttons in reading order; Escape, while the focus is inside it, dismisses it (it takes the key before the window's shortcuts) and
+// gives the focus to `returnFocus` when that is shown, else to the nearest item above it that takes Tab, so the keyboard is never
+// left on a card that went away. It mirrors right to left with the window.
 Item {
     id: notice
     property CanvasLook look: App.theme.look
@@ -38,6 +41,9 @@ Item {
     property Component actions: null
     property Component extra: null
     property Item returnFocus: null
+    property bool announceChanges: true // false: a change of words while it shows is not announced again (a percent going up)
+    property int announcements: 0       // how many times it was announced (tests)
+    property string heard               // the words last announced; "" once they are gone
     // The inner parts' names, for tests and tools: by default the notice's own name with a suffix.
     property string titleName: objectName + "Title"
     property string bodyName: objectName + "Body"
@@ -49,7 +55,14 @@ Item {
     readonly property var role: { void notice.look.text; return notice.look.role(notice.roleName) } // read again when the theme changes
     readonly property string glyph: ({ info: "info", attention: "triangle-alert", error: "circle-x", success: "check" })[tone] ?? ""
     readonly property string spoken: [title, body].concat(lines.map(l => typeof l === "string" ? l
+                                         : (l.tier ?? "") === "" ? qsTr("%1 in place of %2").arg(l.mine).arg(l.theirs)
                                          : qsTr("%1 in place of %2, %3").arg(l.mine).arg(l.theirs).arg(l.tier))).filter(t => t !== "").join("\n")
+    // The lines the table draws, replaced only when they really change: a host's list is a new array at every change of its
+    // owner (an edit, a tab shown), and a new model would make the rows again and drop a tooltip under the pointer.
+    readonly property string linesKey: JSON.stringify(lines)
+    property var drawnLines: []
+    onLinesKeyChanged: drawnLines = lines
+    Component.onCompleted: drawnLines = lines
 
     implicitHeight: card.item ? (card.item as Item).implicitHeight : 0
     height: implicitHeight
@@ -57,21 +70,46 @@ Item {
     LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
     LayoutMirroring.childrenInherit: true
 
+    // Where the focus goes when the notice goes: `returnFocus` when it is shown, else the nearest item above that takes Tab (a panel,
+    // the canvas), else the window.
+    function focusTarget() {
+        if (notice.returnFocus && notice.returnFocus.visible)
+            return notice.returnFocus
+        for (let p = notice.parent; p; p = p.parent)
+            if (p.visible && p.activeFocusOnTab)
+                return p
+        return notice.Window.contentItem
+    }
     function dismiss() {
         let inside = false
         for (let p = notice.Window.activeFocusItem; p; p = p.parent)
             if (p === notice)
                 inside = true
         if (inside)
-            (notice.returnFocus ?? notice.Window.contentItem)?.forceActiveFocus()
+            notice.focusTarget()?.forceActiveFocus()
         notice.dismissed()
     }
-    function announce() {
-        if (notice.visible && notice.spoken !== "")
-            notice.Accessible.announce(notice.spoken)
+    // Once per message: when its words come while it shows, or it shows with words not yet heard (not when a panel above it opens
+    // again on the same words). Weighed once the bindings have settled (a title and its lines change one after the other), and said
+    // through the card, the item screen readers know as the alert.
+    function listen() { Qt.callLater(notice.speak) }
+    function speak() {
+        if (notice.spoken === "") {
+            notice.heard = ""
+            return
+        }
+        if (!notice.visible || !card.item || notice.spoken === notice.heard || (!notice.announceChanges && notice.heard !== ""))
+            return
+        notice.heard = notice.spoken
+        const alert = card.item as Item
+        alert.Accessible.announce(notice.spoken)
+        ++notice.announcements
     }
-    onVisibleChanged: announce()
-    onSpokenChanged: announce()
+    onVisibleChanged: listen()
+    onSpokenChanged: listen()
+    // Escape is the window's too (Cancel the run, leave the group: CommandUi's shortcuts): the notice takes it first while the focus is
+    // in it, as every other Escape of the window does.
+    Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape && notice.dismissible
     Keys.onEscapePressed: (event) => {
         if (notice.dismissible)
             notice.dismiss()
@@ -140,7 +178,7 @@ Item {
                             elide: notice.compact ? Text.ElideRight : Text.ElideNone
                             color: notice.look.text
                             font.pixelSize: notice.compact ? notice.look.captionSize : notice.look.textSize
-                            font.weight: notice.compact || notice.body === "" && notice.lines.length === 0 ? Font.Normal : Font.DemiBold
+                            font.weight: notice.compact || notice.body === "" && notice.drawnLines.length === 0 ? Font.Normal : Font.DemiBold
                         }
                         Text {
                             objectName: notice.bodyName
@@ -192,13 +230,13 @@ Item {
                     id: list
                     Layout.fillWidth: true
                     Layout.leftMargin: mark.visible ? mark.width + 2 * surface.u : 0
-                    visible: notice.lines.length > 0
+                    visible: notice.drawnLines.length > 0
                     spacing: surface.u
                     FontMetrics { id: nameMetrics; font.pixelSize: notice.look.textSize; font.weight: Font.Medium }
                     FontMetrics { id: plainMetrics; font.pixelSize: notice.look.textSize }
-                    readonly property var swaps: notice.lines.filter(l => typeof l !== "string")
+                    readonly property var swaps: notice.drawnLines.filter(l => typeof l !== "string")
                     readonly property real joinWidth: joinProbe.implicitWidth
-                    readonly property real chipWidth: Math.max(0, ...swaps.map(l => plainMetrics.advanceWidth(l.tier) * notice.look.labelSize / notice.look.textSize))
+                    readonly property real chipWidth: Math.max(0, ...swaps.map(l => plainMetrics.advanceWidth(l.tier ?? "") * notice.look.labelSize / notice.look.textSize))
                                                       + 4 * surface.u
                     readonly property bool stacked: width - joinWidth - chipWidth - 6 * surface.u < 48 * surface.u
                     readonly property real room: Math.max(0, width - joinWidth - 4 * surface.u - (stacked ? 0 : chipWidth + 2 * surface.u))
@@ -213,7 +251,9 @@ Item {
                         font.pixelSize: notice.look.labelSize
                     }
                     Repeater {
-                        model: notice.lines
+                        id: lineRows
+                        objectName: "noticeLines"
+                        model: notice.drawnLines
                         delegate: Loader {
                             id: line
                             required property var modelData
@@ -253,7 +293,7 @@ Item {
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: qsTr("in place of")
-                                        color: notice.look.label
+                                        color: notice.look.text // smaller, not paler: the label colour reads under 4.5:1 on some dark tints
                                         font.pixelSize: notice.look.labelSize
                                     }
                                     Text {
@@ -279,6 +319,7 @@ Item {
                                     }
                                 }
                                 KitBadge {
+                                    objectName: "noticeLineTier"
                                     visible: text !== "" && list.stacked
                                     look: notice.look
                                     text: line.modelData.tier ?? ""

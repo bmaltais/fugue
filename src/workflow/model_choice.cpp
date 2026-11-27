@@ -434,7 +434,10 @@ SwapNotice swapNotice(SwapKind kind, const QList<OnDiskUse> &applied) {
     SwapNotice notice;
     if (applied.isEmpty())
         return notice;
-    const int count = int(applied.size());
+    QSet<QString> files; // the title counts the person's files: two models one file stands in for are one file
+    for (const OnDiskUse &use : applied)
+        files.insert(use.match.path.isEmpty() ? use.match.name : use.match.path);
+    const int count = int(files.size());
     notice.title = kind == SwapKind::Opened ? ModelChoice::tr("Opened with your %n files", nullptr, count) : ModelChoice::tr("Using your %n files", nullptr, count);
     QStringList sentences;
     for (const OnDiskUse &use : applied) {

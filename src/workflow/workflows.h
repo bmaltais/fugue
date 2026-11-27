@@ -378,7 +378,10 @@ public:
     // A line for the banner from outside (the image actions, #57).
     Q_INVOKABLE void notify(const QString &text) { setNotice(text); }
     // A swap's banner, in lines (what ModelChoice says; a test's picture).
-    void notifySwaps(const SwapNotice &swaps) { setNotice(swaps.text, swaps.title, swaps.lines); }
+    void notifySwaps(const SwapNotice &swaps) {
+        setNotice(swaps.text, swaps.title, swaps.lines);
+        m_noticeTab = choiceFacts().shownTab;
+    }
     // The model folders changed (the first-run setup, #619): the templates' and the banner's missing models are read again, and `notice` is said when not empty.
     void modelFoldersChanged(const QString &notice);
 
@@ -465,6 +468,7 @@ private:
     bool isPristine(int index) const;
     QString untitledName() const;
     void setNotice(const QString &text, const QString &title = {}, const QVariantList &lines = {});
+    void showMissing(); // the shown tab's own line: what it lacks, or nothing
     void analyze(const Document &document, const QString &title);
     // Opens the Get ready sheet when the shown workflow lacks packs or models it can get (#379).
     void offerReadiness();
@@ -518,6 +522,8 @@ private:
     QString m_notice;
     QString m_noticeTitle;     // a swap's banner (SwapNotice): its title and lines, with `m_notice` its whole text
     QVariantList m_noticeLines;
+    QString m_noticeTab;                   // the tab a swap's banner is about
+    QHash<QString, SwapNotice> m_tabSwaps; // a swap's banner of a tab not shown, shown again with its tab
     QString m_projectName;
     QString m_sessionPath;
     bool m_sessionEnabled = false;

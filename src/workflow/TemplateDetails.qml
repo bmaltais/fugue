@@ -30,6 +30,11 @@ Rectangle {
 
     readonly property var source: template.source ? template.source : {}
     readonly property bool withFiles: template.opensWithFiles === true // ready only through the person's files: Open uses them
+    // How many files of the person's Open uses (two models one file stands in for count once).
+    readonly property int yourFiles: new Set((template.onDisk ?? []).map(d => d.file)).size
+    // Enter takes the primary (docs/ui-ergonomics.md D5); a focused button takes its own Enter first.
+    Keys.onReturnPressed: sheet.open()
+    Keys.onEnterPressed: sheet.open()
     readonly property string sourceText: source.name && source.author ? qsTr("Based on %1 by %2").arg(source.name).arg(source.author)
                                          : source.name ? qsTr("Based on %1").arg(source.name)
                                          : source.author ? qsTr("Workflow by %1").arg(source.author) : ""
@@ -138,7 +143,9 @@ Rectangle {
                         id: row
                         required property var modelData
                         // The person's file that stands in for this model, when there is one (Workflows::templates' onDisk).
-                        readonly property var yours: (sheet.template.onDisk ?? []).find(d => d.name === modelData.name) ?? null
+                        // Only when Open will use it (opensUsingFiles: with "Ask me" a template partly covered opens with its own models).
+                        readonly property var yours: sheet.template.opensUsingFiles === true
+                                                     ? (sheet.template.onDisk ?? []).find(d => d.name === modelData.name) ?? null : null
                         objectName: "templateDetailsModel-" + modelData.name
                         Layout.fillWidth: true
                         spacing: 2 * sheet.u
@@ -228,6 +235,7 @@ Rectangle {
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: sheet.look.hairline }
         RowLayout {
+            id: actionRow
             Layout.fillWidth: true
             Layout.margins: 4 * sheet.u
             spacing: 2 * sheet.u
@@ -239,18 +247,22 @@ Rectangle {
                 bordered: true
                 visible: sheet.withFiles && sheet.template.ownDownloadSize !== ""
                 text: qsTr("Download the template's own files (%1)…").arg(sheet.template.ownDownloadSize)
-                tip: qsTr("The exact files the template was made with, in place of yours: Get ready shows what it fetches before anything starts")
+                // A narrow sheet cuts the label, never Cancel and Open: the whole label is in the tip.
+                maxTextWidth: Math.max(12 * sheet.u, actionRow.width - cancelButton.width - openButton.width - 12 * sheet.u)
+                tip: qsTr("%1: the exact files the template was made with, in place of yours. Get ready shows what it fetches before anything starts.").arg(text)
                 onTapped: sheet.downloadOwn()
             }
             Item { Layout.fillWidth: true }
             ThemedButton {
+                id: cancelButton
                 objectName: "templateDetailsCancel"
                 text: qsTr("Cancel")
                 onClicked: sheet.cancel()
             }
             ThemedButton {
+                id: openButton
                 objectName: "templateDetailsOpen"
-                text: sheet.withFiles ? qsTr("Open with your %n files", "", (sheet.template.onDisk ?? []).length) : qsTr("Open")
+                text: sheet.withFiles ? qsTr("Open with your %n files", "", sheet.yourFiles) : qsTr("Open")
                 highlighted: true
                 onClicked: sheet.open()
             }

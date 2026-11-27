@@ -145,6 +145,7 @@ Item {
         copyName: "noticeCopy"
         dismissible: App.workflows.notice.length > 0
         returnFocus: root.canvasView
+        announceChanges: !App.workflows.hashingUses // "Reading your file… 42%" is said once, not at every percent
         onDismissed: App.workflows.dismissNotice()
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 * root.look.unit; leftMargin: root.noticeInset + 2 * root.look.unit }
         actions: Component {
