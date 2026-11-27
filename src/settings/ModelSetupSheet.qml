@@ -374,7 +374,9 @@ Popup {
                                 label: qsTr("Download new models to")
                                 options: sheet.setup.choices.map(c => ({value: c.value, text: c.text}))
                                 value: sheet.setup.download
-                                // The button says which folder (cut at the end of a long path); the menu says how much room each has.
+                                // The button says which folder (a long path cut in the middle, so the end that tells folders apart stays);
+                                // the menu says how much room each has.
+                                elide: Text.ElideMiddle
                                 text: sheet.setup.choices.find(c => c.value === sheet.setup.download)?.title ?? ""
                                 width: Math.min(implicitWidth, 36 * sheet.u)
                                 onPicked: v => sheet.setup.setDownload(v)
