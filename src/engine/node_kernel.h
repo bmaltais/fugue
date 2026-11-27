@@ -62,6 +62,7 @@
 namespace fugue {
 
 class FileHashes;
+class ModelLibrary;
 class Registry;
 class ResidentModels;
 
@@ -87,6 +88,9 @@ struct NodeContext {
 
     // The process's file-hash memo, for MediaHandle::probe and saved().
     FileHashes *hashes = nullptr;
+    // The model library of a check pass (NodeKernel::check), or null: walked once for the whole pass, so each node's
+    // check does not walk the model folders again (#607). A kernel with none builds its own, `ModelLibrary::current`.
+    const ModelLibrary *library = nullptr;
     // The resident-model cache (9.3), or null. A kernel that loads a model
     // keeps it here under resourceIdentity(handle) so the next node reuses it.
     ResidentModels *models = nullptr;
