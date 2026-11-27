@@ -78,7 +78,7 @@ double seconds(const QJsonValue &value) {
 
 } // namespace
 
-Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes, const QString &shown) {
+Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes, const QString &shown, const QString &shownHash) {
     const QString &named = shown.isEmpty() ? path : shown;
     const Result<QByteArray> output =
         ffmpeg::run(QStringLiteral("ffprobe"),
@@ -136,7 +136,7 @@ Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString 
             handle.m_duration = seconds(audio.value("duration"));
     }
 
-    handle.m_hash = shown.isEmpty() ? hashes.hash(path) : sha256File(path);
+    handle.m_hash = shown.isEmpty() ? hashes.hash(path) : shownHash;
     if (handle.m_hash.isEmpty())
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(named));
     return handle;

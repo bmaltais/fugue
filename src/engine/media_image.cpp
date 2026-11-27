@@ -105,7 +105,7 @@ Result<vips::VImage> MediaHandle::image() const {
     }
 }
 
-Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &hashes, const QString &shown) {
+Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &hashes, const QString &shown, const QString &shownHash) {
     const QString &named = shown.isEmpty() ? path : shown;
     if (!initVips())
         return vipsUnavailable();
@@ -124,7 +124,7 @@ Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &has
     } catch (const vips::VError &) {
         return makeError(QStringLiteral("media_unreadable"), QStringLiteral("%1 is not an image Fugue can read.").arg(named));
     }
-    handle.m_hash = shown.isEmpty() ? hashes.hash(path) : sha256File(path);
+    handle.m_hash = shown.isEmpty() ? hashes.hash(path) : shownHash;
     if (handle.m_hash.isEmpty())
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(named));
     return handle;

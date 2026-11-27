@@ -206,11 +206,14 @@ Result<MediaHandle> MediaHandle::probeIn(MediaType type, const FolderFd &dir, co
     }
     struct stat info {};
     const bool plain = ::fstat(fd, &info) == 0 && S_ISREG(info.st_mode);
+    const QString hash = plain ? hashes.hashOpen(shown, QStringLiteral("/proc/%1/fd/%2").arg(::getpid()).arg(fd), qint64(info.st_size),
+                                                 qint64(info.st_mtim.tv_sec) * 1000000000 + info.st_mtim.tv_nsec)
+                               : QString();
     // The open file itself (a /proc link no rename can redirect), for libvips and ffprobe.
     const QString read = QStringLiteral("/proc/%1/fd/%2").arg(::getpid()).arg(fd);
     const Result<MediaHandle> handle = !plain ? Result<MediaHandle>(makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no file %1.").arg(shown)))
-                                       : type == MediaType::Image ? probeImage(read, hashes, shown)
-                                                                  : probeWithFfprobe(type, read, hashes, shown);
+                                       : type == MediaType::Image ? probeImage(read, hashes, shown, hash)
+                                                                  : probeWithFfprobe(type, read, hashes, shown, hash);
     ::close(fd);
     return handle;
 }

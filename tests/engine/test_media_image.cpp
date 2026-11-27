@@ -107,14 +107,24 @@ private slots:
         QVERIFY(theirs->saved(dir.filePath("other"), "p", hashes).ok());
         const Result<FolderFd> folder = FolderFd::open(dir.filePath("in"), false);
         QVERIFY(folder.ok());
+        // Unchanged, it is not hashed again: a planted remembered hash is what a probe reports.
+        const QString planted = "sha256:" + QString(64, 'a');
+        hashes.remember(dir.filePath("in/p.png"), planted);
+        QCOMPARE(MediaHandle::probeIn(MediaType::Image, *folder, "p.png", hashes)->hash(), planted);
         QVERIFY(QDir().rename(dir.filePath("in"), dir.filePath("in-moved")));
         QVERIFY(QFile::link(dir.filePath("other"), dir.filePath("in")));
 
         const Result<MediaHandle> probed = MediaHandle::probeIn(MediaType::Image, *folder, "p.png", hashes);
         QVERIFY2(probed.ok(), qPrintable(probed.error().message));
         QCOMPARE(probed->width(), 64);
-        QCOMPARE(probed->hash(), sha256File(dir.filePath("in-moved/p.png")));
         QCOMPARE(probed->path(), dir.filePath("in/p.png"));
+
+        // Changed (another mtime), it is hashed again.
+        QFile touched(dir.filePath("in-moved/p.png"));
+        QVERIFY(touched.open(QIODevice::ReadWrite));
+        QVERIFY(touched.setFileTime(QDateTime::currentDateTimeUtc().addSecs(-1000), QFileDevice::FileModificationTime));
+        touched.close();
+        QCOMPARE(MediaHandle::probeIn(MediaType::Image, *folder, "p.png", hashes)->hash(), sha256File(dir.filePath("in-moved/p.png")));
 
         QVERIFY(QFile::link(dir.filePath("other/p.png"), dir.filePath("in-moved/l.png")));
         const Result<MediaHandle> linked = MediaHandle::probeIn(MediaType::Image, *folder, "l.png", hashes);

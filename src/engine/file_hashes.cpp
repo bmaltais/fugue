@@ -167,6 +167,21 @@ QString FileHashes::hash(const QString &path, const HashProgress &progress) {
     return hash;
 }
 
+QString FileHashes::hashOpen(const QString &shown, const QString &readPath, qint64 size, qint64 mtimeNs) {
+    const QString name = QDir::cleanPath(shown); // the folder is canonical and the leaf no link, as key() makes it
+    {
+        QMutexLocker lock(&m_mutex);
+        if (const Entry *entry = lookup(name, size, mtimeNs))
+            return entry->hash;
+    }
+    const QString hash = sha256File(readPath);
+    if (hash.isEmpty())
+        return hash;
+    QMutexLocker lock(&m_mutex);
+    m_entries.insert(name, Entry{size, mtimeNs, hash});
+    return hash;
+}
+
 QString FileHashes::known(const QString &path) {
     const std::optional<Stat> stat = statFile(path);
     if (!stat)

@@ -142,8 +142,8 @@ public:
 private:
     // `path` is read; with `shown`, that is the path the handle and the messages carry instead (an
     // open file's /proc link), and the hash is made from what is read, not remembered by path.
-    static Result<MediaHandle> probeImage(const QString &path, FileHashes &hashes, const QString &shown = {});
-    static Result<MediaHandle> probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes, const QString &shown = {});
+    static Result<MediaHandle> probeImage(const QString &path, FileHashes &hashes, const QString &shown = {}, const QString &shownHash = {});
+    static Result<MediaHandle> probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes, const QString &shown = {}, const QString &shownHash = {});
     Result<MediaHandle> savedImage(const QString &dir, const QString &name, FileHashes &hashes) const;
     Result<MediaHandle> withEditsApplied(const QString &dir, const QString &name, FileHashes &hashes) const;
 
