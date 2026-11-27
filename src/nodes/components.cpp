@@ -1216,6 +1216,9 @@ class VaeEncodeKernel : public StageKernel {
 public:
     VaeEncodeKernel() : StageKernel(QStringLiteral("latent.encode")) {}
 
+    // The size step is not an input: a model that resolves later is another size (#711).
+    QString keyExtraFor(const NodeContext &context) const override { return sizeStepKey(context); }
+
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
         const Result<ModelFiles> files = modelInput(context, selection);
         if (!files)
@@ -1320,6 +1323,9 @@ struct DetailStep {
 // capability), keeps nothing and gives the picture back as it came.
 class DetailRegionsKernel : public StageKernel {
 public:
+    // The size step is not an input: a model that resolves later is another size (#711).
+    QString keyExtraFor(const NodeContext &context) const override { return sizeStepKey(context); }
+
     DetailRegionsKernel() : StageKernel(QStringLiteral("latent.sample")) {}
 
     // Under validate: the boxes written are one `x1 y1 x2 y2` a line. Boxes that are wired are the run's.

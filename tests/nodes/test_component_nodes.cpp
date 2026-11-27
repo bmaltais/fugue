@@ -1496,6 +1496,18 @@ private slots:
         QJsonObject missing = sdxl; // a file this machine has not
         missing.insert("hash", "sha256:" + QString(64, QLatin1Char('0')));
         QCOMPARE(nodes::modelSizeStep(context, missing), 16);
+
+        // The step is part of the cache key of the nodes that size by it, so a result made while the file was not found (16)
+        // is not served once it is (64); a step of 16 leaves the key as it was.
+        const auto keyOf = [&](const QString &id, const QJsonObject &model) {
+            NodeContext keyed = bench.context(id, {{"model", Value(model)}});
+            return id == kVaeEncode ? bench.kernels.provider(id)->keyExtraFor(keyed) : bench.kernels.node(id)->keyExtraFor(keyed);
+        };
+        for (const QString &id : {kVaeEncode, QStringLiteral("fugue/crop-to-mask")}) {
+            QCOMPARE(keyOf(id, sdxl), QStringLiteral("size_step:64"));
+            QCOMPARE(keyOf(id, flux), QString());
+            QCOMPARE(keyOf(id, missing), QString());
+        }
     }
 
     void vaeEncodeAndCropToMaskSizeAUnetsPicturesIn64s() {

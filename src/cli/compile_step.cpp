@@ -18,8 +18,8 @@ QJsonArray notUsedJson(const QList<UnusedInput> &unused) {
 }
 
 Compilation compileDocument(const Document &document, Registry &registry, const CompileSettings &settings) {
-    return compileForRun(document, registry, {settings.target, settings.provider, {}},
-                           runCompileSetup(registerProviders, TrustStore()));
+    return compileForRun(document, registry, {settings.target, settings.provider, {}, {}},
+                         runCompileSetup(registerProviders, TrustStore()));
 }
 
 Validation validateDocument(const Document &document, Context &context, const QString &workflow) {

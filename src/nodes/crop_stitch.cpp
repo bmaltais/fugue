@@ -37,6 +37,9 @@ Error warning(Error error) {
 
 class CropToMaskKernel : public NodeKernel {
 public:
+    // The size step is not an input: a model that resolves later is another size (#711).
+    QString keyExtraFor(const NodeContext &context) const override { return sizeStepKey(context); }
+
     Result<Values> run(const NodeContext &context) override {
         const Value imageValue = context.input("image");
         Result<Pixels> image = pixelsOf(imageValue, "image");

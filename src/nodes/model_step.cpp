@@ -15,11 +15,19 @@ int modelSizeStep(const NodeContext &context, const QJsonObject &model) {
     const QJsonObject base = model.contains(QStringLiteral("derived"))
                                  ? model.value(QStringLiteral("derived")).toObject().value(QStringLiteral("base")).toObject()
                                  : model.contains(QStringLiteral("base")) ? model.value(QStringLiteral("base")).toObject() : model;
-    const ModelLibrary library = ModelLibrary::current(context.registry);
+    std::optional<ModelLibrary> own; // none is given outside a check pass or the cache key's
+    const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));
     const Result<QString> path = library.resolve(base, *context.hashes);
     if (!path)
         return kDefaultSizeStep;
     return sizeStepFor(ModelShapes::shared().of(path.value()));
+}
+
+QString sizeStepKey(const NodeContext &context) {
+    if (!context.inputs.contains(QStringLiteral("model")))
+        return {};
+    const int step = modelSizeStep(context, context.input(QStringLiteral("model")).json().toObject());
+    return step == kDefaultSizeStep ? QString() : QStringLiteral("size_step:%1").arg(step);
 }
 
 } // namespace fugue::nodes

@@ -27,4 +27,8 @@ int sizeStepFor(const std::optional<ModelShape> &diffusionModel);
 // header (ModelShapes). 16 when the input is empty, the file is not on this machine (a paired host's) or is unreadable.
 int modelSizeStep(const NodeContext &context, const QJsonObject &model);
 
+// What a kernel that sizes by the step puts in its cache key (keyExtraFor): "size_step:64" for a UNet, empty for 16, so a
+// result made while the model could not be found (16) is not served once it resolves to a UNet, and no other key changes.
+QString sizeStepKey(const NodeContext &context);
+
 } // namespace fugue::nodes
