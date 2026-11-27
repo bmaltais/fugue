@@ -41,7 +41,7 @@ if git rev-parse --verify -q "$base" >/dev/null && [[ -e templates/.git ]] ; the
   if [[ -n $old && -n $new && $old != "$new" ]]; then
     # Compare in the submodule when both commits are there; if the old one is missing, fetch it first.
     if ! git -C templates cat-file -e "$old^{commit}" 2>/dev/null; then
-      git -C templates fetch -q origin "$old" 2>/dev/null || true
+      GIT_TERMINAL_PROMPT=0 timeout 20 git -C templates fetch -q origin "$old" 2>/dev/null || true # never asks for a password, never hangs
     fi
     if git -C templates cat-file -e "$old^{commit}" 2>/dev/null && git -C templates cat-file -e "$new^{commit}" 2>/dev/null; then
       if ! git -C templates merge-base --is-ancestor "$old" "$new"; then
