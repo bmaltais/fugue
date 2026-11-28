@@ -688,6 +688,41 @@ private slots:
             QVERIFY2(target.startsWith("pipe:") || target.startsWith("/dev/") || target.endsWith("/run.sh"), qPrintable(parts.value(1)));
     }
 
+    // A one-shot's previews are copies made by descriptor in a folder of Fugue's: a link to a key is never shown, a picture is,
+    // from outside the program's work folder.
+    void aOneShotsPreviewsAreCopiesItCannotSwap() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        const QByteArray script = "#!/bin/bash\ncat > /dev/null\n"
+                                  "ln -s '@SSH@' key.png\necho '{\"op\": \"preview\", \"image\": {\"path\": \"key.png\"}}'\n"
+                                  "echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg== | base64 -d > step.png\necho '{\"op\": \"preview\", \"image\": {\"path\": \"step.png\"}}'\n"
+                                  "cp step.png out.png\necho '{\"outputs\": {\"image\": {\"path\": \"out.png\"}}}'\n";
+        const NodeType *type = makePack("io.example.previews", {}, false, script);
+        NodeContext context = contextFor(*type);
+        QStringList shown;
+        context.preview = [&shown](const QString &file) { shown << file; };
+        CommandKernel kernel(300);
+        const Result<Values> result = kernel.run(context);
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        QCOMPARE(shown.size(), 1); // the link was refused
+        QVERIFY2(shown.first().startsWith(cacheDir() + "/previews/") || shown.first().startsWith(QFileInfo(cacheDir()).canonicalFilePath() + "/previews/"),
+                 qPrintable(shown.first()));
+    }
+
+    // A pack's picture is opened only by a loader libvips trusts with files from anywhere: a PPM (an untrusted loader) named
+    // out.png is refused, whatever its name says.
+    void aPacksPictureInAnUntrustedFormatIsRefused() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        const QByteArray script = "#!/bin/bash\ncat > /dev/null\nprintf 'P3\\n1 1\\n255\\n0 0 0\\n' > out.png\n"
+                                  "echo '{\"outputs\": {\"image\": {\"path\": \"out.png\"}}}'\n";
+        const NodeType *type = makePack("io.example.ppm", {}, false, script);
+        CommandKernel kernel(300);
+        const Result<Values> result = kernel.run(contextFor(*type));
+        QVERIFY(!result.ok());
+        QVERIFY2(result.error().code == "node_bad_output" && result.error().message.contains("ppmload"), qPrintable(result.error().message));
+    }
+
     // What a program prints to stderr reaches an error message without its escape sequences.
     void aProgramsEscapeSequencesNeverReachAMessage() {
         if (!sandbox::available())
