@@ -3306,6 +3306,29 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   beside the search, **Source** (by `source.name`) and **Model family**, list each value with the count a choice would
   leave under the other filters; each is hidden while no template has a source or a family. They reset when the
   dialog opens.
+- **Community templates (2026-11-28).** A template a user submitted to `bmaltais/fugue-workflows` is a **community template**: its
+  `template.json` has `"community": {"author": "<text>", "issue": <positive integer>}`, written by that repo's import script
+  (`author` is required, `issue` is optional: a contributor's own pull request has none). The `source` block's rules apply: a field that
+  is not as said (a missing or non-text `author`, an `issue` that is not a positive whole number, an unknown field, a `community` that is
+  not an object) is left out and is a warning of `fugue template list`; the key itself still marks the template, so a bad field never lets
+  it off the rule below. **The rule:** a community template uses built-in nodes only, so it is not listed when its folder has a `packs/`
+  entry or its workflow, or any group definition in it (also a group of a group), has a node type whose namespace is not `fugue`. Fugue
+  checks it too because the feed is the trust boundary: such a template is a `fugue template list` warning that names why, and it does not
+  take its id, so the bundled template of the same id, if any, is listed instead (as for a fetched template this Fugue cannot open). The
+  person's own folder is not held to it and carries no mark (a copy made from a template writes only the title). Browse templates: a card
+  says "Community · by <author>" in a frosted chip at the picture's top left (the apps shelf's card too, at the same place), its tooltip
+  says it was submitted by a user and, with an `issue`, gives `https://github.com/bmaltais/fugue-workflows/issues/<n>`, and a press on the
+  chip opens that address in the browser as the source line's link does (a press on it does not open the template); the details have a
+  line "Community template, submitted by <author>" that is the same link. The **Community** chip beside Apps is on while community
+  templates are listed (the default) and a press hides them; it is there only when some template is a community one and resets (on) when
+  the dialog opens, like the other filters. `fugue template list --json` gives `community` for each: `false`, or `{"author", "issue",
+  "url"}` (each only when valid), and the plain list marks it `[community, by <author>]`.
+- **Canvas actions are left out of Browse templates (2026-11-28).** A workflow with a top-level `action` block ([14.5](#145-the-canvas-revision-store-206-208))
+  is made for the Canvas view's task bar, so Browse templates lists it only while the **Show canvas actions** chip is on (off by
+  default, reset when the dialog opens; there only when some template is one); a category left with nothing hides with them. The test is
+  the block, never the category name. One that is also an app stays listed, as an app. The task bar, `fugue canvas actions` and the apps
+  shelf are unchanged. `fugue template list` still lists them: `canvas_action` is `true` in `--json` and the plain list marks
+  `[canvas action]`.
 - **Apps (#387, epic #397).** A template is an **app** when its workflow has an `app` block that reads (4.9). The block is the
   binding: its inputs, outputs and title are what the App view shows. `template.json` carries only the catalog's side:
   `"app": true`, or `"app": {"title", "summary", "kind"}` (each optional text: the card's name, its one line, and a short

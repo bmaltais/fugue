@@ -11,6 +11,9 @@
 //                        binding; this is only the catalog's flag and the card's words (title and summary
 //                        fall back to the block's (its title is required; the description, then the template's own); `kind` is a short word, as
 //                        "image"). `false` keeps a workflow with a block out of the Apps.
+//                        `community` is optional, {"author": text, "issue": positive whole number, optional}: a template a user
+//                        submitted to fugue-workflows. It uses built-in nodes only and has no packs/ folder, or it is not
+//                        listed (11.10).
 //   <id>/workflow.fugue  the workflow; its `requires.models` give each model's `source`
 //   <id>/preview.webp    (or .png, .jpg) what it makes; optional
 //   <id>/inputs/         sample images its Load Image nodes name as `inputs/<name>`; optional
@@ -75,6 +78,14 @@ struct TemplateApp {
     QString kind;
 };
 
+// template.json's `community` (spec 11.10): a template a user submitted to fugue-workflows. Present, whatever its fields say:
+// the marker is the key itself, so a bad field never lets a template off the rule that it uses built-in nodes only.
+struct TemplateCommunity {
+    QString author; // empty when missing or not text
+    qint64 issue = 0; // the fugue-workflows issue it came in by; 0 when none (optional) or not a positive whole number
+    QString issueUrl() const; // https://github.com/bmaltais/fugue-workflows/issues/<issue>, empty without an issue
+};
+
 struct Template {
     QString id;       // the folder's name (or a .fugue file's stem); a person's own wins a clash
     QString folder;   // absolute
@@ -87,6 +98,8 @@ struct Template {
     QString categoryTitle; // as the root's categories.json names it, else the id
     QStringList tags;
     QJsonObject source;        // template.json's `source`: name, author, url, note (only the valid ones); empty when none
+    bool canvasAction = false; // the workflow has a top-level `action` block (a canvas action, 14.5): made for the Canvas view's task bar
+    std::optional<TemplateCommunity> community; // set when template.json has `community` (11.10): built-in nodes only, no packs
     std::optional<TemplateApp> app; // set when the workflow has a readable `app` block and template.json does not say `false`
     QStringList families;      // the model families of its models (engine/model_family.h), read, never written
     bool own = false;

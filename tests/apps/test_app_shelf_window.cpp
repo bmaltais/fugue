@@ -462,6 +462,104 @@ private slots:
     }
 
 
+    // Community templates (11.10): the card's chip, the details' line and the Community chip that hides them. The pictures with
+    // FUGUE_SHOT_DIR=<dir> [FUGUE_SHOT_THEME=<omarchy theme>] [FUGUE_SHOT_TAG=<tag>]: the Browse templates window with the badge, with the
+    // filter turned off, and the details; the cards without the mark are the "without" of each.
+    void communityTemplatesWearTheChipAndTheFilterHidesThem() {
+        QTemporaryDir root;
+        const QString bundled = fugueSourceDir() + QStringLiteral("/templates");
+        for (const char *id : {"flux2-klein-4b", "camera-angles", "enhance-prompt", "expand"}) {
+            for (const char *name : {"template.json", "workflow.fugue", "preview.webp", "poster.png"})
+                if (QFileInfo::exists(bundled + "/" + id + "/" + name)) {
+                    QDir().mkpath(root.path() + "/" + id);
+                    QVERIFY(QFile::copy(bundled + "/" + id + "/" + name, root.path() + "/" + id + "/" + name));
+                }
+            if (QString(id) == "flux2-klein-4b" || QString(id) == "camera-angles") {
+                QFile about(root.path() + "/" + id + "/template.json");
+                QVERIFY(about.open(QIODevice::ReadWrite));
+                QJsonObject json = QJsonDocument::fromJson(about.readAll()).object();
+                json.insert("community", QJsonObject{{"author", QString(id) == "camera-angles" ? "Ann Example" : "Bo"},
+                                                     {"issue", 12}});
+                if (QString(id) == "flux2-klein-4b")
+                    json.insert("community", QJsonObject{{"author", "Bo"}}); // no issue: no link
+                about.resize(0);
+                about.seek(0);
+                about.write(QJsonDocument(json).toJson());
+            }
+        }
+        const QString themeName = qEnvironmentVariable("FUGUE_SHOT_THEME", QStringLiteral("tokyo-night"));
+        App app(load("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"), {}, Look{themeName, 12});
+        app.workflows.setTemplateRoots({{root.path(), false}});
+        QVERIFY(app.open());
+        QVERIFY(app.commands.run("file.templates"));
+        QObject *dialog = app.window->findChild<QObject *>("templatesDialog");
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(find(app.window, "templateCard-enhance-prompt"));
+        QCOMPARE(find(app.window, "templateCommunity-camera-angles")->property("text").toString(), QString("Community · by Ann Example"));
+        QVERIFY(find(app.window, "templateCommunity-camera-angles")->property("tip").toString().contains("issues/12"));
+        QCOMPARE(find(app.window, "templateCommunity-flux2-klein-4b")->property("text").toString(), QString("Community · by Bo"));
+        QVERIFY(!find(app.window, "templateCommunity-flux2-klein-4b")->property("tip").toString().contains("issues"));
+        QVERIFY(!find(app.window, "templateCommunity-enhance-prompt"));
+        // Expand is a canvas action: out of the list until "Show canvas actions" is on (its category with it).
+        QVERIFY(!find(app.window, "templateCard-expand"));
+        QVERIFY(find(app.window, "templatesActions"));
+
+        const QString dir = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        const QString tag = qEnvironmentVariable("FUGUE_SHOT_TAG");
+        const auto grab = [&](const QString &name) {
+            if (dir.isEmpty())
+                return;
+            QDir().mkpath(dir);
+            QTest::qWait(400); // the pictures decode, the frosted chips measure
+            test_support::grab(app.window).save(dir + "/" + name + "-" + themeName + (tag.isEmpty() ? QString() : "-" + tag) + ".png");
+        };
+        grab("templates-community-shown");
+
+        // The Community chip is on while they are shown; a press hides them, a second shows them again.
+        QQuickItem *chip = find(app.window, "templatesCommunity");
+        QVERIFY(chip);
+        QVERIFY(dialog->property("showCommunity").toBool());
+        tap(app.window, "templatesCommunity");
+        QTRY_VERIFY(!dialog->property("showCommunity").toBool());
+        QTRY_VERIFY(!find(app.window, "templateCard-camera-angles"));
+        QVERIFY(!find(app.window, "templateCard-flux2-klein-4b"));
+        QVERIFY(find(app.window, "templateCard-enhance-prompt"));
+        grab("templates-community-hidden");
+        tap(app.window, "templatesCommunity");
+        QTRY_VERIFY(find(app.window, "templateCard-camera-angles"));
+
+        // The canvas actions switch lists Expand again, under its category; a second press takes it out.
+        tap(app.window, "templatesActions");
+        QTRY_VERIFY(dialog->property("showActions").toBool());
+        QTRY_VERIFY(find(app.window, "templateCard-expand"));
+        QVERIFY(!find(app.window, "templateCommunity-expand"));
+        grab("templates-community-actions-shown");
+        tap(app.window, "templatesActions");
+        QTRY_VERIFY(!find(app.window, "templateCard-expand"));
+
+        // The details say it too, with the issue as a link when there is one.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "camera-angles"), Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(find(app.window, "templateDetailsCommunity")->property("text").toString(), QString("Community template, submitted by Ann Example"));
+        QCOMPARE(find(app.window, "templateDetailsCommunity")->property("link").toString(), QString("https://github.com/bmaltais/fugue-workflows/issues/12"));
+        grab("templates-community-details");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "closeDetails"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "enhance-prompt"), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(!find(app.window, "templateDetailsCommunity"));
+
+        // The setting is reset when the dialog opens again.
+        QVERIFY(dialog->setProperty("showCommunity", false));
+        QVERIFY(dialog->setProperty("showActions", true));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(app.commands.run("file.templates"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(dialog->property("showCommunity").toBool());
+        QVERIFY(!dialog->property("showActions").toBool());
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // Every control of the shelf is reachable by keys (the epic's keyboard rule): Shift+Tab from the search goes back to the header's
     // buttons, Enter on Start blank gives the graph.
     void theHeaderButtonsAreReachableByTab_data() {

@@ -7,6 +7,8 @@
 #include "engine/template_feed.h"
 
 #include <QCoreApplication>
+#include <cmath>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -83,6 +85,60 @@ QJsonObject sourceOf(const QString &id, const QJsonObject &about, Errors *proble
             && it.key() != QLatin1String("url") && it.key() != QLatin1String("note"))
             bad(QStringLiteral("source has an unknown field %1").arg(it.key()));
     return out;
+}
+
+// template.json's `community` (spec 11.10): {"author": text, "issue": positive whole number, optional}. A field that is not as said (or an
+// unknown one) is left out and said in `problems`; the key itself still marks the template (see TemplateCommunity).
+std::optional<TemplateCommunity> communityOf(const QString &id, const QJsonObject &about, Errors *problems) {
+    const QJsonValue raw = about.value(QStringLiteral("community"));
+    if (raw.isUndefined())
+        return std::nullopt;
+    const auto bad = [&](const QString &what) {
+        if (problems)
+            problems->append(problem(QStringLiteral("Template %1: %2 in %3.").arg(id, what, kAbout)));
+    };
+    TemplateCommunity out;
+    if (!raw.isObject()) {
+        bad(QStringLiteral("community must be an object with author and issue"));
+        return out;
+    }
+    const QJsonObject object = raw.toObject();
+    // The author is required, the issue is not (a contributor's own pull request has none).
+    if (const QJsonValue author = object.value(QStringLiteral("author")); author.isString() && !author.toString().trimmed().isEmpty())
+        out.author = author.toString().trimmed();
+    else
+        bad(QStringLiteral("community.author must be text"));
+    if (const QJsonValue issue = object.value(QStringLiteral("issue")); !issue.isUndefined()) {
+        const double number = issue.toDouble();
+        if (issue.isDouble() && number >= 1 && number <= 9007199254740991.0 && number == std::floor(number))
+            out.issue = qint64(number);
+        else
+            bad(QStringLiteral("community.issue must be a positive whole number"));
+    }
+    for (auto it = object.begin(); it != object.end(); ++it)
+        if (it.key() != QLatin1String("author") && it.key() != QLatin1String("issue"))
+            bad(QStringLiteral("community has an unknown field %1").arg(it.key()));
+    return out;
+}
+
+// Why a community template is not listed (spec 11.10), or empty when it keeps to the built-in nodes: a `packs/` folder, or a node
+// type of a namespace other than `fugue`, in the graph or in any group definition.
+QString communityRefusal(const Document &document, const QString &folder) {
+    if (QFileInfo(QDir(folder).filePath(QStringLiteral("packs"))).exists())
+        return QStringLiteral("it carries a packs folder");
+    QStringList foreign;
+    const auto scan = [&](const Nodes &nodes) {
+        for (const Node &node : nodes)
+            if (!document.groups.contains(node.type) && typeNamespace(node.type) != QLatin1String("fugue") && !foreign.contains(node.type))
+                foreign.append(node.type);
+    };
+    scan(document.graph.nodes);
+    for (const GroupDefinition &group : document.groups)
+        scan(group.nodes);
+    if (foreign.isEmpty())
+        return {};
+    foreign.sort();
+    return QStringLiteral("it uses the node type %1, which is not built in").arg(foreign.join(QStringLiteral(", ")));
 }
 
 // template.json's `app` and the workflow's `app` block (#387): the card's words, or nothing when the template is not an app.
@@ -244,6 +300,10 @@ QList<CarriedPack> carriedPacksOf(const QString &templateId, const QString &fold
 }
 
 } // namespace
+
+QString TemplateCommunity::issueUrl() const {
+    return issue > 0 ? QStringLiteral("https://github.com/bmaltais/fugue-workflows/issues/%1").arg(issue) : QString();
+}
 
 TemplatePreview previewFilesIn(const QString &folder) {
     const QDir dir(folder);
@@ -449,6 +509,16 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                     problems->append(named(t.id, document.errors().first()));
                 continue;
             }
+            // A community template (11.10) keeps to the built-in nodes, whatever the feed sent; one that does not is left out and, as
+            // a fetched one that does not open, does not take its id. The person's own folder is not held to it: a copy made
+            // from a template drops the key.
+            if (!root.own && about.contains(QStringLiteral("community"))) {
+                if (const QString why = communityRefusal(*document, t.folder); !why.isEmpty()) {
+                    if (problems)
+                        problems->append(problem(QStringLiteral("Template %1: a community template may use only built-in nodes, but %2.").arg(t.id, why)));
+                    continue;
+                }
+            }
             if (m_registry && !opensHere(*document, *m_registry, &t.neededPacks))
                 continue;
             if (m_registry && problems)
@@ -466,6 +536,9 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             for (const QJsonValue tag : about.value(QStringLiteral("tags")).toArray())
                 t.tags << tag.toString();
             t.source = sourceOf(t.id, about, problems);
+            t.canvasAction = document->extra.contains(QStringLiteral("action"));
+            if (!root.own)
+                t.community = communityOf(t.id, about, problems);
             t.app = appOf(t, about, *document, entry.isDir(), problems);
             t.models = document->models();
             t.providerModels = document->providerModels();

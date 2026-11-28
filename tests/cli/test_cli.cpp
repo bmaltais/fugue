@@ -588,6 +588,48 @@ private slots:
         QVERIFY(!QFile::exists(m_dir.filePath("other.fugue")));
     }
 
+    // 11.10: `community` in `template list --json` and a mark in the plain list; one that breaks the rule is a warning, not listed.
+    void aCommunityTemplateIsMarkedAndTheRuleIsKept() {
+        const QScopeGuard tidy([this] { // others count templates
+            for (const char *id : {"crowd", "solo", "packed"})
+                QDir(m_dir.filePath(QString("templates/") + id)).removeRecursively();
+        });
+        write(m_dir.filePath("templates/crowd/template.json"), R"({"title": "Crowd", "community": {"author": "Ann", "issue": 5}})");
+        write(m_dir.filePath("templates/crowd/workflow.fugue"), shoutyWorkflow);
+        write(m_dir.filePath("templates/solo/template.json"), shoutyAbout);
+        write(m_dir.filePath("templates/solo/workflow.fugue"), shoutyWorkflow);
+        write(m_dir.filePath("templates/packed/template.json"), R"({"title": "Packed", "community": {"author": "Bo"}})");
+        write(m_dir.filePath("templates/packed/workflow.fugue"),
+              R"({"fugue": 1, "graph": {"nodes": {"c": {"type": "io.example.tools/sharpen", "version": "1.0.0"}}}})");
+        Outcome o = fugue({"template", "list", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QJsonObject byId;
+        for (const QJsonValue t : o.json().value("data").toObject().value("templates").toArray())
+            byId.insert(t.toObject().value("id").toString(), t);
+        QVERIFY(byId.contains("crowd") && byId.contains("solo") && !byId.contains("packed"));
+        const QJsonObject crowd = byId.value("crowd").toObject().value("community").toObject();
+        QCOMPARE(crowd.value("author").toString(), QString("Ann"));
+        QCOMPARE(crowd.value("issue").toInt(), 5);
+        QCOMPARE(crowd.value("url").toString(), QString("https://github.com/bmaltais/fugue-workflows/issues/5"));
+        QCOMPARE(byId.value("solo").toObject().value("community").toBool(true), false);
+        QCOMPARE(byId.value("solo").toObject().value("canvas_action").toBool(true), false);
+        const QJsonArray warnings = o.json().value("warnings").toArray();
+        QString packed;
+        for (const QJsonValue w : warnings)
+            if (w.toObject().value("message").toString().contains("Template packed"))
+                packed = w.toObject().value("message").toString();
+        QVERIFY2(packed.contains("io.example.tools/sharpen"), qPrintable(packed));
+        QVERIFY(fugue({"template", "list"}).out.contains("[community, by Ann]"));
+        // A canvas action is listed, marked.
+        write(m_dir.filePath("templates/solo/workflow.fugue"),
+              R"({"fugue": 1, "action": {"format": 1, "name": "Act"}, "graph": {"nodes": {"c": {"type": "fugue/shout", "version": "1.0.0", "inputs": {"text": "hi"}}}}})");
+        o = fugue({"template", "list", "--json"});
+        for (const QJsonValue t : o.json().value("data").toObject().value("templates").toArray())
+            if (t.toObject().value("id").toString() == "solo")
+                QCOMPARE(t.toObject().value("canvas_action").toBool(), true);
+        QVERIFY(fugue({"template", "list"}).out.contains("[canvas action]"));
+    }
+
     // #118: a template that carries the pack its nodes need says so; the CLI names the commands
     // that install it (with the usual question) and never installs it itself.
     void aTemplateThatCarriesAPackSaysHowToInstallIt() {

@@ -118,6 +118,21 @@ Rectangle {
                     TapHandler { gesturePolicy: TapHandler.WithinBounds; enabled: sourceLine.link !== ""; onTapped: Qt.openUrlExternally(sourceLine.link) }
                 }
                 Text {
+                    id: communityLine
+                    objectName: "templateDetailsCommunity"
+                    readonly property string link: sheet.template.communityUrl ? sheet.template.communityUrl : ""
+                    Layout.fillWidth: true
+                    visible: sheet.template.community === true
+                    text: sheet.template.communityAuthor ? qsTr("Community template, submitted by %1").arg(sheet.template.communityAuthor)
+                                                         : qsTr("Community template, submitted by a user")
+                    wrapMode: Text.Wrap
+                    color: link !== "" ? sheet.look.accent : sheet.look.label
+                    font.pixelSize: sheet.look.textSize
+                    font.underline: link !== "" && communityHover.hovered
+                    HoverHandler { id: communityHover; cursorShape: communityLine.link !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                    TapHandler { gesturePolicy: TapHandler.WithinBounds; enabled: communityLine.link !== ""; onTapped: Qt.openUrlExternally(communityLine.link) }
+                }
+                Text {
                     objectName: "templateDetailsFacts"
                     Layout.fillWidth: true
                     readonly property var parts: [sheet.template.categoryTitle,
