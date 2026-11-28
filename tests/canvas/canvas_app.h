@@ -196,6 +196,17 @@ struct App {
 
     ~App() { QCoreApplication::removeTranslator(&translator); }
 
+    // Destroys the window before the stores a test made after the App (and gave it by pointer) go: with a store gone first, the live
+    // bindings of the window read it as null while the window is torn down, and warn on every one.
+    void closeWindow() {
+        const auto roots = engine.rootObjects();
+        for (QObject *root : roots)
+            delete root;
+        window = nullptr;
+        canvas = nullptr;
+        world = nullptr;
+    }
+
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);

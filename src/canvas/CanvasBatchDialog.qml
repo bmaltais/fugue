@@ -303,5 +303,4 @@ Question {
                 root.outFolder = path
         }
     }
-    Component.onDestruction: folderPicker.close()
 }

@@ -140,6 +140,10 @@ struct Rig {
     CanvasRuns runs;
     AppView view;
     AppShelf shelf;
+    App &owner;
+
+    // The window goes before the stores it reads (declared after the App, they would be destroyed first).
+    ~Rig() { owner.closeWindow(); }
 
     static RunSetup setupIn(const QString &root) {
         RunSetup out;
@@ -156,7 +160,8 @@ struct Rig {
         : setup(setupIn(app.dir.path())), service(setup), runs(&app.model, &app.workflows, &service, &app.registry),
           view([this](const RunRequest &request) { started << request; return QStringLiteral("r%1").arg(started.size()); },
                [](const QString &) {}, &app.registry),
-          shelf([&app] { return app.workflows.templates(); }, [&app](const QString &id) { return app.workflows.openTemplateById(id); }) {
+          shelf([&app] { return app.workflows.templates(); }, [&app](const QString &id) { return app.workflows.openTemplateById(id); }),
+          owner(app) {
         app.appShelf = &shelf;
         runs.registerCommands(app.commands);
         app.runs = &runs;
