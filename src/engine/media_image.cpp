@@ -117,9 +117,13 @@ Result<vips::VImage> MediaHandle::image() const {
 }
 
 std::optional<QSize> MediaHandle::imageHeaderSize(const QString &path) {
-    // Opened once, without blocking, and judged by what was opened: a FIFO or a device (a shared workflow can name /dev/stdin)
-    // would block a plain open, and a path checked first could be swapped for one between the check and the open. Only a
-    // regular file is read, through the descriptor that was checked.
+    // Judged by stat() first, so a device or a FIFO is never opened at all (opening /dev/ttyUSB0 resets the board on the other end,
+    // /dev/video0 powers a camera): the check asks after every edit. What passes is opened once, without blocking, and judged again by
+    // what was opened (fstat), since a path checked first could be swapped for another between the check and the open. Only a regular
+    // file is read, through the descriptor that was checked.
+    struct stat named;
+    if (::stat(QFile::encodeName(path).constData(), &named) != 0 || !S_ISREG(named.st_mode))
+        return std::nullopt;
     const int fd = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
     if (fd < 0)
         return std::nullopt;
@@ -148,11 +152,24 @@ std::optional<QSize> MediaHandle::imageHeaderSize(const QString &path) {
     std::optional<QSize> size;
     if (initVips()) {
         try {
-            // The source reads the open descriptor and does not close it (the guard above does).
-            const vips::VSource source = vips::VSource::new_from_descriptor(fd);
-            const VImage image = VImage::new_from_source(source, "");
-            const bool turned = orientationOf(image) >= 5 && orientationOf(image) <= 8;
-            size = turned ? QSize(image.height(), image.width()) : QSize(image.width(), image.height());
+            // The source reads the open descriptor and does not close it (the guard above does). Its loaders are not cached
+            // (libvips marks every *load_source operation nocache), so no copy of the descriptor outlives this call.
+            const auto sizeOf = [](const VImage &image) {
+                const bool turned = orientationOf(image) >= 5 && orientationOf(image) <= 8;
+                return turned ? QSize(image.height(), image.width()) : QSize(image.width(), image.height());
+            };
+            try {
+                const vips::VSource source = vips::VSource::new_from_descriptor(fd);
+                size = sizeOf(VImage::new_from_source(source, ""));
+            } catch (const vips::VError &) {
+                // A format libvips only loads from a file (OpenEXR, NIfTI, Matlab, OpenSlide...) has no source loader: it is read by its
+                // name, when the name still is the file that was checked (the same device and inode). Sequential, so the header
+                // is read and no pixel is; the file is let go when the image is.
+                struct stat again;
+                if (::stat(QFile::encodeName(path).constData(), &again) == 0 && again.st_dev == st.st_dev && again.st_ino == st.st_ino)
+                    size = sizeOf(VImage::new_from_file(fileName(path).constData(),
+                                                        VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL)));
+            }
         } catch (const vips::VError &) {
         }
     }
