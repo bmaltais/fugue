@@ -24,6 +24,12 @@
 
 namespace fugue {
 
+// One version's entry in the trust file, as forget() found it: listed, and the secrets digest recorded with the yes.
+struct TrustEntry {
+    bool listed = false;
+    QString digest;
+};
+
 // A pack a workflow uses.
 struct PackUse {
     QString id;
@@ -65,8 +71,9 @@ public:
     // Drops every version of a pack (it was removed). No effect for a pack that was never trusted. Only this
     // session's own file is changed.
     Errors forget(const QString &packId);
-    // Drops one version of a pack: another major of it stays installed and trusted (6.6).
-    Errors forget(const QString &packId, const QString &version);
+    // Drops one version of a pack: another major of it stays installed and trusted (6.6). `taken`, when given, says what was
+    // dropped, read under the same lock as the change (unlisted when nothing was), for a restore() of exactly that.
+    Errors forget(const QString &packId, const QString &version, TrustEntry *taken = nullptr);
     // A person taking trust back: forget(), except that trust an inherited pack has only from the Default's
     // file is refused (usage, naming the Default project as the place to change it). An empty `version` means
     // every version.

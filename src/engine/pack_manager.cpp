@@ -304,6 +304,7 @@ private:
 struct DeadBackup {
     QString path;
     qint64 epoch = 0;
+    bool legacy = false; // the previous build's name: that build wrote no setup marker
 };
 
 QList<DeadBackup> deadBackupsOf(const QString &packsDir, const QString &folderName) {
@@ -318,7 +319,7 @@ QList<DeadBackup> deadBackupsOf(const QString &packsDir, const QString &folderNa
             if (match.captured(5) == folderName && ownerOf(match, 1) != Owner::Running)
                 found.append({entry.filePath(), match.captured(4).toLongLong()});
         } else if (const QRegularExpressionMatch old = legacy.match(entry.fileName()); old.hasMatch() && old.captured(3) == folderName) {
-            found.append({entry.filePath(), old.captured(2).toLongLong()});
+            found.append({entry.filePath(), old.captured(2).toLongLong(), true});
         }
     }
     std::sort(found.begin(), found.end(), [](const DeadBackup &x, const DeadBackup &y) { return x.epoch < y.epoch; });
@@ -332,7 +333,8 @@ QList<DeadBackup> deadBackupsOf(const QString &packsDir, const QString &folderNa
 // whole, the others are deleted only when it is whole, and what cannot be settled is kept as `.rescue-` and said through `log`.
 // A link at the target is never followed, nor deleted through. Names from before pids stay as they are, except a `.staging-`
 // one that is old. The previous build's names are settled too: its `.staging-` by its pid and start time (never by the 10 minutes
-// of a name without a pid), its `.old-` as a dead owner's. A trust the update forgot stays forgotten (#418).
+// of a name without a pid), its `.old-` as a dead owner's, put back only where the pack folder is missing. A trust the update
+// forgot stays forgotten (#418).
 void removeStale(const QString &packsDir, const std::function<void(const QString &)> &log) {
     static const QRegularExpression scratchPattern(QStringLiteral("^\\.(?:staging|trash)-%1-[0-9a-f]{12}$").arg(ownerPattern));
     static const QRegularExpression oldPattern(QStringLiteral("^\\.old-%1-[0-9]{1,12}-[0-9a-f]{12}-(.+)$").arg(ownerPattern));
@@ -374,6 +376,10 @@ void removeStale(const QString &packsDir, const std::function<void(const QString
                 say(QStringLiteral("%1 is a link, so the old version of the pack was kept in %2").arg(target, rescueBackup(packsDir, folderName, backup.path)));
             } else if (QFileInfo::exists(target) && packComplete(target)) {
                 discardTree(packsDir, backup.path); // the update finished; only its cleanup did not
+            } else if (backup.legacy && QFileInfo::exists(target)) {
+                // The previous build wrote no setup marker (#521 is newer than its names), so a target without one may be its
+                // finished update, or a working pack installed before markers: it is never replaced by a guess. Kept for the person.
+                say(QStringLiteral("An old version of %1 from an update that did not finish was kept in %2").arg(folderName, rescueBackup(packsDir, folderName, backup.path)));
             } else if (!readJsonObject(backup.path + QStringLiteral("/pack.json"))) {
                 // A dead backup with no readable pack.json is what a delete that failed half way left: no pack, never put over
                 // anything (#673). Only the sweep checks this: an update puts back the pack it set aside itself, whatever its pack.json.
@@ -806,6 +812,7 @@ static Result<PackSummary> summarizeAt(const QString &folder, PackDigest record)
     if (const QJsonValue size = json->value("setup").toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
         summary.setupSize = qint64(size.toDouble());
     summary.source = readPackSource(folder);
+    summary.secretsDigest = packSecretsDigestOf(loaded.secrets, summary.source.location);
     fillSecretState(summary);
     QStringList shown{summary.name, summary.version, summary.setupDescription};
     shown += summary.setupCommand;
@@ -887,21 +894,22 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     // what it did not change. A failed update of the same version puts the trust back, only if the old pack is back as it was.
     const int foldersNow = int(foldersOfPack(summary.id, {packsDir}).size());
     const bool beside = replacing ? foldersNow > 1 : foldersNow > 0;
-    // Read from the trust file itself, now rather than at the question: a person may have untrusted the pack since (#673). The packs
-    // lock does not cover trust.json (Settings and the window change trust without it); TrustStore takes trust.json's own lock for
-    // each change, and restore() puts the yes back only while that version is still unlisted, so a yes given during the setup is
-    // kept as it is. What is put back is exactly what the file held, digest included, so a secrets edit made since is not covered.
-    const bool wasTrusted = replacing && !summary.oldVersion.isEmpty() && summary.oldVersion == summary.version
-                            && trust.isListed(summary.id, summary.version);
-    const QString trustedDigest = wasTrusted ? trust.sealedDigest(summary.id, summary.version) : QString();
+    // What forget() took away, as the trust file held it under trust.json's own lock (the packs lock does not cover trust:
+    // Settings and the window change it without it), so an untrust made at any time before is never undone (#673). Only the same
+    // version's is put back, digest included (a secrets edit made since the yes still asks), and restore() puts it back only while
+    // that version is still unlisted, so a yes given during the setup stays as it is.
+    TrustEntry taken;
+    QString trustLost; // why the trust could not be put back, for the error
     Errors warnings;
     // The old pack comes back (or says where it is): the text for the error, empty when it is back.
     const auto putBack = [&]() -> QString {
         const QString lost = restoreBackup(packsDir, target, backup);
-        if (lost.isEmpty() && wasTrusted)
-            trust.restore(summary.id, summary.version, trustedDigest); // best effort: the pack is back either way
+        if (lost.isEmpty() && taken.listed && summary.oldVersion == summary.version)
+            if (const Errors restored = trust.restore(summary.id, summary.version, taken.digest); hasErrors(restored))
+                trustLost = QStringLiteral("its trust could not be put back: %1").arg(restored.first().message);
         return lost;
     };
+    const auto withTrust = [&](const QString &text) { return trustLost.isEmpty() ? text : QStringLiteral("%1; %2").arg(text, trustLost); };
     if (replacing) {
         backup = packsDir + QLatin1Char('/') + backupName(folderName);
         if (!QDir().rename(target, backup))
@@ -909,7 +917,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     }
     // After the old pack is set aside, before the new code is in place. A trust that cannot be taken back (trust.json cannot be
     // written) stops here: that version, still trusted, would run the new code, its setup first.
-    if (const Errors forgotten = trust.forget(summary.id, summary.version); hasErrors(forgotten)) {
+    if (const Errors forgotten = trust.forget(summary.id, summary.version, &taken); hasErrors(forgotten)) {
         const QString lost = replacing ? putBack() : QString();
         const Error &why = *std::find_if(forgotten.begin(), forgotten.end(), [](const Error &e) { return e.severity == Error::Severity::Error; });
         return fail(why.code,
@@ -919,7 +927,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     }
     if (!QDir().rename(staged.folder, target)) {
         const QString lost = replacing ? putBack() : QString();
-        return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot move the pack into %1.").arg(packsDir),
+        return fail(QStringLiteral("permission_denied"), withTrust(QStringLiteral("Cannot move the pack into %1").arg(packsDir)) + QLatin1Char('.'),
                     lost.isEmpty() ? QString() : lost);
     }
     if (runSetup) {
@@ -937,7 +945,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
                 else
                     removeTree(target);
             }
-            const QString outcome = !lost.isEmpty() ? lost : replacing ? QStringLiteral("the old version was put back") : QStringLiteral("the pack was not installed");
+            const QString outcome = withTrust(!lost.isEmpty() ? lost : replacing ? QStringLiteral("the old version was put back") : QStringLiteral("the pack was not installed"));
             if (stopped)
                 return fail(QStringLiteral("cancelled"), QStringLiteral("The setup of %1 was stopped; %2.").arg(summary.id, outcome));
             return fail(QStringLiteral("setup_failed"),
@@ -1178,7 +1186,7 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
                 return *stop;
             continue;
         }
-        for (const Error &warning : added.errors())
+        for (const Error &warning : added.warnings())
             warnings << warning;
         changed << *added;
     }
@@ -1219,12 +1227,14 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
     // Another major of the pack stays trusted.
     const QString packId = parsePackRef(id).id;
     const bool beside = !foldersOfPack(packId, {packsDir}).isEmpty();
-    const Errors forgotten = beside && !summary.version.isEmpty() ? trust.forget(packId, summary.version) : trust.forget(packId);
-    if (hasErrors(forgotten))
-        return forgotten;
+    // The pack is gone already: a trust that cannot be forgotten now (trust.json busy or not writable) is a warning, and its keys
+    // still go. A stale yes is harmless: any install of the id forgets its version before the new code is in place.
+    Errors warnings = beside && !summary.version.isEmpty() ? trust.forget(packId, summary.version) : trust.forget(packId);
+    for (Error &warning : warnings)
+        warning = warningOf(warning, QStringLiteral("%1 was removed, but its trust was not forgotten").arg(id));
     if (!beside)
         PackSecretStore().forgetPack(packId); // its keys go with it; best effort, the pack itself is gone
-    return summary;
+    return Result<PackSummary>(summary, warnings);
 }
 
 Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts) {
@@ -1258,7 +1268,8 @@ Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustS
         return fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not trusted."));
     if (prompts.cancelled && prompts.cancelled())
         return fail(QStringLiteral("cancelled"), QStringLiteral("Stopped; the pack was not trusted."));
-    const Errors errors = trust.trust(summary->id, summary->version, packSecretsDigestOfFolder(folder));
+    // The digest of what the question showed, not of the folder now: an edit made while it was open is not covered by this yes.
+    const Errors errors = trust.trust(summary->id, summary->version, summary->secretsDigest);
     if (hasErrors(errors))
         return errors;
     return *summary;

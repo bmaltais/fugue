@@ -367,7 +367,9 @@ Reply packRemove(const Command &command, Context &context) {
     const Result<PackSummary> removed = removePack(command.positionals.at(0), packsDir(), trust, terminalPrompts(context));
     if (!removed)
         return Reply::failure(removed.errors());
-    return Reply::success(QJsonObject{{"removed", removed->id}}, QStringLiteral("Removed %1.").arg(removed->id));
+    Reply reply = Reply::success(QJsonObject{{"removed", removed->id}}, QStringLiteral("Removed %1.").arg(removed->id));
+    reply.errors = removed.warnings();
+    return reply;
 }
 
 Reply packUpdate(const Command &command, Context &context) {

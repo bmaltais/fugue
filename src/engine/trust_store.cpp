@@ -17,6 +17,10 @@
 #include <QDir>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QSysInfo>
+
+#include <cerrno>
+#include <csignal>
 
 namespace fugue {
 
@@ -47,18 +51,34 @@ QMutex &fileLock() {
 // the packs folder's lock does not cover it). Like that lock, a QLockFile, so a holder that died releases it.
 class ChangeLock {
 public:
-    explicit ChangeLock(const QString &path) : m_mutex(&fileLock()), m_path(path + QStringLiteral(".lock")), m_file(m_path) {
+    // `waitMs`: a change takes milliseconds, so 5 s is another command stuck; 0 for a best-effort change that is skipped when busy.
+    explicit ChangeLock(const QString &path, int waitMs = 5000)
+        : m_mutex(&fileLock()), m_path(path + QStringLiteral(".lock")), m_file(m_path) {
         QDir().mkpath(QFileInfo(path).absolutePath());
-        m_file.setStaleLockTime(0);
-        m_held = m_file.tryLock(5000); // a change takes milliseconds
+        m_file.setStaleLockTime(0); // a holder that died on this computer releases it; no age limit
+        m_held = m_file.tryLock(waitMs);
     }
     bool held() const { return m_held; }
+    // Like the packs folder's lock (PacksLock::busy): the holder, and the file to remove when it is gone or on another computer.
     Errors busy() const {
         if (m_file.error() == QLockFile::PermissionError)
             return {makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write the lock file %1.").arg(m_path),
                               QStringLiteral("Check that you may write in the folder of trust.json."))};
-        return {makeError(QStringLiteral("pack_busy"), QStringLiteral("Another Fugue command is changing %1.").arg(m_path.chopped(5)),
-                          QStringLiteral("Wait for it to finish, then try again."))};
+        if (m_file.error() == QLockFile::UnknownError)
+            return {makeError(QStringLiteral("internal"), QStringLiteral("Cannot take the lock file %1.").arg(m_path))};
+        qint64 holder = 0;
+        QString host, app;
+        m_file.getLockInfo(&holder, &host, &app);
+        if (!host.isEmpty() && host != QSysInfo::machineHostName())
+            return {makeError(QStringLiteral("pack_busy"), QStringLiteral("The trust file is locked from another computer (%1).").arg(host),
+                              QStringLiteral("Wait for it to finish. If it is gone, remove %1.").arg(m_path))};
+        if (holder > 0 && ::kill(pid_t(holder), 0) != 0 && errno != EPERM)
+            return {makeError(QStringLiteral("pack_busy"), QStringLiteral("The trust file is locked by pid %1, which is gone.").arg(holder),
+                              QStringLiteral("Remove %1, then try again.").arg(m_path))};
+        return {makeError(QStringLiteral("pack_busy"),
+                          holder > 0 ? QStringLiteral("Another Fugue command (pid %1) is changing the trust file.").arg(holder)
+                                     : QStringLiteral("Another Fugue command is changing the trust file."),
+                          QStringLiteral("Wait for it to finish, then try again; if it does not, remove %1.").arg(m_path))};
     }
 
 private:
@@ -217,9 +237,10 @@ Errors TrustStore::adoptSecretsDigest(const QString &packId, const QString &vers
     const auto needed = [&] { return isListed(packId, version) && sealedDigest(packId, version).isEmpty(); };
     if (!needed())
         return {};
-    const ChangeLock lock(m_path);
+    // Best effort, and never a wait: it runs inside every pack load (the window's too). Busy now, it is adopted at the next load.
+    const ChangeLock lock(m_path, 0);
     if (!lock.held())
-        return lock.busy();
+        return {};
     if (!needed())
         return {};
     QJsonObject sealed = readSealed(m_path);
@@ -229,7 +250,9 @@ Errors TrustStore::adoptSecretsDigest(const QString &packId, const QString &vers
     return writeTrust(m_path, readPacks(m_path), sealed);
 }
 
-Errors TrustStore::forget(const QString &packId, const QString &version) {
+Errors TrustStore::forget(const QString &packId, const QString &version, TrustEntry *taken) {
+    if (taken)
+        *taken = {};
     if (!isListed(packId, version)) // nothing to forget takes no lock, and needs no writable folder
         return {};
     const ChangeLock lock(m_path);
@@ -250,7 +273,11 @@ Errors TrustStore::forget(const QString &packId, const QString &version) {
         packs.remove(packId);
     else
         packs.insert(packId, kept);
-    return writeTrust(m_path, packs, readSealed(m_path));
+    const QJsonObject sealed = readSealed(m_path);
+    const Errors written = writeTrust(m_path, packs, sealed);
+    if (taken && !hasErrors(written))
+        *taken = {true, sealed.value(packId).toObject().value(version).toString()};
+    return written;
 }
 
 Errors TrustStore::forget(const QString &packId) {

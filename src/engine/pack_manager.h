@@ -49,6 +49,7 @@ struct PackSummary {
     QStringList secrets;      // the names of the secrets the pack reads (6.4 `settings`), in pack.json's order; never values
     QStringList secretsSet;   // of those, the ones already set for this pack id from this same source (an update keeps them)
     QStringList secretsOtherSource; // names set for this pack id from ANOTHER source: this pack does not get them (6.4.1)
+    QString secretsDigest;    // packSecretsDigestOf what this summary read (its secrets and source): what a yes to it covers
     QStringList setupCommand; // empty when the pack has no setup
     QString setupDescription;
     qint64 setupSize = -1;    // bytes its setup downloads, when pack.json's setup says (`size`); -1 when it does not

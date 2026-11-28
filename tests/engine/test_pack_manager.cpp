@@ -2,6 +2,7 @@
 // answer comes only through PackPrompts, and no answer is `needs_confirmation`.
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -961,6 +962,97 @@ private slots:
         from.location = decoy;
         QCOMPARE(preparePack(from, packs(), answering(Answer::Yes)).error().code, QString("pack_exists"));
         QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
+    }
+
+    // The previous build wrote no setup marker: its backup is put back only where the pack folder is missing. A working pack
+    // with a setup and no marker (installed before markers, or a stopped re-setup) is never replaced by it.
+    void aPreviousBuildsBackupNeverReplacesAPack() {
+        const QString id = "io.example.tools";
+        makePack(packs(), id, "1.1.0", false, {{"command", QJsonArray{"true"}}}); // no marker
+        QVERIFY(QDir().rename(makePack(source(), id, "1.0.0"),
+                              packs() + QString("/.old-%1-%2-aaaaaaaaaaaa-%3").arg(deadPid()).arg(QDateTime::currentSecsSinceEpoch() - 100).arg(id)));
+        QVERIFY(addPack(makePack(source(), "io.example.other", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.1.0"));
+        QVERIFY(QDir(packs()).entryList({".old-*"}, QDir::Dirs | QDir::Hidden).isEmpty());
+        QCOMPARE(QDir(packs()).entryList({".rescue-*"}, QDir::Dirs | QDir::Hidden).size(), 1);
+    }
+
+    // A trust that cannot be put back after a failed same-version update is said in the error, not dropped.
+    void aTrustThatCannotBePutBackIsSaid() {
+        if (geteuid() == 0)
+            QSKIP("root can write a read-only folder");
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        makePack(source(), id, "1.0.0", false, {{"command", QJsonArray{"sh", "-c", "echo lock-trust; exit 1"}}});
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.log = [&](const QString &line) { // during the setup, after the trust was forgotten
+            if (line == "lock-trust")
+                QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+        };
+        const Result<QList<PackAdded>> updated = updatePacks(id, {}, packs(), trustStore(), prompts);
+        QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QCOMPARE(updated.error().code, QString("setup_failed"));
+        QVERIFY2(updated.error().message.contains("its trust could not be put back"), qPrintable(updated.error().message));
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+    }
+
+    // Adopting a digest is best effort inside every load: a busy trust file is skipped at once, not waited for.
+    void aBusyTrustFileDoesNotStallALoad() {
+        const QString id = "io.example.old";
+        QDir(packsDir()).removeRecursively();
+        makePack(packsDir(), id, "1.0.0");
+        const QByteArray before = R"({"packs": {"io.example.old": ["1.0.0"]}})";
+        write(TrustStore::defaultPath(), before);
+        {
+            QLockFile held(TrustStore::defaultPath() + ".lock");
+            QVERIFY(held.tryLock());
+            QElapsedTimer timer;
+            timer.start();
+            Registry registry;
+            loadPacks(registry, {packsDir()});
+            QVERIFY2(timer.elapsed() < 2500, qPrintable(QString::number(timer.elapsed()))); // the wait was 5 s; nothing else here is slow
+            QCOMPARE(readAll(TrustStore::defaultPath()), before);
+        }
+        Registry registry;
+        loadPacks(registry, {packsDir()});
+        QVERIFY(readAll(TrustStore::defaultPath()).contains("secrets")); // adopted at the next load
+        QDir(packsDir()).removeRecursively();
+        QFile::remove(TrustStore::defaultPath());
+    }
+
+    // A removed pack whose trust cannot be forgotten is still removed, with a warning, and its keys still go.
+    void aRemoveWhoseTrustCannotBeForgottenStillRemoves() {
+        if (geteuid() == 0)
+            QSKIP("root can write a read-only folder");
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        const Result<PackSummary> removed = removePack(id, packs(), trustStore(), answering(Answer::Yes));
+        QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QVERIFY(removed.ok());
+        QVERIFY(!removed.warnings().isEmpty());
+        QVERIFY(removed.warnings().first().message.contains("was removed, but its trust was not forgotten"));
+        QVERIFY(!QFileInfo::exists(packs() + "/" + id));
+    }
+
+    // A yes covers the pack the question showed: pack.json edited in place while it was open (a new secret) is not covered.
+    void aYesCoversThePackShownNotAnEditMadeMeanwhile() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        const QString folder = packs() + "/" + id;
+        const QString shown = packSecretsDigestOfFolder(folder);
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.trust = [&](const PackSummary &) {
+            QJsonObject pack = QJsonDocument::fromJson(readAll(folder + "/pack.json")).object();
+            pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}}};
+            writeJson(folder + "/pack.json", pack);
+            return Answer::Yes;
+        };
+        QVERIFY(trustPack(id, packs(), trustStore(), prompts).ok());
+        QCOMPARE(trustStore().sealedDigest(id, "1.0.0"), shown);
+        QVERIFY(packSecretsDigestOfFolder(folder) != shown);
     }
 
     // #418: one command at a time changes the packs folder.
