@@ -19,6 +19,7 @@
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
+#include "engine/host_models.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/model_use.h"
@@ -329,6 +330,106 @@ private slots:
         // Only a seed input has modes.
         f.edits.setSeedMode("all", "count", "random");
         QCOMPARE(f.stored("all", "count"), QJsonValue(7));
+    }
+
+    // #735: a paired helper's models are a group below the local ones; picking one names the file by its hash and pins the provider
+    // nodes that take the model to that host, as one undo step. Nothing here reaches a network: the list is the kept one.
+    void aPairedHostsModelIsListedBelowAndPicksPinTheNodesThatTakeIt() {
+        QTemporaryDir kept, models;
+        const QString hash = QString(64, 'a');
+        ProviderInstance gx10;
+        gx10.name = QStringLiteral("gx10");
+        gx10.type = QStringLiteral("fugue-helper");
+        gx10.address = QStringLiteral("http://gx10.example:8787");
+        fugue::test::FakeHttpServer host;
+        QVERIFY(host.listen());
+        const QJsonObject reply{{"models", QJsonArray{QJsonObject{{"name", "diffusion_models/z-image-turbo-Q8_0.gguf"}, {"size", 4000.0}, {"sha256", hash}, {"folder", "diffusion_models"}},
+                                                       QJsonObject{{"name", "diffusion_models/unhashed.gguf"}, {"size", 5.0}, {"sha256", QJsonValue()}, {"folder", "diffusion_models"}}}},
+                                {"hashing", 0}};
+        host.on("POST", "/fugue/v1/models", [&](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, QJsonDocument(reply).toJson(QJsonDocument::Compact)};
+        });
+        HostModelCache cache(kept.filePath("lists"));
+        const auto reach = [&host](const ProviderInstance &paired) {
+            ProviderInstance atTheFake = paired;
+            atTheFake.address = QString::fromLatin1(host.origin());
+            return createProvider(atTheFake);
+        };
+        bool fetched = false;
+        cache.refresh(gx10, false, {}, [&fetched](const HostModelList &) { fetched = true; }, reach);
+        QTRY_VERIFY_WITH_TIMEOUT(fetched, 5000);
+
+        Fixture f;
+        f.canvas.setDocument(document(R"({
+          "fugue": 1,
+          "graph": {"nodes": {
+            "load": {"type": "fugue/load-models", "version": "1.4.0", "inputs": {}},
+            "sample": {"type": "fugue/sampler", "version": "1.5.0", "inputs": {"model": {"from": "load.model"}}}
+          }},
+          "layout": {"nodes": {"load": {"pos": [0, 0]}, "sample": {"pos": [400, 0]}}}
+        })"));
+        f.edits.setModelRoots({models.path()});
+        f.edits.setModelSource([](const QString &, const QStringList &, std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        f.edits.setHostModels([gx10] { return QList<ProviderInstance>{gx10}; }, &cache, reach);
+        f.edits.requestModels("load", "diffusion_model");
+        QVariantList listed; // the catalog's downloads come after them: not this test's
+        for (const QVariant &each : f.edits.models("load", "diffusion_model"))
+            if (!each.toMap().value("catalog").toBool())
+                listed << each;
+        QCOMPARE(listed.size(), 2);
+        const QVariantMap row = listed.first().toMap();
+        QVERIFY(row.value("remote").toBool());
+        QCOMPARE(row.value("host").toString(), QStringLiteral("gx10"));
+        QCOMPARE(row.value("name").toString(), QStringLiteral("z-image-turbo-Q8_0.gguf"));
+        QVERIFY(!row.value("family").toString().isEmpty()); // the family filter takes remote rows too
+
+        const int before = f.steps();
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.steps(), before + 1); // the handle and the pin: one step
+        const QJsonObject stored = f.stored("load", "diffusion_model").toObject();
+        QCOMPARE(stored.value("hash").toString(), "sha256:" + hash);
+        QCOMPARE(stored.value("resource").toString(), QStringLiteral("fugue/diffusion-model"));
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("gx10"));
+        QCOMPARE(f.canvas.document().graph.nodes.value("load").provider, QString()); // Load Models runs nothing
+        f.canvas.undoStack()->undo();
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QString());
+
+        // A pick that is not remote takes back exactly the pin the remote pick set, in the same step; a pin the person set is never touched.
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("gx10"));
+        const int afterRemote = f.steps();
+        QCOMPARE(f.edits.setValue("load", "diffusion_model", QVariantMap{{"resource", "fugue/diffusion-model"}, {"name", "local.gguf"}, {"hash", "sha256:" + QString(64, 'b')}}), QString());
+        QCOMPARE(f.steps(), afterRemote + 1);
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QString()); // run placed locally again
+        QVERIFY(!f.canvas.document().layout.value("nodes").toObject().value("sample").toObject().contains("host_pin"));
+        {
+            Document pinned = f.canvas.document();
+            pinned.graph.nodes["sample"].provider = QStringLiteral("spark"); // the person's own pin
+            f.canvas.commit(pinned, "Pin");
+        }
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("spark")); // not overwritten
+        QCOMPARE(f.edits.setValue("load", "diffusion_model", QVariantMap{{"resource", "fugue/diffusion-model"}, {"name", "local.gguf"}, {"hash", "sha256:" + QString(64, 'b')}}), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("spark")); // nor cleared
+        f.canvas.undoStack()->undo();
+        f.canvas.undoStack()->undo();
+        f.canvas.undoStack()->undo(); // back before the person's pin
+
+        // A file the host has not hashed: it is asked to, and the picker says so; nothing is stored.
+        const int asked = int(host.requestsTo("POST", "/fugue/v1/models").size());
+        const QString message = f.edits.setRemoteModel("load", "diffusion_model", listed.at(1).toMap().value("handle").toMap(), "gx10");
+        QVERIFY(message.contains("hash"));
+        QTRY_COMPARE_WITH_TIMEOUT(int(host.requestsTo("POST", "/fugue/v1/models").size()), asked + 1, 5000);
+        QVERIFY(QJsonDocument::fromJson(host.requestsTo("POST", "/fugue/v1/models").last().body).object().value("hash").toBool());
+        QVERIFY(f.stored("load", "diffusion_model").toObject().value("name").toString() != "unhashed.gguf"); // nothing was stored for it
+        // Deleting the node that made a host pin takes the pin back with it: no stale pin sends the sampler to gx10.
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("gx10"));
+        Document without = f.canvas.document();
+        without.graph.nodes.remove("load");
+        f.canvas.commit(without, "Delete");
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QString());
+        QVERIFY(!f.canvas.document().layout.value("nodes").toObject().value("sample").toObject().contains("host_pin"));
     }
 
     void theModelPickerListsModelsOfTheInputsType() {

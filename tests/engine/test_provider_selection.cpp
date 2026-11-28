@@ -513,6 +513,21 @@ private slots:
         QVERIFY(!chosen->sharesFilesystem);
     }
 
+    // #735: of two paired helpers, the one whose kept model list has the files takes the node, not the first one in the order.
+    void aHostThatListsTheModelIsChosenBeforeAnEarlierOne() {
+        QList<Candidate> candidates = localAndHost(true);
+        Candidate second = candidates[1];
+        second.instance.name = QStringLiteral("spark");
+        candidates.append(second);
+        Requirement requirement = wants("image.generate");
+        requirement.modelsElsewhere = true;
+        QCOMPARE(selectProvider(candidates, requirement)->instance, QStringLiteral("gx10")); // nobody is known to have it: the order
+        requirement.hostsWithModel = {QStringLiteral("spark")};
+        QCOMPARE(selectProvider(candidates, requirement)->instance, QStringLiteral("spark"));
+        requirement.hostsWithModel = {QStringLiteral("elsewhere")}; // a host that is not a candidate changes nothing
+        QCOMPARE(selectProvider(candidates, requirement)->instance, QStringLiteral("gx10"));
+    }
+
     void modelFilesHereKeepTheOrderEvenWithAPairedHelper() {
         const auto chosen = selectProvider(localAndHost(true), wants("image.generate"));
         QVERIFY(chosen);

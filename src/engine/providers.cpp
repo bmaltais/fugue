@@ -633,7 +633,12 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
                 && candidate->description->offer(requirement.capability))
                 remote.append(candidate);
         if (!remote.isEmpty()) {
-            usable = remote;
+            // A host known to have the model files takes the node before one that is not known to (#735).
+            QList<const Candidate *> having;
+            for (const Candidate *candidate : std::as_const(remote))
+                if (requirement.hostsWithModel.contains(candidate->instance.name))
+                    having.append(candidate);
+            usable = having.isEmpty() ? remote : having;
         } else {
             // A paired helper that does not answer: say so, not the model_missing of a machine that never had the files.
             const SilentHelpers silent = silentPairedHelpers(candidates, requirement.capability);

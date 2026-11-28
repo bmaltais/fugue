@@ -236,6 +236,26 @@ private slots:
         QVERIFY(needs.headline().contains("2 models"));
     }
 
+    // #735: a model a paired host has is a quiet row ("on gx10"): the panel hides when every row is hosted or optional, and a blocking
+    // model beside it still shows it.
+    void aHostedModelIsARowThatBlocksNothing() {
+        NeedsModel needs;
+        ReadinessPlan plan;
+        plan.hosted << HostedModel{QStringLiteral("z.gguf"), QStringLiteral("gx10"), QJsonObject{{"hash", hashA}}};
+        needs.setPlan(plan);
+        QVERIFY(needs.ready());
+        QCOMPARE(needs.items().size(), 1);
+        QCOMPARE(needs.items().at(0).toMap().value("kind").toString(), QString("hosted"));
+        QCOMPARE(needs.items().at(0).toMap().value("detail").toString(), QString("on gx10"));
+        QVERIFY(!needs.items().at(0).toMap().value("canDownload").toBool());
+        plan.optionalModels << model(QStringLiteral("other-branch.gguf"), hashA, 1000, QString());
+        needs.setPlan(plan);
+        QVERIFY(needs.ready()); // hosted and optional only
+        needs.setPlan(modelsPlan());
+        QVERIFY(!needs.ready());
+        QVERIFY(needs.headline().contains("models"));
+    }
+
     void aModelWaitingForAPackComesWithTheSheet() {
         NeedsModel needs;
         ReadinessPlan plan = withPack(ReadinessPlan());

@@ -133,6 +133,44 @@ private slots:
         m_server->on("GET", "/b.safetensors", [this](const auto &) { return HttpResponse{200, m_other, "application/octet-stream"}; });
     }
 
+    // #735: a model a paired host's list has is not a download and not a problem; it is listed as on that host. One it does not have
+    // still is a row.
+    void aModelOnAPairedHostsListIsNeitherDownloadedNorMissing() {
+        const QJsonObject onHost = model("a.safetensors", m_bytes, "/a.safetensors", 1200);
+        const QJsonObject notThere = model("b.safetensors", m_other, "/b.safetensors", 900);
+        ReadinessRequest r;
+        r.models = QJsonArray{onHost, notThere};
+        ReadinessEnv e = env();
+        // One host with every missing model takes them all; this one has only a.safetensors, so neither counts (case a below).
+        e.hostHaving = [&onHost](const QList<QJsonObject> &missing, const QList<QJsonObject> &) {
+            for (const QJsonObject &handle : missing)
+                if (handle.value("hash") != onHost.value("hash"))
+                    return HostAvailability{QString(), QStringLiteral("gx10 has it, but not the other models these nodes need.")};
+            return HostAvailability{QStringLiteral("gx10"), QString()};
+        };
+        const ReadinessPlan partial = buildReadinessPlan(r, e);
+        QCOMPARE(partial.models.size(), 2); // still to download, with why the host does not count
+        QVERIFY(partial.hosted.isEmpty());
+        QVERIFY(partial.models.first().hostNote.contains("gx10 has it, but"));
+        r.models = QJsonArray{onHost};
+        const ReadinessPlan plan = buildReadinessPlan(r, e);
+        QVERIFY(plan.models.isEmpty());
+        QCOMPARE(plan.hosted.size(), 1);
+        QCOMPARE(plan.hosted.first().host, QStringLiteral("gx10"));
+        QVERIFY(plan.problems.isEmpty());
+        QVERIFY(plan.unobtainable.isEmpty());
+        QVERIFY(plan.lines().join('\n').contains("on gx10"));
+        r.models = QJsonArray{onHost, notThere};
+        // With no host asked nothing changes.
+        QCOMPARE(buildReadinessPlan(r, env()).models.size(), 2);
+        // A host's model with no source is no "has no source" problem either.
+        QJsonObject noSource = onHost;
+        noSource.remove("source");
+        r.models = QJsonArray{noSource};
+        QVERIFY(buildReadinessPlan(r, e).problems.isEmpty()); // e still says gx10 has it (the only missing model of this list)
+        QCOMPARE(buildReadinessPlan(r, env()).problems.size(), 1);
+    }
+
     // #594: a model only another branch of a Switch holds is a non-blocking row apart: not in the models, the totals, the headline
     // or empty(); a missing one with no source is no problem; chosen by the person it is a row like the others, marked optional.
     void anOptionalModelIsListedApartAndCostsNothingUntilChosen() {

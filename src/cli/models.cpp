@@ -20,6 +20,7 @@
 #include "cli/commands.h"
 #include "engine/document.h"
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/model_download.h"
 #include "engine/model_folder_finder.h"
 #include "engine/place_policy.h"
@@ -29,6 +30,7 @@
 #include "engine/model_recommend.h"
 #include "engine/model_speed.h"
 #include "engine/paths.h"
+#include "engine/sandbox.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
 #include "engine/templates.h"
@@ -83,6 +85,26 @@ Reply modelList(const Command &command, Context &context) {
         types = {declared};
     }
 
+    // The paired helpers (#735): `--host <name>` lists only that one's models, `--refresh` asks them again first.
+    QList<ProviderInstance> helpers;
+    if (const Result<QList<ProviderInstance>> loaded = loadProviderInstances(providersPath()); loaded.ok())
+        for (const ProviderInstance &instance : loaded.value())
+            if (instance.enabled && isPairedHelper(instance))
+                helpers << instance;
+    const QString onlyHost = command.value("host");
+    if (command.has("host")) {
+        const bool known = std::any_of(helpers.cbegin(), helpers.cend(), [&](const ProviderInstance &each) { return each.name == onlyHost; });
+        if (!known) {
+            QJsonArray valid;
+            for (const ProviderInstance &each : std::as_const(helpers))
+                valid.append(each.name);
+            Error error = makeError("usage", QStringLiteral("\"%1\" is not a paired helper.").arg(onlyHost),
+                                    QStringLiteral("Use the name of a `fugue-helper` instance with an address in providers.json."));
+            error.valid = valid;
+            return Reply::failure(error);
+        }
+    }
+
     FileHashes hashes(FileHashes::defaultPath());
     const ModelLibrary library = ModelLibrary::current(&context.registry);
     QJsonArray models;
@@ -92,7 +114,7 @@ Reply modelList(const Command &command, Context &context) {
     const ComputeDevice device = localComputeDevice();
     const ModelSpeeds speeds;
     for (const DeclaredPortType *declared : std::as_const(types)) {
-        const QList<ListedModel> disk = listDiskModels(library, declared->type, hashes);
+        const QList<ListedModel> disk = onlyHost.isEmpty() ? listDiskModels(library, declared->type, hashes) : QList<ListedModel>();
         // Family and Recommended (#370): the same marks the pickers show.
         QList<MarkedFile> files;
         for (const ListedModel &model : disk)
@@ -154,7 +176,7 @@ Reply modelList(const Command &command, Context &context) {
     }
 
     // Providers' models have no family: `--family` is about files.
-    for (const ListedModel &model : wantedFamily.isEmpty() ? offered(command.has("type") ? types.first()->type.toString() : QString()) : QList<ListedModel>()) {
+    for (const ListedModel &model : wantedFamily.isEmpty() && onlyHost.isEmpty() ? offered(command.has("type") ? types.first()->type.toString() : QString()) : QList<ListedModel>()) {
         QJsonObject entry{{"source", "provider"},
                           {"type", model.handle.value("resource").toString()},
                           {"provider", model.provider},
@@ -168,12 +190,55 @@ Reply modelList(const Command &command, Context &context) {
         lines << QStringLiteral("%1  %2  %3  %4")
                      .arg(model.handle.value("resource").toString(), model.name, model.status, model.provider);
     }
+    // The models of the paired helpers, from the lists kept per host (#735); `--refresh` asks each host first, and with `--hash` also
+    // asks it to hash the files it has not (in the background on its side: run it again for the hashes).
+    QJsonArray hosts;
+    HostModelCache &kept = HostModelCache::shared();
+    for (const ProviderInstance &helper : std::as_const(helpers)) {
+        if (!onlyHost.isEmpty() && helper.name != onlyHost)
+            continue;
+        if (command.has("hash") && !command.has("refresh"))
+            lines << QStringLiteral("--hash asks a paired helper to hash only with --refresh.");
+        if (command.has("refresh")) {
+            QEventLoop loop;
+            kept.refresh(helper, command.has("hash"), {}, [&loop](const HostModelList &) { loop.quit(); });
+            loop.exec();
+        }
+        const HostModelList list = kept.cached(helper);
+        QJsonObject info{{"host", helper.name}, {"supported", list.supported}, {"models", int(list.models.size())},
+                         {"fetched_at", list.fetchedAt.isValid() ? QJsonValue(list.fetchedAt.toString(Qt::ISODate)) : QJsonValue()},
+                         {"unhashed", list.unhashed}, {"hashing", list.hashing}, {"truncated", list.truncated}};
+        if (!list.error.isEmpty())
+            info.insert("error", list.error);
+        hosts.append(info);
+        if (!list.known())
+            lines << QStringLiteral("%1: no list kept yet (fugue model list --refresh asks it)").arg(sandbox::printable(helper.name));
+        else if (!list.supported)
+            lines << QStringLiteral("%1: its helper is too old to list models").arg(sandbox::printable(helper.name));
+        for (const DeclaredPortType *declared : std::as_const(types))
+            for (const ListedModel &model : listHostModels({helper}, kept, library, declared->type, listDiskModels(library, declared->type, hashes))) {
+                if (!wantedFamily.isEmpty() && squashed(model.family) != wantedFamily)
+                    continue;
+                const bool hashed = model.handle.contains("hash");
+                QJsonObject entry{{"source", "host"}, {"host", helper.name}, {"type", declared->type.toString()}, {"name", model.name},
+                                  {"size", model.size}, {"hashed", hashed},
+                                  {"folder", model.folder}};
+                entry.insert("family", model.family.isEmpty() ? QJsonValue() : QJsonValue(model.family));
+                if (hashed)
+                    entry.insert("handle", model.handle);
+                models.append(entry);
+                lines << QStringLiteral("%1  %2  %3  on %4")
+                             .arg(declared->type.toString(), sandbox::printable(model.name),
+                                  hashed ? model.handle.value("hash").toString().left(19) + QStringLiteral("…") : QStringLiteral("(not hashed on the host)"),
+                                  sandbox::printable(helper.name));
+            }
+    }
     // Where the models are searched, and which of those folders are the Default project's (1.4.2).
     QJsonArray roots;
     for (const QString &root : library.roots())
         roots.append(QJsonObject{{"path", root},
                                  {"origin", settingOriginName(library.isInherited(root) ? SettingOrigin::Default : SettingOrigin::Own)}});
-    Reply reply = Reply::success(QJsonObject{{"models", models}, {"roots", roots}}, lines.join('\n'));
+    Reply reply = Reply::success(QJsonObject{{"models", models}, {"roots", roots}, {"hosts", hosts}}, lines.join('\n'));
     reply.errors = warnings; // 13.2: a success with warnings
     return reply;
 }

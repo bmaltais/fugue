@@ -38,6 +38,11 @@ struct ListedModel {
     QString folder;
     qint64 size = 0;
 
+    // A file on a paired helper's model list (#735, HostModelCache): `host` and `provider` name the instance, `size` is its size, the
+    // handle has the hash when the host knows it, `family` is the table's name for it (else the engine's).
+    bool remote = false;
+    QString family;
+
     bool onDisk() const { return !path.isEmpty(); }
     // Served by a paired host that does not answer for it (not ready): its models are listed
     // dimmed, "host offline", never hidden (#164).
@@ -51,6 +56,17 @@ struct ListedModel {
 // loop, after the last reply: the providers stay alive until then.
 void listOfferedModels(const QString &type, const QStringList &capabilities,
                        std::function<void(QList<ListedModel>)> done);
+
+class HostModelCache;
+struct ProviderInstance;
+
+// The models the paired helpers' kept lists (HostModelCache, no network) offer for `type`: each file under one of the type's folders
+// (`library.folders(type)` names), as a remote row marked `remote`, in the user's order of hosts then by name. A host whose helper has
+// no list operation, or never answered, lists nothing.
+// `local` are this machine's files of the type (listDiskModels): a host file whose hash is one of theirs is left out (the local one wins);
+// one the host has not hashed, with the name and size of a local file, says "also here" in its note.
+QList<ListedModel> listHostModels(const QList<ProviderInstance> &instances, const HostModelCache &cache, const ModelLibrary &library,
+                                  const PortType &type, const QList<ListedModel> &local = {});
 
 // The model files of `type` (ModelLibrary::list), each with the handle that names it:
 // {"resource", "name"}, and "hash" when `hashes` remembers the file's. Reads no model file.

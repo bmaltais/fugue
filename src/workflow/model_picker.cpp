@@ -22,6 +22,12 @@ QVariantMap modelRow(const ListedModel &model, const QString &type, const QHash<
                     {"hostOffline", model.hostOffline()},
                     {"cloud", model.cloud},
                     {"note", model.note}};
+    if (model.remote) {
+        // A file on a paired helper (#735): no path, so the picker's file logic leaves it alone, but it has a family, a size and a host.
+        row.insert("remote", true);
+        row.insert("size", model.size);
+        row.insert("family", model.family);
+    }
     if (model.onDisk()) {
         row.insert("path", model.path);
         row.insert("folder", model.folder);

@@ -465,15 +465,26 @@ QJsonArray withCompanions(const QJsonArray &models, const ModelLibrary &library,
 QList<MissingModel> ModelLibrary::missing(const QJsonArray &named, FileHashes &hashes) const {
     const QJsonArray models = withCompanions(named, *this, hashes);
     QList<MissingModel> out;
+    QList<QJsonObject> here; // hashed models of the list that are on this machine
     for (const QJsonValue entry : models) {
         QJsonObject handle = entry.toObject();
         const QString source = handle.take(QStringLiteral("source")).toString();
         const QJsonValue size = handle.take(QStringLiteral("size"));
-        if (resolve(handle, hashes, Hashing::RememberedOnly))
+        if (resolve(handle, hashes, Hashing::RememberedOnly)) {
+            if (!handle.value(QStringLiteral("hash")).toString().isEmpty())
+                here.append(handle);
             continue;
+        }
         const std::optional<PortType> type = PortType::parse(handle.value(QStringLiteral("resource")).toString());
         out.append({handle, source, type ? downloadFolder(*type) : QString(),
                     size.isDouble() && size.toDouble() >= 0 ? qint64(size.toDouble()) : -1});
+    }
+    if (m_hostHaving && !out.isEmpty()) { // one paired host has all of them: not missing (#735)
+        QList<QJsonObject> handles;
+        for (const MissingModel &model : std::as_const(out))
+            handles.append(model.handle);
+        if (!m_hostHaving(handles, here).host.isEmpty())
+            return {};
     }
     return out;
 }

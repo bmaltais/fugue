@@ -13,6 +13,7 @@
 
 #include "engine/sandbox.h"
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
@@ -125,6 +126,18 @@ ReadinessPlan ReadinessSheet::buildPlan(bool withChoices) const {
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
+    env.hostHaving = HostModelCache::shared().availabilityFunction(); // a paired host's models are not downloads (#735)
+    {
+        // Lists older than a few minutes are asked again without waiting; the plan is read again when they answer.
+        QList<ProviderInstance> helpers;
+        if (const Result<QList<ProviderInstance>> loaded = loadProviderInstances(providersPath()); loaded.ok())
+            helpers = loaded.value();
+        QPointer<ReadinessSheet> self(const_cast<ReadinessSheet *>(this));
+        HostModelCache::shared().refreshStale(helpers, HostModelCache::kTtlSeconds, [self](const HostModelList &) {
+            if (self)
+                emit self->hostListsRefreshed();
+        });
+    }
     ReadinessRequest request = m_request();
     if (withChoices)
         request.optionalChosen = m_optionalOn;

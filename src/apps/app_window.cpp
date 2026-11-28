@@ -105,6 +105,7 @@ void bindAppView(AppView &view, Workflows &workflows, CanvasModel &canvas, RunSe
         return planUnder(plan, verdict);
     });
     QObject::connect(&view, &AppView::runsOnChanged, needs, &NeedsModel::refreshSoon);
+    QObject::connect(workflows.readiness(), &ReadinessSheet::hostListsRefreshed, needs, &NeedsModel::refreshSoon);
     // A node routed to a service off this machine (#404) is said on the same "Runs on" line.
     QObject::connect(&runs, &CanvasRuns::runsOnChanged, &view, [&view, &runs] { view.setOffMachine(runs.runsOn()); });
     needs->setLocator([&canvas](const QVariantMap &item) { return NeedsModel::nodeFor(canvas.document(), item); });

@@ -285,7 +285,8 @@ Popup {
             // A row cut short (the list at its widest, the window narrow) shows its whole text on hover.
             ToolTip.visible: rowMouse.containsMouse && label.truncated
             ToolTip.delay: menu.look.tooltipDelay
-            ToolTip.text: label.text
+            // A name can come from another machine (a paired helper's list): no `<`, so the tooltip never reads it as rich text.
+            ToolTip.text: label.text.replace(/</g, "\u2039")
             MouseArea {
                 id: rowMouse
                 anchors.fill: parent

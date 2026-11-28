@@ -185,6 +185,8 @@ QStringList ReadinessPlan::lines() const {
     for (const ReadinessModel &m : optionalModels)
         out << QStringLiteral("  Optional model, only if a Switch's other branch is chosen: %1 (%2) from %3")
                    .arg(m.name, m.size >= 0 ? sizeText(m.size) : QStringLiteral("size not recorded"), m.host);
+    for (const HostedModel &m : hosted)
+        out << QStringLiteral("  Model on %1: %2 (nothing to download here)").arg(m.host, m.name);
     for (const Error &p : problems)
         out << QStringLiteral("  Cannot do: %1").arg(p.message);
     return out;
@@ -212,6 +214,12 @@ QJsonObject ReadinessPlan::toJson() const {
                      {"download_bytes", double(downloadBytes)}, {"unknown_sizes", unknownSizes},
                      {"environment_bytes", double(environmentBytes)}, {"free_bytes", double(freeBytes)},
                      {"low_space", lowSpace()}, {"problems", fugue::toJson(problems)}};
+    if (!hosted.isEmpty()) { // on a paired host's model list (#735)
+        QJsonArray hostedRows;
+        for (const HostedModel &m : hosted)
+            hostedRows.append(QJsonObject{{"name", m.name}, {"host", m.host}, {"hash", m.handle.value("hash")}});
+        json.insert("hosted", hostedRows);
+    }
     if (!optionalModels.isEmpty()) { // only a Switch's other branch needs them (#594)
         QJsonArray optionalRows;
         for (const ReadinessModel &m : optionalModels)
@@ -367,13 +375,36 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
     // One row per missing model, from `entries`. An optional model (#594) that cannot be got (no source, no place) is left out
     // quietly: nothing is lost by it, so there is no problem to report; one the person chose is a row like the others.
     const auto addRows = [&](const QJsonArray &entries, bool optional) {
-        for (const MissingModel &model : library.missing(entries, hashes)) {
+        const QList<MissingModel> absent = library.missing(entries, hashes);
+        HostAvailability onHosts; // one host with every missing model of this list, else why none counts
+        if (env.hostHaving && !absent.isEmpty()) {
+            QList<QJsonObject> handles;
+            for (const MissingModel &model : absent)
+                handles.append(model.handle);
+            QList<QJsonObject> here; // the list's hashed models that are on this machine: the host must have those too
+            for (const QJsonValue entry : entries) {
+                const QJsonObject handle = entry.toObject();
+                const bool missingHere = std::any_of(absent.cbegin(), absent.cend(), [&handle](const MissingModel &model) {
+                    return model.handle.value(QStringLiteral("hash")) == handle.value(QStringLiteral("hash"));
+                });
+                if (!missingHere && !handle.value(QStringLiteral("hash")).toString().isEmpty())
+                    here.append(handle);
+            }
+            onHosts = env.hostHaving(handles, here);
+        }
+        for (const MissingModel &model : absent) {
             const QString name = model.handle.value(QStringLiteral("name")).toString();
             const bool chosen = !optional || request.optionalChosen.contains(model.handle.value(QStringLiteral("hash")).toString());
+            // A paired host that lists the file has it: nothing to download or to put here (#735).
+            if (!onHosts.host.isEmpty()) {
+                plan.hosted.append({name, onHosts.host, model.handle});
+                continue;
+            }
             if (model.source.isEmpty()) {
                 if (optional)
                     continue;
-                plan.problems << problem(QStringLiteral("model_missing"), QStringLiteral("The model %1 has no source to download from.").arg(name),
+                plan.problems << problem(QStringLiteral("model_missing"),
+                                         (QStringLiteral("The model %1 has no source to download from. %2").arg(name, onHosts.why)).trimmed(),
                                          QStringLiteral("Put it in %1.").arg(model.folder));
                 plan.unobtainable << model.handle;
                 continue;
@@ -384,6 +415,7 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
             row.size = model.size;
             row.entry = entryOf(entries, model);
             row.optional = optional;
+            row.hostNote = onHosts.why;
             // Its type is declared by a pack this plan installs: nothing to plan until that pack is in (#418).
             if (const std::optional<QString> from = typeFromPack(plan, row.resource, library)) {
                 row.deferred = true;

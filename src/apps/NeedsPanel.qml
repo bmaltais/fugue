@@ -81,7 +81,7 @@ Item {
                     current: true
                     // A file of this list being read is not asked for again (the rows say so too); a file another tab reads is not its business.
                     enabled: !panel.needs.readingOwn
-                    visible: panel.needs.items.some(i => i.kind !== "problem" && i.kind !== "optional")
+                    visible: panel.needs.items.some(i => i.kind !== "problem" && i.kind !== "optional" && i.kind !== "hosted")
                     onTapped: panel.needs.downloadAll()
                 }
             }
@@ -120,7 +120,7 @@ Item {
                             glyph: row.covered ? "download" : ""
                             text: row.covered ? "" : row.modelData.action
                             tip: row.covered ? qsTr("Download %1").arg(row.modelData.size) : ""
-                            visible: row.modelData.kind !== "problem"
+                            visible: row.modelData.kind !== "problem" && row.modelData.kind !== "hosted"
                             enabled: !row.reading
                             onTapped: panel.needs.download(row.index)
                         }

@@ -87,13 +87,15 @@
 // has less free memory than the new one's files take, and a load or a generation that runs out
 // of memory frees the others and is tried once more.
 //
-// --serve-http serves the same jobs as POST /fugue/v1/{describe,submit,status,cancel,result,
+// --serve-http serves the same jobs as POST /fugue/v1/{describe,models,submit,status,cancel,result,
 // shutdown} and GET /fugue/v1/result/<job>/<i>, JSON bodies and a bearer key; the contract is in
 // README.md. There the host makes each job's work dir, inputs arrive as {"data", "format"}, model
 // files are named by handle ({"name", "sha256", "size"}) and found under --models, and the
 // outputs are fetched as files.
 
 #include <algorithm>
+#include <fcntl.h>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <chrono>
@@ -1122,8 +1124,20 @@ private:
     uint64_t m_total = 0;
 };
 
+// Held while a job runs and while the worker asks the engine about a header: the engine is not called from two threads at once.
+std::mutex g_engineMutex;
+
 // The hash of a file; empty if `cancelled` says stop or the file cannot be read.
 std::string sha256OfFile(const fs::path &path, const std::function<bool()> &cancelled) {
+    // Opened without blocking and checked to be a regular file first: a fifo or a device under a root is never read.
+    const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+        return {};
+    struct stat st {};
+    const bool regular = ::fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
+    ::close(fd);
+    if (!regular)
+        return {};
     std::ifstream in(path, std::ios::binary);
     if (!in)
         return {};
@@ -1254,12 +1268,192 @@ public:
         fail("model_missing", "no file named \"" + name + "\" has the content asked for (sha256 " + sha + "): the sha256 differs for " + others);
     }
 
+    // The model files under the roots, for a keyed client (the `models` operation, spec 8.7): read-only. Each file is
+    // {name, size, sha256 (null until hashed), folder, family}. Only a regular file with a model extension (the list of
+    // ModelLibrary::defaultModelExtensions) that is `inside()` the roots is listed, at most `kMostListed`; of two roots holding
+    // the same relative name the first wins, as a handle resolves. A sha256 comes from the remembered hashes only: with `hash`
+    // the helper queues files for the worker thread (the ones in `names`, else the first without a hash; at most
+    // `kHashPerRequest`), and `busy` says the queue was full. The families are read by the same worker, never on a request's thread.
+    static constexpr size_t kMostListed = 4000;
+    static constexpr size_t kHashPerRequest = 8;
+    static constexpr size_t kQueueMost = 16;
+    static constexpr size_t kHeaderQueueMost = 64;
+    static constexpr int kScanSeconds = 30;
+
+    ~Models() {
+        {
+            std::lock_guard<std::mutex> lock(m_workMutex);
+            m_stop = true;
+        }
+        m_workWake.notify_all();
+        if (m_worker.joinable())
+            m_worker.join();
+    }
+
+    json list(bool hash, const std::vector<std::string> &only, bool rescan = false) {
+        std::vector<Entry> files;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (rescan || std::chrono::steady_clock::now() - m_scannedAt > std::chrono::seconds(kScanSeconds))
+                scan(); // a file added since the walk of the last 30 seconds
+            files = m_files;
+        }
+        json models = json::array();
+        std::vector<std::string> unhashed; // names, in the order they would be hashed
+        std::map<std::string, std::string> pathOfName;
+        std::set<std::string> seen;
+        bool truncated = false;
+        for (const Entry &e : files) {
+            if (!hasModelExtension(e.rel) || !seen.insert(e.rel).second || !inside(e.path))
+                continue;
+            if (models.size() >= kMostListed) {
+                truncated = true;
+                break;
+            }
+            const std::string path = e.path.string();
+            pathOfName[e.rel] = path;
+            const std::string sha = knownHash(path);
+            if (sha.empty())
+                unhashed.push_back(e.rel);
+            const std::string folder = e.rel.find('/') == std::string::npos ? std::string() : e.rel.substr(0, e.rel.find('/'));
+            json entry{{"name", e.rel}, {"size", e.size}, {"sha256", sha.empty() ? json() : json(sha)}, {"folder", folder}, {"family", nullptr}};
+            if (folder == "diffusion_models" || folder == "unet" || folder == "checkpoints") {
+                bool known = false;
+                const json family = knownFamily(path, e.size, known);
+                entry["family"] = family;
+                if (!known)
+                    enqueue({Job::Family, path, e.size});
+            }
+            models.push_back(std::move(entry));
+        }
+        size_t started = 0;
+        bool busy = false;
+        if (hash) {
+            std::vector<std::string> order;
+            if (!only.empty()) { // named files only
+                for (const std::string &name : only)
+                    if (std::find(unhashed.begin(), unhashed.end(), name) != unhashed.end())
+                        order.push_back(name);
+            } else {
+                order = unhashed;
+            }
+            for (const std::string &name : order) {
+                if (started >= kHashPerRequest)
+                    break;
+                if (enqueue({Job::Hash, pathOfName[name], 0}))
+                    ++started;
+                else {
+                    busy = true;
+                    break;
+                }
+            }
+        }
+        return {{"models", std::move(models)}, {"truncated", truncated}, {"unhashed", unhashed.size()}, {"hashing", pending()},
+                {"hash_started", started}, {"busy", busy}};
+    }
+
 private:
     struct Entry {
         std::string rel; // relative to its root, with '/'
         fs::path path;
         uintmax_t size;
     };
+
+    static bool hasModelExtension(const std::string &rel) {
+        static const char *const known[] = {".safetensors", ".gguf", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".sft", ".pkl"}; // ModelLibrary::defaultModelExtensions
+        const std::string ext = fs::path(rel).extension().string();
+        if (ext == ".json" && rel.compare(0, 11, "tokenizers/") == 0)
+            return true; // a tokenizer's file (MOSS Image) is a model of its own type
+        std::string lower;
+        for (const char c : ext)
+            lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return std::find_if(std::begin(known), std::end(known), [&lower](const char *each) { return lower == each; }) != std::end(known);
+    }
+
+    // The engine's name for a model file kept for its size; `known` says whether it was asked already.
+    json knownFamily(const std::string &path, uintmax_t size, bool &known) {
+        std::lock_guard<std::mutex> lock(m_familyMutex);
+        const auto found = m_families.find(path);
+        known = found != m_families.end() && found->second.size == size;
+        return known && !found->second.name.empty() ? json(found->second.name) : json();
+    }
+
+    // One worker thread, owned by this object and joined in its destructor, takes the hashing and the header reads one at a time from a
+    // bounded queue (no thread per request); the engine is asked only while no job runs (g_engineMutex).
+    struct Job {
+        enum Kind { Hash, Family } kind;
+        std::string path;
+        uintmax_t size;
+    };
+
+    bool enqueue(Job job) {
+        std::lock_guard<std::mutex> lock(m_workMutex);
+        std::deque<Job> &queue = job.kind == Job::Hash ? m_work : m_headerWork;
+        for (const Job &queued : queue)
+            if (queued.path == job.path)
+                return true; // already waiting: not twice
+        if (m_running == job.path && m_runningKind == job.kind)
+            return true;
+        if (queue.size() >= (job.kind == Job::Hash ? kQueueMost : kHeaderQueueMost))
+            return false; // the hash queue full is `busy`; a header read dropped is asked again by the next listing
+        queue.push_back(std::move(job));
+        if (!m_worker.joinable())
+            m_worker = std::thread([this] { run(); });
+        m_workWake.notify_one();
+        return true;
+    }
+
+    size_t pending() {
+        std::lock_guard<std::mutex> lock(m_workMutex);
+        size_t hashing = 0;
+        for (const Job &queued : m_work)
+            hashing += queued.kind == Job::Hash ? 1 : 0;
+        return hashing + (m_running.empty() || m_runningKind != Job::Hash ? 0 : 1);
+    }
+
+    void run() {
+        for (;;) {
+            Job job;
+            {
+                std::unique_lock<std::mutex> lock(m_workMutex);
+                m_workWake.wait(lock, [this] { return m_stop || !m_work.empty() || !m_headerWork.empty(); });
+                if (m_stop)
+                    return;
+                std::deque<Job> &queue = m_work.empty() ? m_headerWork : m_work; // hashes first
+                job = queue.front();
+                queue.pop_front();
+                m_running = job.path;
+                m_runningKind = job.kind;
+            }
+            try {
+                if (job.kind == Job::Hash) {
+                    hashOf(job.path, [this] { return m_stop.load(); });
+                } else if (std::unique_lock<std::mutex> engine(g_engineMutex, std::try_to_lock); engine.owns_lock()) {
+                    char *text = sd_fugue_inspect_model(job.path.c_str());
+                    const json answer = text ? json::parse(text, nullptr, false) : json();
+                    sd_fugue_string_free(text);
+                    std::string name;
+                    if (answer.is_object() && answer.value("recognised", false) && answer.contains("version") && answer["version"].is_string())
+                        name = answer["version"].get<std::string>();
+                    std::lock_guard<std::mutex> lock(m_familyMutex);
+                    m_families[job.path] = {job.size, name};
+                } // a job is running: asked again by the next listing
+            } catch (...) {
+            }
+            std::lock_guard<std::mutex> lock(m_workMutex);
+            m_running.clear();
+        }
+    }
+
+    // The remembered hash of a file whose size and time are still the ones it was made for; empty if none.
+    std::string knownHash(const std::string &path) {
+        std::error_code ec;
+        const uintmax_t size = fs::file_size(path, ec);
+        const int64_t mtime = static_cast<int64_t>(fs::last_write_time(path, ec).time_since_epoch().count());
+        std::lock_guard<std::mutex> lock(m_hashMutex);
+        const auto known = m_hashes.find(path);
+        return known != m_hashes.end() && known->second.size == size && known->second.mtime == mtime ? known->second.hex : std::string();
+    }
 
     static std::vector<std::string> folders(const std::string &key) {
         static const std::map<std::string, std::vector<std::string>> byKey{
@@ -1398,14 +1592,16 @@ private:
             if (name.empty() || name[0] == '.')
                 continue;
             const std::string childRel = rel.empty() ? name : rel + "/" + name;
-            if (fs::is_directory(path, ec))
-                walk(path, childRel, depth + 1);
-            else if (fs::is_regular_file(path, ec))
+            if (fs::is_directory(path, ec)) {
+                if (inside(path)) // a linked folder that leaves the roots is not entered
+                    walk(path, childRel, depth + 1);
+            } else if (fs::is_regular_file(path, ec) && inside(path))
                 m_files.push_back({childRel, path, fs::file_size(path, ec)});
         }
     }
 
     void scan() {
+        m_scannedAt = std::chrono::steady_clock::now();
         m_files.clear();
         for (const fs::path &root : m_roots)
             walk(root, "", 0);
@@ -1418,6 +1614,21 @@ private:
     fs::path m_hashFile;
     std::map<std::string, Hash> m_hashes;
     std::mutex m_hashMutex;
+    struct Family {
+        uintmax_t size = 0;
+        std::string name;
+    };
+    std::map<std::string, Family> m_families;
+    std::mutex m_familyMutex;
+    std::deque<Job> m_work;       // hashing for the worker, at most kQueueMost
+    std::deque<Job> m_headerWork; // header reads, after the hashes, at most kHeaderQueueMost
+    std::string m_running;
+    Job::Kind m_runningKind = Job::Hash;
+    std::mutex m_workMutex;
+    std::condition_variable m_workWake;
+    std::atomic<bool> m_stop{false};
+    std::thread m_worker; // last: started on the first job, joined in the destructor
+    std::chrono::steady_clock::time_point m_scannedAt{};
 };
 
 // The bytes of a base64 string (RFC 4648, the URL-safe alphabet and white space tolerated).
@@ -1555,8 +1766,17 @@ public:
                         {"shares_filesystem", false},
                         {"backend", FUGUE_BACKEND},
                         {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale", "image.restore"}},
+                        {"operations", {"models"}},
                         {"free_memory_bytes", availableMemory()},
                         {"host", hostName()}};
+        });
+        post("models", [this](const json &body) {
+            std::vector<std::string> only;
+            if (body.contains("names") && body["names"].is_array())
+                for (const json &name : body["names"])
+                    if (name.is_string())
+                        only.push_back(name.get<std::string>());
+            return m_models->list(body.value("hash", false), only, body.value("rescan", false));
         });
         post("submit", [this](const json &body) { return submitHttp(body); });
         for (const char *op : {"status", "cancel", "result"})
@@ -1953,6 +2173,7 @@ private:
                     job.stage = "models";
                 say(statusOf(id, job));
             }
+            std::lock_guard<std::mutex> engine(g_engineMutex);
             const json reply = attempt([&] {
                 if (!pending.empty()) { // hashing a big file takes a while: not in the request
                     const auto cancelled = [this, id] {

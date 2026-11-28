@@ -30,6 +30,7 @@
 
 #include "engine/error.h"
 #include "engine/model_download.h"
+#include "engine/host_availability.h"
 #include "engine/model_library.h"
 #include "engine/pack_manager.h"
 #include "engine/templates.h"
@@ -104,12 +105,23 @@ struct ReadinessModel {
     // row stays and says so (#493). Empty: this machine is where it runs.
     QString onHost;
     QString typeFrom;   // deferred: the pack that gives its type (its name), or empty when the list cannot tell
+    QString hostNote;   // a paired host has it but that does not count, and why ("gx10 has it, but ..."): shown with the row (#735)
     bool optional = false; // only a Switch's lazy side needs it (#594): in `models` only because the person chose to download it
+};
+
+// A model that is not on this machine but is on a paired host that lists it (#735): it needs no download and no Get ready row, and
+// is shown as "on <host>".
+struct HostedModel {
+    QString name;
+    QString host;
+    QJsonObject handle;
 };
 
 struct ReadinessPlan {
     QList<ReadinessPack> packs;
     QList<ReadinessModel> models;
+    // Missing here, on a paired host's list: counted as available, never offered as a download.
+    QList<HostedModel> hosted;
     // The missing models only a lazy side needs and the person did not choose: non-blocking, so not in `models`, `empty()`, the
     // headline or the sizes. Each has a download target, or is left out (no source, no place to put it).
     QList<ReadinessModel> optionalModels;
@@ -160,6 +172,9 @@ struct ReadinessEnv {
     TrustStore *trust = nullptr;
     QString packsDir;
     const ModelCatalog *catalog = nullptr; // for a model's license; may be null
+    // The paired host whose model list has the file this handle names (by its hash), or empty: the model is then available
+    // there (ReadinessPlan::hosted) and is not a download. Null: no host is asked. Reads kept lists only (HostModelCache).
+    HostAvailabilityFn hostHaving;
     // Free bytes where a folder is (a folder that does not exist yet counts as its parent); default QStorageInfo.
     std::function<qint64(const QString &)> freeSpace;
     // What a folder pack's copy prints and `cancelled` to stop it. May be null.

@@ -1,4 +1,6 @@
 #include "apps/app_models.h"
+#include "engine/host_models.h"
+#include "engine/providers.h"
 
 #include <QFileInfo>
 #include <QPointer>
@@ -41,6 +43,25 @@ void AppModels::request(const QString &type, const QStringList &capabilities) {
     entry.missing = (m_catalog ? *m_catalog : ModelCatalog::load()).missing(type, lib, *portType, hashes());
     entry.marks.clear();
     entry.loading = true;
+    {
+        // A paired helper's kept models (no network), and a background refresh of an old list that lists them again when it answers.
+        QList<ProviderInstance> helpers;
+        if (const Result<QList<ProviderInstance>> loaded = loadProviderInstances(providersPath()); loaded.ok())
+            for (const ProviderInstance &instance : loaded.value())
+                if (instance.enabled && isPairedHelper(instance))
+                    helpers << instance;
+        entry.remote = listHostModels(helpers, HostModelCache::shared(), lib, *portType, entry.disk);
+        if (!helpers.isEmpty()) {
+            QPointer<AppModels> self(this);
+            HostModelCache::shared().refreshStale(helpers, HostModelCache::kTtlSeconds, [self, key, helpers, lib, portType](const HostModelList &) {
+                if (!self || !self->m_entries.contains(key))
+                    return;
+                Entry &again = self->m_entries[key];
+                again.remote = listHostModels(helpers, HostModelCache::shared(), lib, *portType, again.disk);
+                emit self->changed();
+            });
+        }
+    }
     emit changed();
 
     // The Recommended mark reads file headers: off the window's thread, applied when it is done unless asked again.
@@ -82,7 +103,7 @@ bool AppModels::loading(const QString &type, const QStringList &capabilities) co
 QVariantList AppModels::entries(const QString &type, const QStringList &capabilities) const {
     const Entry entry = m_entries.value(keyOf(type, capabilities));
     QVariantList list;
-    for (const ListedModel &model : entry.offered + entry.disk)
+    for (const ListedModel &model : entry.offered + entry.disk + entry.remote)
         list.append(modelRow(model, type, entry.marks));
     for (const CatalogModel &model : std::as_const(entry.missing))
         list.append(catalogRow(model));

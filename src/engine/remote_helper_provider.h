@@ -66,6 +66,10 @@ public:
     void status(const QString &job, Reply<JobStatus> reply) override;
     void cancel(const QString &job, Reply<QString> reply) override;
     void result(const QString &job, Reply<JobResult> reply) override;
+    // The models under the host's --models roots (`POST /fugue/v1/models`, 8.7), as the host answered. `hash`: ask it to hash, in
+    // the background, up to a few files that have no hash yet, `names` first. A host without the operation is the error
+    // `not_found`. Read-only on the host.
+    void listModels(bool hash, const QStringList &names, Reply<QJsonObject> reply);
     // Only for a provider Fugue started: asks it to shut down and ends it; returns once it is gone.
     void shutdown(Reply<Nothing> reply) override;
 

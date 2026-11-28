@@ -14,6 +14,7 @@
 #include "engine/group_library.h"
 #include "engine/ids.h"
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/json.h"
 #include "engine/model_catalog.h"
 #include "engine/model_download.h"
@@ -405,6 +406,20 @@ void Workflows::showMissing() {
         return setNotice({});
     m_missingNotice = missingNotice(shownDocument(), m_tabs[size_t(m_current)].title, &m_offer);
     setNotice(m_missingNotice);
+    // A paired host's list that is old is asked again in the background, and the notice made again when it answers (#735).
+    if (!m_missingNotice.isEmpty()) {
+        QPointer<Workflows> self(this);
+        QList<ProviderInstance> helpers;
+        if (const Result<QList<ProviderInstance>> loaded = loadProviderInstances(providersPath()); loaded.ok())
+            helpers = loaded.value();
+        HostModelCache::shared().refreshStale(helpers, HostModelCache::kTtlSeconds, [self](const HostModelList &) {
+            if (self && self->m_current >= 0 && !self->m_refreshingHostLists) {
+                self->m_refreshingHostLists = true; // not again for the refresh this one starts
+                self->showMissing();
+                self->m_refreshingHostLists = false;
+            }
+        });
+    }
 }
 
 void Workflows::dismissNotice() { setNotice({}); }
@@ -1152,6 +1167,7 @@ bool Workflows::templateMatches(const QString &query, const QVariantMap &templ) 
 QVariantMap Workflows::missingModels(const QJsonArray &models) const {
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
+    library.setHostHaving(HostModelCache::shared().availabilityFunction()); // on a paired host: not missing (#735)
     downloadable(models, library); // the folders they would go in
     const QList<MissingModel> absent = library.missing(models, hashes);
     return {{"count", int(absent.size())}, {"total", int(models.size())}, {"download", offerText(absent)}, {"size", downloadSize(absent)}};
@@ -1399,6 +1415,7 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     // Spec 4.3: the models it names that are not here, without reading a model file.
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
+    library.setHostHaving(HostModelCache::shared().availabilityFunction()); // on a paired host: not missing (#735)
     QList<PortType> types;
     const QJsonArray wanted = modelsToHave(document, *m_registry); // not a model only a Switch's lazy side holds (#557)
     for (const MissingModel &model : downloadable(wanted, library))

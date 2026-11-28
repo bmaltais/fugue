@@ -8,6 +8,7 @@
 // node.json files that FUGUE_NODE_MANIFESTS names (through cli::Hooks). Run folders are made with RunFolder under a temporary
 // XDG_CACHE_HOME, the same files a worker writes.
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -809,6 +810,45 @@ private slots:
         QCOMPARE(o.firstCode(), QString("usage"));
         QCOMPARE(o.json().value("errors").toArray().at(0).toObject().value("valid").toArray(),
                  QJsonArray{"fugue/test-lora"});
+    }
+
+    // #735: a paired helper's kept list is in `model list`: its models as `source: host`, and `hosts` says when each list was fetched.
+    // Nothing is asked of the host (the address names no machine); `--host` narrows to one helper and refuses a name that is none.
+    void modelListShowsThePairedHostsKeptModels() {
+        const QString address = QStringLiteral("http://gx10.example:8787");
+        const auto cleanUp = qScopeGuard([this] {
+            QFile::remove(m_dir.filePath("config/fugue/providers.json"));
+            QDir(m_dir.filePath("state/fugue/host_models")).removeRecursively();
+        });
+        write(m_dir.filePath("config/fugue/providers.json"),
+              QJsonDocument(QJsonObject{{"providers", QJsonArray{QJsonObject{{"name", "gx10"}, {"type", "fugue-helper"}, {"address", address}, {"key", "k"}}}}})
+                  .toJson());
+        const QString file = QString::fromLatin1(QCryptographicHash::hash(("gx10\n" + address).toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+        const QString hash(64, 'a');
+        write(m_dir.filePath("state/fugue/host_models/" + file + ".json"),
+              QJsonDocument(QJsonObject{{"host", "gx10"}, {"supported", true}, {"fetched_at", "2026-11-28T10:00:00Z"},
+                                        {"models", QJsonArray{QJsonObject{{"name", "loras/x.safetensors"}, {"size", 10}, {"sha256", hash}, {"folder", "loras"}}}}})
+                  .toJson());
+        const Outcome all = fugue({"model", "list", "--type", "fugue/test-lora", "--json"});
+        QCOMPARE(all.exitCode, 0);
+        const QJsonObject data = all.json().value("data").toObject();
+        QCOMPARE(data.value("hosts").toArray().at(0).toObject().value("fetched_at").toString(), QString("2026-11-28T10:00:00Z"));
+        bool found = false;
+        for (const QJsonValue &each : data.value("models").toArray())
+            if (each.toObject().value("source") == "host") {
+                found = true;
+                QCOMPARE(each.toObject().value("host").toString(), QString("gx10"));
+                QCOMPARE(each.toObject().value("handle").toObject().value("hash").toString(), "sha256:" + hash);
+            }
+        QVERIFY2(found, all.out.constData());
+        const Outcome only = fugue({"model", "list", "--host", "gx10", "--json"});
+        QCOMPARE(only.exitCode, 0);
+        for (const QJsonValue &each : only.json().value("data").toObject().value("models").toArray())
+            QCOMPARE(each.toObject().value("source").toString(), QString("host")); // no files on disk, no provider's models
+        const Outcome nobody = fugue({"model", "list", "--host", "nope", "--json"});
+        QCOMPARE(nobody.exitCode, 1);
+        QCOMPARE(nobody.firstCode(), QString("usage"));
+        QCOMPARE(nobody.json().value("errors").toArray().at(0).toObject().value("valid").toArray(), QJsonArray{"gx10"});
     }
 
     void modelListShowsWhatProvidersOffer() {

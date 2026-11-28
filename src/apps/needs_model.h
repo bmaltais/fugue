@@ -70,7 +70,10 @@ public:
     void setGraphAvailable(bool available);
 
     bool ready() const {
-        return std::none_of(m_items.cbegin(), m_items.cend(), [](const QVariant &item) { return item.toMap().value(QStringLiteral("kind")).toString() != QLatin1String("optional"); });
+        return std::none_of(m_items.cbegin(), m_items.cend(), [](const QVariant &item) {
+            const QString kind = item.toMap().value(QStringLiteral("kind")).toString();
+            return kind != QLatin1String("optional") && kind != QLatin1String("hosted"); // neither blocks (#594, #735)
+        });
     }
     QVariantList items() const { return m_items; }
     QString headline() const { return m_headline; }

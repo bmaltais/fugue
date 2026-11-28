@@ -60,7 +60,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"sandbox-on", {1, 1, {}, {}, packSandboxOn}},
           {"secret", {1, 3, {"origin"}, {}, packSecret}}}},
         {"provider", {{"list", {0, 0, {}, {}, nullptr}}}},
-        {"model", {{"list", {0, 0, {"type", "family"}, {"hash"}, modelList}}, {"get", {1, 1, {"into"}, {}, modelGet}}, {"find-folders", {0, 0, {"only"}, {}, modelFindFolders}}}},
+        {"model", {{"list", {0, 0, {"type", "family", "host"}, {"hash", "refresh"}, modelList}}, {"get", {1, 1, {"into"}, {}, modelGet}}, {"find-folders", {0, 0, {"only"}, {}, modelFindFolders}}}},
         {"template", {{"list", {0, 0, {}, {}, templateList}}, {"update", {0, 0, {}, {}, templateUpdate}}, {"prepare", {1, 1, {}, {}, templatePrepare}}}},
         {"app",
          {{"list", {0, 0, {}, {}, appList}},

@@ -36,6 +36,7 @@
 #include <functional>
 #include <optional>
 
+#include "engine/host_availability.h"
 #include "engine/paths.h"
 #include "engine/port_type.h"
 #include "engine/result.h"
@@ -163,6 +164,11 @@ public:
     // the handle has no hash (a model a provider serves), or its type is not a resource type here.
     Result<QString> resolve(const QJsonObject &handle, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 
+    // A model that a paired host lists (#735) is not missing: `hostHaving` is asked with every handle not here: when one host has them all (fresh list, no error) none is missing.
+    // Only `missing()` asks it, so a run that needs the file here still finds none (resolve) and the scheduler places the node.
+    using HostHaving = HostAvailabilityFn;
+    void setHostHaving(HostHaving hostHaving) { m_hostHaving = std::move(hostHaving); }
+
     // The models `document` names (Document::models()) that are not here, in its order, then the companion files of its models
     // (the Qwen3.5 tokenizer of a MOSS Image model, with the catalog's source and size). A check:
     // it reads no model file (Hashing::RememberedOnly).
@@ -191,6 +197,7 @@ private:
     const Registry *m_registry = nullptr;
     QHash<QString, QString> m_kinds; // set in the settings, by root
     QString m_downloadRoot;          // empty: the first root
+    HostHaving m_hostHaving;
     mutable QHash<QString, QList<ModelFile>> m_listed; // by PortType::toString()
 };
 

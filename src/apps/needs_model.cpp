@@ -93,6 +93,8 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
             parts << tr("from %1").arg(m.host);
         if (!m.onHost.isEmpty())
             parts << tr("on %1 if it has it").arg(m.onHost);
+        if (!m.hostNote.isEmpty())
+            parts << m.hostNote;
         if (m.deferred)
             parts << (m.typeFrom.isEmpty() ? tr("type from a pack in this list") : tr("type from %1").arg(m.typeFrom));
         add({{"kind", "model"}, {"key", "model:" + m.name}, {"name", m.name}, {"id", QString()}, {"hash", m.entry.value("hash").toString()},
@@ -102,6 +104,12 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
              {"action", tr("Download")}},
             m.entry);
     }
+    // Models a paired host lists (#735): nothing to download, said as "on gx10" after the rest.
+    for (const HostedModel &m : plan.hosted)
+        add({{"kind", "hosted"}, {"key", "hosted:" + m.name}, {"name", m.name}, {"id", QString()}, {"hash", m.handle.value("hash").toString()},
+             {"detail", tr("on %1").arg(m.host)}, {"size", QString()}, {"licence", QString()}, {"licenceUrl", QString()}, {"canDownload", false},
+             {"action", QString()}},
+            {});
     // Models only another branch of a Switch needs (#594): non-blocking, listed after the rest with the download on offer. They do not
     // make the panel show by themselves (`ready`): a ready app keeps its App view clean, and the Get ready sheet lists them too.
     for (const ReadinessModel &m : plan.optionalModels) {
@@ -144,7 +152,8 @@ void NeedsModel::setPlan(const ReadinessPlan &plan) {
         counts << (bytes > 0 ? tr("%n models (%1)", nullptr, downloads).arg((unknown ? tr("at least ") : QString()) + ModelDownloads::sizeText(bytes))
                              : tr("%n models", nullptr, downloads));
     const bool anyBlocking = std::any_of(items.cbegin(), items.cend(), [](const QVariant &item) {
-        return item.toMap().value("kind").toString() != QLatin1String("optional");
+        const QString kind = item.toMap().value("kind").toString();
+        return kind != QLatin1String("optional") && kind != QLatin1String("hosted");
     });
     QString headline = counts.isEmpty() ? (!anyBlocking || covered > 0 ? QString() : tr("This app cannot be made ready from this machine."))
                                         : tr("This app needs %1.").arg(counts.join(tr(" and ")));
