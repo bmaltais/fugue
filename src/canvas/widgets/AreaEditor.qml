@@ -64,6 +64,7 @@ Rectangle {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height
+        onHeightChanged: edit.updateGutter()
         ScrollBar.vertical: FugueScrollBar { look: area.host.look }
 
         TextEdit {
@@ -80,6 +81,7 @@ Rectangle {
             selectionColor: area.host.look.accent
             selectedTextColor: area.host.look.accentForeground
             font.pixelSize: area.host.labelPx
+            font.features: { "tnum": 1 } // as the resting text has them, so the lines wrap alike
             // Only a change of the text is typing: the highlighter's passes (and a closing editor) must not preview, or old text could go
             // into the next field's session when a key and Tab arrive in one batch.
             onTextChanged: {
@@ -88,7 +90,10 @@ Rectangle {
                 area.lastText = text
                 area.host.error = area.host.edits.preview(text)
             }
-            onContentHeightChanged: gutter = contentHeight > flick.height ? (flick.ScrollBar.vertical as FugueScrollBar).breadth : 0
+            function updateGutter() {
+                gutter = contentHeight > flick.height ? (flick.ScrollBar.vertical as FugueScrollBar).breadth : 0
+            }
+            onContentHeightChanged: updateGutter()
             onCursorRectangleChanged: {
                 if (cursorRectangle.y < flick.contentY)
                     flick.contentY = cursorRectangle.y

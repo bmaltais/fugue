@@ -249,8 +249,10 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     for (const char *id : {"node.distribute-horizontal", "node.distribute-vertical"})
         registry.setEnabledWhen(QString::fromLatin1(id), [model] { return model->selectedIds().size() >= 3; });
     // Edit text…: a node with a text input (#715).
+    // From a text field that holds the focus it needs no selection: the field's own node is the one (the window finds it).
     registry.setEnabledWhen("node.edit-text", [model, &registry] {
-        return !model->textEditNode(registry.target().value("node").toString()).isEmpty();
+        const QString target = registry.target().value("node").toString();
+        return !model->textEditNode(target).isEmpty() || (target.isEmpty() && registry.textFieldFocus());
     });
     // Rename: one node (#55), or a group's port the menu was opened on (#72).
     registry.setEnabledWhen("edit.rename", [model, &registry] {

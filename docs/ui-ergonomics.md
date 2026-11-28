@@ -1702,5 +1702,8 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Tab rule in the window: Tab and Shift+Tab walk the node's text inputs in order; past the last (before the first) they reach the window's buttons (Go to source, Close); Tab on a button goes to the next button, and past the last one back into the text. Tab is the window's on a button, so it never opens node search behind it.
 - Performance: the window refreshes only for the shown node's rows (and the source node of a linked input), not on every node's change; "+N lines" counts a moment after the text stopped changing and only while the card is shown.
 - A text result is the output the card's excerpt shows (not the first text output in card order); an excerpt that is no output's text (a number, a label) has no text window.
-- Not done: Alt+T from an inline field with no node selected is still off (the command's enabled check looks at the selection; menu_commands.cpp).
+- Keys in the window: every key without Ctrl, Alt or Meta (F-keys apart) is the window's while the focus is anywhere in it, so on Close or Go to source Delete, Q, P and the rest do nothing to the canvas behind it; Ctrl+Enter still runs, Return and Space press the button.
+- A pasted break into a one-line input is replaced inside the just-inserted range, in the same undo step as the paste (`TextLines.replaceBreaks`); the breaks of a stored value are not touched.
+- A Preview's text excerpt has its whole text for the text window: the run records the key it shows (`textKey`), and the window's label is that input's.
+- Alt+T from a focused inline text field needs no selection (the command's enabled check accepts a focused text field).
 - Checked by `test_canvas_widgets` and `test_app_window` (one test each for the above). Not checked by a person: the editor's line positions on a real display.

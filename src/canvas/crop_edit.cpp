@@ -69,23 +69,24 @@ QVariantMap CanvasModel::resultText(const QString &node) const {
     const auto run = m_run.constFind(node);
     if (row < 0 || run == m_run.constEnd())
         return {{"has", false}};
-    // The output the card's excerpt shows: its text is that output's text (cut, with an ellipsis, when huge), whichever comes first in
-    // the card's order. With no excerpt of a text to match (none yet), the first text output in the card's order.
-    QString excerpt = run->thumbnailText;
-    if (excerpt.endsWith(QChar(0x2026)))
-        excerpt.chop(1);
-    const Port *found = nullptr;
-    for (const Port &port : m_rows[size_t(row)].outputs) {
-        if (!run->texts.contains(port.name))
-            continue;
-        if (excerpt.isEmpty() || run->texts.value(port.name).toString().startsWith(excerpt)) {
-            found = &port;
-            break;
-        }
+    const NodeRow &r = m_rows[size_t(row)];
+    // The text the card's excerpt shows: the key the run recorded (a Preview's input: it has no output), its label the input's or the
+    // output's. Without one, the first text output in the card's order.
+    if (const QString key = run->textKey; !key.isEmpty() && run->texts.contains(key)) {
+        QString label = key;
+        for (const Port &port : r.outputs)
+            if (port.name == key)
+                label = port.label;
+        if (label == key)
+            for (const Port &port : r.inputs)
+                if (port.name == key)
+                    label = port.label;
+        return {{"has", true}, {"output", key}, {"label", label}, {"text", run->texts.value(key).toString()}};
     }
-    if (!found)
-        return {{"has", false}};
-    return {{"has", true}, {"output", found->name}, {"label", found->label}, {"text", run->texts.value(found->name).toString()}};
+    for (const Port &port : r.outputs)
+        if (run->texts.contains(port.name))
+            return {{"has", true}, {"output", port.name}, {"label", port.label}, {"text", run->texts.value(port.name).toString()}};
+    return {{"has", false}};
 }
 
 QString CanvasModel::linkedFrom(const QString &node, const QString &input) const {

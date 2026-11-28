@@ -680,7 +680,7 @@ FocusScope {
     property var textDialog: null
     Component {
         id: textDialogComponent
-        TextDialog { onClosed: canvas.forceActiveFocus() }
+        TextDialog { onClosed: if (canvas.visible) canvas.forceActiveFocus() }
     }
     property var mediaDialog: null
     Component {
@@ -1607,7 +1607,10 @@ FocusScope {
         // Alt+T from an inline text field is for that field, not for the selected node.
         function onTextEditRequested(node) {
             const field = canvas.focusedTextField()
-            canvas.openText(field ? field.nodeId : node, field ? field.name : "")
+            if (field)
+                canvas.openText(field.nodeId, field.name)
+            else if (node !== "")
+                canvas.openText(node, "")
         }
         function onFrameRenameRequested(frame) { canvas.renamingFrame = frame }
     }

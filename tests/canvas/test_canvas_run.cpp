@@ -905,6 +905,28 @@ private slots:
     }
 
 
+    // #715: a Preview fed a text shows its excerpt, and a double-click's text window has the whole text of that run (a Preview has no
+    // output to take it from).
+    void aPreviewOfATextHasItsWholeTextForTheTextWindow() {
+        RunApp r(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a cat\nin the snow"}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "words.text"}}}
+  }},
+  "layout": {"nodes": {"words": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}, "view": {"center": [300, 100], "zoom": 1}}
+})");
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(!r.role("show", NodeList::ThumbnailText).toString().isEmpty());
+        const QVariantMap result = r.app.model.resultText("show");
+        QVERIFY(result.value("has").toBool());
+        QCOMPARE(result.value("text").toString(), QString("a cat\nin the snow"));
+        QCOMPARE(result.value("label").toString(), r.app.model.inputPort("show", "value").value("label").toString());
+    }
+
     // 8.2, #404: a node routed to a service off this machine says so on its face; a run that would send data there asks first
     // (nothing is sent meanwhile); the question opens on No, so Enter and Escape cancel the run and Tab then Enter is Yes, which is kept for the next run.
     void aServiceOffThisMachineIsMarkedAndAsksBeforeAnythingIsSent() {

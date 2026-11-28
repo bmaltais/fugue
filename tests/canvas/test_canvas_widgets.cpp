@@ -4,7 +4,9 @@
 // source, Tab between fields, and the text-field focus rules that keep typed keys away from
 // the commands.
 
+#include <QClipboard>
 #include <QFontMetricsF>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QQuickStyle>
@@ -422,6 +424,14 @@ private slots:
         app.key(Qt::Key_Tab);
         QTRY_VERIFY(!dialogItem("textArea")->hasActiveFocus());
         QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
+        // On a button no text field holds the keys, but the window does: the canvas behind gets none of them.
+        app.model.select({"all"});
+        app.key(Qt::Key_Delete);
+        app.key(Qt::Key_Q);
+        app.key(Qt::Key_Period);
+        QVERIFY(app.model.document().graph.nodes.contains("all"));
+        QCOMPARE(app.quits, 0);
+        QCOMPARE(app.fits, 0);
         app.key(Qt::Key_Tab);
         QCOMPARE(app.searches, 0);
         QTRY_VERIFY(dialogItem("textArea")->hasActiveFocus());
@@ -544,16 +554,12 @@ private slots:
         WidgetApp app(R"({"fugue": 1, "graph": {"nodes": {"song": {"type": "fugue/describe-song", "version": "1.0.0", "inputs": {}}}},
                          "layout": {"nodes": {"song": {"pos": [20, 20]}}, "view": {"center": [480, 340], "zoom": 1}}})");
         QVERIFY(app.open());
-        app.model.setRunState("song", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3}, {"thumbnailText", "la la la\u2026"},
-                                       {"texts", QVariantMap{{"caption", "a calm tune"}, {"lyrics", "la la la la la"}}}});
+        app.model.setRunState("song", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3}, {"thumbnailText", "la la la la la"},
+                                       {"textKey", "lyrics"}, {"texts", QVariantMap{{"caption", "a calm tune"}, {"lyrics", "la la la la la"}}}});
         const QVariantMap result = app.model.resultText("song");
         QVERIFY(result.value("has").toBool());
         QCOMPARE(result.value("output").toString(), QString("lyrics"));
         QCOMPARE(result.value("text").toString(), QString("la la la la la"));
-        // An excerpt that is none of the texts (a number, a label) has no text result.
-        app.model.setRunState("song", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3}, {"thumbnailText", "42"},
-                                       {"texts", QVariantMap{{"caption", "a calm tune"}}}});
-        QVERIFY(!app.model.resultText("song").value("has").toBool());
     }
 
     // #715 review: an unset multiline input starts its editor from the whole default, not the first line the card's face shows.
@@ -658,6 +664,40 @@ private slots:
         QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("p qfugueab"));
         QCOMPARE(app.stored("all", "name"), QJsonValue("p qfugueab"));
         QVERIFY(dialogItem("textArea")->property("canUndo").toBool()); // the typing before it can still be undone
+        app.key(Qt::Key_Escape);
+    }
+
+    // #715 review: a real paste of text with a break into a line input is one undo step with its fix, and Ctrl+Z does not loop.
+    void aPasteWithABreakIntoALineInputIsOneUndoStep() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        app.key(Qt::Key_Tab, Qt::ShiftModifier); // Name, a line: "fugue"
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Name"));
+        QGuiApplication::clipboard()->setText("p\nq");
+        app.key(Qt::Key_V, Qt::ControlModifier);
+        QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("fuguep q"));
+        app.key(Qt::Key_Z, Qt::ControlModifier);
+        QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("fugue"));
+        QTest::qWait(50);
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("fugue")); // it stays
+        app.key(Qt::Key_Escape);
+    }
+
+    // #715 review: Alt+T from a focused inline field needs no selection.
+    void altTFromAnInlineFieldNeedsNoSelection() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({});
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
         app.key(Qt::Key_Escape);
     }
 

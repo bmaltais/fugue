@@ -50,7 +50,7 @@ Rectangle {
     }
     Component {
         id: textDialogComponent
-        TextDialog { onClosed: page.forceActiveFocus() }
+        TextDialog { onClosed: if (page.visible) page.forceActiveFocus() }
     }
     readonly property var visibleFields: appView.fields.filter(f => !f.advanced)
     readonly property var advancedFields: appView.fields.filter(f => f.advanced)
