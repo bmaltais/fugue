@@ -65,7 +65,7 @@ QVariantMap bigView() {
             {"packs", QVariantList{QVariantMap{{"id", "segment"}, {"name", "Segment Nodes"}, {"version", "1.2.0"}, {"install", true}, {"pending", false},
                                                {"summary", "from github.com/example/fugue-segment at v1.2.0"},
                                                {"source", "github.com/example/fugue-segment at v1.2.0"}, {"runtime", "python"},
-                                               {"permissions", "network, files"}, {"setup", "uv sync"}, {"setupNote", "Installs the segmentation libraries."},
+                                               {"permissions", "Can use the network, Can reach services on this computer and its X11/Xwayland display, Can read ~/Documents/Scans"}, {"setup", "uv sync"}, {"setupNote", "Installs the segmentation libraries."},
                                                {"setupSize", "1.3 GB"}, {"state", ""}, {"detail", ""}}}},
             {"models", QVariantList{model("Qwen3-8B-Q8_0.gguf", "8.7 GB", "Apache-2.0", ""),
                                     model("flux-2-klein-9b-Q4_K_M.gguf", "5.9 GB", "FLUX Non-Commercial", ""),

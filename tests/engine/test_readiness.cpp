@@ -169,7 +169,8 @@ private slots:
         QCOMPARE(plan.packs.size(), 1);
         QCOMPARE(plan.models.size(), 2);
         QCOMPARE(plan.environmentCount(), 1);
-        QCOMPARE(plan.packs.at(0).pack.permissions, QStringList{"network"});
+        QCOMPARE(plan.packs.at(0).pack.permissions, (QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display",
+                                                                 "Setup uses the network", "Setup can reach services on this computer and its X11/Xwayland display"}));
         QCOMPARE(plan.downloadBytes, qint64(1200000000));
         QCOMPARE(plan.unknownSizes, 1);
         QCOMPARE(plan.environmentBytes, qint64(27000000));
@@ -340,13 +341,14 @@ private slots:
         QCOMPARE(calls, 0);
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
 
-        // https: fetched after the yes; it declares network, which was not shown, so it asks; No skips that row alone.
+        // https: fetched after the yes; it declares network and has a setup, neither shown, so it asks; No skips that row alone.
         plan = buildReadinessPlan(gitRequest("https://example.com/p.git"), env());
         QStringList asked;
         run.allowMore = [&](const PackSummary &, const QStringList &permissions) { asked = permissions; return false; };
         outcome = runReadinessPlan(plan, run);
         QCOMPARE(calls, 1);
-        QCOMPARE(asked, QStringList{"network"});
+        QCOMPARE(asked.first(), QString("Can use the network"));
+        QVERIFY2(asked.last().startsWith("its setup ("), qPrintable(asked.join('|'))); // never run on the list's yes
         QVERIFY(!outcome.ok);
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
         QCOMPARE(QDir(packs()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList()); // staging gone

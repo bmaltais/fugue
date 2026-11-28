@@ -280,7 +280,8 @@ private slots:
         QVERIFY(!withLock.join(' ').contains("uv.lock")); // uv sync --frozen reads the lock, never writes it
         QVERIFY(!hasPair(withLock, "--bind", profile.packDir, profile.packDir));
         QVERIFY(hasPair(withLock, "--bind-try", profile.uvCache, profile.uvCache));
-        QVERIFY2(profile.uvCache.startsWith(cacheDir()), qPrintable(profile.uvCache)); // Fugue's own cache, one per pack
+        QVERIFY2(profile.uvCache.startsWith(cacheDir() + "/uv/io.example.pack+"), qPrintable(profile.uvCache)); // Fugue's own cache, one per setup
+        QVERIFY(sandbox::uvCacheFor("io.example.pack") != profile.uvCache);
         QVERIFY(!withLock.join(' ').contains(home() + "/.cache/uv"));
         QVERIFY(!args.contains("--chdir") || hasPair(args, "--chdir", profile.packDir));
         QVERIFY(!hasPair(args, "--bind", profile.packDir, profile.packDir));
@@ -344,7 +345,8 @@ private slots:
         QVERIFY(good->network && good->gpu);
         QCOMPARE(good->readPaths, QStringList{QFileInfo(home()).canonicalFilePath() + "/Documents/Scans"});
         QCOMPARE(sandbox::plainLines(*good, true),
-                 (QStringList{"Can use the network", "Can reach services on this computer", "Can use the GPU", "Can read ~/Documents/Scans"}));
+                 (QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display", "Can use the GPU",
+                              "Can read ~/Documents/Scans"}));
         QCOMPARE(sandbox::plainLines({}, true, true).first(), QString("Setup uses the network"));
         QVERIFY(sandbox::plainLines({}, false).first().startsWith("NOT sandboxed"));
         QVERIFY(sandbox::plainLines({}, true).first().startsWith("Runs in a sandbox"));

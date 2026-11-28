@@ -45,7 +45,7 @@ struct PackSummary {
     QString name;
     QString folder;
     QStringList runtimeKinds; // "command", "native", ... of the pack's nodes, sorted
-    QStringList permissions;  // "network", "files", "gpu": what the nodes declare (6.3), sorted
+    QStringList permissions;  // what the nodes declare (6.3, 6.7.1) and the setup's network, one plain line each (sandbox::needsLines)
     sandbox::Needs needs;     // what the nodes declare that the sandbox honours (6.7.1), the union of the nodes'
     bool community = false;   // pack.json `community: true` (#731): always sandboxed
     QStringList nodes;        // node type ids

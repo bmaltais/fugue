@@ -448,7 +448,7 @@ Popup {
                         wrapMode: Text.Wrap
                         color: sheet.look.label
                         font.pixelSize: sheet.look.labelSize
-                        text: qsTr("A pack's nodes run as you, with no sandbox. Nothing is installed, trusted, set up or downloaded until you say yes here.")
+                        text: qsTr("A pack's nodes run in a sandbox, with only what each pack declares below. Nothing is installed, trusted, set up or downloaded until you say yes here.")
                     }
                 }
             }

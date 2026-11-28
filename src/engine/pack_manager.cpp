@@ -604,6 +604,7 @@ ProcessResult runSetupCommand(const QStringList &command, const QString &folder,
         return ProcessResult{false, -1, wrapped.refused};
     ProcessResult done = runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true, false,
                                     wrapped.descriptors->numbers(), /*bare*/ true);
+    removeTree(profile.uvCache); // one setup's: what it downloaded is in .venv now
     if (done.ok && QFileInfo(environment).isSymLink()) {
         done.ok = false;
         done.output += QStringLiteral("\n.venv became a link during the setup; a pack's environment folder must be a folder.");
@@ -850,8 +851,10 @@ bool looksLikeGitUrl(const QString &text) {
 }
 
 bool samePack(const PackSummary &shown, const PackSummary &now) {
+    // `permissions` are the needs lines (network, the setup's network, GPU, each read grant); the needs are compared as well.
     return shown.id == now.id && shown.version == now.version && shown.setupCommand == now.setupCommand
-           && shown.permissions == now.permissions && shown.secrets == now.secrets && shown.runtimeKinds == now.runtimeKinds
+           && shown.permissions == now.permissions && shown.needs.network == now.needs.network && shown.needs.gpu == now.needs.gpu
+           && shown.needs.gpuApi == now.needs.gpuApi && shown.needs.readPaths == now.needs.readPaths && shown.secrets == now.secrets && shown.runtimeKinds == now.runtimeKinds
            && shown.nodes == now.nodes
            && (shown.source.commit.isEmpty() || shown.source.commit == now.source.commit);
 }
@@ -927,26 +930,20 @@ static Result<PackSummary> summarizeAt(const QString &folder, PackDigest record)
     summary.folder = folder;
     summary.nodes = loaded.nodes;
     summary.secrets = packSecretNames(loaded.secrets);
-    QSet<QString> kinds, permissions;
+    QSet<QString> kinds;
     for (const QString &id : loaded.nodes) {
         const NodeType *type = scratch.nodeType(id);
         if (!type)
             continue;
         kinds.insert(type->runtime.value("kind").toString());
-        if (type->needs.contains("gpu"))
-            permissions.insert(QStringLiteral("gpu"));
-        for (const char *key : {"network", "files"})
-            if (type->needs.value(QLatin1String(key)).toBool())
-                permissions.insert(QLatin1String(key));
         if (const Result<sandbox::Needs> declared = sandbox::parseNeeds(type->needs))
             summary.needs = sandbox::merged(summary.needs, *declared);
         summary.community = type->packCommunity;
     }
     summary.runtimeKinds = QStringList(kinds.begin(), kinds.end());
     summary.runtimeKinds.sort();
-    summary.permissions = QStringList(permissions.begin(), permissions.end());
-    summary.permissions.sort();
     summary.setupCommand = setupCommandOf(*json);
+    summary.permissions = sandbox::needsLines(summary.needs, !summary.setupCommand.isEmpty());
     summary.setupDescription = json->value("setup").toObject().value("description").toString();
     if (const QJsonValue size = json->value("setup").toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
         summary.setupSize = qint64(size.toDouble());
@@ -1371,6 +1368,9 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
         return fail(QStringLiteral("unknown_pack"), QStringLiteral("The pack %1 is gone already.").arg(id));
     if (!removeTree(folder))
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot remove %1 completely.").arg(folder));
+    // A setup's uv cache that a crash left (6.7.1), and the folder of the layout before per-setup caches.
+    for (const QFileInfo &left : QDir(cacheDir() + QStringLiteral("/uv")).entryInfoList({id, id + QStringLiteral("+*")}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden))
+        removeTree(left.filePath());
     for (const DeadBackup &dead : deadBackupsOf(packsDir, id)) // an old copy a crash left would come back on the next sweep
         discardTree(packsDir, dead.path);
     // Another major of the pack stays trusted.

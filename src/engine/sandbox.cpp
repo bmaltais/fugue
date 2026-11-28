@@ -10,6 +10,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QStandardPaths>
 
@@ -113,7 +114,12 @@ QString uvPythonDir(const QString &homeFolder) {
     return (data.startsWith(QLatin1Char('/')) ? data : homeOf(homeFolder) + QStringLiteral("/.local/share")) + QStringLiteral("/uv/python");
 }
 
-QString uvCacheFor(const QString &packId) { return cacheDir() + QStringLiteral("/uv/") + packId; }
+QString uvCacheFor(const QString &packId) {
+    quint64 bits[2];
+    QRandomGenerator::system()->fillRange(bits);
+    return cacheDir() + QStringLiteral("/uv/") + packId + QLatin1Char('+') + // '+' is in no pack id
+           QString::fromLatin1(QByteArray(reinterpret_cast<const char *>(bits), sizeof bits).toHex());
+}
 
 QStringList denied(const QString &homeFolder) {
     const QString home = realHome(homeFolder);
@@ -212,19 +218,25 @@ Needs merged(const Needs &a, const Needs &b) {
     return result;
 }
 
-QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup, const QString &homeFolder) {
+QStringList needsLines(const Needs &needs, bool hasSetup, const QString &homeFolder) {
     const QString home = realHome(homeFolder);
     QStringList lines;
-    if (!sandboxed)
-        lines << QStringLiteral("NOT sandboxed: this pack's program runs as you.");
     if (needs.network)
-        lines << QStringLiteral("Can use the network") << QStringLiteral("Can reach services on this computer");
+        lines << QStringLiteral("Can use the network") << QStringLiteral("Can reach services on this computer and its X11/Xwayland display");
     if (hasSetup)
-        lines << QStringLiteral("Setup uses the network") << QStringLiteral("Setup can reach services on this computer");
+        lines << QStringLiteral("Setup uses the network") << QStringLiteral("Setup can reach services on this computer and its X11/Xwayland display");
     if (needs.gpu)
         lines << QStringLiteral("Can use the GPU");
     for (const QString &path : needs.readPaths)
         lines << QStringLiteral("Can read %1").arg(shown(path, home));
+    return lines;
+}
+
+QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup, const QString &homeFolder) {
+    QStringList lines;
+    if (!sandboxed)
+        lines << QStringLiteral("NOT sandboxed: this pack's program runs as you.");
+    lines << needsLines(needs, hasSetup, homeFolder);
     if (sandboxed && !needs.network && !needs.gpu && needs.readPaths.isEmpty())
         lines << QStringLiteral("Runs in a sandbox: it sees only its own folder, the files it is given and the run's work folder.");
     return lines;
@@ -334,8 +346,9 @@ Command build(const Profile &profile) {
         if (qEnvironmentVariableIsSet(name))
             env << QStringLiteral("%1=%2").arg(QLatin1String(name), qEnvironmentVariable(name));
     if (setup) {
+        // UV_LINK_MODE=copy: nothing in .venv points into the cache, which goes when the setup ends.
         env << QStringLiteral("UV_CACHE_DIR=") + profile.uvCache << QStringLiteral("UV_PYTHON_INSTALL_DIR=") + uvPythonDir(home)
-            << "UV_PYTHON_DOWNLOADS=never";
+            << "UV_PYTHON_DOWNLOADS=never" << "UV_LINK_MODE=copy";
     }
     env << profile.environment;
     a << "--clearenv";

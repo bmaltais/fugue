@@ -354,7 +354,7 @@ Reply prepare(const ReadinessRequest &request, Context &context, const QString &
     run.log = env.prompts.log;
     run.cancelled = [] { return stopRequested(); };
     run.allowMore = [](const PackSummary &pack, const QStringList &permissions) {
-        say(QStringLiteral("  %1 also wants %2 access.").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", "))));
+        say(QStringLiteral("  %1 also asks for: %2.").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", "))));
         return yesNo(QStringLiteral("Allow it? (no skips this pack)")) == Answer::Yes;
     };
     run.onRow = [&plan](int row, RowState state, const QString &detail) {

@@ -107,7 +107,7 @@ private slots:
         QVERIFY2(added.ok(), qPrintable(added.error().message));
         QCOMPARE(shown.id, QString("io.example.tools"));
         QCOMPARE(shown.runtimeKinds, QStringList{"command"});
-        QCOMPARE(shown.permissions, (QStringList{"gpu", "network"}));
+        QCOMPARE(shown.permissions, (QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display", "Can use the GPU"}));
         QVERIFY(QFileInfo(packs() + "/io.example.tools/tool/node.json").isFile());
         QCOMPARE(readPackSource(packs() + "/io.example.tools").kind, PackSource::Kind::Path);
         QCOMPARE(leftovers(), QStringList{"io.example.tools"}); // no staging folder stays behind

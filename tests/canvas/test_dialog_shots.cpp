@@ -160,7 +160,9 @@ private slots:
             list->setProperty("model", QVariantList{QVariantMap{{"id", "io.example.tools"}, {"version", "1.2.0"},
                                                                 {"source", "github.com/example/fugue-tools"},
                                                                 {"types", QStringList{"io.example.tools/tool", "io.example.tools/shell"}},
-                                                                {"secrets", QStringList{"EXAMPLE_TOKEN"}}}});
+                                                                {"secrets", QStringList{"EXAMPLE_TOKEN"}},
+                                                                {"needs", QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display",
+                                                                                      "Can read ~/Documents/Scans"}}}});
             popup(app, "trustAsk", "trust-packs");
         }
         popup(app, "recoverAsk", "recover");

@@ -12,6 +12,7 @@
 #include "engine/pack_loader.h"
 #include "engine/pack_secrets.h"
 #include "engine/registry.h"
+#include "engine/sandbox.h"
 #include "engine/trust_store.h"
 
 namespace fugue {
@@ -65,6 +66,13 @@ void PacksModel::refresh() {
         for (const PackProblem &problem : pack.disabled)
             problems << QStringLiteral("%1: %2").arg(problem.node, problem.reason);
         const PackSource source = readPackSource(pack.path);
+        // What its programs may do (6.7.1), as the Trust question says it, and whether the person turned the sandbox off.
+        sandbox::Needs needs;
+        for (const QString &id : pack.nodes)
+            if (const NodeType *type = scratch.nodeType(id))
+                if (const Result<sandbox::Needs> declared = sandbox::parseNeeds(type->needs))
+                    needs = sandbox::merged(needs, *declared);
+        const bool sandboxed = pack.community || !trust.isUnsandboxed(pack.id, pack.version);
         const QString secretKey = packSecretKey(pack.id, source.location);
         const QStringList secretsSet = secretStore.namesSet(secretKey);
         QVariantList secrets;
@@ -79,7 +87,8 @@ void PacksModel::refresh() {
             {"nodes", int(pack.nodes.size())}, {"source", source.location}, {"problems", problems},
             {"active", m_registry && pack.enabled && m_registry->hasPackVersion(pack.id, pack.version)},
             {"folder", QFileInfo(pack.path).fileName()}, {"inherited", pack.inherited},
-            {"warning", pack.inherited ? inheritedPackWarning() : QString()}, {"secrets", secrets}};
+            {"warning", pack.inherited ? inheritedPackWarning() : QString()}, {"secrets", secrets},
+            {"sandboxed", sandboxed}, {"needs", sandbox::plainLines(needs, sandboxed)}};
     }
     m_packs = list;
     m_library.clear();
@@ -178,7 +187,9 @@ Answer PacksModel::ask(const QString &kind, const PackSummary &pack) {
         {"source", pack.source.location.isEmpty() ? QString()
                    : pack.source.ref.isEmpty() ? pack.source.location
                                                : QStringLiteral("%1 at %2").arg(pack.source.location, pack.source.ref)},
-        {"runtime", pack.runtimeKinds}, {"permissions", pack.permissions}, {"secrets", pack.secrets}, {"secretsSet", pack.secretsSet}, {"secretsOtherSource", pack.secretsOtherSource}, {"nodes", int(pack.nodes.size())},
+        {"runtime", pack.runtimeKinds}, {"permissions", pack.permissions},
+        // A setup or a run of a version the person turned the sandbox off for runs as them (6.7.1): said where it is asked.
+        {"sandboxed", pack.community || !TrustStore().isUnsandboxed(pack.id, pack.version)}, {"secrets", pack.secrets}, {"secretsSet", pack.secretsSet}, {"secretsOtherSource", pack.secretsOtherSource}, {"nodes", int(pack.nodes.size())},
         {"command", displayCommand(pack.setupCommand)}, {"description", pack.setupDescription}, {"folder", pack.folder},
         // A pack of the Default project runs from, and writes into, the Default's folders: said where it is trusted.
         {"inheritedWarning", isInheritedPack(pack.id, pack.version) ? inheritedPackWarning() : QString()}};

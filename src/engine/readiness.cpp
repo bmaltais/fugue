@@ -152,7 +152,7 @@ QStringList ReadinessPlan::lines() const {
             out << QStringLiteral("    From:      %1").arg(from);
         if (row.pending) {
             out << QStringLiteral("    Details after download: what it runs as, what it declares and its setup are shown by the pack itself once fetched (https only, 200 MB at most);");
-            out << QStringLiteral("    a pack that declares network, file or GPU access, or reads secrets, asks once more before it is installed.");
+            out << QStringLiteral("    a pack that declares network, file or GPU access, reads secrets or has a setup asks once more before it is installed.");
             continue;
         }
         out << QStringLiteral("    Runs as:   %1").arg(p.runtimeKinds.isEmpty() ? QStringLiteral("(no nodes)") : p.runtimeKinds.join(QStringLiteral(", ")));
@@ -549,6 +549,8 @@ ReadinessOutcome runReadinessPlan(const ReadinessPlan &plan, ReadinessRun &run) 
             }
             // Nothing about its permissions could be shown before the download: more than nothing is asked, for this row alone.
             QStringList more = shown.permissions;
+            if (!shown.setupCommand.isEmpty()) // its setup was not shown either: it is asked too, never run on the list's yes
+                more << QStringLiteral("its setup (%1)").arg(displayCommand(shown.setupCommand));
             if (!shown.secrets.isEmpty())
                 more << QStringLiteral("secrets (%1)").arg(shown.secrets.join(QStringLiteral(", ")));
             if (!more.isEmpty() && !(run.allowMore && run.allowMore(shown, more))) {

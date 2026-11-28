@@ -66,6 +66,10 @@ QString deniedReason(const QString &path, const QString &home = {});
 // pack that asks for nothing, the sentence that says what it sees; for one that is not sandboxed, "NOT sandboxed: this
 // pack's program runs as you.".
 QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup = false, const QString &home = {});
+// What the pack asks for, one plain line each and nothing else (no line about the sandbox itself): the network (and, as it is
+// the host's, the services and the X11/Xwayland display of this computer), the setup's network, the GPU, each read grant. What
+// a person is shown as "Declares", and what a later look at the pack is compared with (samePack).
+QStringList needsLines(const Needs &needs, bool hasSetup = false, const QString &home = {});
 
 struct Profile {
     enum class Kind { Run, Setup };
@@ -114,7 +118,9 @@ QProcessEnvironment bwrapEnvironment();
 QString bwrapPath();
 // uv's folder of Python installs as uv finds it (UV_PYTHON_INSTALL_DIR, XDG_DATA_HOME/uv/python, ~/.local/share/uv/python).
 QString uvPythonDir(const QString &home = {});
-// The uv cache of a pack's setup: Fugue's own, one per pack, never the user's ~/.cache/uv (uv links its files into venvs).
+// A fresh uv cache for one setup of a pack: Fugue's own, `<cache>/uv/<pack id>+<128 random bits>`, never the user's ~/.cache/uv
+// (uv links its files into venvs) nor one another setup (another source or version of the same id) could have filled. The
+// caller makes it and removes it when the setup ends; `pack remove` sweeps what a crash left.
 QString uvCacheFor(const QString &packId);
 
 // Whether bwrap (0.8 or newer) is installed and can make a user namespace here with the flags of a real run

@@ -163,7 +163,7 @@ private slots:
         QCOMPARE(info.value("sandboxed").toBool(), true);
         QCOMPARE(info.value("needs").toObject().value("network").toBool(), true);
         QCOMPARE(info.value("needs_lines").toArray().at(0).toString(), QString("Can use the network"));
-        QCOMPARE(info.value("needs_lines").toArray().at(1).toString(), QString("Can reach services on this computer"));
+        QCOMPARE(info.value("needs_lines").toArray().at(1).toString(), QString("Can reach services on this computer and its X11/Xwayland display"));
         QCOMPARE(info.value("needs_lines").toArray().at(2).toString(), QString("Can read ~/Documents/Scans"));
         QVERIFY(QString::fromUtf8(fugue({"pack", "info", "io.example.net"}).out).contains("Can use the network"));
 
@@ -219,7 +219,8 @@ private slots:
         atTerminal({"pack", "remove", "io.example.tools"}, "y\n", &exitCode);
         QCOMPARE(exitCode, 0);
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
-        QVERIFY(fugue({"pack", "list", "--json"}).json().value("data").toObject().value("packs").toArray().isEmpty());
+        const QJsonArray left = fugue({"pack", "list", "--json"}).json().value("data").toObject().value("packs").toArray();
+        QVERIFY2(left.isEmpty(), QJsonDocument(left).toJson().constData());
     }
 
     void setupShowsTheExactCommand() {

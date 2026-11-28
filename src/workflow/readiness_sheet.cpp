@@ -492,7 +492,7 @@ bool ReadinessSheet::askMore(const PackSummary &pack, const QStringList &permiss
         m_answer = -1;
     }
     const QVariantMap question{{"pack", pack.name.isEmpty() ? pack.id : pack.name},
-                               {"text", tr("%1 also wants %2 access. Allow it, or skip this pack?").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", ")))}};
+                               {"text", tr("%1 also asks for: %2. Allow it, or skip this pack?").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", ")))}};
     QMetaObject::invokeMethod(this, [this, question] { m_question = question; publish(); }, Qt::QueuedConnection);
     QMutexLocker lock(&m_mutex);
     while (m_answer < 0 && !m_cancel.load())
