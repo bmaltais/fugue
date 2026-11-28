@@ -112,6 +112,7 @@ struct Bound {
     QString writtenAt;                   // path id of the node it was written on
     QString writtenInput;                // the input name it was written under
     QList<const GroupInput *> narrowing; // the exposed inputs it came through
+    bool overridden = false;             // it is a CompileOptions override's value
 };
 
 // Where a link leads once groups are seen through.
@@ -134,6 +135,7 @@ struct Flat {
     QString provider;
     QString frozen;
     QMap<QString, InputValue> inputs; // links by path id
+    QStringList overridden;           // inputs whose value is a CompileOptions override's
     QMap<QString, InputSpec> checkedAs; // each input as its value was checked: narrowed by group faces
     bool emptied = false;             // a required input lost its value to a bypass
     QMap<QString, QString> lazyDropped; // lazy inputs that lost their value to a bypass, a mute or an emptied source: the reason
@@ -337,8 +339,8 @@ void Compiler::checkTarget() {
 // inputs are (checkNode, checkInstance).
 void Compiler::checkOverrides() {
     for (const InputOverride &given : m_options.overrides) {
-        if (m_flat.contains(given.path))
-            continue;
+        if (m_flat.contains(given.path) || m_status.value(given.path, Status::Leaf) == Status::Broken)
+            continue; // a node that did not build has its own error
         bool instance = false;
         for (const Scope &scope : m_scopes)
             instance = instance || scope.instancePath == given.path;
@@ -517,7 +519,10 @@ QMap<QString, Bound> Compiler::effective(Scope *scope, const QString &id) const 
     // A value given for this compile only wins over both (CompileOptions::overrides).
     for (const InputOverride &given : m_options.overrides)
         if (given.path == path)
+            {
             result[given.input] = Bound{given.value, scope, path, given.input, result.value(given.input).narrowing};
+            result[given.input].overridden = true;
+        }
     return result;
 }
 
@@ -869,6 +874,8 @@ std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpe
 void Compiler::checkValue(Flat &flat, const InputSpec &base, const Bound &bound) {
     const InputSpec spec = narrowed(base, bound.narrowing);
     flat.checkedAs[spec.name] = spec;
+    if (bound.overridden && !flat.overridden.contains(spec.name))
+        flat.overridden << spec.name;
     const InputValue &value = bound.value;
     if (value.kind() != InputValue::Kind::List) {
         if (std::optional<InputValue> resolved = resolveItem(flat, spec, bound, value, -1))
@@ -1334,6 +1341,7 @@ CompiledGraph Compiler::shape() {
         node.provider = flat.provider;
         node.frozen = flat.frozen;
         node.lazyDropped = flat.lazyDropped;
+        node.overridden = flat.overridden;
         graph.nodes[flat.path] = node;
     }
     return graph;

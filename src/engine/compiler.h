@@ -75,6 +75,10 @@ struct CompiledNode {
     // reason: upstream_muted or upstream_empty. They are left out of `inputs`. The node is skipped with that reason when
     // it asks for one (9.9), and runs as usual when it does not.
     QMap<QString, QString> lazyDropped;
+    // The inputs that took their value from a CompileOptions override (here or through an exposed input of a group around the
+    // node). The run records each as the value this node used, in `auto` of run.json (the value a document cannot hold per
+    // instance). Not in toJson.
+    QStringList overridden;
 
     // Every link of inputs, list items included, in input name order.
     QList<CompiledLink> links() const;
@@ -135,9 +139,6 @@ struct InputOverride {
     QString path;
     QString input;
     InputValue value;
-    // The input was Randomize: the run records the value as a drawn seed (run.json's `auto`, the "Seed used" output), as it
-    // would for the `{"auto": "random"}` the override replaces.
-    bool wasRandom = false;
 };
 
 struct CompileOptions {
@@ -168,7 +169,7 @@ struct CompileOptions {
     // goes (engine/paired_placement), when an app's inputs are filled by the run's own values. A run never sets it.
     bool allowUnsetInputs = false;
     // Values given to single inputs of single nodes for this compile (InputOverride). A path that is not a node of the flattened graph
-    // is the error `unknown_node`, and an input the node does not have (nor a group instance exposes) `unknown_input`, as in the
+    // is the error `usage`, and an input the node does not have (nor a group instance exposes) `unknown_input`, as in the
     // document.
     QList<InputOverride> overrides;
 };

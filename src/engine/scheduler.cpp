@@ -1060,9 +1060,8 @@ private:
     Value resolveValue(NodeRun &n, const InputSpec &spec, const InputValue &written, bool &unknown) {
         switch (written.kind()) {
         case InputValue::Kind::Literal:
-            for (const InputOverride &given : m_options.overrides)
-                if (given.wasRandom && given.path == n.path && given.input == spec.name)
-                    n.autoValues.insert(spec.name, written.literal());
+            if (n.node->overridden.contains(spec.name)) // a held seed: the value this node used, as a drawn one is (CompiledNode::overridden)
+                n.autoValues.insert(spec.name, written.literal());
             return Value(written.literal());
         case InputValue::Kind::Resource:
             return Value(written.handle());

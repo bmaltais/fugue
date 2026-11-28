@@ -457,7 +457,7 @@ There is one list of named inputs per node type and no separate "parameter" kind
   held for each instance upstream of the node, at the seed that instance showed, and not in the definition (which would hold it
   in every copy): the run's compile is given the value for that instance's node by path id
   (`CompileOptions::overrides`, an `InputOverride`; `WidgetEdit::heldOverrides`), and the run's document keeps the definition as
-  written. The run records such a value as a drawn seed on its node (run.json `auto`, the Seed used output, the saved image's run section), as the Randomize seed it replaced. An override naming no node is the error `usage`, and an input the node or instance lacks `unknown_input`. An instance that is not upstream draws as in any run. Those nodes
+  written. The run records such a value as a drawn seed on its node (run.json `auto`, the Seed used output, the saved image's run section), as the Randomize seed it replaced, and an Increment seed too. For a shared definition, `run.nodes.<path>.auto` gives the value each instance used and wins over the definition's literal in the embedded workflow (the document cannot hold a value per instance). An override naming no node is the error `usage`, and an input the node or instance lacks `unknown_input`. An instance that is not upstream draws as in any run. Those nodes
   then key as the run before and are cache hits. The node's own seeds and those after it behave as in any run. After the run
   starts, Increment advances only the seeds that were not held; a definition's Increment seed held per instance advances only when an
   instance that ran in this run used the definition's own value (was not held). The CLI has no such flag: holding reads the canvas's shown

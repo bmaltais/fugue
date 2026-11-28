@@ -142,9 +142,6 @@ struct RunOptions {
     // The off-machine provider instances (remote_consent.h) the person has allowed, by name. A node that would run on another
     // one fails with consent_needed before anything is sent (8.2, #404).
     QSet<QString> remoteAllowed;
-    // The compile overrides the graph was made with (CompileOptions::overrides): one that replaced a Randomize seed is recorded
-    // as a drawn value on its node, in `auto` of run.json and the "Seed used" output, as the seed it replaced would have been.
-    QList<InputOverride> overrides;
 };
 
 // The state of a node (10.3).

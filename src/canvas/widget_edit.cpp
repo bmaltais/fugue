@@ -755,7 +755,7 @@ QList<InputOverride> WidgetEdit::heldOverrides(const HeldSeeds &seeds) {
     for (const HeldSeed &seed : seeds)
         if (seed.perInstance)
             overrides << InputOverride{(seed.level + QStringList{seed.node}).join(QLatin1Char('/')), seed.input,
-                                       InputValue::literal(seed.seed), !seed.increment};
+                                       InputValue::literal(seed.seed)};
     return overrides;
 }
 

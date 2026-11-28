@@ -250,7 +250,6 @@ public:
         Waiting waiting{folder.value(), compilation.value(), {}, request.noPictures};
         waiting.options.workflow = request.workflow;
         waiting.options.document = request.document.toJson();
-        waiting.options.overrides = request.overrides;
         waiting.options.roots = m_setup.roots;
         waiting.options.warnings = compilation.problems();
         m_waiting.append(waiting);
