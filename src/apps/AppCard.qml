@@ -136,6 +136,7 @@ KitCard {
             }
         }
         Text {
+            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
             objectName: "appTitle-" + card.entry.id
             visible: !card.renaming
             Layout.fillWidth: true
@@ -174,6 +175,7 @@ KitCard {
             }
         }
         Text {
+            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
             objectName: "appSummary-" + card.entry.id
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -195,6 +197,7 @@ KitCard {
                 font.pixelSize: 16
             }
             Text {
+                textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                 objectName: "appReady-" + card.entry.id
                 Layout.fillWidth: true
                 text: card.entry.ready ? qsTr("Ready") : card.entry.needs

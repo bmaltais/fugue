@@ -318,7 +318,7 @@ private slots:
         QCOMPARE(library.find("bad-author")->community->issue, qint64(4));
         QVERIFY(library.find("no-author")->community->author.isEmpty());
         QVERIFY(library.find("not-object")->community);
-        // The person's own folder is not held to the rule and carries no mark (a copy of a template drops the key).
+        // The person's own folder is not held to the rule and carries no mark (a copy made into it drops the key, tested below).
         makeTemplate(f.own.filePath("mine"), {{"title", "Mine"}, {"community", QJsonObject{{"author", "Ann"}}}});
         QVERIFY(!f.library().find("mine")->community);
     }
@@ -369,6 +369,72 @@ private slots:
         QVERIFY2(mentions("in-group", "io.example.tools/sharpen"), qPrintable(said.join("\n")));
     }
 
+    // Namespaces are exact; a library group (`local/...`) that the workflow does not define is no built-in node; an empty `packs/`
+    // folder, or a file named `packs`, is a packs entry; `"community": null` is still the mark.
+    void theRuleHasNoLooseEnds() {
+        Fixture f;
+        const QJsonObject community{{"author", "Ann"}};
+        makeTemplate(f.bundled.filePath("upper"), {{"title", "A"}, {"community", community}}, workflow({{"p", node("Fugue/text")}}));
+        makeTemplate(f.bundled.filePath("library"), {{"title", "B"}, {"community", community}}, workflow({{"p", node("local/library-group")}}));
+        makeTemplate(f.bundled.filePath("empty-packs"), {{"title", "C"}, {"community", community}});
+        QVERIFY(QDir().mkpath(f.bundled.filePath("empty-packs/packs")));
+        makeTemplate(f.bundled.filePath("file-packs"), {{"title", "D"}, {"community", community}});
+        writeFile(f.bundled.filePath("file-packs/packs"), "not a folder");
+        makeTemplate(f.bundled.filePath("null-mark"), {{"title", "E"}, {"community", QJsonValue(QJsonValue::Null)}},
+                     workflow({{"p", node("io.example.tools/sharpen")}}));
+        makeTemplate(f.bundled.filePath("fine"), {{"title", "F"}, {"community", community}});
+        QCOMPARE(ids(f.library().list()), QStringList{"fine"});
+        QCOMPARE(f.library().problems().size(), 5); // one warning each, naming why
+    }
+
+    // The words a template shows about itself are one plain line: control and format characters dropped, white space collapsed, the
+    // author cut at 64 characters.
+    void theWordsOfATemplateAreCleaned() {
+        Fixture f;
+        const QString author = QString("Ann\u202E\u001b[31m\n  Example") + QString(80, 'x');
+        makeTemplate(f.bundled.filePath("messy"),
+                     {{"title", "  Two\nlines\u200B\ttitle "}, {"description", "One\n\ntwo\u202Eend"},
+                      {"source", QJsonObject{{"name", "A\u202Eb"}, {"author", "C\nd"}}}, {"community", QJsonObject{{"author", author}}}});
+        const Template t = *f.library().find("messy");
+        QCOMPARE(t.title, QStringLiteral("Two lines title"));
+        QCOMPARE(t.description, QStringLiteral("One twoend"));
+        QCOMPARE(t.source.value("name").toString(), QStringLiteral("Ab"));
+        QCOMPARE(t.source.value("author").toString(), QStringLiteral("C d"));
+        QVERIFY(t.community->author.size() <= 64);
+        QVERIFY(t.community->author.startsWith(QStringLiteral("Ann[31m Example")));
+        QVERIFY(!t.community->author.contains(QChar(0x1b)) && !t.community->author.contains(QChar(0x202E)));
+    }
+
+    // An own copy is the person's: it loses the `community` key (Duplicate and saving a template as the person's own).
+    void anOwnCopyOfACommunityTemplateDropsTheMark() {
+        Fixture f;
+        makeTemplate(f.bundled.filePath("crowd"), {{"title", "Crowd"}, {"community", QJsonObject{{"author", "Ann"}, {"issue", 3}}}});
+        const TemplateLibrary library = f.library();
+        const Template crowd = *library.find("crowd");
+        QString copy;
+        QVERIFY(library.duplicate(crowd, "Mine", &copy).isEmpty());
+        QVERIFY(!QJsonDocument::fromJson(readFile(f.own.filePath(copy + "/template.json"))).object().contains("community"));
+        QVERIFY(!library.find(copy)->community);
+        const QString target = QDir(TemplateLibrary::ownFolder()).filePath("crowd");
+        const QScopeGuard tidy([target] { QDir(target).removeRecursively(); });
+        QVERIFY(library.saveOwn(crowd, {}).isEmpty());
+        const QJsonObject saved = QJsonDocument::fromJson(readFile(target + "/template.json")).object();
+        QCOMPARE(saved.value("title").toString(), QStringLiteral("Crowd"));
+        QVERIFY(!saved.contains("community"));
+        // The original is as it was.
+        QVERIFY(QJsonDocument::fromJson(readFile(f.bundled.filePath("crowd/template.json"))).object().contains("community"));
+    }
+
+    // A community canvas action that keeps to the rule is listed, flagged, and so reaches the task bar (which lists the library whole).
+    void aCommunityCanvasActionIsListedAndFlagged() {
+        Fixture f;
+        QJsonObject action = workflow({{"p", node("fugue/text")}});
+        action.insert("action", QJsonObject{{"format", 1}, {"name", "Act"}});
+        makeTemplate(f.bundled.filePath("act"), {{"title", "Act"}, {"community", QJsonObject{{"author", "Ann"}}}}, action);
+        const std::optional<Template> t = f.library().find("act");
+        QVERIFY(t && t->canvasAction && t->community);
+    }
+
     // A fetched community template that breaks the rule does not take its id: the bundled one of the same id is listed instead.
     void aRefusedFetchedCommunityTemplateLeavesTheBundledOne() {
         Fixture f;
@@ -382,6 +448,13 @@ private slots:
         QVERIFY(!library.find("shared")->community);
         QVERIFY(library.find("clean")->community && library.find("clean")->online);
         QCOMPARE(library.problems().size(), 1);
+        // The snapshot's record of the bundled ids (.bundled-ids.json) hides a bundled template the snapshot dropped, but not one the
+        // snapshot has and refused: it stays, as the bundled stand-in.
+        writeJson(online.filePath(".bundled-ids.json"), {{"bundled", QJsonArray{"shared", "gone"}}});
+        makeTemplate(f.bundled.filePath("gone"), {{"title", "Gone"}});
+        const TemplateLibrary recorded({{f.own.path(), true}, {online.path(), false, false, true}, {f.bundled.path(), false}}, &f.registry);
+        QCOMPARE(recorded.find("shared")->title, QStringLiteral("Bundled"));
+        QVERIFY(!recorded.find("gone"));
     }
 
     // template.json's `app` and the workflow's block (#387, 11.10): the block decides what is an app, template.json gives the card's

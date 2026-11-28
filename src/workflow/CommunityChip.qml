@@ -10,9 +10,11 @@ KitChip {
     property string url
     frosted: true
     pill: true
+    interactive: url !== "" // without an issue it is a label: no press, no focus stop, the card under it gets the tap
     text: author !== "" ? qsTr("Community · by %1").arg(author) : qsTr("Community")
     tip: url !== "" ? qsTr("Submitted by a user to the community templates. Press to open its issue: %1").arg(url)
                     : qsTr("Submitted by a user to the community templates.")
     Accessible.name: text
+    Accessible.role: url !== "" ? Accessible.Button : Accessible.StaticText
     onTapped: if (url !== "") Qt.openUrlExternally(url)
 }

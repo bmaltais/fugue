@@ -3315,7 +3315,7 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   entry or its workflow, or any group definition in it (also a group of a group), has a node type whose namespace is not `fugue`. Fugue
   checks it too because the feed is the trust boundary: such a template is a `fugue template list` warning that names why, and it does not
   take its id, so the bundled template of the same id, if any, is listed instead (as for a fetched template this Fugue cannot open). The
-  person's own folder is not held to it and carries no mark (a copy made from a template writes only the title). Browse templates: a card
+  person's own folder is not held to it and carries no mark (opening a template as a copy, or Duplicate, removes the `community` key from the copy's template.json). Browse templates: a card
   says "Community · by <author>" in a frosted chip at the picture's top left (the apps shelf's card too, at the same place), its tooltip
   says it was submitted by a user and, with an `issue`, gives `https://github.com/bmaltais/fugue-workflows/issues/<n>`, and a press on the
   chip opens that address in the browser as the source line's link does (a press on it does not open the template); the details have a
@@ -3329,6 +3329,7 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   the block, never the category name. One that is also an app stays listed, as an app. The task bar, `fugue canvas actions` and the apps
   shelf are unchanged. `fugue template list` still lists them: `canvas_action` is `true` in `--json` and the plain list marks
   `[canvas action]`.
+- A canvas action that is a community template and passes the rule appears in the Canvas view's task bar like any other, with no mark there.
 - **Apps (#387, epic #397).** A template is an **app** when its workflow has an `app` block that reads (4.9). The block is the
   binding: its inputs, outputs and title are what the App view shows. `template.json` carries only the catalog's side:
   `"app": true`, or `"app": {"title", "summary", "kind"}` (each optional text: the card's name, its one line, and a short

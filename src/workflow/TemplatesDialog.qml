@@ -42,6 +42,8 @@ Popup {
     readonly property var detail: detailId === "" ? null : templates.find(t => t.id === detailId) ?? null
     readonly property var noDetail: ({ title: "", description: "", preview: "", categoryTitle: "", source: {}, families: [], tags: [],
                                        canvasAction: false, modelList: [], packs: [], inputs: [], community: false, communityAuthor: "", communityUrl: "" })
+    // A tooltip shows its text as rich text when it starts like HTML; a word joiner in front keeps a template's words plain.
+    function plainTip(text) { return "\u2060" + text }
     function showDetails(id, index) {
         detailId = id
         if (index !== undefined)
@@ -276,6 +278,7 @@ Popup {
                         HoverHandler { id: tabHover }
                         TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: dialog.category = tab.modelData.id }
                         Text {
+                            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 2 * dialog.u
                                       right: parent.right; rightMargin: 2 * dialog.u }
                             text: tab.modelData.title
@@ -288,6 +291,7 @@ Popup {
                 }
                 Item { Layout.fillHeight: true }
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     objectName: "templatesOwnFolder"
                     Layout.fillWidth: true
                     Layout.leftMargin: 2 * dialog.u
@@ -565,6 +569,7 @@ Popup {
                                 }
                                 // The whole title, up to two lines (the details have the rest).
                                 Text {
+                                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                     id: titleText
                                     objectName: "templateTitle-" + cell.modelData.id
                                     Layout.fillWidth: true
@@ -577,7 +582,7 @@ Popup {
                                     font.weight: Font.DemiBold
                                     ToolTip.visible: titleHover.hovered && truncated
                                     ToolTip.delay: App.theme.look.tooltipDelay
-                                    ToolTip.text: cell.modelData.title
+                                    ToolTip.text: dialog.plainTip(cell.modelData.title)
                                     HoverHandler { id: titleHover }
                                 }
                                 // The description takes the room the title and the foot leave, as many lines as fit.
@@ -588,6 +593,7 @@ Popup {
                                     Layout.preferredHeight: 0
                                     clip: true
                                     Text {
+                                        textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                         objectName: "templateDescription-" + cell.modelData.id
                                         anchors { left: parent.left; right: parent.right; top: parent.top }
                                         text: cell.modelData.description
@@ -599,7 +605,7 @@ Popup {
                                         // Cut off at the card's size: the whole text on hover (the details have it too).
                                         ToolTip.visible: descriptionHover.hovered && truncated
                                         ToolTip.delay: App.theme.look.tooltipDelay
-                                        ToolTip.text: cell.modelData.description
+                                        ToolTip.text: dialog.plainTip(cell.modelData.description)
                                         HoverHandler { id: descriptionHover }
                                     }
                                 }
@@ -628,6 +634,7 @@ Popup {
                                             Layout.alignment: Qt.AlignTop
                                         }
                                         Text {
+                                            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                             objectName: "templateStatus-" + cell.modelData.id
                                             Layout.fillWidth: true
                                             text: statusRow.downloading
@@ -671,6 +678,7 @@ Popup {
                     }
 
                     Text {
+                        textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                         objectName: "templatesEmpty"
                         anchors.centerIn: parent
                         width: parent.width - 16 * dialog.u

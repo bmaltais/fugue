@@ -547,6 +547,34 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(dialog, "showDetails", Q_ARG(QVariant, "enhance-prompt"), Q_ARG(QVariant, QVariant())));
         QTRY_VERIFY(!find(app.window, "templateDetailsCommunity"));
 
+        QVERIFY(QMetaObject::invokeMethod(dialog, "closeDetails"));
+        // A category the switches leave empty is left, so the grid is not an empty page: Camera Angles is the only template of "edit".
+        QVERIFY(dialog->setProperty("category", "edit"));
+        QTRY_VERIFY(find(app.window, "templateCard-camera-angles"));
+        QVERIFY(!find(app.window, "templateCard-enhance-prompt"));
+        tap(app.window, "templatesCommunity");
+        QTRY_VERIFY(!dialog->property("showCommunity").toBool());
+        QTRY_COMPARE(dialog->property("category").toString(), QString());
+        tap(app.window, "templatesCommunity");
+        QTRY_VERIFY(dialog->property("showCommunity").toBool());
+        tap(app.window, "templatesActions"); // canvas actions on: their category shows, and leaves again with them
+        QTRY_VERIFY(find(app.window, "templatesCategory-canvas"));
+        QVERIFY(dialog->setProperty("category", "canvas"));
+        QTRY_VERIFY(find(app.window, "templateCard-expand"));
+        tap(app.window, "templatesActions");
+        QTRY_COMPARE(dialog->property("category").toString(), QString());
+        QTRY_VERIFY(!find(app.window, "templatesCategory-canvas"));
+
+        // The badge of a template without an issue is a label: no Tab stop, and a press on it opens the template under it. One with an
+        // issue is a button (it opens the browser, which a test does not press).
+        QVERIFY(!find(app.window, "templateCommunity-flux2-klein-4b")->property("activeFocusOnTab").toBool());
+        QVERIFY(find(app.window, "templateCommunity-camera-angles")->property("activeFocusOnTab").toBool());
+        tap(app.window, "templateCommunity-flux2-klein-4b");
+        QTRY_COMPARE(app.workflows.tabs().at(app.workflows.current()).toMap().value("title").toString(), QString("FLUX.2 Klein 4B"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(app.commands.run("file.templates"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+
         // The setting is reset when the dialog opens again.
         QVERIFY(dialog->setProperty("showCommunity", false));
         QVERIFY(dialog->setProperty("showActions", true));
