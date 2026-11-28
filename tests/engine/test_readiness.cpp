@@ -24,6 +24,7 @@
 #include "engine/hash.h"
 #include "engine/pack_loader.h"
 #include "engine/readiness.h"
+#include "engine/sandbox.h"
 #include "engine/registry.h"
 #include "fake_http.h"
 
@@ -111,6 +112,8 @@ class TestReadiness : public QObject {
 
 private slots:
     void initTestCase() {
+        if (!sandbox::available()) // these tests run real setup commands; the sandbox itself is tested in test_sandbox
+            sandbox::runSetupUnsandboxedForTest(true);
         DeclaredPortType declared;
         declared.type = *PortType::parse("io.test.pack/lora");
         declared.kind = PortKind::Resource;

@@ -278,6 +278,7 @@ static NodeType withoutSecrets(NodeType type) {
     type.packSecrets.clear();
     type.packSecretsOriginRequired.clear();
     type.packSource.clear();
+    type.packVersion.clear(); // an author's own folder, not an installed pack: not wrapped in the sandbox (6.7.1)
     return type;
 }
 

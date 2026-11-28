@@ -103,6 +103,7 @@ struct LoadedPack {
     Errors errors;              // why a pack is disabled; for one that loaded, warnings and declared-type problems
     QStringList nodes;          // type ids registered, sorted
     QList<PackSecretSpec> secrets; // the secrets pack.json declares (6.4); empty when the pack did not read
+    bool community = false;     // pack.json `community: true` (#731): always sandboxed, never offered "run without a sandbox"
     bool inherited = false;     // from the Default project's folders (1.4.2): read-only here
     bool hidden = false;        // an inherited pack an own pack of the same id and major hides: not loaded, no problem
     QList<PackProblem> disabled; // nodes that did not load, in pack.json's order

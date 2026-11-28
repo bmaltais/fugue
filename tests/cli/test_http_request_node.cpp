@@ -18,6 +18,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/sandbox.h"
+
 #include "../test_paths.h"
 #include "../engine/fake_http.h"
 
@@ -440,6 +442,8 @@ private slots:
     }
 
     void aValidationNeverCallsTheServerAndARunDoes() {
+        if (!fugue::sandbox::available())
+            QSKIP("a pack's program runs in the sandbox, and bubblewrap or user namespaces are not available here");
         if (QStandardPaths::findExecutable("script").isEmpty())
             QSKIP("script (util-linux) is needed to give the program a terminal");
         const QString command = shellQuote(fugueBinary()) + " pack add " + shellQuote(kPack);

@@ -4,6 +4,7 @@
 #include "engine/pack_loader.h"
 #include "engine/pack_secrets.h"
 #include "engine/registry.h"
+#include "engine/sandbox.h"
 #include "engine/version.h"
 
 #include <QDateTime>
@@ -471,6 +472,60 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
     return result;
 }
 
+// How a pack's setup runs (6.7.1): in the sandbox when it can start, as the user only after the person's explicit yes for
+// this version (never for a community pack), else not at all. `true`: sandboxed.
+Result<bool> setupSandboxed(const TrustStore &trust, const PackSummary &pack) {
+    if (sandbox::setupUnsandboxedForTest() || (!pack.community && trust.isUnsandboxed(pack.id, pack.version)))
+        return false;
+    if (sandbox::available())
+        return true;
+    return Error(makeError(QStringLiteral("sandbox_unavailable"),
+                           QStringLiteral("The setup of %1 was not run: it must run in a sandbox, and the sandbox cannot start here.").arg(pack.id),
+                           sandbox::unavailableHint()));
+}
+
+// The folder uv keeps its cache in, as uv finds it.
+QString uvCacheDir() {
+    if (const QString set = qEnvironmentVariable("UV_CACHE_DIR"); set.startsWith(QLatin1Char('/')))
+        return set;
+    const QString cache = qEnvironmentVariable("XDG_CACHE_HOME");
+    return (cache.startsWith(QLatin1Char('/')) ? cache : QDir::homePath() + QStringLiteral("/.cache")) + QStringLiteral("/uv");
+}
+
+// Runs the pack's setup command in `folder`: in the sandbox (the network on, the folder and uv's cache writable) or as the user.
+ProcessResult runSetupCommand(const QStringList &command, const QString &folder, bool sandboxed, const PackPrompts &prompts) {
+    if (!sandboxed)
+        return runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled, true);
+    sandbox::Profile profile;
+    profile.kind = sandbox::Profile::Kind::Setup;
+    profile.packDir = folder;
+    profile.program = command.first();
+    profile.arguments = command.mid(1);
+    profile.uvCache = uvCacheDir();
+    QDir().mkpath(profile.uvCache);
+    const sandbox::Command wrapped = sandbox::build(profile);
+    return runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true);
+}
+
+// The folder of the installed pack `id`: in the packs folder, or in a folder of the settings (trust is for any pack found), or
+// else an inherited one (`inherited` is then set too). Empty when there is none.
+QString findPackFolder(const QString &id, const QString &packsDir, QString *inherited = nullptr) {
+    QString folder;
+    QStringList places = packSearchPaths();
+    places.prepend(packsDir);
+    for (const QString &place : places)
+        if (validPackId(id) && QFileInfo(place + QLatin1Char('/') + id).isDir()) {
+            folder = place + QLatin1Char('/') + id;
+            break;
+        }
+    if (folder.isEmpty() && validPackId(id)) {
+        folder = inheritedPackFolder(id);
+        if (inherited)
+            *inherited = folder;
+    }
+    return folder;
+}
+
 Result<QJsonObject> readPackJson(const QString &folder) {
     const Result<QJsonObject> read = readJsonObject(folder + QStringLiteral("/pack.json"));
     if (!read)
@@ -802,6 +857,9 @@ static Result<PackSummary> summarizeAt(const QString &folder, PackDigest record)
         for (const char *key : {"network", "files"})
             if (type->needs.value(QLatin1String(key)).toBool())
                 permissions.insert(QLatin1String(key));
+        if (const Result<sandbox::Needs> declared = sandbox::parseNeeds(type->needs))
+            summary.needs = sandbox::merged(summary.needs, *declared);
+        summary.community = type->packCommunity;
     }
     summary.runtimeKinds = QStringList(kinds.begin(), kinds.end());
     summary.runtimeKinds.sort();
@@ -851,12 +909,19 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     PackAdded added;
     added.pack = summary;
     bool runSetup = false;
+    bool setupInSandbox = true;
     if (!summary.setupCommand.isEmpty()) {
         const Result<bool> yes = ask(prompts.runSetup, summary, QStringLiteral("Running a pack's setup"));
         if (!yes)
             return yes.errors();
         runSetup = *yes;
         added.setupSkipped = !*yes;
+        if (runSetup) {
+            const Result<bool> mode = setupSandboxed(trust, summary);
+            if (!mode)
+                return mode.errors();
+            setupInSandbox = *mode;
+        }
         // An update swaps in a fresh copy, which has no environment (a .venv, downloads): without its setup the
         // pack would stop working and the old environment would be deleted with the old folder. So the old pack
         // stays as it was (#521).
@@ -932,7 +997,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     }
     if (runSetup) {
         const QStringList &command = summary.setupCommand;
-        const ProcessResult done = runProgram(command.first(), command.mid(1), target, prompts.log, false, prompts.cancelled, true);
+        const ProcessResult done = runSetupCommand(command, target, setupInSandbox, prompts);
         if (!done.ok) {
             const bool stopped = prompts.cancelled && prompts.cancelled(); // a stop kills the setup, so it ends like a failure (#418)
             QString lost;
@@ -1240,18 +1305,8 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
 Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts) {
     if (TrustStore::isBuiltIn(parsePackRef(id).id))
         return fail(QStringLiteral("usage"), QStringLiteral("%1 is part of Fugue and is always trusted.").arg(id));
-    // A pack in the packs folder, or in a folder of the settings: trust is for any pack found.
-    QString folder;
-    QStringList places = packSearchPaths();
-    places.prepend(packsDir);
-    for (const QString &place : places)
-        if (validPackId(id) && QFileInfo(place + QLatin1Char('/') + id).isDir()) {
-            folder = place + QLatin1Char('/') + id;
-            break;
-        }
     QString inheritedFolder;
-    if (folder.isEmpty() && validPackId(id))
-        inheritedFolder = folder = inheritedPackFolder(id);
+    const QString folder = findPackFolder(id, packsDir, &inheritedFolder);
     if (folder.isEmpty())
         return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
     const Result<PackSummary> summary = summarizePack(folder);
@@ -1275,6 +1330,32 @@ Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustS
     return *summary;
 }
 
+Result<PackSummary> setPackSandbox(const QString &id, bool sandboxed, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts) {
+    const QString folder = findPackFolder(id, packsDir);
+    if (folder.isEmpty())
+        return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
+    const Result<PackSummary> summary = summarizePack(folder);
+    if (!summary)
+        return summary.errors();
+    if (!sandboxed && summary->community)
+        return fail(QStringLiteral("permission_denied"), QStringLiteral("%1 is a community pack: it always runs in the sandbox.").arg(summary->id),
+                    QStringLiteral("There is no way to turn its sandbox off."));
+    if (!sandboxed && !trust.isListed(summary->id, summary->version))
+        return fail(QStringLiteral("pack_untrusted"), QStringLiteral("%1 %2 is not trusted here, so its sandbox cannot be turned off.").arg(summary->id, summary->version),
+                    QStringLiteral("Trust it first: fugue pack trust %1.").arg(id));
+    if (!sandboxed) {
+        const Result<bool> yes = ask(prompts.unsandbox, *summary, QStringLiteral("Running a pack without its sandbox"));
+        if (!yes)
+            return yes.error();
+        if (!*yes)
+            return fail(QStringLiteral("cancelled"), QStringLiteral("The sandbox of %1 was left on.").arg(summary->id));
+    }
+    const Errors errors = trust.setUnsandboxed(summary->id, summary->version, !sandboxed);
+    if (hasErrors(errors))
+        return errors;
+    return *summary;
+}
+
 Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const PackPrompts &prompts) {
     if (!validPackId(parsePackRef(id).id) || !QFileInfo(packsDir + QLatin1Char('/') + id).isDir())
         return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
@@ -1289,6 +1370,9 @@ Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const 
         return yes.error();
     if (!*yes)
         return fail(QStringLiteral("setup_declined"), QStringLiteral("The setup of %1 was not run.").arg(summary->id));
+    const Result<bool> mode = setupSandboxed(TrustStore(), *summary);
+    if (!mode)
+        return mode.errors();
     const PacksLock lock(packsDir, prompts.lockWaitMs);
     if (!lock.held())
         return lock.busy();
@@ -1302,7 +1386,7 @@ Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const 
     if (prompts.cancelled && prompts.cancelled())
         return fail(QStringLiteral("cancelled"), QStringLiteral("Stopped before the setup of %1.").arg(summary->id));
     const QStringList &command = summary->setupCommand;
-    const ProcessResult done = runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled, true);
+    const ProcessResult done = runSetupCommand(command, folder, *mode, prompts);
     if (!done.ok && prompts.cancelled && prompts.cancelled())
         return fail(QStringLiteral("cancelled"), QStringLiteral("The setup of %1 was stopped; its environment may be half made.").arg(summary->id),
                     QStringLiteral("Run the setup again from Get ready."));

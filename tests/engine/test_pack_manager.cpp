@@ -17,6 +17,7 @@
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
 #include "engine/registry.h"
+#include "engine/sandbox.h"
 
 using namespace fugue;
 
@@ -90,6 +91,11 @@ class TestPackManager : public QObject {
     }
 
 private slots:
+    void initTestCase() {
+        // These tests run real setup commands; the sandbox itself is tested in test_sandbox.
+        if (!sandbox::available())
+            sandbox::runSetupUnsandboxedForTest(true);
+    }
     void init() { reset(); }
 
     void aFolderIsCopiedAfterThePersonAgrees() {
@@ -526,8 +532,9 @@ private slots:
     }
     // #418: a stop kills the setup, and that is a stop, not a failed setup; nothing of the pack stays.
     void aStoppedSetupIsCancelledAndLeavesNothing() {
-        const QString marker = m_dir.path() + "/setup-started";
-        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "touch '" + marker + "'; sleep 30"}}};
+        // The setup runs in the sandbox, which writes only the pack's own folder: the marker is made there.
+        const QString marker = packs() + "/io.example.tools/setup-started";
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "touch setup-started; sleep 30"}}};
         PackPrompts prompts = answering(Answer::Yes);
         prompts.cancelled = [&] { return QFileInfo::exists(marker); };
         const Result<PackAdded> added = addPack(makePack(source(), "io.example.tools", "1.0.0", false, setup), {}, packs(), trustStore(), prompts);
@@ -630,8 +637,8 @@ private slots:
         QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
         if (geteuid() == 0)
             QSKIP("root can delete a read-only folder");
-        const QString marker = m_dir.path() + "/setup-started";
-        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir d && touch d/f && chmod 555 d && touch '" + marker + "' && sleep 30"}}};
+        const QString marker = packs() + "/" + id + "/setup-started"; // the sandbox writes only the pack's folder
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir d && touch d/f && chmod 555 d && touch setup-started && sleep 30"}}};
         makePack(source(), id, "1.0.1", false, setup);
         PackPrompts prompts = answering(Answer::Yes);
         prompts.cancelled = [&] { return QFileInfo::exists(marker); };

@@ -3,6 +3,7 @@
 // terminal path is driven through `script`, which gives the program a pseudo-terminal.
 
 #include "../test_paths.h"
+#include "engine/sandbox.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -39,15 +40,20 @@ class TestCliPacks : public QObject {
         file.write(bytes);
     }
 
-    QString makePack(const QString &root, const QString &id, const QString &version) const {
+    QString makePack(const QString &root, const QString &id, const QString &version, const QJsonObject &needs = {},
+                     bool community = false) const {
         const QString dir = root + "/" + id;
-        write(dir + "/pack.json", QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id}, {"version", version}, {"name", "Test"},
-                                                            {"nodes", QJsonArray{"tool"}}}).toJson());
-        write(dir + "/tool/node.json",
-              QJsonDocument(QJsonObject{{"manifest", 1}, {"id", id + "/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
-                                        {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
-                                        {"inputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}},
-                                        {"outputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}}}).toJson());
+        QJsonObject pack{{"manifest", 1}, {"id", id}, {"version", version}, {"name", "Test"}, {"nodes", QJsonArray{"tool"}}};
+        if (community)
+            pack["community"] = true;
+        write(dir + "/pack.json", QJsonDocument(pack).toJson());
+        QJsonObject node{{"manifest", 1}, {"id", id + "/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
+                         {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                         {"inputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}},
+                         {"outputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}}};
+        if (!needs.isEmpty())
+            node["needs"] = needs;
+        write(dir + "/tool/node.json", QJsonDocument(node).toJson());
         return dir;
     }
 
@@ -143,6 +149,47 @@ private slots:
         QDir(packs()).removeRecursively();
     }
 
+    // The sandbox in plain words (6.7.1, #731): list and info say whether a pack is sandboxed and what it asked for; turning the
+    // sandbox off is a person's yes and is never offered for a community pack.
+    void infoAndListSayWhatThePackMayDoAndTheSandboxCanBeTurnedOffByAPerson() {
+        if (QStandardPaths::findExecutable("script").isEmpty())
+            QSKIP("script (util-linux) is needed to give the program a terminal");
+        makePack(packs(), "io.example.net", "1.0.0", {{"network", true}, {"files", QJsonObject{{"read", QJsonArray{"~/Documents/Scans"}}}}});
+        makePack(packs(), "io.example.shared", "2.0.0", {}, true);
+        write(m_dir.filePath("state/fugue/trust.json"),
+              QJsonDocument(QJsonObject{{"packs", QJsonObject{{"io.example.net", QJsonArray{"1.0.0"}}, {"io.example.shared", QJsonArray{"2.0.0"}}}}}).toJson());
+
+        const QJsonObject info = fugue({"pack", "info", "io.example.net", "--json"}).json().value("data").toObject();
+        QCOMPARE(info.value("sandboxed").toBool(), true);
+        QCOMPARE(info.value("needs").toObject().value("network").toBool(), true);
+        QCOMPARE(info.value("needs_lines").toArray().at(0).toString(), QString("Can use the network"));
+        QCOMPARE(info.value("needs_lines").toArray().at(1).toString(), QString("Can read ~/Documents/Scans"));
+        QVERIFY(QString::fromUtf8(fugue({"pack", "info", "io.example.net"}).out).contains("Can use the network"));
+
+        // Without a person the sandbox stays on; a community pack's can never be turned off.
+        QCOMPARE(fugue({"pack", "sandbox-off", "io.example.net", "--json"}).firstCode(), QString("needs_confirmation"));
+        int exitCode = -1;
+        const QString refused = atTerminal({"pack", "sandbox-off", "io.example.shared"}, "y\n", &exitCode);
+        QCOMPARE(exitCode, 1);
+        QVERIFY2(refused.contains("community"), qPrintable(refused));
+
+        const QString asked = atTerminal({"pack", "sandbox-off", "io.example.net"}, "y\n", &exitCode);
+        QCOMPARE(exitCode, 0);
+        QVERIFY2(asked.contains("NOT sandboxed"), qPrintable(asked));
+        const QJsonArray listed = fugue({"pack", "list", "--json"}).json().value("data").toObject().value("packs").toArray();
+        for (const QJsonValue &entry : listed) {
+            const QJsonObject pack = entry.toObject();
+            QCOMPARE(pack.value("sandboxed").toBool(), pack.value("id").toString() != "io.example.net");
+            if (pack.value("id").toString() == "io.example.net")
+                QCOMPARE(pack.value("needs_lines").toArray().at(0).toString(), QString("NOT sandboxed: this pack's program runs as you."));
+        }
+        QVERIFY(QString::fromUtf8(fugue({"pack", "list"}).out).contains("NOT sandboxed"));
+        QCOMPARE(fugue({"pack", "sandbox-on", "io.example.net", "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"pack", "info", "io.example.net", "--json"}).json().value("data").toObject().value("sandboxed").toBool(), true);
+        QDir(packs()).removeRecursively();
+        QFile::remove(m_dir.filePath("state/fugue/trust.json"));
+    }
+
     void aGitPackWithoutAPinIsAUsageError() {
         const Outcome outcome = fugue({"pack", "add", "https://example.com/x.git", "--json"});
         QCOMPARE(outcome.firstCode(), QString("usage"));
@@ -163,7 +210,7 @@ private slots:
         shown = atTerminal({"pack", "add", source}, "y\n", &exitCode);
         QCOMPARE(exitCode, 0);
         QVERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
-        QVERIFY(shown.contains("Fugue enforces no sandbox"));
+        QVERIFY2(shown.contains("Runs in a sandbox"), qPrintable(shown)); // the plain line of a pack that asks for nothing
 
         // The one yes installed and trusted it: no second question.
         QCOMPARE(fugue({"pack", "list", "--json"}).json().value("data").toObject().value("packs").toArray().at(0).toObject().value("trusted").toBool(), true);
@@ -175,6 +222,8 @@ private slots:
     }
 
     void setupShowsTheExactCommand() {
+        if (!fugue::sandbox::available())
+            QSKIP("the setup runs in the sandbox, and bubblewrap or user namespaces are not available here");
         if (QStandardPaths::findExecutable("script").isEmpty())
             QSKIP("script (util-linux) is needed to give the program a terminal");
         const QString source = makePack(m_dir.filePath("source2"), "io.example.setup", "1.0.0");

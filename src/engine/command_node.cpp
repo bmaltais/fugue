@@ -17,6 +17,7 @@
 
 #include <csignal>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <map>
 #include <optional>
@@ -31,6 +32,8 @@
 #include "engine/pack_secrets.h"
 #include "engine/registry.h"
 #include "engine/resident_models.h"
+#include "engine/run_folder.h"
+#include "engine/sandbox.h"
 #include "engine/trust_store.h"
 
 namespace fugue {
@@ -55,13 +58,13 @@ struct Event {
 // queue. Everything here may be called from any thread.
 class Process {
 public:
-    Process(const QString &program, const QString &workDir, const QProcessEnvironment &environment,
-            double idleSeconds, int graceMs)
+    Process(const QString &program, const QStringList &arguments, const QString &workDir,
+            const QProcessEnvironment &environment, double idleSeconds, int graceMs)
         : m_grace(graceMs), m_idleMs(idleSeconds > 0 ? int(idleSeconds * 1000) : 0) {
         m_context = new QObject;
         m_context->moveToThread(&m_thread);
         m_thread.start();
-        post([this, program, workDir, environment] { start(program, workDir, environment); });
+        post([this, program, arguments, workDir, environment] { start(program, arguments, workDir, environment); });
     }
 
     ~Process() {
@@ -202,7 +205,7 @@ private:
     }
 
     // Runs on the process's thread.
-    void start(const QString &program, const QString &workDir, const QProcessEnvironment &environment) {
+    void start(const QString &program, const QStringList &arguments, const QString &workDir, const QProcessEnvironment &environment) {
         m_process = new QProcess(m_context);
         m_process->setWorkingDirectory(workDir);
         m_process->setProcessEnvironment(environment);
@@ -235,7 +238,7 @@ private:
             m_idle->setSingleShot(true);
             QObject::connect(m_idle, &QTimer::timeout, m_context, [this] { stopWhenIdle(); });
         }
-        m_process->start(program, {});
+        m_process->start(program, arguments);
         m_pgid = pid_t(m_process->processId()); // setsid: the process id is the group id
     }
 
@@ -731,6 +734,119 @@ Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
             {"work_dir", context.workDir}};
 }
 
+// ---- The sandbox (6.7.1): what a pack's program is started with. ----
+
+struct Launch {
+    QString program;
+    QStringList arguments;
+    QProcessEnvironment environment;
+    QStringList mounted; // what the program can see besides its own folder and /usr: a program that lives on cannot see more
+};
+
+bool inFolder(const QString &path, const QString &folder) {
+    return path == folder || path.startsWith(folder + QLatin1Char('/'));
+}
+
+bool covered(const QStringList &mounted, const QString &path) {
+    for (const QString &folder : mounted)
+        if (inFolder(path, folder))
+            return true;
+    return false;
+}
+
+// A node of an installed pack (the built-in packs are Fugue itself).
+bool isPackNode(const NodeType &type) {
+    return !type.packVersion.isEmpty() && !TrustStore::isBuiltIn(TrustStore::packOf(type.id));
+}
+
+// The pack's folder: the node's folder's parent when that holds pack.json, else the node's folder alone.
+QString packFolderOf(const QString &nodeFolder) {
+    const QString parent = QFileInfo(nodeFolder + QStringLiteral("/..")).canonicalFilePath();
+    return !parent.isEmpty() && QFileInfo::exists(parent + QStringLiteral("/pack.json")) ? parent : nodeFolder;
+}
+
+// `value` with every {"path": …} text replaced by change(path).
+QJsonValue mapPaths(const QJsonValue &value, const std::function<QString(const QString &)> &change) {
+    if (value.isArray()) {
+        QJsonArray items;
+        for (const QJsonValue &item : value.toArray())
+            items.append(mapPaths(item, change));
+        return items;
+    }
+    if (!value.isObject())
+        return value;
+    QJsonObject object = value.toObject();
+    for (auto it = object.begin(); it != object.end(); ++it)
+        it.value() = it.key() == QLatin1String("path") && it.value().isString() ? QJsonValue(change(it.value().toString()))
+                                                                                    : mapPaths(it.value(), change);
+    return object;
+}
+
+// What the program is handed besides the work folder. A model file stays where it is and is bound read-only; any other
+// file (a picture, a video) is copied into the run's `.inputs` folder unless it is in a run folder already, so a program
+// that lives on between runs finds the next run's files without being started again. The request's paths are changed to the copies.
+QStringList handOff(const NodeContext &context, QJsonObject &request) {
+    const QString workDir = QFileInfo(context.workDir).canonicalFilePath();
+    const QString runs = QFileInfo(RunFolder::defaultRoot()).canonicalFilePath();
+    QStringList models;
+    int copies = 0;
+    const auto stage = [&](const QString &path) {
+        const QString real = QFileInfo(path).canonicalFilePath();
+        if (real.isEmpty() || workDir.isEmpty() || inFolder(real, workDir) || (!runs.isEmpty() && inFolder(real, runs)))
+            return path;
+        const QString name = QStringLiteral("%1/.inputs/%2-%3").arg(workDir).arg(++copies).arg(QFileInfo(real).fileName());
+        QDir().mkpath(QFileInfo(name).absolutePath());
+        return QFile::copy(real, name) ? name : path;
+    };
+    QJsonObject inputs = request.value("inputs").toObject();
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = context.type->input(it.key());
+        const bool resource = spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource;
+        if (resource)
+            mapPaths(it.value(), [&](const QString &path) {
+                if (!models.contains(path))
+                    models << path;
+                return path;
+            });
+        else
+            it.value() = mapPaths(it.value(), stage);
+    }
+    request.insert("inputs", inputs);
+    return models;
+}
+
+// The program started inside bubblewrap: the node's entry, its pack, the run's work folder and the model files in `models`.
+Result<Launch> sandboxedLaunch(const NodeContext &context, const QString &folder, const QString &program,
+                               const QStringList &models, bool persistent) {
+    const NodeType &type = *context.type;
+    const Result<sandbox::Needs> needs = sandbox::parseNeeds(type.needs);
+    if (!needs)
+        return nodeError(QStringLiteral("node_failed"), QStringLiteral("%1: %2").arg(type.id, needs.error().message));
+    sandbox::Profile profile;
+    profile.packDir = packFolderOf(folder);
+    profile.workDir = context.workDir;
+    profile.needs = *needs;
+    profile.handedFiles = models;
+    profile.allowedRoots = ModelLibrary::current(context.registry).roots();
+    profile.program = program;
+    profile.environment = {QStringLiteral("FUGUE_PROTOCOL=1"), QStringLiteral("FUGUE_NODE_DIR=") + folder,
+                           QStringLiteral("FUGUE_WORK_DIR=") + context.workDir};
+    const QString runs = QFileInfo(RunFolder::defaultRoot()).canonicalFilePath();
+    // A program that lives on between runs is started once: the folder of every run is writable for it.
+    if (persistent && !runs.isEmpty())
+        profile.writableFolders << runs;
+    const sandbox::Command command = sandbox::build(profile);
+    Launch launch;
+    launch.program = command.program;
+    launch.arguments = command.arguments;
+    launch.environment = QProcessEnvironment::systemEnvironment();
+    launch.mounted = command.mounted;
+    launch.mounted << QFileInfo(context.workDir).canonicalFilePath() << profile.writableFolders;
+    for (const QString &model : models)
+        launch.mounted << QDir::cleanPath(model); // also one that was left out: starting again would not help
+    return launch;
+}
+
 } // namespace
 
 QString nodeSeal(const QString &dir, const QString &entry, const QByteArray &packJson) {
@@ -794,7 +910,9 @@ struct CommandKernel::Impl {
         QMutex run;   // one run at a time
         QMutex guard; // `process`, for shutdown() to reach it during a run
         std::unique_ptr<Process> process;
-        QString seal; // NodeType::seal of the files `process` was started from
+        QString seal; // NodeType::seal of the files `process` was started from, and whether it runs in the sandbox
+        QStringList models;  // the model files its sandbox has bound
+        QStringList mounted; // what its sandbox can see (Launch::mounted)
         // While the program is a resident model: the payload ResidentModels holds, whose drop
         // stops the program and waits for it, so the memory is back when the drop returns. Weak,
         // so that only ResidentModels keeps it.
@@ -898,6 +1016,19 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     environment.insert(QStringLiteral("FUGUE_NODE_DIR"), folder);
     environment.insert(QStringLiteral("FUGUE_WORK_DIR"), context.workDir);
 
+    // A pack's program runs in the sandbox (6.7.1), unless the person said, for this version, to run it without one.
+    bool sandboxed = false;
+    if (isPackNode(type)) {
+        const bool optedOut = !type.packCommunity && TrustStore().isUnsandboxed(TrustStore::packOf(type.id), type.packVersion);
+        if (!optedOut) {
+            if (!sandbox::available())
+                return makeError(QStringLiteral("sandbox_unavailable"),
+                                 QStringLiteral("%1 was not run: its program must run in a sandbox, and the sandbox cannot start here.").arg(type.id),
+                                 sandbox::unavailableHint());
+            sandboxed = true;
+        }
+    }
+
     const bool persistent = runtime.value("mode").toString() == QLatin1String("persistent");
     const double timeout = runtime.value("timeout_s").toDouble(0);
     const int timeoutMs = timeout > 0 ? int(timeout * 1000) : 0;
@@ -922,6 +1053,14 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         }
         request.insert("secrets", secrets);
     }
+    QStringList models;
+    if (sandboxed)
+        models = handOff(context, request);
+    const auto launchFor = [&](const QStringList &bound) -> Result<Launch> {
+        if (sandboxed)
+            return sandboxedLaunch(context, folder, program, bound, persistent);
+        return Launch{program, {}, environment, {}};
+    };
     // What the program says as it goes (progress lines) goes through the same mask.
     NodeContext reported = context;
     if (!secretValues.isEmpty() && context.progress)
@@ -931,7 +1070,11 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     const auto finish = [&secretValues](Result<Values> result) { return maskedOutputs(std::move(result), secretValues); };
 
     if (!persistent) {
-        Process process(program, context.workDir, environment, 0, d->grace);
+        const Result<Launch> launched = launchFor(models);
+        if (!launched)
+            return finish(launched.error());
+        const Launch &launch = *launched;
+        Process process(launch.program, launch.arguments, context.workDir, launch.environment, 0, d->grace);
         process.beginRun(secretValues);
         process.sendLine(request);
         process.closeInput();
@@ -956,11 +1099,29 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     }
     std::unique_lock<QMutex> run(slot->run, std::adopt_lock);
     // The pack was loaded again with other files (an update): the program of the old ones goes.
-    if (slot->seal != type.seal) {
+    const QString sealKey = type.seal + (sandboxed ? QString() : QStringLiteral("|unsandboxed"));
+    if (slot->seal != sealKey) {
         QMutexLocker guard(&slot->guard);
         slot->process.reset();
-        slot->seal = type.seal;
+        slot->seal = sealKey;
+        slot->models.clear();
     }
+    // The sandbox of a program that lives on shows it only what it was started with: a model file or a work folder it
+    // cannot see means starting it again, with the model files it had before and this run's.
+    if (sandboxed && slot->process) {
+        bool seen = covered(slot->mounted, QFileInfo(context.workDir).canonicalFilePath());
+        for (const QString &model : models)
+            seen = seen && covered(slot->mounted, QDir::cleanPath(model));
+        if (!seen) {
+            QMutexLocker guard(&slot->guard);
+            slot->process.reset();
+        }
+    }
+    for (const QString &model : models)
+        if (!slot->models.contains(model))
+            slot->models << model;
+    while (slot->models.size() > 16)
+        slot->models.removeFirst();
     // A program that was reused may have just exited (its idle stop, or a crash between runs):
     // nothing it said is lost then, so the run starts again once with a new program.
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -968,10 +1129,15 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         if (!slot->process || !slot->process->acquire()) {
             reused = false;
             const double idle = runtime.value("idle_timeout_s").toDouble(300);
-            auto fresh = std::make_unique<Process>(program, context.workDir, environment, idle, d->grace);
+            const Result<Launch> launched = launchFor(slot->models);
+            if (!launched)
+                return finish(launched.error());
+            const Launch &launch = *launched;
+            auto fresh = std::make_unique<Process>(launch.program, launch.arguments, context.workDir, launch.environment, idle, d->grace);
             {
                 QMutexLocker guard(&slot->guard);
                 slot->process = std::move(fresh);
+                slot->mounted = launch.mounted;
             }
             const Result<QJsonObject> ready = await(*slot->process, reported, id, true, Expect::Ready, 0, d->grace);
             if (!ready) {

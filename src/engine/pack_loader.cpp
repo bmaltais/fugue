@@ -49,7 +49,7 @@ QString shareableSource(const PackSource &source) {
 
 
 const QStringList knownPackFields = {"manifest", "id",    "version", "name",  "license",   "source",
-                                     "description", "nodes", "types", "setup", "converters", "settings"};
+                                     "description", "nodes", "types", "setup", "converters", "settings", "community"};
 
 Error problem(const QString &code, const QString &message, Error::Severity severity = Error::Severity::Error) {
     Error error = makeError(code, message);
@@ -94,6 +94,7 @@ struct PackManifest {
     QStringList nodes;
     QList<DeclaredPortType> types;
     QList<PackSecretSpec> secrets;
+    bool community = false; // reserved (#731): from the reviewed community channel; always sandboxed
 };
 
 // Validates pack.json, reporting every problem found.
@@ -217,6 +218,13 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
             errors << secrets.errors();
     }
 
+    if (json.contains("community")) {
+        if (json.value("community").isBool())
+            pack.community = json.value("community").toBool();
+        else
+            errors << invalid(QStringLiteral("pack.json \"community\" must be true or false."));
+    }
+
     for (auto it = json.begin(); it != json.end(); ++it)
         if (!knownPackFields.contains(it.key()))
             errors << problem(QStringLiteral("invalid_document"),
@@ -336,6 +344,7 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         for (const PackSecretSpec &spec : pack.secrets)
             if (spec.originRequired)
                 type.packSecretsOriginRequired << spec.name;
+        type.packCommunity = pack.community;
         if (!pack.secrets.isEmpty())
             type.packSource = readPackSource(folder).location;
         if (runtime.value("kind").toString() == QLatin1String("command"))
@@ -538,8 +547,10 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.id = read.value().value("id").toString();
     loaded.version = read.value().value("version").toString();
     loaded.name = read.value().value("name").toString();
-    if (pack)
+    if (pack) {
         loaded.secrets = pack->secrets;
+        loaded.community = pack->community;
+    }
     if (!pack)
         return loaded;
     const int major = Version::parse(pack->version)->major; // parsePack checked it

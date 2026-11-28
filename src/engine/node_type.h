@@ -140,6 +140,9 @@ struct NodeType {
     // Where the pack was installed from (its `.fugue-source.json` location), empty for one copied in by hand: with the pack id
     // it is the key the pack's secret values are stored under (6.4.1).
     QString packSource;
+    // pack.json `community: true`: the pack came through the reviewed community channel (#731). It is always sandboxed:
+    // the per-pack "run without a sandbox" yes does not apply to it.
+    bool packCommunity = false;
     // What the pack loader saw of a command node's files (nodeSeal in command_node.h); the
     // runner refuses to run when they no longer match. Empty: not checked.
     QString seal;

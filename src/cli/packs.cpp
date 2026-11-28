@@ -22,6 +22,7 @@
 #include "engine/pack_manager.h"
 #include "engine/pack_secrets.h"
 #include "engine/readiness.h"
+#include "engine/sandbox.h"
 #include "engine/templates.h"
 #include "engine/trust_store.h"
 
@@ -55,12 +56,16 @@ void describe(const PackSummary &pack) {
             say(QStringLiteral("  Warning:     %1 %2 already set for this pack id from ANOTHER source; this pack does not get %3.")
                     .arg(pack.secretsOtherSource.join(", "), pack.secretsOtherSource.size() == 1 ? QStringLiteral("is") : QStringLiteral("are"),
                          pack.secretsOtherSource.size() == 1 ? QStringLiteral("it") : QStringLiteral("them")));
-        say(QStringLiteral("  Isolation:   advisory. A trusted pack's programs run as you and can read Fugue's config folder, where every key is kept."));
+        say(QStringLiteral("  Isolation:   its programs run in a sandbox and cannot read Fugue's config folder, where every key is kept. "
+                           "A pack that can use the network can still send the keys it is given anywhere."));
     }
     say(QStringLiteral("  Nodes:       %1").arg(pack.nodes.size()));
     if (!pack.setupCommand.isEmpty())
         say(QStringLiteral("  Setup:       %1").arg(displayCommand(pack.setupCommand)));
-    say(QStringLiteral("  Fugue enforces no sandbox: a trusted pack runs programs as you."));
+    for (const QString &line : sandbox::plainLines(pack.needs, true))
+        say(QStringLiteral("  Sandbox:     %1").arg(line));
+    if (!sandbox::available())
+        say(QStringLiteral("  Warning:     %1").arg(sandbox::unavailableHint()));
 }
 
 Answer yesNo(const QString &question) {
@@ -125,6 +130,29 @@ PackPrompts terminalPrompts(Context &context) {
     return prompts;
 }
 
+QJsonObject needsJson(const sandbox::Needs &needs) {
+    return QJsonObject{{"network", needs.network}, {"gpu", needs.gpu}, {"read", QJsonArray::fromStringList(needs.readPaths)},
+                       {"write", QJsonArray::fromStringList(needs.writePaths)}};
+}
+
+// What a pack's programs may do (6.7.1): whether they run in the sandbox, what they declared, and the plain lines the Trust
+// question shows. A pack the person turned the sandbox off for (not a community pack's) is `sandboxed: false`.
+QJsonObject sandboxJson(const sandbox::Needs &needs, bool community, bool unsandboxed) {
+    const bool sandboxed = community || !unsandboxed;
+    return QJsonObject{{"sandboxed", sandboxed}, {"community", community}, {"needs", needsJson(needs)},
+                       {"needs_lines", QJsonArray::fromStringList(sandbox::plainLines(needs, sandboxed))}};
+}
+
+// The union of the needs of a loaded pack's nodes.
+sandbox::Needs needsOf(const Registry &registry, const LoadedPack &pack) {
+    sandbox::Needs needs;
+    for (const QString &id : pack.nodes)
+        if (const NodeType *type = registry.nodeType(id))
+            if (const Result<sandbox::Needs> declared = sandbox::parseNeeds(type->needs))
+                needs = sandbox::merged(needs, *declared);
+    return needs;
+}
+
 QJsonObject summaryJson(const PackSummary &pack) {
     QJsonObject object{{"id", pack.id}, {"version", pack.version}, {"name", pack.name}, {"path", pack.folder},
                        {"runtime", QJsonArray::fromStringList(pack.runtimeKinds)},
@@ -132,7 +160,9 @@ QJsonObject summaryJson(const PackSummary &pack) {
                        {"secrets", QJsonArray::fromStringList(pack.secrets)}, // names only, never values
                        {"secrets_set", QJsonArray::fromStringList(pack.secretsSet)},
                        {"secrets_set_for_another_source", QJsonArray::fromStringList(pack.secretsOtherSource)},
-                       {"nodes", QJsonArray::fromStringList(pack.nodes)}};
+                       {"nodes", QJsonArray::fromStringList(pack.nodes)},
+                       {"needs", needsJson(pack.needs)},
+                       {"needs_lines", QJsonArray::fromStringList(sandbox::plainLines(pack.needs, true))}};
     if (!pack.setupCommand.isEmpty())
         object.insert("setup", QJsonObject{{"command", QJsonArray::fromStringList(pack.setupCommand)}, {"description", pack.setupDescription}});
     if (!pack.source.location.isEmpty()) {
@@ -167,6 +197,13 @@ Reply packList(const Command &, Context &) {
                            {"origin", pack.inherited ? QStringLiteral("inherited from Default") : QStringLiteral("own")},
                            {"inherited", pack.inherited},
                            {"nodes", QJsonArray::fromStringList(pack.nodes)}};
+        const sandbox::Needs needs = needsOf(scratch, pack);
+        const bool unsandboxed = pack.enabled && !pack.community && trust.isUnsandboxed(pack.id, pack.version);
+        if (pack.enabled) {
+            const QJsonObject sandboxed = sandboxJson(needs, pack.community, unsandboxed);
+            for (auto it = sandboxed.begin(); it != sandboxed.end(); ++it)
+                object.insert(it.key(), it.value());
+        }
         if (pack.inherited) {
             object.insert("hidden", pack.hidden);
             if (!pack.hidden) {
@@ -196,7 +233,7 @@ Reply packList(const Command &, Context &) {
         }
         lines << (pack.enabled ? QStringLiteral("%1 %2  %3  %4 node(s)")
                                      .arg(pack.id, pack.version, trust.isTrusted(pack.id, pack.version) ? QStringLiteral("trusted") : QStringLiteral("untrusted"))
-                                     .arg(pack.nodes.size())
+                                     .arg(pack.nodes.size()) + (unsandboxed ? QStringLiteral("  NOT sandboxed") : QString())
                                : QStringLiteral("%1  disabled: %2").arg(pack.id.isEmpty() ? pack.path : pack.id,
                                                                          pack.errors.isEmpty() ? QStringLiteral("it did not load") : pack.errors.first().message))
               + origin;
@@ -499,6 +536,68 @@ Reply packSecret(const Command &command, Context &) {
     if (hasErrors(stored))
         return Reply::failure(stored);
     return Reply::success(secretsJson(*pack, store), QStringLiteral("Stored %1 of %2.").arg(name, pack->id));
+}
+
+Reply packInfo(const Command &command, Context &) {
+    Registry scratch;
+    const PackRef ref = parsePackRef(command.positionals.at(0));
+    const PackReport report = loadPacks(scratch, packSearchPaths(), inheritedPackPaths());
+    const TrustStore trust;
+    for (const LoadedPack &pack : report.packs) {
+        if (!pack.enabled || pack.hidden || pack.id != ref.id)
+            continue;
+        const bool unsandboxed = !pack.community && trust.isUnsandboxed(pack.id, pack.version);
+        const bool trusted = trust.isTrusted(pack.id, pack.version);
+        QJsonObject object = sandboxJson(needsOf(scratch, pack), pack.community, unsandboxed);
+        object.insert("id", pack.id);
+        object.insert("version", pack.version);
+        object.insert("name", pack.name);
+        object.insert("path", pack.path);
+        object.insert("trusted", trusted);
+        object.insert("nodes", QJsonArray::fromStringList(pack.nodes));
+        object.insert("sandbox_available", sandbox::available());
+        QStringList lines{QStringLiteral("%1 %2  %3").arg(pack.id, pack.version, trusted ? QStringLiteral("trusted") : QStringLiteral("untrusted"))};
+        for (const QJsonValue &line : object.value("needs_lines").toArray())
+            lines << QStringLiteral("  ") + line.toString();
+        if (pack.community)
+            lines << QStringLiteral("  Community pack: always sandboxed.");
+        if (!sandbox::available() && !unsandboxed)
+            lines << QStringLiteral("  Cannot run here: %1").arg(sandbox::unavailableHint());
+        return Reply::success(object, lines.join('\n'));
+    }
+    return Reply::failure(makeError(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed and loaded.").arg(command.positionals.at(0)),
+                                    QStringLiteral("`fugue pack list` shows the packs.")));
+}
+
+namespace {
+
+Reply sandboxReply(const Result<PackSummary> &done, bool sandboxed) {
+    if (!done)
+        return Reply::failure(done.errors());
+    const QJsonObject object{{"id", done->id}, {"version", done->version}, {"sandboxed", sandboxed}};
+    return Reply::success(object, sandboxed ? QStringLiteral("%1 %2 runs in the sandbox.").arg(done->id, done->version)
+                                            : QStringLiteral("%1 %2: NOT sandboxed. Its programs run as you.").arg(done->id, done->version));
+}
+
+} // namespace
+
+Reply packSandboxOff(const Command &command, Context &context) {
+    TrustStore trust;
+    PackPrompts prompts = terminalPrompts(context);
+    prompts.unsandbox = [](const PackSummary &pack) {
+        if (!onTerminal())
+            return Answer::NoHuman;
+        describe(pack);
+        say(QStringLiteral("  NOT sandboxed: this pack's program runs as you."));
+        say(QStringLiteral("  It can read and change every file you can, use the network and read the keys of Fugue's config folder."));
+        return yesNo(QStringLiteral("Run this version of the pack without a sandbox?"));
+    };
+    return sandboxReply(setPackSandbox(command.positionals.at(0), false, packsDir(), trust, prompts), false);
+}
+
+Reply packSandboxOn(const Command &command, Context &context) {
+    TrustStore trust;
+    return sandboxReply(setPackSandbox(command.positionals.at(0), true, packsDir(), trust, terminalPrompts(context)), true);
 }
 
 } // namespace fugue::cli
