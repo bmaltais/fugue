@@ -328,7 +328,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: qsTr("A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.")
+                text: qsTr("A command node is a program. A pack's programs run in a sandbox, with only what the pack declares. Nothing from these packs runs until you allow it.")
             }
             Repeater {
                 model: App.workflows.pendingTrust
@@ -339,10 +339,11 @@ Item {
                     text: modelData.id + (modelData.version ? " " + modelData.version : "")
                           + (modelData.source ? "\n" + modelData.source : "")
                           + "\n" + modelData.types.join(", ")
+                          + (modelData.needs && modelData.needs.length > 0 ? "\n" + modelData.needs.join("\n") : "")
                           + (modelData.secrets.length > 0 ? "\n" + qsTr("Reads secrets: %1").arg(modelData.secrets.join(", ")) : "")
                 }
             }
-            // Not now is the default, highlighted and focused: Allow lets a pack's programs run as you, so it takes a deliberate
+            // Not now is the default, highlighted and focused: Allow lets a pack's programs run, so it takes a deliberate
             // press, never a stray Enter (D8).
             KitDialogButtons {
                 ThemedButton {

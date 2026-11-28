@@ -24,6 +24,7 @@
 #include "engine/hash.h"
 #include "engine/pack_loader.h"
 #include "engine/readiness.h"
+#include "engine/sandbox.h"
 #include "engine/registry.h"
 #include "fake_http.h"
 
@@ -111,6 +112,8 @@ class TestReadiness : public QObject {
 
 private slots:
     void initTestCase() {
+        if (!sandbox::available()) // these tests run real setup commands; the sandbox itself is tested in test_sandbox
+            sandbox::runSetupUnsandboxedForTest(true);
         DeclaredPortType declared;
         declared.type = *PortType::parse("io.test.pack/lora");
         declared.kind = PortKind::Resource;
@@ -166,7 +169,8 @@ private slots:
         QCOMPARE(plan.packs.size(), 1);
         QCOMPARE(plan.models.size(), 2);
         QCOMPARE(plan.environmentCount(), 1);
-        QCOMPARE(plan.packs.at(0).pack.permissions, QStringList{"network"});
+        QCOMPARE(plan.packs.at(0).pack.permissions, (QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display",
+                                                                 "Setup uses the network", "Setup can reach services on this computer and its X11/Xwayland display"}));
         QCOMPARE(plan.downloadBytes, qint64(1200000000));
         QCOMPARE(plan.unknownSizes, 1);
         QCOMPARE(plan.environmentBytes, qint64(27000000));
@@ -183,7 +187,7 @@ private slots:
     }
 
     void oneYesInstallsTrustsSetsUpAndDownloads() {
-        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch environment.ok"));
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch .venv/environment.ok"));
         const ReadinessPlan plan = buildReadinessPlan(
             request(folder, {model("a.safetensors", m_bytes, "/a.safetensors", m_bytes.size()), model("b.safetensors", m_other, "/b.safetensors", -1)}), env());
         QList<RowState> last(plan.rowCount(), RowState::Waiting);
@@ -193,7 +197,7 @@ private slots:
         QVERIFY2(outcome.ok, outcome.errors.isEmpty() ? "" : qPrintable(outcome.errors.first().message));
         QVERIFY(outcome.packsChanged);
         QCOMPARE(last, (QList<RowState>{RowState::Done, RowState::Done, RowState::Done}));
-        QVERIFY(QFileInfo(packs() + "/io.test.segment/environment.ok").isFile()); // its setup ran
+        QVERIFY(QFileInfo(packs() + "/io.test.segment/.venv/environment.ok").isFile()); // its setup ran
         QVERIFY(m_trust->isTrusted("io.test.segment", "1.0.0"));                 // and it is trusted, from the same yes
         QCOMPARE(QFileInfo(models() + "/loras/a.safetensors").size(), qint64(m_bytes.size()));
         QVERIFY(QFileInfo(models() + "/loras/b.safetensors").isFile());
@@ -287,14 +291,14 @@ private slots:
 
     // What is installed is the copy the list showed: the source changing afterwards changes nothing.
     void theInstalledPackIsTheCopyTheListShowed() {
-        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch shown"));
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch .venv/shown"));
         const ReadinessPlan plan = buildReadinessPlan(request(folder, {}), env());
-        makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch evil")); // another setup command, after the list
+        makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch .venv/evil")); // another setup command, after the list
         ReadinessRun run{packs(), m_trust.get(), m_hashes.get()};
         const ReadinessOutcome outcome = runReadinessPlan(plan, run);
         QVERIFY(outcome.ok);
-        QVERIFY(QFileInfo::exists(packs() + "/io.test.segment/shown"));
-        QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment/evil"));
+        QVERIFY(QFileInfo::exists(packs() + "/io.test.segment/.venv/shown"));
+        QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment/.venv/evil"));
     }
 
     // Review of #379: nothing is fetched before the yes. A git pack's row shows what the workflow records.
@@ -337,13 +341,14 @@ private slots:
         QCOMPARE(calls, 0);
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
 
-        // https: fetched after the yes; it declares network, which was not shown, so it asks; No skips that row alone.
+        // https: fetched after the yes; it declares network and has a setup, neither shown, so it asks; No skips that row alone.
         plan = buildReadinessPlan(gitRequest("https://example.com/p.git"), env());
         QStringList asked;
         run.allowMore = [&](const PackSummary &, const QStringList &permissions) { asked = permissions; return false; };
         outcome = runReadinessPlan(plan, run);
         QCOMPARE(calls, 1);
-        QCOMPARE(asked, QStringList{"network"});
+        QCOMPARE(asked.first(), QString("Can use the network"));
+        QVERIFY2(asked.last().startsWith("its setup ("), qPrintable(asked.join('|'))); // never run on the list's yes
         QVERIFY(!outcome.ok);
         QVERIFY(!QFileInfo::exists(packs() + "/io.test.segment"));
         QCOMPARE(QDir(packs()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList()); // staging gone
@@ -406,13 +411,13 @@ private slots:
     // #521: a pack whose setup never ran to its end here (no marker; one installed before the marker existed is the same) is
     // offered the setup by Get ready, trusted or not, and the one yes runs it.
     void anInstalledPackWithASetupAndNoMarkerIsOfferedTheSetup() {
-        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch environment.ok"));
+        const QString folder = makePack(m_dir.filePath("source"), "io.test.segment", setupOf("touch .venv/environment.ok"));
         PackPrompts yes;
         yes.install = yes.trust = yes.runSetup = [](const PackSummary &) { return Answer::Yes; };
         QVERIFY(addPack(folder, {}, packs(), *m_trust, yes).ok());
         QVERIFY(trustPack("io.test.segment", packs(), *m_trust, yes).ok());
         const QString installed = packs() + "/io.test.segment";
-        QVERIFY(QFileInfo(installed + "/environment.ok").isFile());
+        QVERIFY(QFileInfo(installed + "/.venv/environment.ok").isFile());
         Registry loaded;
         loadPacks(loaded, {packs()});
         ReadinessEnv e = env();
@@ -422,7 +427,7 @@ private slots:
         QVERIFY(buildReadinessPlan(r, e).packs.isEmpty()); // set up, trusted: nothing to do
 
         // The environment is gone and so is the marker (what a pack installed before markers looks like).
-        QVERIFY(QFile::remove(installed + "/environment.ok"));
+        QVERIFY(QFile::remove(installed + "/.venv/environment.ok"));
         QVERIFY(QFile::remove(installed + "/.fugue-setup.json"));
         const ReadinessPlan plan = buildReadinessPlan(r, e);
         QCOMPARE(plan.packs.size(), 1);
@@ -434,12 +439,12 @@ private slots:
         run.cancelled = nullptr;
         const ReadinessOutcome outcome = runReadinessPlan(plan, run);
         QVERIFY(outcome.ok);
-        QVERIFY(QFileInfo(installed + "/environment.ok").isFile());
+        QVERIFY(QFileInfo(installed + "/.venv/environment.ok").isFile());
         QVERIFY(buildReadinessPlan(r, e).packs.isEmpty()); // the marker is back
 
         // A setup that fails leaves no marker, so it is offered again.
         QVERIFY(QFile::remove(installed + "/.fugue-setup.json"));
-        QVERIFY(QFile::remove(installed + "/environment.ok"));
+        QVERIFY(QFile::remove(installed + "/.venv/environment.ok"));
         QCOMPARE(buildReadinessPlan(r, e).packs.size(), 1);
     }
 

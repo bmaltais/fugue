@@ -49,7 +49,7 @@ QString shareableSource(const PackSource &source) {
 
 
 const QStringList knownPackFields = {"manifest", "id",    "version", "name",  "license",   "source",
-                                     "description", "nodes", "types", "setup", "converters", "settings"};
+                                     "description", "nodes", "types", "setup", "converters", "settings", "community"};
 
 Error problem(const QString &code, const QString &message, Error::Severity severity = Error::Severity::Error) {
     Error error = makeError(code, message);
@@ -94,6 +94,7 @@ struct PackManifest {
     QStringList nodes;
     QList<DeclaredPortType> types;
     QList<PackSecretSpec> secrets;
+    bool community = false; // reserved (#731): from the reviewed community channel; always sandboxed
 };
 
 // Validates pack.json, reporting every problem found.
@@ -217,6 +218,13 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
             errors << secrets.errors();
     }
 
+    if (json.contains("community")) {
+        if (json.value("community").isBool())
+            pack.community = json.value("community").toBool();
+        else
+            errors << invalid(QStringLiteral("pack.json \"community\" must be true or false."));
+    }
+
     for (auto it = json.begin(); it != json.end(); ++it)
         if (!knownPackFields.contains(it.key()))
             errors << problem(QStringLiteral("invalid_document"),
@@ -292,10 +300,13 @@ QString reasonOf(const Errors &errors) {
 }
 
 // Loads one node folder; empty reason on success, the type id in `typeId`.
+// `needs`: the `needs` of the node.json this parsed (empty when it did not read), for the digest trust covers.
 QString loadNode(Registry &registry, const PackManifest &pack, const QString &folder, const QString &name,
-                 PackOrigin origin, QString &typeId, Errors &warnings, const QByteArray &packBytes) {
+                 PackOrigin origin, QString &typeId, Errors &warnings, const QByteArray &packBytes, QJsonObject &needs) {
     const QString path = folder + QLatin1Char('/') + name + QStringLiteral("/node.json");
     const Result<QJsonObject> read = readJsonObject(path);
+    if (read.ok())
+        needs = read->value("needs").toObject();
     if (!read.ok())
         return read.error().code == QLatin1String("file_not_found")
                    ? QStringLiteral("%1/node.json is missing.").arg(name)
@@ -336,6 +347,11 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         for (const PackSecretSpec &spec : pack.secrets)
             if (spec.originRequired)
                 type.packSecretsOriginRequired << spec.name;
+        type.packCommunity = pack.community;
+        if (origin != PackOrigin::BuiltIn && type.needs.value("files").isBool() && type.needs.value("files").toBool())
+            warnings << problem(QStringLiteral("invalid_document"),
+                                QStringLiteral("%1: needs.files: true grants a sandboxed program nothing; list the folders in {\"read\": [...], \"write\": [...]}.").arg(name),
+                                Error::Severity::Warning);
         if (!pack.secrets.isEmpty())
             type.packSource = readPackSource(folder).location;
         if (runtime.value("kind").toString() == QLatin1String("command"))
@@ -498,14 +514,42 @@ Result<QJsonObject> readPackJson(const QString &folder, QByteArray &bytes) {
 
 } // namespace
 
-QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation) {
+QString packNeedsDigestOf(const QStringList &nodes, const QHash<QString, QJsonObject> &needs) {
+    QStringList sorted = nodes;
+    sorted.sort();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const QString &node : std::as_const(sorted)) {
+        hash.addData(node.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(QJsonDocument(needs.value(node)).toJson(QJsonDocument::Compact));
+        hash.addData(QByteArrayView("\0", 1));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+QString packNeedsDigest(const QString &folder, const QStringList &nodes) {
+    QHash<QString, QJsonObject> needs;
+    for (const QString &node : nodes)
+        if (const Result<QJsonObject> read = readJsonObject(folder + QLatin1Char('/') + node + QStringLiteral("/node.json")))
+            needs.insert(node, read->value("needs").toObject());
+    return packNeedsDigestOf(nodes, needs);
+}
+
+// Where the pack came from as trust records it: the location and, for git, the commit `ref` resolved to, so a tag moved to new
+// code is another digest and asks again (6.7).
+QString sourceForDigest(const QString &folder) {
+    const PackSource source = readPackSource(folder);
+    return source.commit.isEmpty() ? source.location : source.location + QStringLiteral("\ncommit:") + source.commit;
+}
+
+QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation, const QString &needsDigest) {
     // The name and origin rule of each declared secret and where the pack came from (the key its values are stored
     // under): what decides which values it is handed and where they may go. Labels and descriptions are only text.
     QStringList lines;
     for (const PackSecretSpec &spec : secrets)
         lines << spec.name + QLatin1Char(':') + (spec.originRequired ? QStringLiteral("required") : QStringLiteral("optional"));
     lines.sort();
-    lines << QStringLiteral("source:") + sourceLocation;
+    lines << QStringLiteral("source:") + sourceLocation << QStringLiteral("needs:") + needsDigest;
     return QString::fromLatin1(QCryptographicHash::hash(lines.join(QLatin1Char('\n')).toUtf8(), QCryptographicHash::Sha256).toHex());
 }
 
@@ -521,7 +565,7 @@ QString packSecretsDigestOfFolder(const QString &folder) {
         return {};
     Errors ignored;
     const std::optional<PackManifest> pack = parsePack(read.value(), PackOrigin::Disk, ignored);
-    return pack ? packSecretsDigestOf(pack->secrets, readPackSource(folder).location) : QString();
+    return pack ? packSecretsDigestOf(pack->secrets, sourceForDigest(folder), packNeedsDigest(folder, pack->nodes)) : QString();
 }
 
 LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin, PackDigest record) {
@@ -538,8 +582,10 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.id = read.value().value("id").toString();
     loaded.version = read.value().value("version").toString();
     loaded.name = read.value().value("name").toString();
-    if (pack)
+    if (pack) {
         loaded.secrets = pack->secrets;
+        loaded.community = pack->community;
+    }
     if (!pack)
         return loaded;
     const int major = Version::parse(pack->version)->major; // parsePack checked it
@@ -567,9 +613,12 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     for (const DeclaredPortType &type : pack->types)
         loaded.errors << registry.add(type);
 
+    QHash<QString, QJsonObject> needs; // what each node.json said, as parsed: the digest covers these bytes, not a second read
     for (const QString &name : pack->nodes) {
         QString typeId;
-        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors, packBytes);
+        QJsonObject declared;
+        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors, packBytes, declared);
+        needs.insert(name, declared);
         if (!reason.isEmpty())
             loaded.disabled << PackProblem{name, reason};
         else if (!loaded.nodes.contains(typeId))
@@ -590,9 +639,10 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
         registry.setPackSource(pack->id, pack->version, shared, source.commit.isEmpty() ? source.ref : source.commit);
     }
     loaded.enabled = true;
+    // What trust compares (6.7): the secrets and needs this load parsed, not another folder that happens to name the same pack.
+    loaded.digest = packSecretsDigestOf(pack->secrets, sourceForDigest(folder), packNeedsDigestOf(pack->nodes, needs));
     if (origin == PackOrigin::Disk && record == PackDigest::Record) {
-        // What trust compares (6.7): the secrets this load parsed, not another folder that happens to name the same pack.
-        const QString digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location);
+        const QString digest = loaded.digest;
         {
             QMutexLocker lock(&digestLock());
             loadedDigests().insert(digestKey(pack->id, pack->version), digest);

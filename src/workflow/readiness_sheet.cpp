@@ -11,6 +11,7 @@
 
 #include <algorithm>
 
+#include "engine/sandbox.h"
 #include "engine/file_hashes.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
@@ -492,7 +493,7 @@ bool ReadinessSheet::askMore(const PackSummary &pack, const QStringList &permiss
         m_answer = -1;
     }
     const QVariantMap question{{"pack", pack.name.isEmpty() ? pack.id : pack.name},
-                               {"text", tr("%1 also wants %2 access. Allow it, or skip this pack?").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", ")))}};
+                               {"text", tr("%1 also asks for: %2. Allow it, or skip this pack?").arg(pack.name.isEmpty() ? pack.id : pack.name, permissions.join(QStringLiteral(", ")))}};
     QMetaObject::invokeMethod(this, [this, question] { m_question = question; publish(); }, Qt::QueuedConnection);
     QMutexLocker lock(&m_mutex);
     while (m_answer < 0 && !m_cancel.load())
@@ -631,6 +632,8 @@ void ReadinessSheet::publish() {
                              {"secrets", p.secrets.join(QStringLiteral(", "))},
                              {"setup", row.hasEnvironment() ? displayCommand(p.setupCommand) : QString()},
                              {"setupNote", p.setupDescription},
+                             // What a setup's sandbox lets it do (6.7.1): the network, the host's.
+                             {"setupLines", row.hasEnvironment() ? sandbox::needsLines({}, true) : QStringList()},
                              {"setupSize", p.setupSize >= 0 ? ModelDownloads::sizeText(p.setupSize) : QString()},
                              {"state", stateName(m_states.value(i))}, {"detail", m_details.value(i)}};
     }

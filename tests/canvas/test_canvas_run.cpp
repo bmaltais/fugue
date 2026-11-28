@@ -2219,6 +2219,9 @@ private slots:
         const QString packs = fugue::packsDir();
         FUGUE_REQUIRE_TEST_HOME(packs);
         QDir(packs).removeRecursively();
+        // ctest keeps a test's home between runs: a yes an earlier run left was sealed with the digest of that run's pack and
+        // Fugue, and trust() before the pack is loaded keeps it, so the run after the reload would be refused as untrusted.
+        QVERIFY(fugue::TrustStore().forget("io.example.tools").isEmpty());
         RunApp r(R"({
   "fugue": 1,
   "graph": {"nodes": {
@@ -2240,7 +2243,7 @@ private slots:
         QVERIFY(!r.role("say", NodeList::Missing).toBool());
         r.runs->start();
         QTRY_COMPARE(finished.size(), 2);
-        QCOMPARE(finished.at(1).at(1).toString(), QStringLiteral("ok"));
+        QVERIFY2(finished.at(1).at(1).toString() == QStringLiteral("ok"), qPrintable(QJsonDocument::fromVariant(r.runs->errors()).toJson()));
         QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("first"));
 
         // The update: new files at a new version. The workflow still records 1.0.0, a minor
@@ -2296,6 +2299,7 @@ echo '{"outputs": {"text": "painted"}}'
 )");
         QVERIFY(writeToolsPack(packs, "paint", script, "1.0.0", {{"deterministic", false}}));
         fugue::TrustStore trust;
+        QVERIFY(trust.forget("io.example.tools").isEmpty()); // an earlier run's yes, sealed with another digest (the home is kept)
         QVERIFY(trust.trust("io.example.tools", "1.0.0").isEmpty());
         RunApp r(R"({
   "fugue": 1,

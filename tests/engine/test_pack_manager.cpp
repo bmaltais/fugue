@@ -17,6 +17,7 @@
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
 #include "engine/registry.h"
+#include "engine/sandbox.h"
 
 using namespace fugue;
 
@@ -90,6 +91,11 @@ class TestPackManager : public QObject {
     }
 
 private slots:
+    void initTestCase() {
+        // These tests run real setup commands; the sandbox itself is tested in test_sandbox.
+        if (!sandbox::available())
+            sandbox::runSetupUnsandboxedForTest(true);
+    }
     void init() { reset(); }
 
     void aFolderIsCopiedAfterThePersonAgrees() {
@@ -101,7 +107,7 @@ private slots:
         QVERIFY2(added.ok(), qPrintable(added.error().message));
         QCOMPARE(shown.id, QString("io.example.tools"));
         QCOMPARE(shown.runtimeKinds, QStringList{"command"});
-        QCOMPARE(shown.permissions, (QStringList{"gpu", "network"}));
+        QCOMPARE(shown.permissions, (QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display", "Can use the GPU"}));
         QVERIFY(QFileInfo(packs() + "/io.example.tools/tool/node.json").isFile());
         QCOMPARE(readPackSource(packs() + "/io.example.tools").kind, PackSource::Kind::Path);
         QCOMPARE(leftovers(), QStringList{"io.example.tools"}); // no staging folder stays behind
@@ -217,7 +223,7 @@ private slots:
     }
 
     void setupRunsOnlyAfterTheExactCommandIsShownAndAccepted() {
-        const QJsonObject setup{{"command", QJsonArray{"touch", "setup ran"}}, {"description", "Make the marker"}};
+        const QJsonObject setup{{"command", QJsonArray{"touch", ".venv/setup ran"}}, {"description", "Make the marker"}};
         const QString dir = makePack(source(), "io.example.tools", "1.0.0", false, setup);
 
         QStringList shown;
@@ -225,10 +231,10 @@ private slots:
         prompts.runSetup = [&](const PackSummary &pack) { shown = pack.setupCommand; return Answer::No; };
         const Result<PackAdded> declined = addPack(dir, {}, packs(), trustStore(), prompts);
         QVERIFY(declined.ok());
-        QCOMPARE(shown, (QStringList{"touch", "setup ran"}));
+        QCOMPARE(shown, (QStringList{"touch", ".venv/setup ran"}));
         QVERIFY(declined->setupSkipped && !declined->setupRan);
-        QVERIFY(!QFileInfo(packs() + "/io.example.tools/setup ran").exists());
-        QCOMPARE(displayCommand(shown), QString("touch 'setup ran'"));
+        QVERIFY(!QFileInfo(packs() + "/io.example.tools/.venv/setup ran").exists());
+        QCOMPARE(displayCommand(shown), QString("touch '.venv/setup ran'"));
 
         // With no person to ask the setup, nothing is installed.
         QDir(packs()).removeRecursively();
@@ -240,7 +246,7 @@ private slots:
         const Result<PackAdded> done = addPack(dir, {}, packs(), trustStore(), answering(Answer::Yes));
         QVERIFY(done.ok());
         QVERIFY(done->setupRan);
-        QVERIFY(QFileInfo(packs() + "/io.example.tools/setup ran").exists()); // ran inside the pack folder
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/.venv/setup ran").exists()); // ran inside the pack folder
     }
 
     void aFailingSetupIsReported() {
@@ -526,8 +532,9 @@ private slots:
     }
     // #418: a stop kills the setup, and that is a stop, not a failed setup; nothing of the pack stays.
     void aStoppedSetupIsCancelledAndLeavesNothing() {
-        const QString marker = m_dir.path() + "/setup-started";
-        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "touch '" + marker + "'; sleep 30"}}};
+        // The setup runs in the sandbox, which writes only the pack's own folder: the marker is made there.
+        const QString marker = packs() + "/io.example.tools/.venv/setup-started";
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "touch .venv/setup-started; sleep 30"}}};
         PackPrompts prompts = answering(Answer::Yes);
         prompts.cancelled = [&] { return QFileInfo::exists(marker); };
         const Result<PackAdded> added = addPack(makePack(source(), "io.example.tools", "1.0.0", false, setup), {}, packs(), trustStore(), prompts);
@@ -630,8 +637,8 @@ private slots:
         QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
         if (geteuid() == 0)
             QSKIP("root can delete a read-only folder");
-        const QString marker = m_dir.path() + "/setup-started";
-        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir d && touch d/f && chmod 555 d && touch '" + marker + "' && sleep 30"}}};
+        const QString marker = packs() + "/" + id + "/.venv/setup-started"; // the sandbox writes only the pack's folder
+        const QJsonObject setup{{"command", QJsonArray{"sh", "-c", "mkdir .venv/d && touch .venv/d/f && chmod 555 .venv/d && touch .venv/setup-started && sleep 30"}}};
         makePack(source(), id, "1.0.1", false, setup);
         PackPrompts prompts = answering(Answer::Yes);
         prompts.cancelled = [&] { return QFileInfo::exists(marker); };

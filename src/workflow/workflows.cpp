@@ -28,6 +28,7 @@
 #include "engine/paths.h"
 #include "engine/settings.h"
 #include "engine/app_binding.h"
+#include "engine/sandbox.h"
 #include "engine/share_package.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
@@ -1599,8 +1600,15 @@ bool Workflows::addPendingTrust(const QList<PackUse> &uses) {
                 for (const QString &name : node->packSecrets)
                     if (!secrets.contains(name))
                         secrets << name;
+        // What the pack's programs may do (6.7.1), for the whole pack the yes covers: the Trust question's plain lines.
+        sandbox::Needs needs;
+        for (const NodeType *node : m_registry->allNodeTypes())
+            if (node->id.startsWith(use.id + QLatin1Char('/')) && node->packVersion == use.version)
+                if (const Result<sandbox::Needs> declared = sandbox::parseNeeds(node->needs))
+                    needs = sandbox::merged(needs, *declared);
         m_pendingTrust.append(QVariantMap{
-            {"id", use.id}, {"version", use.version}, {"source", use.source}, {"types", use.types}, {"secrets", secrets}});
+            {"id", use.id}, {"version", use.version}, {"source", use.source}, {"types", use.types}, {"secrets", secrets},
+            {"needs", sandbox::plainLines(needs, true)}});
         changed = true;
     }
     return changed;

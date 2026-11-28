@@ -1,5 +1,7 @@
 #include "vips.h"
 
+#include <QFile>
+
 #include <mutex>
 
 namespace fugue {
@@ -15,6 +17,26 @@ bool initVips() {
         }
     });
     return ok;
+}
+
+QString untrustedLoaderProblem(const QString &path) {
+    if (!initVips())
+        return QStringLiteral("libvips could not be started.");
+    const char *loader = vips_foreign_find_load(QFile::encodeName(path).constData());
+    if (!loader) {
+        vips_error_clear();
+        return QStringLiteral("no image loader recognises it.");
+    }
+    const GType type = vips_type_find("VipsOperation", loader);
+    if (!type)
+        return QStringLiteral("its loader (%1) is not known.").arg(QString::fromLatin1(loader));
+    auto *klass = static_cast<VipsOperationClass *>(g_type_class_ref(type));
+    const bool untrusted = klass && (klass->flags & VIPS_OPERATION_UNTRUSTED);
+    if (klass)
+        g_type_class_unref(klass);
+    const char *nickname = vips_nickname_find(type);
+    return untrusted ? QStringLiteral("its format (%1) is not read from a pack's program.").arg(QString::fromLatin1(nickname ? nickname : loader))
+                     : QString();
 }
 
 Error vipsUnavailable() {

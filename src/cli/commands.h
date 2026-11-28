@@ -80,6 +80,10 @@ Reply packAdd(const Command &command, Context &context);
 Reply packRemove(const Command &command, Context &context);
 Reply packUpdate(const Command &command, Context &context);
 Reply packTrust(const Command &command, Context &context);
+// `pack info <pack>`: the sandbox and what the pack may do; `pack sandbox-off <pack>` (asks a person) and `sandbox-on` (6.7.1, #731).
+Reply packInfo(const Command &command, Context &context);
+Reply packSandboxOff(const Command &command, Context &context);
+Reply packSandboxOn(const Command &command, Context &context);
 // `pack secret list [<pack>]`, `set <pack> <name>` (the value from stdin) and `clear <pack> <name>` (6.4, #402).
 Reply packSecret(const Command &command, Context &context);
 // `template prepare` and `workflow prepare` (#379): the one list and the one question (engine/readiness.h).

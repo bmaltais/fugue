@@ -1,6 +1,7 @@
 #include "command_node.h"
 
 #include <QDeadlineTimer>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -17,21 +18,29 @@
 
 #include <csignal>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <map>
 #include <optional>
 
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <QCryptographicHash>
 
+#include "engine/beneath_fs.h"
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
 #include "engine/pack_secrets.h"
 #include "engine/registry.h"
 #include "engine/resident_models.h"
+#include "engine/run_folder.h"
+#include "engine/sandbox.h"
 #include "engine/trust_store.h"
+#include "engine/vips.h"
 
 namespace fugue {
 namespace {
@@ -55,13 +64,18 @@ struct Event {
 // queue. Everything here may be called from any thread.
 class Process {
 public:
-    Process(const QString &program, const QString &workDir, const QProcessEnvironment &environment,
-            double idleSeconds, int graceMs)
+    // `descriptors`: what the command line names by number (bwrap's --ro-bind-fd), inherited by the program alone and closed
+    // here once it has started.
+    Process(const QString &program, const QStringList &arguments, const QString &workDir,
+            const QProcessEnvironment &environment, double idleSeconds, int graceMs,
+            std::shared_ptr<sandbox::Descriptors> descriptors = {})
         : m_grace(graceMs), m_idleMs(idleSeconds > 0 ? int(idleSeconds * 1000) : 0) {
         m_context = new QObject;
         m_context->moveToThread(&m_thread);
         m_thread.start();
-        post([this, program, workDir, environment] { start(program, workDir, environment); });
+        post([this, program, arguments, workDir, environment, descriptors = std::move(descriptors)]() mutable {
+            start(program, arguments, workDir, environment, std::move(descriptors));
+        });
     }
 
     ~Process() {
@@ -202,12 +216,18 @@ private:
     }
 
     // Runs on the process's thread.
-    void start(const QString &program, const QString &workDir, const QProcessEnvironment &environment) {
+    void start(const QString &program, const QStringList &arguments, const QString &workDir, const QProcessEnvironment &environment,
+               std::shared_ptr<sandbox::Descriptors> descriptors) {
         m_process = new QProcess(m_context);
         m_process->setWorkingDirectory(workDir);
         m_process->setProcessEnvironment(environment);
-        // Its own process group: a cancel reaches what a shell script started too.
-        m_process->setChildProcessModifier([] { ::setsid(); });
+        // Its own process group: a cancel reaches what a shell script started too. The descriptors bwrap binds stay open across
+        // exec in this child only (they are close-on-exec everywhere else).
+        const QList<int> inherited = descriptors ? descriptors->numbers() : QList<int>();
+        m_process->setChildProcessModifier([inherited] {
+            ::setsid();
+            beneath::inheritOnly(inherited);
+        });
         QObject::connect(m_process, &QProcess::readyReadStandardOutput, m_context, [this] { readOutput(false); });
         QObject::connect(m_process, &QProcess::readyReadStandardError, m_context, [this] { readErrors(false); });
         QObject::connect(m_process, &QProcess::finished, m_context, [this](int code, QProcess::ExitStatus status) {
@@ -235,8 +255,9 @@ private:
             m_idle->setSingleShot(true);
             QObject::connect(m_idle, &QTimer::timeout, m_context, [this] { stopWhenIdle(); });
         }
-        m_process->start(program, {});
+        m_process->start(program, arguments);
         m_pgid = pid_t(m_process->processId()); // setsid: the process id is the group id
+        descriptors.reset(); // the child has its copies (or never started): ours close
     }
 
     // Shutdown message, then SIGTERM, then SIGKILL, a grace period apart (7.3).
@@ -297,6 +318,7 @@ private:
         for (QString &line : lines) {
             if (line.trimmed().isEmpty())
                 continue;
+            line = sandbox::printable(line); // no escape sequence of the program's reaches a terminal or an error message
             line = maskSecrets(line, m_secrets); // before it is cut short: a value cut in two is no longer found
             if (line.size() > 500)
                 line = line.left(500) + QStringLiteral("…");
@@ -337,8 +359,8 @@ QString withTail(const QString &message, const Process &process) {
 // What the node reported with an `error` line. A node's own codes are its business; the engine
 // reports them as node_failed, keeping the node's code in the message, except `cancelled`.
 Error reportedError(const QJsonObject &line) {
-    const QString code = line.value("code").toString();
-    const QString message = line.value("message").toString();
+    const QString code = sandbox::printable(line.value("code").toString().left(200));
+    const QString message = sandbox::printable(line.value("message").toString(), true);
     if (code == QLatin1String("cancelled"))
         return nodeError(QStringLiteral("cancelled"), message.isEmpty() ? QStringLiteral("The node was cancelled.") : message);
     QString text = message.isEmpty() ? QStringLiteral("The node reported an error.") : message;
@@ -371,10 +393,22 @@ Result<QString> fileInWorkDir(const QJsonValue &value, const QString &workDir, c
 // A `preview` line (7.2): its image is shown (NodeContext::preview) when it is a file inside
 // work_dir. A preview is only a picture, so a bad one is left out and the run goes on; the first
 // bad one of a run becomes a warning in `warnings`, so the node's author hears of it.
-void showPreview(const QJsonObject &line, const NodeContext &context, Errors *warnings) {
+// `fetch` (a sandboxed program): the preview's file copied by descriptor into a folder of Fugue's that no program can reach
+// (the run's work folder for one that lives on, a previews folder for a one-shot), before anything looks at it; that copy is
+// what is shown. Empty when it may not be.
+using Fetch = std::function<std::optional<QString>(const QString &)>;
+
+void showPreview(const QJsonObject &line, const NodeContext &context, Errors *warnings, const Fetch &fetch = {}) {
     const QString workDir = QFileInfo(context.workDir).canonicalFilePath();
-    Result<QString> file = fileInWorkDir(line.value("image"), workDir, QStringLiteral("node_bad_preview"),
-                                         QStringLiteral("A preview's image"));
+    const QJsonValue image = line.value("image");
+    Result<QString> file = makeError(QStringLiteral("node_bad_preview"),
+                                     QStringLiteral("A preview's image must be a regular file inside the node's work_dir (not a link, a folder or a path out of it)."));
+    if (fetch) {
+        if (const std::optional<QString> copied = fetch(image.toObject().value("path").toString()))
+            file = *copied;
+    } else {
+        file = fileInWorkDir(image, workDir, QStringLiteral("node_bad_preview"), QStringLiteral("A preview's image"));
+    }
     if (file) {
         if (context.preview)
             context.preview(file.value());
@@ -393,7 +427,7 @@ void showPreview(const QJsonObject &line, const NodeContext &context, Errors *wa
 // `warnings`), cancel, the timeout and a program that dies or breaks the protocol.
 Result<QJsonObject> await(Process &process, const NodeContext &context, const QString &id, bool persistent,
                           Expect expect, int timeoutMs, int graceMs, Errors *warnings = nullptr,
-                          bool *heard = nullptr) {
+                          bool *heard = nullptr, const Fetch &fetch = {}) {
     enum class Why { None, Cancelled, Timeout, Protocol };
     Why why = Why::None;
     QString protocolMessage;
@@ -464,11 +498,11 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
                 } else if (op == QLatin1String("progress") && mine) {
                     if (context.progress)
                         context.progress(qBound(0.0, line.value("value").toDouble(), 1.0), QString(),
-                                         line.value("message").toString());
+                                         sandbox::printable(line.value("message").toString()));
                 } else if (op == QLatin1String("preview") && mine && expect == Expect::Result) {
                     // Once a one-shot program has given its answer, what it shows no longer counts.
                     if (!result && !reported)
-                        showPreview(line, context, warnings);
+                        showPreview(line, context, warnings, fetch);
                 } else if (op == QLatin1String("result") && mine && expect == Expect::Result) {
                     if (persistent)
                         return line;
@@ -502,7 +536,8 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
 
 // The node's outputs from the result line: a media or data output is a file the program wrote
 // inside work_dir, named by {"path": …}; the scheduler checks the rest against the manifest.
-Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context) {
+// `untrustedProducer`: the outputs of a sandboxed pack program, whose pictures only a trusted libvips loader opens.
+Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context, bool untrustedProducer = false) {
     const NodeType &type = *context.type;
     const QJsonValue given = result.value("outputs");
     if (!given.isObject() && !given.isUndefined())
@@ -541,6 +576,13 @@ Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context
         if (!file)
             return file.error();
         if (media) {
+            // A sandboxed pack's picture is opened only by a loader libvips trusts with files from anywhere (6.7.1).
+            if (untrustedProducer && *media == MediaType::Image)
+                if (const QString why = untrustedLoaderProblem(file.value()); !why.isEmpty()) {
+                    Error error = nodeError(QStringLiteral("node_bad_output"), QStringLiteral("Output %1 is not a readable image: %2").arg(spec.name, why));
+                    error.output = spec.name;
+                    return error;
+                }
             const Result<MediaHandle> handle = MediaHandle::probe(*media, file.value(), *context.hashes);
             if (!handle) {
                 Error error = nodeError(QStringLiteral("node_bad_output"),
@@ -731,7 +773,298 @@ Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
             {"work_dir", context.workDir}};
 }
 
+// ---- The sandbox (6.7.1): what a pack's program is started with. ----
+
+struct Launch {
+    QString program;
+    QStringList arguments;
+    QProcessEnvironment environment;
+    QStringList mounted; // the model files its sandbox has bound: a program that lives on cannot see others
+    std::shared_ptr<sandbox::Descriptors> descriptors; // what its command line binds by number, moved into the Process
+};
+
+bool inFolder(const QString &path, const QString &folder) {
+    return path == folder || path.startsWith(folder + QLatin1Char('/'));
+}
+
+bool covered(const QStringList &mounted, const QString &path) {
+    for (const QString &folder : mounted)
+        if (inFolder(path, folder))
+            return true;
+    return false;
+}
+
+// A node of an installed pack (the built-in packs are Fugue itself).
+bool isPackNode(const NodeType &type) {
+    return !type.packVersion.isEmpty() && !TrustStore::isBuiltIn(TrustStore::packOf(type.id));
+}
+
+// The pack's folder: the node's folder's parent when that holds pack.json, else the node's folder alone.
+QString packFolderOf(const QString &nodeFolder) {
+    const QString parent = QFileInfo(nodeFolder + QStringLiteral("/..")).canonicalFilePath();
+    return !parent.isEmpty() && QFileInfo::exists(parent + QStringLiteral("/pack.json")) ? parent : nodeFolder;
+}
+
+// `value` with each top-level {"path": …} of a handle (or of each handle of a list) replaced by change(path).
+QJsonValue mapHandlePaths(const QJsonValue &value, const std::function<QString(const QString &)> &change) {
+    if (value.isArray()) {
+        QJsonArray items;
+        for (const QJsonValue &item : value.toArray())
+            items.append(mapHandlePaths(item, change));
+        return items;
+    }
+    if (!value.isObject() || !value.toObject().value("path").isString())
+        return value;
+    QJsonObject object = value.toObject();
+    object.insert("path", change(object.value("path").toString()));
+    return object;
+}
+
+void addResolvedModelPaths(const QJsonValue &value, QStringList &paths) {
+    if (value.isArray()) {
+        for (const QJsonValue &item : value.toArray())
+            addResolvedModelPaths(item, paths);
+        return;
+    }
+    const QJsonObject handle = value.toObject();
+    if (!handle.contains("derived")) {
+        if (const QString path = handle.value("path").toString(); !path.isEmpty() && !paths.contains(path))
+            paths << path;
+        return;
+    }
+    const QJsonObject derived = handle.value("derived").toObject();
+    addResolvedModelPaths(derived.value("base"), paths);
+    for (auto it = derived.begin(); it != derived.end(); ++it)
+        if (it.key() != QLatin1String("base") && it.key() != QLatin1String("apply") && it.value().isObject() &&
+            it.value().toObject().contains("resource"))
+            addResolvedModelPaths(it.value(), paths);
+    for (const QJsonValue &step : derived.value("apply").toArray())
+        addResolvedModelPaths(step.toObject().value("lora"), paths);
+}
+
+// A folder that a program kept between runs reads and writes in, outside the runs folder: each request gets a subfolder, and
+// Fugue copies the inputs in and the outputs out, so the program never writes where another run's records are (#731). The
+// program can change anything in it at any moment, so Fugue touches it through descriptors only (engine/beneath_fs.h).
+struct Exchange {
+    // `kind`: "exchange", or "previews" (a one-shot's preview copies, which Fugue alone writes).
+    static std::shared_ptr<Exchange> make(QString *why, const QString &kind = QStringLiteral("exchange")) {
+        auto made = std::make_shared<Exchange>();
+        const QString base = cacheDir() + QLatin1Char('/') + kind;
+        QDir().mkpath(base); // Fugue's own cache folder: no program can reach it
+        made->base = beneath::Fd(::open(QFile::encodeName(base).constData(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+        if (!made->base) {
+            *why = QStringLiteral("The exchange folder %1 cannot be opened.").arg(base);
+            return {};
+        }
+        removeStale(made->base.get());
+        made->name = beneath::mkdirBeneathRandom(made->base.get());
+        if (!made->name.isEmpty())
+            made->root = beneath::openBeneath(made->base.get(), made->name, O_RDONLY | O_DIRECTORY);
+        made->path = beneath::realPathOf(made->root.get());
+        if (!made->root || made->path.isEmpty()) {
+            *why = QStringLiteral("An exchange folder cannot be made in %1 (%2).").arg(base, beneath::lastProblem());
+            return {};
+        }
+        return made;
+    }
+    ~Exchange() {
+        if (base && !name.isEmpty())
+            beneath::removeTreeBeneath(base.get(), name);
+    }
+    beneath::Fd base; // <cache>/exchange
+    beneath::Fd root; // this program's folder in it, bound into its sandbox at `path`
+    QString name;
+    QString path;
+
+private:
+    // What a crashed Fugue left: folders older than a day.
+    static void removeStale(int base) {
+        DIR *listing = ::fdopendir(beneath::dupCloexec(base));
+        if (!listing)
+            return;
+        QStringList old;
+        while (const dirent *entry = ::readdir(listing)) {
+            struct stat info {};
+            const QByteArray name(entry->d_name);
+            if (name != "." && name != ".." && ::fstatat(base, name.constData(), &info, AT_SYMLINK_NOFOLLOW) == 0 &&
+                QDateTime::currentSecsSinceEpoch() - qint64(info.st_mtime) > 86400)
+                old << QFile::decodeName(name);
+        }
+        ::closedir(listing);
+        for (const QString &name : std::as_const(old))
+            beneath::removeTreeBeneath(base, name);
+    }
+};
+
+// The model files a node is handed: exactly the paths withPaths resolved for the handles of its resource inputs. Each must lie
+// in a model folder (or be a link into one); sandbox::build checks that again on what it opens. Else an error.
+Result<QStringList> modelFilesOf(const NodeContext &context, const QJsonObject &inputs) {
+    QStringList roots;
+    for (const QString &root : ModelLibrary::current(context.registry).roots())
+        if (const QString real = QFileInfo(root).canonicalFilePath(); !real.isEmpty())
+            roots << real;
+    QStringList files;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = context.type->input(it.key());
+        if (!spec || !context.registry || context.registry->portKind(spec->type.type) != PortKind::Resource)
+            continue;
+        for (const QString &path : resolvedModelPaths(it.value())) {
+            const QString real = QFileInfo(path).canonicalFilePath();
+            if (real.isEmpty() || !covered(roots, real))
+                return nodeError(QStringLiteral("node_failed"),
+                                 QStringLiteral("The model file %1 of %2 is not in a model folder, so it is not handed to a sandboxed program.").arg(path, it.key()));
+            if (!files.contains(path))
+                files << path;
+        }
+    }
+    return files;
+}
+
+// The other files a node is handed (pictures, videos, what an earlier node made), by the top-level path of each handle.
+QStringList mediaFilesOf(const NodeContext &context, const QJsonObject &inputs) {
+    QStringList files;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = context.type->input(it.key());
+        if (spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource)
+            continue;
+        mapHandlePaths(it.value(), [&](const QString &path) {
+            if (!files.contains(path))
+                files << path;
+            return path;
+        });
+    }
+    return files;
+}
+
+// A file a sandboxed one-shot names (`path`, relative to its work folder or absolute inside it), checked through the work
+// folder's descriptor (openat2 beneath it, no link anywhere): its path when it is a regular file there, else nothing.
+std::optional<QString> regularBeneath(const QString &path, int workFd, const QString &workDir) {
+    QString relative = QDir::cleanPath(path);
+    if (relative.startsWith(QLatin1Char('/'))) {
+        if (!relative.startsWith(workDir + QLatin1Char('/')))
+            return std::nullopt;
+        relative = relative.mid(workDir.size() + 1);
+    }
+    if (path.isEmpty() || relative == QLatin1String(".") || relative == QLatin1String("..") || relative.startsWith(QLatin1String("../")))
+        return std::nullopt;
+    const beneath::Fd fd = beneath::openBeneath(workFd, relative, O_RDONLY | O_NONBLOCK | O_NOCTTY);
+    struct stat info {};
+    if (!fd || ::fstat(fd.get(), &info) != 0 || !S_ISREG(info.st_mode))
+        return std::nullopt;
+    return workDir + QLatin1Char('/') + relative;
+}
+
+// One request of a program that lives on, in its exchange folder: `<exchange>/<128 random bits>/` with `in/` (the media
+// inputs, copied in) and `work/` (its work_dir), each held open.
+struct Staged {
+    QString name;
+    beneath::Fd folder;
+    beneath::Fd work;
+    QString workPath; // `work` as the program sees it (the exchange folder is bound at its own path)
+};
+
+// A file the program wrote in its request's work folder (`path`, relative to it or absolute inside it), copied into the run's
+// own work folder through descriptors; the new path. Nothing when it is not a regular file beneath the work folder (a link, a
+// folder, a FIFO, a path out of it): nothing of the exchange folder is then looked at by path.
+std::optional<QString> copyOut(const QString &path, const Staged &staged, int workFd, const QString &workDir, int &counter) {
+    QString relative = QDir::cleanPath(path);
+    if (relative.startsWith(QLatin1Char('/'))) {
+        if (!relative.startsWith(staged.workPath + QLatin1Char('/')))
+            return std::nullopt;
+        relative = relative.mid(staged.workPath.size() + 1);
+    }
+    QString name = QFileInfo(relative).fileName();
+    if (path.isEmpty() || relative == QLatin1String(".") || relative.startsWith(QLatin1String("../")) || name.isEmpty() || name == QLatin1String(".."))
+        return std::nullopt;
+    struct stat info {};
+    if (::fstatat(workFd, QFile::encodeName(name).constData(), &info, AT_SYMLINK_NOFOLLOW) == 0)
+        name = QStringLiteral("%1-%2").arg(++counter).arg(name);
+    if (!beneath::copyOutBeneath(staged.work.get(), relative, workFd, name))
+        return std::nullopt;
+    return workDir + QLatin1Char('/') + name;
+}
+
+// A request for a sandboxed program that lives on: a new request folder in its exchange folder, the media files copied in (a
+// model file is bound where it is), and the request's paths and work_dir changed to them. Each media file is opened without
+// links and must not be a file that is never handed over.
+Result<Staged> stageRequest(const NodeContext &context, const Exchange &exchange, QJsonObject &request, const QString &home = {}) {
+    Staged staged;
+    staged.name = beneath::mkdirBeneathRandom(exchange.root.get());
+    if (!staged.name.isEmpty())
+        staged.folder = beneath::openBeneath(exchange.root.get(), staged.name, O_RDONLY | O_DIRECTORY);
+    if (staged.folder && beneath::mkdirBeneath(staged.folder.get(), QStringLiteral("work")) && beneath::mkdirBeneath(staged.folder.get(), QStringLiteral("in")))
+        staged.work = beneath::openBeneath(staged.folder.get(), QStringLiteral("work"), O_RDONLY | O_DIRECTORY);
+    if (!staged.work)
+        return nodeError(QStringLiteral("node_failed"), QStringLiteral("The request's folder cannot be made in the exchange folder (%1).").arg(beneath::lastProblem()));
+    const QString folder = exchange.path + QLatin1Char('/') + staged.name;
+    staged.workPath = folder + QStringLiteral("/work");
+    QJsonObject inputs = request.value("inputs").toObject();
+    int copies = 0;
+    QString problem;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = context.type->input(it.key());
+        if (spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource)
+            continue;
+        it.value() = mapHandlePaths(it.value(), [&](const QString &path) {
+            const QString real = QFileInfo(path).canonicalFilePath();
+            const QString to = QStringLiteral("in/%1-%2").arg(++copies).arg(QFileInfo(QDir::cleanPath(path)).fileName());
+            const beneath::Fd from = real.isEmpty() || sandbox::handedDenied(real, home) ? beneath::Fd() : beneath::openRegularFile(real);
+            if (from && beneath::realPathOf(from.get()) == real && beneath::copyInBeneath(from.get(), staged.folder.get(), to))
+                return folder + QLatin1Char('/') + to;
+            if (problem.isEmpty())
+                problem = path;
+            return path;
+        });
+    }
+    if (!problem.isEmpty())
+        return nodeError(QStringLiteral("node_failed"), QStringLiteral("The file %1 cannot be handed to the sandboxed program.").arg(problem));
+    request.insert("inputs", inputs);
+    request.insert("work_dir", staged.workPath);
+    return staged;
+}
+
+// The program started inside bubblewrap: the node's entry, its pack, its work folder (a one-shot's own, or the exchange folder of a
+// program that lives on), the model files in `models` and the media files in `media`.
+Result<Launch> sandboxedLaunch(const NodeContext &context, const QString &folder, const QString &program, const QString &workDir,
+                               const Exchange *exchange, const QStringList &models, const QStringList &media) {
+    const NodeType &type = *context.type;
+    const Result<sandbox::Needs> needs = sandbox::parseNeeds(type.needs);
+    if (!needs)
+        return nodeError(QStringLiteral("node_failed"), QStringLiteral("%1: %2").arg(type.id, needs.error().message));
+    sandbox::Profile profile;
+    profile.packDir = packFolderOf(folder);
+    if (exchange) {
+        profile.exchangeFd = exchange->root.get();
+        profile.exchangeDir = exchange->path;
+    } else {
+        profile.workDir = workDir;
+    }
+    profile.needs = *needs;
+    profile.modelFiles = models;
+    profile.modelRoots = ModelLibrary::current(context.registry).roots();
+    profile.handedFiles = media;
+    profile.program = program;
+    profile.environment = {QStringLiteral("FUGUE_PROTOCOL=1"), QStringLiteral("FUGUE_NODE_DIR=") + folder, QStringLiteral("FUGUE_WORK_DIR=") + workDir};
+    sandbox::Command command = sandbox::build(profile);
+    if (!command.refused.isEmpty())
+        return nodeError(QStringLiteral("node_failed"), QStringLiteral("%1 was not run: %2").arg(type.id, command.refused));
+    Launch launch;
+    launch.program = command.program;
+    launch.arguments = command.arguments;
+    launch.environment = sandbox::bwrapEnvironment(); // none of Fugue's variables in bwrap's own process inside the sandbox
+    launch.descriptors = std::move(command.descriptors);
+    for (const QString &file : models)
+        launch.mounted << QDir::cleanPath(file);
+    return launch;
+}
+
 } // namespace
+
+QStringList resolvedModelPaths(const QJsonValue &withPaths) {
+    QStringList paths;
+    addResolvedModelPaths(withPaths, paths);
+    return paths;
+}
 
 QString nodeSeal(const QString &dir, const QString &entry, const QByteArray &packJson) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
@@ -788,13 +1121,17 @@ QString packSecretsKeyPart(const NodeType &type) {
 struct CommandKernel::Impl {
     explicit Impl(int graceMs) : grace(graceMs) {}
     int grace;
+    bool alwaysSandboxed = false;
 
     // A persistent program per node type, and the lock that makes it one run at a time.
     struct Slot {
         QMutex run;   // one run at a time
         QMutex guard; // `process`, for shutdown() to reach it during a run
         std::unique_ptr<Process> process;
-        QString seal; // NodeType::seal of the files `process` was started from
+        QString seal; // NodeType::seal of the files `process` was started from, and whether it runs in the sandbox
+        QStringList models;  // the model files its sandbox has bound
+        QStringList mounted; // what its sandbox can see (Launch::mounted)
+        std::shared_ptr<Exchange> exchange; // the folder it works in (sandboxed only)
         // While the program is a resident model: the payload ResidentModels holds, whose drop
         // stops the program and waits for it, so the memory is back when the drop returns. Weak,
         // so that only ResidentModels keeps it.
@@ -852,6 +1189,8 @@ CommandKernel::CommandKernel(int graceMs) : d(new Impl(graceMs)) {}
 
 CommandKernel::~CommandKernel() { shutdown(); }
 
+void CommandKernel::setAlwaysSandboxed(bool on) { d->alwaysSandboxed = on; }
+
 void CommandKernel::shutdown() {
     std::map<QString, std::shared_ptr<Impl::Slot>> packs;
     {
@@ -898,6 +1237,21 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     environment.insert(QStringLiteral("FUGUE_NODE_DIR"), folder);
     environment.insert(QStringLiteral("FUGUE_WORK_DIR"), context.workDir);
 
+    // A pack's program runs in the sandbox (6.7.1), unless the person said, for this version, to run it without one.
+    // `fugue node test` (alwaysSandboxed) runs a folder under test: a yes for an installed pack of the same id and version is
+    // not its, and no id makes it a built-in.
+    bool sandboxed = false;
+    if (d->alwaysSandboxed ? !type.packVersion.isEmpty() : isPackNode(type)) {
+        const bool optedOut = !d->alwaysSandboxed && !type.packCommunity && TrustStore().isUnsandboxed(TrustStore::packOf(type.id), type.packVersion);
+        if (!optedOut) {
+            if (!sandbox::available())
+                return makeError(QStringLiteral("sandbox_unavailable"),
+                                 QStringLiteral("%1 was not run: its program must run in a sandbox, and the sandbox cannot start here.").arg(type.id),
+                                 sandbox::unavailableHint());
+            sandboxed = true;
+        }
+    }
+
     const bool persistent = runtime.value("mode").toString() == QLatin1String("persistent");
     const double timeout = runtime.value("timeout_s").toDouble(0);
     const int timeoutMs = timeout > 0 ? int(timeout * 1000) : 0;
@@ -922,6 +1276,27 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         }
         request.insert("secrets", secrets);
     }
+    // A sandboxed program is handed model files from a model folder only; a one-shot gets its media files bound read-only, a
+    // program that lives on gets copies in its exchange folder (staged per request below).
+    QStringList models;
+    QStringList media;
+    const QString workDir = QFileInfo(context.workDir).canonicalFilePath();
+    if (sandboxed) {
+        const QJsonObject inputs = request.value("inputs").toObject();
+        const Result<QStringList> found = modelFilesOf(context, inputs);
+        if (!found)
+            return found.error();
+        models = *found;
+        media = mediaFilesOf(context, inputs);
+        if (workDir.isEmpty())
+            return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's work folder is gone."));
+        request.insert("work_dir", workDir); // the folder that is bound is the one the program is told
+    }
+    const auto launchFor = [&](const QString &where, const Exchange *exchange, const QStringList &bound, const QStringList &handed) -> Result<Launch> {
+        if (sandboxed)
+            return sandboxedLaunch(context, folder, program, where, exchange, bound, handed);
+        return Launch{program, {}, environment, {}, {}};
+    };
     // What the program says as it goes (progress lines) goes through the same mask.
     NodeContext reported = context;
     if (!secretValues.isEmpty() && context.progress)
@@ -931,16 +1306,67 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     const auto finish = [&secretValues](Result<Values> result) { return maskedOutputs(std::move(result), secretValues); };
 
     if (!persistent) {
-        Process process(program, context.workDir, environment, 0, d->grace);
+        Result<Launch> launched = launchFor(workDir, nullptr, models, media);
+        if (!launched)
+            return finish(launched.error());
+        Launch &launch = *launched;
+        Process process(launch.program, launch.arguments, context.workDir, launch.environment, 0, d->grace, std::move(launch.descriptors));
         process.beginRun(secretValues);
         process.sendLine(request);
         process.closeInput();
         Errors warnings;
-        const Result<QJsonObject> result =
-            await(process, reported, id, false, Expect::Result, timeoutMs, d->grace, &warnings);
+        // A sandboxed one-shot's previews are copied by descriptor out of its work folder (it may swap them while it runs), and
+        // its outputs are opened beneath the work folder's descriptor before anything else touches them.
+        beneath::Fd workFd;
+        std::shared_ptr<Exchange> previewFolder;
+        QStringList previews;
+        int copies = 0;
+        Fetch fetch;
+        if (sandboxed) {
+            workFd = beneath::openNoLinks(workDir, O_RDONLY | O_DIRECTORY);
+            if (!workFd)
+                return finish(nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's work folder cannot be opened.")));
+            fetch = [&](const QString &file) -> std::optional<QString> {
+                if (!previewFolder) {
+                    QString why;
+                    previewFolder = Exchange::make(&why, QStringLiteral("previews"));
+                    if (!previewFolder)
+                        return std::nullopt;
+                }
+                Staged from;
+                from.work = beneath::Fd(beneath::dupCloexec(workFd.get()));
+                from.workPath = workDir;
+                const std::optional<QString> copied = copyOut(file, from, previewFolder->root.get(), previewFolder->path, copies);
+                if (copied) {
+                    previews << *copied;
+                    while (previews.size() > 2)
+                        ::unlinkat(previewFolder->root.get(), QFile::encodeName(QFileInfo(previews.takeFirst()).fileName()).constData(), 0);
+                }
+                return copied;
+            };
+        }
+        Result<QJsonObject> result =
+            await(process, reported, id, false, Expect::Result, timeoutMs, d->grace, &warnings, nullptr, fetch);
         if (!result)
             return finish(result.error());
-        return finish(withWarnings(outputsFrom(result.value(), reported), warnings));
+        if (sandboxed) {
+            QJsonObject line = result.value();
+            QString refused;
+            QJsonObject outputs = line.value("outputs").toObject();
+            for (auto it = outputs.begin(); it != outputs.end(); ++it)
+                it.value() = mapHandlePaths(it.value(), [&](const QString &path) {
+                    const std::optional<QString> checked = regularBeneath(path, workFd.get(), workDir);
+                    if (!checked && refused.isEmpty())
+                        refused = QStringLiteral("Output %1 names %2, which is not a regular file inside the node's work_dir (a link, a folder or a path out of it).")
+                                      .arg(it.key(), path);
+                    return checked ? *checked : path;
+                });
+            if (!refused.isEmpty())
+                return finish(nodeError(QStringLiteral("node_bad_output"), refused));
+            line.insert("outputs", outputs);
+            result = line;
+        }
+        return finish(withWarnings(outputsFrom(result.value(), reported, sandboxed), warnings));
     }
 
     {
@@ -956,11 +1382,29 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     }
     std::unique_lock<QMutex> run(slot->run, std::adopt_lock);
     // The pack was loaded again with other files (an update): the program of the old ones goes.
-    if (slot->seal != type.seal) {
+    const QString sealKey = type.seal + (sandboxed ? QString() : QStringLiteral("|unsandboxed"));
+    if (slot->seal != sealKey) {
         QMutexLocker guard(&slot->guard);
         slot->process.reset();
-        slot->seal = type.seal;
+        slot->seal = sealKey;
+        slot->models.clear();
     }
+    // The sandbox of a program that lives on shows it only what it was started with: a model file or a work folder it
+    // cannot see means starting it again, with the model files it had before and this run's.
+    if (sandboxed && slot->process) {
+        bool seen = true;
+        for (const QString &model : models)
+            seen = seen && covered(slot->mounted, QDir::cleanPath(model));
+        if (!seen) {
+            QMutexLocker guard(&slot->guard);
+            slot->process.reset();
+        }
+    }
+    for (const QString &model : models)
+        if (!slot->models.contains(model))
+            slot->models << model;
+    while (slot->models.size() > 16)
+        slot->models.removeFirst();
     // A program that was reused may have just exited (its idle stop, or a crash between runs):
     // nothing it said is lost then, so the run starts again once with a new program.
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -968,10 +1412,22 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         if (!slot->process || !slot->process->acquire()) {
             reused = false;
             const double idle = runtime.value("idle_timeout_s").toDouble(300);
-            auto fresh = std::make_unique<Process>(program, context.workDir, environment, idle, d->grace);
+            if (sandboxed) {
+                QString why;
+                slot->exchange = Exchange::make(&why);
+                if (!slot->exchange)
+                    return finish(nodeError(QStringLiteral("node_failed"), why));
+            }
+            Result<Launch> launched = launchFor(sandboxed ? slot->exchange->path : context.workDir, slot->exchange.get(), slot->models, {});
+            if (!launched)
+                return finish(launched.error());
+            Launch &launch = *launched;
+            auto fresh = std::make_unique<Process>(launch.program, launch.arguments, context.workDir, launch.environment, idle, d->grace,
+                                                   std::move(launch.descriptors));
             {
                 QMutexLocker guard(&slot->guard);
                 slot->process = std::move(fresh);
+                slot->mounted = launch.mounted;
             }
             const Result<QJsonObject> ready = await(*slot->process, reported, id, true, Expect::Ready, 0, d->grace);
             if (!ready) {
@@ -984,11 +1440,58 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         process.setBusy(true);
         process.discardLines();
         process.beginRun(secretValues); // its stderr tail starts empty, and the values of this run are masked from here
-        process.sendLine(request);
+        // A sandboxed program works in its exchange folder: this request's files are copied in, what it makes is copied out.
+        QJsonObject sent = request;
+        std::optional<Staged> staged;
+        beneath::Fd workFd;
+        Fetch fetch;
+        QStringList previews;
+        int copies = 0;
+        if (sandboxed) {
+            Result<Staged> made = stageRequest(context, *slot->exchange, sent);
+            if (made)
+                workFd = beneath::openNoLinks(workDir, O_RDONLY | O_DIRECTORY);
+            if (!made || !workFd) {
+                process.setBusy(false);
+                if (made)
+                    beneath::removeTreeBeneath(slot->exchange->root.get(), made->name);
+                return finish(made ? nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's work folder cannot be opened.")) : made.error());
+            }
+            staged.emplace(std::move(*made));
+            // Each preview is a copy in the run's work folder; only the last two are kept (the window may still be reading the one
+            // before), so a program that sends previews without end fills nothing.
+            fetch = [&staged, &workFd, workDir, &copies, &previews](const QString &file) {
+                const std::optional<QString> copied = copyOut(file, *staged, workFd.get(), workDir, copies);
+                if (copied) {
+                    previews << *copied;
+                    while (previews.size() > 2)
+                        ::unlinkat(workFd.get(), QFile::encodeName(QFileInfo(previews.takeFirst()).fileName()).constData(), 0);
+                }
+                return copied;
+            };
+        }
+        process.sendLine(sent);
         bool heard = false;
         Errors warnings;
-        const Result<QJsonObject> result =
-            await(process, reported, id, true, Expect::Result, timeoutMs, d->grace, &warnings, &heard);
+        Result<QJsonObject> result =
+            await(process, reported, id, true, Expect::Result, timeoutMs, d->grace, &warnings, &heard, fetch);
+        if (staged && result) {
+            QJsonObject line = result.value();
+            QString refused;
+            QJsonObject outputs = line.value("outputs").toObject();
+            for (auto it = outputs.begin(); it != outputs.end(); ++it)
+                it.value() = mapHandlePaths(it.value(), [&](const QString &path) {
+                    const std::optional<QString> copied = copyOut(path, *staged, workFd.get(), workDir, copies);
+                    if (!copied && refused.isEmpty())
+                        refused = QStringLiteral("Output %1 names %2, which is not a regular file inside the node's work_dir (a link, a folder or a path out of it).")
+                                      .arg(it.key(), path);
+                    return copied ? *copied : path;
+                });
+            line.insert("outputs", outputs);
+            result = refused.isEmpty() ? Result<QJsonObject>(line) : Result<QJsonObject>(nodeError(QStringLiteral("node_bad_output"), refused));
+        }
+        if (staged)
+            beneath::removeTreeBeneath(slot->exchange->root.get(), staged->name);
         if (process.gone()) {
             QMutexLocker guard(&slot->guard);
             slot->process.reset();
@@ -1001,7 +1504,7 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
             return finish(result.error());
         if (context.models && !residentProgramKey(type).isEmpty())
             Impl::keepResident(slot, *context.models, type.id);
-        return finish(withWarnings(outputsFrom(result.value(), reported), warnings));
+        return finish(withWarnings(outputsFrom(result.value(), reported, sandboxed), warnings));
     }
     return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's program could not be run."));
 }

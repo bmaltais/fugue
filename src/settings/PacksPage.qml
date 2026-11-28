@@ -8,8 +8,8 @@ import "../kit"
 // one line per pack in a list (glyph, name, version, trust, and Trust... when it is not yet), one of them open at a time to show its
 // folder, its keys, what the load said and Update and Remove in a tray, a closed row "Add a pack", and under them the library's groups.
 // The search filters packs and groups as you type. Every change goes through a question the person answers here (at the top of the
-// page): the model installs, trusts, removes or runs a setup only after a yes, and shows exactly what it will do. Fugue enforces no
-// sandbox, and the page says so.
+// page): the model installs, trusts, removes or runs a setup only after a yes, and shows exactly what it will do, with what each
+// pack's sandbox lets it do (6.7.1) and, loudly, a pack the person turned the sandbox off for.
 //
 // The list is made again on every change, so the page keeps its state by the pack's ID, not its place: which row is open
 // (`expandedKey`) and which row had the focus (`keepKey`, put back by `restoreFocus()` when the rows are made again).
@@ -46,7 +46,7 @@ ColumnLayout {
                                                             model.packs.some(p => p.inherited) ? Math.max(tmInheritedNot.advanceWidth, tmInheritedDis.advanceWidth) : 0))
     // What the row says about trust; a pack of the Default project says so too, so the Trust... beside it is never read alone.
     function statusOf(p) {
-        const word = !p.enabled ? qsTr("disabled") : p.trusted ? qsTr("trusted") : qsTr("not trusted")
+        const word = !p.enabled ? qsTr("disabled") : !p.trusted ? qsTr("not trusted") : p.sandboxed ? qsTr("trusted") : qsTr("trusted, NOT sandboxed")
         return p.inherited ? qsTr("inherited, %1").arg(word) : word
     }
     KitChip { id: trustMeasure; look: page.look; visible: false; text: qsTr("Trust…") }
@@ -135,7 +135,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         Layout.leftMargin: 2 * page.u
-        text: qsTr("Nodes come in packs. A trusted pack runs programs as you: Fugue enforces no sandbox, so trust only what you would run in a terminal.")
+        text: qsTr("Nodes come in packs. A pack's programs run in a sandbox that gives them only what the pack declares. A sandbox is not trust: trust only packs you would run anyway.")
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: page.look.label
@@ -187,8 +187,9 @@ ColumnLayout {
                 color: page.look.label
                 font.pixelSize: page.look.labelSize
                 text: (ask.q.inheritedWarning ? ask.q.inheritedWarning + "\n" : "") + (ask.q.kind === "setup"
-                      ? qsTr("%1\nIn %2, this command runs as you:\n%3").arg(ask.q.description).arg(ask.q.folder).arg(ask.q.command)
-                      : qsTr("%1\nRuns as: %2\nDeclares: %3%4\nNo sandbox: a trusted pack runs programs as you.")
+                      ? (ask.q.sandboxed ? qsTr("%1\nIn %2, this command runs in the sandbox, with the network on:\n%3")
+                                         : qsTr("%1\nIn %2, this command runs as you (NOT sandboxed):\n%3")).arg(ask.q.description).arg(ask.q.folder).arg(ask.q.command)
+                      : qsTr("%1\nRuns as: %2\nDeclares: %3%4\n%5")
                             .arg(ask.q.source !== "" ? ask.q.id + "\n" + qsTr("From %1").arg(ask.q.source) : ask.q.id)
                             .arg(ask.q.runtime && ask.q.runtime.length ? ask.q.runtime.join(", ") : qsTr("no nodes"))
                             .arg(ask.q.permissions && ask.q.permissions.length ? ask.q.permissions.join(", ") : qsTr("nothing (network, files, GPU)"))
@@ -196,7 +197,9 @@ ColumnLayout {
                                  + (ask.q.secretsSet && ask.q.secretsSet.length ? "\n" + qsTr("Already set: %1").arg(ask.q.secretsSet.join(", ")) : "")
                                  + (ask.q.secretsOtherSource && ask.q.secretsOtherSource.length
                                     ? "\n" + qsTr("%1 already set for this pack id from another source; this pack does not get it.").arg(ask.q.secretsOtherSource.join(", ")) : "")
-                                 + (ask.q.secrets && ask.q.secrets.length ? "\n" + qsTr("Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.") : "")))
+                                 + (ask.q.secrets && ask.q.secrets.length && !ask.q.sandboxed ? "\n" + qsTr("Isolation between packs is advisory: a trusted pack's programs run as you and can read Fugue's config folder.") : ""))
+                            .arg(ask.q.sandboxed ? qsTr("Runs in a sandbox: it sees only its own folder, the files it is given and what it declares.")
+                                                 : qsTr("NOT sandboxed: this pack's program runs as you.")))
             }
             // No first, the answer that acts last at the right (KitDialogButtons); a removal is the danger tint and No the safe,
             // highlighted answer (D8).
@@ -352,6 +355,18 @@ ColumnLayout {
                             text: qsTr("%1 · %2 · %n nodes", "", row.modelData.nodes).arg(row.modelData.version).arg(row.modelData.path)
                             color: page.look.label
                             font.pixelSize: page.look.labelSize
+                        }
+                        // What its programs may do (6.7.1), or that it runs as you: the lines of the Trust question.
+                        Text {
+                            objectName: "packNeeds-" + row.pid
+                            visible: row.modelData.enabled && row.modelData.needs.length > 0
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: row.modelData.needs.join("\n")
+                            color: row.modelData.sandboxed ? page.look.label : page.look.text
+                            font.pixelSize: page.look.labelSize
+                            font.bold: !row.modelData.sandboxed
                         }
                         // An inherited pack runs from the Default project's folder: what that means, once (PacksModel).
                         Text {

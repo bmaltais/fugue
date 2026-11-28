@@ -9,6 +9,7 @@
 
 #include "cli/args.h"
 #include "cli/commands.h"
+#include "engine/sandbox.h"
 #include "engine/queue.h"
 #include "engine/json.h"
 #include "engine/run_folder.h"
@@ -24,8 +25,10 @@ void writeOut(const QByteArray &bytes) {
 
 void writeLine(const QByteArray &line) { writeOut(line + '\n'); }
 
+// What reaches the terminal never drives it: a program's words (an error, a progress line, a setup's output) lose their
+// control characters here too.
 void logLine(const QString &text) {
-    const QByteArray bytes = text.toUtf8() + '\n';
+    const QByteArray bytes = sandbox::printable(text, true).toUtf8() + '\n';
     std::fwrite(bytes.constData(), 1, size_t(bytes.size()), stderr);
     std::fflush(stderr);
 }
@@ -44,6 +47,7 @@ QString humanError(const Error &error) {
         where << QStringLiteral("output %1").arg(error.output);
     if (!where.isEmpty())
         text += QStringLiteral(" (%1)").arg(where.join(", "));
+    text = sandbox::printable(text, true);
     if (!error.valid.isEmpty()) {
         QStringList valid;
         for (const QJsonValue &option : error.valid)

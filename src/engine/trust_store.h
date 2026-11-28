@@ -68,6 +68,12 @@ public:
     // Trust on first sight: a version trusted before digests were kept gets `digest` now (nothing for a version that is not
     // trusted here or already has one), so a later edit of its secrets asks again.
     Errors adoptSecretsDigest(const QString &packId, const QString &version, const QString &digest);
+    // The person's explicit "run this pack without a sandbox" (6.7.1, #731), per pack id and version, kept in trust.json
+    // beside the trust (`"unsandboxed": {"<id>": ["1.2.0"]}`). It needs the version to be trusted here, goes when the
+    // version's trust goes, and is never given to a built-in pack. Whether the pack is a community pack is the caller's
+    // to check (the loader knows it, this file does not).
+    bool isUnsandboxed(const QString &packId, const QString &version) const;
+    Errors setUnsandboxed(const QString &packId, const QString &version, bool unsandboxed);
     // Drops every version of a pack (it was removed). No effect for a pack that was never trusted. Only this
     // session's own file is changed.
     Errors forget(const QString &packId);

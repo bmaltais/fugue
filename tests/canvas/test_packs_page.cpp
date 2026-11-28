@@ -554,9 +554,22 @@ private slots:
             QVERIFY(file.open(QIODevice::WriteOnly));
             file.write(QJsonDocument(json).toJson());
         };
+        // io.example.tools (trusted) and io.example.draw (not yet) have a node that asks for the network and a read grant (6.7.1).
+        for (const QString id : {"io.example.tools", "io.example.draw"}) {
+            const QString version = id.endsWith("draw") ? "0.12.3" : "1.0.0";
+            write(packs() + "/" + id + "/net/node.json",
+                  QJsonObject{{"manifest", 1}, {"id", id + "/net"}, {"version", version}, {"name", "Net"},
+                              {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}}, {"inputs", QJsonArray{}},
+                              {"outputs", QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}}}},
+                              {"needs", QJsonObject{{"network", true}, {"files", QJsonObject{{"read", QJsonArray{"/srv/scans"}}}}}}});
+            QFile script(packs() + "/" + id + "/net/run.sh");
+            QVERIFY(script.open(QIODevice::WriteOnly));
+            script.write("#!/bin/sh\n");
+        }
         for (const QString id : {"io.example.tools", "io.example.draw", "io.example.keyed"})
             write(packs() + "/" + id + "/pack.json", QJsonObject{{"manifest", 1}, {"id", id}, {"version", id.endsWith("draw") ? "0.12.3" : "1.0.0"},
-                  {"name", id.section('.', -1).replace(0, 1, id.section('.', -1).at(0).toUpper())}, {"nodes", QJsonArray{}},
+                  {"name", id.section('.', -1).replace(0, 1, id.section('.', -1).at(0).toUpper())},
+                  {"nodes", id.endsWith("keyed") ? QJsonArray{} : QJsonArray{"net"}},
                   {"settings", id.endsWith("keyed") ? QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}, {"label", "API token"},
                       {"description", "Sent to the service this pack's nodes call."}, {"origin", "required"}}} : QJsonArray{}}});
         QDir().mkpath(packs() + "/io.example.broken");
@@ -595,6 +608,15 @@ private slots:
         clickHeader(app, "pack-io.example.keyed");
         QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "pack-io.example.keyed"), 20000);
         shot("packs-2-open");
+        // The Trust question of a pack that asks for the network and a folder: what its sandbox lets it do.
+        reveal("pack-io.example.draw");
+        click(app, NEED("packTrust-io.example.draw"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
+        QTRY_VERIFY2_WITH_TIMEOUT(NEED("packQuestionDetail")->property("text").toString().contains("Can read /srv/scans"),
+                                  qPrintable(NEED("packQuestionDetail")->property("text").toString()), 20000);
+        shot("packs-2c-trust-question");
+        click(app, NEED("packNo"));
+        QTRY_VERIFY_WITH_TIMEOUT(!find(app.window, "packQuestion"), 20000);
         reveal("packAddRow");
         clickHeader(app, "packAddRow");
         QTRY_VERIFY_WITH_TIMEOUT(openAndGrown(app.window, "packAddRow"), 20000);

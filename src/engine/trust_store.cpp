@@ -19,6 +19,8 @@
 #include <QMutexLocker>
 #include <QSysInfo>
 
+#include <optional>
+
 #include <cerrno>
 #include <csignal>
 
@@ -110,7 +112,23 @@ bool secretsUnchanged(const QJsonObject &sealed, const QString &packId, const QS
     return now.isEmpty() || now == recorded;
 }
 
-Errors writeTrust(const QString &path, const QJsonObject &packs, QJsonObject sealed) {
+QJsonObject readOpen(const QString &path) { return readFileObject(path).value("unsandboxed").toObject(); }
+
+// `open`: the versions run without a sandbox (setUnsandboxed), kept only for a version that is still trusted. Unless given,
+// the file's own list stays as it is.
+Errors writeTrust(const QString &path, const QJsonObject &packs, QJsonObject sealed, std::optional<QJsonObject> open = std::nullopt) {
+    QJsonObject unsandboxed = open ? *open : readOpen(path);
+    for (const QString &id : unsandboxed.keys()) {
+        QJsonArray kept;
+        for (const QJsonValue &version : unsandboxed.value(id).toArray())
+            for (const QJsonValue &trusted : packs.value(id).toArray())
+                if (trusted == version)
+                    kept.append(version);
+        if (kept.isEmpty())
+            unsandboxed.remove(id);
+        else
+            unsandboxed.insert(id, kept);
+    }
     // Only what a trusted version still has.
     for (const QString &id : sealed.keys()) {
         QJsonObject versions = sealed.value(id).toObject();
@@ -129,6 +147,8 @@ Errors writeTrust(const QString &path, const QJsonObject &packs, QJsonObject sea
     QJsonObject file{{"packs", packs}};
     if (!sealed.isEmpty())
         file.insert("secrets", sealed);
+    if (!unsandboxed.isEmpty())
+        file.insert("unsandboxed", unsandboxed);
     // Only its owner may read or change what they trust (replaceFile makes the folder).
     return replaceFile(path, writeJson(file), QFileInfo(path).fileName(), FileMode::OwnerOnly);
 }
@@ -278,6 +298,40 @@ Errors TrustStore::forget(const QString &packId, const QString &version, TrustEn
     if (taken && !hasErrors(written))
         *taken = {true, sealed.value(packId).toObject().value(version).toString()};
     return written;
+}
+
+bool TrustStore::isUnsandboxed(const QString &packId, const QString &version) const {
+    if (isBuiltIn(packId))
+        return false;
+    for (const QJsonValue &value : readOpen(m_path).value(packId).toArray())
+        if (value.toString() == version)
+            return isTrusted(packId, version); // the yes stands only for what was trusted: its digest (secrets, source, needs) too
+    return false;
+}
+
+Errors TrustStore::setUnsandboxed(const QString &packId, const QString &version, bool unsandboxed) {
+    if (isBuiltIn(packId))
+        return {makeError(QStringLiteral("usage"), QStringLiteral("%1 is part of Fugue; it has no sandbox to turn off.").arg(packId))};
+    if (isUnsandboxed(packId, version) == unsandboxed)
+        return {};
+    if (unsandboxed && !isListed(packId, version))
+        return {makeError(QStringLiteral("pack_untrusted"), QStringLiteral("%1 %2 is not trusted, so it cannot be set to run without a sandbox.").arg(packId, version),
+                          QStringLiteral("Trust it first (`fugue pack trust %1`).").arg(packId))};
+    const ChangeLock lock(m_path);
+    if (!lock.held())
+        return lock.busy();
+    QJsonObject open = readOpen(m_path);
+    QJsonArray versions;
+    for (const QJsonValue &value : open.value(packId).toArray())
+        if (value.toString() != version)
+            versions.append(value);
+    if (unsandboxed)
+        versions.append(version);
+    if (versions.isEmpty())
+        open.remove(packId);
+    else
+        open.insert(packId, versions);
+    return writeTrust(m_path, readPacks(m_path), readSealed(m_path), open);
 }
 
 Errors TrustStore::forget(const QString &packId) {

@@ -1,7 +1,12 @@
 #include "engine/cache_manager.h"
 
+#include "engine/beneath_fs.h"
+
+#include <fcntl.h>
+
 #include <QDir>
 #include <QDirIterator>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QMap>
@@ -131,7 +136,16 @@ QList<RunInfo> listRuns(const CacheFolders &folders, const QSet<QString> &queued
     return runs;
 }
 
-bool removeFolder(const QString &path) { return QDir(path).removeRecursively(); }
+// A run folder may hold what a pack's program wrote (links among it): removed through descriptors, never following a link.
+bool removeFolder(const QString &path) {
+    const QFileInfo info(path);
+    if (info.isSymLink())
+        return QFile::remove(path);
+    if (!info.exists())
+        return true;
+    const beneath::Fd parent(::open(QFile::encodeName(info.absolutePath()).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    return parent && beneath::removeTreeBeneath(parent.get(), info.fileName());
+}
 
 } // namespace
 

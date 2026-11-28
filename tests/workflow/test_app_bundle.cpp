@@ -61,10 +61,11 @@ QByteArray png() {
 }
 
 // An installed pack `root/<id>` with one command node, a setup, and what an install leaves around (an environment, git's folder).
+// The setup writes in `.venv`, the only folder of a pack a setup may write in (6.7.1); it is not uv, so it needs no uv.lock.
 QString makePack(const QString &root, const QString &id) {
     const QString dir = root + "/" + id;
     writeJson(dir + "/pack.json", QJsonObject{{"manifest", 1}, {"id", id}, {"version", "1.0.0"}, {"name", "Segment"}, {"nodes", QJsonArray{"tool"}},
-                                              {"setup", QJsonObject{{"command", QJsonArray{"sh", "-c", "touch environment.ok"}}, {"description", "Makes the environment"}}}});
+                                              {"setup", QJsonObject{{"command", QJsonArray{"sh", "-c", "touch .venv/environment.ok"}}, {"description", "Makes the environment"}}}});
     writeJson(dir + "/tool/node.json",
               QJsonObject{{"manifest", 1}, {"id", id + "/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
                           {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
@@ -217,8 +218,8 @@ private slots:
         QVERIFY2(outcome.ok, outcome.errors.isEmpty() ? "" : qPrintable(outcome.errors.first().message));
         QCOMPARE(questions, 0);
         QVERIFY(outcome.packsChanged);
-        QVERIFY(QFileInfo(packsDir + "/io.test.segment/environment.ok").isFile());
-        QVERIFY(!QFileInfo::exists(packsDir + "/io.test.segment/.venv")); // the sender's environment never travelled
+        QVERIFY(QFileInfo(packsDir + "/io.test.segment/.venv/environment.ok").isFile());
+        QVERIFY(!QFileInfo::exists(packsDir + "/io.test.segment/.venv/bin/python")); // the sender's environment never travelled
         QVERIFY(QFileInfo(packsDir + "/io.test.segment/tool/run.sh").isExecutable()); // #520: else execve says Permission denied
         // The source record names the bundle, a file that stays, not the scratch folder the bundle was unpacked into (#520).
         const PackSource recordedSource = readPackSource(packsDir + "/io.test.segment");

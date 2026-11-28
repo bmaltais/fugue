@@ -15,6 +15,7 @@
 
 #include "engine/error.h"
 #include "engine/result.h"
+#include "engine/sandbox.h"
 #include "engine/trust_store.h"
 
 #include <QJsonObject>
@@ -44,7 +45,9 @@ struct PackSummary {
     QString name;
     QString folder;
     QStringList runtimeKinds; // "command", "native", ... of the pack's nodes, sorted
-    QStringList permissions;  // "network", "files", "gpu": what the nodes declare (6.3), sorted
+    QStringList permissions;  // what the nodes declare (6.3, 6.7.1) and the setup's network, one plain line each (sandbox::needsLines)
+    sandbox::Needs needs;     // what the nodes declare that the sandbox honours (6.7.1), the union of the nodes'
+    bool community = false;   // pack.json `community: true` (#731): always sandboxed
     QStringList nodes;        // node type ids
     QStringList secrets;      // the names of the secrets the pack reads (6.4 `settings`), in pack.json's order; never values
     QStringList secretsSet;   // of those, the ones already set for this pack id from this same source (an update keeps them)
@@ -70,6 +73,7 @@ struct PackPrompts {
     std::function<Answer(const PackSummary &)> remove;    // remove this pack?
     std::function<Answer(const PackSummary &)> trust;     // allow this pack's nodes to run?
     std::function<Answer(const PackSummary &)> runSetup;  // run this exact command?
+    std::function<Answer(const PackSummary &)> unsandbox; // run this pack's programs as you, without the sandbox (6.7.1)?
     // What a command prints while it runs (git, setup), a line at a time. May be null.
     std::function<void(const QString &)> log;
     // True when the person stopped the work: git and a setup are killed, and the rest is skipped.
@@ -146,6 +150,11 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
 // Also forgets its trust.
 Result<PackSummary> removePack(const QString &id, const QString &packsDir, TrustStore &trust,
                                const PackPrompts &prompts);
+
+// Turns the sandbox of an installed, trusted pack off (after asking, `prompts.unsandbox`) or back on (no question), for its
+// installed version: the person's explicit "run it without a sandbox" (6.7.1, #731), stored beside the trust. A community pack's
+// sandbox stays on (permission_denied); an untrusted pack has none to turn off (pack_untrusted).
+Result<PackSummary> setPackSandbox(const QString &id, bool sandboxed, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts);
 
 // Runs the setup of an installed pack (folder name `id`, as `trustPack` takes) after asking, and records that it ran.
 // `setup_declined` when the answer is no, `setup_failed` when it fails. A pack with no setup is returned as it is.

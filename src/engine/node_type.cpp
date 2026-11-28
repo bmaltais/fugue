@@ -2,6 +2,7 @@
 
 #include "engine/canonical.h"
 #include "engine/ids.h"
+#include "engine/sandbox.h"
 #include "engine/suggest.h"
 
 #include <QJsonArray>
@@ -629,6 +630,8 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
     if (!needs.isUndefined() && !needs.isObject())
         r.fail(QStringLiteral("\"needs\" must be an object."));
     type.needs = needs.toObject();
+    if (const QString bad = sandbox::needsProblem(type.needs); !bad.isEmpty())
+        r.fail(bad);
     type.capabilities = manifest.value("capabilities");
     if (manifest.contains("ui"))
         r.fail(QStringLiteral("\"ui\" is reserved and must be absent in this version."));

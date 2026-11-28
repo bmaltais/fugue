@@ -31,7 +31,9 @@
 #include "engine/node_kernel.h"
 
 #include <QByteArray>
+#include <QJsonValue>
 #include <QString>
+#include <QStringList>
 
 #include <memory>
 
@@ -52,6 +54,12 @@ QString packSecretsKeyPart(const NodeType &type);
 // cacheable, so a result made when the file was readable again is never stored under a key shared by every such run.
 constexpr const char *kSecretsUnreadable = "unreadable";
 
+// The model files a sandboxed program is handed for one resource input (6.7.1): the paths ModelLibrary::withPaths resolved in
+// `withPaths`, walked the way it adds them: a handle's own `path`, or for a derived handle (2.5) the paths of its `base`, of each
+// other handle beside it (`text_encoder`, `vae`) and of each `apply[].lora`. A "path" anywhere else (one a workflow wrote into
+// a derived handle) is not one of them.
+QStringList resolvedModelPaths(const QJsonValue &withPaths);
+
 // The resident-model key of a node type's persistent program, "program:<type id>"; empty for a
 // type whose program is not one (not persistent, or no `needs.gpu`). A node of the type keeps
 // it among its own models, so making room for the node does not stop its program.
@@ -66,6 +74,10 @@ public:
     ~CommandKernel() override;
 
     Result<Values> run(const NodeContext &context) override;
+
+    // `fugue node test`: every node with a pack version runs in the sandbox, whatever trust.json says of an installed pack of
+    // the same id and version (its sandbox-off is not the folder under test's), and whatever its id.
+    void setAlwaysSandboxed(bool on);
 
     // Stops every persistent process now, ending runs in flight (they fail) and refusing new
     // ones. Final: a kernel that was shut down runs nothing.

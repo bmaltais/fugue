@@ -4,6 +4,7 @@
 #include "../test_paths.h"
 #include "engine/error.h"
 #include "engine/pack_secrets.h"
+#include "engine/sandbox.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -30,7 +31,10 @@ class TestCliAuthoring : public QObject {
     Q_OBJECT
     QTemporaryDir m_dir;
 
-    Outcome fugue(const QStringList &args, const QString &cwd) const {
+    Outcome fugue(QStringList args, const QString &cwd) const {
+        // Where there is no sandbox, a node under test runs as the author (--no-sandbox); the sandboxed run is tested in test_sandbox.
+        if (args.size() > 1 && args.at(0) == "node" && args.at(1) == "test" && !fugue::sandbox::available() && !args.contains("--no-sandbox"))
+            args << "--no-sandbox";
         QProcess process;
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove("QT_QPA_PLATFORM");
@@ -172,7 +176,7 @@ private slots:
         QVERIFY(run.open(QIODevice::WriteOnly | QIODevice::Truncate));
         run.write(QByteArray("#!/bin/sh\ncat > '") + request.toUtf8() + "'\nexit 1\n"); // keeps what the node was handed
         run.close();
-        fugue({"node", "test", "io.example.greeter/greeter"}, cwd); // the cases fail: only what was handed over matters
+        fugue({"node", "test", "io.example.greeter/greeter", "--no-sandbox"}, cwd); // the cases fail: only what was handed over matters
         QFile handed(request);
         QVERIFY(handed.open(QIODevice::ReadOnly));
         const QByteArray bytes = handed.readAll();

@@ -15,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/sandbox.h"
+
 namespace {
 
 struct Outcome {
@@ -174,6 +176,8 @@ private slots:
     }
 
     void aRunUsingAnInheritedTrustedPackWorksAndLeavesTheDefaultAsItWas() {
+        if (!fugue::sandbox::available())
+            QSKIP("a pack's program runs in the sandbox, and bubblewrap or user namespaces are not available here");
         const QString project = makeProject("packs");
         write(path("work/say.fugue"), R"({"fugue":1,"graph":{"nodes":{"s":{"type":"io.example.tools/say","version":"1.0.0","inputs":{}},
                                          "p":{"type":"fugue/preview","version":"1.0.0","inputs":{"value":{"from":"s.text"}}}}}})");
