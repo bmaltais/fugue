@@ -15,6 +15,7 @@
 #include "../window_grab.h"
 #include "canvas/widget_edit.h"
 #include "canvas_app.h"
+#include "engine/file_hashes.h"
 #include "engine/host_models.h"
 
 using namespace fugue;
@@ -75,8 +76,16 @@ private slots:
         for (const auto &[name, mb] : {std::pair{"diffusion_models/flux-2-klein-9b-Q8_0.gguf", 9400}, std::pair{"diffusion_models/z-image-turbo-Q8_0.gguf", 7200},
                                        std::pair{"diffusion_models/flux1-dev-Q8_0.gguf", 12700}})
             touch(models + "/" + name, qint64(mb) * 1000 * 1000);
+        // Klein is here and there with the same content (the local file's hash is remembered): the host's row is left out. Z-Image is
+        // there unhashed with the local file's name and size: it stays, saying "Also here".
+        {
+            FileHashes known(FileHashes::defaultPath());
+            known.remember(models + "/diffusion_models/flux-2-klein-9b-Q8_0.gguf", "sha256:" + QString(64, 'a'));
+            known.save();
+        }
         const auto entry = [](const QString &name, double size, const QString &family) {
-            return QJsonObject{{"name", name}, {"size", size}, {"sha256", QString(64, 'a')}, {"folder", name.section('/', 0, 0)}, {"family", family}};
+            return QJsonObject{{"name", name}, {"size", size}, {"sha256", name.contains("z-image") ? QJsonValue() : QJsonValue(QString(64, name.contains("klein") ? 'a' : 'c'))},
+                               {"folder", name.section('/', 0, 0)}, {"family", family}};
         };
         fugue::test::FakeHttpServer host;
         QVERIFY(host.listen());

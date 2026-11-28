@@ -278,6 +278,22 @@ private slots:
             QVERIFY(registry.add(declared).isEmpty());
         }
         const ModelLibrary library({m_dir.filePath("models")}, &registry);
+        // The one rule for both pickers: a host file with a hash that a local file has is left out, an unhashed one with a local file's
+        // name and size says "Also here".
+        ListedModel here;
+        here.name = QStringLiteral("z-image-turbo-Q8_0.gguf");
+        here.size = 4000;
+        here.handle = QJsonObject{{"hash", "sha256:" + kHash}};
+        QCOMPARE(listHostModels({instance()}, kept, library, *PortType::parse("fugue/diffusion-model"), {here}).size(), 0); // same hash: local wins
+        ListedModel sameName = here;
+        sameName.handle = QJsonObject{{"hash", "sha256:" + QString(64, '9')}};
+        QCOMPARE(listHostModels({instance()}, kept, library, *PortType::parse("fugue/diffusion-model"), {sameName}).size(), 1); // another content: both stay
+        ListedModel unhashedHere;
+        unhashedHere.name = QStringLiteral("ae.safetensors");
+        unhashedHere.size = 300;
+        const QList<ListedModel> also = listHostModels({instance()}, kept, library, *PortType::parse("fugue/vae"), {unhashedHere});
+        QCOMPARE(also.size(), 1);
+        QVERIFY(also.first().note.contains("Also here"));
         const QList<ListedModel> unets = listHostModels({instance()}, kept, library, *PortType::parse("fugue/diffusion-model"));
         QCOMPARE(unets.size(), 1);
         QVERIFY(unets.first().remote);
