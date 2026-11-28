@@ -8,7 +8,7 @@
   "keywords": ["template", "format", "fill", "placeholder", "prompt", "join", "combine", "concat", "string", "variable"],
   "runtime": {"kind": "builtin"},
   "inputs": [
-    {"name": "template", "type": "text", "label": "Template", "default": "{a}\n{b}", "widget": "multiline",
+    {"name": "template", "type": "text", "label": "Template", "default": "{a}\n{b}", "widget": "multiline", "syntax": "template",
      "description": "The text to fill. {a} to {f} are replaced by the inputs of those names; an input with nothing in it gives nothing. Write {{ and }} for a literal { and }. Any other name between braces is an error."},
     {"name": "a", "type": "text", "label": "A", "default": "", "widget": "multiline"},
     {"name": "b", "type": "text", "label": "B", "default": "", "widget": "multiline"},

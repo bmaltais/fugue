@@ -230,6 +230,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.number(o, "step", input.step, where, n);
     r.boolean(o, "integer", input.integer, where, n);
     r.string(o, "widget", input.widgetName, where, n);
+    r.string(o, "syntax", input.syntax, where, n);
     r.string(o, "section", input.section, where, n);
     r.boolean(o, "advanced", input.advanced, where, n);
     r.string(o, "role", input.role, where, n);
@@ -245,7 +246,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     input.defaultValue = o.value("default");
     r.unknownFields(o,
                     {"name", "type", "label", "description", "default", "optional", "lazy", "takes_list", "list", "min_items",
-                     "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
+                     "max_items", "min", "max", "step", "integer", "choices", "widget", "syntax", "section",
                      "advanced", "role", "over", "shown_when"},
                     where, n);
 
@@ -277,6 +278,12 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
             r.fail(where + QStringLiteral(" has \"min_items\" above \"max_items\"."), n);
         if (!input.over.isEmpty() && input.widgetName != QLatin1String("mask") && input.widgetName != QLatin1String("paint"))
             r.fail(where + QStringLiteral(" has \"over\", which only applies to the widgets \"mask\" and \"paint\"."), n);
+        if (!input.syntax.isEmpty()) {
+            if (input.syntax != QLatin1String("dynamic-prompt") && input.syntax != QLatin1String("template"))
+                r.fail(where + QStringLiteral(" has the syntax \"%1\"; the syntaxes are \"dynamic-prompt\" and \"template\".").arg(input.syntax), n);
+            else if (id != "text" || (input.widget() != QLatin1String("multiline") && input.widget() != QLatin1String("line")))
+                r.fail(where + QStringLiteral(" has \"syntax\", which only applies to text inputs with the widget \"line\" or \"multiline\"."), n);
+        }
         if (!input.widgetName.isEmpty() && !widgetFits(input.widgetName, input))
             r.fail(where + QStringLiteral(" is %1 and cannot use the widget \"%2\".")
                                .arg(input.type.toString(), input.widgetName),
@@ -446,6 +453,7 @@ QJsonObject inputJson(const InputSpec &input) {
     if (input.choices)
         i.insert("choices", QJsonArray::fromStringList(*input.choices));
     putIf(i, "widget", input.widgetName);
+    putIf(i, "syntax", input.syntax);
     putIf(i, "section", input.section);
     putIfTrue(i, "advanced", input.advanced);
     putIf(i, "role", input.role);

@@ -25,6 +25,8 @@ void addPixelKernels(Kernels &kernels);           // pixel.cpp
 void addSaveMediaKernels(Kernels &kernels);       // save_media.cpp
 void addDynamicPromptKernels(Kernels &kernels);  // dynamic_prompt.cpp
 void addTextTemplateKernels(Kernels &kernels);   // text_template.cpp
+// Text Template's check of a template alone (the text editors name its first problem as it is typed): empty when it fills.
+Errors checkTextTemplate(const QString &text);   // text_template.cpp
 void addExpressionKernels(Kernels &kernels);     // expression.cpp
 void addSwitchKernels(Kernels &kernels);         // switch.cpp
 void addTextGenerationKernels(Kernels &kernels);  // text_generation.cpp

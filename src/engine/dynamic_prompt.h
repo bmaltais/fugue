@@ -61,4 +61,8 @@ Result<Expansion> expandAll(const QString &templ, const Options &options, int ca
 // Text Template), and the run itself fails with the same error.
 Errors check(const QString &templ, const Options &options);
 
+// The syntax alone, as check() finds it first: no wildcard is looked up (the text editors colour a template as it is typed).
+// Empty when the template parses; else the one problem, with its line and column in the message.
+Errors checkSyntax(const QString &templ);
+
 } // namespace fugue::dynprompt

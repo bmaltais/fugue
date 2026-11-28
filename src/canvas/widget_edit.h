@@ -154,7 +154,7 @@ public:
     bool writing() const { return m_writing; }
 
     // --- the text window (#715): a larger editor for a node's text inputs ---
-    // The node's text inputs in the order its card shows them: [{name, label, widget ("multiline" or "line"), linked}].
+    // The node's text inputs in the order its card shows them: [{name, label, widget ("multiline" or "line"), linked, syntax (the manifest's, or empty)}].
     Q_INVOKABLE QVariantList textInputs(const QString &node) const;
     // One typed change from a window that stays open beside the canvas: it writes `text` to the input inside a session of its own
     // (begun here when this input has none open, so another edit that ended it, or a field that took its place, never gets the

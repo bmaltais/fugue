@@ -8,6 +8,7 @@
 #include "engine/node_kernel.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
+#include "nodes/kernels.h"
 
 using namespace fugue;
 
@@ -38,6 +39,15 @@ private slots:
     void initTestCase() {
         nodes::addBuiltinNodeTypes(m_registry);
         nodes::addBuiltinKernels(m_kernels);
+    }
+
+    // The text editors colour the template by the manifest's `syntax` (#715), and name its first problem in the kernel's words.
+    void theTemplateInputNamesItsSyntaxAndItsProblemHasALine() {
+        QCOMPARE(m_registry.nodeType("fugue/text-template")->input("template")->syntax, QString("template"));
+        QCOMPARE(m_registry.nodeType("fugue/dynamic-prompt")->input("template")->syntax, QString("dynamic-prompt"));
+        QVERIFY(nodes::checkTextTemplate("{a}\n{b}").isEmpty());
+        QVERIFY(nodes::checkTextTemplate("{a}\nx {q}").first().message.contains("line 2, column 3 of the template"));
+        QVERIFY(nodes::checkTextTemplate("a\n}").first().message.contains("line 2, column 1"));
     }
 
     void placeholdersTakeTheTextOfTheirInput() {

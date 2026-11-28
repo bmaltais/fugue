@@ -32,7 +32,7 @@ Popup {
                 return i
         return -1
     }
-    readonly property var current: index >= 0 ? inputs[index] : ({ name: "", label: "", widget: "line", linked: false })
+    readonly property var current: index >= 0 ? inputs[index] : ({ name: "", label: "", widget: "line", linked: false, syntax: "" })
     readonly property bool linked: current.linked
     // Re-read the linked input's source when the run state or the document changes.
     property int stamp: 0
@@ -41,6 +41,8 @@ Popup {
     readonly property string shownText: linked ? (source.has ? source.text : "") : edit.text
     // The text is being typed or set by the window itself: a document change it made is not an outside edit.
     property bool busy: false
+    // The text as last loaded or typed: a change that leaves it so is the highlighter's formatting, not a key.
+    property string known: ""
     // Why the text typed is not a value, and the node's own error under it (a run's or a check's).
     property string typedError: ""
     readonly property string nodeError: stamp >= 0 && root.opened ? canvasModel.runError(nodeId) : ""
@@ -106,6 +108,7 @@ Popup {
         edit.text = linked ? (source.has ? source.text : "") : startText()
         TextLines.setLineHeight(edit.textDocument, lineRatio)
         edit.cursorPosition = edit.length
+        known = edit.text
         busy = false
     }
     function finishSession() {
@@ -147,6 +150,7 @@ Popup {
         finishSession()
         busy = true // emptying the field is not a typed change
         edit.text = ""
+        known = ""
         busy = false
     }
     Connections {
@@ -272,6 +276,19 @@ Popup {
             border.width: edit.activeFocus ? 1 : 0
             border.color: root.look.accent
 
+            // The manifest's `syntax` of the input colours the text (spec 6.2); a linked input's text is a result, not a template.
+            PromptHighlight {
+                id: highlight
+                objectName: "textHighlight"
+                target: edit.textDocument
+                syntax: root.linked ? "" : (root.current.syntax || "")
+                accent: root.look.accent
+                label: root.look.label
+                role: root.look.role("blue").frameEdge
+                error: root.look.error
+                well: root.look.well
+            }
+
             Flickable {
                 id: flick
                 anchors.fill: parent
@@ -296,8 +313,10 @@ Popup {
                     selectedTextColor: root.look.accentForeground
                     font.pixelSize: root.textPx
                     onTextChanged: {
-                        if (root.busy || root.linked)
+                        // The highlighter's own formatting also reports a change of the text, with the text as it was: not typing.
+                        if (root.busy || root.linked || text === root.known)
                             return
+                        root.known = text
                         root.busy = true
                         root.typedError = root.edits.typeInto(root.nodeId, root.inputName, text)
                         root.busy = false
@@ -330,7 +349,8 @@ Popup {
             readonly property int characters: text.length
             readonly property int words: text.trim() === "" ? 0 : text.trim().split(/\s+/).length
             readonly property int lines: text === "" ? 0 : text.split("\n").length
-            readonly property string problem: root.typedError !== "" ? root.typedError : root.nodeError
+            // What the document refused, else the first thing wrong with the syntax (its line in the words), else the node's own error.
+            readonly property string problem: root.typedError !== "" ? root.typedError : highlight.problem !== "" ? highlight.problem : root.nodeError
             Text {
                 id: counts
                 objectName: "textCounts"
