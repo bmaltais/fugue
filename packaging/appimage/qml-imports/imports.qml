@@ -4,9 +4,12 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
+import QtQuick.Controls.Material.impl
+import QtQuick.Controls.impl
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Shapes
+import QtQuick.Templates as T
 import QtCore
 import QtMultimedia
 
