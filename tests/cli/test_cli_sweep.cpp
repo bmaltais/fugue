@@ -78,10 +78,20 @@ class TestCliSweep : public QObject {
 private slots:
     void init() {
         QVERIFY(m_dir.isValid());
+        // The output folder is outside the home folder (a drive of its own): the cells are saved there and the sheet's run must still read
+        // them, though the file roots only allow reading under home.
+        QVERIFY(QDir().mkpath(path("outside/out")));
+        QVERIFY(QDir().mkpath(path("home/.config/fugue")));
+        QFile settings(path("home/.config/fugue/settings.json"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write(QJsonDocument(QJsonObject{{"output_folder", path("outside/out")}}).toJson());
         QVERIFY(QDir().mkpath(path("home/work")));
         QVERIFY(QDir().mkpath(path("home/pics")));
     }
-    void cleanup() { QDir(path("home")).removeRecursively(); }
+    void cleanup() {
+        QDir(path("home")).removeRecursively();
+        QDir(path("outside")).removeRecursively();
+    }
 
     // Two axes, four cells: a picture that is there and one that is not, each as png and webp. The two that fail are blank tiles, the sheet
     // is still made, and the answer says which is which.
@@ -97,8 +107,10 @@ private slots:
 
         const Outcome run = fugue({"run", "flow.fugue", "--wait", "--to", "save", "--json", "--sweep", "load.file=" + red + "," + path("home/pics/gone.png"),
                                    "--sweep", "save.format=png,webp"});
-        QVERIFY2(run.exitCode == 0, run.out + run.err);
+        QCOMPARE(run.exitCode, 1); // a cell failed, the sheet is made all the same
+        QVERIFY2(run.json().value("ok").toBool(), run.out + run.err);
         const QJsonObject data = run.data();
+        QVERIFY2(data.value("grid").toString().startsWith(path("outside/out")), run.out);
         const QJsonArray cells = data.value("cells").toArray();
         QCOMPARE(cells.size(), 4);
         QCOMPARE(data.value("failed").toInt(), 2);

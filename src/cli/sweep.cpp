@@ -2,15 +2,14 @@
 // workflow are engine/sweep.h's; this starts each cell's run the way `fugue run` does (startBoundRun, one after the other: they share
 // the one GPU) and waits for it, then runs the sheet. A cell that fails is a labelled blank tile, and Ctrl+C cancels the rest.
 
-#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 
 #include "cli/canvas_run.h"
 #include "cli/runs.h"
-#include "engine/paths.h"
+#include "engine/media.h"
+#include "engine/json.h"
 #include "engine/sweep.h"
-#include "engine/vips.h"
 
 namespace fugue::cli {
 
@@ -26,7 +25,8 @@ struct CellOutcome {
 
 Error usageProblem(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("usage"), message, hint); }
 
-// The first picture node `node` made in the run: a Save node's file, else what a Preview shows (as `fugue app run` reads it).
+// The first picture node `node` made in the run (a handle of type image, not any file: a model loader has a path too): a Save node's
+// file, else what a Preview shows (as `fugue app run` reads it).
 QString pictureOf(const RunFolder &folder, const QString &node) {
     QStringList paths;
     for (const QJsonObject &event : folder.events()) {
@@ -34,9 +34,9 @@ QString pictureOf(const RunFolder &folder, const QString &node) {
         if ((kind != QLatin1String("node.done") && kind != QLatin1String("node.cached")) || event.value("node").toString() != node)
             continue;
         const qsizetype before = paths.size();
-        collectMediaPaths(event.value("outputs"), paths);
+        collectMediaPaths(event.value("outputs"), paths, QStringLiteral("image"));
         if (paths.size() == before)
-            collectMediaPaths(event.value("shown"), paths);
+            collectMediaPaths(event.value("shown"), paths, QStringLiteral("image"));
     }
     return paths.value(0);
 }
@@ -63,29 +63,6 @@ CellOutcome runCell(const Document &bound, const QString &workflow, const QStrin
         }
     }
     return outcome;
-}
-
-// A plain tile the size of the first picture that was made, kept in the inputs folder (a run may always read it), for a cell
-// that did not make one.
-QString blankTile(const QString &sizedLike) {
-    int width = 256, height = 256;
-    try {
-        if (initVips() && !sizedLike.isEmpty()) {
-            const vips::VImage picture = vips::VImage::new_from_file(QFile::encodeName(sizedLike).constData());
-            width = picture.width();
-            height = picture.height();
-        }
-        const QString path = QDir(inputsDir()).filePath(QStringLiteral("sweep-blank-%1x%2.png").arg(width).arg(height));
-        if (QFileInfo::exists(path))
-            return path;
-        QDir().mkpath(inputsDir());
-        vips::VImage tile = vips::VImage::black(width, height).new_from_image(std::vector<double>{60, 60, 60}).copy(
-            vips::VImage::option()->set("interpretation", VIPS_INTERPRETATION_sRGB));
-        tile.write_to_file(QFile::encodeName(path).constData());
-        return path;
-    } catch (const vips::VError &) {
-        return {};
-    }
 }
 
 } // namespace
@@ -124,6 +101,7 @@ Reply sweepRun(const Command &command, Context &context) {
     QStringList files;
     SweepLabels labels = plan->labels;
     QString firstPicture;
+    QSize blank{256, 256};
     for (qsizetype i = 0; i < plan->cells.size(); ++i) {
         const SweepCell &cell = plan->cells.at(i);
         context.log(QStringLiteral("[%1/%2] %3 ...").arg(i + 1).arg(plan->cells.size()).arg(cell.label));
@@ -132,8 +110,15 @@ Reply sweepRun(const Command &command, Context &context) {
                     outcome.status == QLatin1String("ok") ? QStringLiteral("ok") : QStringLiteral("%1: %2").arg(outcome.status, outcome.message)));
         outcomes << outcome;
         files << outcome.file;
-        if (firstPicture.isEmpty())
+        if (firstPicture.isEmpty() && !outcome.file.isEmpty()) {
+            // The size of a picture is known: say now, not after the last cell, that the sheet could not be made.
             firstPicture = outcome.file;
+            if (const std::optional<QSize> size = MediaHandle::imageHeaderSize(firstPicture)) {
+                blank = *size;
+                if (const Errors tooBig = checkSheetSize(labels, blank); !tooBig.isEmpty())
+                    return Reply::failure(tooBig);
+            }
+        }
     }
     const auto cellRows = [&] {
         QJsonArray rows;
@@ -159,23 +144,23 @@ Reply sweepRun(const Command &command, Context &context) {
                                         "Run the workflow once with `fugue run --wait` to see the error."));
     }
 
-    // A cell without a picture is a blank tile saying so.
-    const QString blank = blankTile(firstPicture);
-    if (blank.isEmpty())
-        return Reply::failure(makeError(QStringLiteral("internal"), QStringLiteral("The blank tile for a failed cell could not be made.")));
+    // A cell without a picture stays an empty entry (composeDocument makes a plain tile of it) and says so in its label.
     int failed = 0;
     for (qsizetype i = 0; i < files.size(); ++i) {
         if (!files.at(i).isEmpty())
             continue;
         ++failed;
-        files[i] = blank;
         labels.cells[i] = labels.cells.at(i).isEmpty() ? QStringLiteral("failed") : labels.cells.at(i) + QStringLiteral(" (failed)");
     }
-    const Result<Document> sheet = composeDocument(files, labels, context.registry);
+    const Result<Document> sheet = composeDocument(files, labels, context.registry, {{}, blank});
     if (!sheet)
         return Reply::failure(sheet.errors());
     context.log(QStringLiteral("Laying out the sheet ..."));
-    const Result<RunFolder> folder = startBoundRun(*sheet, file, context, {});
+    // The sheet's run reads the cells' pictures, wherever the output folder is; nothing else beyond the usual roots. It is recorded under the
+    // swept file like the cells (its roots and its place in History), and its own workflow.json is the sheet's graph.
+    QStringList pictures = files;
+    pictures.removeAll(QString());
+    const Result<RunFolder> folder = startBoundRun(*sheet, file, context, {}, {}, pictures);
     if (!folder)
         return Reply::failure(folder.errors());
     const canvas::BatchRunResult laid = waitForRun(*folder, context);
@@ -183,13 +168,26 @@ Reply sweepRun(const Command &command, Context &context) {
         return Reply::failure(makeError(laid.status == QLatin1String("cancelled") ? QStringLiteral("cancelled")
                                         : laid.code.isEmpty() ? QStringLiteral("node_failed") : laid.code, laid.message));
     const QString grid = pictureOf(*folder, QStringLiteral("sheet"));
-    Reply reply = Reply::success(QJsonObject{{"grid", grid}, {"run", folder->id()}, {"columns", labels.columns}, {"failed", failed},
-                                             {"cells", cellRows()}}, grid);
+    QJsonObject data{{"grid", grid}, {"run", folder->id()}, {"columns", labels.columns}, {"failed", failed}, {"cells", cellRows()}};
+    // Streamed, as `fugue canvas batch`: the sheet is made and printed, and the exit says whether every cell made its picture.
+    Reply reply;
+    reply.streamed = true;
+    reply.exitCode = failed > 0 ? 1 : 0;
+    Errors warnings;
     if (failed > 0) {
-        // A warning: the sheet was made, and each cell's own status is in the data.
         Error warning = makeError(QStringLiteral("node_failed"), QStringLiteral("%1 of %2 cells failed; the sheet shows them blank.").arg(failed).arg(files.size()));
         warning.severity = Error::Severity::Warning;
-        reply.errors = {warning};
+        warnings << warning;
+    }
+    if (command.json) {
+        QJsonObject envelope = okEnvelope(data);
+        if (!warnings.isEmpty())
+            envelope.insert("warnings", toJson(warnings));
+        context.line(compactJson(envelope));
+    } else {
+        for (const Error &warning : warnings)
+            context.log(warning.message);
+        context.line(grid.toUtf8());
     }
     return reply;
 }

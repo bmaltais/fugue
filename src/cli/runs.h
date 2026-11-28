@@ -42,9 +42,10 @@ Errors applySetOverrides(Document &document, const QStringList &overrides);
 
 // The steps of `fugue run` after the compile: the run folder, the queue entry and a detached worker. `document` is the
 // workflow as compiled (empty for a compiled graph), `file` the path the run is recorded under. Returns the queued run's
-// folder, or why it could not start. The canvas batch (cli/canvas_batch.cpp) starts each picture's run this way.
+// folder, or why it could not start. `alsoRead` are files this run may read besides the file roots (13.6): the sweep's sheet reads its cells' pictures, wherever the output folder is. The canvas batch (cli/canvas_batch.cpp) starts each picture's run this way.
 Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
-                                   const QJsonObject &allowRemote = {});
+                                   const QJsonObject &allowRemote = {},
+                                   const QStringList &alsoRead = {});
 
 // `fugue runs cancel`: removes a waiting run's entry, or signals the worker.
 Reply cancelRun(const Command &command, Context &context);

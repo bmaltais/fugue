@@ -206,7 +206,7 @@ Plan graphToRun(const Command &command, Context &context) {
 } // namespace
 
 Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
-                                   const QJsonObject &allowRemote) {
+                                   const QJsonObject &allowRemote, const QStringList &alsoRead) {
     const Result<RunFolder> folder = RunFolder::create(context.runsRoot);
     if (!folder)
         return folder.errors();
@@ -219,7 +219,10 @@ Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonOb
     if (!document.isEmpty())
         written += folder->writeWorkflow(document);
     // The worker is not started here, so "the current directory" of 13.6 is recorded now.
-    written += folder->writeRoots(FileRoots::defaults(QDir::currentPath(), workflow));
+    FileRoots roots = FileRoots::defaults(QDir::currentPath(), workflow);
+    for (const QString &path : alsoRead)
+        roots.read << canonicalPath(path);
+    written += folder->writeRoots(roots);
     if (!allowRemote.isEmpty())
         written += folder->writeRemoteAllowed(allowRemote);
     if (hasErrors(written)) {

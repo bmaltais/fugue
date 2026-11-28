@@ -21,9 +21,9 @@ bool stopRequested();
 
 // Compiles `bound` and starts its run (the run folder, the queue entry, the worker). `workflow` is the file it is recorded under.
 // A run that would send data off this machine is refused with consent_needed unless allowed (engine/remote_consent.h, #404);
-// `allowRemote` is allowRemoteFingerprints() of `--allow-remote`; `settings` are the compile's `--to` and `--provider`.
+// `allowRemote` is allowRemoteFingerprints() of `--allow-remote`; `settings` are the compile's `--to` and `--provider`; `alsoRead` are files the run may read besides the file roots.
 Result<RunFolder> startBoundRun(const Document &bound, const QString &workflow, Context &context, const QJsonObject &allowRemote = {},
-                                const CompileSettings &settings = {});
+                                const CompileSettings &settings = {}, const QStringList &alsoRead = {});
 
 // Waits until the run ends: ok, failed (the first error's code and message) or cancelled. A stop request cancels it. `onEvent`, when
 // given, gets each event of the run as it is written (node.running, node.progress, node.done, ...).

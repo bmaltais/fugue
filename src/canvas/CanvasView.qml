@@ -737,7 +737,6 @@ Item {
         onTransformAsked: (dx, dy, scaleX, scaleY, degrees) => root.transformSelection(dx, dy, scaleX, scaleY, degrees)
     }
     Component.onDestruction: {
-        exportDialog.close()
         if (exportDialogBox)
             exportDialogBox.close()
         if (keysHot)
