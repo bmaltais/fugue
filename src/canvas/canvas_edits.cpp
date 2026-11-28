@@ -502,6 +502,54 @@ void CanvasModel::endEdit(const QString &text) {
     contentChanged();
 }
 
+namespace {
+// A host pin (#735) is a node's `provider` with a marker {host, by: "<node>.<input>"} in the layout. It stands only while that input still
+// holds a hashed model handle and the pinned node is still fed from the input's node; otherwise (the node was deleted, the input unset or
+// linked, a copy pasted without its source) the pin and the marker go, so a pin the person did not set never outlives the pick that made it.
+void pruneHostPins(Document &document) {
+    QJsonObject layoutNodes = document.layout.value("nodes").toObject();
+    bool touched = false;
+    for (auto it = layoutNodes.begin(); it != layoutNodes.end(); ++it) {
+        QJsonObject entry = it.value().toObject();
+        const QJsonObject mark = entry.value("host_pin").toObject();
+        if (mark.isEmpty())
+            continue;
+        const QString by = mark.value("by").toString();
+        const QString source = by.section(QLatin1Char('.'), 0, 0), input = by.section(QLatin1Char('.'), 1);
+        bool stands = false;
+        if (document.graph.nodes.contains(it.key()) && document.graph.nodes.contains(source)) {
+            const InputValue value = document.graph.nodes.value(source).inputs.value(input);
+            const bool hashed = value.kind() == InputValue::Kind::Resource && !value.handle().value("hash").toString().isEmpty();
+            QSet<QString> reached{source};
+            for (bool grew = hashed; grew;) { // forward over links: is the pinned node fed from the source?
+                grew = false;
+                for (auto node = document.graph.nodes.cbegin(); node != document.graph.nodes.cend(); ++node)
+                    if (!reached.contains(node.key()))
+                        for (const InputValue &each : node->inputs)
+                            if (each.kind() == InputValue::Kind::Link && reached.contains(each.from().node)) {
+                                reached.insert(node.key());
+                                grew = true;
+                                break;
+                            }
+            }
+            stands = hashed && reached.contains(it.key());
+        }
+        if (stands)
+            continue;
+        if (document.graph.nodes.contains(it.key())) {
+            Node &pinned = document.graph.nodes[it.key()];
+            if (pinned.provider == mark.value("host").toString())
+                pinned.provider.clear();
+        }
+        entry.remove("host_pin");
+        it.value() = entry;
+        touched = true;
+    }
+    if (touched)
+        document.layout.insert("nodes", layoutNodes);
+}
+} // namespace
+
 void CanvasModel::commit(const Document &document, const QString &text) {
     beginEdit();
     QStringList order;
@@ -509,6 +557,7 @@ void CanvasModel::commit(const Document &document, const QString &text) {
         order << row.id;
     Document made = document;
     dropEmptyRows(made);
+    pruneHostPins(made);
     followReroutes(m_document, made);
     restore({m_scope.isEmpty() ? made : merged(made), order}, false);
     endEdit(text);

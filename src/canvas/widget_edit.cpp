@@ -1325,11 +1325,25 @@ QString WidgetEdit::setRemoteModel(const QString &node, const QString &input, co
                 names << model.name;
         const ProviderInstance asked = *instance;
         QPointer<WidgetEdit> self(this);
-        hostCache().refresh(asked, true, names, [self, asked](const HostModelList &list) {
-            if (self && list.hashing > 0)
+        if (hostCache().cached(asked).busy)
+            return tr("%1 is busy hashing, try again in a moment.").arg(host);
+        hostCache().refresh(asked, true, names, [self, asked, names](const HostModelList &list) {
+            if (!self)
+                return;
+            if (list.busy) { // its queue was full: once more after a short delay, and the next pick says it is busy if still so
+                QTimer::singleShot(3000, self, [self, asked, names] {
+                    if (self)
+                        self->hostCache().refresh(asked, true, names, [self, asked](const HostModelList &again) {
+                            if (self && again.hashing > 0)
+                                self->pollHashing(asked, 90);
+                        }, self->m_hostMake);
+                });
+                return;
+            }
+            if (list.hashing > 0)
                 self->pollHashing(asked, 90);
         }, m_hostMake);
-        return tr("%1 is hashing %2 so that the model is named by its content. Pick it again in a moment.").arg(host, name);
+        return tr("Asking %1 to hash %2 so that the model is named by its content. Pick it again in a moment.").arg(host, name);
     }
     picked.insert("resource", t.spec->type.type.toString());
     // The nodes that take this model run on the host: it is the only place that has it.

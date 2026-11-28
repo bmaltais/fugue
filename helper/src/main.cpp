@@ -1277,6 +1277,7 @@ public:
     static constexpr size_t kMostListed = 4000;
     static constexpr size_t kHashPerRequest = 8;
     static constexpr size_t kQueueMost = 16;
+    static constexpr size_t kHeaderQueueMost = 64;
     static constexpr int kScanSeconds = 30;
 
     ~Models() {
@@ -1361,6 +1362,8 @@ private:
     static bool hasModelExtension(const std::string &rel) {
         static const char *const known[] = {".safetensors", ".gguf", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".sft", ".pkl"}; // ModelLibrary::defaultModelExtensions
         const std::string ext = fs::path(rel).extension().string();
+        if (ext == ".json" && rel.compare(0, 11, "tokenizers/") == 0)
+            return true; // a tokenizer's file (MOSS Image) is a model of its own type
         std::string lower;
         for (const char c : ext)
             lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -1385,14 +1388,15 @@ private:
 
     bool enqueue(Job job) {
         std::lock_guard<std::mutex> lock(m_workMutex);
-        for (const Job &queued : m_work)
-            if (queued.kind == job.kind && queued.path == job.path)
+        std::deque<Job> &queue = job.kind == Job::Hash ? m_work : m_headerWork;
+        for (const Job &queued : queue)
+            if (queued.path == job.path)
                 return true; // already waiting: not twice
         if (m_running == job.path && m_runningKind == job.kind)
             return true;
-        if (m_work.size() >= kQueueMost)
-            return false;
-        m_work.push_back(std::move(job));
+        if (queue.size() >= (job.kind == Job::Hash ? kQueueMost : kHeaderQueueMost))
+            return false; // the hash queue full is `busy`; a header read dropped is asked again by the next listing
+        queue.push_back(std::move(job));
         if (!m_worker.joinable())
             m_worker = std::thread([this] { run(); });
         m_workWake.notify_one();
@@ -1412,11 +1416,12 @@ private:
             Job job;
             {
                 std::unique_lock<std::mutex> lock(m_workMutex);
-                m_workWake.wait(lock, [this] { return m_stop || !m_work.empty(); });
+                m_workWake.wait(lock, [this] { return m_stop || !m_work.empty() || !m_headerWork.empty(); });
                 if (m_stop)
                     return;
-                job = m_work.front();
-                m_work.pop_front();
+                std::deque<Job> &queue = m_work.empty() ? m_headerWork : m_work; // hashes first
+                job = queue.front();
+                queue.pop_front();
                 m_running = job.path;
                 m_runningKind = job.kind;
             }
@@ -1615,7 +1620,8 @@ private:
     };
     std::map<std::string, Family> m_families;
     std::mutex m_familyMutex;
-    std::deque<Job> m_work; // hashing and header reads for the worker, at most kQueueMost
+    std::deque<Job> m_work;       // hashing for the worker, at most kQueueMost
+    std::deque<Job> m_headerWork; // header reads, after the hashes, at most kHeaderQueueMost
     std::string m_running;
     Job::Kind m_runningKind = Job::Hash;
     std::mutex m_workMutex;

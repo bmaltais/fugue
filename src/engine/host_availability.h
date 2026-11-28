@@ -15,6 +15,7 @@ struct HostAvailability {
     QString why;  // else, when a host has some of them: why that does not count ("gx10 has it, but ..."); empty when none does
 };
 // Asked with the handles that are not in this machine's folders, all of them at once.
-using HostAvailabilityFn = std::function<HostAvailability(const QList<QJsonObject> &missing)>;
+// `local` are the document's other hashed models, which are on this machine: the host must have them too, since the nodes that go there read them there.
+using HostAvailabilityFn = std::function<HostAvailability(const QList<QJsonObject> &missing, const QList<QJsonObject> &local)>;
 
 } // namespace fugue

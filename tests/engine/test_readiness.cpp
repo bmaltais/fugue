@@ -142,7 +142,7 @@ private slots:
         r.models = QJsonArray{onHost, notThere};
         ReadinessEnv e = env();
         // One host with every missing model takes them all; this one has only a.safetensors, so neither counts (case a below).
-        e.hostHaving = [&onHost](const QList<QJsonObject> &missing) {
+        e.hostHaving = [&onHost](const QList<QJsonObject> &missing, const QList<QJsonObject> &) {
             for (const QJsonObject &handle : missing)
                 if (handle.value("hash") != onHost.value("hash"))
                     return HostAvailability{QString(), QStringLiteral("gx10 has it, but not the other models these nodes need.")};

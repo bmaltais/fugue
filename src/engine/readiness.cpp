@@ -381,7 +381,16 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
             QList<QJsonObject> handles;
             for (const MissingModel &model : absent)
                 handles.append(model.handle);
-            onHosts = env.hostHaving(handles);
+            QList<QJsonObject> here; // the list's hashed models that are on this machine: the host must have those too
+            for (const QJsonValue entry : entries) {
+                const QJsonObject handle = entry.toObject();
+                const bool missingHere = std::any_of(absent.cbegin(), absent.cend(), [&handle](const MissingModel &model) {
+                    return model.handle.value(QStringLiteral("hash")) == handle.value(QStringLiteral("hash"));
+                });
+                if (!missingHere && !handle.value(QStringLiteral("hash")).toString().isEmpty())
+                    here.append(handle);
+            }
+            onHosts = env.hostHaving(handles, here);
         }
         for (const MissingModel &model : absent) {
             const QString name = model.handle.value(QStringLiteral("name")).toString();

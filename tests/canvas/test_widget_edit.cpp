@@ -418,10 +418,18 @@ private slots:
         // A file the host has not hashed: it is asked to, and the picker says so; nothing is stored.
         const int asked = int(host.requestsTo("POST", "/fugue/v1/models").size());
         const QString message = f.edits.setRemoteModel("load", "diffusion_model", listed.at(1).toMap().value("handle").toMap(), "gx10");
-        QVERIFY(message.contains("hashing"));
+        QVERIFY(message.contains("hash"));
         QTRY_COMPARE_WITH_TIMEOUT(int(host.requestsTo("POST", "/fugue/v1/models").size()), asked + 1, 5000);
         QVERIFY(QJsonDocument::fromJson(host.requestsTo("POST", "/fugue/v1/models").last().body).object().value("hash").toBool());
         QVERIFY(f.stored("load", "diffusion_model").toObject().value("name").toString() != "unhashed.gguf"); // nothing was stored for it
+        // Deleting the node that made a host pin takes the pin back with it: no stale pin sends the sampler to gx10.
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("gx10"));
+        Document without = f.canvas.document();
+        without.graph.nodes.remove("load");
+        f.canvas.commit(without, "Delete");
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QString());
+        QVERIFY(!f.canvas.document().layout.value("nodes").toObject().value("sample").toObject().contains("host_pin"));
     }
 
     void theModelPickerListsModelsOfTheInputsType() {

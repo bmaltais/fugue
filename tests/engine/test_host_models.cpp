@@ -212,13 +212,25 @@ private slots:
         QVERIFY2(both.why.contains("gx10 has it, but"), qPrintable(both.why));
     }
 
+    // The host must also have the document's hashed models that are local only.
+    void aHostWithoutALocalOnlyModelOfTheDocumentDoesNotCount() {
+        answer(reply(QJsonArray{entry("diffusion_models/z.gguf", 4000, kHash)}));
+        HostModelCache kept = cache();
+        refreshed(kept);
+        const QJsonObject diffusion{{"hash", "sha256:" + kHash}};
+        const QJsonObject vae{{"hash", "sha256:" + QString(64, 'f')}, {"name", "ae.safetensors"}};
+        const HostAvailability answer = kept.availability({instance()}, {diffusion}, {vae});
+        QVERIFY(answer.host.isEmpty());
+        QCOMPARE(answer.why, QStringLiteral("gx10 does not have ae.safetensors."));
+    }
+
     // Case b: a list whose last refresh failed, or older than 10 minutes, does not make a model available.
     void aListWithAnErrorOrTooOldDoesNotCount() {
         answer(reply(QJsonArray{entry("diffusion_models/z.gguf", 4000, kHash)}));
         HostModelCache kept = cache();
         refreshed(kept);
         const QJsonObject diffusion{{"hash", "sha256:" + kHash}};
-        QVERIFY(kept.availability({instance()}, {diffusion}, QDateTime::currentDateTimeUtc().addSecs(700)).why.contains("older than 10 minutes"));
+        QVERIFY(kept.availability({instance()}, {diffusion}, {}, QDateTime::currentDateTimeUtc().addSecs(700)).why.contains("older than 10 minutes"));
         m_host.on("POST", "/fugue/v1/models", [](const HttpRequest &) {
             return HttpResponse{500, json({{"error", QJsonObject{{"code", "helper_failed"}, {"message", "boom"}}}})};
         });

@@ -45,7 +45,9 @@ struct HostModelList {
     QDateTime attemptedAt;      // the last refresh, failed or not: a list is stale from here, so a host that is down is not asked in a loop
     QDateTime fetchedAt;        // when `models` was read from the host; invalid when it never was
     QString error;              // why the last refresh failed ("" if it did not): `models` is then the last good list
-    bool truncated = false;     // the host listed only its first entries
+    bool truncated = false;     // the host listed only its first entries, or this side cut the list
+    bool busy = false;          // the last request to hash found the host's queue full: nothing was queued
+    int hashStarted = 0;        // files that request got queued
     int unhashed = 0;           // models the host has not hashed yet
     int hashing = 0;            // files the host is hashing now
 
@@ -84,7 +86,7 @@ public:
 
     // Whether the models are available on a paired host (spec 8.7): the first of `instances` whose list is fresh (under 10 minutes), has no
     // error and has every one of them. Else `why` says what stops the nearest host from counting. Handles with no hash count for nothing.
-    HostAvailability availability(const QList<ProviderInstance> &instances, const QList<QJsonObject> &missing,
+    HostAvailability availability(const QList<ProviderInstance> &instances, const QList<QJsonObject> &missing, const QList<QJsonObject> &local = {},
                                   const QDateTime &now = QDateTime::currentDateTimeUtc()) const;
     // The same over the providers.json of now, for ModelLibrary::setHostHaving and ReadinessEnv; empty (asks nothing) when no paired helper
     // is configured.

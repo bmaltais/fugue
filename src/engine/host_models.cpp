@@ -89,6 +89,8 @@ QJsonObject HostModelList::toJson() const {
                        {"fetched_at", fetchedAt.isValid() ? QJsonValue(fetchedAt.toString(Qt::ISODate)) : QJsonValue()},
                        {"error", error},
                        {"truncated", truncated},
+                       {"busy", busy},
+                       {"hash_started", hashStarted},
                        {"unhashed", unhashed},
                        {"hashing", hashing}};
 }
@@ -108,7 +110,9 @@ HostModelList HostModelList::fromJson(const QJsonObject &object) {
     list.fetchedAt = QDateTime::fromString(object.value("fetched_at").toString(), Qt::ISODate);
     list.attemptedAt = QDateTime::fromString(object.value("attempted_at").toString(), Qt::ISODate);
     list.error = plain(object.value("error").toString(), 300);
-    list.truncated = object.value("truncated").toBool();
+    list.truncated = list.truncated || object.value("truncated").toBool();
+    list.busy = object.value("busy").toBool();
+    list.hashStarted = object.value("hash_started").toInt();
     list.unhashed = object.value("unhashed").toInt();
     list.hashing = object.value("hashing").toInt();
     return list;
@@ -259,7 +263,8 @@ QStringList HostModelCache::hostsHavingAll(const QList<ProviderInstance> &instan
     return hosts;
 }
 
-HostAvailability HostModelCache::availability(const QList<ProviderInstance> &instances, const QList<QJsonObject> &missing, const QDateTime &now) const {
+HostAvailability HostModelCache::availability(const QList<ProviderInstance> &instances, const QList<QJsonObject> &missing, const QList<QJsonObject> &local,
+                                              const QDateTime &now) const {
     QStringList hashes;
     for (const QJsonObject &handle : missing)
         hashes << handle.value("hash").toString();
@@ -277,12 +282,17 @@ HostAvailability HostModelCache::availability(const QList<ProviderInstance> &ins
             have += list.byHash(hash) ? 1 : 0;
         if (have == 0)
             continue;
+        QStringList lacking; // the document's local-only models this host lacks
+        for (const QJsonObject &handle : local)
+            if (!list.byHash(handle.value("hash").toString()))
+                lacking << handle.value("name").toString();
         const QString why = !list.error.isEmpty()
                                 ? QObject::tr("%1 has it, but its list could not be refreshed (%2).").arg(instance.name, list.error)
                             : list.fetchedAt.secsTo(now) >= kUsableSeconds
                                 ? QObject::tr("%1 has it, but its list is older than 10 minutes.").arg(instance.name)
-                            : have < hashes.size()
-                                ? QObject::tr("%1 has it, but not the other models these nodes need.").arg(instance.name)
+                            : have < hashes.size() || !lacking.isEmpty()
+                                ? (lacking.isEmpty() ? QObject::tr("%1 has it, but not the other models these nodes need.").arg(instance.name)
+                                                     : QObject::tr("%1 does not have %2.").arg(instance.name, lacking.join(QStringLiteral(", "))))
                                 : QString();
         if (why.isEmpty()) {
             answer.host = instance.name;
@@ -303,7 +313,7 @@ HostAvailabilityFn HostModelCache::availabilityFunction() const {
                 paired.append(instance);
     if (paired.isEmpty())
         return {};
-    return [this, paired](const QList<QJsonObject> &missing) { return availability(paired, missing); };
+    return [this, paired](const QList<QJsonObject> &missing, const QList<QJsonObject> &local) { return availability(paired, missing, local); };
 }
 
 void HostModelCache::refreshStale(const QList<ProviderInstance> &instances, int ttlSeconds, const Done &changed, const Make &make) {
