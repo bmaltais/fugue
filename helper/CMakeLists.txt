@@ -26,7 +26,7 @@ if(NOT FUGUE_HELPER_BACKEND MATCHES "^(cuda|vulkan|cpu)$")
   message(FATAL_ERROR "FUGUE_HELPER_BACKEND must be cuda, vulkan or cpu, not '${FUGUE_HELPER_BACKEND}'")
 endif()
 
-# The fork's tag fugue-2026-11-24c (upstream 3b12781f plus Fugue's commits).
+# A commit on the fork's `fugue` branch (upstream 3b12781f plus Fugue's commits).
 set(sdcpp_commit 03da399d318503d09bec3047123f1edb50941170)
 set(sdcpp_sha256 e76d6a090d804bbb7d8c70f4d7d89f74edb8c825be9dcedad4fa820ca732e484)
 set(ggml_commit eeda9ec48fc84a3df0bb9dcc19ae9053075a2539)

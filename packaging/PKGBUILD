@@ -53,7 +53,7 @@ checkdepends=(
   'jq'
   'noto-fonts'
 )
-# Fugue's fork, tag fugue-2026-11-24c: upstream 3b12781f plus Fugue's engine commits.
+# Fugue's fork, a commit on its `fugue` branch: upstream 3b12781f plus Fugue's engine commits.
 _sdcpp=03da399d318503d09bec3047123f1edb50941170
 _ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
 _cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
