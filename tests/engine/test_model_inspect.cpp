@@ -122,6 +122,73 @@ private slots:
         QCOMPARE(runs().size(), 1);
     }
 
+    // A helper that dies (exit 3) on a file named "crash", after answering the files before it.
+    void crashingHelper() {
+        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nshift\n" +
+                                       R"(for f in "$@"; do
+  case "$f" in
+    *crash*) exit 3 ;;
+    *) printf '{"path":"%s","recognised":true,"version":"Fake DiT","id":"fake_dit","is_dit":true,"video":false,"inpaint":false,"latent_channels":16,"vae_kind":"flux"}\n' "$f" ;;
+  esac
+done
+)"));
+        QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    }
+
+    void aCrashOnOneFileCostsTheGoodFilesNothing() {
+        crashingHelper();
+        for (const char *name : {"a.gguf", "crash.gguf", "b.gguf", "c.gguf"})
+            write(name, "x");
+        ModelInspector inspector(path("crasher.sh"), path("cache.json"));
+        const QStringList files{path("a.gguf"), path("crash.gguf"), path("b.gguf"), path("c.gguf")};
+        const QHash<QString, EngineModel> answers = inspector.inspect(files);
+        QVERIFY(answers.contains(files[0]) && answers.contains(files[2]) && answers.contains(files[3]));
+        QVERIFY(!answers.contains(files[1]));
+        // The batch, then the three it did not answer, one process each; the crashing one alone is the one remembered.
+        QCOMPARE(runs(), (QStringList{"5", "2", "2", "2"}));
+        QCOMPARE(inspector.inspect(files).size(), 3);
+        QCOMPARE(runs().size(), 4); // nothing is asked again: the good ones are kept, the bad one is known
+        QVERIFY(inspector.cached(files[2]));
+    }
+
+    void aHelperThatCrashesOnEverythingIsGivenUpOn() {
+        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nexit 3\n"));
+        QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        QStringList files;
+        for (int i = 0; i < 20; ++i) {
+            files << path(QStringLiteral("m%1.gguf").arg(i));
+            write(QStringLiteral("m%1.gguf").arg(i).toUtf8().constData(), "x");
+        }
+        ModelInspector inspector(path("crasher.sh"), path("cache.json"));
+        QVERIFY(inspector.inspect(files).isEmpty());
+        QCOMPARE(runs().size(), 1 + 3); // the batch and three alone, then it stops
+        // Nothing was blamed on a file: a helper that works asks them again.
+        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nfor f in \"$@\"; do case \"$f\" in --inspect) ;; *) printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\" ;; esac; done\n"));
+        QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        inspector.configure(path("crasher.sh"), path("cache.json"));
+        QCOMPARE(inspector.inspect(files).size(), 20);
+    }
+
+    void theStopFlagIsCheckedBetweenBatches() {
+        QStringList files;
+        for (int i = 0; i < 90; ++i) {
+            files << path(QStringLiteral("m%1.gguf").arg(i));
+            write(QStringLiteral("m%1.gguf").arg(i).toUtf8().constData(), "x");
+        }
+        ModelInspector inspector(path("helper.sh"), path("cache.json"));
+        const QHash<QString, EngineModel> answers = inspector.inspect(files, [this] { return !runs().isEmpty(); });
+        QCOMPARE(runs(), QStringList{"41"}); // the first batch ran, the other two did not
+        QCOMPARE(answers.size(), 40);
+        QVERIFY(inspector.cached(files[39]));
+        QVERIFY(!inspector.cached(files[40]));
+    }
+
+    void aProcessIsGivenAFewSecondsNotAMinute() {
+        QVERIFY(ModelInspector::askTimeoutMs(1) <= 5000);
+        QVERIFY(ModelInspector::askTimeoutMs(40) <= 20000);
+        QVERIFY(ModelInspector::askTimeoutMs(40) > ModelInspector::askTimeoutMs(1));
+    }
+
     void theFamilyFallsBackToTheEnginesNameAndTheTableWins() {
         write("mystery.safetensors", "x");
         write("flux-2-klein-9b.gguf", "x");

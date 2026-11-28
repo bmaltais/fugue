@@ -48,11 +48,12 @@ void AppModels::request(const QString &type, const QStringList &capabilities) {
     QList<MarkedFile> files;
     for (const ListedModel &model : std::as_const(entry.disk))
         files.append({model.path, model.size});
-    if (!files.isEmpty())
-        m_work.read(this, [key, type, files, asked, this]() -> std::function<void()> {
+    if (!files.isEmpty()) {
+        const std::shared_ptr<std::atomic_bool> stopped = m_work.stopFlag();
+        m_work.read(this, [key, type, files, asked, this, stopped]() -> std::function<void()> {
             const ModelSpeeds speeds;
-            const QHash<QString, ModelMark> found =
-                markModels(type, files, RecommendContext{localComputeDevice(), 0, &speeds}, ModelShapes::shared(), &ModelInspector::shared());
+            const QHash<QString, ModelMark> found = markModels(type, files, RecommendContext{localComputeDevice(), 0, &speeds},
+                                                               ModelShapes::shared(), &ModelInspector::shared(), [stopped] { return stopped->load(); });
             return [this, key, found, asked] {
                 if (m_asked != asked || !m_entries.contains(key))
                     return;
@@ -60,6 +61,7 @@ void AppModels::request(const QString &type, const QStringList &capabilities) {
                 emit changed();
             };
         });
+    }
     if (!m_source)
         m_source = listOfferedModels;
     QPointer<AppModels> self(this);

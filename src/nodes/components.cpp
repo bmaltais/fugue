@@ -759,7 +759,10 @@ public:
     }
 
     // A diffusion model the engine does not load (#703): a warning, since a paired host may run another engine. The answer is the
-    // helper's (engine/model_inspect.h), kept by the file's size and time, so only the first check of a file asks; none without a local helper.
+    // helper's (engine/model_inspect.h), kept by the file's size and time (a failure too), so only the first check of a file asks; none without a local
+    // helper. The ask is synchronous and a CheckAbort cannot cut it (a check's context carries none), but one file is one process of at most a few
+    // seconds (ModelInspector::askTimeoutMs), it holds no lock a picker's pass keeps, and the answer is kept: accepted over a warning that only a cache read
+    // would make unreliable (a file nothing has asked about yet would never be warned about).
     static std::optional<Error> notRecognisedWarning(const NodeContext &context) {
         std::optional<ModelLibrary> own;
         const ModelLibrary &library = context.library ? *context.library : own.emplace(ModelLibrary::current(context.registry));

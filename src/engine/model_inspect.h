@@ -18,6 +18,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <optional>
 
 namespace fugue {
@@ -44,7 +45,8 @@ bool engineDetectsKind(const QString &resourceType);
 class ModelInspector {
 public:
     // `helper` the fugue-helper to run (empty: none, nothing is asked), `cacheFile` where answers are kept (empty: in memory only).
-    ModelInspector(QString helper, QString cacheFile, int timeoutMs = 60000);
+    // `timeoutMs` is how long one helper process may take; 0 scales it with the files it is given (askTimeoutMs).
+    ModelInspector(QString helper, QString cacheFile, int timeoutMs = 0);
 
     // The process-wide inspector: the local helper (helperProgram(), looked up on each call, so FUGUE_HELPER and a
     // helper installed since are followed) and the cache in Fugue's cache folder.
@@ -57,9 +59,14 @@ public:
     // The answer kept for `path` while its size and modification time are as they were.
     std::optional<EngineModel> cached(const QString &path) const;
     // The answers for `paths`: the kept ones, and the others asked of the helper in one process per 40 files. A file the helper
-    // could not read, or a run that failed or timed out, has no entry (and is not asked again until the helper or the file changes,
-    // for this process).
-    QHash<QString, EngineModel> inspect(const QStringList &paths);
+    // could not read has no entry (and is not asked again until the helper or the file changes, for this process). When a process
+    // crashes or times out, the files it left unanswered are asked again one process each (a bounded number), and only a file whose
+    // own process fails is remembered as failed: another file's crash costs a good file nothing.
+    // The lock is not held while the helper runs. `stop` (any thread) is asked between processes: true returns what is known so far.
+    QHash<QString, EngineModel> inspect(const QStringList &paths, const std::function<bool()> &stop = {});
+
+    // How long one process asking about `files` files may take: a start (~0.1 s) and ~0.2 s an answer, with room.
+    static int askTimeoutMs(int files);
 
 private:
     struct Entry {
@@ -71,7 +78,14 @@ private:
     void load();
     void save();
     bool stampOf(const QString &path, qint64 &size, qint64 &mtime) const;
-    QHash<QString, EngineModel> ask(const QStringList &paths);
+    // One helper process. `finished` is false when it could not start, crashed, timed out or exited with an error: the files
+    // it did not answer are then not known to be unreadable.
+    struct Asked {
+        QHash<QString, EngineModel> answers;
+        bool finished = false;
+        bool started = false;
+    };
+    Asked ask(const QString &helper, const QStringList &paths) const;
 
     QString m_helper;
     QString m_cacheFile;
