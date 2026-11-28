@@ -151,6 +151,7 @@ class TestSandbox : public QObject {
     std::unique_ptr<FileHashes> m_hashes;
     QTcpServer m_server;
     int m_counter = 0;
+    QString m_workRoot; // where contextFor makes work folders: the test's folder, or (set by a test) Fugue's own runs folder
     Registry m_registry;
     std::shared_ptr<std::atomic<bool>> m_cancel = std::make_shared<std::atomic<bool>>(false);
 
@@ -194,7 +195,7 @@ class TestSandbox : public QObject {
         context.run = "r1";
         context.type = &type;
         context.inputs = inputs;
-        context.workDir = m_root.path() + "/work" + QString::number(++m_counter);
+        context.workDir = (m_workRoot.isEmpty() ? m_root.path() : m_workRoot) + "/work" + QString::number(++m_counter);
         QDir().mkpath(context.workDir);
         context.hashes = m_hashes.get();
         context.registry = &m_registry;
@@ -532,15 +533,23 @@ private slots:
     // A node handed what an earlier pack node made: bound read-only (one-shot) or copied into the exchange folder (persistent).
     void chainedPackNodesPassTheirFiles_data() {
         QTest::addColumn<bool>("persistent");
-        QTest::newRow("one-shot") << false;
-        QTest::newRow("persistent") << true;
+        QTest::addColumn<bool>("inRuns");
+        QTest::newRow("one-shot") << false << false;
+        QTest::newRow("persistent") << true << false;
+        // The default layout: the upstream output lies in <cache>/runs, which is handed out (the rest of the cache is not).
+        QTest::newRow("one-shot, runs folder") << false << true;
+        QTest::newRow("persistent, runs folder") << true << true;
     }
     void chainedPackNodesPassTheirFiles() {
         if (!sandbox::available())
             QSKIP("bubblewrap or user namespaces are not available here");
         QFETCH(bool, persistent);
-        const QString first = persistent ? "io.example.chainfirstp" : "io.example.chainfirst";
-        const QString second = persistent ? "io.example.chainsecondp" : "io.example.chainsecond";
+        QFETCH(bool, inRuns);
+        const QString suffix = QString(persistent ? "p" : "") + (inRuns ? "r" : "");
+        const QString first = "io.example.chainfirst" + suffix;
+        const QString second = "io.example.chainsecond" + suffix;
+        m_workRoot = inRuns ? RunFolder::defaultRoot() + "/rchain" : QString();
+        QVERIFY(!inRuns || m_workRoot.startsWith(cacheDir() + "/runs/"));
         makePack(first, {}, false, probeScript(false));
         makePack(second, {}, false, probeScript(persistent), persistent);
         CommandKernel kernel(300);
@@ -549,6 +558,20 @@ private slots:
         const Result<Values> read = runProbe(kernel, *m_registry.nodeType(second + "/hostile"), "chain", {{"image", made->value("image")}});
         QVERIFY2(read.ok(), qPrintable(read.error().message));
         QCOMPARE(read->value("text").text(), QString("size=%1").arg(QFileInfo(made->value("image").media().path()).size()));
+        m_workRoot.clear();
+    }
+
+    // What is handed out of Fugue's cache: the runs and the cached results, never the exchange folders, the uv caches or the
+    // rest; of ~/.cache/huggingface only the credential files are kept back (a model folder there works).
+    void handedFilesFromTheCacheAreRunsAndResultsOnly() {
+        const QString cache = QFileInfo(cacheDir()).canonicalFilePath().isEmpty() ? cacheDir() : QFileInfo(cacheDir()).canonicalFilePath();
+        for (const char *ok : {"/runs/r1/n/out.png", "/results/ab/out.png"})
+            QVERIFY2(!sandbox::handedDenied(cache + ok), ok);
+        for (const char *bad : {"/exchange/x/work/f", "/uv/io.example.p+00/f", "/thumbnails/a.png"})
+            QVERIFY2(sandbox::handedDenied(cache + bad), bad);
+        const QString hf = QFileInfo(home()).canonicalFilePath() + "/.cache/huggingface";
+        QVERIFY(!sandbox::handedDenied(hf + "/hub/models--x/snapshots/1/model.safetensors"));
+        QVERIFY(sandbox::handedDenied(hf + "/token") && sandbox::handedDenied(hf + "/stored_tokens"));
     }
 
     void theFolderThatIsBoundIsTheOneTheProgramIsToldEvenThroughALink() {

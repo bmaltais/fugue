@@ -127,7 +127,8 @@ QStringList denied(const QString &homeFolder) {
     QStringList paths;
     for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.mozilla", "/.claude",
                             "/.config/gh", "/.config/uv", "/.config/fugue", "/.config/chromium", "/.config/google-chrome",
-                            "/.config/BraveSoftware", "/.config/systemd", "/.config/autostart", "/.config/hypr", "/.cache/huggingface",
+                            "/.config/BraveSoftware", "/.config/systemd", "/.config/autostart", "/.config/hypr", "/.cache/huggingface/token",
+                            "/.cache/huggingface/stored_tokens",
                             "/.local/bin", "/.local/state/fugue", "/.local/share/fugue", "/.local/share/uv/credentials", "/.local/share/keyrings",
                             "/.local/share/kwalletd", "/.local/share/applications", "/.password-store", "/.bashrc", "/.bash_profile",
                             "/.zshrc", "/.profile", "/snap"})
@@ -251,16 +252,24 @@ QList<int> Descriptors::numbers() const {
 }
 
 bool handedDenied(const QString &path, const QString &homeFolder) {
-    // denied(), the one list: but this session's data folder and the base one hold the runs and the models that are handed
-    // over, so of them only the packs are; and /tmp, which denied() leaves to the grant rules, is no area of its own here.
-    const QStringList own{canonical(dataDir()), canonical(baseDataDir())};
+    // denied(), the one list, but for the folders that hold what is handed over: of this session's data folder and the base
+    // one (models, runs of old) only `packs` is denied; of the cache folders only `runs` and `results` are handed out (the
+    // upstream outputs and cached results), never `exchange`, `uv` or the rest. /tmp, which denied() leaves to the grant
+    // rules, is no area of its own here.
+    const QStringList data{canonical(dataDir()), canonical(baseDataDir())};
+    const QStringList cache{canonical(cacheDir()), canonical(baseCacheDir())};
     for (const QString &blocked : denied(homeFolder)) {
-        if (own.contains(blocked)) {
+        if (data.contains(blocked)) {
             if (inside(path, blocked + QStringLiteral("/packs")))
                 return true;
             continue;
         }
-        if (inside(path, blocked) && !inside(own.first(), blocked)) // this session's own project root holds its runs and models
+        if (cache.contains(blocked)) {
+            if (inside(path, blocked) && !inside(path, blocked + QStringLiteral("/runs")) && !inside(path, blocked + QStringLiteral("/results")))
+                return true;
+            continue;
+        }
+        if (inside(path, blocked) && !inside(data.first(), blocked)) // this session's own project root holds its runs and models
             return true;
     }
     return false;
