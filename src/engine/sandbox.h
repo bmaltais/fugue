@@ -19,6 +19,7 @@
 
 #include <QJsonObject>
 #include <QList>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -104,6 +105,10 @@ struct Command {
 // The bwrap command line for `profile`. Paths are made canonical, then opened without following links; the program is looked
 // up on PATH when not absolute.
 Command build(const Profile &profile);
+
+// The environment bwrap itself is started with: PATH=/usr/bin:/bin and nothing else, so bwrap's own process inside the sandbox
+// (pid 1, whose /proc/1/environ the program can read) holds none of Fugue's variables. The program's is set by --setenv.
+QProcessEnvironment bwrapEnvironment();
 
 // /usr/bin/bwrap, empty when it is not there: never looked up on PATH, which a pack's program or a project could shape.
 QString bwrapPath();

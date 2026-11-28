@@ -9,6 +9,7 @@
 // The same openat2 rules from an absolute path (openNoLinks) open what is bound into a sandbox, so that what was checked is
 // what bwrap binds (--ro-bind-fd).
 
+#include <QList>
 #include <QString>
 
 #include <sys/types.h>
@@ -51,6 +52,13 @@ QString realPathOf(int fd);
 bool available();
 // Why the last failure of this module happened, in words, for an error message (strerror of errno, ELOOP as "a link").
 QString lastProblem();
+
+// For a child between fork and exec (async-signal-safe): every descriptor from 3 up becomes close-on-exec (close_range,
+// Linux 5.11; a loop before that), then exactly `fds` are kept across exec. A descriptor another thread of Fugue opened without
+// O_CLOEXEC (or dup()ed) never reaches the program.
+void inheritOnly(const QList<int> &fds);
+// dup with close-on-exec.
+int dupCloexec(int fd);
 
 // A new folder in `dir` named by 128 random bits in hex, mode 0700, never one that exists already; the name, or empty.
 QString mkdirBeneathRandom(int dir);

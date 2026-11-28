@@ -481,6 +481,12 @@ std::optional<bool> &cachedAvailable() {
 
 } // namespace
 
+QProcessEnvironment bwrapEnvironment() {
+    QProcessEnvironment environment;
+    environment.insert(QStringLiteral("PATH"), QStringLiteral("/usr/bin:/bin"));
+    return environment;
+}
+
 QString bwrapPath() {
     QMutexLocker lock(&stateLock());
     if (bwrapOverride())
@@ -498,12 +504,16 @@ bool available() {
     bool works = false;
     if (!path.isEmpty() && beneath::available()) {
         QProcess version;
+        version.setProcessEnvironment(bwrapEnvironment());
+        version.setChildProcessModifier([] { beneath::inheritOnly({}); });
         version.start(path, {"--version"});
         version.waitForFinished(5000);
         const QRegularExpressionMatch match = QRegularExpression(QStringLiteral("(\\d+)\\.(\\d+)")).match(QString::fromUtf8(version.readAllStandardOutput()));
         const bool recent = match.hasMatch() && (match.captured(1).toInt() > 0 || match.captured(2).toInt() >= 8);
         if (recent) {
             QProcess probe;
+            probe.setProcessEnvironment(bwrapEnvironment());
+            probe.setChildProcessModifier([] { beneath::inheritOnly({}); });
             probe.start(path, {"--unshare-all", "--unshare-user", "--disable-userns", "--new-session", "--die-with-parent", "--ro-bind", "/", "/", "true"});
             works = probe.waitForFinished(10000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
         }

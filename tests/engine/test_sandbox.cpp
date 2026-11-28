@@ -16,8 +16,10 @@
 #include <QtTest>
 
 #include <atomic>
+#include <thread>
 
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "engine/command_node.h"
 #include "engine/file_hashes.h"
@@ -620,6 +622,41 @@ private slots:
         QVERIFY(!trust.isTrusted(id, "1.0.0"));
     }
 
+    // Fugue's descriptors and environment never reach the sandbox: not a directory descriptor another thread holds open
+    // without close-on-exec (a program could openat() its way out of one), nor a variable of Fugue's in bwrap's own process,
+    // whose /proc/1/environ the program can read.
+    void noDescriptorOrVariableOfFuguesReachesTheProgram() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        qputenv("FUGUE_LEAK_MARKER", "leak-123");
+        const int leaked = ::open(QFile::encodeName(m_root.path() + "/outside").constData(), O_RDONLY | O_DIRECTORY); // no O_CLOEXEC
+        QVERIFY(leaked >= 0);
+        std::atomic<bool> stop{false};
+        std::thread holder([&] { // and one opened and closed over and over meanwhile
+            while (!stop.load()) {
+                const int fd = ::open(QFile::encodeName(m_root.path() + "/outside").constData(), O_RDONLY | O_DIRECTORY);
+                if (fd >= 0)
+                    ::close(fd);
+            }
+        });
+        const QByteArray script = "#!/bin/bash\ncat > /dev/null\n"
+                                  "fds=$(for f in /proc/self/fd/*; do readlink \"$f\"; done | tr '\\n' ' ')\n"
+                                  "marker=$(tr '\\0' '\\n' < /proc/1/environ | grep -c FUGUE_LEAK_MARKER)\n"
+                                  "printf '{\"outputs\":{\"text\":\"%s|%s\"}}\\n' \"$marker\" \"$fds\"\n";
+        const NodeType *type = makePack("io.example.leaks", {}, false, script);
+        CommandKernel kernel(300);
+        const Result<Values> result = kernel.run(contextFor(*type));
+        stop = true;
+        holder.join();
+        ::close(leaked);
+        qunsetenv("FUGUE_LEAK_MARKER");
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        const QStringList parts = result->value("text").text().split('|');
+        QCOMPARE(parts.value(0), QString("0")); // bwrap's own environment holds none of Fugue's variables
+        for (const QString &target : parts.value(1).split(' ', Qt::SkipEmptyParts))
+            QVERIFY2(target.startsWith("pipe:") || target.startsWith("/dev/") || target.endsWith("/run.sh"), qPrintable(parts.value(1)));
+    }
+
     // A derived handle hands over the paths withPaths resolved (its base, its other parts, its LoRAs), each bound by descriptor;
     // a "path" a workflow wrote anywhere else in the value is nothing to the sandbox.
     void derivedModelHandlesHandOverExactlyWhatWasResolved() {
@@ -715,10 +752,8 @@ private slots:
         QVERIFY(QFile::link(m_root.path() + "/outside/swap-secret", grant));
         QProcess process;
         const QList<int> inherited = command.descriptors->numbers();
-        process.setChildProcessModifier([inherited] {
-            for (const int fd : inherited)
-                ::fcntl(fd, F_SETFD, 0);
-        });
+        process.setProcessEnvironment(sandbox::bwrapEnvironment());
+        process.setChildProcessModifier([inherited] { beneath::inheritOnly(inherited); });
         process.start(command.program, command.arguments);
         QVERIFY(process.waitForFinished(10000));
         QCOMPARE(process.readAllStandardOutput(), QByteArray("checked"));

@@ -225,8 +225,7 @@ private:
         const QList<int> inherited = descriptors ? descriptors->numbers() : QList<int>();
         m_process->setChildProcessModifier([inherited] {
             ::setsid();
-            for (const int fd : inherited)
-                ::fcntl(fd, F_SETFD, 0);
+            beneath::inheritOnly(inherited);
         });
         QObject::connect(m_process, &QProcess::readyReadStandardOutput, m_context, [this] { readOutput(false); });
         QObject::connect(m_process, &QProcess::readyReadStandardError, m_context, [this] { readErrors(false); });
@@ -867,7 +866,7 @@ struct Exchange {
 private:
     // What a crashed Fugue left: folders older than a day.
     static void removeStale(int base) {
-        DIR *listing = ::fdopendir(::dup(base));
+        DIR *listing = ::fdopendir(beneath::dupCloexec(base));
         if (!listing)
             return;
         QStringList old;
@@ -1021,7 +1020,7 @@ Result<Launch> sandboxedLaunch(const NodeContext &context, const QString &folder
     Launch launch;
     launch.program = command.program;
     launch.arguments = command.arguments;
-    launch.environment = QProcessEnvironment::systemEnvironment();
+    launch.environment = sandbox::bwrapEnvironment(); // none of Fugue's variables in bwrap's own process inside the sandbox
     launch.descriptors = std::move(command.descriptors);
     for (const QString &file : models)
         launch.mounted << QDir::cleanPath(file);

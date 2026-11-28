@@ -438,7 +438,7 @@ struct ProcessResult {
 ProcessResult runProgram(const QString &program, const QStringList &arguments, const QString &workDir,
                          const std::function<void(const QString &)> &log, bool quiet = false,
                          const std::function<bool()> &cancelled = {}, bool ownGroup = false, bool cleanUv = false,
-                         const QList<int> &inherited = {}) {
+                         const QList<int> &inherited = {}, bool bare = false) {
     ProcessResult result;
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
@@ -452,7 +452,7 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
                 env.remove(name);
         env.insert(QStringLiteral("UV_PYTHON_INSTALL_DIR"), sandbox::uvPythonDir());
     }
-    process.setProcessEnvironment(env);
+    process.setProcessEnvironment(bare ? sandbox::bwrapEnvironment() : env); // bare: bwrap, whose own process the sandbox can read
     QByteArray pending;
     const auto flush = [&](bool all) {
         for (;;) {
@@ -479,13 +479,11 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
     });
     // A setup gets its own process group, so a stop ends what it started too (sh -c, uv's children), not only the program. Git is
     // left in ours: ssh asks for a passphrase on the terminal, which a background group may not read.
-    if (ownGroup || !inherited.isEmpty())
-        process.setChildProcessModifier([ownGroup, inherited] {
-            if (ownGroup)
-                ::setpgid(0, 0);
-            for (const int fd : inherited)
-                ::fcntl(fd, F_SETFD, 0);
-        });
+    process.setChildProcessModifier([ownGroup, inherited] {
+        if (ownGroup)
+            ::setpgid(0, 0);
+        beneath::inheritOnly(inherited); // also git and setups as you: nothing of Fugue's but stdio reaches them
+    });
     process.start(program, arguments);
     if (!process.waitForStarted(10000))
         return result;
@@ -605,7 +603,7 @@ ProcessResult runSetupCommand(const QStringList &command, const QString &folder,
     if (!wrapped.refused.isEmpty())
         return ProcessResult{false, -1, wrapped.refused};
     ProcessResult done = runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true, false,
-                                    wrapped.descriptors->numbers());
+                                    wrapped.descriptors->numbers(), /*bare*/ true);
     if (done.ok && QFileInfo(environment).isSymLink()) {
         done.ok = false;
         done.output += QStringLiteral("\n.venv became a link during the setup; a pack's environment folder must be a folder.");

@@ -162,7 +162,7 @@ bool removeEntry(int parent, const QByteArray &name, int depth) {
         }
         Fd folder(sub);
         std::vector<QByteArray> entries;
-        if (DIR *listing = ::fdopendir(::dup(folder.get()))) {
+        if (DIR *listing = ::fdopendir(::fcntl(folder.get(), F_DUPFD_CLOEXEC, 0))) {
             while (const dirent *entry = ::readdir(listing)) {
                 const QByteArray entryName(entry->d_name);
                 if (entryName != "." && entryName != "..")
@@ -243,6 +243,24 @@ QString lastProblem() {
         return QStringLiteral("this kernel has no openat2 (Linux 5.6 or newer is needed)");
     return QString::fromLocal8Bit(std::strerror(t_errno));
 }
+
+void inheritOnly(const QList<int> &fds) {
+#ifndef CLOSE_RANGE_CLOEXEC
+#define CLOSE_RANGE_CLOEXEC (1U << 2)
+#endif
+#ifndef SYS_close_range
+#define SYS_close_range 436
+#endif
+    if (::syscall(SYS_close_range, 3U, ~0U, CLOSE_RANGE_CLOEXEC) != 0) {
+        const long most = ::sysconf(_SC_OPEN_MAX);
+        for (int fd = 3; fd < (most > 0 && most < 65536 ? most : 65536); ++fd)
+            ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    }
+    for (const int fd : fds)
+        ::fcntl(fd, F_SETFD, 0);
+}
+
+int dupCloexec(int fd) { return ::fcntl(fd, F_DUPFD_CLOEXEC, 0); }
 
 bool mkdirBeneath(int dir, const QString &name) {
     const QByteArray bytes = QFile::encodeName(name);
