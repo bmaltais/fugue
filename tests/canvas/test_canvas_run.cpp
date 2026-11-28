@@ -1827,6 +1827,51 @@ private slots:
                  expected);
     }
 
+    // A definition's Increment seed, held on one instance by an override: a plain run inside g7 uses 10 in both instances and the
+    // definition moves on to 11; after leaving the group, Run from here on g7's Resize holds g7 at the 10 it used. The picture
+    // says 10 (run section) though the workflow it embeds holds 11 for the definition.
+    void aHeldIncrementSeedIsRecordedAtTheValueTheInstanceUsedNotTheDefinitions() {
+        QTemporaryDir out;
+        RunApp r(twoInstances(out.path(), kIncrementGroup, kIncrementLayout));
+        QVERIFY(r.app.open());
+        const auto definitionSeed = [&r] {
+            return r.app.model.document().group("local/gen")->nodes.value("gen").inputs.value("seed").toJson();
+        };
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QVERIFY(r.app.model.groups()->enterGroup("g7"));
+        const QString first = r.runs->start();
+        QVERIFY(!first.isEmpty());
+        int answered = 0;
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            const QStringList jobs = r.jobs();
+            for (; answered < jobs.size(); ++answered)
+                r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(answered), {{"image.png", png(64, 64)}}); });
+            return finished.size() == 1;
+        })(), 10000);
+        const int jobs = r.jobs().size();
+        QCOMPARE(definitionSeed(), QJsonValue(11.0)); // used 10, the next is 11
+        QVERIFY(r.app.model.groups()->leaveGroup());
+        r.app.model.widgets()->setValue("rz", "width", 100);
+        r.app.model.select({"rz"});
+        const QString second = r.runs->runFromSelected();
+        QVERIFY(!second.isEmpty());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(finished.last().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), jobs); // g7/gen held at 10: a cache hit
+        const auto folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", second);
+        QVERIFY(folder.ok());
+        QCOMPARE(folder->state().value("auto").toObject().value("g7/gen").toObject().value("seed").toDouble(-1), 10.0);
+        const fugue::Result<QJsonObject> embedded = fugue::readEmbeddedWorkflow(out.path() + "/held-2.png");
+        QVERIFY(embedded.ok());
+        QCOMPARE(embedded->value("run").toObject().value("nodes").toObject().value("g7/gen").toObject().value("auto").toObject()
+                     .value("seed").toDouble(-1),
+                 10.0);
+        QCOMPARE(embedded->value("groups").toObject().value("local/gen").toObject().value("nodes").toObject().value("gen").toObject()
+                     .value("inputs").toObject().value("seed"),
+                 QJsonValue(11.0));
+        QCOMPARE(definitionSeed(), QJsonValue(11.0)); // the canvas's definition is as it was
+    }
+
     // The increment seeds that were held are not advanced by the run; the ones after the node are.
     void runFromHereLeavesAHeldIncrementSeedWhereItWas() {
         RunApp r(kBranches);

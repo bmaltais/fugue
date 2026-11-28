@@ -77,7 +77,7 @@ struct CompiledNode {
     QMap<QString, QString> lazyDropped;
     // The inputs that took their value from a CompileOptions override (here or through an exposed input of a group around the
     // node). The run records each as the value this node used, in `auto` of run.json (the value a document cannot hold per
-    // instance). Not in toJson.
+    // instance). The scheduler records any such input, whatever its type (only seeds are given today). Not in toJson.
     QStringList overridden;
 
     // Every link of inputs, list items included, in input name order.

@@ -518,10 +518,10 @@ QMap<QString, Bound> Compiler::effective(Scope *scope, const QString &id) const 
     }
     // A value given for this compile only wins over both (CompileOptions::overrides).
     for (const InputOverride &given : m_options.overrides)
-        if (given.path == path)
-            {
-            result[given.input] = Bound{given.value, scope, path, given.input, result.value(given.input).narrowing};
-            result[given.input].overridden = true;
+        if (given.path == path) {
+            Bound bound{given.value, scope, path, given.input, result.value(given.input).narrowing};
+            bound.overridden = true;
+            result[given.input] = bound;
         }
     return result;
 }

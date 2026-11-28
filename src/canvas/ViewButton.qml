@@ -150,13 +150,24 @@ Rectangle {
     // (not blocking), and clicks stay blocked: the button's TapHandler is as disabled as the button.
     HoverHandler {
         id: offHover
+        // The handler lives and dies with button.parent (a handler's QObject parent is the item it is set on), so it can be
+        // destroyed before the button when that parent is torn down; a binding that read offHover would then read a dead object
+        // ("Cannot read property 'hovered' of null"). The handler writes what it saw to the button instead (offOver), and nothing
+        // reads it from here.
         parent: button.parent
         enabled: !button.enabled
         blocking: false
+        onHoveredChanged: button.watchOff()
+        onPointChanged: button.watchOff()
+        onEnabledChanged: button.watchOff()
     }
-    readonly property bool tipOver: enabled ? hover.hovered
-        : offHover.hovered && offHover.point.position.x >= x && offHover.point.position.x < x + width
-          && offHover.point.position.y >= y && offHover.point.position.y < y + height
+    // Whether the pointer is over the disabled button, in the parent's coordinates (offHover's).
+    property bool offOver: false
+    function watchOff() {
+        const at = offHover.point.position;
+        offOver = offHover.enabled && offHover.hovered && at.x >= x && at.x < x + width && at.y >= y && at.y < y + height;
+    }
+    readonly property bool tipOver: enabled ? hover.hovered : offOver
     ToolTip.visible: tipOver && button.tip !== "" && button.visible
     ToolTip.delay: button.look.tooltipDelay
     ToolTip.text: button.tip
