@@ -76,6 +76,15 @@ The D numbers are the audit's decisions of 2026-11-22. D4 (one button: `ViewButt
 - Decisions taken without the owner (each to confirm; confidence medium-high): pairing is by order (the k-th output with the k-th plain socket input), not by type, so a node with two outputs and one socket-only input shares only the first row; the category map is a table in `CanvasLook::categoryColor` over the six top-level categories the built-in nodes use; Video takes dusk's rose because five tones serve six categories.
 - Not checked by a person: the Crop, Compare and Media corners on a real GPU with a picture in them (the corner shader is one item with no texture; a Load Image card, the rows, the dots and the wires at 100% and 40% were seen in a hidden-session look-shot). Group faces, the magnifier and the live Sampler frame in Compact were not looked at again.
 
+### 2026-11-28 Model picker: the models of a paired helper (#735)
+
+- Control: the model menu of a model input (`src/canvas/widgets/InputWidget.qml`, `modelRows`); the rows come from `WidgetEdit::models` (`remote`, `host`, `family`, `size`) and a pick is `WidgetEdit::setRemoteModel`.
+- Old: the menu listed this machine's files, the providers' served models and the catalog's downloads; a model that only a paired helper holds could not be chosen.
+- New: below the local files, one heading "On gx10" per helper with its files (family and size in the detail, the host's place glyph, "has not hashed this file yet" as the note). The family filter and the search include them, and they never sit among the local ones. No new control: the row is the file row.
+- Why: a model's place is a group heading and a place glyph already (providers' hosts, #164), and the filter and search are the ones the person has in the same menu. The pick pins the nodes that take the model, which is how the node pin of spec 8.3 is set today (there is no pin control on the card).
+- Rules met: Floor (no new control), Grouping (a heading per place), Learned place (the same row as a file's).
+- Not checked by a person: the menu in a real window against a real helper; a picture of it is in the PR.
+
 ### 2026-11-27 Model picker: a file the engine does not recognise, and the engine's family (#703)
 
 - Control: the model menu of a model input (`src/canvas/widgets/InputWidget.qml`) and of the App view (`src/apps/AppModelInput.qml`); the row's `engineNote` and `family` come from `modelRow` (`src/workflow/model_picker.cpp`).

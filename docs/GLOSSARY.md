@@ -225,6 +225,9 @@ _Avoid_: endpoint, service
 A configured source of capabilities: the Omarchy model servers, Fugue's own helper, a generic HTTP endpoint or an optional ComfyUI server. Local or remote is only its address.
 _Avoid_: backend, server
 
+**Host models**:
+The list of model files a paired helper reports under its `--models` roots (`POST /fugue/v1/models`), kept per host and read without the network. The picker shows them under "On <host>", and a model on the list counts as available there (not downloaded, not missing).
+
 **Paired placement**:
 The verdict, made before a run, of where an app whose model files are not on this machine goes: per node the paired host that takes it (*RunsOn*), the nodes no host can take with why (*Blocked*), and the host that did not answer (*Silent*, never named as the host). The CLI and the window share it.
 _Avoid_: remote check, host check
