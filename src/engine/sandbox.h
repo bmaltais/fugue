@@ -110,6 +110,11 @@ struct Command {
 // up on PATH when not absolute.
 Command build(const Profile &profile);
 
+// `text` with its control characters made spaces (escape sequences, the other C0 characters, DEL and C1), so a program's
+// words can never drive a terminal: a tab stays, and newlines when `keepNewlines`. For everything a program says that reaches
+// a terminal, a log or an error message.
+QString printable(QString text, bool keepNewlines = false);
+
 // The environment bwrap itself is started with: PATH=/usr/bin:/bin and nothing else, so bwrap's own process inside the sandbox
 // (pid 1, whose /proc/1/environ the program can read) holds none of Fugue's variables. The program's is set by --setenv.
 QProcessEnvironment bwrapEnvironment();

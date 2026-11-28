@@ -318,9 +318,7 @@ private:
         for (QString &line : lines) {
             if (line.trimmed().isEmpty())
                 continue;
-            for (QChar &c : line) // no escape sequence of the program's reaches a terminal or an error message
-                if ((c.unicode() < 0x20 && c != QLatin1Char('\t')) || (c.unicode() >= 0x7f && c.unicode() < 0xa0))
-                    c = QLatin1Char(' ');
+            line = sandbox::printable(line); // no escape sequence of the program's reaches a terminal or an error message
             line = maskSecrets(line, m_secrets); // before it is cut short: a value cut in two is no longer found
             if (line.size() > 500)
                 line = line.left(500) + QStringLiteral("…");
@@ -361,8 +359,8 @@ QString withTail(const QString &message, const Process &process) {
 // What the node reported with an `error` line. A node's own codes are its business; the engine
 // reports them as node_failed, keeping the node's code in the message, except `cancelled`.
 Error reportedError(const QJsonObject &line) {
-    const QString code = line.value("code").toString();
-    const QString message = line.value("message").toString();
+    const QString code = sandbox::printable(line.value("code").toString().left(200));
+    const QString message = sandbox::printable(line.value("message").toString(), true);
     if (code == QLatin1String("cancelled"))
         return nodeError(QStringLiteral("cancelled"), message.isEmpty() ? QStringLiteral("The node was cancelled.") : message);
     QString text = message.isEmpty() ? QStringLiteral("The node reported an error.") : message;
@@ -500,7 +498,7 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
                 } else if (op == QLatin1String("progress") && mine) {
                     if (context.progress)
                         context.progress(qBound(0.0, line.value("value").toDouble(), 1.0), QString(),
-                                         line.value("message").toString());
+                                         sandbox::printable(line.value("message").toString()));
                 } else if (op == QLatin1String("preview") && mine && expect == Expect::Result) {
                     // Once a one-shot program has given its answer, what it shows no longer counts.
                     if (!result && !reported)

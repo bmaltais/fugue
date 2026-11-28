@@ -231,6 +231,8 @@ QStringList needsLines(const Needs &needs, bool hasSetup, const QString &homeFol
         lines << QStringLiteral("Can use the GPU");
     for (const QString &path : needs.readPaths)
         lines << QStringLiteral("Can read %1").arg(shown(path, home));
+    if (!needs.readPaths.isEmpty()) // what a folder holds is not scanned: another program's socket or FIFO in it is in reach
+        lines << QStringLiteral("Can connect to a socket or write to a FIFO in a folder it can read");
     return lines;
 }
 
@@ -516,6 +518,15 @@ std::optional<bool> &cachedAvailable() {
 }
 
 } // namespace
+
+QString printable(QString text, bool keepNewlines) {
+    for (QChar &c : text) {
+        const char16_t u = c.unicode();
+        if ((u < 0x20 && u != u'\t' && !(keepNewlines && u == u'\n')) || (u >= 0x7f && u < 0xa0))
+            c = QLatin1Char(' ');
+    }
+    return text;
+}
 
 QProcessEnvironment bwrapEnvironment() {
     QProcessEnvironment environment;

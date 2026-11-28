@@ -433,14 +433,6 @@ struct ProcessResult {
     QString output; // stdout and stderr together, last 4 KB
 };
 
-// `text` without control characters (an escape sequence a program prints could rewrite the terminal or the question shown
-// above it): a tab stays, every other C0 and C1 character and DEL become a space.
-QString withoutControls(QString text) {
-    for (QChar &c : text)
-        if ((c.unicode() < 0x20 && c != QLatin1Char('\t')) || (c.unicode() >= 0x7f && c.unicode() < 0xa0))
-            c = QLatin1Char(' ');
-    return text;
-}
 
 // Runs a program (never a shell) and passes its output on line by line.
 // `inherited`: descriptors the command line names (bwrap's --ro-bind-fd), kept open across exec in this child only.
@@ -468,14 +460,14 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
             const int newline = pending.indexOf('\n');
             if (newline < 0)
                 break;
-            const QString line = withoutControls(QString::fromUtf8(pending.left(newline))).trimmed();
+            const QString line = sandbox::printable(QString::fromUtf8(pending.left(newline))).trimmed();
             pending.remove(0, newline + 1);
             result.output += line + QLatin1Char('\n');
             if (log && !quiet)
                 log(line);
         }
         if (all && !pending.isEmpty()) {
-            const QString line = withoutControls(QString::fromUtf8(pending)).trimmed();
+            const QString line = sandbox::printable(QString::fromUtf8(pending)).trimmed();
             result.output += line + QLatin1Char('\n');
             if (log && !quiet)
                 log(line);
@@ -526,8 +518,10 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
 // this version (never for a community pack), else not at all. `true`: sandboxed.
 // The yes is for the files it was given for: a copy about to be installed (another source, other needs) whose digest is not the
 // one the trust recorded runs its setup in the sandbox.
-Result<bool> setupSandboxed(const TrustStore &trust, const PackSummary &pack) {
-    if (sandbox::setupUnsandboxedForTest() || (!pack.community && trust.isUnsandboxed(pack.id, pack.version) && !pack.secretsDigest.isEmpty()
+// `staged`: a copy being installed or updated, whose setup always runs in the sandbox (a yes to run without one was given for
+// files already on disk, never for a fetch).
+Result<bool> setupSandboxed(const TrustStore &trust, const PackSummary &pack, bool staged = false) {
+    if (sandbox::setupUnsandboxedForTest() || (!staged && !pack.community && trust.isUnsandboxed(pack.id, pack.version) && !pack.secretsDigest.isEmpty()
                                                && trust.sealedDigest(pack.id, pack.version) == pack.secretsDigest))
         return false;
     if (sandbox::available())
@@ -1010,7 +1004,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
         runSetup = *yes;
         added.setupSkipped = !*yes;
         if (runSetup) {
-            const Result<bool> mode = setupSandboxed(trust, summary);
+            const Result<bool> mode = setupSandboxed(trust, summary, /*staged*/ true);
             if (!mode)
                 return mode.errors();
             setupInSandbox = *mode;
@@ -1381,7 +1375,8 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
     if (!removeTree(folder))
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot remove %1 completely.").arg(folder));
     // A setup's uv cache that a crash left (6.7.1), and the folder of the layout before per-setup caches.
-    for (const QFileInfo &left : QDir(cacheDir() + QStringLiteral("/uv")).entryInfoList({id, id + QStringLiteral("+*")}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden))
+    const QString cacheId = parsePackRef(id).id; // `<id>@<major>` names the folder; the setup's cache is named by the pack id
+    for (const QFileInfo &left : QDir(cacheDir() + QStringLiteral("/uv")).entryInfoList({cacheId, cacheId + QStringLiteral("+*")}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden))
         removeTree(left.filePath());
     for (const DeadBackup &dead : deadBackupsOf(packsDir, id)) // an old copy a crash left would come back on the next sweep
         discardTree(packsDir, dead.path);

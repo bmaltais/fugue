@@ -535,6 +535,13 @@ QString packNeedsDigest(const QString &folder, const QStringList &nodes) {
     return packNeedsDigestOf(nodes, needs);
 }
 
+// Where the pack came from as trust records it: the location and, for git, the commit `ref` resolved to, so a tag moved to new
+// code is another digest and asks again (6.7).
+QString sourceForDigest(const QString &folder) {
+    const PackSource source = readPackSource(folder);
+    return source.commit.isEmpty() ? source.location : source.location + QStringLiteral("\ncommit:") + source.commit;
+}
+
 QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation, const QString &needsDigest) {
     // The name and origin rule of each declared secret and where the pack came from (the key its values are stored
     // under): what decides which values it is handed and where they may go. Labels and descriptions are only text.
@@ -558,7 +565,7 @@ QString packSecretsDigestOfFolder(const QString &folder) {
         return {};
     Errors ignored;
     const std::optional<PackManifest> pack = parsePack(read.value(), PackOrigin::Disk, ignored);
-    return pack ? packSecretsDigestOf(pack->secrets, readPackSource(folder).location, packNeedsDigest(folder, pack->nodes)) : QString();
+    return pack ? packSecretsDigestOf(pack->secrets, sourceForDigest(folder), packNeedsDigest(folder, pack->nodes)) : QString();
 }
 
 LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin, PackDigest record) {
@@ -633,7 +640,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     }
     loaded.enabled = true;
     // What trust compares (6.7): the secrets and needs this load parsed, not another folder that happens to name the same pack.
-    loaded.digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location, packNeedsDigestOf(pack->nodes, needs));
+    loaded.digest = packSecretsDigestOf(pack->secrets, sourceForDigest(folder), packNeedsDigestOf(pack->nodes, needs));
     if (origin == PackOrigin::Disk && record == PackDigest::Record) {
         const QString digest = loaded.digest;
         {

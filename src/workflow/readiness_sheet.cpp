@@ -11,6 +11,7 @@
 
 #include <algorithm>
 
+#include "engine/sandbox.h"
 #include "engine/file_hashes.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
@@ -631,6 +632,8 @@ void ReadinessSheet::publish() {
                              {"secrets", p.secrets.join(QStringLiteral(", "))},
                              {"setup", row.hasEnvironment() ? displayCommand(p.setupCommand) : QString()},
                              {"setupNote", p.setupDescription},
+                             // What a setup's sandbox lets it do (6.7.1): the network, the host's.
+                             {"setupLines", row.hasEnvironment() ? sandbox::needsLines({}, true) : QStringList()},
                              {"setupSize", p.setupSize >= 0 ? ModelDownloads::sizeText(p.setupSize) : QString()},
                              {"state", stateName(m_states.value(i))}, {"detail", m_details.value(i)}};
     }

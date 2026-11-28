@@ -349,7 +349,7 @@ private slots:
         QCOMPARE(good->readPaths, QStringList{QFileInfo(home()).canonicalFilePath() + "/Documents/Scans"});
         QCOMPARE(sandbox::plainLines(*good, true),
                  (QStringList{"Can use the network", "Can reach services on this computer and its X11/Xwayland display", "Can use the GPU",
-                              "Can read ~/Documents/Scans"}));
+                              "Can read ~/Documents/Scans", "Can connect to a socket or write to a FIFO in a folder it can read"}));
         QCOMPARE(sandbox::plainLines({}, true, true).first(), QString("Setup uses the network"));
         QVERIFY(sandbox::plainLines({}, false).first().startsWith("NOT sandboxed"));
         QVERIFY(sandbox::plainLines({}, true).first().startsWith("Runs in a sandbox"));

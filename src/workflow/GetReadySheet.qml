@@ -215,7 +215,7 @@ Popup {
                                 title: qsTr("Environment for %1").arg(modelData.name)
                                 trailing: modelData.setupSize
                                 subtitle: qsTr("runs %1").arg(modelData.setup)
-                                more: modelData.setupNote
+                                more: [modelData.setupNote].concat(modelData.setupLines || []).filter(t => t !== "").join("\n")
                                 open: sheet.expanded[key] === true
                                 stateText: sheet.stateText(modelData.state)
                                 failed: modelData.state === "failed"
