@@ -1,5 +1,7 @@
 #include "engine/model_inspect.h"
 
+#include <algorithm>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -83,6 +85,7 @@ void ModelInspector::configure(const QString &helper, const QString &cacheFile) 
     m_entries.clear();
     m_failed.clear();
     m_loaded = false;
+    ++m_generation; // a pass under way (inspect) keeps nothing of what it learned from the old setup
 }
 
 bool ModelInspector::stampOf(const QString &path, qint64 &size, qint64 &mtime) const {
@@ -143,71 +146,156 @@ std::optional<EngineModel> ModelInspector::cached(const QString &path) const {
     return it->model;
 }
 
-QHash<QString, EngineModel> ModelInspector::ask(const QStringList &paths) {
-    QHash<QString, EngineModel> out;
+int ModelInspector::askTimeoutMs(int files) {
+    // A lone file gets room for a cold start (a GPU runtime, a network share) too.
+    return std::max(8000, 3000 + 300 * files);
+}
+
+ModelInspector::Asked ModelInspector::ask(const QString &helper, const QStringList &paths, const std::function<bool()> &stop) const {
+    Asked out;
     QProcess process;
     process.setProcessChannelMode(QProcess::SeparateChannels);
-    process.start(m_helper, QStringList{QStringLiteral("--inspect")} + paths);
+    process.start(helper, QStringList{QStringLiteral("--inspect")} + paths);
     if (!process.waitForStarted(5000))
         return out;
+    out.started = true;
     process.closeWriteChannel();
-    if (!process.waitForFinished(m_timeoutMs)) {
+    // Waited for in slices, so a stop (a window closing) ends it at once instead of after the whole timeout.
+    const int timeout = m_timeoutMs > 0 ? m_timeoutMs : askTimeoutMs(int(paths.size()));
+    constexpr int slice = 100;
+    bool done = false;
+    for (int waited = 0; !done && waited < timeout; waited += slice) {
+        done = process.waitForFinished(slice);
+        if (!done && stop && stop()) {
+            out.stopped = true;
+            break;
+        }
+    }
+    if (!done) {
+        out.timedOut = !out.stopped;
         process.kill();
         process.waitForFinished(2000);
-        return out;
+    } else {
+        out.finished = process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+        out.crashed = !out.finished;
     }
+    // What was said before a crash or a timeout still counts.
     for (const QByteArray &line : process.readAllStandardOutput().split('\n')) {
         const QJsonObject object = QJsonDocument::fromJson(line).object();
         const QString path = object.value("path").toString();
         if (path.isEmpty() || object.contains("error") || !object.contains("recognised"))
             continue;
-        out.insert(path, EngineModel::fromJson(object));
+        out.answers.insert(path, EngineModel::fromJson(object));
     }
     return out;
 }
 
-QHash<QString, EngineModel> ModelInspector::inspect(const QStringList &paths) {
-    QMutexLocker lock(&m_mutex);
-    load();
+QHash<QString, EngineModel> ModelInspector::inspect(const QStringList &paths, const std::function<bool()> &stop) {
     QHash<QString, EngineModel> out;
     QStringList wanted;
-    for (const QString &path : paths) {
-        qint64 size = 0, mtime = 0;
-        if (!stampOf(path, size, mtime))
-            continue;
-        const auto it = m_entries.constFind(path);
-        if (it != m_entries.constEnd() && it->size == size && it->mtime == mtime) {
-            out.insert(path, it->model);
-            continue;
+    QString helper;
+    quint64 generation = 0;
+    {
+        QMutexLocker lock(&m_mutex);
+        load();
+        for (const QString &path : paths) {
+            qint64 size = 0, mtime = 0;
+            if (!stampOf(path, size, mtime))
+                continue;
+            const auto it = m_entries.constFind(path);
+            if (it != m_entries.constEnd() && it->size == size && it->mtime == mtime) {
+                out.insert(path, it->model);
+                continue;
+            }
+            const auto failed = m_failed.constFind(path);
+            if (failed != m_failed.constEnd() && failed->first == size && failed->second == mtime)
+                continue;
+            if (!wanted.contains(path))
+                wanted << path;
         }
-        const auto failed = m_failed.constFind(path);
-        if (failed != m_failed.constEnd() && failed->first == size && failed->second == mtime)
-            continue;
-        if (!wanted.contains(path))
-            wanted << path;
+        helper = m_helper;
+        generation = m_generation;
     }
-    if (wanted.isEmpty() || m_helper.isEmpty())
+    if (wanted.isEmpty() || helper.isEmpty())
         return out;
+
     bool changed = false;
-    for (qsizetype from = 0; from < wanted.size(); from += batchSize) {
-        const QStringList batch = wanted.mid(from, batchSize);
-        const QHash<QString, EngineModel> answers = ask(batch);
+    // Keeps what the helper said for `batch`, and the failure of the files in `failed`. False when configure() ran meanwhile
+    // (another helper, an upgraded one in place, another cache file): what this run learned is then the old one's and is dropped.
+    const auto keep = [&](const QStringList &batch, const QHash<QString, EngineModel> &answers, const QStringList &failed) {
+        QMutexLocker lock(&m_mutex);
+        if (m_generation != generation)
+            return false;
         for (const QString &path : batch) {
             qint64 size = 0, mtime = 0;
             if (!stampOf(path, size, mtime))
                 continue;
             const auto it = answers.constFind(path);
-            if (it == answers.constEnd()) {
+            if (it != answers.constEnd()) {
+                m_entries.insert(path, Entry{size, mtime, *it});
+                out.insert(path, *it);
+                changed = true;
+            } else if (failed.contains(path)) {
                 m_failed.insert(path, {size, mtime});
-                continue;
             }
-            m_entries.insert(path, Entry{size, mtime, *it});
-            out.insert(path, *it);
-            changed = true;
+        }
+        return true;
+    };
+    const auto stopped = [&] { return stop && stop(); };
+
+    // A crashed process says nothing of the files it did not reach, so each of those is asked alone, up to this many in all; a
+    // helper that fails three alone in a row is broken, not the files. A lone file is blamed for a crash only once the helper
+    // answered another file in this run, and never for a timeout or a stop (a cold start, a slow share, a closing window).
+    constexpr int retryBudget = 40;
+    constexpr int brokenAfter = 3;
+    int retries = 0;
+    int failedInARow = 0;
+    bool broken = false;
+    bool answeredAny = false;
+    QStringList pendingBlame;
+    for (qsizetype from = 0; from < wanted.size() && !broken && !stopped(); from += batchSize) {
+        const QStringList batch = wanted.mid(from, batchSize);
+        const Asked asked = ask(helper, batch, stop);
+        answeredAny = answeredAny || !asked.answers.isEmpty();
+        const bool alone = batch.size() == 1;
+        // A clean exit with no answer is the helper saying it could not read the file.
+        if (!keep(batch, asked.answers, asked.finished ? batch : QStringList()))
+            return out;
+        if (alone && asked.crashed)
+            pendingBlame << batch;
+        if (!asked.started)
+            broken = true; // the helper does not even start: nothing is learned about the files
+        if (asked.finished || !asked.started || asked.stopped || alone)
+            continue;
+        for (const QString &path : batch) {
+            if (asked.answers.contains(path))
+                continue;
+            if (stopped() || retries >= retryBudget || failedInARow >= brokenAfter) {
+                broken = failedInARow >= brokenAfter;
+                break;
+            }
+            ++retries;
+            const QStringList one{path};
+            const Asked single = ask(helper, one, stop);
+            if (single.answers.contains(path)) {
+                failedInARow = 0;
+                answeredAny = true;
+            } else if (!single.finished && !single.stopped) {
+                ++failedInARow;
+            }
+            if (!keep(one, single.answers, single.finished ? one : QStringList()))
+                return out;
+            if (single.crashed && !single.answers.contains(path))
+                pendingBlame << path;
         }
     }
-    if (changed)
-        save();
+    if (answeredAny && !broken && !pendingBlame.isEmpty() && !keep(pendingBlame, {}, pendingBlame))
+        return out;
+    if (changed) {
+        QMutexLocker lock(&m_mutex);
+        if (m_generation == generation)
+            save();
+    }
     return out;
 }
 

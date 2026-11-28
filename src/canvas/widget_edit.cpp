@@ -1069,10 +1069,11 @@ void WidgetEdit::requestMarks(const QString &node, const QString &input) {
     ModelShapes *shapes = m_shapes;
     const int asked = marks.asked;
     const qint64 others = otherModelsMb(node, input);
-    m_work.read(this, [this, shapes, key, asked, type, files, others]() -> std::function<void()> {
+    const std::shared_ptr<std::atomic_bool> stopped = m_work.stopFlag();
+    m_work.read(this, [this, shapes, key, asked, type, files, others, stopped]() -> std::function<void()> {
         const ModelSpeeds speeds;
         const QHash<QString, ModelMark> found = markModels(type, files, RecommendContext{localComputeDevice(), others, &speeds}, *shapes,
-                                                                  &ModelInspector::shared());
+                                                           &ModelInspector::shared(), [stopped] { return stopped->load(); });
         return [this, key, asked, found] {
             if (m_marks.value(key).asked != asked)
                 return;

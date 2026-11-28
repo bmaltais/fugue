@@ -2,7 +2,9 @@
 // batch, an answer kept by path, size and time, no helper, a failed file), and the marks that use it (the family fallback, the
 // not-recognised mark). No real helper or model: the script answers by the file's name.
 
+#include <QElapsedTimer>
 #include <QFile>
+#include <QThread>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -120,6 +122,111 @@ private slots:
         QCOMPARE(answers.size(), 1);
         QVERIFY(inspector.inspect({path("bad.safetensors")}).isEmpty());
         QCOMPARE(runs().size(), 1);
+    }
+
+    // A helper that dies (exit 3) on a file named "crash", after answering the files before it.
+    void crashingHelper() {
+        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nshift\n" +
+                                       R"(for f in "$@"; do
+  case "$f" in
+    *crash*) exit 3 ;;
+    *) printf '{"path":"%s","recognised":true,"version":"Fake DiT","id":"fake_dit","is_dit":true,"video":false,"inpaint":false,"latent_channels":16,"vae_kind":"flux"}\n' "$f" ;;
+  esac
+done
+)"));
+        QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    }
+
+    void aCrashOnOneFileCostsTheGoodFilesNothing() {
+        crashingHelper();
+        for (const char *name : {"a.gguf", "crash.gguf", "b.gguf", "c.gguf"})
+            write(name, "x");
+        ModelInspector inspector(path("crasher.sh"), path("cache.json"));
+        const QStringList files{path("a.gguf"), path("crash.gguf"), path("b.gguf"), path("c.gguf")};
+        const QHash<QString, EngineModel> answers = inspector.inspect(files);
+        QVERIFY(answers.contains(files[0]) && answers.contains(files[2]) && answers.contains(files[3]));
+        QVERIFY(!answers.contains(files[1]));
+        // The batch, then the three it did not answer, one process each; the crashing one alone is the one remembered.
+        QCOMPARE(runs(), (QStringList{"5", "2", "2", "2"}));
+        QCOMPARE(inspector.inspect(files).size(), 3);
+        QCOMPARE(runs().size(), 4); // nothing is asked again: the good ones are kept, the bad one is known
+        QVERIFY(inspector.cached(files[2]));
+    }
+
+    void aHelperThatCrashesOnEverythingIsGivenUpOnAndBlamesNoFile() {
+        // The same script all along (its stamp must not change): it works once the file "ok" exists.
+        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nshift\n[ -f '" + path("ok").toUtf8() +
+                                       "' ] || exit 3\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\"; done\n"));
+        QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        QStringList files;
+        for (int i = 0; i < 20; ++i) {
+            files << path(QStringLiteral("m%1.gguf").arg(i));
+            write(QStringLiteral("m%1.gguf").arg(i).toUtf8().constData(), "x");
+        }
+        ModelInspector inspector(path("crasher.sh"), path("cache.json"));
+        QVERIFY(inspector.inspect(files).isEmpty());
+        QCOMPARE(runs().size(), 1 + 3); // the batch and three alone, then it stops
+        write("ok", "");
+        QCOMPARE(inspector.inspect(files).size(), 20); // nothing was blamed on a file: the same helper, now working, asks them all
+    }
+
+    void aSlowHelperIsNeverBlamedOnAFile() {
+        write("slow.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nexec sleep 30\n"));
+        QVERIFY(QFile::setPermissions(path("slow.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        write("a.gguf", "x");
+        ModelInspector inspector(path("slow.sh"), path("cache.json"), 300); // a timeout of 0.3 s
+        QVERIFY(inspector.inspect({path("a.gguf")}).isEmpty());
+        QVERIFY(inspector.inspect({path("a.gguf")}).isEmpty());
+        QCOMPARE(runs().size(), 2); // asked again: a timeout is not the file's failure
+    }
+
+    void stopEndsARunningProcessAtOnce() {
+        write("slow.sh", QByteArray("#!/bin/sh\nexec sleep 30\n"));
+        QVERIFY(QFile::setPermissions(path("slow.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        write("a.gguf", "x");
+        ModelInspector inspector(path("slow.sh"), path("cache.json"));
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(inspector.inspect({path("a.gguf")}, [&] { return timer.elapsed() > 300; }).isEmpty());
+        QVERIFY2(timer.elapsed() < 3000, qPrintable(QString::number(timer.elapsed())));
+    }
+
+    void aHelperUpgradedWhileAskingKeepsNothingOfTheOldRun() {
+        write("slowish.sh", QByteArray("#!/bin/sh\nshift\nsleep 1\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\"; done\n"));
+        QVERIFY(QFile::setPermissions(path("slowish.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        write("a.gguf", "x");
+        ModelInspector inspector(path("slowish.sh"), path("cache.json"));
+        QHash<QString, EngineModel> answers;
+        QThread *worker = QThread::create([&] { answers = inspector.inspect({path("a.gguf")}); });
+        worker->start();
+        QTest::qWait(300);
+        write("slowish.sh", QByteArray("#!/bin/sh\n# upgraded in place\nshift\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":true,\"version\":\"New\",\"id\":\"n\"}\\n' \"$f\"; done\n"));
+        QVERIFY(QFile::setPermissions(path("slowish.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        inspector.configure(path("slowish.sh"), path("cache.json")); // as shared() does on its next call
+        worker->wait();
+        delete worker;
+        QVERIFY(!inspector.cached(path("a.gguf"))); // the old helper's answer was not kept under the new stamp
+        QCOMPARE(inspector.inspect({path("a.gguf")}).value(path("a.gguf")).version, QStringLiteral("New"));
+    }
+
+    void theStopFlagIsCheckedBetweenBatches() {
+        QStringList files;
+        for (int i = 0; i < 90; ++i) {
+            files << path(QStringLiteral("m%1.gguf").arg(i));
+            write(QStringLiteral("m%1.gguf").arg(i).toUtf8().constData(), "x");
+        }
+        ModelInspector inspector(path("helper.sh"), path("cache.json"));
+        const QHash<QString, EngineModel> answers = inspector.inspect(files, [this] { return !runs().isEmpty(); });
+        QCOMPARE(runs(), QStringList{"41"}); // the first batch ran, the other two did not
+        QCOMPARE(answers.size(), 40);
+        QVERIFY(inspector.cached(files[39]));
+        QVERIFY(!inspector.cached(files[40]));
+    }
+
+    void aProcessIsGivenAFewSecondsNotAMinute() {
+        QVERIFY(ModelInspector::askTimeoutMs(1) <= 10000);
+        QVERIFY(ModelInspector::askTimeoutMs(40) <= 20000);
+        QVERIFY(ModelInspector::askTimeoutMs(40) > ModelInspector::askTimeoutMs(1));
     }
 
     void theFamilyFallsBackToTheEnginesNameAndTheTableWins() {

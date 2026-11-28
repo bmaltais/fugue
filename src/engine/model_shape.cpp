@@ -214,6 +214,22 @@ bool hasTensor(const Shapes &shapes, const QString &part) {
     return false;
 }
 
+// A CLIP vision file: `vision_model.embeddings.*` (at the start of a name, or after a prefix such as `vision_tower.`), and no language
+// model beside it. A VLM text encoder (Gemma 3's `vision_tower.vision_model.embeddings.*` with its `language_model.*`) holds the
+// same tensors but is a text encoder. Anything else may be there: CLIP's projections, `logit_bias`, `scaled_fp8`, a llava
+// `multi_modal_projector.*`.
+bool isClipVisionFile(const Shapes &shapes) {
+    bool vision = false;
+    for (auto it = shapes.begin(); it != shapes.end(); ++it) {
+        const QString &name = it.key();
+        if (name.contains(QLatin1String("language_model.")) || name.startsWith(QLatin1String("model.layers."))
+            || name.contains(QLatin1String("embed_tokens")) || name.startsWith(QLatin1String("lm_head")))
+            return false;
+        vision = vision || name.contains(QLatin1String("vision_model.embeddings."));
+    }
+    return vision;
+}
+
 // The input width of a linear layer or the input channels of a convolution.
 std::optional<int> inputWidth(const std::optional<QList<qint64>> &shape) {
     if (!shape || shape->size() < 2 || shape->at(1) <= 0)
@@ -382,8 +398,19 @@ ModelShape shapeOf(const Header &header) {
     shape.clipVisionWidth = inputWidth(tensor(shapes, {QStringLiteral("img_emb.proj.1.weight")}));
     // Chroma (the engine finds it by this tensor too, model_loader.cpp) and Chroma Radiance.
     shape.chroma = hasTensor(shapes, QStringLiteral("distilled_guidance_layer.in_proj."));
+    // LTX's 32x VAE: its transformer's patchify_proj and adaln_single (no 2x2 patching, so 32 pixels a latent token).
+    if (hasTensor(shapes, QStringLiteral("patchify_proj.")) && hasTensor(shapes, QStringLiteral("adaln_single.")))
+        shape.sizeStep = 32;
+    // MiniMax-H3 (video_patch_proj with condition_proj, the engine's test: a 16x VAE, 2x2) and SenseNova U1.5 (language_model layers with
+    // q_proj_mot_gen, pixels straight to 32-pixel patches).
+    if ((hasTensor(shapes, QStringLiteral("video_patch_proj.")) && hasTensor(shapes, QStringLiteral("condition_proj.")))
+        || hasTensor(shapes, QStringLiteral("self_attn.q_proj_mot_gen.")))
+        shape.sizeStep = 32;
     // A CLIP vision file (ComfyUI's clip_vision folder): vision_model.*, with no diffusion layers.
-    if (hasTensor(shapes, QStringLiteral("vision_model.embeddings."))) {
+    // Only at the start of the name, and with nothing else in the file but CLIP's own projections: a VLM text encoder (Gemma 3's
+    // `vision_tower.vision_model.embeddings.*`, SigLIP or InternVL parts beside an LLM) holds the same tensors deeper in and is no
+    // CLIP vision file.
+    if (isClipVisionFile(shapes)) {
         shape.isClipVision = true;
         if (const auto cls = tensor(shapes, {QStringLiteral("vision_model.embeddings.class_embedding")}); cls && !cls->isEmpty())
             shape.clipVisionWidth = int(cls->last());
@@ -391,8 +418,12 @@ ModelShape shapeOf(const Header &header) {
         if (!hasTensor(shapes, QStringLiteral("text_model.")))
             return shape;
     }
+    // A VLM text encoder's vision tower (SigLIP, CLIP: patch_embedding, position_embedding) is no diffusion model's image input.
+    Shapes withoutVisionTower = shapes;
+    for (auto it = withoutVisionTower.begin(); it != withoutVisionTower.end();)
+        it = it.key().contains(QLatin1String("vision_model.")) || it.key().contains(QLatin1String("vision_tower.")) ? withoutVisionTower.erase(it) : std::next(it);
     std::optional<QList<qint64>> image =
-        tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
+        tensor(withoutVisionTower, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
                         QStringLiteral("patch_embedding.weight"), QStringLiteral("video_embedder.weight"), QStringLiteral("first.weight")});
     // A diffusers UNet names its input convolution conv_in (a VAE has encoder.conv_in and
@@ -453,6 +484,13 @@ ModelShape shapeOf(const Header &header) {
             shape.needsQwen35Tokenizer = true;
         }
         shape.unet = hasTensor(shapes, QStringLiteral("input_blocks.")) || hasTensor(shapes, QStringLiteral("down_blocks."));
+        // The engine's TI2V test is a patch_embedding of 3072 x 48 x 2 x 2 (a Wan 2.1 Fun Control takes 48 channels too, at 5120 wide).
+    // The engine aligns to its VAE's scale times the model's down factor: 8 x 8 for a UNet; Wan 2.2 TI2V (a 48-channel video
+        // VAE, 16x, with 2x2 patches) and Qwen-Image 2.1 (64 channels, 16x, 2x2) 16 x 2.
+        if (*shape.unet)
+            shape.sizeStep = 64;
+        else if ((wan && shape.latentChannels == 48 && image && image->at(0) == 3072) || (*shape.videoVae && !wan && shape.latentChannels == 64))
+            shape.sizeStep = 32;
         // A checkpoint carries its VAE (first_stage_model.decoder) beside the diffusion model.
         shape.kind = tensor(shapes, {QStringLiteral("decoder.conv_in.weight")}) ? ModelKind::Checkpoint : ModelKind::DiffusionModel;
         for (auto it = shapes.begin(); it != shapes.end(); ++it) // what a LoRA may change

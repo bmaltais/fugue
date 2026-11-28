@@ -162,7 +162,8 @@ QString familyKindOf(const QString &resourceType) {
 }
 
 QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<MarkedFile> &files, const RecommendContext &context,
-                                     ModelShapes &shapes, ModelInspector *inspector) {
+                                     ModelShapes &shapes, ModelInspector *inspector,
+                                     const std::function<bool()> &stop) {
     QHash<QString, ModelMark> marks;
     QList<RecommendCandidate> candidates;
     const QString kind = familyKindOf(resourceType);
@@ -171,7 +172,7 @@ QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<Ma
         QStringList paths;
         for (const MarkedFile &file : files)
             paths << file.path;
-        engine = inspector->inspect(paths);
+        engine = inspector->inspect(paths, stop);
     }
     for (const MarkedFile &file : files) {
         const QString family = modelFamily(kind, QFileInfo(file.path).fileName());

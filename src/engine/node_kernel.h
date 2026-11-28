@@ -47,6 +47,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QSize>
+#include <QSet>
 #include <QString>
 
 #include <functional>
@@ -124,6 +125,9 @@ struct NodeContext {
     // Under validate only: the size of the picture on each linked input whose size is known before a run, by input name: what
     // the node upstream made (cached), or what its own outputSizes() predicted. An input not in it has no known size.
     PictureSizes inputSizes;
+    // Under validate only: the inputs that are linked to another node's output. Such an input is absent from `inputs` when the
+    // node upstream has not run, so its absence is not a missing value.
+    QSet<QString> linkedInputs;
 
     // The input's value, or an Empty value when it has none.
     Value input(const QString &name) const { return inputs.value(name); }

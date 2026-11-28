@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include <fcntl.h>
+#include <sys/inotify.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -173,6 +174,44 @@ private slots:
         worker.join();
         QVERIFY2(inTime, "imageHeaderSize waited on a FIFO");
         QCOMPARE(result.get(), (std::pair<bool, bool>{false, false}));
+    }
+
+    // A FIFO is never opened, not even without blocking: a device (a serial port, a camera) would be touched by an open. Watched
+    // for IN_OPEN, which a FIFO node gives as a device node does.
+    void aSpecialFileIsNotEvenOpened() {
+        QTemporaryDir dir;
+        const QByteArray fifo = QFile::encodeName(dir.filePath("pipe.png"));
+        QCOMPARE(mkfifo(fifo.constData(), 0600), 0);
+        const int watch = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+        QVERIFY(watch >= 0);
+        QVERIFY(::inotify_add_watch(watch, fifo.constData(), IN_OPEN) >= 0);
+        QVERIFY(!MediaHandle::imageHeaderSize(dir.filePath("pipe.png")).has_value());
+        char buffer[256];
+        const ssize_t events = ::read(watch, buffer, sizeof buffer);
+        ::close(watch);
+        QVERIFY2(events < 0, "the FIFO was opened");
+    }
+
+    // A format libvips loads only from a file (OpenEXR has no source loader) still has its size predicted, and the check leaves no
+    // file open behind it.
+    void aFileOnlyFormatHasItsSizeAndLeavesNoDescriptor() {
+        QTemporaryDir dir;
+        if (vips_type_find("VipsOperation", "openexrload") == 0)
+            QSKIP("this libvips has no OpenEXR loader");
+        const QString file = dir.filePath("t.exr"); // a 4 x 3 OpenEXR file with no pixels in it: the header is all that is read
+        QFile out(file);
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        out.write(QByteArray::fromHex("762f3101020000006368616e6e656c730063686c697374001300000042000200000000000000010000000100000000636f6d7072657373696f6e00636f6d7072657373696f6e0001000000006461746157696e646f7700626f783269001000000000000000000000000300000002000000646973706c617957696e646f7700626f7832690010000000000000000000000003000000020000006c696e654f72646572006c696e654f72646572000100000000706978656c417370656374526174696f00666c6f617400040000000000803f73637265656e57696e646f7743656e746572007632660008000000000000000000000073637265656e57696e646f77576964746800666c6f617400040000000000803f00210100000000000031010000000000004101000000000000000000000800000000000000000000000100000008000000000000000000000002000000080000000000000000000000"));
+        out.close();
+        const auto openFiles = [] { return QDir(QStringLiteral("/proc/self/fd")).entryList(QDir::NoDotAndDotDot).size(); };
+        const int before = openFiles();
+        QCOMPARE(MediaHandle::imageHeaderSize(file), std::optional<QSize>(QSize(4, 3)));
+        QCOMPARE(openFiles(), before);
+        // The same through a source loader: nothing is kept either.
+        const QString png = dir.filePath("p.png");
+        pictureOf(8, 6).image().value().cast(VIPS_FORMAT_UCHAR).pngsave(QFile::encodeName(png).constData());
+        QCOMPARE(MediaHandle::imageHeaderSize(png), std::optional<QSize>(QSize(8, 6)));
+        QCOMPARE(openFiles(), before);
     }
 
     // The memo is keyed on what stat says, not on size and millisecond time alone: a file of the same size, put back to the same

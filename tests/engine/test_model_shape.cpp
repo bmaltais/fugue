@@ -240,6 +240,69 @@ private slots:
         QCOMPARE(shape(file("qwen_2.5_vl_7b.safetensors")).hiddenSize, std::optional<int>(3584));
     }
 
+    // A VLM text encoder holds a vision tower's `vision_model.embeddings.*` deeper in its names (Gemma 3's HF layout, from its
+    // transformers module names): it is a text encoder still, and no CLIP vision file.
+    void aVlmTextEncoderIsNotAClipVisionFile() {
+        writeSafetensors(file("gemma_3_4b_it.safetensors"),
+                         {{"vision_tower.vision_model.embeddings.patch_embedding.weight", QJsonArray{1152, 3, 14, 14}},
+                          {"vision_tower.vision_model.embeddings.position_embedding.weight", QJsonArray{4096, 1152}},
+                          {"vision_tower.vision_model.post_layernorm.weight", QJsonArray{1152}},
+                          {"multi_modal_projector.mm_input_projection_weight", QJsonArray{1152, 2560}},
+                          {"language_model.model.embed_tokens.weight", QJsonArray{262208, 2560}},
+                          {"language_model.model.layers.0.self_attn.q_proj.weight", QJsonArray{2048, 2560}}});
+        const ModelShape vlm = shape(file("gemma_3_4b_it.safetensors"));
+        QVERIFY(!vlm.isClipVision);
+        QCOMPARE(vlm.hiddenSize, std::optional<int>(2560));
+        QCOMPARE(vlm.textKind, std::optional<TextKind>(TextKind::Llm));
+        QVERIFY(!vlm.latentChannels);
+    }
+
+    // The step a picture aligns to (the engine's VAE scale times the model's down factor): 64 UNet, 32 for the 16x VAEs and LTX.
+    void theSizeStepFollowsTheEnginesAlignment() {
+        writeSafetensors(file("sdxl.safetensors"), {{"model.diffusion_model.input_blocks.0.0.weight", QJsonArray{320, 4, 3, 3}}});
+        writeSafetensors(file("wan22_ti2v_5b.safetensors"), {{"patch_embedding.weight", QJsonArray{3072, 48, 1, 2, 2}},
+                                                             {"text_embedding.0.weight", QJsonArray{3072, 4096}}});
+        writeSafetensors(file("wan22_14b.safetensors"), {{"patch_embedding.weight", QJsonArray{5120, 16, 1, 2, 2}},
+                                                         {"text_embedding.0.weight", QJsonArray{5120, 4096}}});
+        writeSafetensors(file("ltx.safetensors"), {{"patchify_proj.weight", QJsonArray{4096, 128}},
+                                                   {"adaln_single.linear.weight", QJsonArray{24576, 4096}}});
+        writeSafetensors(file("z.safetensors"), {{"cap_embedder.1.weight", QJsonArray{3840, 2560}}, {"x_embedder.weight", QJsonArray{3840, 64}}});
+        QCOMPARE(shape(file("sdxl.safetensors")).sizeStep, 64);
+        QCOMPARE(shape(file("wan22_ti2v_5b.safetensors")).sizeStep, 32);
+        QCOMPARE(shape(file("wan22_14b.safetensors")).sizeStep, 0);
+        writeSafetensors(file("wan21_fun_control.safetensors"), {{"patch_embedding.weight", QJsonArray{5120, 48, 1, 2, 2}},
+                                                                 {"text_embedding.0.weight", QJsonArray{5120, 4096}}});
+        QCOMPARE(shape(file("wan21_fun_control.safetensors")).sizeStep, 0); // 48 channels in, but not the 5B's 3072 wide
+        writeSafetensors(file("h3.safetensors"), {{"video_patch_proj.weight", QJsonArray{2048, 96}}, {"condition_proj.weight", QJsonArray{2048, 2048}}});
+        QCOMPARE(shape(file("h3.safetensors")).sizeStep, 32);
+        writeSafetensors(file("sensenova.safetensors"),
+                         {{"language_model.model.layers.0.self_attn.q_proj_mot_gen.weight", QJsonArray{4096, 4096}},
+                          {"language_model.model.embed_tokens.weight", QJsonArray{150000, 4096}}});
+        QCOMPARE(shape(file("sensenova.safetensors")).sizeStep, 32);
+        QCOMPARE(shape(file("ltx.safetensors")).sizeStep, 32);
+        QCOMPARE(shape(file("z.safetensors")).sizeStep, 0);
+    }
+
+    // CLIP vision files as they come: SigLIP, a llava vision tower with its projector, an fp8 file with its scale key.
+    void clipVisionFilesOfOtherMakesAreRecognised() {
+        writeSafetensors(file("siglip.safetensors"), {{"vision_model.embeddings.patch_embedding.weight", QJsonArray{1152, 3, 14, 14}},
+                                                      {"vision_model.embeddings.position_embedding.weight", QJsonArray{729, 1152}},
+                                                      {"vision_model.head.probe", QJsonArray{1, 1, 1152}},
+                                                      {"logit_bias", QJsonArray{1}}});
+        writeSafetensors(file("llava_vision.safetensors"),
+                         {{"vision_tower.vision_model.embeddings.class_embedding", QJsonArray{1024}},
+                          {"vision_tower.vision_model.embeddings.patch_embedding.weight", QJsonArray{1024, 3, 14, 14}},
+                          {"multi_modal_projector.linear_1.weight", QJsonArray{4096, 1024}}});
+        writeSafetensors(file("clip_vision_fp8.safetensors"), {{"vision_model.embeddings.class_embedding", QJsonArray{1280}},
+                                                               {"vision_model.embeddings.patch_embedding.weight", QJsonArray{1280, 3, 14, 14}},
+                                                               {"scaled_fp8", QJsonArray{2}}});
+        for (const char *name : {"siglip.safetensors", "llava_vision.safetensors", "clip_vision_fp8.safetensors"}) {
+            const ModelShape vision = shape(file(name));
+            QVERIFY2(vision.isClipVision, name);
+            QVERIFY2(!vision.textKind && !vision.latentChannels, name);
+        }
+    }
+
     void aFileThatIsNoModelHasNoShape() {
         QFile text(file("notes.safetensors"));
         QVERIFY(text.open(QIODevice::WriteOnly));
@@ -754,6 +817,8 @@ private slots:
         QCOMPARE(v21.latentChannels, std::optional<int>(64)); // no 2x2 patching, as the 64-channel VAE
         QCOMPARE(v1.latentChannels, std::optional<int>(16));
         QCOMPARE(v1.llmFamily, QStringLiteral("qwen2.5"));
+        QCOMPARE(v21.sizeStep, 32); // its VAE is 16x with 2x2 patches
+        QCOMPARE(v1.sizeStep, 0);
         QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen3vl.safetensors"))), Fit::Fits);
         QCOMPARE(loadableTextEncoderFits(v21, shape(file("qwen35.safetensors"))), Fit::DoesNotFit);
         QCOMPARE(loadableTextEncoderFits(v1, shape(file("qwen25vl.safetensors"))), Fit::Fits);

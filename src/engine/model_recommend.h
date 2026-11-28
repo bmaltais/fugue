@@ -26,6 +26,7 @@
 #include <QList>
 #include <QString>
 
+#include <functional>
 #include <optional>
 
 #include "engine/model_inspect.h"
@@ -92,7 +93,8 @@ struct MarkedFile {
 // checkpoint type (engine/model_inspect.h): the table's family wins, else the engine's version name is the family, and a file
 // it does not recognise has `notRecognised`. Such a file is never a Recommended candidate unless the table names a family.
 QHash<QString, ModelMark> markModels(const QString &resourceType, const QList<MarkedFile> &files, const RecommendContext &context,
-                                     ModelShapes &shapes, ModelInspector *inspector = nullptr);
+                                     ModelShapes &shapes, ModelInspector *inspector = nullptr,
+                                     const std::function<bool()> &stop = {});
 
 class ModelLibrary;
 

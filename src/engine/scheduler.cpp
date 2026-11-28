@@ -962,10 +962,12 @@ private:
         context.registry = m_env.registry;
         context.library = m_env.registry ? &library() : nullptr;
         context.roots = m_options.roots; // a kernel that reads a file for its answer keeps to the folders a run may read (13.6)
-        for (const CompiledLink &link : n.node->links())
+        for (const CompiledLink &link : n.node->links()) {
+            context.linkedInputs.insert(link.input);
             if (link.item < 0)
                 if (const std::optional<QSize> size = sizeFrom(link.from))
                     context.inputSizes.insert(link.input, *size);
+        }
         return context;
     }
 
@@ -1907,6 +1909,10 @@ GraphCheck checkUnusedNodes(const CompiledGraph &graph, const RunEnvironment &en
             if (spec->lazy)
                 continue;
             const auto written = it->inputs.constFind(spec->name);
+            // A link, an auto value or a list is not known here, but a linked input is not a missing one.
+            if (written != it->inputs.constEnd() && !written->isEmpty() && written->kind() != InputValue::Kind::Literal
+                && written->kind() != InputValue::Kind::Resource)
+                context.linkedInputs.insert(spec->name);
             Value value;
             if (written == it->inputs.constEnd() || written->isEmpty()) {
                 if (!spec->defaultValue.isUndefined())

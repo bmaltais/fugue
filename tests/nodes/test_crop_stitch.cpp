@@ -228,6 +228,8 @@ private slots:
         QTest::newRow("half a megapixel") << CropBox{0, 0, 100, 100} << 0.25 << 16 << CropSize{512, 512};
         QTest::newRow("0 keeps the size") << CropBox{0, 0, 333, 211} << 0.0 << 16 << CropSize{333, 211};
         QTest::newRow("a sliver keeps one step") << CropBox{0, 0, 1, 4000} << 1.0 << 16 << CropSize{16, 4096};
+        QTest::newRow("a step that does not divide the cap stays under it") << CropBox{0, 0, 300, 300} << 16.0 << 3000 << CropSize{3000, 3000};
+        QTest::newRow("a step past the cap is cut to it") << CropBox{0, 0, 300, 300} << 1.0 << 16320 << CropSize{4096, 4096};
     }
     void theCropSizeIsResizeToMegapixelsSize() {
         QFETCH(CropBox, box);

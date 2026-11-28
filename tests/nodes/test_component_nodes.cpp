@@ -866,6 +866,11 @@ private slots:
             const Errors checked = bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs));
             QCOMPARE(checked.size(), 1);
             QCOMPARE(checked.first().input, part);
+
+            // A part linked to a node that has not run is absent from the inputs, and the check does not call it missing.
+            NodeContext linked = bench.context(kLoadModels, inputs);
+            linked.linkedInputs.insert(part);
+            QVERIFY(bench.kernels.node(kLoadModels)->check(linked).isEmpty());
         }
     }
 
@@ -1510,6 +1515,23 @@ private slots:
         }
     }
 
+    void keyingTheSizeStepNeverHashesAModel() {
+        Bench bench;
+        const QJsonObject sdxl = bench.model("fugue/diffusion-model", "diffusion_models/sdxl.safetensors", unetHeader());
+        const QString path = Bench::modelPath("diffusion_models/sdxl.safetensors");
+        QVERIFY(bench.hashes.known(path).isEmpty());
+        const NodeContext keyed = bench.context(kVaeEncode, {{"model", Value(sdxl)}});
+        // The file with the handle's name is taken to be the one, and its header gives the step: no hash is read. Not verified, so
+        // the file is in the key: a run that finds another file of that name does not store its result under this one's.
+        const QString unverified = "size_step:64@" + path;
+        QCOMPARE(bench.kernels.provider(kVaeEncode)->keyExtraFor(keyed), unverified);
+        QCOMPARE(bench.kernels.node(QStringLiteral("fugue/crop-to-mask"))->keyExtraFor(keyed), unverified);
+        QVERIFY(bench.hashes.known(path).isEmpty());
+        QCOMPARE(nodes::modelSizeStep(keyed, sdxl), 64); // a run reads the hash
+        QVERIFY(!bench.hashes.known(path).isEmpty());
+        QCOMPARE(bench.kernels.provider(kVaeEncode)->keyExtraFor(keyed), QStringLiteral("size_step:64")); // verified: the plain key
+    }
+
     void vaeEncodeAndCropToMaskSizeAUnetsPicturesIn64s() {
         Bench bench;
         initVips();
@@ -1548,8 +1570,10 @@ private slots:
         const QSize stepped = crop({{"model", Value(unet)}});
         QCOMPARE(stepped.width() % 64, 0);
         QCOMPARE(stepped.height() % 64, 0);
-        // A multiple of 100 is kept with the model's 64: their common multiple.
-        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(100)}}).width() % 1600, 0);
+        // A multiple of 24 is kept with the model's 64: their common multiple. Past 256 (100 and 64 share 1600) it is the multiple
+        // rounded up to the model's step.
+        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(24)}}).width() % 192, 0);
+        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(100)}}).width() % 128, 0);
         // A model of another family keeps the multiple as asked.
         const QJsonObject z = bench.model("fugue/diffusion-model", "diffusion_models/z.safetensors",
                                           safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}}}));
@@ -1895,8 +1919,9 @@ private slots:
         const Result<JobRequest> defaults = bench.request(kTextEncode, krea);
         QVERIFY2(defaults, defaults ? "" : qPrintable(defaults.error().message));
         QCOMPARE(defaults->params.value("krea2_edit_format").toString(), QStringLiteral("krea2edit"));
-        QCOMPARE(defaults->params.value("krea2_ref_boost").toDouble(), 1.0);
-        QCOMPARE(defaults->params.value("krea2_ref_position").toString(), QStringLiteral("aligned"));
+        // The encode's text conditioning does not read the boosts or placements: only the Sampler is sent them.
+        for (const char *key : {"krea2_ref_boost", "krea2_ref_position", "krea2_ref_boost_a", "krea2_ref_position_a"})
+            QVERIFY(!defaults->params.contains(QLatin1String(key)));
         QCOMPARE(defaults->params.value("krea2_grounding_px").toInt(), 768);
         QVERIFY(!defaults->params.contains("moss_edit_format"));
 
@@ -1907,11 +1932,9 @@ private slots:
         krea.insert("vision_size", Value(512));
         const Result<JobRequest> encode = bench.request(kTextEncode, krea);
         QVERIFY(encode);
-        QCOMPARE(encode->params.value("krea2_ref_boost").toDouble(), 2.5);
-        QCOMPARE(encode->params.value("krea2_ref_position").toString(), QStringLiteral("bag"));
-        QCOMPARE(encode->params.value("krea2_ref_boost_a").toDouble(), 0.5);
-        QCOMPARE(encode->params.value("krea2_ref_position_a").toString(), QStringLiteral("beside"));
         QCOMPARE(encode->params.value("krea2_grounding_px").toInt(), 512);
+        QVERIFY(!encode->params.contains("krea2_ref_boost"));
+        QVERIFY(!encode->params.contains("krea2_ref_position_a"));
 
         const QString file = bench.workDir() + "/conditioning.bin";
         const Result<Values> out =
@@ -1922,9 +1945,12 @@ private slots:
             bench.request(kSampler, {{"model", Value(model)}, {"conditioning", out->value("conditioning")},
                                      {"latent", empty->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
         QVERIFY(sample);
-        for (const char *key : {"krea2_edit_format", "krea2_ref_boost", "krea2_ref_position", "krea2_ref_boost_a",
-                                "krea2_ref_position_a", "krea2_grounding_px"})
+        for (const char *key : {"krea2_edit_format", "krea2_grounding_px"})
             QCOMPARE(sample->params.value(QLatin1String(key)), encode->params.value(QLatin1String(key)));
+        QCOMPARE(sample->params.value("krea2_ref_boost").toDouble(), 2.5);
+        QCOMPARE(sample->params.value("krea2_ref_position").toString(), QStringLiteral("bag"));
+        QCOMPARE(sample->params.value("krea2_ref_boost_a").toDouble(), 0.5);
+        QCOMPARE(sample->params.value("krea2_ref_position_a").toString(), QStringLiteral("beside"));
     }
 
     // A reference whose file is gone or changed since Text Encode ran (a cached conditioning
