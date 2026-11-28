@@ -27,6 +27,7 @@
 #include "engine/pack_loader.h"
 #include "engine/trust_store.h"
 #include "engine/queue.h"
+#include "engine/embed.h"
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_bar.h"
@@ -108,6 +109,40 @@ const QByteArray kBranches = R"({
   "layout": {"nodes": {"words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "rz": {"pos": [600, 0]}, "show": {"pos": [900, 0]},
                        "rz2": {"pos": [600, 300]}, "show2": {"pos": [900, 300]}}}
 })";
+
+// Run from here through groups that run twice: two instances of one group (`groups`, its definition) each into a Resize and a
+// Preview, the first also into a Save Image (embedding the workflow and the run) in `folder`.
+QByteArray twoInstances(const QString &folder, const QString &groups, const QString &layout = {}) {
+    return QStringLiteral(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "g7": {"type": "local/gen", "version": "1.0.0", "inputs": {}},
+    "g8": {"type": "local/gen", "version": "1.0.0", "inputs": {}},
+    "rz": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}, "width": 160, "height": 120}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz.image"}}},
+    "save7": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "rz.image"}, "name": "held", "folder": "%1"}},
+    "rz2": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "g8.image"}, "width": 80, "height": 60}},
+    "show2": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz2.image"}}}
+  }},
+  "groups": {"local/gen": %2},
+  "layout": {"nodes": {"g7": {"pos": [0, 0]}, "g8": {"pos": [0, 300]}, "rz": {"pos": [300, 0]}, "show": {"pos": [600, 0]},
+                       "rz2": {"pos": [300, 300]}, "show2": {"pos": [600, 300]}}%3}
+})").arg(folder, groups, layout).toUtf8();
+}
+
+// A Generate Image whose seed is Randomize, in the group.
+const QString kRandomGroup = R"({"version": "1.0.0", "name": "Gen", "inputs": [], "outputs": [{"name": "image", "from": "gen.image"}],
+    "nodes": {"gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a cat", "seed": {"auto": "random"}}}}})";
+// The same with an Increment seed (10).
+const QString kIncrementGroup = R"({"version": "1.0.0", "name": "Gen", "inputs": [], "outputs": [{"name": "image", "from": "gen.image"}],
+    "nodes": {"gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a cat", "seed": 10}}}})";
+const QString kIncrementLayout = R"(, "groups": {"local/gen": {"nodes": {"gen": {"increment": ["seed"]}}}})";
+// Two levels: the seed is Randomize on an instance of an inner group, which exposes it to the Generate Image (`g7/inner/k`).
+const QString kNestedGroup = R"({"version": "1.0.0", "name": "Gen", "inputs": [], "outputs": [{"name": "image", "from": "inner.image"}],
+    "nodes": {"inner": {"type": "local/inner", "version": "1.0.0", "inputs": {"seed": {"auto": "random"}}}}},
+  "local/inner": {"version": "1.0.0", "name": "Inner", "inputs": [{"name": "seed", "targets": ["k.seed"]}],
+    "outputs": [{"name": "image", "from": "k.image"}],
+    "nodes": {"k": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a cat"}}}})";
 
 QByteArray png(int width, int height) {
     QImage image(width, height, QImage::Format_RGB32);
@@ -1735,6 +1770,106 @@ private slots:
         r.runs->checkNow();
         QTRY_COMPARE(r.state("rz2"), QStringLiteral("stale")); // not downstream: it did not run
         QCOMPARE(r.state("show2"), QStringLiteral("stale"));
+    }
+
+    // A seed held per instance by a compile override is still recorded as the one its node used, in run.json `auto` and in the
+    // run section the Save Image embeds (spec 11.7), whatever the shared definition says.
+    void heldSeedsOfAGroupThatRunsTwiceAreRecorded_data() {
+        QTest::addColumn<QString>("groups");
+        QTest::addColumn<QString>("layout");
+        QTest::addColumn<QString>("leaf");
+        QTest::addColumn<double>("expected"); // 0: the seed the first run drew
+        QTest::newRow("randomize") << kRandomGroup << QString() << "g7/gen" << 0.0;
+        QTest::newRow("increment") << kIncrementGroup << kIncrementLayout << "g7/gen" << 10.0;
+        QTest::newRow("exposed on a nested instance") << kNestedGroup << QString() << "g7/inner/k" << 0.0;
+    }
+    void heldSeedsOfAGroupThatRunsTwiceAreRecorded() {
+        QFETCH(QString, groups);
+        QFETCH(QString, layout);
+        QFETCH(QString, leaf);
+        QFETCH(double, expected);
+        QTemporaryDir out;
+        RunApp r(twoInstances(out.path(), groups, layout));
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        const QString first = r.runs->start();
+        QVERIFY(!first.isEmpty());
+        int answered = 0; // the generations take their turns (an Increment seed's two are one job)
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            const QStringList jobs = r.jobs();
+            for (; answered < jobs.size(); ++answered)
+                r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(answered), {{"image.png", png(64, 64)}}); });
+            return finished.size() == 1;
+        })(), 10000);
+        const int jobs = r.jobs().size();
+        const auto seedOf = [&](const QString &run, const QString &path) {
+            const auto folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+            return folder ? folder->state().value("auto").toObject().value(path).toObject().value("seed") : QJsonValue();
+        };
+        if (expected == 0.0) {
+            expected = seedOf(first, leaf).toDouble(-1);
+            QVERIFY(expected >= 0);
+        }
+        // Run from here on the Resize after the first instance: its seed is held (no new job), and recorded as the one it used.
+        r.app.model.widgets()->setValue("rz", "width", 100);
+        r.app.model.select({"rz"});
+        const QString second = r.runs->runFromSelected();
+        QVERIFY(!second.isEmpty());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(finished.last().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), jobs); // the held node was a cache hit; the other instance did not run
+        QCOMPARE(seedOf(second, leaf).toDouble(-1), expected);
+        QVERIFY(seedOf(second, QString(leaf).replace("g7", "g8")).isUndefined());
+        const fugue::Result<QJsonObject> embedded = fugue::readEmbeddedWorkflow(out.path() + "/held-2.png"); // the second run's picture
+        QVERIFY(embedded.ok());
+        QCOMPARE(embedded->value("run").toObject().value("nodes").toObject().value(leaf).toObject().value("auto").toObject()
+                     .value("seed").toDouble(-1),
+                 expected);
+    }
+
+    // A definition's Increment seed, held on one instance by an override: a plain run inside g7 uses 10 in both instances and the
+    // definition moves on to 11; after leaving the group, Run from here on g7's Resize holds g7 at the 10 it used. The picture
+    // says 10 (run section) though the workflow it embeds holds 11 for the definition.
+    void aHeldIncrementSeedIsRecordedAtTheValueTheInstanceUsedNotTheDefinitions() {
+        QTemporaryDir out;
+        RunApp r(twoInstances(out.path(), kIncrementGroup, kIncrementLayout));
+        QVERIFY(r.app.open());
+        const auto definitionSeed = [&r] {
+            return r.app.model.document().group("local/gen")->nodes.value("gen").inputs.value("seed").toJson();
+        };
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        QVERIFY(r.app.model.groups()->enterGroup("g7"));
+        const QString first = r.runs->start();
+        QVERIFY(!first.isEmpty());
+        int answered = 0;
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            const QStringList jobs = r.jobs();
+            for (; answered < jobs.size(); ++answered)
+                r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(answered), {{"image.png", png(64, 64)}}); });
+            return finished.size() == 1;
+        })(), 10000);
+        const int jobs = r.jobs().size();
+        QCOMPARE(definitionSeed(), QJsonValue(11.0)); // used 10, the next is 11
+        QVERIFY(r.app.model.groups()->leaveGroup());
+        r.app.model.widgets()->setValue("rz", "width", 100);
+        r.app.model.select({"rz"});
+        const QString second = r.runs->runFromSelected();
+        QVERIFY(!second.isEmpty());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(finished.last().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), jobs); // g7/gen held at 10: a cache hit
+        const auto folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", second);
+        QVERIFY(folder.ok());
+        QCOMPARE(folder->state().value("auto").toObject().value("g7/gen").toObject().value("seed").toDouble(-1), 10.0);
+        const fugue::Result<QJsonObject> embedded = fugue::readEmbeddedWorkflow(out.path() + "/held-2.png");
+        QVERIFY(embedded.ok());
+        QCOMPARE(embedded->value("run").toObject().value("nodes").toObject().value("g7/gen").toObject().value("auto").toObject()
+                     .value("seed").toDouble(-1),
+                 10.0);
+        QCOMPARE(embedded->value("groups").toObject().value("local/gen").toObject().value("nodes").toObject().value("gen").toObject()
+                     .value("inputs").toObject().value("seed"),
+                 QJsonValue(11.0));
+        QCOMPARE(definitionSeed(), QJsonValue(11.0)); // the canvas's definition is as it was
     }
 
     // The increment seeds that were held are not advanced by the run; the ones after the node are.

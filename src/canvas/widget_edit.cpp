@@ -722,10 +722,6 @@ void countInstances(const Document &document, const Nodes &nodes, QHash<QString,
 
 } // namespace
 
-Document WidgetEdit::holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const {
-    return withHeldSeeds(seedsToHold(from, seedUsed), held);
-}
-
 Document WidgetEdit::withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) const {
     Document document = m_canvas->document();
     if (seeds.isEmpty())
@@ -733,7 +729,15 @@ Document WidgetEdit::withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) 
     if (m_registry)
         embedGroupTypes(document, *m_registry);
     const QStringList shown = m_canvas->scope();
+    QString shownDefinition;
+    nodesAt(document, shown, &shownDefinition);
     for (const HeldSeed &seed : seeds) {
+        if (seed.perInstance) {
+            // The definition's own Increment seed (shown when the canvas is inside it) is kept when no instance that ran used it.
+            if (held && seed.increment && seed.keepsDefinition && seed.definition == shownDefinition)
+                held->insert(seed.node + QLatin1Char('/') + seed.input);
+            continue;
+        }
         Nodes *nodes = seed.definition.isEmpty() ? &document.graph.nodes
                        : document.groups.contains(seed.definition) ? &document.groups[seed.definition].nodes
                                                                     : nullptr;
@@ -744,6 +748,15 @@ Document WidgetEdit::withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) 
             held->insert(seed.node + QLatin1Char('/') + seed.input);
     }
     return document;
+}
+
+QList<InputOverride> WidgetEdit::heldOverrides(const HeldSeeds &seeds) {
+    QList<InputOverride> overrides;
+    for (const HeldSeed &seed : seeds)
+        if (seed.perInstance)
+            overrides << InputOverride{(seed.level + QStringList{seed.node}).join(QLatin1Char('/')), seed.input,
+                                       InputValue::literal(seed.seed)};
+    return overrides;
 }
 
 WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUsed &seedUsed) const {
@@ -809,8 +822,7 @@ WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUse
                 continue;
             QString definition;
             const Nodes *nodes = nodesAt(document, at->level, &definition);
-            if (!definition.isEmpty() && instances.value(definition) > 1)
-                continue; // the same definition runs elsewhere in this run with its own seed
+            const bool perInstance = !definition.isEmpty() && instances.value(definition) > 1; // the same definition runs elsewhere
             const InputValue value = nodes->value(at->node).inputs.value(at->input);
             const QJsonObject layout = definition.isEmpty()
                                            ? document.layout
@@ -824,7 +836,29 @@ WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUse
             if (!seed)
                 continue;
             done.insert(at->key());
-            seeds << HeldSeed{at->level, definition, at->node, at->input, *seed, increment};
+            seeds << HeldSeed{at->level, definition, at->node, at->input, *seed, increment, perInstance, false};
+        }
+    }
+    // A definition's Increment seed that every instance running in this run had held was used by none: it does not advance.
+    // Its places: each instance the run has that the seed's value reaches (as the compile reads it), held or not.
+    for (HeldSeed &seed : seeds) {
+        if (!seed.perInstance || !seed.increment)
+            continue;
+        QSet<QString> heldPlaces;
+        for (const HeldSeed &other : std::as_const(seeds))
+            if (other.perInstance && other.definition == seed.definition && other.node == seed.node && other.input == seed.input)
+                heldPlaces.insert(Written{other.level, other.node, other.input}.key());
+        seed.keepsDefinition = true;
+        for (auto it = graph.nodes.constBegin(); it != graph.nodes.constEnd() && seed.keepsDefinition; ++it) {
+            const NodeType *type = m_registry->nodeTypeFor(it->type, it->version.major);
+            const auto [level, leaf] = split(it.key());
+            if (!type || !type->input(seed.input) || type->input(seed.input)->widget() != QLatin1String("seed"))
+                continue;
+            const std::optional<Written> at = writtenAt(document, level, leaf, seed.input, true);
+            QString definition;
+            if (at && at->node == seed.node && at->input == seed.input && nodesAt(document, at->level, &definition)
+                && definition == seed.definition && !heldPlaces.contains(at->key()))
+                seed.keepsDefinition = false; // an instance ran on the definition's own value
         }
     }
     return seeds;

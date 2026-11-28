@@ -112,6 +112,7 @@ struct Bound {
     QString writtenAt;                   // path id of the node it was written on
     QString writtenInput;                // the input name it was written under
     QList<const GroupInput *> narrowing; // the exposed inputs it came through
+    bool overridden = false;             // it is a CompileOptions override's value
 };
 
 // Where a link leads once groups are seen through.
@@ -134,6 +135,7 @@ struct Flat {
     QString provider;
     QString frozen;
     QMap<QString, InputValue> inputs; // links by path id
+    QStringList overridden;           // inputs whose value is a CompileOptions override's
     QMap<QString, InputSpec> checkedAs; // each input as its value was checked: narrowed by group faces
     bool emptied = false;             // a required input lost its value to a bypass
     QMap<QString, QString> lazyDropped; // lazy inputs that lost their value to a bypass, a mute or an emptied source: the reason
@@ -179,6 +181,7 @@ private:
     void checkRecursion();
     void checkProviders();
     void checkTarget();
+    void checkOverrides();
     void build(Scope *scope);
     bool checkVersion(const QString &path, const Node &node, const QString &typeName, const Version &installed);
     bool checkTrust(const QString &path, const NodeType &type);
@@ -332,6 +335,26 @@ void Compiler::checkTarget() {
     fail(error);
 }
 
+// An override names a node of the flattened graph, or a group instance (its exposed inputs); the input is checked where the node's
+// inputs are (checkNode, checkInstance).
+void Compiler::checkOverrides() {
+    for (const InputOverride &given : m_options.overrides) {
+        if (m_flat.contains(given.path) || m_status.value(given.path, Status::Leaf) == Status::Broken)
+            continue; // a node that did not build has its own error
+        bool instance = false;
+        for (const Scope &scope : m_scopes)
+            instance = instance || scope.instancePath == given.path;
+        if (instance)
+            continue;
+        QStringList paths = m_flat.keys();
+        Error error = makeError(QStringLiteral("usage"), QStringLiteral("There is no node %1 to give %2 a value.")
+                                                              .arg(given.path, given.input));
+        error.valid = QJsonArray::fromStringList(paths);
+        addHint(error, given.path, paths);
+        fail(error);
+    }
+}
+
 QStringList Compiler::knownTypes() const {
     QStringList ids;
     for (const NodeType *type : m_registry.nodeTypes())
@@ -477,22 +500,29 @@ QMap<QString, Bound> Compiler::effective(Scope *scope, const QString &id) const 
     const Node &node = *scope->nodes->constFind(id);
     for (auto it = node.inputs.constBegin(); it != node.inputs.constEnd(); ++it)
         result[it.key()] = Bound{*it, scope, path, it.key(), {}};
-    if (!scope->definition)
-        return result;
-    const QMap<QString, Bound> outer = effective(scope->parent, scope->instanceId);
-    for (const GroupInput &exposed : scope->definition->inputs) {
-        for (const PortRef &target : exposed.targets) {
-            if (target.node != id)
-                continue;
-            if (outer.contains(exposed.name)) {
-                Bound bound = outer.value(exposed.name);
-                bound.narrowing << &exposed;
-                result[target.port] = bound;
-            } else if (exposed.defaultValue) {
-                result[target.port] = Bound{*exposed.defaultValue, scope, scope->instancePath, exposed.name, {&exposed}};
+    if (scope->definition) {
+        const QMap<QString, Bound> outer = effective(scope->parent, scope->instanceId);
+        for (const GroupInput &exposed : scope->definition->inputs) {
+            for (const PortRef &target : exposed.targets) {
+                if (target.node != id)
+                    continue;
+                if (outer.contains(exposed.name)) {
+                    Bound bound = outer.value(exposed.name);
+                    bound.narrowing << &exposed;
+                    result[target.port] = bound;
+                } else if (exposed.defaultValue) {
+                    result[target.port] = Bound{*exposed.defaultValue, scope, scope->instancePath, exposed.name, {&exposed}};
+                }
             }
         }
     }
+    // A value given for this compile only wins over both (CompileOptions::overrides).
+    for (const InputOverride &given : m_options.overrides)
+        if (given.path == path) {
+            Bound bound{given.value, scope, path, given.input, result.value(given.input).narrowing};
+            bound.overridden = true;
+            result[given.input] = bound;
+        }
     return result;
 }
 
@@ -685,14 +715,18 @@ void Compiler::checkInstance(Scope *scope, const QString &id, Scope *child) {
     QStringList exposedNames;
     for (const GroupInput &input : group.inputs)
         exposedNames << input.name;
-    for (auto it = node.inputs.constBegin(); it != node.inputs.constEnd(); ++it) {
-        if (exposedNames.contains(it.key()))
+    QStringList written = node.inputs.keys(); // what the document writes on the instance, and what an override gives it
+    for (const InputOverride &given : m_options.overrides)
+        if (given.path == path && !written.contains(given.input))
+            written << given.input;
+    for (const QString &name : std::as_const(written)) {
+        if (exposedNames.contains(name))
             continue;
         Error error = nodeError(QStringLiteral("unknown_input"), path,
-                                QStringLiteral("Group %1 has no exposed input %2.").arg(node.type, it.key()));
-        error.input = it.key();
+                                QStringLiteral("Group %1 has no exposed input %2.").arg(node.type, name));
+        error.input = name;
         error.valid = QJsonArray::fromStringList(exposedNames);
-        addHint(error, it.key(), exposedNames);
+        addHint(error, name, exposedNames);
         fail(error);
     }
 
@@ -840,6 +874,8 @@ std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpe
 void Compiler::checkValue(Flat &flat, const InputSpec &base, const Bound &bound) {
     const InputSpec spec = narrowed(base, bound.narrowing);
     flat.checkedAs[spec.name] = spec;
+    if (bound.overridden && !flat.overridden.contains(spec.name))
+        flat.overridden << spec.name;
     const InputValue &value = bound.value;
     if (value.kind() != InputValue::Kind::List) {
         if (std::optional<InputValue> resolved = resolveItem(flat, spec, bound, value, -1))
@@ -1305,6 +1341,7 @@ CompiledGraph Compiler::shape() {
         node.provider = flat.provider;
         node.frozen = flat.frozen;
         node.lazyDropped = flat.lazyDropped;
+        node.overridden = flat.overridden;
         graph.nodes[flat.path] = node;
     }
     return graph;
@@ -1320,6 +1357,7 @@ Compilation Compiler::run() {
     check(top);
     checkProviders();
     checkTarget();
+    checkOverrides();
 
     // Cycles are looked for even when there are other errors: links that did
     // not resolve are not in the flattened graph, so what is there is sound.

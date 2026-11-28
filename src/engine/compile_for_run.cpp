@@ -27,6 +27,7 @@ Compilation compileForRun(const Document &document, Registry &registry, const Ru
     options.from = request.from;
     options.provider = request.provider;
     options.entered = request.entered;
+    options.overrides = request.overrides;
     if (setup.registerProviders)
         options.providers = registry.providerNames(); // without providers, a pin is not checked
     options.trusted = setup.trusted;

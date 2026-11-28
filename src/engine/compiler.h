@@ -75,6 +75,10 @@ struct CompiledNode {
     // reason: upstream_muted or upstream_empty. They are left out of `inputs`. The node is skipped with that reason when
     // it asks for one (9.9), and runs as usual when it does not.
     QMap<QString, QString> lazyDropped;
+    // The inputs that took their value from a CompileOptions override (here or through an exposed input of a group around the
+    // node). The run records each as the value this node used, in `auto` of run.json (the value a document cannot hold per
+    // instance). The scheduler records any such input, whatever its type (only seeds are given today). Not in toJson.
+    QStringList overridden;
 
     // Every link of inputs, list items included, in input name order.
     QList<CompiledLink> links() const;
@@ -127,6 +131,16 @@ struct CompiledGraph {
     static Result<CompiledGraph> fromJson(const QJsonObject &json);
 };
 
+// One input of one node, given a value for this compile only (the document is not changed): `path` is the node's path id in the
+// flattened graph ("g7/first", so one instance of a group and not the others), `input` the name of one of its inputs. The value
+// replaces what is written there and what an exposed input of the group around it gives, and is read as if it were written on
+// the node. Run from here uses it to hold a seed written in a group definition that runs more than once (3.4).
+struct InputOverride {
+    QString path;
+    QString input;
+    InputValue value;
+};
+
 struct CompileOptions {
     // "Run to here" (3.4): the path id to stop at. Only it and what it needs
     // are kept, and no sink is added. A group instance's path id stands for every live node inside it (a group card); any other path id that is not a node of the
@@ -154,6 +168,10 @@ struct CompileOptions {
     // Do not report a required input that holds nothing (`missing_input`): for a reading of the nodes before a run, such as where an app
     // goes (engine/paired_placement), when an app's inputs are filled by the run's own values. A run never sets it.
     bool allowUnsetInputs = false;
+    // Values given to single inputs of single nodes for this compile (InputOverride). A path that is not a node of the flattened graph
+    // is the error `usage`, and an input the node does not have (nor a group instance exposes) `unknown_input`, as in the
+    // document.
+    QList<InputOverride> overrides;
 };
 
 // What compiling gives: the compiled graph with the warnings found, or, when

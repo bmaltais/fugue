@@ -454,9 +454,13 @@ There is one list of named inputs per node type and no separate "parameter" kind
   in the flattened graph: it reaches into the group instances before the node and, inside a group, out to the nodes that feed
   it; nothing inside a group card that is the end point is held. A seed is held where its value is written: on its node, or on
   the instance whose exposed input drives it. One written in a group definition that runs more than once (two instances) is
-  left as it is, since holding it there would hold it in every copy (`WidgetEdit::holdUpstream`). Those nodes
+  held for each instance upstream of the node, at the seed that instance showed, and not in the definition (which would hold it
+  in every copy): the run's compile is given the value for that instance's node by path id
+  (`CompileOptions::overrides`, an `InputOverride`; `WidgetEdit::heldOverrides`), and the run's document keeps the definition as
+  written. The run records such a value as a drawn seed on its node (run.json `auto`, the Seed used output, the saved image's run section), as the Randomize seed it replaced, and an Increment seed too. For a shared definition, `run.nodes.<path>.auto` gives the value each instance used and wins over the definition's literal in the embedded workflow (the document cannot hold a value per instance). An override naming no node is the error `usage`, and an input the node or instance lacks `unknown_input`. An instance that is not upstream draws as in any run. Those nodes
   then key as the run before and are cache hits. The node's own seeds and those after it behave as in any run. After the run
-  starts, Increment advances only the seeds that were not held. The CLI has no such flag: holding reads the canvas's shown
+  starts, Increment advances only the seeds that were not held; a definition's Increment seed held per instance advances only when an
+  instance that ran in this run used the definition's own value (was not held). The CLI has no such flag: holding reads the canvas's shown
   results, which `fugue run` has none of.
 - A node with no sink downstream does not run, and the canvas marks it "not part of any output".
 - A node that feeds a **lazy input** ([3.2](#32-inputs)) only runs if some node that runs asks for it. A node is *demanded* when it is a sink or the run's target, when a demanded node reads it through an input that is not lazy, or when a node that runs asked for the lazy input that reads it. A node nothing demands is skipped with the reason `not_chosen` (so is what only it needed, up to the nodes something else demands). A node read by both sides of a Switch, or by a demanded node through an input that is not lazy, runs once. **A sink is always a root:** a Save or Preview hanging off a node on the side a Switch did not choose still runs that node and what it needs (ComfyUI's output-node behaviour). A frozen node that is not demanded is skipped, not served. A demanded frozen node with a valid frozen result is served even when a lazy input it would ask for is muted or empty ([10.4](#104-freeze)).
