@@ -1510,6 +1510,20 @@ private slots:
         }
     }
 
+    void keyingTheSizeStepNeverHashesAModel() {
+        Bench bench;
+        const QJsonObject sdxl = bench.model("fugue/diffusion-model", "diffusion_models/sdxl.safetensors", unetHeader());
+        const QString path = Bench::modelPath("diffusion_models/sdxl.safetensors");
+        QVERIFY(bench.hashes.known(path).isEmpty());
+        const NodeContext keyed = bench.context(kVaeEncode, {{"model", Value(sdxl)}});
+        // The file with the handle's name is taken to be the one, and its header gives the step: no hash is read.
+        QCOMPARE(bench.kernels.provider(kVaeEncode)->keyExtraFor(keyed), QStringLiteral("size_step:64"));
+        QCOMPARE(bench.kernels.node(QStringLiteral("fugue/crop-to-mask"))->keyExtraFor(keyed), QStringLiteral("size_step:64"));
+        QVERIFY(bench.hashes.known(path).isEmpty());
+        QCOMPARE(nodes::modelSizeStep(keyed, sdxl), 64); // a run reads the hash
+        QVERIFY(!bench.hashes.known(path).isEmpty());
+    }
+
     void vaeEncodeAndCropToMaskSizeAUnetsPicturesIn64s() {
         Bench bench;
         initVips();
