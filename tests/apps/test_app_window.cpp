@@ -413,6 +413,24 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // #715 review: the form's text window is the shown tab's: another tab's form (or a rebuilt one) closes it, so a key never types into
+    // a field of the wrong form.
+    void theFormsTextWindowClosesWhenTheTabChanges() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return find(app.window, name); };
+        QQuickItem *prompt = find(app.window, "appInput-prompt-edit");
+        QVERIFY(prompt);
+        QTest::mouseMove(app.window, prompt->mapToScene(QPointF(20, 10)).toPoint());
+        QTRY_VERIFY(find(app.window, "appInput-prompt-expand"));
+        tap(app.window, find(app.window, "appInput-prompt-expand"));
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        rig.view.show("another-tab", app.model.document(), QString());
+        QTRY_VERIFY(!dialogItem("textArea"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     // FUGUE_SHOT_DIR=<folder> (#715 slice 5): the form at a narrow width with the expand button on a hovered field, and the text window
     // over it. Pictures only.
     void theFormsTextWindowLook() {

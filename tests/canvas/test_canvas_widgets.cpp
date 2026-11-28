@@ -52,6 +52,19 @@ const char *promptGraph = R"({
              "view": {"center": [480, 340], "zoom": 1}}
 })";
 
+// A Text Template whose template is unset (its default is two lines), and a second node with text inputs.
+// A one-pixel picture for a node's thumbnail (an undecodable URL warns).
+const char *kPixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC";
+
+const char *unsetGraph = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "tmpl": {"type": "fugue/text-template", "version": "1.0.0", "inputs": {}}
+  }},
+  "layout": {"nodes": {"tmpl": {"pos": [420, 20]}},
+             "view": {"center": [480, 340], "zoom": 1}}
+})";
+
 struct WidgetApp : App {
     int quits = 0, fits = 0, searches = 0, runs = 0;
     explicit WidgetApp(const char *graph = fixture, const canvas_test::Look &look = {})
@@ -378,6 +391,7 @@ private slots:
         QVERIFY(app.open());
         const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
         // The button shows on hover and not before.
+        QTest::mouseMove(app.window, app.screen(700, 600)); // from elsewhere, so the move is a hover whatever the last test left
         QTest::mouseMove(app.window, app.in("all", "notes"));
         QTRY_VERIFY(canvas_test::item(app.widget("all", "notes"), "widgetExpand"));
         QQuickItem *button = canvas_test::item(app.widget("all", "notes"), "widgetExpand");
@@ -395,10 +409,29 @@ private slots:
         app.key(Qt::Key_Return, Qt::ControlModifier);
         QCOMPARE(app.runs, 1);
         QVERIFY(dialogItem("textArea")->hasActiveFocus());
-        // Tab goes to the node's other text input, Shift+Tab back; the title follows.
-        app.key(Qt::Key_Tab);
-        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Name"));
+        // Shift+Tab goes to the node's other text input (Name, a line), Tab back; the title follows. Past the last input Tab reaches
+        // the window's buttons, and Tab from the button is the window's, not node search.
         app.key(Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Name"));
+        // A line input takes no Enter: no line break gets into it.
+        app.key(Qt::Key_Return);
+        QVERIFY(!dialogItem("textArea")->property("text").toString().contains('\n'));
+        app.key(Qt::Key_Tab);
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
+        QCOMPARE(app.steps(), 1); // Name was not changed
+        app.key(Qt::Key_Tab);
+        QTRY_VERIFY(!dialogItem("textArea")->hasActiveFocus());
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
+        app.key(Qt::Key_Tab);
+        QCOMPARE(app.searches, 0);
+        QTRY_VERIFY(dialogItem("textArea")->hasActiveFocus());
+        app.key(Qt::Key_Tab, Qt::ShiftModifier); // Notes is not the first: back to Name
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Name"));
+        app.key(Qt::Key_Tab, Qt::ShiftModifier); // before the first: the buttons
+        QTRY_VERIFY(!dialogItem("textArea")->hasActiveFocus());
+        app.key(Qt::Key_Tab);
+        QTRY_VERIFY(dialogItem("textArea")->hasActiveFocus());
+        app.key(Qt::Key_Tab);
         QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!dialogItem("textArea"));
@@ -506,6 +539,161 @@ private slots:
         app.key(Qt::Key_Escape);
     }
 
+    // #715 review: a text result is the output the card's excerpt shows, not the first text output in the card's order.
+    void aTextResultIsTheOutputTheExcerptShows() {
+        WidgetApp app(R"({"fugue": 1, "graph": {"nodes": {"song": {"type": "fugue/describe-song", "version": "1.0.0", "inputs": {}}}},
+                         "layout": {"nodes": {"song": {"pos": [20, 20]}}, "view": {"center": [480, 340], "zoom": 1}}})");
+        QVERIFY(app.open());
+        app.model.setRunState("song", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3}, {"thumbnailText", "la la la\u2026"},
+                                       {"texts", QVariantMap{{"caption", "a calm tune"}, {"lyrics", "la la la la la"}}}});
+        const QVariantMap result = app.model.resultText("song");
+        QVERIFY(result.value("has").toBool());
+        QCOMPARE(result.value("output").toString(), QString("lyrics"));
+        QCOMPARE(result.value("text").toString(), QString("la la la la la"));
+        // An excerpt that is none of the texts (a number, a label) has no text result.
+        app.model.setRunState("song", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3}, {"thumbnailText", "42"},
+                                       {"texts", QVariantMap{{"caption", "a calm tune"}}}});
+        QVERIFY(!app.model.resultText("song").value("has").toBool());
+    }
+
+    // #715 review: an unset multiline input starts its editor from the whole default, not the first line the card's face shows.
+    void anUnsetMultilineStartsItsEditorFromTheWholeDefault() {
+        WidgetApp app(unsetGraph);
+        QVERIFY(app.open());
+        app.click(app.in("tmpl", "template"));
+        QTRY_VERIFY(app.typing());
+        app.key(Qt::Key_End, Qt::ControlModifier);
+        app.type("z");
+        QCOMPARE(app.stored("tmpl", "template"), QJsonValue("{a}\n{b}z"));
+    }
+
+    // #715 review: a press on a line of the resting text puts the caret on that line, in both node styles (the editor has the resting
+    // text's font and its 16 px lines).
+    void aClickOnALaterLineOfTheRestingTextLandsOnThatLine() {
+        for (const char *style : {"flat", "compact"}) {
+            WidgetApp app(fixture, canvas_test::Look{"catppuccin", 8, style});
+            QVERIFY(app.open());
+            app.click(app.in("all", "notes"));
+            QTRY_VERIFY(app.typing());
+            app.type("l1");
+            for (const char *line : {"l2", "l3", "l4", "l5"}) {
+                app.key(Qt::Key_Return);
+                app.type(line);
+            }
+            app.key(Qt::Key_Escape);
+            QTRY_VERIFY(!app.typing());
+            QQuickItem *label = canvas_test::item(app.widget("all", "notes"), "widgetValue");
+            QVERIFY(label);
+            QTRY_COMPARE(label->property("text").toString(), QString("l1\nl2\nl3\nl4\nl5"));
+            app.click(label->mapToScene(QPointF(1, 3 * 16 + 8)).toPoint()); // the middle of the 4th line, at its start
+            QTRY_VERIFY2(app.typing(), style);
+            app.type("X");
+            QCOMPARE(app.stored("all", "notes"), QJsonValue("l1\nl2\nl3\nXl4\nl5")) ;
+            app.key(Qt::Key_Escape);
+        }
+    }
+
+    // #715 review: Alt+T from an inline field is for that field, not for the selected node.
+    void altTFromAnInlineFieldOpensThatField() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"prompt"});
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Notes"));
+        app.key(Qt::Key_Escape);
+    }
+
+    // #715 review: the window is the Graph's: it closes with the Graph, and Alt+T opens nothing on a Graph that is not shown.
+    void theTextWindowGoesWithAHiddenGraph() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        QQuickItem *canvas = canvas_test::item(app.window->contentItem(), "canvas");
+        QVERIFY(canvas);
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        canvas->setVisible(false);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTest::qWait(50);
+        QVERIFY(!dialogItem("textArea"));
+        canvas->setVisible(true);
+    }
+
+    // #715 review: moving the open window to another node ends the first visit's undo step first.
+    void movingTheTextWindowToAnotherNodeEndsTheFirstVisit() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        app.type("a fox");
+        QCOMPARE(app.steps(), 0); // the visit's step is still open
+        app.model.select({"prompt"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("Prompt · Text"));
+        QCOMPARE(app.steps(), 1);
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("a fox"));
+        app.key(Qt::Key_Escape);
+    }
+
+    // #715 review: a pasted line break in a one-line input becomes a space by an edit of the document, so its undo history stays.
+    void aPastedBreakInALineInputKeepsTheWindowsUndoAndLineHeight() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        app.key(Qt::Key_Tab, Qt::ShiftModifier); // Name, a line
+        QTRY_COMPARE(dialogItem("textTitle")->property("text").toString(), QString("All widgets · Name"));
+        app.type("ab");
+        QVERIFY(QMetaObject::invokeMethod(dialogItem("textArea"), "insert", Q_ARG(int, 0), Q_ARG(QString, "p\nq"))); // as a paste is
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("p qfugueab"));
+        QCOMPARE(app.stored("all", "name"), QJsonValue("p qfugueab"));
+        QVERIFY(dialogItem("textArea")->property("canUndo").toBool()); // the typing before it can still be undone
+        app.key(Qt::Key_Escape);
+    }
+
+    // #715 review: only the shown node's rows (and its link's source) refresh the window; another node's run does not.
+    void theTextWindowIgnoresOtherNodesRuns() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"all"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea"));
+        QObject *dialog = app.window->findChild<QObject *>("textDialog");
+        QVERIFY(dialog);
+        const int stamp = dialog->property("stamp").toInt();
+        app.model.setRunState("prompt", {{"state", "cached"}, {"texts", QVariantMap{{"text", "x"}}}});
+        QTest::qWait(30);
+        QCOMPARE(dialog->property("stamp").toInt(), stamp);
+        app.model.setRunState("all", {{"state", "error"}, {"error", "boom"}});
+        QTRY_VERIFY(dialog->property("stamp").toInt() > stamp);
+        app.key(Qt::Key_Escape);
+    }
+
+    // #715 review: a brace key and Tab in one batch leave no text of the closed editor in the next field's preview.
+    void aKeyAndTabInOneBatchPreviewsNothingIntoTheNextField() {
+        WidgetApp app(promptGraph);
+        QVERIFY(app.open());
+        app.click(app.in("tmpl", "template"));
+        QTRY_VERIFY(app.typing());
+        app.type("{");
+        app.key(Qt::Key_Tab);
+        QTRY_COMPARE(app.focused()->objectName(), QString("widgetArea"));
+        QTest::qWait(50);
+        QVERIFY(!app.error() || !app.error()->isVisible());
+        app.key(Qt::Key_Escape);
+    }
+
     // FUGUE_SHOT_DIR=<folder> (#715 slice 4): a Dynamic Prompt in the text window with an unclosed brace, dark and light. Pictures only.
     void aHighlightedPromptLook() {
         const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
@@ -541,7 +729,7 @@ private slots:
         QVERIFY(app.open());
         const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
         const QString whole = "a red fox\nin the snow at dawn, soft light, detailed fur";
-        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3},
                                          {"thumbnailText", "a red fox\nin the snow at dawn, soft li\u2026"}, {"texts", QVariantMap{{"text", whole}}}});
         QRectF excerpt;
         for (int row = 0; row < app.model.nodes()->rowCount(); ++row)
@@ -563,7 +751,7 @@ private slots:
         QCOMPARE(app.steps(), 0);
         QCOMPARE(app.stored("prompt", "text"), QJsonValue("a red fox"));
         // A new run's text shows in the window.
-        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3},
                                          {"thumbnailText", "a blue fox"}, {"texts", QVariantMap{{"text", "a blue fox"}}}});
         QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("a blue fox"));
         app.key(Qt::Key_Escape);
@@ -583,7 +771,7 @@ private slots:
         WidgetApp app;
         QVERIFY(app.open());
         app.window->resize(1000, 640);
-        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", kPixel}, {"thumbnailAspect", 0.3},
                                          {"thumbnailText", "a red fox in the snow at dawn, soft light, detailed fur, shallow dep\u2026"},
                                          {"texts", QVariantMap{{"text", "a red fox in the snow at dawn, soft light, detailed fur, shallow depth of field, 35mm photo, film grain, muted colours, a quiet forest behind it"}}}});
         QRectF excerpt;

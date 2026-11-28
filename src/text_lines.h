@@ -21,6 +21,8 @@ public:
     // Every block of the document at `ratio` times the font's line height (1.5: one and a half). The document's own undo history
     // is not kept: the text was just set, so it has none worth keeping, and a format change must not be an undo step of its own.
     Q_INVOKABLE static void setLineHeight(QQuickTextDocument *document, qreal ratio);
+    // ... or `pixels` high exactly, as a Text's `lineHeightMode: Text.FixedHeight` does (the inline editor matches the resting well's lines).
+    Q_INVOKABLE static void setFixedLineHeight(QQuickTextDocument *document, qreal pixels);
 };
 
 } // namespace fugue

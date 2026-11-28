@@ -347,7 +347,13 @@ FocusScope {
     }
     onWidthChanged: { if (placedHidden && visible) placeWhenSettled.restart(); else refitAutoFramed() }
     onHeightChanged: { if (placedHidden && visible) placeWhenSettled.restart(); else refitAutoFramed() }
-    onVisibleChanged: if (placedHidden && visible) placeWhenSettled.restart()
+    onVisibleChanged: {
+        if (placedHidden && visible)
+            placeWhenSettled.restart()
+        // The text window is the Graph's: it goes with it (the App page, or an area with another view, shows instead).
+        if (!visible && textDialog)
+            textDialog.close()
+    }
     function fit() {
         if (model.fitView(width, height, reservedTop, reservedBottom))
             applyView()
@@ -647,6 +653,8 @@ FocusScope {
     }
     // The text window of a node's text input (#715), made on the first use: `input` empty is the node's first multiline input.
     function openText(node, input) {
+        if (!visible) // a Graph that is not shown has no text to edit (Alt+T on the App page names the hidden graph's selection)
+            return
         if (!textDialog)
             textDialog = textDialogComponent.createObject(canvas, {edits: model.widgets, canvasModel: model})
         textDialog.openFor(node, input)
@@ -654,9 +662,20 @@ FocusScope {
     // ... read-only on the whole text a node's last run made (a double-click on its text excerpt, as a double-click on a picture
     // opens its large view).
     function openTextResult(node) {
+        if (!visible)
+            return
         if (!textDialog)
             textDialog = textDialogComponent.createObject(canvas, {edits: model.widgets, canvasModel: model})
         textDialog.openForResult(node)
+    }
+    // The text input (a line or multiline widget) whose inline editor holds the focus: its InputWidget, else null.
+    function focusedTextField() {
+        for (let item = Window.activeFocusItem; item; item = item.parent) {
+            const host = item.host
+            if (host && host.nodeId !== undefined && host.editingText && (host.kind === "multiline" || host.kind === "line"))
+                return host
+        }
+        return null
     }
     property var textDialog: null
     Component {
@@ -1585,7 +1604,11 @@ FocusScope {
     Connections {
         target: canvas.model
         function onNodeRenameRequested(node) { canvas.renamingNode = node }
-        function onTextEditRequested(node) { canvas.openText(node, "") }
+        // Alt+T from an inline text field is for that field, not for the selected node.
+        function onTextEditRequested(node) {
+            const field = canvas.focusedTextField()
+            canvas.openText(field ? field.nodeId : node, field ? field.name : "")
+        }
         function onFrameRenameRequested(frame) { canvas.renamingFrame = frame }
     }
     // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a
