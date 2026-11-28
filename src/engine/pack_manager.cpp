@@ -766,12 +766,14 @@ static void fillSecretState(PackSummary &summary) {
     summary.secretsOtherSource = store.namesSetForOtherSources(summary.id, key);
 }
 
-Result<PackSummary> summarizePack(const QString &folder) {
+// `record`: Leave for a staged copy, which is only looked at: its secrets (and a `.fugue-source.json` it may carry) must never
+// become the digest trust compares the installed pack of that id and version with, nor be adopted into the trust file.
+static Result<PackSummary> summarizeAt(const QString &folder, PackDigest record) {
     const Result<QJsonObject> json = readPackJson(folder);
     if (!json)
         return json.error();
     Registry scratch;
-    const LoadedPack loaded = loadPack(scratch, folder);
+    const LoadedPack loaded = loadPack(scratch, folder, PackOrigin::Disk, record);
     if (!loaded.enabled) {
         const QString why = loaded.errors.isEmpty() ? QStringLiteral("it did not load") : loaded.errors.first().message;
         return fail(QStringLiteral("pack_invalid"), QStringLiteral("The pack is not valid: %1").arg(why));
@@ -813,6 +815,8 @@ Result<PackSummary> summarizePack(const QString &folder) {
                         QStringLiteral("They could change what a prompt shows."));
     return summary;
 }
+
+Result<PackSummary> summarizePack(const QString &folder) { return summarizeAt(folder, PackDigest::Record); }
 
 namespace {
 
@@ -1003,7 +1007,7 @@ Result<std::shared_ptr<PreparedPack>> preparePack(const PackSource &source, cons
     prepared->staging = staged->staging;
     prepared->folder = staged->folder;
     prepared->source = staged->source;
-    Result<PackSummary> summary = summarizePack(staged->folder);
+    Result<PackSummary> summary = summarizeAt(staged->folder, PackDigest::Leave);
     if (!summary)
         return summary.errors();
     summary->source = staged->source;
@@ -1133,7 +1137,7 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue;
         }
         const auto cleanup = [&] { removeTree(staged->staging); };
-        Result<PackSummary> next = summarizePack(staged->folder);
+        Result<PackSummary> next = summarizeAt(staged->folder, PackDigest::Leave);
         Errors why;
         if (!next)
             why = next.errors();

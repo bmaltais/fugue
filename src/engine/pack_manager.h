@@ -95,8 +95,8 @@ bool packSetupDone(const QString &packFolder, const QStringList &command);
 // The installed pack folders' record of where each came from, or an empty source.
 PackSource readPackSource(const QString &packFolder);
 
-// A summary of the pack at `folder` (an installed or staged one). Reads pack.json and the
-// manifests of its nodes; errors when the pack does not load.
+// A summary of the pack installed at `folder`. Reads pack.json and the manifests of its nodes; errors when the pack does
+// not load. Like any load it records the digest of its secrets for trust (6.7); a staged copy is summarized without that.
 Result<PackSummary> summarizePack(const QString &folder);
 
 // A pack read into a staging folder (a folder is copied, a git address cloned), not yet installed. Installing it

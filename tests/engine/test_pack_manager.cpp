@@ -693,8 +693,8 @@ private slots:
         QVERIFY(trustStore().isTrusted(id, "1.0.0"));
         makePack(source(), id, "1.0.0", false, {{"command", QJsonArray{"false"}}}); // same version, new setup that fails
         QCOMPARE(updatePacks(id, {}, packs(), trustStore(), answering(Answer::Yes)).error().code, QString("setup_failed"));
+        QVERIFY(trustStore().isTrusted(id, "1.0.0")); // before anything loads the pack again
         QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
-        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
     }
 
     // #673: a pid that was handed out again is told by its start ticks, a pid from before a reboot by the boot id; no clock is read.
@@ -815,7 +815,6 @@ private slots:
             QSKIP("root can write a read-only folder");
         QCOMPARE(updated.error().code, QString("permission_denied"));
         QVERIFY2(updated.error().message.startsWith("Cannot replace"), qPrintable(updated.error().message)); // not the staging
-        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0")); // loaded again, as the window's reload does
         QVERIFY(trustStore().isTrusted(id, "1.0.0"));
         QCOMPARE(readAll(packs() + "/" + id + "/tool/run.sh"), QByteArray("#!/bin/sh\n"));
     }
@@ -848,7 +847,6 @@ private slots:
         QCOMPARE(updated.error().code, QString("permission_denied"));
         QCOMPARE(readAll(packs() + "/" + id + "/tool/run.sh"), QByteArray("#!/bin/sh\n"));
         QCOMPARE(leftovers(), QStringList{id});
-        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0")); // loaded again, as the window's reload does
         QVERIFY(trustStore().isTrusted(id, "1.0.0"));
     }
 
@@ -912,6 +910,57 @@ private slots:
         QVERIFY(given);
         QVERIFY(trustStore().isListed(id, "1.0.0"));
         QCOMPARE(trustStore().sealedDigest(id, "1.0.0"), QString("feedface"));
+    }
+
+    // A staged copy is only looked at: summarizing it does not replace the digest trust compares the installed pack of that id
+    // and version with (it has no source record, or one it carries), so a declined update leaves the trusted pack trusted.
+    void aDeclinedUpdateLeavesTheInstalledPackTrusted() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        write(source() + "/" + id + "/tool/run.sh", "#!/bin/sh\necho changed\n"); // new code, same version
+        PackPrompts prompts = answering(Answer::Yes);
+        prompts.install = [](const PackSummary &) { return Answer::No; };
+        const Result<QList<PackAdded>> updated = updatePacks(id, {}, packs(), trustStore(), prompts);
+        QVERIFY(updated.ok() && updated->isEmpty());
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+    }
+
+    // Nor does a staged copy adopt its digest into the session's trust file for a yes given before digests were kept: only the
+    // installed pack, when it is loaded, may.
+    void aStagedCopyLeavesTheTrustFileAlone() {
+        const QString id = "io.example.staged";
+        const QByteArray before = R"({"packs": {"io.example.staged": ["1.0.0"]}})";
+        write(TrustStore::defaultPath(), before); // the session's own file (the test's home), which a load adopts digests into
+        PackSource from;
+        from.location = makePack(source(), id, "1.0.0");
+        const Result<std::shared_ptr<PreparedPack>> prepared = preparePack(from, packs(), answering(Answer::Yes));
+        QVERIFY(prepared.ok());
+        QCOMPARE(readAll(TrustStore::defaultPath()), before);
+        QVERIFY(packSecretsDigest(id, "1.0.0").isEmpty());
+        QFile::remove(TrustStore::defaultPath());
+    }
+
+    // Security (#497): a staged copy of the same id and version that declares the secrets the person approved, and carries the
+    // installed pack's source record, does not make the installed pack, edited in place to read a secret nobody approved, read as
+    // trusted (it did: summarizing the copy replaced the digest trust compares with, while the registry kept the edited pack).
+    void aStagedCopyDoesNotVouchForAnEditedPack() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        const QString folder = packs() + "/" + id;
+        QJsonObject pack = QJsonDocument::fromJson(readAll(folder + "/pack.json")).object();
+        pack["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}}};
+        writeJson(folder + "/pack.json", pack);
+        Registry registry;
+        loadPacks(registry, {packs()});
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
+        const QString decoy = makePack(source() + "/decoy", id, "1.0.0"); // what was approved, and where it came from
+        QVERIFY(QFile::copy(folder + "/.fugue-source.json", decoy + "/.fugue-source.json"));
+        PackSource from;
+        from.location = decoy;
+        QCOMPARE(preparePack(from, packs(), answering(Answer::Yes)).error().code, QString("pack_exists"));
+        QVERIFY(!trustStore().isTrusted(id, "1.0.0"));
     }
 
     // #418: one command at a time changes the packs folder.
