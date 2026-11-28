@@ -7,6 +7,7 @@
 //   FUGUE_NODE_SHOTS=/tmp/shots build/test_canvas_node_style screenshots
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QQuickStyle>
 
@@ -202,6 +203,33 @@ private slots:
         canvas.setNodeStyle("flat");
         QCOMPARE(node(canvas, "blur").value("nodeHeight").toDouble(), flat.value("nodeHeight").toDouble());
         QVERIFY(!port(node(canvas, "blur"), "inputs", "image").value("sharesRow").toBool());
+    }
+
+    // A socket-only input with a `shown_when` never shares an output's row, shown or not: when its condition flipped, the pairs and
+    // every row under them would move.
+    void anInputWithAConditionNeverSharesARow() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        const Result<NodeType> type = NodeType::fromJson(QJsonDocument::fromJson(R"({"manifest": 1, "id": "io.example.cond/mix",
+            "version": "1.0.0", "name": "Mix", "runtime": {"kind": "builtin"},
+            "inputs": [{"name": "mode", "type": "text", "choices": ["over", "under"], "default": "over"},
+                       {"name": "under", "type": "image", "optional": true, "shown_when": {"mode": ["under"]}},
+                       {"name": "image", "type": "image"}],
+            "outputs": [{"name": "image", "type": "image"}]})").object());
+        QVERIFY(type.ok());
+        QVERIFY(registry.add(type.value()).isEmpty());
+        CanvasModel canvas(&registry);
+        const Result<Document> loaded = Document::load(R"({"fugue": 1, "graph": {"nodes": {
+            "mix": {"type": "io.example.cond/mix", "version": "1.0.0", "inputs": {"mode": "under"}}}},
+          "layout": {"nodes": {"mix": {"pos": [0, 0]}}}})");
+        QVERIFY(loaded.ok());
+        canvas.setDocument(loaded.value());
+        canvas.setNodeStyle("compact");
+        QVERIFY(!port(node(canvas, "mix"), "inputs", "under").value("sharesRow").toBool()); // shown now, and still not paired
+        QVERIFY(port(node(canvas, "mix"), "inputs", "image").value("sharesRow").toBool());
+        QCOMPARE(canvas.widgets()->setValue("mix", "mode", "over"), QString());
+        QVERIFY(port(node(canvas, "mix"), "inputs", "under").value("notUsed").toBool());
+        QVERIFY(port(node(canvas, "mix"), "inputs", "image").value("sharesRow").toBool()); // the same pair as before
     }
 
     // #476: the model says each node's top-level category, which colours the Compact header's dot.

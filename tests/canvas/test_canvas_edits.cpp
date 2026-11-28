@@ -3,8 +3,10 @@
 // the document the model gives back (canvas_model.h).
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 #include <QUndoStack>
 
@@ -12,6 +14,8 @@
 #include "canvas/canvas_model.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
+#include "engine/group_library.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "workflow/content_hash.h"
 #include "nodes/builtin.h"
@@ -87,7 +91,15 @@ class TestCanvasEdits : public QObject {
     Registry m_registry;
 
 private slots:
-    void initTestCase() { nodes::addBuiltinNodeTypes(m_registry); }
+    void initTestCase() {
+        nodes::addBuiltinNodeTypes(m_registry);
+        // A LoRA to link from: no built-in node has a LoRA output.
+        const Result<NodeType> pick = NodeType::fromJson(QJsonDocument::fromJson(R"({"manifest": 1, "id": "io.example.lora/pick",
+            "version": "1.0.0", "name": "Pick LoRA", "runtime": {"kind": "builtin"}, "inputs": [],
+            "outputs": [{"name": "lora", "type": "fugue/lora"}]})").object());
+        QVERIFY2(pick.ok(), qPrintable(pick.ok() ? QString() : pick.error().message));
+        QVERIFY(m_registry.add(pick.value()).isEmpty());
+    }
 
     // #55: P pins the selection (layout.nodes.<id>.pinned), one undo step; a pinned node stays
     // where it is when a drag or its Frame moves the others.
@@ -815,6 +827,182 @@ private slots:
         QCOMPARE(canvas.undoStack()->count(), 2); // the redo of the disconnect is gone, the clearing is a step of its own
         canvas.undo();
         QCOMPARE(inputNames(canvas, "apply").size(), 8);
+    }
+
+    // A row's link picked up and put down on the empty "Add LoRA" row moves the row: its strength and On go with the LoRA, in one
+    // undo step. Put down nowhere, the row goes with its values (6.1.2).
+    void movingARowsLinkToTheEmptyRowTakesItsValues() {
+        CanvasModel canvas(&m_registry);
+        const Document start = document(R"({"fugue": 1, "graph": {"nodes": {
+            "pick": {"type": "io.example.lora/pick", "version": "1.0.0", "inputs": {}},
+            "apply": {"type": "fugue/apply-loras", "version": "1.0.0",
+                      "inputs": {"lora_1": {"from": "pick.lora"}, "strength_1": 0.3, "enabled_1": false,
+                                 "lora_3": {"resource": "fugue/lora", "name": "ink.safetensors"}, "strength_3": 0.8}}}},
+          "layout": {"nodes": {"pick": {"pos": [0, 0]}, "apply": {"pos": [300, 0]}}}})");
+        canvas.setDocument(start);
+        QCOMPARE(inputNames(canvas, "apply"),
+                 (QStringList{"model", "lora_1", "strength_1", "enabled_1", "lora_3", "strength_3", "enabled_3", "lora_4"}));
+        canvas.beginLinkDrag("apply", "lora_1", false);
+        QVERIFY(canvas.endLinkDrag("apply", "lora_4", false));
+        const Node moved = canvas.document().graph.nodes.value("apply");
+        QCOMPARE(from(canvas, "apply", "lora_4"), QStringLiteral("pick.lora"));
+        QCOMPARE(moved.inputs.value("strength_4").literal(), QJsonValue(0.3));
+        QCOMPARE(moved.inputs.value("enabled_4").literal(), QJsonValue(false));
+        QVERIFY(!moved.inputs.contains("strength_1") && !moved.inputs.contains("lora_1"));
+        QCOMPARE(moved.inputs.value("strength_3").literal(), QJsonValue(0.8)); // the row it did not touch keeps its own
+        QCOMPARE(canvas.undoStack()->count(), 1);
+        canvas.undo();
+        QCOMPARE(canvas.document().graph.nodes.value("apply").inputs, start.graph.nodes.value("apply").inputs);
+
+        // Let go on nothing: the link and its row are gone, as when the link is taken away.
+        canvas.beginLinkDrag("apply", "lora_1", false);
+        QVERIFY(!canvas.endLinkDrag());
+        QVERIFY(!canvas.document().graph.nodes.value("apply").inputs.contains("strength_1"));
+        // A later link into an empty key does not bring the old row's values back.
+        QVERIFY(canvas.connectPorts("pick", "lora", "apply", "lora_4"));
+        QVERIFY(!canvas.document().graph.nodes.value("apply").inputs.contains("strength_4"));
+    }
+
+    // Run from here holds what is upstream in the flattened graph (3.4): the Randomize seeds inside a group instance before the
+    // node, and, inside a group, the nodes outside that feed it; never the end point's own, nor those inside a group card that
+    // is the end point. A seed written in a definition with two instances is left as it is: holding it there would hold it in
+    // the other copy too.
+    void runFromHereHoldsSeedsThroughGroups() {
+        const char *pass = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a", "seed": {"auto": "random"}}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}}%1}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "image", "targets": ["first.image"]}], "outputs": [{"name": "image", "from": "second.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "b", "seed": {"auto": "random"}}},
+                      "second": {"type": "fugue/generate-image", "version": "1.0.0",
+                                 "inputs": {"prompt": "c", "seed": 9, "image": {"from": "first.image"}}}}}}})";
+        const QHash<QString, double> shown{{"pre/seed", 1}, {"g7/first/seed", 2}, {"g7/second/seed", 9}, {"g8/first/seed", 3}};
+        const WidgetEdit::SeedUsed seedUsed = [&shown](const QString &path, const QString &input) -> std::optional<double> {
+            const auto it = shown.constFind(path + "/" + input);
+            return it == shown.constEnd() ? std::nullopt : std::optional<double>(*it);
+        };
+        const auto seed = [](const Document &doc, const QString &group, const QString &node) {
+            const Node &n = group.isEmpty() ? doc.graph.nodes.value(node) : doc.group(group)->nodes.value(node);
+            return n.inputs.value("seed").toJson();
+        };
+        const QJsonValue random = QJsonObject{{"auto", "random"}};
+
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(QString::fromUtf8(pass).arg("").toUtf8().constData()));
+        QSet<QString> held;
+        Document run = canvas.widgets()->holdUpstream("save", seedUsed, &held);
+        QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
+        QCOMPARE(seed(run, "local/pass", "first"), QJsonValue(2.0)); // inside the instance before the node
+        QCOMPARE(seed(run, "local/pass", "second"), QJsonValue(9.0));
+        QVERIFY(held.isEmpty()); // no increment seeds
+        QCOMPARE(seed(canvas.document(), "local/pass", "first"), random); // the canvas's own document is as it was
+        // The group's card as the end point: everything inside runs as in any run.
+        run = canvas.widgets()->holdUpstream("g7", seedUsed, &held);
+        QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
+        QCOMPARE(seed(run, "local/pass", "first"), random);
+        // Inside the group: what feeds it from outside is upstream too.
+        QVERIFY(canvas.groups()->enterGroup("g7"));
+        run = canvas.widgets()->holdUpstream("g7/second", seedUsed, &held);
+        QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
+        QCOMPARE(seed(run, "local/pass", "first"), QJsonValue(2.0));
+
+        // A second instance of the definition: its inner seeds are not held, the outer ones still are.
+        canvas.setDocument(document(QString::fromUtf8(pass)
+                                        .arg(R"(, "g8": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+                                               "save2": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g8.image"}}})")
+                                        .toUtf8().constData()));
+        run = canvas.widgets()->holdUpstream("save", seedUsed, &held);
+        QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
+        QCOMPARE(seed(run, "local/pass", "first"), random);
+        QVERIFY(canvas.groups()->enterGroup("g7"));
+        run = canvas.widgets()->holdUpstream("g7/second", seedUsed, &held);
+        QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
+        QCOMPARE(seed(run, "local/pass", "first"), random);
+    }
+
+    // What else decides a held place: a library group named only by its type id is held inside as the run embeds it; an exposed
+    // seed that also drives the end point is not held (it would pin the end point's own seed); an Increment seed never set is
+    // held on its node.
+    void runFromHereHoldsLibraryGroupsAndNeverTheEndPointsSeed() {
+        // One exposed seed drives both inner nodes, so both used the same one.
+        const QHash<QString, double> shown{{"pre/seed", 1}, {"g7/first/seed", 2}, {"g7/second/seed", 2}};
+        const WidgetEdit::SeedUsed seedUsed = [&shown](const QString &path, const QString &input) -> std::optional<double> {
+            const auto it = shown.constFind(path + "/" + input);
+            return it == shown.constEnd() ? std::nullopt : std::optional<double>(*it);
+        };
+        const char *both = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a"}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}, "seed": {"auto": "random"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}}}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "image", "targets": ["first.image"]}, {"name": "seed", "targets": ["first.seed", "second.seed"]}],
+            "outputs": [{"name": "image", "from": "second.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "b"}},
+                      "second": {"type": "fugue/generate-image", "version": "1.0.0",
+                                 "inputs": {"prompt": "c", "image": {"from": "first.image"}}}}}},
+          "layout": {"nodes": {"pre": {"increment": ["seed"]}}}})";
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(both));
+        QSet<QString> held;
+        Document run = canvas.widgets()->holdUpstream("save", seedUsed, &held);
+        QCOMPARE(run.graph.nodes.value("pre").inputs.value("seed").toJson(), QJsonValue(1.0)); // Increment, never set
+        QCOMPARE(held, QSet<QString>{"pre/seed"});
+        QCOMPARE(run.graph.nodes.value("g7").inputs.value("seed").toJson(), QJsonValue(2.0)); // drives two nodes, both before
+        QVERIFY(canvas.groups()->enterGroup("g7"));
+        held.clear();
+        run = canvas.widgets()->holdUpstream("g7/second", seedUsed, &held);
+        QCOMPARE(run.graph.nodes.value("pre").inputs.value("seed").toJson(), QJsonValue(1.0));
+        QCOMPARE(run.graph.nodes.value("g7").inputs.value("seed").toJson(), QJsonValue(QJsonObject{{"auto", "random"}}));
+        QVERIFY(held.isEmpty()); // pre's is not on the level shown: no advance to skip
+
+        // A group from the library, the workflow naming only its type id: its inner Randomize seed is held in the run's copy.
+        const char *lib = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a"}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}}}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "image", "targets": ["first.image"]}], "outputs": [{"name": "image", "from": "first.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0",
+                                "inputs": {"prompt": "b", "seed": {"auto": "random"}}}}}}})";
+        QTemporaryDir packs;
+        QVERIFY(saveToLibrary(document(lib), "local/pass", m_registry, packs.filePath("local")).ok());
+        Registry library;
+        nodes::addBuiltinNodeTypes(library);
+        loadPacks(library, {packs.path()});
+        Document bare = document(lib);
+        bare.groups.clear();
+        CanvasModel fromLibrary(&library);
+        fromLibrary.setDocument(bare);
+        run = fromLibrary.widgets()->holdUpstream("save", seedUsed, nullptr);
+        QVERIFY(run.group("local/pass"));
+        QCOMPARE(run.group("local/pass")->nodes.value("first").inputs.value("seed").toJson(), QJsonValue(2.0));
+        QVERIFY(fromLibrary.document().groups.isEmpty()); // the canvas's own document is as it was
+    }
+
+    // A row whose key the group's face drives is there inside the group (6.1.2, 5.4): Make group moved lora_2's link to the
+    // instance, and an edit inside keeps row 2's strength and On, which the compiler reads with the instance's link.
+    void aRowWhoseKeyTheGroupDrivesKeepsItsValuesInside() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "pick": {"type": "io.example.lora/pick", "version": "1.0.0", "inputs": {}},
+            "apply": {"type": "fugue/apply-loras", "version": "1.0.0",
+                      "inputs": {"lora_1": {"resource": "fugue/lora", "name": "ink.safetensors"},
+                                 "lora_2": {"from": "pick.lora"}, "strength_2": 0.3, "enabled_2": false}}}},
+          "layout": {"nodes": {"pick": {"pos": [0, 0]}, "apply": {"pos": [300, 0]}}}})"));
+        canvas.select({"apply"});
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(canvas.groups()->problem()));
+        QCOMPARE(from(canvas, instance, "lora_2"), QStringLiteral("pick.lora"));
+        QVERIFY(canvas.groups()->enterGroup(instance));
+        QCOMPARE(inputNames(canvas, "apply"),
+                 (QStringList{"model", "lora_1", "strength_1", "enabled_1", "lora_2", "strength_2", "enabled_2", "lora_3"}));
+        QCOMPARE(canvas.widgets()->setValue("apply", "strength_1", 0.5), QString());
+        const Document whole = canvas.document();
+        const Node inner = whole.group(whole.graph.nodes.value(instance).type)->nodes.value("apply");
+        QCOMPARE(inner.inputs.value("strength_1").literal(), QJsonValue(0.5));
+        QCOMPARE(inner.inputs.value("strength_2").literal(), QJsonValue(0.3));
+        QCOMPARE(inner.inputs.value("enabled_2").literal(), QJsonValue(false));
     }
 };
 

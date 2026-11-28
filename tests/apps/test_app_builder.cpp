@@ -295,6 +295,24 @@ private slots:
         QCOMPARE(f.builder.outputChoices().first().toMap().value("node").toString(), QStringLiteral("save"));
     }
 
+    // A repeating input's rows can go in an app, and so can the empty row's key (6.1.2): filling it makes the row.
+    void theChoicesListTheRowsOfARepeatingInput() {
+        Fixture f(R"({"fugue": 1, "graph": {"nodes": {
+            "apply": {"type": "fugue/apply-loras", "version": "1.0.0",
+                      "inputs": {"lora_1": {"resource": "fugue/lora", "name": "ink.safetensors"}, "strength_1": 0.5,
+                                 "lora_2": {"resource": "fugue/lora", "name": "detail.safetensors"}}}}}})");
+        QVERIFY(f.builder.begin("A"));
+        QStringList offered;
+        for (const QVariant &choice : f.builder.inputChoices())
+            offered << choice.toMap().value("input").toString();
+        QCOMPARE(offered, (QStringList{"model", "lora_1", "strength_1", "enabled_1", "lora_2", "strength_2", "enabled_2", "lora_3"}));
+        QVERIFY(f.builder.exposeInput("apply", "strength_1"));
+        QStringList also;
+        for (const QVariant &candidate : f.builder.driveCandidates("strength_1"))
+            also << candidate.toMap().value("input").toString();
+        QCOMPARE(also, QStringList{"strength_2"});
+    }
+
     void thePreviewIsTheAppViewsFormOfTheDraft() {
         Fixture f;
         QVERIFY(f.builder.begin("A"));

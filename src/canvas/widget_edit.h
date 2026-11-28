@@ -184,9 +184,28 @@ public:
     // Every incrementing seed gains one (back to its minimum past the maximum), one undo step.
     Q_INVOKABLE void advanceSeeds();
     // "Run from here" (spec 3.4): the whole workflow as a run takes it, with every random or increment seed of the nodes
-    // strictly upstream of `node` (in the level shown) set to the seed its shown result used, when there is one. The canvas's
-    // own document is not touched. `held` gets "node/input" for each seed that was held, for advanceSeeds not to advance.
-    fugue::Document holdUpstream(const QString &node, QSet<QString> *held) const;
+    // strictly upstream of `from` set to the seed its shown result used, when there is one: `seedUsed(path, input)`, the
+    // "Seed used" the node at that path id last showed. `from` is a path id; a group instance stands for every node inside it.
+    // Upstream is read in the flattened graph, so it reaches into the group instances before `from` and, inside a group, out to
+    // what feeds it. A seed is held where its value is written: on its node, or on the group instance whose exposed input
+    // drives it. One written in a group definition that has more than one instance is left as it is, since holding it there
+    // would hold it in every copy of the group in the run. The canvas's own document is not touched. `held` gets
+    // "node/input" for each increment seed held on the level shown, for advanceSeedsExcept not to advance.
+    using SeedUsed = std::function<std::optional<double>(const QString &path, const QString &input)>;
+    fugue::Document holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const;
+    // holdUpstream in two halves, so a batch compiles once: the seeds to hold (where each is written, and its value), and the
+    // document as it is now with them held.
+    struct HeldSeed {
+        QStringList level;  // the instance ids around the node it is written on
+        QString definition; // that level's group definition, empty at the top
+        QString node;
+        QString input;
+        double seed = 0;
+        bool increment = false;
+    };
+    using HeldSeeds = QList<HeldSeed>;
+    HeldSeeds seedsToHold(const QString &from, const SeedUsed &seedUsed) const;
+    fugue::Document withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) const;
     // advanceSeeds() leaving the increment seeds named in `held` (holdUpstream's keys) as they are.
     void advanceSeedsExcept(const QSet<QString> &held);
 

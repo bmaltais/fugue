@@ -930,6 +930,23 @@ private slots:
         QCOMPARE(o.exitCode, 0);
         QCOMPARE(o.json().value("data").toObject().value("outputs").toObject().keys(), (QStringList{"b"}));
     }
+
+    // Run to here on a group's card (3.4): the target is the instance, and its result is what the nodes inside it made.
+    void runsResultOfAGroupCardTargetListsTheNodesInsideIt() {
+        auto folder = RunFolder::create(runsRoot(), "20261123-100000-000-ffff");
+        QVERIFY(folder.ok());
+        folder->writeState(QJsonObject{{"status", "ok"}});
+        const QJsonObject node{{"type", "fugue/show"}, {"version", "1.0.0"}, {"inputs", QJsonObject()}};
+        folder->writeCompiled(QJsonObject{{"fugue-compiled", 1}, {"source", "sha256:" + QString(64, '0')},
+                                          {"nodes", QJsonObject{{"a", node}, {"g7/b", node}}}, {"skipped", QJsonObject()},
+                                          {"target", "g7"}});
+        for (const char *id : {"a", "g7/b"})
+            folder->appendEvent(QJsonObject{{"event", "node.done"}, {"node", QString(id)},
+                                            {"outputs", QJsonObject{{"text", QString(id)}}}, {"seconds", 0.1}});
+        const Outcome o = fugue({"runs", "result", "20261123-100000-000-ffff", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("outputs").toObject().keys(), (QStringList{"g7/b"}));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCli)

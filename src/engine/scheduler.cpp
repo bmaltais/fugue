@@ -349,9 +349,12 @@ public:
                 ++m_nodes[dep].potential;
             }
         }
-        // Sinks and the run's target are the roots; under validate the condition is unknown, so everything is.
+        // Sinks and the run's target are the roots; under validate the condition is unknown, so everything is. A `from` that is a
+        // group instance (its card, 3.4) is every node inside it.
+        const QString fromInside = m_graph.from + QLatin1Char('/');
         for (NodeRun &n : m_nodes)
-            if (m_dry || n.readers == 0 || n.node->sink || (!m_graph.from.isEmpty() && n.path == m_graph.from))
+            if (m_dry || n.readers == 0 || n.node->sink
+                || (!m_graph.from.isEmpty() && (n.path == m_graph.from || n.path.startsWith(fromInside))))
                 demand(n);
 
         if (!m_dry) {

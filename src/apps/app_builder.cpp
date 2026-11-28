@@ -57,6 +57,27 @@ QString roleFor(const InputSpec &spec, const Registry &registry) {
     return {};
 }
 
+// The inputs a node has on its face (6.1.2): the declared ones, the rows of a repeating input that are there, and the key of the
+// empty row after them ("Add LoRA"), which an app can fill to make that row. Not the other items of the empty row.
+QList<const InputSpec *> faceInputs(const NodeType &type, const Node &node) {
+    const auto has = [&node](const QString &name) { return !node.inputs.value(name).isEmpty(); };
+    QStringList next;
+    for (int r = 0; r < type.repeats.size(); ++r) {
+        const QList<int> rows = type.rowsOf(r, has);
+        const int row = rows.isEmpty() ? 1 : rows.last() + 1;
+        if (row <= type.repeats.at(r).max)
+            next << NodeType::rowInputName(type.repeats.at(r).items.first().name, row);
+    }
+    QList<const InputSpec *> list;
+    for (const InputSpec *spec : type.inputsWhere([&](const QString &name) { return has(name) || next.contains(name); })) {
+        const std::optional<RowInput> at = type.rowInput(spec->name);
+        if (at && at->item > 0 && next.contains(NodeType::rowInputName(type.repeats.at(at->repeat).items.first().name, at->row)))
+            continue;
+        list << spec;
+    }
+    return list;
+}
+
 // What the row of the builder says the control will be.
 QString kindFor(const InputBinding &input, const InputSpec *spec) {
     if (input.role == QLatin1String("image") || input.role == QLatin1String("mask") || input.role == QLatin1String("model")
@@ -500,7 +521,8 @@ QVariantList AppBuilder::driveCandidates(const QString &key) const {
         const NodeType *type = registry.nodeTypeFor(node->type, node->version.major);
         if (!type)
             continue;
-        for (const InputSpec &spec : type->inputs) {
+        for (const InputSpec *each : faceInputs(*type, *node)) {
+            const InputSpec &spec = *each;
             if (spec.type.type != first->type.type || spec.type.list != first->type.list || taken.contains(node.key() + QLatin1Char('.') + spec.name)
                 || wired(*node, spec.name) || (spec.widget().isEmpty() && registry.portKind(spec.type.type) != PortKind::Resource))
                 continue;
@@ -559,7 +581,8 @@ QVariantList AppBuilder::inputChoices() const {
         const NodeType *type = registry.nodeTypeFor(node->type, node->version.major);
         if (!type)
             continue;
-        for (const InputSpec &spec : type->inputs) {
+        for (const InputSpec *each : faceInputs(*type, *node)) {
+            const InputSpec &spec = *each;
             if (wired(*node, spec.name) || (spec.widget().isEmpty() && registry.portKind(spec.type.type) != PortKind::Resource))
                 continue;
             choices << Choice{node.key(), spec.name, titleOf(node.key()), spec.label.isEmpty() ? humanize(spec.name) : spec.label,

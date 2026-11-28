@@ -157,9 +157,22 @@ QVariantList SearchResults::portMaps(const NodeType &type, bool outputs, const Q
     if (outputs)
         for (const OutputSpec &out : type.outputs)
             add(out.name, out.label, out.type);
-    else
-        for (const InputSpec &in : type.inputs)
-            add(in.name, in.label, in.type);
+    else {
+        // A new node's inputs as its face shows them (6.1.2): the declared ones and, at each repeating input's place, the empty
+        // row of its key alone ("Add LoRA").
+        QStringList firstKeys;
+        for (const RepeatSpec &repeat : type.repeats)
+            firstKeys << NodeType::rowInputName(repeat.items.first().name, 1);
+        for (const InputSpec *in : type.inputsWhere([&firstKeys](const QString &name) { return firstKeys.contains(name); })) {
+            const std::optional<RowInput> at = type.rowInput(in->name);
+            if (!at) {
+                add(in->name, in->label, in->type);
+            } else if (at->item == 0) {
+                const InputSpec &key = type.repeats.at(at->repeat).items.first();
+                add(in->name, tr("Add %1").arg(key.label.isEmpty() ? key.name : key.label), in->type);
+            }
+        }
+    }
     return list;
 }
 

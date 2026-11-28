@@ -445,22 +445,36 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
 
 // A repeating input's row whose key was cleared or unlinked (#714) is taken out with the same edit: the values of its
 // other items go, so the face shows it no more and the file keeps nothing that is not used. Other rows keep their numbers.
+// Inside a group a key the group's face drives is there, as the compiler sees it: its link or value is on the instance.
 void CanvasModel::dropEmptyRows(Document &document) const {
     if (!m_registry)
         return;
-    for (Node &node : document.graph.nodes) {
-        const NodeType *type = m_registry->nodeTypeFor(node.type, node.version.major);
+    for (auto node = document.graph.nodes.begin(); node != document.graph.nodes.end(); ++node) {
+        const NodeType *type = m_registry->nodeTypeFor(node->type, node->version.major);
         if (!type || type->repeats.isEmpty())
             continue;
-        for (auto it = node.inputs.begin(); it != node.inputs.end();) {
+        const QSet<QString> exposed = exposedOn(document, node.key());
+        for (auto it = node->inputs.begin(); it != node->inputs.end();) {
             const std::optional<RowInput> at = type->rowInput(it.key());
             const QString key = at ? NodeType::rowInputName(type->repeats.at(at->repeat).items.first().name, at->row) : QString();
-            if (at && at->item > 0 && node.inputs.value(key).isEmpty())
-                it = node.inputs.erase(it);
+            if (at && at->item > 0 && node->inputs.value(key).isEmpty() && !exposed.contains(key))
+                it = node->inputs.erase(it);
             else
                 ++it;
         }
     }
+}
+
+QSet<QString> CanvasModel::exposedOn(const Document &level, const QString &node) const {
+    QSet<QString> inputs;
+    if (m_scope.isEmpty())
+        return inputs;
+    if (const GroupDefinition *group = level.group(scopeGroup()))
+        for (const GroupInput &exposed : group->inputs)
+            for (const PortRef &target : exposed.targets)
+                if (target.node == node)
+                    inputs.insert(target.port);
+    return inputs;
 }
 
 // --- edit bounds and the undo stack ---------------------------------------------

@@ -212,9 +212,21 @@ QString CanvasRuns::startRun(const QString &target, bool first, const QString &f
     const QString tab = currentTab();
     if (tab.isEmpty())
         return {};
+    // Run from here: what to hold is worked out once for the batch (a compile); each run holds it in the document as it is then.
+    WidgetEdit::HeldSeeds held;
+    if (!from.isEmpty()) {
+        // "Seed used" as each node showed it last, by path id: the nodes inside groups too.
+        const QHash<QString, NodeView> &views = m_tabs[tab].nodes;
+        const auto seedUsed = [&views](const QString &path, const QString &input) -> std::optional<double> {
+            bool ok = false;
+            const double seed = views.value(path).values.value(input).toString().toDouble(&ok);
+            return ok ? std::optional<double>(seed) : std::nullopt;
+        };
+        held = m_canvas->widgets()->seedsToHold(from, seedUsed);
+    }
     QString firstId;
     for (int i = 0; i < m_batch; ++i) {
-        const QString id = startOne(tab, target, first, from);
+        const QString id = startOne(tab, target, first, from, held);
         if (firstId.isEmpty())
             firstId = id;
     }
@@ -245,16 +257,12 @@ bool CanvasRuns::showResults(const QString &run, const QString &workflow) {
     return true;
 }
 
-QString CanvasRuns::startOne(const QString &tab, const QString &target, bool first, const QString &from) {
+QString CanvasRuns::startOne(const QString &tab, const QString &target, bool first, const QString &from,
+                             const WidgetEdit::HeldSeeds &toHold) {
     RunRequest request;
     // Run from here: the run's copy has the seeds before the node as their shown results; the canvas's document stays as it is.
     QSet<QString> held;
-    if (from.isEmpty()) {
-        request.document = m_canvas->document();
-    } else {
-        const QString row = rowFor(from);
-        request.document = m_canvas->widgets()->holdUpstream(row, &held);
-    }
+    request.document = from.isEmpty() ? m_canvas->document() : m_canvas->widgets()->withHeldSeeds(toHold, &held);
     request.from = from;
     request.workflow = m_workflows->pathOf(m_workflows->current());
     request.target = target;

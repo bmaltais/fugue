@@ -304,12 +304,21 @@ Reply runsResult(const Command &command, Context &context) {
                 wanted.insert(graph->from);
         }
     }
+    // A target or `from` that is a group instance (its card, 3.4) stands for every node inside it.
+    const auto isWanted = [&wanted](const QString &node) {
+        if (wanted.contains(node))
+            return true;
+        for (const QString &end : wanted)
+            if (node.startsWith(end + QLatin1Char('/')))
+                return true;
+        return false;
+    };
     QJsonObject outputs;
     QJsonArray errors;
     for (const QJsonObject &event : events) {
         const QString kind = event.value("event").toString();
         if (kind == "node.done" || kind == "node.cached") {
-            if (!filter || wanted.contains(event.value("node").toString())) {
+            if (!filter || isWanted(event.value("node").toString())) {
                 // A sink with no outputs (Preview) reports what it shows as `shown`: its inputs
                 // are its result.
                 QJsonObject values = event.value("outputs").toObject();

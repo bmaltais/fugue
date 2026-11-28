@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <utility>
 
 using namespace fugue;
 using namespace canvas_detail;
@@ -547,7 +548,10 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         row.specs = type->inputs;
         // A repeating input (6.1, #714): its rows that are there, then one empty row, of its key alone: filling it makes
         // the next one. Rows are listed by number and keep their gaps.
-        const auto has = [&node](const QString &name) { return !node.inputs.value(name).isEmpty(); };
+        // Inside a group a key the group's face drives is there too (its value or link is on the instance), as the compiler
+        // and dropEmptyRows see it.
+        const QSet<QString> exposed = exposedOn(m_document, row.id);
+        const auto has = [&node, &exposed](const QString &name) { return !node.inputs.value(name).isEmpty() || exposed.contains(name); };
         QHash<int, QString> nextKey; // by repeat
         for (int r = 0; r < type->repeats.size(); ++r) {
             const QList<int> rows = type->rowsOf(r, has);
@@ -689,11 +693,16 @@ void CanvasModel::layOut(NodeRow &row) const {
             place(port, m_rowHeight);
         }
         if (m_compact) {
+            // Any `shown_when`, not only one that hides the row now: when its condition flips, the pairs would change.
+            QSet<QString> conditional;
+            for (const InputSpec &spec : row.specs)
+                if (!spec.shownWhen.clauses.isEmpty())
+                    conditional.insert(spec.name);
             size_t next = 0;
             for (Port *laid : laidOut) {
                 if (next >= row.outputs.size())
                     break;
-                if (laid->widget || laid->advanced || !laid->section.isEmpty() || notUsed.contains(laid->name))
+                if (laid->widget || laid->advanced || !laid->section.isEmpty() || conditional.contains(laid->name))
                     continue;
                 Port &output = row.outputs[next++];
                 output.sharesRow = laid->sharesRow = true;
@@ -1373,15 +1382,28 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
     // Picking a link up and putting it down is one edit.
     beginEdit();
     m_dragOpen = true;
+    m_dragRow = {};
     QString startNode = node, startPort = port;
     bool startOutput = output;
     if (!output && !(p->type && p->type->list)) {
-        const InputValue value = m_document.graph.nodes.value(node).inputs.value(port);
+        const Node &picked = m_document.graph.nodes.value(node);
+        const InputValue value = picked.inputs.value(port);
         if (value.kind() == InputValue::Kind::Link && findPort(value.from().node, value.from().port, true)) {
             // Pick the link up: the drag goes on from its source.
             startNode = value.from().node;
             startPort = value.from().port;
             startOutput = true;
+            // From a row's key the row's other values wait to go where the link is put down.
+            const NodeType *type = m_registry ? m_registry->nodeTypeFor(picked.type, picked.version.major) : nullptr;
+            if (const std::optional<RowInput> at = type ? type->rowInput(port) : std::nullopt; at && at->item == 0) {
+                m_dragRow.node = node;
+                m_dragRow.repeat = at->repeat;
+                const QList<InputSpec> &items = type->repeats.at(at->repeat).items;
+                for (int item = 1; item < items.size(); ++item)
+                    if (const InputValue other = picked.inputs.value(NodeType::rowInputName(items.at(item).name, at->row));
+                        !other.isEmpty())
+                        m_dragRow.values.append({item, other});
+            }
             const QScopedValueRollback<bool> own(m_gestureEditing, true);
             disconnectInput(node, port);
         }
@@ -1474,8 +1496,27 @@ bool CanvasModel::endLinkDrag(const QString &node, const QString &port, bool out
             connected = true;
         }
     } else if (allowed) {
+        // A row's link put down on the empty key of a row of the same repeat: its values come along.
+        const DragRow carried = std::exchange(m_dragRow, {});
+        const NodeType *type = m_registry && fromOutput && carried.node == node && !carried.values.isEmpty()
+                                   ? m_registry->nodeTypeFor(m_document.graph.nodes.value(node).type,
+                                                             m_document.graph.nodes.value(node).version.major)
+                                   : nullptr;
+        const std::optional<RowInput> at = type ? type->rowInput(port) : std::nullopt;
+        const bool carry = at && at->item == 0 && at->repeat == carried.repeat
+                           && m_document.graph.nodes.value(node).inputs.value(port).isEmpty();
         connected = fromOutput ? connectPorts(dragNode, dragPort, node, port) : connectPorts(node, port, dragNode, dragPort);
+        if (connected && carry) {
+            Document document = this->scopeDocument();
+            Node &into = document.graph.nodes[node];
+            const QList<InputSpec> &items = type->repeats.at(at->repeat).items;
+            for (const auto &[item, value] : carried.values)
+                if (const QString name = NodeType::rowInputName(items.at(item).name, at->row); !into.inputs.contains(name))
+                    into.inputs.insert(name, value);
+            commit(document, tr("Connect"));
+        }
     }
+    m_dragRow = {};
     if (m_dragOpen) {
         m_dragOpen = false;
         endEdit(connected ? tr("Connect") : tr("Disconnect"));

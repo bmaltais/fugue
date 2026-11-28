@@ -115,6 +115,20 @@ private slots:
         QCOMPARE(ran.state.value("status").toString(), QStringLiteral("ok"));
     }
 
+    // Run from here on a group's card (3.4): every node inside it is demanded, so one the Switch after it declines runs too.
+    void aGroupCardFromDemandsTheNodesInsideIt() {
+        World world;
+        addTypes(world);
+        CompiledGraph graph = world.graph(graphFor("yes"));
+        graph.nodes.insert("g/f3", graph.nodes.take("f3"));
+        graph.nodes["sw"].inputs.insert("on_false", InputValue::link({"g/f3", "text"}));
+        graph.from = "g";
+        const Ran ran = world.run(graph);
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(world.calls.count("g/f3"), 1);
+        QCOMPARE(textOf(ran, "sw", "value"), QStringLiteral("t1++")); // the Switch still takes its chosen side
+    }
+
     void theOtherAnswerChoosesTheOtherSide() {
         World world;
         addTypes(world);
