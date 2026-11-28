@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import ".."
 
 // A multiline widget's field while it is typed into: it opens over the rows below with room
@@ -34,6 +35,17 @@ Rectangle {
         text: area.host.port.label
         color: area.host.look.label
         font.pixelSize: area.host.look.labelSize
+    }
+    // The input's manifest `syntax` colours the text as in the text window (its problems underlined; the window's footer names them).
+    PromptHighlight {
+        objectName: "widgetHighlight"
+        target: edit.textDocument
+        syntax: area.host.edits.spec(area.host.nodeId, area.host.name).syntax || ""
+        accent: area.host.look.accent
+        label: area.host.look.label
+        role: area.host.look.role("blue").frameEdge
+        error: area.host.look.error
+        well: area.host.wellColor
     }
     Flickable {
         id: flick

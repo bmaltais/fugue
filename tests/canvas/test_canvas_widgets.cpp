@@ -42,9 +42,20 @@ const char *fixture = R"({
              "view": {"center": [480, 340], "zoom": 1}}
 })";
 
+const char *promptGraph = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "dyn": {"type": "fugue/dynamic-prompt", "version": "1.0.0", "inputs": {"template": "a photo of a {red|green|blue} {cat|dog|fox}"}},
+    "tmpl": {"type": "fugue/text-template", "version": "1.0.0", "inputs": {"template": "{a}\n{b}"}}
+  }},
+  "layout": {"nodes": {"dyn": {"pos": [20, 20]}, "tmpl": {"pos": [420, 20]}},
+             "view": {"center": [480, 340], "zoom": 1}}
+})";
+
 struct WidgetApp : App {
     int quits = 0, fits = 0, searches = 0, runs = 0;
-    explicit WidgetApp(const char *graph = fixture) : App(load(graph), widget_test::addWidgetType) {
+    explicit WidgetApp(const char *graph = fixture, const canvas_test::Look &look = {})
+        : App(load(graph), widget_test::addWidgetType, look) {
         // Commands whose keys a field must keep: count them instead of acting.
         commands.setHandler("app.quit", [this] { ++quits; });
         commands.setHandler("view.fit", [this] { ++fits; });
@@ -437,6 +448,153 @@ private slots:
         QTRY_COMPARE(app.model.selectedIds(), QStringList{"prompt"});
         QVERIFY(dialogItem("textArea")); // the window stays
         app.key(Qt::Key_Escape);
+    }
+
+    // #715 slice 4: the manifest's `syntax` colours a prompt in the text window and in the inline editor, and the window's footer names the
+    // first problem with its line.
+    void aPromptIsColouredByItsSyntaxAndTheWindowNamesTheFirstProblem() {
+        WidgetApp app(promptGraph);
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        app.model.select({"dyn"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        // Opening writes nothing: the highlighter's formatting reports the text as changed, and that is not typing.
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("a photo of a {red|green|blue} {cat|dog|fox}"));
+        QCOMPARE(app.stored("dyn", "template"), QJsonValue("a photo of a {red|green|blue} {cat|dog|fox}"));
+        QCOMPARE(app.steps(), 0);
+        QObject *highlight = app.window->findChild<QObject *>("textHighlight");
+        QVERIFY(highlight);
+        QCOMPARE(highlight->property("syntax").toString(), QString("dynamic-prompt"));
+        QVERIFY(!dialogItem("textProblem")->isVisible());
+        app.type("{"); // an open brace at the end of the template
+        QTRY_VERIFY(dialogItem("textProblem")->isVisible());
+        QVERIFY2(dialogItem("textProblem")->property("text").toString().contains("The { is never closed (line 1, column "),
+                 qPrintable(dialogItem("textProblem")->property("text").toString()));
+        app.key(Qt::Key_Backspace);
+        QTRY_VERIFY(!dialogItem("textProblem")->isVisible());
+        // Tab to the next text input: a template with its own syntax; the seed is no text input.
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        app.model.select({"tmpl"});
+        app.key(Qt::Key_T, Qt::AltModifier);
+        QTRY_COMPARE(app.window->findChild<QObject *>("textHighlight")->property("syntax").toString(), QString("template"));
+        app.key(Qt::Key_End, Qt::ControlModifier);
+        app.type("{z}");
+        QTRY_VERIFY2(dialogItem("textProblem")->property("text").toString().contains("unknown placeholder {z} (line 2, column "),
+                     qPrintable(dialogItem("textProblem")->property("text").toString()));
+        app.key(Qt::Key_Tab); // a: its syntax is none
+        QTRY_COMPARE(app.window->findChild<QObject *>("textHighlight")->property("syntax").toString(), QString());
+        QVERIFY(!dialogItem("textProblem")->isVisible());
+        app.key(Qt::Key_Escape);
+    }
+
+    void theInlineEditorColoursAPromptToo() {
+        WidgetApp app(promptGraph);
+        QVERIFY(app.open());
+        app.click(app.in("dyn", "template"));
+        QTRY_VERIFY(app.typing());
+        QObject *highlight = app.widget("dyn", "template")->findChild<QObject *>("widgetHighlight");
+        QVERIFY(highlight);
+        QCOMPARE(highlight->property("syntax").toString(), QString("dynamic-prompt"));
+        app.key(Qt::Key_Escape);
+        // A field of an input with no syntax has the highlighter with none.
+        QTRY_VERIFY(!app.typing());
+        app.click(app.in("tmpl", "a"));
+        QTRY_VERIFY(app.typing());
+        QCOMPARE(app.widget("tmpl", "a")->findChild<QObject *>("widgetHighlight")->property("syntax").toString(), QString());
+        app.key(Qt::Key_Escape);
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715 slice 4): a Dynamic Prompt in the text window with an unclosed brace, dark and light. Pictures only.
+    void aHighlightedPromptLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        for (const char *theme : {"catppuccin", "catppuccin-latte", "ethereal"}) {
+            WidgetApp app(promptGraph, canvas_test::Look{theme, 8, "compact"});
+            QVERIFY(app.open());
+            app.window->resize(1000, 700);
+            app.model.select({"dyn"});
+            app.key(Qt::Key_T, Qt::AltModifier);
+            const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+            QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+            app.key(Qt::Key_A, Qt::ControlModifier);
+            app.type("# a portrait, one of each");
+            app.key(Qt::Key_Return);
+            app.type("{0.5::a red|2::a blue} fox in {2$$ and $$snow|mist|rain}, ${mood=calm} ${mood} light");
+            app.key(Qt::Key_Return);
+            app.type("__styles/ink__, \\{escaped\\}, {1-2$$a|b|{c|d}}");
+            app.key(Qt::Key_Return);
+            app.type("__wild__ and a stray } here");
+            QTRY_VERIFY(dialogItem("textProblem")->isVisible());
+            QTest::qWait(300);
+            QVERIFY(test_support::grab(app.window).save(QString("%1/prompt-highlight-%2.png").arg(out, theme)));
+        }
+    }
+
+    // #715 slice 5: a double-click on a node's text result (the excerpt that stands where a picture would) opens the whole text,
+    // read-only, in the text window, as a double-click on a picture opens its large view.
+    void aDoubleClickOnATextResultOpensItReadOnly() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        const QString whole = "a red fox\nin the snow at dawn, soft light, detailed fur";
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                         {"thumbnailText", "a red fox\nin the snow at dawn, soft li\u2026"}, {"texts", QVariantMap{{"text", whole}}}});
+        QRectF excerpt;
+        for (int row = 0; row < app.model.nodes()->rowCount(); ++row)
+            if (app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::NodeId).toString() == "prompt")
+                excerpt = app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::ThumbnailRect).toRectF().translated(app.model.position("prompt"));
+        QVERIFY(!excerpt.isEmpty());
+        // A single click only selects.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.center().x(), excerpt.center().y()));
+        QVERIFY(!dialogItem("textArea"));
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.center().x(), excerpt.center().y()));
+        QTRY_VERIFY(dialogItem("textArea"));
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), whole);
+        QVERIFY(dialogItem("textArea")->property("readOnly").toBool());
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("Prompt · Text"));
+        QVERIFY(!dialogItem("textLinkLine")->isVisible()); // a result is not a link
+        QCOMPARE(dialogItem("textCounts")->property("text").toString(), QString("55 characters · 12 words · 2 lines"));
+        app.type("x"); // nothing is typed into a result
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), whole);
+        QCOMPARE(app.steps(), 0);
+        QCOMPARE(app.stored("prompt", "text"), QJsonValue("a red fox"));
+        // A new run's text shows in the window.
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                         {"thumbnailText", "a blue fox"}, {"texts", QVariantMap{{"text", "a blue fox"}}}});
+        QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("a blue fox"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        QCOMPARE(app.steps(), 0);
+        // A picture node's double-click is not changed by it: a node with no text result opens nothing here.
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.left() - 40, excerpt.center().y()));
+        QVERIFY(!dialogItem("textArea"));
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715 slice 5): a text result's window, read-only. Picture only.
+    void aTextResultWindowLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        WidgetApp app;
+        QVERIFY(app.open());
+        app.window->resize(1000, 640);
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                         {"thumbnailText", "a red fox in the snow at dawn, soft light, detailed fur, shallow dep\u2026"},
+                                         {"texts", QVariantMap{{"text", "a red fox in the snow at dawn, soft light, detailed fur, shallow depth of field, 35mm photo, film grain, muted colours, a quiet forest behind it"}}}});
+        QRectF excerpt;
+        for (int row = 0; row < app.model.nodes()->rowCount(); ++row)
+            if (app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::NodeId).toString() == "prompt")
+                excerpt = app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::ThumbnailRect).toRectF().translated(app.model.position("prompt"));
+        QTest::qWait(100);
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.center().x(), excerpt.center().y()));
+        QTRY_VERIFY(canvas_test::item(app.window->contentItem(), "textArea"));
+        QTest::qWait(200);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-result-window.png"));
     }
 
     // FUGUE_SHOT_DIR=<folder> (#715 slice 3): the text window on a long prompt, editable and linked. Picture only.

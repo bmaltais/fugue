@@ -735,6 +735,37 @@ private slots:
         QVERIFY(f.canvas.textEditNode("gone").isEmpty());
     }
 
+    // #715 slice 5: a double-click on a text result's excerpt opens the whole result: it says where the excerpt is, and what the text is.
+    void aTextResultsExcerptIsWhereADoubleClickOpensItsWholeText() {
+        Fixture f;
+        QVERIFY(!f.canvas.resultText("prompt").value("has").toBool()); // before a run
+        f.canvas.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                        {"thumbnailText", "a red fox\nin the snow"},
+                                        {"texts", QVariantMap{{"text", "a red fox\nin the snow at dawn, soft light"}}}});
+        const QVariantMap result = f.canvas.resultText("prompt");
+        QVERIFY(result.value("has").toBool());
+        QCOMPARE(result.value("output").toString(), QString("text"));
+        QCOMPARE(result.value("label").toString(), QString("Text"));
+        QCOMPARE(result.value("text").toString(), QString("a red fox\nin the snow at dawn, soft light"));
+        QRectF excerpt; // in the world: the card's own rectangle moved to where the node is
+        for (int row = 0; row < f.canvas.nodes()->rowCount(); ++row)
+            if (f.canvas.nodes()->data(f.canvas.nodes()->index(row, 0), NodeList::NodeId).toString() == "prompt")
+                excerpt = f.canvas.nodes()->data(f.canvas.nodes()->index(row, 0), NodeList::ThumbnailRect).toRectF().translated(f.canvas.position("prompt"));
+        QVERIFY(!excerpt.isEmpty());
+        QVERIFY(f.canvas.textResultAt("prompt", excerpt.center().x(), excerpt.center().y()));
+        QVERIFY(!f.canvas.textResultAt("prompt", excerpt.left() - 30, excerpt.center().y())); // off the excerpt
+        QVERIFY(!f.canvas.pictureAt("prompt", excerpt.center().x(), excerpt.center().y()));   // a text is not a picture
+        // A placeholder, a number and a node with no text are not text results.
+        f.canvas.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                        {"thumbnailText", "No result yet"}, {"thumbnailDim", true},
+                                        {"texts", QVariantMap{{"text", "x"}}}});
+        QVERIFY(!f.canvas.textResultAt("prompt", excerpt.center().x(), excerpt.center().y()));
+        f.canvas.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3}, {"thumbnailText", "42"}});
+        QVERIFY(!f.canvas.textResultAt("prompt", excerpt.center().x(), excerpt.center().y()));
+        QVERIFY(!f.canvas.resultText("all").value("has").toBool());
+        QVERIFY(!f.canvas.textResultAt("gone", 0, 0));
+    }
+
     void aVisitToTheTextWindowIsOneStepAndAnInterruptedOneBeginsAnother() {
         Fixture f;
         QCOMPARE(f.edits.typeInto("all", "notes", "a"), QString());

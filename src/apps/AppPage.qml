@@ -41,6 +41,17 @@ Rectangle {
     // The app's own window (apps/AppWindow.qml): the page is the whole window and has no graph behind it.
     property bool standalone: false
     property bool advancedOpen: false
+    // The text window of a text field (#715 slice 5), made on the first use: the form's own value is typed into, as in the field.
+    property var textDialog: null
+    function openText(field) {
+        if (!textDialog)
+            textDialog = textDialogComponent.createObject(page, {appView: page.appView})
+        textDialog.openForField(page.appView, field)
+    }
+    Component {
+        id: textDialogComponent
+        TextDialog { onClosed: page.forceActiveFocus() }
+    }
     readonly property var visibleFields: appView.fields.filter(f => !f.advanced)
     readonly property var advancedFields: appView.fields.filter(f => f.advanced)
     // The form's width. Automatic: a quarter of the window, at least 80u (320px at the default size), at most 40%. Once its border
@@ -339,6 +350,8 @@ Rectangle {
                                 delegate: AppInput {
                                     required property var modelData
                                     field: modelData
+                                    expandable: true
+                                    onExpandRequested: f => page.openText(f)
                                     onEdited: (key, value) => page.appView.setValue(key, value)
                                 }
                             }
@@ -364,6 +377,8 @@ Rectangle {
                                 delegate: AppInput {
                                     required property var modelData
                                     field: modelData
+                                    expandable: true
+                                    onExpandRequested: f => page.openText(f)
                                     onEdited: (key, value) => page.appView.setValue(key, value)
                                 }
                             }

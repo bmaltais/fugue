@@ -1484,6 +1484,15 @@ Result<Expansion> expandAll(const QString &templ, const Options &options, int ca
     }
 }
 
+Errors checkSyntax(const QString &templ) {
+    try {
+        parseText(templ, QString(), Limits());
+        return {};
+    } catch (const Problem &problem) {
+        return {toError(problem)};
+    }
+}
+
 Errors check(const QString &templ, const Options &options) {
     try {
         const SeqP top = parseText(templ, QString(), options.limits);

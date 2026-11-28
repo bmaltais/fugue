@@ -15,16 +15,27 @@ import "../kit"
 // and the title follows. Escape or the close button ends it and keeps the text (a prompt is never lost to a key). Another edit made on
 // the canvas meanwhile (a run advancing a seed, an undo) ends the session; the next key begins a new one, so no text goes to the
 // wrong input. A linked input shows the text its source made in its last run, read-only, with Go to source.
+//
+// It has three kinds of subject (#715 slice 5), set by the call that opens it: a node's text input (`openFor`, above), a node's text
+// result (`openForResult`: a double-click on its excerpt; the whole text, read-only, following the node's runs), and an App form's text
+// field (`openForField`: the form's own value, `AppView.setValue` as it is typed; the form has no undo, so there is no step to keep and
+// nothing to end, and Escape keeps the text as everywhere).
 Popup {
     id: root
     objectName: "textDialog"
     readonly property CanvasLook look: App.theme.look
-    required property WidgetEdit edits
-    required property CanvasModel canvasModel
+    property WidgetEdit edits: null
+    property CanvasModel canvasModel: null
+    property AppView appView: null
+    // "input" (a node's text input), "result" (a node's text result, read-only) or "form" (an App form's field).
+    property string mode: "input"
     property string nodeId
     property string inputName
+    // The App form's field being edited ({key, label, multiline}): a field that is not `multiline` is one line that wraps, as in the form.
+    property var field: ({})
+    readonly property bool singleLine: mode === "form" && field.multiline !== true
 
-    // The node's text inputs ([{name, label, widget, linked}]) and the one shown.
+    // The subject's text inputs ([{name, label, widget, linked, syntax}]: a node's, or the one result or form field) and the one shown.
     property var inputs: []
     readonly property int index: {
         for (let i = 0; i < inputs.length; ++i)
@@ -32,18 +43,22 @@ Popup {
                 return i
         return -1
     }
-    readonly property var current: index >= 0 ? inputs[index] : ({ name: "", label: "", widget: "line", linked: false })
+    readonly property var current: index >= 0 ? inputs[index] : ({ name: "", label: "", widget: "line", linked: false, syntax: "" })
     readonly property bool linked: current.linked
+    // Nothing is typed: a linked input shows its source's text, and a result is only read.
+    readonly property bool readOnly: linked || mode === "result"
     // Re-read the linked input's source when the run state or the document changes.
     property int stamp: 0
     readonly property var source: stamp >= 0 && root.opened && linked ? edits.linkedText(nodeId, inputName) : ({ linked: false })
-    readonly property string title: canvasModel.nodeTitle(nodeId) + " · " + current.label
+    readonly property string title: mode === "form" ? current.label : canvasModel.nodeTitle(nodeId) + " · " + current.label
     readonly property string shownText: linked ? (source.has ? source.text : "") : edit.text
     // The text is being typed or set by the window itself: a document change it made is not an outside edit.
     property bool busy: false
+    // The text as last loaded or typed: a change that leaves it so is the highlighter's formatting, not a key.
+    property string known: ""
     // Why the text typed is not a value, and the node's own error under it (a run's or a check's).
     property string typedError: ""
-    readonly property string nodeError: stamp >= 0 && root.opened ? canvasModel.runError(nodeId) : ""
+    readonly property string nodeError: mode === "input" && stamp >= 0 && root.opened ? canvasModel.runError(nodeId) : ""
 
     readonly property real u: look.unit
     readonly property int textPx: Math.round(look.textSize * 14 / 12) // the 14 px interface text at the default size
@@ -72,9 +87,34 @@ Popup {
         text: "n".repeat(72) // about 72 characters wide
     }
 
-    function inputList() { return edits.textInputs(nodeId) }
+    function inputList() {
+        if (mode === "form")
+            return [{ name: field.key, label: field.label, widget: "multiline", linked: false, syntax: "" }]
+        if (mode === "result") {
+            const result = canvasModel.resultText(nodeId)
+            return result.has ? [{ name: result.output, label: result.label, widget: "multiline", linked: false, syntax: "" }] : []
+        }
+        return edits.textInputs(nodeId)
+    }
 
+    // The text window on a node's text input (`input` empty: its first multiline one).
     function openFor(node, input) {
+        mode = "input"
+        begin(node, input)
+    }
+    // ... on the whole text a node's last run made (read-only).
+    function openForResult(node) {
+        mode = "result"
+        begin(node, "")
+    }
+    // ... on an App form's text field, `field` being the form's own ({key, label, multiline}).
+    function openForField(form, formField) {
+        appView = form
+        field = formField
+        mode = "form"
+        begin("", formField.key)
+    }
+    function begin(node, input) {
         nodeId = node
         inputs = inputList()
         const first = inputs.find(i => i.widget === "multiline") || inputs[0]
@@ -94,6 +134,12 @@ Popup {
     }
     // The text window's text from the document.
     function startText() {
+        if (mode === "form") {
+            const kept = appView.valueOf(inputName)
+            return kept === undefined || kept === null ? "" : String(kept)
+        }
+        if (mode === "result")
+            return canvasModel.resultText(nodeId).text ?? ""
         const value = edits.value(nodeId, inputName)
         if (typeof value === "string")
             return value
@@ -106,10 +152,20 @@ Popup {
         edit.text = linked ? (source.has ? source.text : "") : startText()
         TextLines.setLineHeight(edit.textDocument, lineRatio)
         edit.cursorPosition = edit.length
+        known = edit.text
         busy = false
     }
+    // The text as typed, to where this subject keeps it; returns why not (the document's own reason), or empty.
+    function type(text) {
+        if (mode === "form") {
+            appView.setValue(inputName, text)
+            return ""
+        }
+        return edits.typeInto(nodeId, inputName, text)
+    }
     function finishSession() {
-        edits.finishInto(nodeId, inputName)
+        if (mode === "input")
+            edits.finishInto(nodeId, inputName)
     }
     // Tab (1) and Shift+Tab (-1): the next text input of the node. With one only, the focus moves on in the window.
     function step(by) {
@@ -147,6 +203,7 @@ Popup {
         finishSession()
         busy = true // emptying the field is not a typed change
         edit.text = ""
+        known = ""
         busy = false
     }
     Connections {
@@ -159,8 +216,15 @@ Popup {
         function onDocumentReset() { root.close() }
     }
     Connections {
-        target: root.canvasModel.nodes
+        target: root.canvasModel ? root.canvasModel.nodes : null
         function onDataChanged() { root.refresh() }
+    }
+    // The form's value changed by itself (Reuse inputs, a sample, another tab) or in the field under the window: the window follows, unless
+    // it is being typed.
+    Connections {
+        target: root.appView
+        function onValueChanged(key) { if (key === root.inputName) root.refresh() }
+        function onValueTyped(key) { if (key === root.inputName) root.refresh() }
     }
 
     background: PopupSurface { look: root.look; tone: "slate" }
@@ -272,6 +336,19 @@ Popup {
             border.width: edit.activeFocus ? 1 : 0
             border.color: root.look.accent
 
+            // The manifest's `syntax` of the input colours the text (spec 6.2); a linked input's text is a result, not a template.
+            PromptHighlight {
+                id: highlight
+                objectName: "textHighlight"
+                target: edit.textDocument
+                syntax: root.linked ? "" : (root.current.syntax || "")
+                accent: root.look.accent
+                label: root.look.label
+                role: root.look.role("blue").frameEdge
+                error: root.look.error
+                well: root.look.well
+            }
+
             Flickable {
                 id: flick
                 anchors.fill: parent
@@ -288,18 +365,28 @@ Popup {
                     objectName: "textArea"
                     width: flick.width - (flick.ScrollBar.vertical as FugueScrollBar).inset
                     wrapMode: TextEdit.Wrap
-                    readOnly: root.linked
+                    readOnly: root.readOnly
                     selectByMouse: true
                     textFormat: TextEdit.PlainText
                     color: root.linked && !root.source.has ? root.look.label : root.look.text
+                    Accessible.role: Accessible.EditableText
+                    Accessible.name: root.current.label
                     selectionColor: root.look.accent
                     selectedTextColor: root.look.accentForeground
                     font.pixelSize: root.textPx
                     onTextChanged: {
-                        if (root.busy || root.linked)
+                        // The highlighter's own formatting also reports a change of the text, with the text as it was: not typing.
+                        if (root.busy || root.readOnly || text === root.known)
                             return
                         root.busy = true
-                        root.typedError = root.edits.typeInto(root.nodeId, root.inputName, text)
+                        // A one-line value of an App form: a pasted line break is a space, as in the form's own field.
+                        if (root.singleLine && /[\r\n]/.test(text)) {
+                            const at = cursorPosition
+                            edit.text = text.replace(/\r\n|\r|\n/g, " ")
+                            cursorPosition = Math.min(at, length)
+                        }
+                        root.known = edit.text
+                        root.typedError = root.type(edit.text)
                         root.busy = false
                     }
                     onCursorRectangleChanged: {
@@ -312,6 +399,8 @@ Popup {
                     // window's Run shortcut: the field takes it as nothing, and the dialog stays open.
                     Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
                     Keys.onEscapePressed: root.close()
+                    Keys.onReturnPressed: event => { event.accepted = root.singleLine && !(event.modifiers & Qt.ControlModifier) }
+                    Keys.onEnterPressed: event => { event.accepted = root.singleLine && !(event.modifiers & Qt.ControlModifier) }
                     Keys.onTabPressed: event => root.step(event.modifiers & Qt.ShiftModifier ? -1 : 1)
                     Keys.onBacktabPressed: root.step(-1)
                 }
@@ -330,7 +419,8 @@ Popup {
             readonly property int characters: text.length
             readonly property int words: text.trim() === "" ? 0 : text.trim().split(/\s+/).length
             readonly property int lines: text === "" ? 0 : text.split("\n").length
-            readonly property string problem: root.typedError !== "" ? root.typedError : root.nodeError
+            // What the document refused, else the first thing wrong with the syntax (its line in the words), else the node's own error.
+            readonly property string problem: root.typedError !== "" ? root.typedError : highlight.problem !== "" ? highlight.problem : root.nodeError
             Text {
                 id: counts
                 objectName: "textCounts"

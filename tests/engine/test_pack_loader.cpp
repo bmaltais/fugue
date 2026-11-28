@@ -226,6 +226,42 @@ private slots:
             QVERIFY2(!reasonOf(loaded, name).isEmpty(), name);
     }
 
+    // A text input can name its prompt syntax for the text editors to colour (#715): a fixed set, on text inputs with a line widget.
+    void aTextInputNamesItsPromptSyntax() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        const auto node = [&](const char *name, const QJsonObject &input) {
+            QJsonObject n = nodeJson(id + "/" + name);
+            n["inputs"] = QJsonArray{input};
+            return n;
+        };
+        const QJsonObject text{{"name", "t"}, {"type", "text"}, {"widget", "multiline"}};
+        const auto with = [&](const QJsonValue &syntax) {
+            QJsonObject input = text;
+            input["syntax"] = syntax;
+            return input;
+        };
+        QJsonObject number = QJsonObject{{"name", "t"}, {"type", "number"}, {"syntax", "template"}};
+        const QString dir = makePack(root.path(), id, packJson(id, {"dyn", "tmpl", "plain", "unknown", "number", "choice", "notstring"}),
+                                     {{"dyn", node("dyn", with("dynamic-prompt"))}, {"tmpl", node("tmpl", with("template"))},
+                                      {"plain", node("plain", text)}, {"unknown", node("unknown", with("markdown"))},
+                                      {"number", node("number", number)},
+                                      {"choice", node("choice", QJsonObject{{"name", "t"}, {"type", "text"}, {"choices", QJsonArray{"a", "b"}}, {"syntax", "template"}})},
+                                      {"notstring", node("notstring", with(3))}});
+        Registry registry;
+        const LoadedPack loaded = loadPack(registry, dir);
+        for (const char *name : {"dyn", "tmpl"}) {
+            const NodeType *type = registry.nodeType(id + "/" + name);
+            QVERIFY2(type, qPrintable(reasonOf(loaded, name)));
+            QCOMPARE(type->input("t")->syntax, QString(name) == "dyn" ? QString("dynamic-prompt") : QString("template"));
+            QCOMPARE(NodeType::fromJson(type->toJson()).value().input("t")->syntax, type->input("t")->syntax);
+        }
+        QVERIFY(registry.nodeType(id + "/plain")->input("t")->syntax.isEmpty());
+        for (const char *name : {"unknown", "number", "choice", "notstring"})
+            QVERIFY2(!reasonOf(loaded, name).isEmpty(), name);
+        QVERIFY(reasonOf(loaded, "unknown").contains("syntax"));
+    }
+
     // The paint widget (#181) is the mask widget's twin: text, `over` naming the picture, an input file.
     void aPacksPaintWidgetIsATextInputFileOverAnImage() {
         QTemporaryDir root;

@@ -289,7 +289,8 @@ QVariantMap WidgetEdit::spec(const QString &node, const QString &input) const {
                     {"label", label(s)},
                     {"integer", s.integer},
                     {"optional", s.optional},
-                    {"step", stepOf(s)}};
+                    {"step", stepOf(s)},
+                    {"syntax", s.syntax}};
     if (s.min)
         map.insert("min", *s.min);
     if (s.max)
@@ -527,7 +528,9 @@ QVariantList WidgetEdit::textInputs(const QString &node) const {
         if (port.widgetType != QLatin1String("multiline") && port.widgetType != QLatin1String("line"))
             continue;
         const bool linked = m_canvas->m_document.graph.nodes.value(node).inputs.value(port.name).kind() == InputValue::Kind::Link;
-        found.append(QVariantMap{{"name", port.name}, {"label", port.label}, {"widget", port.widgetType}, {"linked", linked}});
+        const InputSpec *spec = m_canvas->inputSpec(node, port.name);
+        found.append(QVariantMap{{"name", port.name}, {"label", port.label}, {"widget", port.widgetType}, {"linked", linked},
+                                 {"syntax", spec ? spec->syntax : QString()}});
     }
     return found;
 }

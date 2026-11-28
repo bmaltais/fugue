@@ -8,6 +8,8 @@ import "../kit"
 // `singleLine`: then Enter is left to the window and pasted line breaks become spaces (a one-line value that wraps to read).
 // Tab and Shift+Tab move on (a prompt is never a place to get stuck in), and Ctrl+Enter is not taken, so the window's Run
 // reaches it. `text` in, `edited(text)` out.
+// `expandable` (#715 slice 5): while the pointer is over the well an expand button (Lucide `maximize-2`) shows at its top right, and
+// Alt+T in the field does the same: both ask for the text window (`expandRequested`), a larger editor on this field's own value.
 Rectangle {
     id: area
     required property CanvasLook look
@@ -15,7 +17,9 @@ Rectangle {
     property string label // the screen reader's name
     property int minLines: 3
     property bool singleLine: false
+    property bool expandable: false
     signal edited(string text)
+    signal expandRequested()
 
     readonly property real lineHeight: Math.round(look.textSize * 4 / 3)
     implicitHeight: Math.max(minLines, Math.min(8, edit.lineCount)) * lineHeight + 2 * look.unit + 8
@@ -61,6 +65,14 @@ Rectangle {
                 }
                 if (text !== area.text) area.edited(text)
             }
+            // Alt+T is the text window's key (the canvas's Edit text…): the field takes it before the window's shortcuts.
+            Keys.onShortcutOverride: event => { if (area.expandable && event.key === Qt.Key_T && event.modifiers === Qt.AltModifier) event.accepted = true }
+            Keys.onPressed: event => {
+                if (area.expandable && event.key === Qt.Key_T && event.modifiers === Qt.AltModifier) {
+                    area.expandRequested()
+                    event.accepted = true
+                }
+            }
             Keys.onReturnPressed: event => { event.accepted = area.singleLine && !(event.modifiers & Qt.ControlModifier) }
             Keys.onEnterPressed: event => { event.accepted = area.singleLine && !(event.modifiers & Qt.ControlModifier) }
             Keys.onTabPressed: event => { nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocusReason); event.accepted = true }
@@ -74,5 +86,26 @@ Rectangle {
         }
     }
     TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: edit.forceActiveFocus() }
+    HoverHandler { id: over }
+    // The button has the well's fill behind it: the text runs under it.
+    Rectangle {
+        objectName: area.objectName + "-expand"
+        visible: area.expandable && (over.hovered || expandButton.hovered)
+        anchors { top: parent.top; right: parent.right; topMargin: 2; rightMargin: 2 }
+        width: 24
+        height: 24
+        radius: area.look.smallCorner
+        color: Qt.tint(area.look.kitGroup, Qt.rgba(0, 0, 0, area.look.light ? area.look.params.wellDarkenLight : area.look.params.wellDarken))
+        ViewButton {
+            id: expandButton
+            anchors.fill: parent
+            look: area.look
+            compact: true
+            flat: true
+            glyph: "maximize-2"
+            tip: qsTr("Edit in a larger window (Alt+T)")
+            onTapped: area.expandRequested()
+        }
+    }
     readonly property alias editor: edit
 }

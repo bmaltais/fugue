@@ -8,7 +8,7 @@
   "keywords": ["dynamic prompts", "wildcard", "random", "variant", "choice", "prompt", "template", "a1111", "randomize", "variable", "yaml"],
   "runtime": {"kind": "builtin"},
   "inputs": [
-    {"name": "template", "type": "text", "label": "Template", "default": "a photo of a {red|green|blue} {cat|dog|fox}", "widget": "multiline",
+    {"name": "template", "type": "text", "label": "Template", "default": "a photo of a {red|green|blue} {cat|dog|fox}", "widget": "multiline", "syntax": "dynamic-prompt",
      "description": "The prompt with dynamic syntax, as in A1111's Dynamic Prompts: {a|b|c} picks one, {0.5::a|0.2::b} weights, {2$$a|b|c} picks two, {1-3$$ and $$a|b|c} one to three joined by ' and '. __name__ takes a line of name.txt (or a list in a .yaml or .json file) from the wildcards folders; __colours*__ and __people/**__ match several files. ${v=...} sets a variable, ${v=!...} picks once, ${v} and ${v:default} use it, __name(v=value)__ passes it. # starts a comment at the start of a line or before a space; \\# is a literal #. Newlines count as spaces."},
     {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
      "max": 9007199254740991, "widget": "seed",

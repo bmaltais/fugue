@@ -336,6 +336,9 @@ signals:
     void areaToggleRequested();
     // The store changed a value itself (see the fields' doc): the control shows `valueOf(key)`.
     void valueChanged(const QString &key);
+    // setValue changed the key's value (a field's own typing, or the text window's): what else shows the value (the field under the
+    // text window, the window over the field) follows (#715).
+    void valueTyped(const QString &key);
     // A picture taken by the page's paste or drop was refused (`text`) or taken (empty): the picture input `key` shows it.
     void imageNotice(const QString &key, const QString &text);
     void modelsChanged();

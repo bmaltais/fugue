@@ -605,6 +605,11 @@ FocusScope {
         function onContextMenuRequested(at) { canvas.contextMenuRequested(at.x, at.y) }
         // A double click on a picture: the viewer of its kind, when the node has a picture to show (#62, #73).
         function onViewerRequested(kind, node) {
+            if (kind === "text") { // a text result's excerpt: the whole result, read-only, in the text window (#715)
+                canvas.model.endMove()
+                canvas.openTextResult(node)
+                return
+            }
             if (kind !== "compare" && kind !== "paint" && !(App.runs && App.runs.imageFile(node) !== ""))
                 return
             canvas.model.endMove()
@@ -645,6 +650,13 @@ FocusScope {
         if (!textDialog)
             textDialog = textDialogComponent.createObject(canvas, {edits: model.widgets, canvasModel: model})
         textDialog.openFor(node, input)
+    }
+    // ... read-only on the whole text a node's last run made (a double-click on its text excerpt, as a double-click on a picture
+    // opens its large view).
+    function openTextResult(node) {
+        if (!textDialog)
+            textDialog = textDialogComponent.createObject(canvas, {edits: model.widgets, canvasModel: model})
+        textDialog.openForResult(node)
     }
     property var textDialog: null
     Component {

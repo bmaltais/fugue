@@ -339,6 +339,11 @@ void CanvasGesture::doubleClick(const QPointF &screen, const QPointF &world, int
             emit viewerRequested(kind, hit);
             return;
         }
+        // On a text result's excerpt: the text window, read-only, on the whole result (#715).
+        if (m_canvas->textResultAt(hit, world.x(), world.y())) {
+            emit viewerRequested(QStringLiteral("text"), hit);
+            return;
+        }
     }
     if (hit.isEmpty() && !onPort)
         emit searchRequested(world);

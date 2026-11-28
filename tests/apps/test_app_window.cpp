@@ -351,6 +351,99 @@ private slots:
         qDeleteAll(app.engine.rootObjects());
     }
 
+    // #715 slice 5: a text field of the form opens the text window from its expand button and from Alt+T. It types into the form's own
+    // value (AppView::setValue, which has no undo: each key is a value, as in the field), Ctrl+Enter runs from inside it, a one-line
+    // field takes no line break, and Escape keeps the text.
+    void aFormFieldOpensTheTextWindowOnItsOwnValue() {
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return find(app.window, name); };
+        const auto type = [&](const char *text) {
+            for (const char *c = text; *c; ++c)
+                QTest::keyClick(app.window, *c);
+        };
+        QQuickItem *prompt = find(app.window, "appInput-prompt-edit");
+        QVERIFY(prompt);
+        // The button shows while the pointer is over the field, and opens the window on its value.
+        QVERIFY(!find(app.window, "appInput-prompt-expand")); // find() sees shown items only
+        QTest::mouseMove(app.window, prompt->mapToScene(QPointF(20, 10)).toPoint());
+        QTRY_VERIFY(find(app.window, "appInput-prompt-expand"));
+        tap(app.window, find(app.window, "appInput-prompt-expand"));
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("Prompt"));
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("old words"));
+        QVERIFY(!dialogItem("textLinkLine")); // a form field is never linked
+        // Typing is the form's value, and the form's field follows.
+        QTest::keyClick(app.window, Qt::Key_End, Qt::ControlModifier);
+        type(" and more");
+        QTest::keyClick(app.window, Qt::Key_Return);
+        type("second line");
+        QCOMPARE(rig.view.valueOf("prompt").toString(), QString("old words and more\nsecond line"));
+        QTRY_COMPARE(prompt->property("text").toString(), QString("old words and more\nsecond line"));
+        QCOMPARE(dialogItem("textCounts")->property("text").toString(), QString("30 characters · 6 words · 2 lines"));
+        // Ctrl+Enter runs the app from inside it and leaves it open.
+        QTest::keyClick(app.window, Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(rig.started.size(), 1);
+        QCOMPARE(rig.started.first().document.graph.nodes.value("encode").inputs.value("prompt").toJson(),
+                 QJsonValue("old words and more\nsecond line"));
+        QVERIFY(dialogItem("textArea"));
+        // A value the form changes by itself shows in the window.
+        rig.view.setValue("prompt", "reset");
+        QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("reset"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        QCOMPARE(rig.view.valueOf("prompt").toString(), QString("reset")); // Escape keeps it
+        // Alt+T in a field opens it too; the one-line field takes no line break.
+        QQuickItem *title = find(app.window, "appInput-title-edit");
+        title->forceActiveFocus();
+        QTRY_VERIFY(title->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(dialogItem("textArea") && dialogItem("textArea")->hasActiveFocus());
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("Name"));
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("out"));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        type("put");
+        QCOMPARE(rig.view.valueOf("title").toString(), QString("output"));
+        dialogItem("textArea")->setProperty("text", "pasted\nlines");
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), QString("pasted lines"));
+        QCOMPARE(rig.view.valueOf("title").toString(), QString("pasted lines"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        qDeleteAll(app.engine.rootObjects());
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715 slice 5): the form at a narrow width with the expand button on a hovered field, and the text window
+    // over it. Pictures only.
+    void theFormsTextWindowLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        App app(load(appWorkflow));
+        Rig rig(app);
+        QVERIFY(app.open());
+        app.window->resize(560, 720);
+        QTest::qWait(200); // laid out at the new size
+        QQuickItem *prompt = find(app.window, "appInput-prompt-edit");
+        QVERIFY(prompt);
+        rig.view.setValue("prompt", "a red fox in the snow at dawn, soft light, detailed fur, shallow depth of field, 35mm photo");
+        QTRY_COMPARE(prompt->property("text").toString().left(9), QString("a red fox"));
+        QTest::mouseMove(app.window, prompt->mapToScene(QPointF(30, 12)).toPoint());
+        QTest::mouseMove(app.window, prompt->mapToScene(QPointF(34, 14)).toPoint());
+        QTRY_VERIFY(find(app.window, "appInput-prompt-expand"));
+        QTest::qWait(150);
+        QVERIFY(test_support::grab(app.window).save(out + "/form-expand-button.png"));
+        prompt->forceActiveFocus();
+        QTRY_VERIFY(prompt->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_T, Qt::AltModifier);
+        QTRY_VERIFY(find(app.window, "textArea"));
+        QTest::qWait(200);
+        QVERIFY(test_support::grab(app.window).save(out + "/form-text-window.png"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        qDeleteAll(app.engine.rootObjects());
+    }
+
     void anAppOpensAsTheFormRunsAndGoesToTheGraphAndBack() {
         App app(load(appWorkflow));
         Rig rig(app);

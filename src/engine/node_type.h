@@ -49,6 +49,7 @@ struct InputSpec {
     bool integer = false;
     std::optional<QStringList> choices; // text inputs only: makes it a choice
     QString widgetName; // as declared; empty means the type's default (6.2)
+    QString syntax; // a text input's prompt syntax for the text editors to colour: "dynamic-prompt" or "template" (6.1); empty: none
     QString section;
     bool advanced = false;
     QString role; // "mask" on an image input that takes a mask (6.1, 14.4); empty for none
