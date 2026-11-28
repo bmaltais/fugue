@@ -61,9 +61,9 @@ struct SweepPlan {
     SweepLabels labels;
 };
 
-// What the sheet of `labels` is at least in pixels when each picture is `cell` big (the Image Grid's gap of 8; the label bands come on
-// top), and `value_out_of_range` when that is over what the Image Grid makes (16384 on a side). The command asks it once the first
-// picture is known, before it spends the rest of the cells.
+// What the sheet of `labels` is in pixels when the largest picture is `cell` (the Image Grid's gap of 8, and a safe allowance for the
+// label bands that exist), and `value_out_of_range` when that is over what the Image Grid makes (16384 on a side). The command asks it after every cell, with the largest
+// picture so far, before it spends the rest of the cells.
 Errors checkSheetSize(const SweepLabels &labels, const QSize &cell);
 
 // One or two axes over `document`, run up to the node `to`. Refused with nothing run: `usage` (no or over two axes, an axis twice,

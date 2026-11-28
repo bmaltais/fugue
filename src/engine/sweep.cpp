@@ -121,7 +121,7 @@ QJsonValue parseSetValue(const QString &raw) {
 void collectMediaPaths(const QJsonValue &value, QStringList &paths, const QString &type) {
     if (value.isArray()) {
         for (const QJsonValue &item : value.toArray())
-            collectMediaPaths(item, paths);
+            collectMediaPaths(item, paths, type);
     } else if (value.isObject()) {
         const QJsonObject object = value.toObject();
         if (const QString path = object.value("path").toString();
@@ -258,8 +258,18 @@ Result<SweepPlan> planSweep(const Document &document, const QList<SweepAxis> &ax
 }
 
 Errors checkSheetSize(const SweepLabels &labels, const QSize &cell) {
-    const long long width = (long long)kSheetGap + (long long)labels.columns * (cell.width() + kSheetGap);
-    const long long height = (long long)kSheetGap + (long long)labels.rows * (cell.height() + kSheetGap);
+    // The Image Grid's own sum (nodes/image_grid.cpp), with each label band allowed one line of its size and 4 px over (a label that
+    // wraps makes the band taller, which only the grid itself knows).
+    const auto any = [](const QStringList &lines) {
+        return std::any_of(lines.cbegin(), lines.cend(), [](const QString &line) { return !line.isEmpty(); });
+    };
+    const int lineSize = std::max(10, int(std::lround(cell.height() * 0.03)));
+    const int pad = std::max(4, kSheetGap / 2);
+    const int underCell = any(labels.cells) ? lineSize + 4 + pad : 0;
+    const int aboveColumns = any(labels.columnLabels) ? lineSize + 4 + pad : 0;
+    const int leftRows = any(labels.rowLabels) ? cell.width() + 4 + pad : 0;
+    const long long width = (long long)kSheetGap + leftRows + (long long)labels.columns * cell.width() + (long long)(labels.columns - 1) * kSheetGap + kSheetGap;
+    const long long height = (long long)kSheetGap + aboveColumns + (long long)labels.rows * (cell.height() + underCell) + (long long)(labels.rows - 1) * kSheetGap + kSheetGap;
     if (width <= kSheetMaxSide && height <= kSheetMaxSide)
         return {};
     return {makeError(QStringLiteral("value_out_of_range"),

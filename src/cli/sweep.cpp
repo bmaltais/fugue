@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QJsonArray>
 
+#include <algorithm>
+
 #include "cli/canvas_run.h"
 #include "cli/runs.h"
 #include "engine/media.h"
@@ -100,26 +102,6 @@ Reply sweepRun(const Command &command, Context &context) {
     QList<CellOutcome> outcomes;
     QStringList files;
     SweepLabels labels = plan->labels;
-    QString firstPicture;
-    QSize blank{256, 256};
-    for (qsizetype i = 0; i < plan->cells.size(); ++i) {
-        const SweepCell &cell = plan->cells.at(i);
-        context.log(QStringLiteral("[%1/%2] %3 ...").arg(i + 1).arg(plan->cells.size()).arg(cell.label));
-        const CellOutcome outcome = runCell(cell.bound, file, to, settings, *allowRemote, context);
-        context.log(QStringLiteral("[%1/%2] %3: %4").arg(i + 1).arg(plan->cells.size()).arg(cell.label,
-                    outcome.status == QLatin1String("ok") ? QStringLiteral("ok") : QStringLiteral("%1: %2").arg(outcome.status, outcome.message)));
-        outcomes << outcome;
-        files << outcome.file;
-        if (firstPicture.isEmpty() && !outcome.file.isEmpty()) {
-            // The size of a picture is known: say now, not after the last cell, that the sheet could not be made.
-            firstPicture = outcome.file;
-            if (const std::optional<QSize> size = MediaHandle::imageHeaderSize(firstPicture)) {
-                blank = *size;
-                if (const Errors tooBig = checkSheetSize(labels, blank); !tooBig.isEmpty())
-                    return Reply::failure(tooBig);
-            }
-        }
-    }
     const auto cellRows = [&] {
         QJsonArray rows;
         for (qsizetype i = 0; i < outcomes.size(); ++i) {
@@ -135,6 +117,48 @@ Reply sweepRun(const Command &command, Context &context) {
         }
         return rows;
     };
+    // The sheet cannot be made: the error, and still which cell made which file, so what was spent is not lost.
+    const auto sizeFailure = [&](const Errors &errors) {
+        Reply reply;
+        reply.streamed = true;
+        reply.exitCode = 1;
+        if (command.json) {
+            QJsonObject envelope = errorEnvelope(errors);
+            envelope.insert("cells", cellRows());
+            context.line(compactJson(envelope));
+        } else {
+            for (const Error &error : errors)
+                context.log(error.message + QLatin1Char(' ') + error.hint);
+            for (qsizetype i = 0; i < outcomes.size(); ++i)
+                if (!outcomes.at(i).file.isEmpty())
+                    context.line((outcomes.at(i).file + QLatin1Char('\t') + plan->cells.at(i).label).toUtf8());
+        }
+        return reply;
+    };
+    QString firstPicture;
+    QSize largest; // of the pictures made so far (null: none read yet)
+    for (qsizetype i = 0; i < plan->cells.size(); ++i) {
+        const SweepCell &cell = plan->cells.at(i);
+        context.log(QStringLiteral("[%1/%2] %3 ...").arg(i + 1).arg(plan->cells.size()).arg(cell.label));
+        const CellOutcome outcome = runCell(cell.bound, file, to, settings, *allowRemote, context);
+        context.log(QStringLiteral("[%1/%2] %3: %4").arg(i + 1).arg(plan->cells.size()).arg(cell.label,
+                    outcome.status == QLatin1String("ok") ? QStringLiteral("ok") : QStringLiteral("%1: %2").arg(outcome.status, outcome.message)));
+        outcomes << outcome;
+        files << outcome.file;
+        if (outcome.file.isEmpty())
+            continue;
+        if (firstPicture.isEmpty())
+            firstPicture = outcome.file;
+        // The sheet is as big as the largest picture so far: say now, not after the last cell, that it could not be made.
+        const std::optional<QSize> size = MediaHandle::imageHeaderSize(outcome.file);
+        if (!size) {
+            context.log(QStringLiteral("Warning: the size of %1 could not be read, so it is not counted in the sheet's size check.").arg(outcome.file));
+            continue;
+        }
+        largest = QSize(std::max(largest.width(), size->width()), std::max(largest.height(), size->height()));
+        if (const Errors tooBig = checkSheetSize(labels, largest); !tooBig.isEmpty())
+            return sizeFailure(tooBig);
+    }
     if (stopRequested())
         return Reply::failure(makeError(QStringLiteral("cancelled"), QStringLiteral("The sweep was cancelled.")));
     if (firstPicture.isEmpty()) {
@@ -152,7 +176,7 @@ Reply sweepRun(const Command &command, Context &context) {
         ++failed;
         labels.cells[i] = labels.cells.at(i).isEmpty() ? QStringLiteral("failed") : labels.cells.at(i) + QStringLiteral(" (failed)");
     }
-    const Result<Document> sheet = composeDocument(files, labels, context.registry, {{}, blank});
+    const Result<Document> sheet = composeDocument(files, labels, context.registry, {{}, largest.isNull() ? QSize(256, 256) : largest});
     if (!sheet)
         return Reply::failure(sheet.errors());
     context.log(QStringLiteral("Laying out the sheet ..."));

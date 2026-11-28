@@ -148,6 +148,13 @@ private slots:
         const Errors tooBig = checkSheetSize(two->labels, QSize(1024, 1024)); // 16 columns of 1024 px pass 16384
         QCOMPARE(tooBig.value(0).code, QString("value_out_of_range"));
         QVERIFY(checkSheetSize(two->labels, QSize(512, 512)).isEmpty());
+        // The label bands count: 15 rows of 1060 px pass without labels and not with a line under each picture.
+        SweepLabels tall;
+        tall.columns = 1;
+        tall.rows = 15;
+        QVERIFY(checkSheetSize(tall, QSize(1000, 1060)).isEmpty());
+        tall.cells = QStringList(15, "x");
+        QCOMPARE(checkSheetSize(tall, QSize(1000, 1060)).value(0).code, QString("value_out_of_range"));
     }
 
     void aTargetMustMakeAPicture() {
@@ -184,12 +191,14 @@ private slots:
     }
 
     void onlyImageHandlesCountAsPictures() {
-        const QJsonObject outputs{{"model", QJsonObject{{"resource", "fugue/image-model"}, {"path", "/m/x.safetensors"}}},
+        // A list output whose key sorts before the picture's: its model handles are not pictures either.
+        const QJsonObject outputs{{"a_models", QJsonArray{QJsonObject{{"resource", "fugue/image-model"}, {"path", "/m/y.safetensors"}}}},
+                                  {"model", QJsonObject{{"resource", "fugue/image-model"}, {"path", "/m/x.safetensors"}}},
                                   {"file", QJsonObject{{"type", "image"}, {"path", "/p/a.png"}}}};
         QStringList any, images;
         collectMediaPaths(outputs, any);
         collectMediaPaths(outputs, images, "image");
-        QCOMPARE(any.size(), 2);
+        QCOMPARE(any.size(), 3);
         QCOMPARE(images, (QStringList{"/p/a.png"}));
     }
 
