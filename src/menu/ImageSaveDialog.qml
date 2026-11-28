@@ -18,10 +18,6 @@ Item {
         onRejected: if (root.actions) root.actions.cancelSave() // gone first when the window closes
     }
 
-    // The window going while the dialog shows (quit from the keys): it closes first, so the
-    // in-window dialog is not torn down mid-show.
-    Component.onDestruction: dialog.close()
-
     Connections {
         target: root.actions
         function onSaveRequested(folder, file, suffix) {

@@ -23,6 +23,7 @@
 
 #include "cli/commands.h"
 #include "engine/compiler.h"
+#include "engine/document.h"
 #include "engine/queue.h"
 #include "engine/run_folder.h"
 
@@ -32,11 +33,19 @@ namespace fugue::cli {
 // events until run.done and exits 1 unless the run ended ok.
 Reply startRun(const Command &command, Context &context);
 
+// `fugue run <file> --sweep <node>.<input>=v1,v2 [--sweep ...] --to <node> --wait` (cli/sweep.cpp, #552): one run per cell, then one
+// run that lays the pictures out as a sheet. Reached from startRun.
+Reply sweepRun(const Command &command, Context &context);
+
+// `--set <node>.<input>=<value>` applied to `document` (the form was checked by the argument parser): `usage` for a node it lacks.
+Errors applySetOverrides(Document &document, const QStringList &overrides);
+
 // The steps of `fugue run` after the compile: the run folder, the queue entry and a detached worker. `document` is the
 // workflow as compiled (empty for a compiled graph), `file` the path the run is recorded under. Returns the queued run's
-// folder, or why it could not start. The canvas batch (cli/canvas_batch.cpp) starts each picture's run this way.
+// folder, or why it could not start. `alsoRead` are files this run may read besides the file roots (13.6): the sweep's sheet reads its cells' pictures, wherever the output folder is. The canvas batch (cli/canvas_batch.cpp) starts each picture's run this way.
 Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
-                                   const QJsonObject &allowRemote = {});
+                                   const QJsonObject &allowRemote = {},
+                                   const QStringList &alsoRead = {});
 
 // `fugue runs cancel`: removes a waiting run's entry, or signals the worker.
 Reply cancelRun(const Command &command, Context &context);

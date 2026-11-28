@@ -64,7 +64,14 @@ QtObject {
         qtFolder.close()
     }
 
-    Component.onDestruction: root.close()
+    // A picker going while its dialog shows (quit from the keys) closes it first, so the in-window dialog is not torn down mid-show.
+    // Not `root.close()`: when the picker is destroyed from above, its own functions are already gone by here ("Property 'close' is
+    // not a function", under load), but the dialogs it holds are still there. A parent therefore need not close its pickers itself.
+    Component.onDestruction: {
+        portal.close()
+        qtFile.close()
+        qtFolder.close()
+    }
 
     // The functions the dialogs and open() share.
     function openQt() {

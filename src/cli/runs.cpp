@@ -21,6 +21,7 @@
 #include "engine/document.h"
 #include "engine/json.h"
 #include "engine/remote_consent.h"
+#include "engine/sweep.h"
 
 namespace fugue::cli {
 
@@ -30,16 +31,17 @@ std::atomic<bool> g_cancel{false};
 
 void onSignal(int) { g_cancel.store(true); }
 
+} // namespace
+
 // --set <node>.<input>=<value>: the value is JSON when it parses as one (a number, true,
-// "text"), else plain text. The input then holds that literal, replacing a link.
-Errors applyOverrides(Document &document, const QStringList &overrides) {
+// "text"), else plain text (parseSetValue). The input then holds that literal, replacing a link.
+Errors applySetOverrides(Document &document, const QStringList &overrides) {
     Errors errors;
     for (const QString &text : overrides) {
         const int dot = text.indexOf('.');
         const int equals = text.indexOf('=');
         const QString node = text.left(dot);
         const QString input = text.mid(dot + 1, equals - dot - 1);
-        QString raw = text.mid(equals + 1);
         const auto found = document.graph.nodes.find(node);
         if (found == document.graph.nodes.end()) {
             Error error = makeError("usage", QStringLiteral("--set names node \"%1\", which the workflow does not have.").arg(node),
@@ -49,16 +51,10 @@ Errors applyOverrides(Document &document, const QStringList &overrides) {
             errors << error;
             continue;
         }
-        QJsonValue value = raw;
-        const QJsonDocument parsed = QJsonDocument::fromJson("[" + raw.toUtf8() + "]");
-        if (parsed.isArray() && parsed.array().size() == 1)
-            value = parsed.array().at(0);
-        found->inputs.insert(input, InputValue::fromJson(value));
+        found->inputs.insert(input, InputValue::fromJson(parseSetValue(text.mid(equals + 1))));
     }
     return errors;
 }
-
-} // namespace
 
 namespace {
 
@@ -192,7 +188,7 @@ Plan graphToRun(const Command &command, Context &context) {
     Result<Document> document = Document::loadFile(file);
     if (!document)
         return {Compilation(document.errors()), {}};
-    const Errors setErrors = applyOverrides(*document, command.options.value("set"));
+    const Errors setErrors = applySetOverrides(*document, command.options.value("set"));
     if (!setErrors.isEmpty())
         return {Compilation(setErrors), {}};
     // The files on disk of the models it names that are not (#605): used for this run when asked, else said.
@@ -210,7 +206,7 @@ Plan graphToRun(const Command &command, Context &context) {
 } // namespace
 
 Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context,
-                                   const QJsonObject &allowRemote) {
+                                   const QJsonObject &allowRemote, const QStringList &alsoRead) {
     const Result<RunFolder> folder = RunFolder::create(context.runsRoot);
     if (!folder)
         return folder.errors();
@@ -223,7 +219,10 @@ Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonOb
     if (!document.isEmpty())
         written += folder->writeWorkflow(document);
     // The worker is not started here, so "the current directory" of 13.6 is recorded now.
-    written += folder->writeRoots(FileRoots::defaults(QDir::currentPath(), workflow));
+    FileRoots roots = FileRoots::defaults(QDir::currentPath(), workflow);
+    for (const QString &path : alsoRead)
+        roots.read << canonicalPath(path);
+    written += folder->writeRoots(roots);
     if (!allowRemote.isEmpty())
         written += folder->writeRemoteAllowed(allowRemote);
     if (hasErrors(written)) {
@@ -256,6 +255,8 @@ Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonOb
 }
 
 Reply startRun(const Command &command, Context &context) {
+    if (command.has("sweep"))
+        return sweepRun(command, context);
     const QString file = command.positionals.at(0);
     const Plan plan = graphToRun(command, context);
     const Compilation &compilation = plan.compilation;

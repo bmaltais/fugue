@@ -19,7 +19,7 @@ struct Spec {
     Handler handler = nullptr; // null: a later milestone, parsed but not run
 };
 
-const Spec runSpec{1, 1, {"to", "provider", "set", "allow-remote"}, {"wait", "first", "use-on-disk", "no-use-on-disk"}, startRun};
+const Spec runSpec{1, 1, {"to", "provider", "set", "sweep", "allow-remote"}, {"wait", "first", "use-on-disk", "no-use-on-disk"}, startRun};
 const Spec validateSpec{1, 1, {}, {"use-on-disk", "no-use-on-disk"}, validateWorkflow};
 const Spec compileSpec{1, 1, {}, {}, compileWorkflow};
 

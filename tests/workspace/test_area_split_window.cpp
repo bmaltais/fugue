@@ -376,12 +376,18 @@ private slots:
         QVERIFY(app.open());
         QVERIFY(app.commands.trigger("area.view-canvas"));
         QTRY_VERIFY(find(app.window, "canvasArea") && !app.canvas->isVisible());
-        // The window's own focus: a Canvas view that has it keeps H for its Hand tool.
-        app.window->contentItem()->forceActiveFocus();
-        app.key(Qt::Key_H);
+        // H is the window's only while no Canvas view is hot: one that has the focus or the pointer over it keeps H for its Hand tool.
+        // The pointer sits wherever the offscreen screen left it (over the view, or not, by when the window was laid out), so it is
+        // moved off the views and the owner of H is waited for, not assumed.
+        const auto pressH = [&] {
+            app.window->contentItem()->forceActiveFocus();
+            QTest::mouseMove(app.window, QPoint(1, 1));
+            QTRY_COMPARE(app.commands.ownerOf("H"), QString("view.focus-mode"));
+            app.key(Qt::Key_H);
+        };
+        pressH();
         QTRY_VERIFY(app.chrome.focusMode());
-        app.window->contentItem()->forceActiveFocus();
-        app.key(Qt::Key_H);
+        pressH();
         QTRY_VERIFY(!app.chrome.focusMode());
         app.sidePanels.setTab("nodes");
         QQuickItem *library = nullptr;

@@ -343,5 +343,4 @@ Question {
             }
         }
     }
-    Component.onDestruction: target.close()
 }
