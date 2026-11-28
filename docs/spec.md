@@ -443,11 +443,14 @@ There is one list of named inputs per node type and no separate "parameter" kind
   takes `CompileOptions::from` (a path id) and records it in
   `CompiledGraph::from` and compiled.json's `from` (a "run to here" graph records `target` instead; both are absent in a normal
   run); the scheduler demands that node itself. A group instance's path id, for `from` and `target` alike (its card on the
-  canvas), stands for every node inside it, through each level. An end point that does not run is the error `usage`: one
+  canvas), stands for every node inside it, through each level (the scheduler demands each; an inner view sink stays quiet, 5.5,
+  and `fugue runs result` lists what they made). An end point that does not run is the error `usage`: one
   that is not there or is bypassed, a muted one, and one skipped because what it needs is muted or empty (a run from it would
   do nothing, and say nothing). The canvas also **holds what is upstream** of the node: in the run's copy of the
   document (never the canvas's), every seed input of a node strictly upstream whose mode is Randomize or Increment takes the
-  seed the shown result used ("Seed used", recorded by path id); one with no shown result is left as it is. Upstream is read
+  seed the shown result used ("Seed used", recorded by path id); one with no shown result is left as it is, and so is one
+  whose value also reaches the node or one after it (an exposed input driving both). An Increment seed never set is held on its
+  node. A library group named only by its type id is held inside as the run embeds it. Upstream is read
   in the flattened graph: it reaches into the group instances before the node and, inside a group, out to the nodes that feed
   it; nothing inside a group card that is the end point is held. A seed is held where its value is written: on its node, or on
   the instance whose exposed input drives it. One written in a group definition that runs more than once (two instances) is

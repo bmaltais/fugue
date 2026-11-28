@@ -193,6 +193,19 @@ public:
     // "node/input" for each increment seed held on the level shown, for advanceSeedsExcept not to advance.
     using SeedUsed = std::function<std::optional<double>(const QString &path, const QString &input)>;
     fugue::Document holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const;
+    // holdUpstream in two halves, so a batch compiles once: the seeds to hold (where each is written, and its value), and the
+    // document as it is now with them held.
+    struct HeldSeed {
+        QStringList level;  // the instance ids around the node it is written on
+        QString definition; // that level's group definition, empty at the top
+        QString node;
+        QString input;
+        double seed = 0;
+        bool increment = false;
+    };
+    using HeldSeeds = QList<HeldSeed>;
+    HeldSeeds seedsToHold(const QString &from, const SeedUsed &seedUsed) const;
+    fugue::Document withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) const;
     // advanceSeeds() leaving the increment seeds named in `held` (holdUpstream's keys) as they are.
     void advanceSeedsExcept(const QSet<QString> &held);
 

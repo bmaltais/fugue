@@ -40,6 +40,7 @@
 
 #include <memory>
 
+#include "canvas/widget_edit.h"
 #include "run/run_service.h"
 
 class CanvasModel;
@@ -200,7 +201,8 @@ private:
     QString keyFor(const QString &node) const;
     static qreal progressOf(const NodeView &view);
     QString startRun(const QString &target, bool first, const QString &from = {});
-    QString startOne(const QString &tab, const QString &target, bool first, const QString &from = {});
+    QString startOne(const QString &tab, const QString &target, bool first, const QString &from,
+                     const WidgetEdit::HeldSeeds &toHold);
     QString currentTab() const;
     void onEvent(const QString &run, const QJsonObject &event);
     void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems, const QJsonArray &checkErrors);

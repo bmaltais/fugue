@@ -954,6 +954,19 @@ void TestCompiler::aGroupCardIsTheEndPointOfEveryNodeInside() {
     QCOMPARE(from->nodes.keys(), (QStringList{"g7/gen", "g7/inner3/s2", "prompt", "save"}));
     QCOMPARE(from->sinks(), QStringList{"save"});
     QCOMPARE(from->from, QString("g7/inner3"));
+
+    // A view sink inside the card is no end point: nothing reads it, so it stays quiet as in any run (5.5).
+    const Document viewing = document(withGroups(
+        "'g': {'type': 'local/v', 'version': '1.0.0', 'inputs': {}},"
+        "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g.image'}}}",
+        "'local/v': {'version': '1.0.0', 'name': 'V', 'inputs': [], 'outputs': [{'name': 'image', 'from': 'gen.image'}],"
+        " 'nodes': {'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'x'}},"
+        "           'cmp': {'type': 'fugue/compare', 'version': '1.0.0',"
+        "                   'inputs': {'a': {'from': 'gen.image'}, 'b': {'from': 'gen.image'}}}}}"));
+    options.from = "g";
+    const Compilation card = compile(viewing, registry(), options);
+    QVERIFY2(card.ok(), qPrintable(dump(card.problems())));
+    QCOMPARE(card->nodes.keys(), (QStringList{"g/gen", "save"}));
 }
 
 void TestCompiler::anEndPointThatDoesNotRunIsAUsageError() {

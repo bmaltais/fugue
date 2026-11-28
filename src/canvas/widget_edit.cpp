@@ -8,6 +8,7 @@
 #include "canvas/input_links.h"
 #include "engine/compiler.h"
 #include "engine/file_hashes.h"
+#include "engine/group_library.h"
 #include "engine/model_download.h"
 #include "engine/model_family.h"
 #include "engine/model_inspect.h"
@@ -678,14 +679,17 @@ const Nodes *nodesAt(const Document &document, const QStringList &level, QString
 }
 
 // Where the value an input of the flattened graph takes is written (as Compiler::effective reads it): on an exposed input of
-// the group around the node that the instance, or a level further out, sets; else on the node itself. Nothing when neither
-// holds one, or when the value in effect is an exposed input's default, which the definition holds for every instance.
+// the group around the node that the instance, or a level further out, sets; else on the node itself. Nothing when the value in
+// effect is an exposed input's default, which the definition holds for every instance. With `orEmpty`, a node that holds
+// nothing for it is its place too (an Increment seed never set has its default).
 struct Written {
     QStringList level; // the instance ids around the node it is written on
     QString node;
     QString input;
+    QString key() const { return level.join(QLatin1Char('/')) + QLatin1Char('|') + node + QLatin1Char('|') + input; }
 };
-std::optional<Written> writtenAt(const Document &document, const QStringList &level, const QString &node, const QString &input) {
+std::optional<Written> writtenAt(const Document &document, const QStringList &level, const QString &node, const QString &input,
+                                 bool orEmpty) {
     QString definition;
     const Nodes *nodes = nodesAt(document, level, &definition);
     if (!nodes)
@@ -694,13 +698,13 @@ std::optional<Written> writtenAt(const Document &document, const QStringList &le
         for (const GroupInput &exposed : group->inputs) {
             if (!exposed.targets.contains(PortRef{node, input}))
                 continue;
-            if (auto outer = writtenAt(document, level.mid(0, level.size() - 1), level.last(), exposed.name))
+            if (auto outer = writtenAt(document, level.mid(0, level.size() - 1), level.last(), exposed.name, false))
                 return outer;
             if (exposed.defaultValue)
                 return std::nullopt;
         }
     }
-    if (nodes->value(node).inputs.value(input).isEmpty())
+    if (!orEmpty && nodes->value(node).inputs.value(input).isEmpty())
         return std::nullopt;
     return Written{level, node, input};
 }
@@ -719,9 +723,36 @@ void countInstances(const Document &document, const Nodes &nodes, QHash<QString,
 } // namespace
 
 Document WidgetEdit::holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const {
+    return withHeldSeeds(seedsToHold(from, seedUsed), held);
+}
+
+Document WidgetEdit::withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) const {
     Document document = m_canvas->document();
-    if (!m_registry || from.isEmpty())
+    if (seeds.isEmpty())
         return document;
+    if (m_registry)
+        embedGroupTypes(document, *m_registry);
+    const QStringList shown = m_canvas->scope();
+    for (const HeldSeed &seed : seeds) {
+        Nodes *nodes = seed.definition.isEmpty() ? &document.graph.nodes
+                       : document.groups.contains(seed.definition) ? &document.groups[seed.definition].nodes
+                                                                    : nullptr;
+        if (!nodes || !nodes->contains(seed.node))
+            continue;
+        (*nodes)[seed.node].inputs.insert(seed.input, InputValue::literal(seed.seed));
+        if (held && seed.increment && seed.level == shown)
+            held->insert(seed.node + QLatin1Char('/') + seed.input);
+    }
+    return document;
+}
+
+WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUsed &seedUsed) const {
+    HeldSeeds seeds;
+    if (!m_registry || from.isEmpty() || !seedUsed)
+        return seeds;
+    Document document = m_canvas->document();
+    // A library or pack group named only by its type id runs from its definition, as the run embeds it (compileForRun).
+    embedGroupTypes(document, *m_registry);
     // The flattened graph the run will have (3.4): what is upstream of `from` there, through the groups' faces.
     CompileOptions options;
     options.from = from;
@@ -729,18 +760,14 @@ Document WidgetEdit::holdUpstream(const QString &from, const SeedUsed &seedUsed,
     options.allowUnsetInputs = true;
     const Compilation compiled = compile(document, *m_registry, options);
     if (!compiled.ok())
-        return document; // the run reports why; nothing to hold
+        return seeds; // the run reports why; nothing to hold
     const CompiledGraph &graph = compiled.value();
-    QStringList ends;
-    if (graph.nodes.contains(from)) {
-        ends << from;
-    } else {
-        for (auto it = graph.nodes.constBegin(); it != graph.nodes.constEnd(); ++it)
-            if (it.key().startsWith(from + QLatin1Char('/')))
-                ends << it.key();
-    }
+    const auto inside = [&from](const QString &path) { return path == from || path.startsWith(from + QLatin1Char('/')); };
     QSet<QString> upstream;
-    QStringList open = ends;
+    QStringList open;
+    for (auto it = graph.nodes.constBegin(); it != graph.nodes.constEnd(); ++it)
+        if (inside(it.key()))
+            open << it.key();
     while (!open.isEmpty()) {
         for (const CompiledLink &link : graph.nodes.value(open.takeLast()).links())
             if (!upstream.contains(link.from.node)) {
@@ -748,26 +775,37 @@ Document WidgetEdit::holdUpstream(const QString &from, const SeedUsed &seedUsed,
                 open << link.from.node;
             }
     }
+    upstream.removeIf(inside); // a loop cannot compile; the end point's own are never held
+    const auto split = [](const QString &path) {
+        QStringList segments = path.split(QLatin1Char('/'));
+        const QString leaf = segments.takeLast();
+        return std::make_pair(segments, leaf);
+    };
+    // A place whose value also reaches the end point or a node after it (an exposed input driving both sides) is not held:
+    // that would pin the end point's own seed.
+    QSet<QString> reachesOn;
+    for (auto it = graph.nodes.constBegin(); it != graph.nodes.constEnd(); ++it) {
+        if (upstream.contains(it.key()))
+            continue;
+        const auto [level, leaf] = split(it.key());
+        for (auto input = it->inputs.constBegin(); input != it->inputs.constEnd(); ++input)
+            if (const std::optional<Written> at = writtenAt(document, level, leaf, input.key(), true))
+                reachesOn.insert(at->key());
+    }
     QHash<QString, int> instances;
     countInstances(document, document.graph.nodes, instances);
-    const QStringList shown = m_canvas->scope();
     QSet<QString> done;
     for (const QString &path : std::as_const(upstream)) {
-        if (ends.contains(path) || path.startsWith(from + QLatin1Char('/')))
-            continue; // a loop cannot compile, but the end point's own seeds are never held
         const CompiledNode &compiledNode = graph.nodes.value(path);
         const NodeType *type = m_registry->nodeTypeFor(compiledNode.type, compiledNode.version.major);
         if (!type)
             continue;
-        const QStringList segments = path.split(QLatin1Char('/'));
+        const auto [level, leaf] = split(path);
         for (const InputSpec &spec : type->inputs) {
             if (spec.widget() != QLatin1String("seed"))
                 continue;
-            const std::optional<Written> at = writtenAt(document, segments.mid(0, segments.size() - 1), segments.last(), spec.name);
-            if (!at)
-                continue;
-            const QString key = at->level.join(QLatin1Char('/')) + QLatin1Char('|') + at->node + QLatin1Char('|') + at->input;
-            if (done.contains(key))
+            const std::optional<Written> at = writtenAt(document, level, leaf, spec.name, true);
+            if (!at || done.contains(at->key()) || reachesOn.contains(at->key()))
                 continue;
             QString definition;
             const Nodes *nodes = nodesAt(document, at->level, &definition);
@@ -777,22 +815,19 @@ Document WidgetEdit::holdUpstream(const QString &from, const SeedUsed &seedUsed,
             const QJsonObject layout = definition.isEmpty()
                                            ? document.layout
                                            : document.layout.value("groups").toObject().value(definition).toObject();
-            const bool increment = value.kind() == InputValue::Kind::Literal
+            const bool increment = (value.isEmpty() || value.kind() == InputValue::Kind::Literal)
                                    && layout.value("nodes").toObject().value(at->node).toObject().value("increment").toArray()
                                           .contains(QJsonValue(at->input));
             if (value.kind() != InputValue::Kind::Auto && !increment)
                 continue;
-            const std::optional<double> seed = seedUsed ? seedUsed(path, spec.name) : std::nullopt;
+            const std::optional<double> seed = seedUsed(path, spec.name);
             if (!seed)
                 continue;
-            done.insert(key);
-            Nodes &writable = definition.isEmpty() ? document.graph.nodes : document.groups[definition].nodes;
-            writable[at->node].inputs.insert(at->input, InputValue::literal(*seed));
-            if (held && increment && at->level == shown)
-                held->insert(at->node + QLatin1Char('/') + at->input);
+            done.insert(at->key());
+            seeds << HeldSeed{at->level, definition, at->node, at->input, *seed, increment};
         }
     }
-    return document;
+    return seeds;
 }
 
 void WidgetEdit::advanceSeeds() { advanceSeedsExcept({}); }

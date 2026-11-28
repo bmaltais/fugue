@@ -1216,9 +1216,10 @@ CompiledGraph Compiler::shape() {
         if (live.contains(wanted)) {
             ends << wanted;
         } else {
+            // Not its inner sinks: a view sink kept live for a reader stays quiet unless that reader needs it (5.5).
             const QString prefix = wanted + QLatin1Char('/');
             for (auto it = live.constBegin(); it != live.constEnd(); ++it)
-                if (it.key().startsWith(prefix))
+                if (it.key().startsWith(prefix) && !quiet(*it))
                     ends << it.key();
         }
         if (ends.isEmpty()) {

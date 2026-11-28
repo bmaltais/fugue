@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 #include <QUndoStack>
 
@@ -13,6 +14,8 @@
 #include "canvas/canvas_model.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
+#include "engine/group_library.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "workflow/content_hash.h"
 #include "nodes/builtin.h"
@@ -916,6 +919,65 @@ private slots:
         run = canvas.widgets()->holdUpstream("g7/second", seedUsed, &held);
         QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
         QCOMPARE(seed(run, "local/pass", "first"), random);
+    }
+
+    // What else decides a held place: a library group named only by its type id is held inside as the run embeds it; an exposed
+    // seed that also drives the end point is not held (it would pin the end point's own seed); an Increment seed never set is
+    // held on its node.
+    void runFromHereHoldsLibraryGroupsAndNeverTheEndPointsSeed() {
+        // One exposed seed drives both inner nodes, so both used the same one.
+        const QHash<QString, double> shown{{"pre/seed", 1}, {"g7/first/seed", 2}, {"g7/second/seed", 2}};
+        const WidgetEdit::SeedUsed seedUsed = [&shown](const QString &path, const QString &input) -> std::optional<double> {
+            const auto it = shown.constFind(path + "/" + input);
+            return it == shown.constEnd() ? std::nullopt : std::optional<double>(*it);
+        };
+        const char *both = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a"}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}, "seed": {"auto": "random"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}}}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "image", "targets": ["first.image"]}, {"name": "seed", "targets": ["first.seed", "second.seed"]}],
+            "outputs": [{"name": "image", "from": "second.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "b"}},
+                      "second": {"type": "fugue/generate-image", "version": "1.0.0",
+                                 "inputs": {"prompt": "c", "image": {"from": "first.image"}}}}}},
+          "layout": {"nodes": {"pre": {"increment": ["seed"]}}}})";
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(both));
+        QSet<QString> held;
+        Document run = canvas.widgets()->holdUpstream("save", seedUsed, &held);
+        QCOMPARE(run.graph.nodes.value("pre").inputs.value("seed").toJson(), QJsonValue(1.0)); // Increment, never set
+        QCOMPARE(held, QSet<QString>{"pre/seed"});
+        QCOMPARE(run.graph.nodes.value("g7").inputs.value("seed").toJson(), QJsonValue(2.0)); // drives two nodes, both before
+        QVERIFY(canvas.groups()->enterGroup("g7"));
+        held.clear();
+        run = canvas.widgets()->holdUpstream("g7/second", seedUsed, &held);
+        QCOMPARE(run.graph.nodes.value("pre").inputs.value("seed").toJson(), QJsonValue(1.0));
+        QCOMPARE(run.graph.nodes.value("g7").inputs.value("seed").toJson(), QJsonValue(QJsonObject{{"auto", "random"}}));
+        QVERIFY(held.isEmpty()); // pre's is not on the level shown: no advance to skip
+
+        // A group from the library, the workflow naming only its type id: its inner Randomize seed is held in the run's copy.
+        const char *lib = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a"}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}}}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "image", "targets": ["first.image"]}], "outputs": [{"name": "image", "from": "first.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0",
+                                "inputs": {"prompt": "b", "seed": {"auto": "random"}}}}}}})";
+        QTemporaryDir packs;
+        QVERIFY(saveToLibrary(document(lib), "local/pass", m_registry, packs.filePath("local")).ok());
+        Registry library;
+        nodes::addBuiltinNodeTypes(library);
+        loadPacks(library, {packs.path()});
+        Document bare = document(lib);
+        bare.groups.clear();
+        CanvasModel fromLibrary(&library);
+        fromLibrary.setDocument(bare);
+        run = fromLibrary.widgets()->holdUpstream("save", seedUsed, nullptr);
+        QVERIFY(run.group("local/pass"));
+        QCOMPARE(run.group("local/pass")->nodes.value("first").inputs.value("seed").toJson(), QJsonValue(2.0));
+        QVERIFY(fromLibrary.document().groups.isEmpty()); // the canvas's own document is as it was
     }
 
     // A row whose key the group's face drives is there inside the group (6.1.2, 5.4): Make group moved lora_2's link to the
