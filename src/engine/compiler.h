@@ -129,7 +129,7 @@ struct CompiledGraph {
 
 struct CompileOptions {
     // "Run to here" (3.4): the path id to stop at. Only it and what it needs
-    // are kept, and no sink is added. A path id that is not a node of the
+    // are kept, and no sink is added. A group instance's path id stands for every live node inside it (a group card); any other path id that is not a node of the
     // flattened graph is the error `usage`.
     QString target;
     // "Run from here" (3.4): a path id. Kept are it, every sink that is a descendant of it, and what those need; no other
