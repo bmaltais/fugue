@@ -22,6 +22,8 @@
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 #include "engine/providers.h"
+#include "engine/host_models.h"
+#include "../engine/fake_http.h"
 #include "../test_shard.h"
 #include "../window_grab.h"
 
@@ -1367,6 +1369,82 @@ private:
         QVERIFY2(!stored.isEmpty(), "OK left the mask input empty");
         QVERIFY(QFileInfo(stored).isFile());
         QTRY_COMPARE(find(app.window, "appMaskState-mask")->property("text").toString(), QStringLiteral("Painted"));
+    }
+
+private slots:
+    // #735 pictures, skipped unless FUGUE_SHOT_DIR is set: the App view's model menu with a paired helper's "On gx10" group, dark and light.
+    //   FUGUE_SHOT_DIR=<dir> QT_QUICK_BACKEND=software build/test_app_window modelMenuWithAPairedHostsModelsShot
+    void modelMenuWithAPairedHostsModelsShot_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::newRow("dark") << QString();
+        QTest::newRow("light") << QStringLiteral("flexoki-light");
+    }
+    void modelMenuWithAPairedHostsModelsShot() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the App view's model menu");
+        QFETCH(QString, theme);
+        if (!theme.isEmpty() && !QFile::exists("/usr/share/omarchy/themes/" + theme))
+            QSKIP("Omarchy's themes are not installed here");
+        QDir().mkpath(out);
+        QTemporaryDir scratch;
+        qputenv("XDG_DATA_HOME", scratch.filePath("data").toLocal8Bit());
+        qputenv("XDG_STATE_HOME", scratch.filePath("state").toLocal8Bit());
+        qputenv("XDG_CONFIG_HOME", scratch.filePath("config").toLocal8Bit());
+        QDir().mkpath(scratch.filePath("config/fugue"));
+        QFile providers(scratch.filePath("config/fugue/providers.json"));
+        QVERIFY(providers.open(QIODevice::WriteOnly));
+        providers.write(QByteArray("{\"providers\": [{\"name\": \"gx10\", \"type\": \"fugue-helper\", \"key\": \"k\", \"address\": \"http:") + "//gx10.example:8787\"}]}");
+        providers.close();
+        const QString models = scratch.filePath("data/fugue/models/diffusion_models");
+        QDir().mkpath(models);
+        for (const char *name : {"flux-2-klein-9b-Q8_0.gguf", "z-image-turbo-Q8_0.gguf"}) {
+            QFile file(models + "/" + name);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.resize(qint64(7.2e9));
+        }
+        const auto entry = [](const QString &name, double size, const QString &sha) {
+            return QJsonObject{{"name", name}, {"size", size}, {"sha256", sha.isEmpty() ? QJsonValue() : QJsonValue(sha)}, {"folder", "diffusion_models"}, {"family", QJsonValue()}};
+        };
+        fugue::test::FakeHttpServer host;
+        QVERIFY(host.listen());
+        const QJsonObject reply{{"models", QJsonArray{entry("diffusion_models/qwen-image-edit-2511-Q4_K_M.gguf", 13.1e9, QString(64, 'a')),
+                                                       entry("diffusion_models/wan2.2_t2v_high_noise_14B_Q4_K_S.gguf", 8.2e9, QString(64, 'b')),
+                                                       entry("diffusion_models/z-image-turbo-Q8_0.gguf", 7.2e9, "")}}, {"hashing", 0}};
+        host.on("POST", "/fugue/v1/models", [&reply](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, QJsonDocument(reply).toJson(QJsonDocument::Compact)};
+        });
+        ProviderInstance gx10;
+        gx10.name = QStringLiteral("gx10");
+        gx10.type = QStringLiteral("fugue-helper");
+        gx10.address = QStringLiteral("http://gx10.example:8787");
+        bool fetched = false;
+        HostModelCache::shared().refresh(gx10, false, {}, [&fetched](const HostModelList &) { fetched = true; }, [&host](const ProviderInstance &paired) {
+            ProviderInstance atTheFake = paired;
+            atTheFake.address = QString::fromLatin1(host.origin());
+            return createProvider(atTheFake);
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(fetched, 5000);
+
+        const QByteArray text = QByteArray(R"({
+          "fugue": 1,
+          "app": {"format": 1, "title": "Models", "defaultView": "app",
+                  "inputs": [{"role": "model", "targets": ["load.diffusion_model"], "label": "Model"}],
+                  "outputs": [{"node": "save"}]},
+          "graph": {"nodes": {
+            "load": {"type": "fugue/load-models", "version": "1.4.0", "inputs": {}},
+            "save": {"type": "fugue/save-image", "version": "1.1.0", "inputs": {"name": "out"}}}}
+        })");
+        App app(load(text.constData()), {}, Look{theme, -1});
+        Rig rig(app);
+        QVERIFY(app.open());
+        app.window->resize(760, 640);
+        QTRY_COMPARE(app.window->contentItem()->width(), 760.0);
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = find(app.window, "appInput-model")));
+        tap(app.window, field);
+        QTest::qWait(600);
+        QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/app-model-menu-%2.png").arg(out, theme.isEmpty() ? "dark" : "light")));
     }
 };
 
