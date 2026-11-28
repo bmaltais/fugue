@@ -30,6 +30,20 @@ QJsonValue appAsJson(const Template &t) {
     return QJsonObject{{"title", t.app->title}, {"summary", t.app->summary}, {"kind", t.app->kind}};
 }
 
+// `false` for a template that is not a community one, else the author and the issue it came in by (11.10).
+QJsonValue communityAsJson(const Template &t) {
+    if (!t.community)
+        return false;
+    QJsonObject out;
+    if (!t.community->author.isEmpty())
+        out.insert("author", t.community->author);
+    if (t.community->issue > 0) {
+        out.insert("issue", t.community->issue);
+        out.insert("url", t.community->issueUrl());
+    }
+    return out;
+}
+
 } // namespace
 
 Reply templateList(const Command &, Context &context) {
@@ -62,6 +76,8 @@ Reply templateList(const Command &, Context &context) {
                                   {"source", t.source},
                                   {"families", QJsonArray::fromStringList(t.families)},
                                   {"app", appAsJson(t)},
+                                  {"community", communityAsJson(t)},
+                                  {"canvas_action", t.canvasAction},
                                   {"own", t.own},
                                   {"inherited", t.inherited},
                                   {"online", t.online},
@@ -76,6 +92,10 @@ Reply templateList(const Command &, Context &context) {
         QString line = QStringLiteral("%1  %2").arg(t.id, t.title);
         if (t.inherited)
             line += QStringLiteral("  [inherited from Default]");
+        if (t.canvasAction)
+            line += QStringLiteral("  [canvas action]");
+        if (t.community)
+            line += t.community->author.isEmpty() ? QStringLiteral("  [community]") : QStringLiteral("  [community, by %1]").arg(t.community->author);
         if (missing)
             line += QStringLiteral("  (%1 of %2 models missing)").arg(missing).arg(t.models.size());
         if (!t.neededPacks.isEmpty())

@@ -87,6 +87,7 @@ Rectangle {
                 spacing: 3 * sheet.u
 
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     objectName: "templateDetailsTitle"
                     Layout.fillWidth: true
                     text: sheet.template.title
@@ -96,6 +97,7 @@ Rectangle {
                     font.weight: Font.DemiBold
                 }
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     objectName: "templateDetailsDescription"
                     Layout.fillWidth: true
                     text: sheet.template.description
@@ -104,6 +106,7 @@ Rectangle {
                     font.pixelSize: sheet.look.textSize
                 }
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     id: sourceLine
                     objectName: "templateDetailsSource"
                     readonly property string link: sheet.source.url ? sheet.source.url : ""
@@ -118,6 +121,23 @@ Rectangle {
                     TapHandler { gesturePolicy: TapHandler.WithinBounds; enabled: sourceLine.link !== ""; onTapped: Qt.openUrlExternally(sourceLine.link) }
                 }
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
+                    id: communityLine
+                    objectName: "templateDetailsCommunity"
+                    readonly property string link: sheet.template.communityUrl ? sheet.template.communityUrl : ""
+                    Layout.fillWidth: true
+                    visible: sheet.template.community === true
+                    text: sheet.template.communityAuthor ? qsTr("Community template, submitted by %1").arg(sheet.template.communityAuthor)
+                                                         : qsTr("Community template, submitted by a user")
+                    wrapMode: Text.Wrap
+                    color: link !== "" ? sheet.look.accent : sheet.look.label
+                    font.pixelSize: sheet.look.textSize
+                    font.underline: link !== "" && communityHover.hovered
+                    HoverHandler { id: communityHover; cursorShape: communityLine.link !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                    TapHandler { gesturePolicy: TapHandler.WithinBounds; enabled: communityLine.link !== ""; onTapped: Qt.openUrlExternally(communityLine.link) }
+                }
+                Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     objectName: "templateDetailsFacts"
                     Layout.fillWidth: true
                     readonly property var parts: [sheet.template.categoryTitle,
@@ -131,6 +151,7 @@ Rectangle {
                 }
 
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     visible: sheet.template.modelList.length > 0
                     text: qsTr("Models used")
                     color: sheet.look.text
@@ -159,6 +180,7 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: 0
                             Text {
+                                textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                 Layout.fillWidth: true
                                 text: row.modelData.name
                                 elide: Text.ElideMiddle
@@ -166,6 +188,7 @@ Rectangle {
                                 font.pixelSize: sheet.look.textSize
                             }
                             Text {
+                                textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                 Layout.fillWidth: true
                                 text: row.yours ? qsTr("Opens with your %1 (%2)").arg(row.yours.file).arg(row.yours.same)
                                       : [row.modelData.kind, row.modelData.size, row.modelData.license].filter(p => p !== "").join(" · ")
@@ -175,6 +198,7 @@ Rectangle {
                             }
                         }
                         Text {
+                            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                             text: row.yours ? qsTr("Your file")
                                   : row.modelData.status === "disk" ? qsTr("On disk")
                                   : row.modelData.status === "served" ? qsTr("Served") : qsTr("Missing")
@@ -185,6 +209,7 @@ Rectangle {
                 }
 
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     visible: sheet.template.packs.length > 0
                     text: qsTr("Packs needed")
                     color: sheet.look.text
@@ -206,6 +231,7 @@ Rectangle {
                 }
 
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     visible: sheet.template.inputs.length > 0
                     text: qsTr("Sample inputs")
                     color: sheet.look.text

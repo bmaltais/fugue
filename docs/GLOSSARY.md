@@ -107,6 +107,12 @@ _Avoid_: scope check, blocklist
 A download not finished yet, `<file>.part` beside where the model goes; it becomes the model only once its hash is the handle's.
 _Avoid_: temp file, partial
 
+**Community template**:
+A template a user submitted to bmaltais/fugue-workflows, marked by `community` in its `template.json` (spec 11.10). It uses built-in nodes only and carries no `packs/` folder, or Fugue does not list it.
+
+**Canvas action** (as a template):
+A workflow with a top-level `action` block, made for the Canvas view's task bar. Browse templates hides it unless "Show canvas actions" is on.
+
 **App**:
 A workflow with an `app` block: a few inputs worth changing and the results, shown as one simple screen (the App view). The graph stays the truth; there is no second file format.
 _Avoid_: mini-app, form, wizard

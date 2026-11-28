@@ -45,9 +45,12 @@ Rectangle {
     readonly property string tone: toned ? KitTone.nearest(chip) : ""
     readonly property color currentFill: tone === "" || look.params.controlColour === "accent" ? look.selectedRow
                                          : Qt.alpha(look.tone(tone).glass, 0.34)
+    // False for a label that only looks like a chip (a badge with a tooltip and nothing to press): it takes no press, so the card
+    // under it gets the tap, no focus stop, no hover fill, no pointing hand; the tooltip stays.
+    property bool interactive: true
     signal tapped
 
-    readonly property bool hovered: hover.hovered
+    readonly property bool hovered: interactive && hover.hovered
     readonly property bool pressed: tap.pressed
 
     implicitHeight: 7 * look.unit
@@ -73,7 +76,7 @@ Rectangle {
     readonly property bool ringOutside: dialogRow && (primary || solidDanger)
     border.width: ring && !ringOutside ? 2 : bordered && !solidDanger ? 1 : 0
     border.color: ring ? (primary ? look.accentForeground : alarmed ? look.error : look.accent) : look.hairlineStrong
-    activeFocusOnTab: enabled
+    activeFocusOnTab: enabled && interactive
     opacity: enabled && !dimmed ? 1 : 0.4
     Accessible.role: Accessible.Button
     Accessible.name: text !== "" ? text : tip
@@ -124,15 +127,17 @@ Rectangle {
     TapHandler {
         id: tap
         gesturePolicy: TapHandler.WithinBounds
+        enabled: chip.interactive
         onTapped: chip.tapped()
     }
     HoverHandler {
         id: hover
-        cursorShape: chip.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        cursorShape: chip.enabled && chip.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
     ToolTip.visible: hover.hovered && chip.tip !== "" && chip.visible
     ToolTip.delay: chip.look.tooltipDelay
     ToolTip.text: chip.tip
+    Keys.enabled: chip.interactive
     Keys.onReturnPressed: chip.tapped()
     Keys.onEnterPressed: chip.tapped()
     Keys.onSpacePressed: chip.tapped()

@@ -30,6 +30,10 @@ Popup {
     property bool readyOnly: false
     // Only the apps (#387): the templates with an `app` block.
     property bool appsOnly: false
+    // Community templates, the ones users submitted to fugue-workflows (11.10): shown unless this is turned off.
+    property bool showCommunity: true
+    // Canvas actions (a workflow with an `action` block) are made for the Canvas view's task bar: out of the list unless this is on.
+    property bool showActions: false
     // "" is every source, else a source's name (template.json's `source.name`, #369); the same for a model family.
     property string source: ""
     property string family: ""
@@ -37,7 +41,9 @@ Popup {
     property string detailId: ""
     readonly property var detail: detailId === "" ? null : templates.find(t => t.id === detailId) ?? null
     readonly property var noDetail: ({ title: "", description: "", preview: "", categoryTitle: "", source: {}, families: [], tags: [],
-                                       modelList: [], packs: [], inputs: [] })
+                                       canvasAction: false, modelList: [], packs: [], inputs: [], community: false, communityAuthor: "", communityUrl: "" })
+    // A tooltip shows its text as rich text when it starts like HTML; a word joiner in front keeps a template's words plain.
+    function plainTip(text) { return "\u2060" + text }
     function showDetails(id, index) {
         detailId = id
         if (index !== undefined)
@@ -82,6 +88,8 @@ Popup {
         source = ""
         family = ""
         appsOnly = false
+        showCommunity = true
+        showActions = false
         detailId = ""
         if (category !== "" && !categories.some(c => c.id === category))
             category = ""
@@ -104,11 +112,11 @@ Popup {
     // the order the templates come in (categories.json's).
     readonly property var categories: {
         const list = [{ id: "", title: qsTr("All") }]
-        if (templates.some(t => t.own))
+        if (templates.some(t => t.own && audience(t)))
             list.push({ id: "own", title: qsTr("Your templates") })
         const seen = {}
         for (const t of templates) {
-            if (t.own || t.category === "" || seen[t.category])
+            if (t.own || t.category === "" || seen[t.category] || !audience(t))
                 continue
             seen[t.category] = true
             list.push({ id: t.category, title: t.categoryTitle })
@@ -119,12 +127,21 @@ Popup {
     // Whether a template passes the tab, Ready to run, Apps, the search and the two drop-downs, except
     // the one named by `skip` ("source" or "family"): the counts of a drop-down say what choosing
     // each of its entries would leave.
+    // Whether the two switches leave a template in the list: community ones unless turned off; canvas actions only when turned on
+    // (one that is also an app stays, as an app).
+    function audience(t) {
+        if (!showCommunity && t.community)
+            return false
+        return showActions || !t.canvasAction || t.app === true
+    }
     function passes(t, skip) {
         if (category === "own" ? !t.own : category !== "" && (t.own || t.category !== category))
             return false
         if (readyOnly && !t.ready)
             return false
         if (appsOnly && !t.app)
+            return false
+        if (!audience(t))
             return false
         if (skip !== "source" && source !== "" && t.source.name !== source)
             return false
@@ -261,6 +278,7 @@ Popup {
                         HoverHandler { id: tabHover }
                         TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: dialog.category = tab.modelData.id }
                         Text {
+                            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                             anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 2 * dialog.u
                                       right: parent.right; rightMargin: 2 * dialog.u }
                             text: tab.modelData.title
@@ -273,6 +291,7 @@ Popup {
                 }
                 Item { Layout.fillHeight: true }
                 Text {
+                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                     objectName: "templatesOwnFolder"
                     Layout.fillWidth: true
                     Layout.leftMargin: 2 * dialog.u
@@ -298,6 +317,8 @@ Popup {
                     readonly property real others: (sourceBox.visible ? sourceBox.width + spacing : 0)
                                                    + (familyBox.visible ? familyBox.width + spacing : 0) + readyChip.width + spacing
                                                    + (appsChip.visible ? appsChip.width + spacing : 0)
+                                                   + (communityChip.visible ? communityChip.width + spacing : 0)
+                                                   + (actionsChip.visible ? actionsChip.width + spacing : 0)
                 KitSearch {
                     id: search
                     objectName: "templatesSearch"
@@ -359,6 +380,47 @@ Popup {
                     Accessible.role: Accessible.CheckBox
                     Accessible.checked: dialog.appsOnly
                     onTapped: dialog.appsOnly = !dialog.appsOnly
+                }
+                // Community templates are in the list unless this is off: a chip that is on says "included", and it is there only when some are.
+                KitChip {
+                    id: communityChip
+                    objectName: "templatesCommunity"
+                    visible: dialog.templates.some(t => t.community)
+                    look: dialog.look
+                    pill: true
+                    toned: true
+                    text: qsTr("Community")
+                    glyph: dialog.showCommunity ? "check" : ""
+                    tip: dialog.showCommunity ? qsTr("Community templates, submitted by users, are shown. Press to hide them.")
+                                              : qsTr("Community templates, submitted by users, are hidden. Press to show them.")
+                    current: dialog.showCommunity
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: dialog.showCommunity
+                    onTapped: {
+                        dialog.showCommunity = !dialog.showCommunity
+                        if (dialog.category !== "" && !dialog.categories.some(c => c.id === dialog.category))
+                            dialog.category = ""
+                    }
+                }
+                // Canvas actions: off unless chosen (they belong to the Canvas view's task bar); there only when the library has some.
+                KitChip {
+                    id: actionsChip
+                    objectName: "templatesActions"
+                    visible: dialog.templates.some(t => t.canvasAction && t.app !== true)
+                    look: dialog.look
+                    pill: true
+                    toned: true
+                    text: qsTr("Show canvas actions")
+                    glyph: dialog.showActions ? "check" : ""
+                    tip: qsTr("Canvas actions are made for the Canvas view's task bar, so they are left out of this list. Press to list them too.")
+                    current: dialog.showActions
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: dialog.showActions
+                    onTapped: {
+                        dialog.showActions = !dialog.showActions
+                        if (dialog.category !== "" && !dialog.categories.some(c => c.id === dialog.category))
+                            dialog.category = ""
+                    }
                 }
                 }
 
@@ -450,6 +512,19 @@ Popup {
                                         Accessible.name: qsTr("About this template")
                                         onTapped: dialog.showDetails(cell.modelData.id, cell.index)
                                     }
+                                    // A template a user submitted (11.10): a frosted chip in the picture's corner, over the badges' side.
+                                    // Its own press opens the issue it came in by, when it has one.
+                                    CommunityChip {
+                                        objectName: "templateCommunity-" + cell.modelData.id
+                                        anchors { left: parent.left; top: parent.top; margins: dialog.u * 1.5 }
+                                        look: dialog.look
+                                        backdrop: picture.backdropItem
+                                        backdropSource: cell.modelData.preview
+                                        maxTextWidth: parent.width - 8 * dialog.u
+                                        visible: cell.modelData.community
+                                        author: cell.modelData.communityAuthor
+                                        url: cell.modelData.communityUrl
+                                    }
                                     // Where its models are (#164): the same badges as the model pickers, on a
                                     // pill over the preview's corner so the card keeps its height.
                                     Rectangle {
@@ -494,6 +569,7 @@ Popup {
                                 }
                                 // The whole title, up to two lines (the details have the rest).
                                 Text {
+                                    textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                     id: titleText
                                     objectName: "templateTitle-" + cell.modelData.id
                                     Layout.fillWidth: true
@@ -506,7 +582,7 @@ Popup {
                                     font.weight: Font.DemiBold
                                     ToolTip.visible: titleHover.hovered && truncated
                                     ToolTip.delay: App.theme.look.tooltipDelay
-                                    ToolTip.text: cell.modelData.title
+                                    ToolTip.text: dialog.plainTip(cell.modelData.title)
                                     HoverHandler { id: titleHover }
                                 }
                                 // The description takes the room the title and the foot leave, as many lines as fit.
@@ -517,6 +593,7 @@ Popup {
                                     Layout.preferredHeight: 0
                                     clip: true
                                     Text {
+                                        textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                         objectName: "templateDescription-" + cell.modelData.id
                                         anchors { left: parent.left; right: parent.right; top: parent.top }
                                         text: cell.modelData.description
@@ -528,7 +605,7 @@ Popup {
                                         // Cut off at the card's size: the whole text on hover (the details have it too).
                                         ToolTip.visible: descriptionHover.hovered && truncated
                                         ToolTip.delay: App.theme.look.tooltipDelay
-                                        ToolTip.text: cell.modelData.description
+                                        ToolTip.text: dialog.plainTip(cell.modelData.description)
                                         HoverHandler { id: descriptionHover }
                                     }
                                 }
@@ -557,6 +634,7 @@ Popup {
                                             Layout.alignment: Qt.AlignTop
                                         }
                                         Text {
+                                            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                                             objectName: "templateStatus-" + cell.modelData.id
                                             Layout.fillWidth: true
                                             text: statusRow.downloading
@@ -600,6 +678,7 @@ Popup {
                     }
 
                     Text {
+                        textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                         objectName: "templatesEmpty"
                         anchors.centerIn: parent
                         width: parent.width - 16 * dialog.u

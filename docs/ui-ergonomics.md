@@ -1428,6 +1428,16 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rules met: Floor (28px chip as before), Primary (no accent fill; a filter is not an action), Gaps (2u, the filter row's), Learned place (right of Ready to run).
 - Not checked by a person: the chip's wrap in the narrowest dialog.
 
+### 2026-11-28 Community chip and Show canvas actions in the Templates window
+
+- Control: `src/workflow/CommunityChip.qml` (`templateCommunity-<id>` on a Templates card, `appCommunity-<id>` on an apps card; a frosted `KitChip` pill at the picture's top left, `maxTextWidth` cuts a long author), `templateDetailsCommunity` (the details' line, the link as the source line is), and two `KitChip` toggles in the filter row after Apps: `templatesCommunity` ("Community", on by default) and `templatesActions` ("Show canvas actions", off by default).
+- Old: no mark for a user-submitted template; the canvas actions (made for the Canvas view's task bar) were listed with the others.
+- New: see spec 11.10. A chip that is on shows a check and the tone fill, as Ready to run does; each is hidden while no template needs it; both reset when the dialog opens (the window keeps no other browse filter either); a category with nothing left under them leaves the list.
+- Why: the community mark tells a person who made a workflow they did not get from the repo's owner; the actions switch keeps task-bar tools out of a regular person's browsing. The Community chip's on state means "included" (the default shows them), so it reads like the other chips.
+- Rules met: Floor (chips 7u, the badge a 7u chip with a 28px press target), Primary (no accent fill), Gaps (the filter row's 2u; the chip 1.5u from the picture's corner), Learned place (right of Apps), Posture (browsing), Keys (Tab reaches each chip, Space or Return toggles; the badge is a button reached by Tab like the info chip).
+- Not checked by a person: the narrowest dialog's wrap of five chips; the layout right to left (the badge sits at the picture's left like the where-badges, which do not mirror).
+- Pictures (`FUGUE_SHOT_DIR=<dir> FUGUE_SHOT_THEME=tokyo-night|catppuccin-latte build/test_app_shelf_window communityTemplatesWearTheChipAndTheFilterHidesThem`): `templates-community-shown`, `-hidden`, `-actions-shown`, `-details`.
+
 ### 2026-11-24 Settings, Get ready and the Needs panel in the kit (#464, #469, epic #456)
 
 - Controls: Settings window (`settingsPanel`), Get ready sheet (`getReadySheet`), Needs panel (`appNeeds`); toggles are `KitToggle`, choices `KitSegmented` or toned chips, buttons `KitChip`.

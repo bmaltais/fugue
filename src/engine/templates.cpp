@@ -7,6 +7,8 @@
 #include "engine/template_feed.h"
 
 #include <QCoreApplication>
+#include <cmath>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -47,6 +49,28 @@ Error named(const QString &id, Error error) {
     return error;
 }
 
+// Text from a template.json or a workflow, which the feed can fill with anything, as one plain line: control and format characters
+// (bidi controls, ESC) are dropped, a line break or a tab is a space, runs of white space are one space, and at most `limit` characters
+// are kept (0: no limit). Every word a template shows about itself goes through it.
+QString cleanText(const QString &text, int limit = 0) {
+    QString out;
+    out.reserve(text.size());
+    for (const QChar c : text) {
+        if (c == QLatin1Char('\n') || c == QLatin1Char('\r') || c == QLatin1Char('\t'))
+            out += QLatin1Char(' ');
+        else if (c.category() != QChar::Other_Control && c.category() != QChar::Other_Format)
+            out += c;
+    }
+    out = out.simplified();
+    if (limit > 0 && out.size() > limit) {
+        out.truncate(limit);
+        if (out.at(out.size() - 1).isHighSurrogate())
+            out.chop(1);
+        out = out.trimmed();
+    }
+    return out;
+}
+
 // template.json's `source` (#369): the strings of name, author, url and note that are there. What is not
 // as 11.10 says (not an object, a field that is not text, a url that is not http or https) is left out
 // and said in `problems`, so a template with a bad link is still listed, with no link.
@@ -68,7 +92,7 @@ QJsonObject sourceOf(const QString &id, const QJsonObject &about, Errors *proble
         const QJsonValue value = object.value(key);
         if (value.isUndefined())
             continue;
-        const QString text = value.toString().trimmed();
+        const QString text = cleanText(value.toString());
         if (!value.isString()) {
             bad(QStringLiteral("source.%1 must be text").arg(key));
         } else if (key == QLatin1String("url") && !text.isEmpty()
@@ -83,6 +107,60 @@ QJsonObject sourceOf(const QString &id, const QJsonObject &about, Errors *proble
             && it.key() != QLatin1String("url") && it.key() != QLatin1String("note"))
             bad(QStringLiteral("source has an unknown field %1").arg(it.key()));
     return out;
+}
+
+// template.json's `community` (spec 11.10): {"author": text, "issue": positive whole number, optional}. A field that is not as said (or an
+// unknown one) is left out and said in `problems`; the key itself still marks the template (see TemplateCommunity).
+std::optional<TemplateCommunity> communityOf(const QString &id, const QJsonObject &about, Errors *problems) {
+    const QJsonValue raw = about.value(QStringLiteral("community"));
+    if (raw.isUndefined())
+        return std::nullopt;
+    const auto bad = [&](const QString &what) {
+        if (problems)
+            problems->append(problem(QStringLiteral("Template %1: %2 in %3.").arg(id, what, kAbout)));
+    };
+    TemplateCommunity out;
+    if (!raw.isObject()) {
+        bad(QStringLiteral("community must be an object with author and issue"));
+        return out;
+    }
+    const QJsonObject object = raw.toObject();
+    // The author is required, the issue is not (a contributor's own pull request has none).
+    if (const QJsonValue author = object.value(QStringLiteral("author")); author.isString() && !cleanText(author.toString()).isEmpty())
+        out.author = cleanText(author.toString(), 64);
+    else
+        bad(QStringLiteral("community.author must be text"));
+    if (const QJsonValue issue = object.value(QStringLiteral("issue")); !issue.isUndefined()) {
+        const double number = issue.toDouble();
+        if (issue.isDouble() && number >= 1 && number <= 9007199254740991.0 && number == std::floor(number))
+            out.issue = qint64(number);
+        else
+            bad(QStringLiteral("community.issue must be a positive whole number"));
+    }
+    for (auto it = object.begin(); it != object.end(); ++it)
+        if (it.key() != QLatin1String("author") && it.key() != QLatin1String("issue"))
+            bad(QStringLiteral("community has an unknown field %1").arg(it.key()));
+    return out;
+}
+
+// Why a community template is not listed (spec 11.10), or empty when it keeps to the built-in nodes: a `packs/` folder, or a node
+// type of a namespace other than `fugue`, in the graph or in any group definition.
+QString communityRefusal(const Document &document, const QString &folder) {
+    if (QFileInfo(QDir(folder).filePath(QStringLiteral("packs"))).exists())
+        return QStringLiteral("it carries a packs folder");
+    QStringList foreign;
+    const auto scan = [&](const Nodes &nodes) {
+        for (const Node &node : nodes)
+            if (!document.groups.contains(node.type) && typeNamespace(node.type) != QLatin1String("fugue") && !foreign.contains(node.type))
+                foreign.append(node.type);
+    };
+    scan(document.graph.nodes);
+    for (const GroupDefinition &group : document.groups)
+        scan(group.nodes);
+    if (foreign.isEmpty())
+        return {};
+    foreign.sort();
+    return QStringLiteral("it uses the node type %1, which is not built in").arg(foreign.join(QStringLiteral(", ")));
 }
 
 // template.json's `app` and the workflow's `app` block (#387): the card's words, or nothing when the template is not an app.
@@ -124,12 +202,12 @@ std::optional<TemplateApp> appOf(const Template &t, const QJsonObject &about, co
         bad(QStringLiteral("app must be true or an object with title, summary and kind in %1").arg(kAbout));
     }
     const auto text = [&](const char *key, const QString &fallback) {
-        const QString own = card.value(QLatin1String(key)).toString().trimmed();
+        const QString own = cleanText(card.value(QLatin1String(key)).toString());
         return own.isEmpty() ? fallback : own;
     };
     TemplateApp app;
-    app.title = text("title", (*block)->title.trimmed()); // the block always has a title (4.9)
-    app.summary = text("summary", (*block)->description.trimmed().isEmpty() ? t.description : (*block)->description.trimmed());
+    app.title = text("title", cleanText((*block)->title)); // the block always has a title (4.9)
+    app.summary = text("summary", cleanText((*block)->description).isEmpty() ? t.description : cleanText((*block)->description));
     app.kind = text("kind", QString());
     return app;
 }
@@ -244,6 +322,10 @@ QList<CarriedPack> carriedPacksOf(const QString &templateId, const QString &fold
 }
 
 } // namespace
+
+QString TemplateCommunity::issueUrl() const {
+    return issue > 0 ? QStringLiteral("https://github.com/bmaltais/fugue-workflows/issues/%1").arg(issue) : QString();
+}
 
 TemplatePreview previewFilesIn(const QString &folder) {
     const QDir dir(folder);
@@ -425,7 +507,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                     continue;
                 }
                 about = read.value();
-                t.title = about.value(QStringLiteral("title")).toString().trimmed();
+                t.title = cleanText(about.value(QStringLiteral("title")).toString());
                 if (t.title.isEmpty()) {
                     if (problems)
                         problems->append(problem(QStringLiteral("Template %1 has no title in its %2.").arg(t.id, kAbout)));
@@ -449,6 +531,16 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                     problems->append(named(t.id, document.errors().first()));
                 continue;
             }
+            // A community template (11.10) keeps to the built-in nodes, whatever the feed sent; one that does not is left out and, as
+            // a fetched one that does not open, does not take its id. The person's own folder is not held to it: a copy made
+            // into it drops the key (saveOwn and duplicate), and its folder is not scanned for the mark.
+            if (!root.own && about.contains(QStringLiteral("community"))) {
+                if (const QString why = communityRefusal(*document, t.folder); !why.isEmpty()) {
+                    if (problems)
+                        problems->append(problem(QStringLiteral("Template %1: a community template may use only built-in nodes, but %2.").arg(t.id, why)));
+                    continue;
+                }
+            }
             if (m_registry && !opensHere(*document, *m_registry, &t.neededPacks))
                 continue;
             if (m_registry && problems)
@@ -459,13 +551,16 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                                 .arg(t.id, input.node, input.text),
                             QStringLiteral("Put the sample in the template's inputs folder and name it inputs/<name>.")));
 
-            t.description = about.value(QStringLiteral("description")).toString();
-            t.category = about.value(QStringLiteral("category")).toString();
+            t.description = cleanText(about.value(QStringLiteral("description")).toString());
+            t.category = cleanText(about.value(QStringLiteral("category")).toString());
             const auto category = categories.find(t.category);
-            t.categoryTitle = category != categories.end() && !category->second.isEmpty() ? category->second : t.category;
+            t.categoryTitle = category != categories.end() && !category->second.isEmpty() ? cleanText(category->second) : t.category;
             for (const QJsonValue tag : about.value(QStringLiteral("tags")).toArray())
-                t.tags << tag.toString();
+                t.tags << cleanText(tag.toString());
             t.source = sourceOf(t.id, about, problems);
+            t.canvasAction = document->extra.contains(QStringLiteral("action"));
+            if (!root.own)
+                t.community = communityOf(t.id, about, problems);
             t.app = appOf(t, about, *document, entry.isDir(), problems);
             t.models = document->models();
             t.providerModels = document->providerModels();
@@ -554,6 +649,20 @@ Errors copyTree(const QString &from, const QString &to) {
     return {};
 }
 
+// A copy in the person's own folder is theirs, not a community template: its template.json loses the `community` mark (11.10).
+Errors dropCommunityMark(const QString &folder) {
+    const QString path = QDir(folder).filePath(kAbout);
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {}; // no template.json: nothing to drop
+    QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    if (!json.contains(QStringLiteral("community")))
+        return {};
+    json.remove(QStringLiteral("community"));
+    return replaceFile(path, QJsonDocument(json).toJson(), kAbout);
+}
+
 } // namespace
 
 Errors TemplateLibrary::saveOwn(const Template &chosen, const QByteArray &workflow) const {
@@ -579,6 +688,8 @@ Errors TemplateLibrary::saveOwn(const Template &chosen, const QByteArray &workfl
     };
     if (QFileInfo(chosen.workflow).fileName() == kWorkflow) {
         if (Errors failed = copyTree(chosen.folder, target); !failed.isEmpty())
+            return undo(failed);
+        if (Errors failed = dropCommunityMark(target); !failed.isEmpty())
             return undo(failed);
     } else { // a loose .fugue file of the Default's folder: a folder with a title of its own
         if (Errors made = makeFolder(target); !made.isEmpty())
@@ -650,6 +761,8 @@ Errors TemplateLibrary::duplicate(const Template &chosen, const QString &title, 
         return errors;
     };
     if (Errors failed = copyTree(chosen.folder, target); !failed.isEmpty())
+        return undo(failed);
+    if (Errors failed = dropCommunityMark(target); !failed.isEmpty())
         return undo(failed);
     if (Errors failed = writeTitle(target, name); !failed.isEmpty())
         return undo(failed);

@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../canvas"
 import "../kit"
+import "../workflow"
 
 // One app on the shelf (#388, #463, #470): a kit card (raised, the Corners and Spacing sliders move it) with its picture, which
 // moves while the card is in view and the window is focused (the app's WebM, `entry.video`; KitVideo keeps the budget and the
@@ -57,6 +58,18 @@ KitCard {
             playing: card.playing
             radius: Math.max(2, card.look.params.cornerGroup * card.u - card.pad * 0.6)
 
+            // A template a user submitted (11.10), as the Templates window's card says it.
+            CommunityChip {
+                objectName: "appCommunity-" + card.entry.id
+                anchors { left: parent.left; top: parent.top; margins: card.u * 1.5 }
+                look: card.look
+                backdrop: picture.backdropItem
+                backdropSource: card.entry.preview
+                maxTextWidth: parent.width / 2 - 4 * card.u
+                visible: card.entry.community === true
+                author: card.entry.communityAuthor
+                url: card.entry.communityUrl
+            }
             // Where its models are (#164): the same badges the Templates window draws.
             Rectangle {
                 objectName: "appPlaces-" + card.entry.id
@@ -123,6 +136,7 @@ KitCard {
             }
         }
         Text {
+            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
             objectName: "appTitle-" + card.entry.id
             visible: !card.renaming
             Layout.fillWidth: true
@@ -161,6 +175,7 @@ KitCard {
             }
         }
         Text {
+            textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
             objectName: "appSummary-" + card.entry.id
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -182,6 +197,7 @@ KitCard {
                 font.pixelSize: 16
             }
             Text {
+                textFormat: Text.PlainText // text from a template.json or the feed is never rich text (it could fetch an address)
                 objectName: "appReady-" + card.entry.id
                 Layout.fillWidth: true
                 text: card.entry.ready ? qsTr("Ready") : card.entry.needs

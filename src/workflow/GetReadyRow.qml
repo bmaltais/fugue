@@ -95,6 +95,7 @@ Rectangle {
                 horizontalAlignment: Text.AlignHCenter
             }
             Text {
+                textFormat: Text.PlainText
                 id: titleText
                 Layout.fillWidth: true
                 text: row.title
@@ -142,6 +143,7 @@ Rectangle {
             }
         }
         Text {
+            textFormat: Text.PlainText
             id: subtitleText
             visible: row.subtitle !== ""
             Layout.fillWidth: true
