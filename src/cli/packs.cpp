@@ -16,6 +16,7 @@
 
 #include "engine/document.h"
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/json.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
@@ -300,6 +301,7 @@ struct ReadinessStores {
         env.trust = &trust;
         env.packsDir = packsDir();
         env.catalog = &catalog;
+        env.hostHaving = HostModelCache::shared().hostHavingFunction(); // a paired host's models are not downloads (#735)
         return env;
     }
 };

@@ -471,6 +471,8 @@ QList<MissingModel> ModelLibrary::missing(const QJsonArray &named, FileHashes &h
         const QJsonValue size = handle.take(QStringLiteral("size"));
         if (resolve(handle, hashes, Hashing::RememberedOnly))
             continue;
+        if (m_hostHaving && !m_hostHaving(handle).isEmpty())
+            continue; // on a paired host's list: not a download (#735)
         const std::optional<PortType> type = PortType::parse(handle.value(QStringLiteral("resource")).toString());
         out.append({handle, source, type ? downloadFolder(*type) : QString(),
                     size.isDouble() && size.toDouble() >= 0 ? qint64(size.toDouble()) : -1});

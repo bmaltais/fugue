@@ -2426,5 +2426,11 @@
   "%n lines": {
     "one": "%n line",
     "other": "%n lines"
-  }
+  },
+  "On %1": "On %1",
+  "on %1": "on %1",
+  "Pick %1 on %2": "Pick %1 on %2",
+  "%1 has not hashed this file yet; picking it asks it to.": "%1 has not hashed this file yet; picking it asks it to.",
+  "%1 is hashing %2 so that the model is named by its content. Pick it again in a moment.": "%1 is hashing %2 so that the model is named by its content. Pick it again in a moment.",
+  "%1 is not a paired helper in providers.json.": "%1 is not a paired helper in providers.json."
 }

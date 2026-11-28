@@ -13,6 +13,7 @@
 
 #include "engine/sandbox.h"
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
@@ -125,6 +126,7 @@ ReadinessPlan ReadinessSheet::buildPlan(bool withChoices) const {
     env.trust = &trust;
     env.packsDir = packsDir();
     env.catalog = &catalog;
+    env.hostHaving = HostModelCache::shared().hostHavingFunction(); // a paired host's models are not downloads (#735)
     ReadinessRequest request = m_request();
     if (withChoices)
         request.optionalChosen = m_optionalOn;

@@ -458,15 +458,17 @@ Rectangle {
                           ? { text: qsTr("Family: %1").arg(familyFilter !== "" ? familyFilter : qsTr("All")), value: { familyMenu: true }, keep: true }
                           : null
         if (familyFilter !== "")
-            listed = listed.filter(m => m.path === undefined || m.family === familyFilter)
+            listed = listed.filter(m => (m.path === undefined && m.remote !== true) || m.family === familyFilter)
         // Files of a family sit together, under its name, their quantizations beside each other.
-        const byFamily = (a, b) => (a.path === undefined || b.path === undefined || a.family === b.family) ? 0
+        const byFamily = (a, b) => ((a.path === undefined && a.remote !== true) || (b.path === undefined && b.remote !== true) || a.family === b.family) ? 0
                                    : a.family === "" ? 1 : b.family === "" ? -1 : (a.family < b.family ? -1 : 1)
         listed = listed.map((m, i) => ({ m: m, i: i })).sort((a, b) => byFamily(a.m, b.m) || a.i - b.i).map(x => x.m)
         const fitsFor = edits.fitsModel(nodeId, name)
         const anyFits = listed.some(m => m.fits === true)
         const isOther = m => m.path !== undefined && (anyFits ? m.fits !== true : m.fits === false)
         listed = listed.filter(m => !isOther(m)).concat(listed.filter(isOther))
+        // The files of a paired host (#735) come below the local ones, each family's under "On <host>".
+        listed = listed.filter(m => m.remote !== true).concat(listed.filter(m => m.remote === true))
         // The rows are made one model at a time by modelRows(), its `m` and `state` plain var: qmllint takes ~20 s
         // over this loop with `m` inferred from the list's type (2026-11-25).
         const state = { group: null, other: false, fitsShown: false, currentMarked: false,
@@ -501,10 +503,22 @@ Rectangle {
             state.group = m.folder // one heading for them all
             entries.push({ text: qsTr("Fits %1").arg(state.fitsFor), heading: true, enabled: false })
         }
-        const heading = m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
+        const heading = m.remote === true ? qsTr("On %1").arg(m.host) : m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
         if (heading !== state.group && !state.other && !(state.anyFits && m.fits === true)) {
             state.group = heading
             entries.push({ text: heading, heading: true, enabled: false })
+        }
+        if (m.remote === true) {
+            // A file on a paired helper (#735): its hash names it, so the model in use is found by that when both are known.
+            const isRemoteCurrent = !state.currentMarked && state.current !== undefined
+                                    && (state.currentHash !== undefined && m.handle.hash !== undefined ? m.handle.hash === state.currentHash
+                                                                                                       : m.name === state.current)
+            if (isRemoteCurrent)
+                state.currentMarked = true
+            entries.push({ text: m.title, detail: (m.family ? m.family + "  " : "") + sizeText(m.size),
+                           value: { remote: m.handle, host: m.host }, place: "host", placeHost: m.host, note: m.note,
+                           checked: isRemoteCurrent })
+            return
         }
         if (m.path !== undefined) {
             // The file a stored handle names: by its hash when both are known, else by its name (a file Fugue
@@ -534,7 +548,7 @@ Rectangle {
     function familiesOf(files) {
         const out = []
         for (const m of files)
-            if (m.path !== undefined && m.family && !out.includes(m.family))
+            if ((m.path !== undefined || m.remote === true) && m.family && !out.includes(m.family))
                 out.push(m.family)
         return out.sort()
     }
@@ -542,7 +556,7 @@ Rectangle {
     property string familyFilter: ""
     // The choices of the family menu: All, then each family of the files with its count.
     function familyEntries() {
-        const files = edits.models(nodeId, name).filter(m => m.path !== undefined)
+        const files = edits.models(nodeId, name).filter(m => m.path !== undefined || m.remote === true)
         const entries = [{ text: qsTr("All families"), detail: String(files.length), value: { family: "" }, checked: familyFilter === "" }]
         for (const family of familiesOf(files))
             entries.push({ text: family, detail: String(files.filter(m => m.family === family).length), value: { family: family },
@@ -597,6 +611,8 @@ Rectangle {
                 return picker().confirmDownload(value.download)
             if (value.disk !== undefined)
                 return edits.setDiskModel(nodeId, name, value.disk)
+            if (value.remote !== undefined)
+                return edits.setRemoteModel(nodeId, name, value.remote, value.host)
             return edits.setModel(nodeId, name, value.handle)
         }
     }

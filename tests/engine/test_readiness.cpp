@@ -133,6 +133,33 @@ private slots:
         m_server->on("GET", "/b.safetensors", [this](const auto &) { return HttpResponse{200, m_other, "application/octet-stream"}; });
     }
 
+    // #735: a model a paired host's list has is not a download and not a problem; it is listed as on that host. One it does not have
+    // still is a row.
+    void aModelOnAPairedHostsListIsNeitherDownloadedNorMissing() {
+        const QJsonObject onHost = model("a.safetensors", m_bytes, "/a.safetensors", 1200);
+        const QJsonObject notThere = model("b.safetensors", m_other, "/b.safetensors", 900);
+        ReadinessRequest r;
+        r.models = QJsonArray{onHost, notThere};
+        ReadinessEnv e = env();
+        e.hostHaving = [&onHost](const QJsonObject &handle) { return handle.value("hash") == onHost.value("hash") ? QStringLiteral("gx10") : QString(); };
+        const ReadinessPlan plan = buildReadinessPlan(r, e);
+        QCOMPARE(plan.models.size(), 1);
+        QCOMPARE(plan.models.first().name, QStringLiteral("b.safetensors"));
+        QCOMPARE(plan.hosted.size(), 1);
+        QCOMPARE(plan.hosted.first().host, QStringLiteral("gx10"));
+        QVERIFY(plan.problems.isEmpty());
+        QVERIFY(plan.unobtainable.isEmpty());
+        QVERIFY(plan.lines().join('\n').contains("on gx10"));
+        // With no host asked nothing changes.
+        QCOMPARE(buildReadinessPlan(r, env()).models.size(), 2);
+        // A host's model with no source is no "has no source" problem either.
+        QJsonObject noSource = onHost;
+        noSource.remove("source");
+        r.models = QJsonArray{noSource};
+        QVERIFY(buildReadinessPlan(r, e).problems.isEmpty());
+        QCOMPARE(buildReadinessPlan(r, env()).problems.size(), 1);
+    }
+
     // #594: a model only another branch of a Switch holds is a non-blocking row apart: not in the models, the totals, the headline
     // or empty(); a missing one with no source is no problem; chosen by the person it is a row like the others, marked optional.
     void anOptionalModelIsListedApartAndCostsNothingUntilChosen() {

@@ -394,7 +394,8 @@ WidgetEdit::~WidgetEdit() {
     // reads them again (m_work stops them as it goes).
 }
 
-void WidgetEdit::write(const QString &node, const QString &input, const QJsonValue &value, const QString &text) {
+void WidgetEdit::write(const QString &node, const QString &input, const QJsonValue &value, const QString &text, const QStringList &pinned,
+                       const QString &host) {
     Document document = m_canvas->scopeDocument();
     if (!document.graph.nodes.contains(node))
         return;
@@ -408,6 +409,9 @@ void WidgetEdit::write(const QString &node, const QString &input, const QJsonVal
         n.inputs.remove(input);
     else
         n.inputs.insert(input, InputValue::fromJson(value));
+    for (const QString &id : pinned)
+        if (document.graph.nodes.contains(id))
+            document.graph.nodes[id].provider = host;
     // The session's own value goes into its open edit; anything else is an edit of its own,
     // which ends the session first (CanvasModel::beginEdit).
     const bool inSession = editing() && m_session.node == node && m_session.input == input;
@@ -929,6 +933,7 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
     const PortType &portType = target(node, input).spec->type.type;
     const QString type = portType.toString();
     m_diskModels.insert(key, listDiskModels(library(), portType, hashes()));
+    listHostModels(node, input);
     if (!m_catalogSet)
         m_catalog = ModelCatalog::load(); // read each time: a file dropped in the catalog folder shows
     m_catalogMissing.insert(key, m_catalog.missing(type, library(), portType, hashes()));
@@ -1130,7 +1135,7 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
     const QHash<QString, ModelMark> marks = m_marks.value(fitsKey(node, input)).byPath;
     const QString type = target(node, input).spec->type.type.toString();
     QVariantList list;
-    for (const Model &model : m_models.value(key) + m_diskModels.value(key)) {
+    for (const Model &model : m_models.value(key) + m_diskModels.value(key) + m_hostModels.value(key)) {
         QVariantMap entry = modelRow(model, type, marks);
         if (model.onDisk())
             if (const auto fit = fits.constFind(model.path); fit != fits.constEnd()) {
@@ -1159,6 +1164,139 @@ QString WidgetEdit::setModel(const QString &node, const QString &input, const QV
     if (target(node, input).widget != QLatin1String("model"))
         return tr("%1 cannot be edited here.").arg(input);
     return setValue(node, input, handle);
+}
+
+// --- models on a paired host (#735) --------------------------------------------
+
+HostModelCache &WidgetEdit::hostCache() const { return m_hostCache ? *m_hostCache : HostModelCache::shared(); }
+
+void WidgetEdit::setHostModels(std::function<QList<ProviderInstance>()> instances, HostModelCache *cache, HostModelCache::Make make) {
+    m_hostInstances = std::move(instances);
+    m_hostCache = cache;
+    m_hostMake = std::move(make);
+}
+
+QList<ProviderInstance> WidgetEdit::pairedHelpers() const {
+    QList<ProviderInstance> all;
+    if (m_hostInstances) {
+        all = m_hostInstances();
+    } else if (const Result<QList<ProviderInstance>> loaded = loadProviderInstances(providersPath()); loaded.ok()) {
+        all = loaded.value();
+    }
+    QList<ProviderInstance> paired;
+    for (const ProviderInstance &instance : std::as_const(all))
+        if (instance.enabled && isPairedHelper(instance))
+            paired.append(instance);
+    return paired;
+}
+
+// The kept lists now (no network), then a refresh of the stale ones in the background: the rows are rebuilt when it answers.
+void WidgetEdit::listHostModels(const QString &node, const QString &input) {
+    const QString key = modelsKey(node, input);
+    const PortType &portType = target(node, input).spec->type.type;
+    const QList<ProviderInstance> helpers = pairedHelpers();
+    m_hostModels.insert(key, fugue::listHostModels(helpers, hostCache(), library(), portType));
+    if (helpers.isEmpty())
+        return;
+    QPointer<WidgetEdit> self(this);
+    hostCache().refreshStale(helpers, HostModelCache::kTtlSeconds,
+                             [self, key, helpers, portType](const HostModelList &) {
+                                 if (!self)
+                                     return;
+                                 self->m_hostModels.insert(key, fugue::listHostModels(helpers, self->hostCache(), self->library(), portType));
+                                 ++self->m_modelsRevision;
+                                 emit self->modelsChanged();
+                             },
+                             m_hostMake);
+}
+
+// Asks a host that is hashing a file again in a couple of seconds, so the row learns the hash (up to a few minutes).
+void WidgetEdit::pollHashing(const ProviderInstance &instance, int tries) {
+    if (tries <= 0)
+        return;
+    QPointer<WidgetEdit> self(this);
+    QTimer::singleShot(2000, this, [self, instance, tries] {
+        if (!self)
+            return;
+        self->hostCache().refresh(instance, false, {}, [self, instance, tries](const HostModelList &list) {
+            if (!self)
+                return;
+            // The rows of every open list are rebuilt on the next requestModels; the open picker is told now.
+            for (auto it = self->m_hostModels.begin(); it != self->m_hostModels.end(); ++it) {
+                const QStringList parts = it.key().split(QLatin1Char('\n'));
+                if (const std::optional<PortType> type = PortType::parse(parts.value(0)))
+                    it.value() = fugue::listHostModels(self->pairedHelpers(), self->hostCache(), self->library(), *type);
+            }
+            ++self->m_modelsRevision;
+            emit self->modelsChanged();
+            if (list.hashing > 0)
+                self->pollHashing(instance, tries - 1);
+        }, self->m_hostMake);
+    });
+}
+
+QStringList WidgetEdit::providerNodesUsing(const QString &node) const {
+    const Document document = m_canvas->scopeDocument();
+    QSet<QString> reached{node};
+    QStringList pinned;
+    if (const NodeType *own = document.graph.nodes.contains(node) ? m_registry->nodeTypeFor(document.graph.nodes.value(node).type, document.graph.nodes.value(node).version.major) : nullptr;
+        own && !own->capabilities.toArray().isEmpty())
+        pinned << node; // a node that takes its own model (Generate Image)
+    bool grew = true;
+    while (grew) {
+        grew = false;
+        for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
+            if (reached.contains(it.key()))
+                continue;
+            for (auto input = it->inputs.cbegin(); input != it->inputs.cend(); ++input) {
+                if (input->kind() != InputValue::Kind::Link || !reached.contains(input->from().node))
+                    continue;
+                const InputSpec *spec = m_canvas->inputSpec(it.key(), input.key());
+                if (!spec || m_registry->portKind(spec->type.type) != PortKind::Resource)
+                    continue;
+                reached.insert(it.key());
+                grew = true;
+                const NodeType *type = m_registry->nodeTypeFor(it->type, it->version.major);
+                if (type && !type->capabilities.toArray().isEmpty())
+                    pinned << it.key();
+                break;
+            }
+        }
+    }
+    pinned.sort();
+    return pinned;
+}
+
+QString WidgetEdit::setRemoteModel(const QString &node, const QString &input, const QVariantMap &handle, const QString &host) {
+    const Target t = target(node, input);
+    if (t.widget != QLatin1String("model"))
+        return tr("%1 cannot be edited here.").arg(input);
+    if (m_canvas->scopeDocument().graph.nodes.value(node).inputs.value(input).kind() == InputValue::Kind::Link)
+        return tr("%1 is linked; take the link out to pick a model.").arg(label(*t.spec));
+    const QList<ProviderInstance> helpers = pairedHelpers();
+    const auto instance = std::find_if(helpers.cbegin(), helpers.cend(), [&host](const ProviderInstance &each) { return each.name == host; });
+    if (instance == helpers.cend())
+        return tr("%1 is not a paired helper in providers.json.").arg(host);
+    QJsonObject picked = QJsonObject::fromVariantMap(handle);
+    if (picked.value("hash").toString().isEmpty()) {
+        // The host has not hashed the file: ask it to (in the background, on its side), and learn the hash as it comes.
+        const QString name = picked.value("name").toString();
+        QStringList names;
+        for (const HostModel &model : hostCache().cached(*instance).models)
+            if (model.handleName() == name)
+                names << model.name;
+        const ProviderInstance asked = *instance;
+        QPointer<WidgetEdit> self(this);
+        hostCache().refresh(asked, true, names, [self, asked](const HostModelList &list) {
+            if (self && list.hashing > 0)
+                self->pollHashing(asked, 90);
+        }, m_hostMake);
+        return tr("%1 is hashing %2 so that the model is named by its content. Pick it again in a moment.").arg(host, name);
+    }
+    picked.insert("resource", t.spec->type.type.toString());
+    // The nodes that take this model run on the host: it is the only place that has it.
+    write(node, input, picked, tr("Pick %1 on %2").arg(picked.value("name").toString(), host), providerNodesUsing(node), host);
+    return {};
 }
 
 QString WidgetEdit::setModelName(const QString &node, const QString &input, const QString &name) {

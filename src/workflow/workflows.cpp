@@ -14,6 +14,7 @@
 #include "engine/group_library.h"
 #include "engine/ids.h"
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/json.h"
 #include "engine/model_catalog.h"
 #include "engine/model_download.h"
@@ -1152,6 +1153,7 @@ bool Workflows::templateMatches(const QString &query, const QVariantMap &templ) 
 QVariantMap Workflows::missingModels(const QJsonArray &models) const {
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
+    library.setHostHaving(HostModelCache::shared().hostHavingFunction()); // on a paired host: not missing (#735)
     downloadable(models, library); // the folders they would go in
     const QList<MissingModel> absent = library.missing(models, hashes);
     return {{"count", int(absent.size())}, {"total", int(models.size())}, {"download", offerText(absent)}, {"size", downloadSize(absent)}};
@@ -1399,6 +1401,7 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     // Spec 4.3: the models it names that are not here, without reading a model file.
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
+    library.setHostHaving(HostModelCache::shared().hostHavingFunction()); // on a paired host: not missing (#735)
     QList<PortType> types;
     const QJsonArray wanted = modelsToHave(document, *m_registry); // not a model only a Switch's lazy side holds (#557)
     for (const MissingModel &model : downloadable(wanted, library))

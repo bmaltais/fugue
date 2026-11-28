@@ -87,7 +87,7 @@
 // has less free memory than the new one's files take, and a load or a generation that runs out
 // of memory frees the others and is tried once more.
 //
-// --serve-http serves the same jobs as POST /fugue/v1/{describe,submit,status,cancel,result,
+// --serve-http serves the same jobs as POST /fugue/v1/{describe,models,submit,status,cancel,result,
 // shutdown} and GET /fugue/v1/result/<job>/<i>, JSON bodies and a bearer key; the contract is in
 // README.md. There the host makes each job's work dir, inputs arrive as {"data", "format"}, model
 // files are named by handle ({"name", "sha256", "size"}) and found under --models, and the
@@ -1254,12 +1254,136 @@ public:
         fail("model_missing", "no file named \"" + name + "\" has the content asked for (sha256 " + sha + "): the sha256 differs for " + others);
     }
 
+    // The model files under the roots, for a keyed client (the `models` operation, spec 8.7): read-only. Each file is
+    // {name, size, sha256 (null until hashed), folder, family}. Only a regular file that `inside()` the roots is listed
+    // (a link that leaves a root is not), at most `kMostListed`. A sha256 comes from the remembered hashes only: with
+    // `hash` the helper starts hashing up to `kHashPerRequest` files that have none (the ones in `only` first) on a
+    // background thread and says how many are still to do; the client asks again.
+    static constexpr size_t kMostListed = 4000;
+    static constexpr size_t kHashPerRequest = 8;
+    static constexpr size_t kInspectPerRequest = 200;
+
+    json list(bool hash, const std::vector<std::string> &only) {
+        std::vector<Entry> files;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            scan(); // a file added since the start
+            files = m_files;
+        }
+        json models = json::array();
+        std::vector<std::string> unhashed; // paths, in the order they would be hashed
+        size_t inspected = 0;
+        bool truncated = false;
+        for (const Entry &e : files) {
+            if (!inside(e.path))
+                continue;
+            if (models.size() >= kMostListed) {
+                truncated = true;
+                break;
+            }
+            const std::string path = e.path.string();
+            const std::string sha = knownHash(path);
+            if (sha.empty())
+                unhashed.push_back(e.rel);
+            const std::string folder = e.rel.find('/') == std::string::npos ? std::string() : e.rel.substr(0, e.rel.find('/'));
+            json entry{{"name", e.rel}, {"size", e.size}, {"sha256", sha.empty() ? json() : json(sha)}, {"folder", folder}, {"family", nullptr}};
+            if (folder == "diffusion_models" || folder == "unet" || folder == "checkpoints")
+                entry["family"] = familyOf(path, e.size, inspected < kInspectPerRequest, inspected);
+            models.push_back(std::move(entry));
+        }
+        size_t started = 0;
+        if (hash && !unhashed.empty()) {
+            std::vector<std::string> order;
+            for (const std::string &name : only)
+                if (std::find(unhashed.begin(), unhashed.end(), name) != unhashed.end())
+                    order.push_back(name);
+            for (const std::string &name : unhashed)
+                if (std::find(order.begin(), order.end(), name) == order.end())
+                    order.push_back(name);
+            std::vector<std::string> paths;
+            for (const std::string &name : order) {
+                if (paths.size() >= kHashPerRequest)
+                    break;
+                for (const Entry &e : files)
+                    if (e.rel == name) {
+                        paths.push_back(e.path.string());
+                        break;
+                    }
+            }
+            started = startHashing(paths);
+        }
+        return {{"models", std::move(models)}, {"truncated", truncated}, {"unhashed", unhashed.size()}, {"hashing", hashingNow()}, {"hash_started", started}};
+    }
+
 private:
     struct Entry {
         std::string rel; // relative to its root, with '/'
         fs::path path;
         uintmax_t size;
     };
+
+    // The remembered hash of a file whose size and time are still the ones it was made for; empty if none.
+    std::string knownHash(const std::string &path) {
+        std::error_code ec;
+        const uintmax_t size = fs::file_size(path, ec);
+        const int64_t mtime = static_cast<int64_t>(fs::last_write_time(path, ec).time_since_epoch().count());
+        std::lock_guard<std::mutex> lock(m_hashMutex);
+        const auto known = m_hashes.find(path);
+        return known != m_hashes.end() && known->second.size == size && known->second.mtime == mtime ? known->second.hex : std::string();
+    }
+
+    // The engine's name for a model file, from its header (kept per path, size and time); null when it is not asked for yet
+    // (the per-request cap), not recognised or unreadable.
+    json familyOf(const std::string &path, uintmax_t size, bool mayAsk, size_t &asked) {
+        {
+            std::lock_guard<std::mutex> lock(m_familyMutex);
+            const auto known = m_families.find(path);
+            if (known != m_families.end() && known->second.size == size)
+                return known->second.name.empty() ? json() : json(known->second.name);
+        }
+        if (!mayAsk)
+            return nullptr;
+        ++asked;
+        char *text = sd_fugue_inspect_model(path.c_str());
+        const json answer = text ? json::parse(text, nullptr, false) : json();
+        sd_fugue_string_free(text);
+        std::string name;
+        if (answer.is_object() && answer.value("recognised", false) && answer.contains("version") && answer["version"].is_string())
+            name = answer["version"].get<std::string>();
+        std::lock_guard<std::mutex> lock(m_familyMutex);
+        m_families[path] = {size, name};
+        return name.empty() ? json() : json(name);
+    }
+
+    // Hashes `paths` one after the other on a thread of its own (a job is not held up; the process ends with _Exit).
+    // A path already queued is not queued twice. Returns how many were queued.
+    size_t startHashing(const std::vector<std::string> &paths) {
+        std::vector<std::string> fresh;
+        {
+            std::lock_guard<std::mutex> lock(m_hashQueueMutex);
+            for (const std::string &path : paths)
+                if (m_hashQueue.insert(path).second)
+                    fresh.push_back(path);
+        }
+        if (fresh.empty())
+            return 0;
+        std::thread([this, fresh] {
+            for (const std::string &path : fresh) {
+                try {
+                    hashOf(path, {});
+                } catch (...) {
+                }
+                std::lock_guard<std::mutex> lock(m_hashQueueMutex);
+                m_hashQueue.erase(path);
+            }
+        }).detach();
+        return fresh.size();
+    }
+
+    size_t hashingNow() {
+        std::lock_guard<std::mutex> lock(m_hashQueueMutex);
+        return m_hashQueue.size();
+    }
 
     static std::vector<std::string> folders(const std::string &key) {
         static const std::map<std::string, std::vector<std::string>> byKey{
@@ -1418,6 +1542,14 @@ private:
     fs::path m_hashFile;
     std::map<std::string, Hash> m_hashes;
     std::mutex m_hashMutex;
+    struct Family {
+        uintmax_t size = 0;
+        std::string name;
+    };
+    std::map<std::string, Family> m_families;
+    std::mutex m_familyMutex;
+    std::set<std::string> m_hashQueue; // files being hashed for a listing, or waiting to be
+    std::mutex m_hashQueueMutex;
 };
 
 // The bytes of a base64 string (RFC 4648, the URL-safe alphabet and white space tolerated).
@@ -1555,8 +1687,17 @@ public:
                         {"shares_filesystem", false},
                         {"backend", FUGUE_BACKEND},
                         {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale", "image.restore"}},
+                        {"operations", {"models"}},
                         {"free_memory_bytes", availableMemory()},
                         {"host", hostName()}};
+        });
+        post("models", [this](const json &body) {
+            std::vector<std::string> only;
+            if (body.contains("names") && body["names"].is_array())
+                for (const json &name : body["names"])
+                    if (name.is_string())
+                        only.push_back(name.get<std::string>());
+            return m_models->list(body.value("hash", false), only);
         });
         post("submit", [this](const json &body) { return submitHttp(body); });
         for (const char *op : {"status", "cancel", "result"})

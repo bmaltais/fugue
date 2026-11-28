@@ -128,6 +128,9 @@ struct Requirement {
     // gone. A pin still wins. With no paired helper configured at all nothing changes: the node
     // reports its own model_missing.
     bool modelsElsewhere = false;
+    // With `modelsElsewhere`: the paired hosts whose model list has every file the node needs (HostModelCache, #735). Of the helpers
+    // that could take the node, those go first: a host that is known to have the model is chosen over one that is not asked or has not.
+    QStringList hostsWithModel;
 };
 
 struct Selection {

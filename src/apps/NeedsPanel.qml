@@ -81,7 +81,7 @@ Item {
                     current: true
                     // A file of this list being read is not asked for again (the rows say so too); a file another tab reads is not its business.
                     enabled: !panel.needs.readingOwn
-                    visible: panel.needs.items.some(i => i.kind !== "problem" && i.kind !== "optional")
+                    visible: panel.needs.items.some(i => i.kind !== "problem" && i.kind !== "optional" && i.kind !== "hosted")
                     onTapped: panel.needs.downloadAll()
                 }
             }

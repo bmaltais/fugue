@@ -141,4 +141,27 @@ check "... saying so" yes "$(maskjob QUJD 4 | grep -q 'cannot read the mask' && 
 # (the job then stops for want of a picture, an error that names the mask too: only the mask's own errors count)
 check "a mask of the request's size passes the mask check" no "$(maskjob "$mask4" 4 | grep -Eq 'the mask is|cannot read the mask' && echo yes || echo no)"
 
+# The listing of the models (`models`, read-only): the files under the roots with their sizes, never one that a link leads out
+# with, a sha256 only once the hash is known, and hashing on request.
+check "describe advertises the models operation" models "$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["operations"]))' "$describe")"
+check "models without the key: 401" 401 "$(code -X POST -d '{}' "$url/models")"
+listing="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/models")"
+lister() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(" ".join(sorted(m["name"] for m in d["models"])))' "$1"; }
+check "models lists the files in the roots" "tokenizers/a=b/tok.json tokenizers/tok.json vae/small.safetensors" "$(lister "$listing")"
+check "... not the link out of the root, nor the folder link" no "$(python3 -c 'import sys; print("yes" if "stolen" in sys.argv[1] or "link" in sys.argv[1] or "outdir" in sys.argv[1] else "no")' "$listing")"
+check "... with the size and the folder" "1000 vae" "$(python3 -c 'import json,sys; m=[m for m in json.loads(sys.argv[1])["models"] if m["name"]=="vae/small.safetensors"][0]; print(m["size"], m["folder"])' "$listing")"
+check "... and the sha256 of a file hashed above" "$good" "$(python3 -c 'import json,sys; print([m for m in json.loads(sys.argv[1])["models"] if m["name"]=="vae/small.safetensors"][0]["sha256"])' "$listing")"
+check "... null for a file not hashed" None "$(python3 -c 'import json,sys; print([m for m in json.loads(sys.argv[1])["models"] if m["name"]=="tokenizers/tok.json"][0]["sha256"])' "$listing")"
+check "no hashing unless asked" 0 "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["hash_started"])' "$listing")"
+want="$(sha256sum "$work/models/tokenizers/tok.json" | cut -d' ' -f1)"
+asked="$(curl -s "${auth[@]}" -X POST -d '{"hash":true,"names":["tokenizers/tok.json"]}' "$url/models")"
+check "hash:true starts hashing and says so" "True" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["hash_started"] >= 1)' "$asked")"
+got=None
+for _ in $(seq 50); do
+  got="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/models" | python3 -c 'import json,sys; print([m for m in json.load(sys.stdin)["models"] if m["name"]=="tokenizers/tok.json"][0]["sha256"])')"
+  [[ $got != None ]] && break; sleep 0.1
+done
+check "... and the hash shows in the next listing" "$want" "$got"
+check "models with a body that is not an object: 400" 400 "$(code "${auth[@]}" -X POST -d '[1]' "$url/models")"
+
 ((failures == 0)) && echo "all passed" || { echo "$failures failed"; exit 1; }

@@ -24,6 +24,7 @@
 #include <QUrl>
 
 #include "engine/file_hashes.h"
+#include "engine/host_models.h"
 #include "engine/ids.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
@@ -802,8 +803,12 @@ private:
             requirement.nodePin = n.node->provider;
             requirement.workflowPin.clear();
             // A node that takes its model files in the job and whose files are not here can only run on a paired host (#395).
-            if (requirement.model.isEmpty() && modelFilesElsewhere(n))
+            QStringList missingHashes;
+            if (requirement.model.isEmpty() && modelFilesElsewhere(n, missingHashes)) {
                 requirement.modelsElsewhere = true;
+                // The hosts whose model list has all of them take the node first (#735).
+                requirement.hostsWithModel = HostModelCache::shared().hostsHavingAll(candidateInstances(), missingHashes);
+            }
             Result<Selection> selection = selectProvider(m_candidates, requirement);
             // A paired host that is not answering may still have made this node's result already (#492): the cache is asked with the
             // engine id it had when it last answered, and only a hit is served. Anything else is the error of the host being gone.
@@ -990,7 +995,14 @@ private:
     // The node is given a model file that is known to be missing here: a handle with a sha256 of a resource type that is installed,
     // which the model folders do not have (a check reads no file, as warnMissingModels). A handle a provider serves by name, or of
     // a type no installed pack declares, is not this (#395). Only asked when a paired helper is configured: no folder walk otherwise.
-    bool modelFilesElsewhere(const NodeRun &n) {
+    QList<ProviderInstance> candidateInstances() const {
+        QList<ProviderInstance> instances;
+        for (const Candidate &candidate : m_candidates)
+            instances.append(candidate.instance);
+        return instances;
+    }
+
+    bool modelFilesElsewhere(const NodeRun &n, QStringList &missingHashes) {
         const bool pairedHelper = std::any_of(m_candidates.cbegin(), m_candidates.cend(), [](const Candidate &candidate) {
             return candidate.instance.enabled && isPairedHelper(candidate.instance);
         });
@@ -1000,30 +1012,33 @@ private:
             const InputSpec *spec = n.type->input(it.key());
             if (!spec || it.value().isEmpty() || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
                 continue;
-            if (hashedHandleMissing(it.value().toJson()))
-                return true;
+            hashedHandleMissing(it.value().toJson(), missingHashes);
         }
-        return false;
+        return !missingHashes.isEmpty();
     }
 
-    bool hashedHandleMissing(const QJsonValue &value) {
+    // Adds the hash of every handle in `value` (and its parts) whose file is not in the model folders to `missing`.
+    void hashedHandleMissing(const QJsonValue &value, QStringList &missing) {
         if (value.isArray()) {
             for (const QJsonValue &item : value.toArray())
-                if (hashedHandleMissing(item))
-                    return true;
-            return false;
+                hashedHandleMissing(item, missing);
+            return;
         }
         const QJsonObject object = value.toObject();
         if (object.contains("resource") && object.contains("hash")) {
             const std::optional<PortType> type = PortType::parse(object.value("resource").toString());
-            return type && m_env.registry->portKind(*type) == PortKind::Resource
-                   && object.value("hash").toString().startsWith(QLatin1String("sha256:"))
-                   && !library().resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+            if (type && m_env.registry->portKind(*type) == PortKind::Resource
+                && object.value("hash").toString().startsWith(QLatin1String("sha256:"))
+                && !library().resolve(object, *m_env.hashes, ModelLibrary::Hashing::RememberedOnly)) {
+                const QString hash = object.value("hash").toString();
+                if (!missing.contains(hash))
+                    missing.append(hash);
+            }
+            return;
         }
         for (const QJsonValue &part : object) // a derived model's parts, its LoRAs
-            if ((part.isObject() || part.isArray()) && hashedHandleMissing(part))
-                return true;
-        return false;
+            if (part.isObject() || part.isArray())
+                hashedHandleMissing(part, missing);
     }
 
     void warnMissingModels(const NodeRun &n) {

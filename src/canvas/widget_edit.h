@@ -65,6 +65,7 @@
 
 #include "canvas/canvas_choices.h"
 #include "engine/model_catalog.h"
+#include "engine/host_models.h"
 #include "engine/model_offers.h"
 #include "engine/model_recommend.h"
 #include "engine/model_shape.h"
@@ -245,6 +246,15 @@ public:
     int modelsRevision() const { return m_modelsRevision; }
     // Picks a listed model (its handle as a map), one undo step.
     Q_INVOKABLE QString setModel(const QString &node, const QString &input, const QVariantMap &handle);
+    // --- models on a paired host (#735) ---
+    // Where the picker finds the paired helpers and their kept model lists: by default providers.json's paired helpers and
+    // HostModelCache::shared(); `make` is how a refresh reaches a host (tests).
+    void setHostModels(std::function<QList<fugue::ProviderInstance>()> instances, fugue::HostModelCache *cache,
+                       fugue::HostModelCache::Make make = {});
+    // Picks a model that is on the paired host `host` (a row of models() with `remote`): its handle carries the content hash, and
+    // the provider nodes that take the model (the ones linked to this input's node through model ports) are pinned to `host`, as one
+    // undo step. A model the host has not hashed yet is asked to be: returns that, and the pick is made again once it is.
+    Q_INVOKABLE QString setRemoteModel(const QString &node, const QString &input, const QVariantMap &handle, const QString &host);
     // A model served by this name, as typed.
     Q_INVOKABLE QString setModelName(const QString &node, const QString &input, const QString &name);
     // Picks the model file at `path`, which must be one of the input type's files in the model
@@ -349,7 +359,9 @@ private:
     QString parse(const Target &target, const QString &text, QJsonValue *value, bool *unsetIt) const;
     QString checkValue(const Target &target, const QJsonValue &value) const;
     // Writes the value (undefined: unset) as one step, or into the open session.
-    void write(const QString &node, const QString &input, const QJsonValue &value, const QString &text);
+    // `pinned` provider nodes are pinned to `host` in the same undo step (a remote model's pick, #735).
+    void write(const QString &node, const QString &input, const QJsonValue &value, const QString &text, const QStringList &pinned = {},
+               const QString &host = {});
     QString stepText(const QString &node, const QString &input) const;
     double randomSeed(const fugue::InputSpec &spec) const;
     // The capabilities of the node type the input is on (a group's: its inner node's).
@@ -401,6 +413,16 @@ private:
     int m_modelsRevision = 0;
     std::optional<QStringList> m_modelRoots;
     QHash<QString, QList<Model>> m_diskModels; // by modelsKey()
+    QHash<QString, QList<Model>> m_hostModels; // the paired helpers' files, by modelsKey() (#735)
+    std::function<QList<fugue::ProviderInstance>()> m_hostInstances;
+    fugue::HostModelCache *m_hostCache = nullptr; // null: the shared one
+    fugue::HostModelCache::Make m_hostMake;
+    fugue::HostModelCache &hostCache() const;
+    QList<fugue::ProviderInstance> pairedHelpers() const;
+    void listHostModels(const QString &node, const QString &input);
+    void pollHashing(const fugue::ProviderInstance &instance, int tries);
+    // The provider nodes of this scope that take the model `node` makes (links through Resource ports, any depth).
+    QStringList providerNodesUsing(const QString &node) const;
     // A file picked for an input and being hashed.
     struct Pick {
         QString scope; // CanvasModel::scopePath() when it was picked

@@ -185,6 +185,8 @@ QStringList ReadinessPlan::lines() const {
     for (const ReadinessModel &m : optionalModels)
         out << QStringLiteral("  Optional model, only if a Switch's other branch is chosen: %1 (%2) from %3")
                    .arg(m.name, m.size >= 0 ? sizeText(m.size) : QStringLiteral("size not recorded"), m.host);
+    for (const HostedModel &m : hosted)
+        out << QStringLiteral("  Model on %1: %2 (nothing to download here)").arg(m.host, m.name);
     for (const Error &p : problems)
         out << QStringLiteral("  Cannot do: %1").arg(p.message);
     return out;
@@ -212,6 +214,12 @@ QJsonObject ReadinessPlan::toJson() const {
                      {"download_bytes", double(downloadBytes)}, {"unknown_sizes", unknownSizes},
                      {"environment_bytes", double(environmentBytes)}, {"free_bytes", double(freeBytes)},
                      {"low_space", lowSpace()}, {"problems", fugue::toJson(problems)}};
+    if (!hosted.isEmpty()) { // on a paired host's model list (#735)
+        QJsonArray hostedRows;
+        for (const HostedModel &m : hosted)
+            hostedRows.append(QJsonObject{{"name", m.name}, {"host", m.host}, {"hash", m.handle.value("hash")}});
+        json.insert("hosted", hostedRows);
+    }
     if (!optionalModels.isEmpty()) { // only a Switch's other branch needs them (#594)
         QJsonArray optionalRows;
         for (const ReadinessModel &m : optionalModels)
@@ -370,6 +378,13 @@ ReadinessPlan buildReadinessPlan(const ReadinessRequest &request, const Readines
         for (const MissingModel &model : library.missing(entries, hashes)) {
             const QString name = model.handle.value(QStringLiteral("name")).toString();
             const bool chosen = !optional || request.optionalChosen.contains(model.handle.value(QStringLiteral("hash")).toString());
+            // A paired host that lists the file has it: nothing to download or to put here (#735).
+            if (env.hostHaving) {
+                if (const QString host = env.hostHaving(model.handle); !host.isEmpty()) {
+                    plan.hosted.append({name, host, model.handle});
+                    continue;
+                }
+            }
             if (model.source.isEmpty()) {
                 if (optional)
                     continue;

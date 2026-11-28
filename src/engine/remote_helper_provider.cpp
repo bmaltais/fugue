@@ -38,7 +38,7 @@ Error hostError(const QJsonObject &error) {
                          QStringLiteral("Put qwen3.5_tokenizer.json in the tokenizers folder of the paired host (Get ready here downloads it to this machine only)."));
     // These keep their codes (8.5, 8.8, 9.5); everything else the host says is about this job's work.
     if (code == QLatin1String("out_of_memory") || code == QLatin1String("cancelled") ||
-        code == QLatin1String("model_missing"))
+        code == QLatin1String("model_missing") || code == QLatin1String("not_found")) // not_found: a host too old for an operation
         return makeError(code, message);
     return makeError(QStringLiteral("node_failed"), message);
 }
@@ -186,6 +186,15 @@ void RemoteHelperProvider::sendPost(const QString &op, const QJsonObject &body, 
         reply->deleteLater();
         answer(parsed);
     });
+}
+
+void RemoteHelperProvider::listModels(bool hash, const QStringList &names, Reply<QJsonObject> reply) {
+    QJsonObject body;
+    if (hash)
+        body.insert("hash", true);
+    if (!names.isEmpty())
+        body.insert("names", QJsonArray::fromStringList(names));
+    post(QStringLiteral("models"), body, [reply = std::move(reply)](const Result<QJsonObject> &answer) { reply(answer); });
 }
 
 void RemoteHelperProvider::describe(Reply<Description> reply) {
