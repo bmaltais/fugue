@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QMap>
 #include <QSet>
 #include <QDir>
@@ -36,12 +37,36 @@ TrustStore::TrustStore(QString path) : m_path(std::move(path)) {}
 
 namespace {
 
-// trust.json is read, changed and written back: one change at a time in this process (the
-// window's worker thread and its GUI thread both make changes).
 QMutex &fileLock() {
     static QMutex mutex;
     return mutex;
 }
+
+// trust.json is read, changed and written back. One change at a time: the mutex for this process (the window's worker thread
+// and its GUI thread both make changes), `trust.json.lock` for every process (Settings, the window and the CLI change it, and
+// the packs folder's lock does not cover it). Like that lock, a QLockFile, so a holder that died releases it.
+class ChangeLock {
+public:
+    explicit ChangeLock(const QString &path) : m_mutex(&fileLock()), m_path(path + QStringLiteral(".lock")), m_file(m_path) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        m_file.setStaleLockTime(0);
+        m_held = m_file.tryLock(5000); // a change takes milliseconds
+    }
+    bool held() const { return m_held; }
+    Errors busy() const {
+        if (m_file.error() == QLockFile::PermissionError)
+            return {makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write the lock file %1.").arg(m_path),
+                              QStringLiteral("Check that you may write in the folder of trust.json."))};
+        return {makeError(QStringLiteral("pack_busy"), QStringLiteral("Another Fugue command is changing %1.").arg(m_path.chopped(5)),
+                          QStringLiteral("Wait for it to finish, then try again."))};
+    }
+
+private:
+    QMutexLocker<QMutex> m_mutex;
+    QString m_path;
+    QLockFile m_file;
+    bool m_held = false;
+};
 
 QJsonObject readFileObject(const QString &path) {
     QFile file(path);
@@ -136,8 +161,12 @@ Error defaultsTrust(const QString &packId, const QString &version) {
 } // namespace
 
 Errors TrustStore::trust(const QString &packId, const QString &version, const QString &secretsDigest) {
-    QMutexLocker lock(&fileLock());
     if (isBuiltIn(packId) || isTrusted(packId, version))
+        return {};
+    const ChangeLock lock(m_path);
+    if (!lock.held())
+        return lock.busy();
+    if (isTrusted(packId, version)) // another command's yes, given meanwhile
         return {};
     QJsonObject packs = readPacks(m_path);
     QJsonArray versions = packs.value(packId).toArray();
@@ -158,16 +187,18 @@ Errors TrustStore::trust(const QString &packId, const QString &version, const QS
 }
 
 Errors TrustStore::restore(const QString &packId, const QString &version, const QString &digest) {
-    QMutexLocker lock(&fileLock());
-    if (isBuiltIn(packId))
+    // Only while the version is unlisted: a yes given since it was forgotten (Settings, another command) is newer, and stays as it
+    // is, digest included. Checked again under the lock, so no change made between the check and the write is lost.
+    if (isBuiltIn(packId) || isListed(packId, version))
+        return {};
+    const ChangeLock lock(m_path);
+    if (!lock.held())
+        return lock.busy();
+    if (isListed(packId, version))
         return {};
     QJsonObject packs = readPacks(m_path);
     QJsonArray versions = packs.value(packId).toArray();
-    bool known = false;
-    for (const QJsonValue &value : versions)
-        known |= value.toString() == version;
-    if (!known)
-        versions.append(version);
+    versions.append(version);
     packs.insert(packId, versions);
     QJsonObject sealed = readSealed(m_path);
     QJsonObject own = sealed.value(packId).toObject();
@@ -182,22 +213,28 @@ Errors TrustStore::restore(const QString &packId, const QString &version, const 
 Errors TrustStore::adoptSecretsDigest(const QString &packId, const QString &version, const QString &digest) {
     if (isBuiltIn(packId) || digest.isEmpty())
         return {};
-    QMutexLocker lock(&fileLock());
-    const QJsonObject packs = readPacks(m_path);
-    bool trusted = false;
-    for (const QJsonValue &value : packs.value(packId).toArray())
-        trusted |= value.toString() == version;
+    // Nothing to do (the common case, at every load) takes no lock.
+    const auto needed = [&] { return isListed(packId, version) && sealedDigest(packId, version).isEmpty(); };
+    if (!needed())
+        return {};
+    const ChangeLock lock(m_path);
+    if (!lock.held())
+        return lock.busy();
+    if (!needed())
+        return {};
     QJsonObject sealed = readSealed(m_path);
     QJsonObject own = sealed.value(packId).toObject();
-    if (!trusted || !own.value(version).toString().isEmpty())
-        return {};
     own.insert(version, digest);
     sealed.insert(packId, own);
-    return writeTrust(m_path, packs, sealed);
+    return writeTrust(m_path, readPacks(m_path), sealed);
 }
 
 Errors TrustStore::forget(const QString &packId, const QString &version) {
-    QMutexLocker lock(&fileLock());
+    if (!isListed(packId, version)) // nothing to forget takes no lock, and needs no writable folder
+        return {};
+    const ChangeLock lock(m_path);
+    if (!lock.held())
+        return lock.busy();
     QJsonObject packs = readPacks(m_path);
     QJsonArray kept;
     bool found = false;
@@ -217,7 +254,11 @@ Errors TrustStore::forget(const QString &packId, const QString &version) {
 }
 
 Errors TrustStore::forget(const QString &packId) {
-    QMutexLocker lock(&fileLock());
+    if (!readPacks(m_path).contains(packId))
+        return {};
+    const ChangeLock lock(m_path);
+    if (!lock.held())
+        return lock.busy();
     QJsonObject packs = readPacks(m_path);
     if (!packs.contains(packId))
         return {};

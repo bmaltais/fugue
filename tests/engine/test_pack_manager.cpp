@@ -800,17 +800,118 @@ private slots:
         QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
         write(source() + "/" + id + "/tool/run.sh", "#!/bin/sh\necho changed\n");
         PackPrompts prompts = answering(Answer::Yes);
-        prompts.cancelled = [&] { // asked under the lock, just before the first move
-            QFile::setPermissions(packs(), QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+        bool asked = false; // cancelled() is also asked before staging, which must still work
+        prompts.install = [&](const PackSummary &) { asked = true; return Answer::Yes; };
+        prompts.cancelled = [&] { // the first time after the question: under the lock, just before the first move
+            if (asked)
+                QFile::setPermissions(packs(), QFileDevice::ReadOwner | QFileDevice::ExeOwner);
             return false;
         };
+        if (geteuid() != 0) // the lock is let go while the folder is still read-only
+            QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Could not remove our own lock file"));
         const Result<QList<PackAdded>> updated = updatePacks(id, {}, packs(), trustStore(), prompts);
         QFile::setPermissions(packs(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
         if (geteuid() == 0)
             QSKIP("root can write a read-only folder");
         QCOMPARE(updated.error().code, QString("permission_denied"));
+        QVERIFY2(updated.error().message.startsWith("Cannot replace"), qPrintable(updated.error().message)); // not the staging
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0")); // loaded again, as the window's reload does
         QVERIFY(trustStore().isTrusted(id, "1.0.0"));
         QCOMPARE(readAll(packs() + "/" + id + "/tool/run.sh"), QByteArray("#!/bin/sh\n"));
+    }
+
+    // An update puts back the pack it set aside even when that pack's pack.json is broken: only the sweep's dead backups are
+    // checked for one (a delete that failed half way).
+    void aFailedUpdateOfABrokenPackPutsItBack() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        write(packs() + "/" + id + "/pack.json", "{ broken");
+        makePack(source(), id, "1.1.0", false, {{"command", QJsonArray{"false"}}});
+        QCOMPARE(updatePacks(id, {}, packs(), trustStore(), answering(Answer::Yes)).error().code, QString("setup_failed"));
+        QCOMPARE(readAll(packs() + "/" + id + "/pack.json"), QByteArray("{ broken"));
+        QCOMPARE(leftovers(), QStringList{id});
+    }
+
+    // Spec 6.8: a trust that cannot be taken back (trust.json cannot be written) stops a same-version update before its new code
+    // is in place; the old pack and its trust stay.
+    void anUpdateWhoseTrustCannotBeTakenBackChangesNothing() {
+        if (geteuid() == 0)
+            QSKIP("root can write a read-only folder");
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        write(source() + "/" + id + "/tool/run.sh", "#!/bin/sh\necho changed\n"); // new code, same version
+        QVERIFY(QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner)); // trust.json's folder
+        const Result<QList<PackAdded>> updated = updatePacks(id, {}, packs(), trustStore(), answering(Answer::Yes));
+        QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QVERIFY(!updated.ok());
+        QCOMPARE(updated.error().code, QString("permission_denied"));
+        QCOMPARE(readAll(packs() + "/" + id + "/tool/run.sh"), QByteArray("#!/bin/sh\n"));
+        QCOMPARE(leftovers(), QStringList{id});
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0")); // loaded again, as the window's reload does
+        QVERIFY(trustStore().isTrusted(id, "1.0.0"));
+    }
+
+    // The previous build's names (#418, before #673): its `.old-<pid>-<epoch>-<random>-<folder>` is a dead owner's whatever the
+    // pid (that build swaps under the same lock), and its `.staging-<pid>-<epoch>-<random>` goes by its pid and start time, never by age.
+    void thePreviousBuildsLeftoversAreSettled() {
+        const QString id = "io.example.tools";
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        const qint64 me = QCoreApplication::applicationPid();
+        QVERIFY(QDir().mkpath(packs()));
+        QVERIFY(QDir().rename(makePack(source(), id, "1.0.0"), packs() + QString("/.old-%1-%2-aaaaaaaaaaaa-%3").arg(me).arg(now - 100).arg(id)));
+        const QString live = QString(".staging-%1-%2-bbbbbbbbbbbb").arg(me).arg(now);
+        const QString gone = QString(".staging-%1-%2-cccccccccccc").arg(deadPid()).arg(now);
+        const QString reused = QString(".staging-%1-%2-dddddddddddd").arg(me).arg(now - 10 * 365 * 86400); // made before this process
+        for (const QString &name : {live, gone, reused}) {
+            QDir().mkpath(packs() + "/" + name + "/work");
+            makeOld(packs() + "/" + name);
+        }
+        QVERIFY(addPack(makePack(source(), "io.example.other", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QCOMPARE(summarizePack(packs() + "/" + id)->version, QString("1.0.0"));
+        QVERIFY(QDir(packs()).entryList({".old-*"}, QDir::Dirs | QDir::Hidden).isEmpty());
+        QVERIFY(QFileInfo(packs() + "/" + live + "/work").isDir()); // a live owner's, two hours old
+        QVERIFY(!QFileInfo::exists(packs() + "/" + gone));
+        QVERIFY(!QFileInfo::exists(packs() + "/" + reused));
+    }
+
+    // An owner that could not read its own start ticks or boot id wrote 0 for them: it is not known, so a live one's staging
+    // folder is not swept (its clone runs without the lock); a pid no process has is gone all the same.
+    void anOwnerWrittenWithoutTicksOrBootIsNotTakenForGone() {
+        QProcess sleeper;
+        sleeper.start("sleep", {"30"});
+        QVERIFY(sleeper.waitForStarted());
+        const qint64 pid = sleeper.processId();
+        const QString noTicks = QString(".staging-%1-0-%2-aaaaaaaaaaaa").arg(pid).arg(bootId());
+        const QString noBoot = QString(".staging-%1-%2-0-bbbbbbbbbbbb").arg(pid).arg(ticksOf(pid));
+        const QString gone = QString(".staging-%1-0-0-cccccccccccc").arg(deadPid());
+        for (const QString &name : {noTicks, noBoot, gone})
+            QDir().mkpath(packs() + "/" + name + "/work");
+        QVERIFY(addPack(makePack(source(), "io.example.other", "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        sleeper.kill();
+        sleeper.waitForFinished();
+        QVERIFY(QFileInfo(packs() + "/" + noTicks + "/work").isDir());
+        QVERIFY(QFileInfo(packs() + "/" + noBoot + "/work").isDir());
+        QVERIFY(!QFileInfo::exists(packs() + "/" + gone));
+    }
+
+    // A yes given while a same-version update's setup runs (Settings, another command: trust.json is not under the packs lock) is
+    // newer than the one the update took away: a failed update leaves it as it is, digest included.
+    void aYesGivenDuringAFailedUpdateIsKept() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source(), id, "1.0.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(trustPack(id, packs(), trustStore(), answering(Answer::Yes)).ok());
+        makePack(source(), id, "1.0.0", false, {{"command", QJsonArray{"sh", "-c", "echo trust-now; exit 1"}}});
+        PackPrompts prompts = answering(Answer::Yes);
+        bool given = false;
+        prompts.log = [&](const QString &line) {
+            if (line == "trust-now")
+                given = !hasErrors(TrustStore(trustFile()).trust(id, "1.0.0", "feedface"));
+        };
+        QCOMPARE(updatePacks(id, {}, packs(), trustStore(), prompts).error().code, QString("setup_failed"));
+        QVERIFY(given);
+        QVERIFY(trustStore().isListed(id, "1.0.0"));
+        QCOMPARE(trustStore().sealedDigest(id, "1.0.0"), QString("feedface"));
     }
 
     // #418: one command at a time changes the packs folder.
