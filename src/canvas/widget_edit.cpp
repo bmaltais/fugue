@@ -6,6 +6,7 @@
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
+#include "engine/compiler.h"
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
 #include "engine/model_family.h"
@@ -656,45 +657,142 @@ std::optional<double> WidgetEdit::lastSeed(const QString &node, const QString &i
     return ok ? std::optional<double>(seed) : std::nullopt;
 }
 
-Document WidgetEdit::holdUpstream(const QString &node, QSet<QString> *held) const {
-    Document level = m_canvas->scopeDocument();
-    // Every node a path of links leads from to `node`, not `node` itself.
-    QSet<QString> upstream;
-    QStringList open{node};
-    while (!open.isEmpty()) {
-        const Node &current = level.graph.nodes.value(open.takeLast());
-        const auto add = [&](const InputValue &value) {
-            if (value.kind() == InputValue::Kind::Link && level.graph.nodes.contains(value.from().node)
-                && !upstream.contains(value.from().node)) {
-                upstream.insert(value.from().node);
-                open << value.from().node;
-            }
-        };
-        for (const InputValue &value : current.inputs) {
-            add(value);
-            if (value.kind() == InputValue::Kind::List)
-                for (const InputValue &item : value.items())
-                    add(item);
-        }
+namespace {
+
+// The nodes of one level of a document: the top graph's (`level` empty), or those of the definition of the group instance the
+// path of instance ids leads to, whose id goes to `definition`. Null when the path leads nowhere.
+const Nodes *nodesAt(const Document &document, const QStringList &level, QString *definition = nullptr) {
+    const Nodes *nodes = &document.graph.nodes;
+    QString id;
+    for (const QString &instance : level) {
+        const auto it = nodes->constFind(instance);
+        const GroupDefinition *group = it == nodes->constEnd() ? nullptr : document.group(it->type);
+        if (!group)
+            return nullptr;
+        id = it->type;
+        nodes = &group->nodes;
     }
-    upstream.remove(node); // a loop cannot compile, but the end point's own seeds are never held
-    for (const QString &id : upstream) {
-        Node &held_node = level.graph.nodes[id];
-        QStringList inputs = incrementing(level, id);
-        for (auto it = held_node.inputs.cbegin(); it != held_node.inputs.cend(); ++it)
-            if (it.value().kind() == InputValue::Kind::Auto && !inputs.contains(it.key()))
-                inputs << it.key();
-        for (const QString &input : inputs) {
-            const QString mode = seedMode(id, input);
-            const std::optional<double> seed = lastSeed(id, input);
-            if ((mode != QLatin1String("random") && mode != QLatin1String("increment")) || !seed)
+    if (definition)
+        *definition = id;
+    return nodes;
+}
+
+// Where the value an input of the flattened graph takes is written (as Compiler::effective reads it): on an exposed input of
+// the group around the node that the instance, or a level further out, sets; else on the node itself. Nothing when neither
+// holds one, or when the value in effect is an exposed input's default, which the definition holds for every instance.
+struct Written {
+    QStringList level; // the instance ids around the node it is written on
+    QString node;
+    QString input;
+};
+std::optional<Written> writtenAt(const Document &document, const QStringList &level, const QString &node, const QString &input) {
+    QString definition;
+    const Nodes *nodes = nodesAt(document, level, &definition);
+    if (!nodes)
+        return std::nullopt;
+    if (const GroupDefinition *group = level.isEmpty() ? nullptr : document.group(definition)) {
+        for (const GroupInput &exposed : group->inputs) {
+            if (!exposed.targets.contains(PortRef{node, input}))
                 continue;
-            held_node.inputs.insert(input, InputValue::literal(*seed));
-            if (held && mode == QLatin1String("increment"))
-                held->insert(id + QLatin1Char('/') + input);
+            if (auto outer = writtenAt(document, level.mid(0, level.size() - 1), level.last(), exposed.name))
+                return outer;
+            if (exposed.defaultValue)
+                return std::nullopt;
         }
     }
-    return m_canvas->merged(level);
+    if (nodes->value(node).inputs.value(input).isEmpty())
+        return std::nullopt;
+    return Written{level, node, input};
+}
+
+// How many times each group definition runs: its instances in the flattened graph, through every level.
+void countInstances(const Document &document, const Nodes &nodes, QHash<QString, int> &count, int depth = 0) {
+    if (depth > 64) // recursion is refused on edit (5.2); this only keeps a broken file from looping
+        return;
+    for (const Node &node : nodes)
+        if (const GroupDefinition *group = document.group(node.type)) {
+            ++count[node.type];
+            countInstances(document, group->nodes, count, depth + 1);
+        }
+}
+
+} // namespace
+
+Document WidgetEdit::holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const {
+    Document document = m_canvas->document();
+    if (!m_registry || from.isEmpty())
+        return document;
+    // The flattened graph the run will have (3.4): what is upstream of `from` there, through the groups' faces.
+    CompileOptions options;
+    options.from = from;
+    options.entered = m_canvas->scopePath();
+    options.allowUnsetInputs = true;
+    const Compilation compiled = compile(document, *m_registry, options);
+    if (!compiled.ok())
+        return document; // the run reports why; nothing to hold
+    const CompiledGraph &graph = compiled.value();
+    QStringList ends;
+    if (graph.nodes.contains(from)) {
+        ends << from;
+    } else {
+        for (auto it = graph.nodes.constBegin(); it != graph.nodes.constEnd(); ++it)
+            if (it.key().startsWith(from + QLatin1Char('/')))
+                ends << it.key();
+    }
+    QSet<QString> upstream;
+    QStringList open = ends;
+    while (!open.isEmpty()) {
+        for (const CompiledLink &link : graph.nodes.value(open.takeLast()).links())
+            if (!upstream.contains(link.from.node)) {
+                upstream.insert(link.from.node);
+                open << link.from.node;
+            }
+    }
+    QHash<QString, int> instances;
+    countInstances(document, document.graph.nodes, instances);
+    const QStringList shown = m_canvas->scope();
+    QSet<QString> done;
+    for (const QString &path : std::as_const(upstream)) {
+        if (ends.contains(path) || path.startsWith(from + QLatin1Char('/')))
+            continue; // a loop cannot compile, but the end point's own seeds are never held
+        const CompiledNode &compiledNode = graph.nodes.value(path);
+        const NodeType *type = m_registry->nodeTypeFor(compiledNode.type, compiledNode.version.major);
+        if (!type)
+            continue;
+        const QStringList segments = path.split(QLatin1Char('/'));
+        for (const InputSpec &spec : type->inputs) {
+            if (spec.widget() != QLatin1String("seed"))
+                continue;
+            const std::optional<Written> at = writtenAt(document, segments.mid(0, segments.size() - 1), segments.last(), spec.name);
+            if (!at)
+                continue;
+            const QString key = at->level.join(QLatin1Char('/')) + QLatin1Char('|') + at->node + QLatin1Char('|') + at->input;
+            if (done.contains(key))
+                continue;
+            QString definition;
+            const Nodes *nodes = nodesAt(document, at->level, &definition);
+            if (!definition.isEmpty() && instances.value(definition) > 1)
+                continue; // the same definition runs elsewhere in this run with its own seed
+            const InputValue value = nodes->value(at->node).inputs.value(at->input);
+            const QJsonObject layout = definition.isEmpty()
+                                           ? document.layout
+                                           : document.layout.value("groups").toObject().value(definition).toObject();
+            const bool increment = value.kind() == InputValue::Kind::Literal
+                                   && layout.value("nodes").toObject().value(at->node).toObject().value("increment").toArray()
+                                          .contains(QJsonValue(at->input));
+            if (value.kind() != InputValue::Kind::Auto && !increment)
+                continue;
+            const std::optional<double> seed = seedUsed ? seedUsed(path, spec.name) : std::nullopt;
+            if (!seed)
+                continue;
+            done.insert(key);
+            Nodes &writable = definition.isEmpty() ? document.graph.nodes : document.groups[definition].nodes;
+            writable[at->node].inputs.insert(at->input, InputValue::literal(*seed));
+            if (held && increment && at->level == shown)
+                held->insert(at->node + QLatin1Char('/') + at->input);
+        }
+    }
+    return document;
 }
 
 void WidgetEdit::advanceSeeds() { advanceSeedsExcept({}); }

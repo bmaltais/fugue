@@ -146,6 +146,19 @@ private slots:
         QCOMPARE(outputs.first().toMap().value("type").toString(), QString("image"));
     }
 
+    // A repeating input shows as a new node's face does (6.1.2): the declared inputs and the empty row's key, "Add LoRA".
+    void aRepeatingInputShowsItsEmptyRowOnTheCard() {
+        search->openAt(0, 0);
+        search->setQuery("apply loras");
+        auto *r = search->results();
+        QVERIFY(r->rowCount() > 0);
+        QCOMPARE(r->data(r->index(0), SearchResults::Name).toString(), QString("Apply LoRAs"));
+        QStringList inputs;
+        for (const QVariant &input : r->data(r->index(0), SearchResults::Inputs).toList())
+            inputs << input.toMap().value("name").toString() + "=" + input.toMap().value("label").toString();
+        QCOMPARE(inputs, (QStringList{"model=Model", "lora_1=Add LoRA"}));
+    }
+
     void aLinkFromAnOutputKeepsNodesWithACompatibleInput() {
         search->openFromLink({{"node", "prompt"}, {"port", "text"}, {"output", true}}, 300, 300);
         const QStringList found = names(search->results());

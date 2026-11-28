@@ -205,6 +205,8 @@ private slots:
     void aMutedUpstreamOfAnUnneededViewSinkSaysNothingOfIt();
     void runToHereKeepsOnlyWhatTheTargetNeeds();
     void runFromHereKeepsTheSinksAfterTheNode();
+    void aGroupCardIsTheEndPointOfEveryNodeInside();
+    void anEndPointThatDoesNotRunIsAUsageError();
     void unknownTargetIsAUsageError();
     void providerPinsAreResolvedAndChecked();
     void nodesOfUntrustedPacksFailAtTheInstalledVersion();
@@ -931,6 +933,47 @@ void TestCompiler::runFromHereKeepsTheSinksAfterTheNode() {
     QVERIFY2(node.ok(), qPrintable(dump(node.problems())));
     QCOMPARE(node->nodes.keys(), (QStringList{"a", "c", "p2"}));
     options.from = "gone";
+    QCOMPARE(compile(doc, registry(), options).problems().first().code, QString("usage"));
+}
+
+void TestCompiler::aGroupCardIsTheEndPointOfEveryNodeInside() {
+    // Run to here and Run from here on a group instance's card (3.4): every node inside it, through each level, is the end point.
+    const Document doc = document(withGroups(nestedGraph, nestedGroups));
+    CompileOptions options;
+    options.target = "g7";
+    const Compilation to = compile(doc, registry(), options);
+    QVERIFY2(to.ok(), qPrintable(dump(to.problems())));
+    QCOMPARE(to->nodes.keys(), (QStringList{"g7/gen", "g7/inner3/s2", "prompt"}));
+    QCOMPARE(to->target, QString("g7"));
+    QVERIFY(to->sinks().isEmpty());
+
+    options.target.clear();
+    options.from = "g7/inner3";
+    const Compilation from = compile(doc, registry(), options);
+    QVERIFY2(from.ok(), qPrintable(dump(from.problems())));
+    QCOMPARE(from->nodes.keys(), (QStringList{"g7/gen", "g7/inner3/s2", "prompt", "save"}));
+    QCOMPARE(from->sinks(), QStringList{"save"});
+    QCOMPARE(from->from, QString("g7/inner3"));
+}
+
+void TestCompiler::anEndPointThatDoesNotRunIsAUsageError() {
+    // A muted node, or one whose source is muted, does not run: starting from it or stopping at it would run nothing, and say so.
+    QByteArray graph = nestedGraph;
+    graph.replace("'prompt': {'type': 'fugue/text', 'version': '1.0.0',", "'prompt': {'type': 'fugue/text', 'version': '1.0.0', 'mode': 'mute',");
+    const Document doc = document(withGroups(graph.constData(), nestedGroups));
+    CompileOptions options;
+    options.from = "prompt";
+    Compilation result = compile(doc, registry(), options);
+    QVERIFY(!result.ok());
+    QCOMPARE(result.problems().first().code, QString("usage"));
+    QCOMPARE(result.problems().first().message, QString("Node prompt is muted, so a run cannot start from it."));
+    options.from = "g7";
+    result = compile(doc, registry(), options);
+    QVERIFY(!result.ok());
+    QCOMPARE(result.problems().first().node, QString("g7"));
+    QVERIFY2(result.problems().first().message.contains("a node it needs is muted"), qPrintable(result.problems().first().message));
+    options.from.clear();
+    options.target = "g7/gen";
     QCOMPARE(compile(doc, registry(), options).problems().first().code, QString("usage"));
 }
 

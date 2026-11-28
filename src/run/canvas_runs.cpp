@@ -252,8 +252,14 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     if (from.isEmpty()) {
         request.document = m_canvas->document();
     } else {
-        const QString row = rowFor(from);
-        request.document = m_canvas->widgets()->holdUpstream(row, &held);
+        // "Seed used" as each node showed it last, by path id: the nodes inside groups too.
+        const QHash<QString, NodeView> &views = m_tabs[tab].nodes;
+        const auto seedUsed = [&views](const QString &path, const QString &input) -> std::optional<double> {
+            bool ok = false;
+            const double seed = views.value(path).values.value(input).toString().toDouble(&ok);
+            return ok ? std::optional<double>(seed) : std::nullopt;
+        };
+        request.document = m_canvas->widgets()->holdUpstream(from, seedUsed, &held);
     }
     request.from = from;
     request.workflow = m_workflows->pathOf(m_workflows->current());

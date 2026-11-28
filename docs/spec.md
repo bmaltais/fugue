@@ -440,11 +440,18 @@ There is one list of named inputs per node type and no separate "parameter" kind
 - **Run from here** (#701, `run.from-here`, the node toolbar's second run button): the selected node runs, and so does every
   sink downstream of it (a descendant in the flattened graph), with what those need served from the cache when unchanged. A sink
   that is not downstream does not run. With no sink downstream it is Run to here with the node as the end point. The compiler
-  takes `CompileOptions::from` (a path id; a node that does not run is the error `usage`, as for `target`) and records it in
+  takes `CompileOptions::from` (a path id) and records it in
   `CompiledGraph::from` and compiled.json's `from` (a "run to here" graph records `target` instead; both are absent in a normal
-  run); the scheduler demands that node itself. The canvas also **holds what is upstream** of the node: in the run's copy of the
+  run); the scheduler demands that node itself. A group instance's path id, for `from` and `target` alike (its card on the
+  canvas), stands for every node inside it, through each level. An end point that does not run is the error `usage`: one
+  that is not there or is bypassed, a muted one, and one skipped because what it needs is muted or empty (a run from it would
+  do nothing, and say nothing). The canvas also **holds what is upstream** of the node: in the run's copy of the
   document (never the canvas's), every seed input of a node strictly upstream whose mode is Randomize or Increment takes the
-  seed the shown result used (`WidgetEdit::lastSeed`, "Seed used"); one with no shown result is left as it is. Those nodes
+  seed the shown result used ("Seed used", recorded by path id); one with no shown result is left as it is. Upstream is read
+  in the flattened graph: it reaches into the group instances before the node and, inside a group, out to the nodes that feed
+  it; nothing inside a group card that is the end point is held. A seed is held where its value is written: on its node, or on
+  the instance whose exposed input drives it. One written in a group definition that runs more than once (two instances) is
+  left as it is, since holding it there would hold it in every copy (`WidgetEdit::holdUpstream`). Those nodes
   then key as the run before and are cache hits. The node's own seeds and those after it behave as in any run. After the run
   starts, Increment advances only the seeds that were not held. The CLI has no such flag: holding reads the canvas's shown
   results, which `fugue run` has none of.
@@ -1125,7 +1132,10 @@ fixed count of numbered inputs.
   kernel's (Apply LoRAs leaves the row out).
 - **The face.** The node shows its rows and one empty row of the key alone, labelled "Add <key label>" ("Add LoRA"). Filling it
   (picking a LoRA, or linking one) makes the next empty row; setting a row's key back to None, or taking its link away, takes the
-  row out with its other values. Each is one undo step (the canvas drops the values of a row with no key in every edit).
+  row out with its other values. Each is one undo step (the canvas drops the values of a row with no key in every edit). A
+  row's link picked up and put down on an empty key of the same node's rows moves the row: its other values go with it. Inside
+  a group, a key that an exposed input of the group drives counts as having a value (its link or value is on the instance), as
+  the compiler reads it.
 - **Versions.** A workflow stores rows as ordinary inputs, so a file with rows is format 1. A Fugue from before #714 reads a
   `repeat` entry as an input with no name and no type and refuses the manifest, so a node type that uses it is not installed
   there: the node opens as the placeholder of 3.6, keeping its rows' values and links, and does not run.

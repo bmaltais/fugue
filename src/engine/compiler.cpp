@@ -307,7 +307,7 @@ void Compiler::checkProviders() {
             check(it->provider, scope.prefix + it.key());
 }
 
-// "Run to here" needs a node that runs.
+// "Run to here" needs a node that runs, or a group instance (its card on the canvas): the nodes inside it are the end point.
 void Compiler::checkTarget() {
     const QString &wanted = !m_options.target.isEmpty() ? m_options.target : m_options.from;
     if (wanted.isEmpty())
@@ -315,6 +315,10 @@ void Compiler::checkTarget() {
     const auto it = m_flat.constFind(wanted);
     if (it != m_flat.constEnd() && !it->hidden && it->mode != NodeMode::Bypass)
         return;
+    if (it == m_flat.constEnd())
+        for (const Scope &scope : m_scopes)
+            if (scope.instancePath == wanted && !scope.hidden)
+                return; // shape() says so when nothing inside it runs
     QStringList paths;
     for (const Flat &flat : m_flat)
         if (!flat.hidden && flat.mode != NodeMode::Bypass)
@@ -1204,19 +1208,55 @@ CompiledGraph Compiler::shape() {
             graph.skipped[it.key()] = *it;
     }
 
+    // The nodes the target or `from` names: the node, or every node inside a group instance. None of them running (muted, or
+    // what it needs is muted or empty) is an error: the run would do nothing, and say nothing (3.4).
+    const QString wanted = !m_options.target.isEmpty() ? m_options.target : m_options.from;
+    QStringList ends;
+    if (!wanted.isEmpty()) {
+        if (live.contains(wanted)) {
+            ends << wanted;
+        } else {
+            const QString prefix = wanted + QLatin1Char('/');
+            for (auto it = live.constBegin(); it != live.constEnd(); ++it)
+                if (it.key().startsWith(prefix))
+                    ends << it.key();
+        }
+        if (ends.isEmpty()) {
+            QString why = dropped.value(wanted);
+            for (auto it = dropped.constBegin(); why.isEmpty() && it != dropped.constEnd(); ++it)
+                if (it.key().startsWith(wanted + QLatin1Char('/')))
+                    why = *it;
+            const QString what = m_options.target.isEmpty() ? QStringLiteral("start from") : QStringLiteral("stop at");
+            Error error = makeError(QStringLiteral("usage"),
+                                    why == QLatin1String("muted")
+                                        ? QStringLiteral("Node %1 is muted, so a run cannot %2 it.").arg(wanted, what)
+                                    : why == QLatin1String("upstream_muted")
+                                        ? QStringLiteral("Node %1 does not run: a node it needs is muted, so a run cannot %2 it.")
+                                              .arg(wanted, what)
+                                    : why == QLatin1String("upstream_empty")
+                                        ? QStringLiteral("Node %1 does not run: an input it needs is empty (a bypassed node gave it "
+                                                         "nothing), so a run cannot %2 it.")
+                                              .arg(wanted, what)
+                                        : QStringLiteral("Nothing in %1 runs, so a run cannot %2 it.").arg(wanted, what));
+            error.node = wanted;
+            error.hint = QStringLiteral("Unmute what it needs, or pick a node that runs.");
+            fail(error);
+            return graph;
+        }
+    }
+
     // Only what a sink, or the target, needs (3.4).
     QStringList roots;
     if (!m_options.target.isEmpty()) {
-        if (live.contains(m_options.target))
-            roots << m_options.target;
+        roots << ends;
     } else {
         QSet<QString> below; // "run from here": from and everything after it
-        if (!m_options.from.isEmpty() && live.contains(m_options.from)) {
+        if (!ends.isEmpty()) {
             QHash<QString, QStringList> readers;
             for (const Flat &flat : live)
                 for (const QString &dep : sources(flat.inputs))
                     readers[dep] << flat.path;
-            QStringList open{m_options.from};
+            QStringList open = ends;
             while (!open.isEmpty()) {
                 const QString path = open.takeLast();
                 if (below.contains(path))
@@ -1224,7 +1264,7 @@ CompiledGraph Compiler::shape() {
                 below.insert(path);
                 open << readers.value(path);
             }
-            roots << m_options.from;
+            roots << ends;
         }
         for (const Flat &flat : live)
             if (flat.spec().sink && !quiet(flat) && (m_options.from.isEmpty() || below.contains(flat.path)))

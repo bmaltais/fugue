@@ -896,6 +896,10 @@ private:
     void rebuildLinks();
     // Takes out the rows of repeating inputs whose key has no value (#714): every edit does, in commit().
     void dropEmptyRows(fugue::Document &document) const;
+    // The inputs of `node` that an exposed input of the group shown drives (5.4), in `level` (the shown level's document):
+    // inside a group such an input takes what the instance gives it, so a repeating input's row whose key is one of them is
+    // there though the inner node holds nothing for it. Empty at the top.
+    QSet<QString> exposedOn(const fugue::Document &level, const QString &node) const;
     void layOut(NodeRow &row) const;
     qreal autoWidth(const NodeRow &row, const fugue::Node &node) const;
     // layOut again and emit what changed (plus `roles`); the node's wires follow.
@@ -968,6 +972,15 @@ private:
 
     QVariantMap m_drag;
     QSet<QString> m_dragUnreachable; // nodes the dragged link would make a cycle with
+    // A link picked up from a repeating input's key (6.1.2): the node and repeat it left, and the values of the row's other items
+    // (a LoRA's strength and On), which go with the link when it is put down on an empty key of the same repeat of that node: the
+    // row moves, not only its key. Put down anywhere else, the row is gone with its values, as when its link is taken away.
+    struct DragRow {
+        QString node;
+        int repeat = -1;
+        QList<std::pair<int, fugue::InputValue>> values; // by item index
+    };
+    DragRow m_dragRow;
 
     QStringList m_moving;
     QStringList m_pinnedMembers; // a Frame move's pinned nodes: they stay, and stay its members (#55)
