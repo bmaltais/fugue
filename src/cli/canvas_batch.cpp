@@ -79,8 +79,9 @@ void installStopHandlers() {
 
 bool stopRequested() { return g_stop.load(); }
 
-Result<RunFolder> startBoundRun(const Document &bound, const QString &workflow, Context &context, const QJsonObject &allowRemote) {
-    const Compilation compilation = compileDocument(bound, context.registry);
+Result<RunFolder> startBoundRun(const Document &bound, const QString &workflow, Context &context, const QJsonObject &allowRemote,
+                                const CompileSettings &settings) {
+    const Compilation compilation = compileDocument(bound, context.registry, settings);
     if (!compilation.ok())
         return compilation.errors();
     if (const Errors refused = remoteConsentProblems(*compilation, context, workflow, allowRemote); !refused.isEmpty())

@@ -30,6 +30,7 @@ before guessing a fix.
 4. `fugue run <file> --wait` streams events (JSON lines) and ends with `run.done`; without `--wait`
    it prints a run id and returns. `--set <node>.<input>=<value>` overrides one value for that run.
    `--to <node>` runs only up to a node.
+   `--sweep <node>.<input>=v1,v2` (once or twice, with `--to <node>` and `--wait`) runs the workflow once per value and prints the path of one labelled sheet of the pictures; a cell that fails is a blank tile.
 5. `fugue runs result <run-id> --json` gives each sink's values and output file paths. Use
    `fugue runs status <run-id>` for per-node state and `fugue runs events <run-id>` to replay events;
    `fugue runs list` shows recent runs; `fugue runs cancel <run-id>` stops one.
@@ -81,7 +82,7 @@ fail with `permission_denied`.
 
 | Command | Does |
 | --- | --- |
-| `fugue run <file>` | Start a run (`--wait`, `--first`, `--to`, `--provider`, `--set`, `--allow-remote <instance>` for this run only when a node would send pictures or prompts to a service off this machine; a missing model whose same weights are on disk is swapped for that file, for this run only, saying so on stderr, unless the setting "When a model is missing but the same model is on disk" is Ask me (the settings key is use_on_disk, with the values use or ask): `--use-on-disk` forces it and `--no-use-on-disk` opts out; `validate` and `app run` take both) |
+| `fugue run <file>` | Start a run (`--wait`, `--first`, `--to`, `--provider`, `--set`, `--sweep <node>.<input>=v1,v2` (one or two axes; needs `--to` and `--wait`; one sheet of pictures), `--allow-remote <instance>` for this run only when a node would send pictures or prompts to a service off this machine; a missing model whose same weights are on disk is swapped for that file, for this run only, saying so on stderr, unless the setting "When a model is missing but the same model is on disk" is Ask me (the settings key is use_on_disk, with the values use or ask): `--use-on-disk` forces it and `--no-use-on-disk` opts out; `validate` and `app run` take both) |
 | `fugue validate <file>` | Compile and report errors and warnings; runs nothing |
 | `fugue compile <file>` | Print the compiled graph |
 | `fugue workflow new <file>` | Write an empty workflow, or a template's (`--template <id>`) |

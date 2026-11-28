@@ -23,6 +23,7 @@
 
 #include "cli/commands.h"
 #include "engine/compiler.h"
+#include "engine/document.h"
 #include "engine/queue.h"
 #include "engine/run_folder.h"
 
@@ -31,6 +32,13 @@ namespace fugue::cli {
 // `fugue run`: returns {"run", "status": "queued"} at once, or with --wait streams
 // events until run.done and exits 1 unless the run ended ok.
 Reply startRun(const Command &command, Context &context);
+
+// `fugue run <file> --sweep <node>.<input>=v1,v2 [--sweep ...] --to <node> --wait` (cli/sweep.cpp, #552): one run per cell, then one
+// run that lays the pictures out as a sheet. Reached from startRun.
+Reply sweepRun(const Command &command, Context &context);
+
+// `--set <node>.<input>=<value>` applied to `document` (the form was checked by the argument parser): `usage` for a node it lacks.
+Errors applySetOverrides(Document &document, const QStringList &overrides);
 
 // The steps of `fugue run` after the compile: the run folder, the queue entry and a detached worker. `document` is the
 // workflow as compiled (empty for a compiled graph), `file` the path the run is recorded under. Returns the queued run's

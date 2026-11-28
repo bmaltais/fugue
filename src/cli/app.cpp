@@ -36,6 +36,7 @@
 #include "engine/paired_placement.h"
 #include "engine/registry.h"
 #include "engine/share_package.h"
+#include "engine/sweep.h"
 #include "engine/templates.h"
 
 namespace fugue::cli {
@@ -312,21 +313,6 @@ Result<QMap<QString, QJsonValue>> givenValues(const Command &command, const Load
     return values;
 }
 
-// The files in a value: every `path` of a media handle in it, in order.
-void collectPaths(const QJsonValue &value, QStringList &paths) {
-    if (value.isArray()) {
-        for (const QJsonValue &item : value.toArray())
-            collectPaths(item, paths);
-    } else if (value.isObject()) {
-        const QJsonObject object = value.toObject();
-        if (const QString path = object.value("path").toString(); !path.isEmpty() && !paths.contains(path))
-            paths << path;
-        for (auto it = object.begin(); it != object.end(); ++it)
-            if (it.key() != QLatin1String("path"))
-                collectPaths(it.value(), paths);
-    }
-}
-
 // What each output node of the app made, from the run's own events (the same node.done a `runs result` reads).
 QJsonArray resultsOf(const Loaded &loaded, const RunFolder &folder, QStringList &all) {
     QJsonArray results;
@@ -338,9 +324,9 @@ QJsonArray resultsOf(const Loaded &loaded, const RunFolder &folder, QStringList 
             if ((kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) && event.value("node").toString() == output.node) {
                 // A Save node's file is its output; a Preview has none, so what it shows is its result (as `runs result` reads).
                 const qsizetype before = paths.size();
-                collectPaths(event.value("outputs"), paths);
+                collectMediaPaths(event.value("outputs"), paths);
                 if (paths.size() == before)
-                    collectPaths(event.value("shown"), paths);
+                    collectMediaPaths(event.value("shown"), paths);
             }
         }
         for (const QString &path : std::as_const(paths))

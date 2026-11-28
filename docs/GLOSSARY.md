@@ -28,6 +28,10 @@ _Avoid_: conditional input, deferred input
 A named, typed slot on a node that carries a value it produced or used, such as the seed it actually ran with. May be optional.
 _Avoid_: result, return value
 
+**Sweep**:
+One workflow run once per value of one or two inputs (`fugue run --sweep`), each run a cell, the pictures laid out as one labelled sheet by the Image Grid node. The document is never changed; a cell is a run of a copy with the values written in.
+_Avoid_: batch (that is a folder of pictures through one action), grid search
+
 **Port type**:
 What kind of value an input or output carries. Six are built in (Text, Number, Boolean, Image, Video, Audio); packs can declare more, as resource types or data types.
 _Avoid_: socket type, value type
