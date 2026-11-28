@@ -1,5 +1,6 @@
 #include "engine/pack_manager.h"
 
+#include "engine/beneath_fs.h"
 #include "engine/json.h"
 #include "engine/pack_loader.h"
 #include "engine/paths.h"
@@ -24,6 +25,7 @@
 #include <QSet>
 #include <QUuid>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <csignal>
@@ -206,11 +208,17 @@ Owner legacyOwnerOf(qint64 pid, qint64 madeAt) {
     return started <= madeAt + 5 ? Owner::Running : Owner::Gone; // 5 s: the two clocks are read apart
 }
 
-// Removes a folder tree. A link at the top is refused, never followed: it points where this command may not delete.
+// Removes a folder tree. A link at the top is refused, never followed: it points where this command may not delete. Inside,
+// nothing is followed either, even when a program (a pack's, whose `.venv` it may write in while this runs) swaps a folder for
+// a link midway: the tree is removed through descriptors (engine/beneath_fs.h).
 bool removeTree(const QString &path) {
-    if (QFileInfo(path).isSymLink())
+    const QFileInfo info(path);
+    if (info.isSymLink())
         return false;
-    return QDir(path).removeRecursively();
+    if (!info.exists())
+        return true;
+    const beneath::Fd parent(::open(QFile::encodeName(info.absolutePath()).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    return parent && beneath::removeTreeBeneath(parent.get(), info.fileName());
 }
 
 // Removes what is at `path`: a link as a link, a folder as a tree.
@@ -226,14 +234,34 @@ void discardTree(const QString &packsDir, const QString &path) {
     removeTree(QDir().rename(path, trash) ? trash : path);
 }
 
+QStringList setupCommandOf(const QJsonObject &pack) {
+    QStringList command;
+    for (const QJsonValue &part : pack.value("setup").toObject().value("command").toArray())
+        command << part.toString();
+    // `uv sync` installs exactly what the pack's uv.lock pins and never writes the lock (6.8): --frozen, unless it says --locked.
+    if (command.size() >= 2 && QFileInfo(command.first()).fileName() == QLatin1String("uv") && command.at(1) == QLatin1String("sync") &&
+        !command.contains(QStringLiteral("--frozen")) && !command.contains(QStringLiteral("--locked")))
+        command.insert(2, QStringLiteral("--frozen"));
+    return command;
+}
+
+// Why the setup `command` may not run for the pack in `folder`, or empty: a setup with uv installs what the pack's uv.lock pins
+// (6.8), so a pack whose setup is uv ships a uv.lock (a regular file, not a link).
+QString uvLockProblem(const QStringList &command, const QString &folder) {
+    if (command.isEmpty() || QFileInfo(command.first()).fileName() != QLatin1String("uv"))
+        return {};
+    const QFileInfo lock(folder + QStringLiteral("/uv.lock"));
+    if (lock.isFile() && !lock.isSymLink())
+        return {};
+    return QStringLiteral("The pack's setup uses uv, but the pack has no uv.lock: a setup installs only the versions a lock file pins.");
+}
+
 // Whether the pack in `folder` is whole: it has no setup, or its setup ran to its end (the marker names the command).
 bool packComplete(const QString &folder) {
     const Result<QJsonObject> json = readJsonObject(folder + QStringLiteral("/pack.json"));
     if (!json)
         return false;
-    QStringList command;
-    for (const QJsonValue &part : json->value("setup").toObject().value("command").toArray())
-        command << part.toString();
+    const QStringList command = setupCommandOf(*json);
     return command.isEmpty() || packSetupDone(folder, command);
 }
 
@@ -406,9 +434,11 @@ struct ProcessResult {
 };
 
 // Runs a program (never a shell) and passes its output on line by line.
+// `inherited`: descriptors the command line names (bwrap's --ro-bind-fd), kept open across exec in this child only.
 ProcessResult runProgram(const QString &program, const QStringList &arguments, const QString &workDir,
                          const std::function<void(const QString &)> &log, bool quiet = false,
-                         const std::function<bool()> &cancelled = {}, bool ownGroup = false, bool cleanUv = false) {
+                         const std::function<bool()> &cancelled = {}, bool ownGroup = false, bool cleanUv = false,
+                         const QList<int> &inherited = {}) {
     ProcessResult result;
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
@@ -449,8 +479,13 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
     });
     // A setup gets its own process group, so a stop ends what it started too (sh -c, uv's children), not only the program. Git is
     // left in ours: ssh asks for a passphrase on the terminal, which a background group may not read.
-    if (ownGroup)
-        process.setChildProcessModifier([] { ::setpgid(0, 0); });
+    if (ownGroup || !inherited.isEmpty())
+        process.setChildProcessModifier([ownGroup, inherited] {
+            if (ownGroup)
+                ::setpgid(0, 0);
+            for (const int fd : inherited)
+                ::fcntl(fd, F_SETFD, 0);
+        });
     process.start(program, arguments);
     if (!process.waitForStarted(10000))
         return result;
@@ -534,7 +569,8 @@ QString installInterpreter(const QStringList &command, const QString &folder, co
     const QString version = wantedPython(folder);
     if (version.isEmpty())
         return {};
-    const QString uv = QStandardPaths::findExecutable(command.first());
+    // Fugue's own uv, from PATH: never the program the pack's command names (a `./uv` of its own would run here as the user).
+    const QString uv = QStandardPaths::findExecutable(QStringLiteral("uv"));
     if (uv.isEmpty())
         return {};
     const QString elsewhere = cacheDir() + QStringLiteral("/uv-python-install");
@@ -545,9 +581,11 @@ QString installInterpreter(const QStringList &command, const QString &folder, co
     return done.ok ? QString() : done.output.trimmed();
 }
 
-// Runs the pack's setup command in `folder`: in the sandbox (the network on, only `.venv` and uv.lock of the pack and Fugue's own
-// uv cache for this pack writable) or as the user. After a sandboxed run `.venv` must still be a folder, not a link.
+// Runs the pack's setup command in `folder`: in the sandbox (the network on, only `.venv` of the pack and Fugue's own uv cache for
+// this pack writable) or as the user. After a sandboxed run `.venv` must still be a folder, not a link.
 ProcessResult runSetupCommand(const QStringList &command, const QString &folder, const QString &packId, bool sandboxed, const PackPrompts &prompts) {
+    if (const QString why = uvLockProblem(command, folder); !why.isEmpty())
+        return ProcessResult{false, -1, why};
     if (!sandboxed)
         return runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled, true);
     if (const QString why = installInterpreter(command, folder, prompts); !why.isEmpty())
@@ -564,7 +602,10 @@ ProcessResult runSetupCommand(const QStringList &command, const QString &folder,
     profile.uvCache = sandbox::uvCacheFor(packId);
     QDir().mkpath(profile.uvCache);
     const sandbox::Command wrapped = sandbox::build(profile);
-    ProcessResult done = runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true);
+    if (!wrapped.refused.isEmpty())
+        return ProcessResult{false, -1, wrapped.refused};
+    ProcessResult done = runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true, false,
+                                    wrapped.descriptors->numbers());
     if (done.ok && QFileInfo(environment).isSymLink()) {
         done.ok = false;
         done.output += QStringLiteral("\n.venv became a link during the setup; a pack's environment folder must be a folder.");
@@ -580,12 +621,6 @@ Result<QJsonObject> readPackJson(const QString &folder) {
     return read.value();
 }
 
-QStringList setupCommandOf(const QJsonObject &pack) {
-    QStringList command;
-    for (const QJsonValue &part : pack.value("setup").toObject().value("command").toArray())
-        command << part.toString();
-    return command;
-}
 
 QString realPath(const QString &path) {
     const QString canonical = QFileInfo(path).canonicalFilePath();
@@ -793,6 +828,8 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const Pa
     const Result<QJsonObject> json = readPackJson(work);
     if (!json)
         return cleanFail(json.error());
+    if (const QString why = uvLockProblem(setupCommandOf(*json), work); !why.isEmpty())
+        return cleanFail(fail(QStringLiteral("pack_invalid"), why, QStringLiteral("Run `uv lock` in the pack's folder and ship the uv.lock it makes.")));
     const QString id = json->value("id").toString();
     if (!validPackId(id))
         return cleanFail(fail(QStringLiteral("pack_invalid"), QStringLiteral("pack.json has no usable \"id\" (%1).").arg(id)));
@@ -916,10 +953,7 @@ static Result<PackSummary> summarizeAt(const QString &folder, PackDigest record)
     if (const QJsonValue size = json->value("setup").toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
         summary.setupSize = qint64(size.toDouble());
     summary.source = readPackSource(folder);
-    QStringList nodeNames;
-    for (const QJsonValue &node : json->value("nodes").toArray())
-        nodeNames << node.toString();
-    summary.secretsDigest = packSecretsDigestOf(loaded.secrets, summary.source.location, packNeedsDigest(folder, nodeNames));
+    summary.secretsDigest = loaded.digest; // of what the load parsed, not a second read
     fillSecretState(summary);
     QStringList shown{summary.name, summary.version, summary.setupDescription};
     shown += summary.setupCommand;

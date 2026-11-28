@@ -115,7 +115,10 @@ Reply projectRemove(const Command &command, Context &) {
     if (!removed)
         return Reply::failure(removed.errors());
     return Reply::success(QJsonObject{{"removed", removed->name()}, {"path", removed->root}},
-                          QStringLiteral("Removed %1 from the list. Its folder %2 and everything in it are untouched.").arg(removed->name(), removed->root));
+                          QStringLiteral("Removed %1 from the list. Its folder %2 and everything in it are untouched, its keys "
+                                         "(pack-secrets.json, providers.json) too: the sandbox no longer knows it as a project, so a pack "
+                                         "given a folder that holds it could read them. Delete the folder, or move it, when it is no longer "
+                                         "used.").arg(removed->name(), removed->root));
 }
 
 Reply projectInherits(const Command &command, Context &) {

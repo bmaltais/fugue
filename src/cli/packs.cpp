@@ -132,8 +132,7 @@ PackPrompts terminalPrompts(Context &context) {
 }
 
 QJsonObject needsJson(const sandbox::Needs &needs) {
-    return QJsonObject{{"network", needs.network}, {"gpu", needs.gpu}, {"read", QJsonArray::fromStringList(needs.readPaths)},
-                       {"write", QJsonArray::fromStringList(needs.writePaths)}};
+    return QJsonObject{{"network", needs.network}, {"gpu", needs.gpu}, {"read", QJsonArray::fromStringList(needs.readPaths)}};
 }
 
 // What a pack's programs may do (6.7.1): whether they run in the sandbox, what they declared, and the plain lines the Trust

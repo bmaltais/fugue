@@ -300,10 +300,13 @@ QString reasonOf(const Errors &errors) {
 }
 
 // Loads one node folder; empty reason on success, the type id in `typeId`.
+// `needs`: the `needs` of the node.json this parsed (empty when it did not read), for the digest trust covers.
 QString loadNode(Registry &registry, const PackManifest &pack, const QString &folder, const QString &name,
-                 PackOrigin origin, QString &typeId, Errors &warnings, const QByteArray &packBytes) {
+                 PackOrigin origin, QString &typeId, Errors &warnings, const QByteArray &packBytes, QJsonObject &needs) {
     const QString path = folder + QLatin1Char('/') + name + QStringLiteral("/node.json");
     const Result<QJsonObject> read = readJsonObject(path);
+    if (read.ok())
+        needs = read->value("needs").toObject();
     if (!read.ok())
         return read.error().code == QLatin1String("file_not_found")
                    ? QStringLiteral("%1/node.json is missing.").arg(name)
@@ -511,18 +514,25 @@ Result<QJsonObject> readPackJson(const QString &folder, QByteArray &bytes) {
 
 } // namespace
 
-QString packNeedsDigest(const QString &folder, const QStringList &nodes) {
+QString packNeedsDigestOf(const QStringList &nodes, const QHash<QString, QJsonObject> &needs) {
     QStringList sorted = nodes;
     sorted.sort();
     QCryptographicHash hash(QCryptographicHash::Sha256);
     for (const QString &node : std::as_const(sorted)) {
-        const Result<QJsonObject> read = readJsonObject(folder + QLatin1Char('/') + node + QStringLiteral("/node.json"));
         hash.addData(node.toUtf8());
         hash.addData(QByteArrayView("\0", 1));
-        hash.addData(QJsonDocument(read ? read->value("needs").toObject() : QJsonObject()).toJson(QJsonDocument::Compact));
+        hash.addData(QJsonDocument(needs.value(node)).toJson(QJsonDocument::Compact));
         hash.addData(QByteArrayView("\0", 1));
     }
     return QString::fromLatin1(hash.result().toHex());
+}
+
+QString packNeedsDigest(const QString &folder, const QStringList &nodes) {
+    QHash<QString, QJsonObject> needs;
+    for (const QString &node : nodes)
+        if (const Result<QJsonObject> read = readJsonObject(folder + QLatin1Char('/') + node + QStringLiteral("/node.json")))
+            needs.insert(node, read->value("needs").toObject());
+    return packNeedsDigestOf(nodes, needs);
 }
 
 QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation, const QString &needsDigest) {
@@ -596,9 +606,12 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     for (const DeclaredPortType &type : pack->types)
         loaded.errors << registry.add(type);
 
+    QHash<QString, QJsonObject> needs; // what each node.json said, as parsed: the digest covers these bytes, not a second read
     for (const QString &name : pack->nodes) {
         QString typeId;
-        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors, packBytes);
+        QJsonObject declared;
+        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors, packBytes, declared);
+        needs.insert(name, declared);
         if (!reason.isEmpty())
             loaded.disabled << PackProblem{name, reason};
         else if (!loaded.nodes.contains(typeId))
@@ -619,9 +632,10 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
         registry.setPackSource(pack->id, pack->version, shared, source.commit.isEmpty() ? source.ref : source.commit);
     }
     loaded.enabled = true;
+    // What trust compares (6.7): the secrets and needs this load parsed, not another folder that happens to name the same pack.
+    loaded.digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location, packNeedsDigestOf(pack->nodes, needs));
     if (origin == PackOrigin::Disk && record == PackDigest::Record) {
-        // What trust compares (6.7): the secrets this load parsed, not another folder that happens to name the same pack.
-        const QString digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location, packNeedsDigest(folder, pack->nodes));
+        const QString digest = loaded.digest;
         {
             QMutexLocker lock(&digestLock());
             loadedDigests().insert(digestKey(pack->id, pack->version), digest);

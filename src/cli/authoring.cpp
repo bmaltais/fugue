@@ -313,6 +313,7 @@ Reply nodeTest(const Command &command, Context &) {
         return Reply::failure(makeError("permission_denied", QStringLiteral("Cannot make a temporary folder.")));
     FileHashes hashes(scratch.filePath("hashes.json"));
     CommandKernel kernel(1000);
+    kernel.setAlwaysSandboxed(!command.has("no-sandbox"));
 
     QJsonArray report;
     QStringList lines;

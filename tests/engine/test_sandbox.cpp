@@ -5,15 +5,19 @@
 // Seam: sandbox::build / parseNeeds, CommandKernel::run() on a node loaded from a pack folder, addPack() for the setup.
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include <atomic>
+
+#include <fcntl.h>
 
 #include "engine/command_node.h"
 #include "engine/file_hashes.h"
@@ -21,6 +25,7 @@
 #include "engine/pack_manager.h"
 #include "engine/pack_secrets.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 #include "engine/registry.h"
 #include "engine/run_folder.h"
 #include "engine/sandbox.h"
@@ -49,6 +54,15 @@ QByteArray readAll(const QString &path) {
 bool hasPair(const QStringList &args, const QString &flag, const QString &first, const QString &second = {}) {
     for (qsizetype i = 0; i + 1 < args.size(); ++i)
         if (args[i] == flag && args[i + 1] == first && (second.isEmpty() || (i + 2 < args.size() && args[i + 2] == second)))
+            return true;
+    return false;
+}
+
+// `flag N dest` (--ro-bind-fd, --bind-fd): bound by a descriptor of the command's, at `dest`.
+bool boundFd(const sandbox::Command &command, const QString &flag, const QString &dest) {
+    const QStringList &args = command.arguments;
+    for (qsizetype i = 0; i + 2 < args.size(); ++i)
+        if (args[i] == flag && args[i + 2] == dest && command.descriptors->numbers().contains(args[i + 1].toInt()))
             return true;
     return false;
 }
@@ -225,12 +239,15 @@ private slots:
         profile.environment = {"FUGUE_PROTOCOL=1"};
         const sandbox::Command command = sandbox::build(profile);
         const QStringList &args = command.arguments;
+        QVERIFY2(command.refused.isEmpty(), qPrintable(command.refused));
         for (const char *flag : {"--unshare-all", "--unshare-user", "--disable-userns", "--new-session", "--die-with-parent", "--clearenv"})
             QVERIFY2(args.contains(flag), flag);
         QVERIFY(!args.contains("--share-net")); // no `network`: the network namespace stays empty
-        QVERIFY(hasPair(args, "--ro-bind", profile.packDir, profile.packDir));
-        QVERIFY(hasPair(args, "--bind", profile.packDir + "/.venv", profile.packDir + "/.venv")); // its environment folder
-        QVERIFY(hasPair(args, "--bind", profile.workDir, profile.workDir));
+        // The folders are bound by descriptor, never by a path a program could swap for a link before bwrap reads it.
+        QVERIFY(boundFd(command, "--ro-bind-fd", profile.packDir));
+        QVERIFY(boundFd(command, "--bind-fd", profile.packDir + "/.venv")); // its environment folder
+        QVERIFY(boundFd(command, "--bind-fd", profile.workDir));
+        QVERIFY(!hasPair(args, "--ro-bind", profile.packDir, profile.packDir) && !hasPair(args, "--bind", profile.workDir, profile.workDir));
         QVERIFY(hasPair(args, "--setenv", "FUGUE_PROTOCOL", "1"));
         QVERIFY(hasPair(args, "--setenv", "HOME", "/tmp/home")); // no home
         QVERIFY(args.contains("--tmpfs"));
@@ -254,10 +271,11 @@ private slots:
         write(profile.packDir + "/uv.lock", "lock");
         QDir().mkpath(profile.packDir + "/.venv");
         profile.uvCache = sandbox::uvCacheFor("io.example.pack");
-        const QStringList withLock = sandbox::build(profile).arguments;
-        QVERIFY(hasPair(withLock, "--ro-bind", profile.packDir, profile.packDir)); // the pack's own files are read-only
-        QVERIFY(hasPair(withLock, "--bind", profile.packDir + "/.venv", profile.packDir + "/.venv"));
-        QVERIFY(hasPair(withLock, "--bind", profile.packDir + "/uv.lock", profile.packDir + "/uv.lock"));
+        const sandbox::Command withLockCommand = sandbox::build(profile);
+        const QStringList &withLock = withLockCommand.arguments;
+        QVERIFY(boundFd(withLockCommand, "--ro-bind-fd", profile.packDir)); // the pack's own files are read-only
+        QVERIFY(boundFd(withLockCommand, "--bind-fd", profile.packDir + "/.venv"));
+        QVERIFY(!withLock.join(' ').contains("uv.lock")); // uv sync --frozen reads the lock, never writes it
         QVERIFY(!hasPair(withLock, "--bind", profile.packDir, profile.packDir));
         QVERIFY(hasPair(withLock, "--bind-try", profile.uvCache, profile.uvCache));
         QVERIFY2(profile.uvCache.startsWith(cacheDir()), qPrintable(profile.uvCache)); // Fugue's own cache, one per pack
@@ -280,21 +298,32 @@ private slots:
         sandbox::Profile profile;
         profile.packDir = m_root.path() + "/arg2/pack";
         profile.program = "/usr/bin/true";
-        profile.allowedRoots = {models};
+        profile.modelRoots = {models};
         profile.handedFiles = {models + "/real.onnx", models + "/inside.onnx", models + "/outside.onnx", models + "/key.onnx",
                                home() + "/.ssh/handed", models + "/missing.onnx"};
         const sandbox::Command command = sandbox::build(profile);
-        QVERIFY(hasPair(command.arguments, "--ro-bind", models + "/real.onnx", models + "/real.onnx"));
+        QVERIFY(boundFd(command, "--ro-bind-fd", models + "/real.onnx"));
         QVERIFY(hasPair(command.arguments, "--symlink", models + "/real.onnx", models + "/inside.onnx")); // the link points at the bound target
         QVERIFY(!command.arguments.join(' ').contains(elsewhere)); // a link out of the roots: left out
         QVERIFY(!command.arguments.join(' ').contains(".ssh")); // and a denied path never, linked or handed directly
         QCOMPARE(command.skipped.size(), 4);
+        QVERIFY(command.refused.isEmpty());
+
+        // A model file must lie in a model folder, on what was opened: one outside refuses the run instead of being left out.
+        profile.handedFiles.clear();
+        profile.modelFiles = {models + "/real.onnx"};
+        QVERIFY(sandbox::build(profile).refused.isEmpty());
+        profile.modelFiles = {models + "/real.onnx", elsewhere + "/secret.onnx"};
+        const sandbox::Command refused = sandbox::build(profile);
+        QVERIFY2(refused.refused.contains("model folder"), qPrintable(refused.refused));
+        QVERIFY(!refused.arguments.join(' ').contains(elsewhere));
     }
 
     // --- needs.files and the denylist ---
 
     void grantsAreAnAllowlist() {
-        const QStringList readBad{"~/.ssh", "~/.ssh/id_rsa", "~/.gnupg", "~/.config/fugue", "~/.local/share/uv/credentials", "~/.local/share/keyrings",
+        QDir().mkpath(home() + "/snap/firefox");
+        const QStringList readBad{"~/snap", "~/snap/firefox", "/var", "/home", outputDir(), outputDir() + "/Out","~/.ssh", "~/.ssh/id_rsa", "~/.gnupg", "~/.config/fugue", "~/.local/share/uv/credentials", "~/.local/share/keyrings",
                                   "~", "/", "/etc", "~/Documents/../.ssh", "relative/path", "~/.cache/huggingface/token", "~/.git-credentials",
                                   "~/.claude", "~/.mozilla/firefox", "~/.config/chromium", "~/.bashrc", "~/.local/bin", "~/.config/systemd/user",
                                   "~/.config/hypr", "~/.local/share/applications", "~/.anything-with-a-dot/inside", "/tmp/tmux-1000", "/var/tmp",
@@ -302,19 +331,18 @@ private slots:
                                   dataDir() + "/packs", cacheDir(), baseConfigDir(), baseDataDir() + "/projects"};
         for (const QString &bad : readBad)
             QVERIFY2(!sandbox::parseNeeds({{"files", QJsonObject{{"read", QJsonArray{bad}}}}}).ok(), qPrintable("read " + bad));
-        // Writing is allowed in the output folder only.
-        const QStringList writeBad{"~/Documents/Out", "~/.local/bin", "~/.bashrc", "~/.config/autostart", "~/.config/systemd/user", "~/.config/hypr/hyprland.conf",
-                                   "~/.local/share/applications", "~", "/tmp", "/srv/out", outputDir() + "/../elsewhere", configDir()};
-        for (const QString &bad : writeBad)
-            QVERIFY2(!sandbox::parseNeeds({{"files", QJsonObject{{"write", QJsonArray{bad}}}}}).ok(), qPrintable("write " + bad));
+        // No write grant in v1, not even in the output folder: a program returns files as outputs.
+        for (const QString &bad : {outputDir() + "/Out", QString("~/Documents/Out")}) {
+            const Result<sandbox::Needs> write = sandbox::parseNeeds({{"files", QJsonObject{{"write", QJsonArray{bad}}}}});
+            QVERIFY2(!write.ok() && write.error().message.contains("write grants are not supported yet"), qPrintable("write " + bad));
+        }
         const Result<sandbox::Needs> good = sandbox::parseNeeds({{"network", true}, {"gpu", QJsonObject{{"api", "any"}}},
-                                                                 {"files", QJsonObject{{"read", QJsonArray{"~/Documents/Scans"}}, {"write", QJsonArray{outputDir() + "/Out"}}}}});
+                                                                 {"files", QJsonObject{{"read", QJsonArray{"~/Documents/Scans"}}, {"write", QJsonArray{}}}}});
         QVERIFY2(good.ok(), qPrintable(good.error().message));
         QVERIFY(good->network && good->gpu);
-        QCOMPARE(good->readPaths, QStringList{home() + "/Documents/Scans"});
+        QCOMPARE(good->readPaths, QStringList{QFileInfo(home()).canonicalFilePath() + "/Documents/Scans"});
         QCOMPARE(sandbox::plainLines(*good, true),
-                 (QStringList{"Can use the network", "Can reach services on this computer", "Can use the GPU", "Can read ~/Documents/Scans",
-                              "Can write ~/Pictures/Fugue/Out"}));
+                 (QStringList{"Can use the network", "Can reach services on this computer", "Can use the GPU", "Can read ~/Documents/Scans"}));
         QCOMPARE(sandbox::plainLines({}, true, true).first(), QString("Setup uses the network"));
         QVERIFY(sandbox::plainLines({}, false).first().startsWith("NOT sandboxed"));
         QVERIFY(sandbox::plainLines({}, true).first().startsWith("Runs in a sandbox"));
@@ -335,9 +363,14 @@ private slots:
         QVERIFY(hasPair(args, "--ro-bind-try", "/sys/module/nvidia", "/sys/module/nvidia"));
         QVERIFY(hasPair(args, "--ro-bind-try", "/sys/module/nvidia_uvm", "/sys/module/nvidia_uvm"));
         QVERIFY(!args.join(' ').contains("/dev/dri"));
+        // Vulkan: the render nodes only, never /dev/dri as a whole or a card node (which can drive the displays).
         profile.gpuNodes.clear();
         profile.needs.gpuApi = "vulkan";
-        QVERIFY(hasPair(sandbox::build(profile).arguments, "--dev-bind-try", "/dev/dri", "/dev/dri"));
+        const QStringList vulkan = sandbox::build(profile).arguments;
+        QVERIFY(!hasPair(vulkan, "--dev-bind-try", "/dev/dri", "/dev/dri"));
+        QVERIFY(!vulkan.join(' ').contains("/dev/dri/card"));
+        for (const QFileInfo &render : QDir("/dev/dri").entryInfoList({"renderD*"}, QDir::System | QDir::Files))
+            QVERIFY2(hasPair(vulkan, "--dev-bind-try", render.filePath(), render.filePath()), qPrintable(render.filePath()));
     }
 
     void bwrapIsOnlyEverTheOneInUsrBin() {
@@ -352,13 +385,17 @@ private slots:
         qunsetenv("UV_PYTHON_INSTALL_DIR");
     }
 
-    void aNodeWithADeniedPathDoesNotLoad() {
-        const QJsonObject manifest{{"manifest", 1}, {"id", "io.example.tools/bad"}, {"version", "1.0.0"}, {"name", "Bad"},
-                                   {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
-                                   {"needs", QJsonObject{{"files", QJsonObject{{"read", QJsonArray{"~/.ssh"}}}}}}};
+    void aNodeWithADeniedPathOrAWriteGrantDoesNotLoad() {
+        QJsonObject manifest{{"manifest", 1}, {"id", "io.example.tools/bad"}, {"version", "1.0.0"}, {"name", "Bad"},
+                             {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                             {"needs", QJsonObject{{"files", QJsonObject{{"read", QJsonArray{"~/.ssh"}}}}}}};
         const Result<NodeType> type = NodeType::fromJson(manifest);
         QVERIFY(!type.ok());
         QVERIFY2(type.error().message.contains(".ssh"), qPrintable(type.error().message));
+        manifest["needs"] = QJsonObject{{"files", QJsonObject{{"write", QJsonArray{outputDir()}}}}};
+        const Result<NodeType> writes = NodeType::fromJson(manifest);
+        QVERIFY(!writes.ok());
+        QVERIFY2(writes.error().message.contains("write grants are not supported yet; return files as outputs"), qPrintable(writes.error().message));
     }
 
     // --- real programs ---
@@ -391,21 +428,17 @@ private slots:
             QSKIP("bubblewrap or user namespaces are not available here");
         write(home() + "/Documents/Scans/page.txt", "scan");
         write(home() + "/Documents/Private/other.txt", "private");
-        QDir().mkpath(outputDir() + "/Out");
         const QByteArray script = "#!/bin/bash\ncat > /dev/null\nr=\"\"\n"
                                   "check() { name=$1; shift; if \"$@\" > /dev/null 2>&1; then r=\"$r $name=ALLOWED\"; else r=\"$r $name=denied\"; fi; }\n"
                                   "check scan cat \"$HOME_REAL/Documents/Scans/page.txt\"\n"
                                   "check scanwrite bash -c \"echo x > '$HOME_REAL/Documents/Scans/new.txt'\"\n"
                                   "check other cat \"$HOME_REAL/Documents/Private/other.txt\"\n"
-                                  "check out bash -c \"echo x > '$OUT_REAL/Out/new.txt'\"\n"
                                   "printf '{\"outputs\":{\"text\":\"%s\"}}\\n' \"$r\"\n";
         QByteArray body = script;
-        body.replace("$HOME_REAL", home().toUtf8());
-        body.replace("$OUT_REAL", outputDir().toUtf8());
-        const NodeType *type = makePack("io.example.files",
-                                        {{"files", QJsonObject{{"read", QJsonArray{"~/Documents/Scans"}}, {"write", QJsonArray{outputDir() + "/Out"}}}}}, false, body);
+        body.replace("$HOME_REAL", QFileInfo(home()).canonicalFilePath().toUtf8());
+        const NodeType *type = makePack("io.example.files", {{"files", QJsonObject{{"read", QJsonArray{"~/Documents/Scans"}}}}}, false, body);
         const QStringList words = runHostile(*type);
-        QCOMPARE(words, (QStringList{"scan=ALLOWED", "scanwrite=denied", "other=denied", "out=ALLOWED"}));
+        QCOMPARE(words, (QStringList{"scan=ALLOWED", "scanwrite=denied", "other=denied"}));
     }
 
     void setupRunsInTheSandboxWithTheNetworkAndWritesOnlyItsOwnFolder() {
@@ -441,6 +474,8 @@ private slots:
 
 
     // --- the escapes the review found (#731) ---
+
+    static QString made(const Result<Values> &result) { return result->value("image").media().path(); }
 
     Result<Values> runProbe(CommandKernel &kernel, const NodeType &type, const QString &mode, const Values &more = {}, QString *workDir = nullptr) {
         Values inputs = more;
@@ -585,14 +620,183 @@ private slots:
         QVERIFY(!trust.isTrusted(id, "1.0.0"));
     }
 
-    void aSandboxedProgramThatSeesAModelOrMediaFileOnlyThroughItsHandle() {
-        // A handle's "path" is what is bound; another "path" text inside a value is nothing to the sandbox.
+    // A derived handle hands over the paths withPaths resolved (its base, its other parts, its LoRAs), each bound by descriptor;
+    // a "path" a workflow wrote anywhere else in the value is nothing to the sandbox.
+    void derivedModelHandlesHandOverExactlyWhatWasResolved() {
+        const QString models = QFileInfo(m_root.path()).canonicalFilePath() + "/derived-models";
+        for (const char *name : {"base.safetensors", "vae.safetensors", "lora.safetensors", "plain.onnx"})
+            write(models + "/" + name, "m");
+        const QJsonObject derived{
+            {"resource", "fugue/model"},
+            {"path", home() + "/.ssh/id_test"},
+            {"derived", QJsonObject{{"base", QJsonObject{{"resource", "fugue/diffusion-model"}, {"path", models + "/base.safetensors"}}},
+                                    {"vae", QJsonObject{{"resource", "fugue/vae"}, {"path", models + "/vae.safetensors"}}},
+                                    {"note", QJsonObject{{"path", "/etc/shadow"}}},
+                                    {"apply", QJsonArray{QJsonObject{{"lora", QJsonObject{{"resource", "fugue/lora"}, {"path", models + "/lora.safetensors"}}},
+                                                                     {"weight", 1}}}}}}};
+        const QJsonObject plain{{"resource", "fugue/model"}, {"path", models + "/plain.onnx"}};
+        const QStringList paths = resolvedModelPaths(QJsonArray{derived, plain});
+        QCOMPARE(paths, (QStringList{models + "/base.safetensors", models + "/vae.safetensors", models + "/lora.safetensors", models + "/plain.onnx"}));
         QDir().mkpath(m_root.path() + "/arg4/pack");
         sandbox::Profile profile;
         profile.packDir = m_root.path() + "/arg4/pack";
         profile.program = "/usr/bin/true";
-        profile.handedFiles = {};
-        QVERIFY(!sandbox::build(profile).arguments.join(' ').contains(".ssh"));
+        profile.modelRoots = {models};
+        profile.modelFiles = paths;
+        const sandbox::Command command = sandbox::build(profile);
+        QVERIFY2(command.refused.isEmpty(), qPrintable(command.refused));
+        for (const QString &path : paths)
+            QVERIFY2(boundFd(command, "--ro-bind-fd", path), qPrintable(path));
+        QVERIFY(!command.arguments.join(' ').contains(".ssh") && !command.arguments.join(' ').contains("/etc/shadow"));
+    }
+
+    // A program that lives on plants links in its exchange folder: where Fugue's next request folder would have been (it is
+    // 128 random bits now), and its own `work` turned into a link to a folder of the test's. Nothing outside is created,
+    // deleted or copied out, and the next request still works.
+    void aProgramThatLivesOnCannotLeadTheExchangeFolderOutWithLinks() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        const QString victim = m_root.path() + "/outside/victim";
+        write(victim + "/secret.png", "SECRET");
+        QByteArray script = probeScript(true);
+        script.replace("    if mode == 'ok':",
+                       "    if mode == 'escape':\n"
+                       "        request = os.path.dirname(work)\n"
+                       "        root = os.path.dirname(request)\n"
+                       "        for name in [str(n) for n in range(1, 40)] + ['next', 'in', 'work']:\n"
+                       "            try: os.symlink('@VICTIM@', os.path.join(root, name))\n"
+                       "            except OSError: pass\n"
+                       "        os.rename(work, work + '.real')\n"
+                       "        os.symlink('@VICTIM@', work)\n"
+                       "        os.symlink('@VICTIM@', os.path.join(request, 'in', 'planted'))\n"
+                       "        return {'image': {'path': 'secret.png'}}\n"
+                       "    if mode == 'ok':");
+        script.replace("@VICTIM@", victim.toUtf8());
+        makePack("io.example.exchangelinks", {}, false, script, true);
+        const NodeType *type = m_registry.nodeType("io.example.exchangelinks/hostile");
+        QString escapeWork;
+        {
+            CommandKernel kernel(300);
+            const Result<Values> escaped = runProbe(kernel, *type, "escape", {}, &escapeWork);
+            QVERIFY(!escaped.ok());
+            QVERIFY2(escaped.error().code == "node_bad_output", qPrintable(escaped.error().code + " " + escaped.error().message));
+            QString okWork;
+            const Result<Values> after = runProbe(kernel, *type, "ok", {}, &okWork);
+            QVERIFY2(after.ok(), qPrintable(after.error().message));
+            QVERIFY(made(after).startsWith(QFileInfo(okWork).canonicalFilePath() + "/"));
+        } // the kernel goes: its program stops and its exchange folder is removed, links and all
+        QCOMPARE(QDir(victim).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList{"secret.png"});
+        QCOMPARE(readAll(victim + "/secret.png"), QByteArray("SECRET"));
+        QVERIFY(QDir(escapeWork).entryList(QDir::Files).isEmpty()); // nothing was copied out of it
+        QDirIterator left(cacheDir() + "/exchange", QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System);
+        QVERIFY2(!left.hasNext(), qPrintable(left.hasNext() ? left.next() : QString()));
+    }
+
+    // A read grant swapped for a link between the check and the start: bwrap binds the descriptor that was checked, not
+    // what the path names a moment later; and the next start refuses the link.
+    void aGrantSwappedForALinkAfterTheCheckBindsWhatWasChecked() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        const QString grant = QFileInfo(home()).canonicalFilePath() + "/Documents/Swapped";
+        write(grant + "/file.txt", "checked");
+        write(m_root.path() + "/outside/swap-secret/file.txt", "SECRET");
+        QDir().mkpath(m_root.path() + "/swap/pack");
+        sandbox::Profile profile;
+        profile.packDir = m_root.path() + "/swap/pack";
+        profile.program = "/usr/bin/cat";
+        profile.arguments = {grant + "/file.txt"};
+        const Result<sandbox::Needs> needs = sandbox::parseNeeds({{"files", QJsonObject{{"read", QJsonArray{"~/Documents/Swapped"}}}}});
+        QVERIFY2(needs.ok(), qPrintable(needs.error().message));
+        profile.needs = *needs;
+        const sandbox::Command command = sandbox::build(profile);
+        QVERIFY2(command.refused.isEmpty(), qPrintable(command.refused));
+        QVERIFY(boundFd(command, "--ro-bind-fd", grant));
+        QVERIFY(QDir().rename(grant, grant + ".real"));
+        QVERIFY(QFile::link(m_root.path() + "/outside/swap-secret", grant));
+        QProcess process;
+        const QList<int> inherited = command.descriptors->numbers();
+        process.setChildProcessModifier([inherited] {
+            for (const int fd : inherited)
+                ::fcntl(fd, F_SETFD, 0);
+        });
+        process.start(command.program, command.arguments);
+        QVERIFY(process.waitForFinished(10000));
+        QCOMPARE(process.readAllStandardOutput(), QByteArray("checked"));
+        const sandbox::Command again = sandbox::build(profile);
+        QVERIFY2(again.refused.contains("link"), qPrintable(again.refused));
+        QVERIFY(!again.arguments.join(' ').contains("swap-secret"));
+        QFile::remove(grant);
+        QVERIFY(QDir().rename(grant + ".real", grant));
+    }
+
+    // Another project's keys are in its root: a grant that holds one or lies in one is refused, a project made with --in
+    // anywhere included, and a root registered after the node loaded is caught at the start.
+    void aGrantThatHoldsOrLiesInAProjectIsRefused() {
+        const QString realHome = QFileInfo(home()).canonicalFilePath();
+        QDir(realHome + "/Work").removeRecursively(); // ctest keeps the home between runs
+        QDir(realHome + "/Shared").removeRecursively();
+        const Result<ProjectEntry> client = createProject("Client", realHome + "/Work/client", {});
+        QVERIFY2(client.ok(), qPrintable(client.ok() ? QString() : client.error().message));
+        for (const char *bad : {"~/Work", "~/Work/client", "~/Work/client/inputs"})
+            QVERIFY2(!sandbox::parseNeeds({{"files", QJsonObject{{"read", QJsonArray{bad}}}}}).ok(), qPrintable(bad));
+        // Taken out of the list, its folder (and its keys) stay: a grant in it is still found by its project.json.
+        QVERIFY(removeProject("Client").ok());
+        QVERIFY(!sandbox::parseNeeds({{"files", QJsonObject{{"read", QJsonArray{"~/Work/client/inputs"}}}}}).ok());
+
+        write(realHome + "/Shared/a.txt", "a");
+        const Result<sandbox::Needs> needs = sandbox::parseNeeds({{"files", QJsonObject{{"read", QJsonArray{"~/Shared"}}}}});
+        QVERIFY2(needs.ok(), qPrintable(needs.error().message));
+        QDir().mkpath(m_root.path() + "/later/pack");
+        sandbox::Profile profile;
+        profile.packDir = m_root.path() + "/later/pack";
+        profile.program = "/usr/bin/true";
+        profile.needs = *needs;
+        QVERIFY(sandbox::build(profile).refused.isEmpty());
+        const Result<ProjectEntry> later = createProject("Later", realHome + "/Shared/later", {});
+        QVERIFY2(later.ok(), qPrintable(later.ok() ? QString() : later.error().message));
+        const sandbox::Command refused = sandbox::build(profile);
+        QVERIFY2(refused.refused.contains("Shared/later"), qPrintable(refused.refused));
+        QVERIFY(removeProject("Later").ok());
+    }
+
+    // `fugue node test` runs the folder under test in the sandbox even when the person turned it off for the installed pack of
+    // the same id and version.
+    void aNodeUnderTestIgnoresTheInstalledPacksSandboxOff() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        const NodeType *type = makePack("io.example.undertest");
+        TrustStore trust;
+        QVERIFY(trust.trust("io.example.undertest", "1.0.0").isEmpty());
+        QVERIFY(trust.setUnsandboxed("io.example.undertest", "1.0.0", true).isEmpty());
+        CommandKernel kernel(300);
+        kernel.setAlwaysSandboxed(true);
+        const Result<Values> result = kernel.run(contextFor(*type));
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        QVERIFY2(result->value("text").text().contains("ssh=denied"), qPrintable(result->value("text").text()));
+        QVERIFY(trust.forget("io.example.undertest").isEmpty());
+    }
+
+    // A setup with uv installs only what a lock file pins: a pack without uv.lock is refused, and `uv sync` runs --frozen.
+    void aPackWhoseSetupIsUvShipsAUvLock() {
+        const QString source = m_root.path() + "/uv-source/io.example.uvpack";
+        write(source + "/pack.json",
+              QJsonDocument(QJsonObject{{"manifest", 1}, {"id", "io.example.uvpack"}, {"version", "1.0.0"}, {"name", "Uv"},
+                                        {"nodes", QJsonArray{"tool"}}, {"setup", QJsonObject{{"command", QJsonArray{"uv", "sync", "--no-dev"}}}}}).toJson());
+        write(source + "/tool/node.json",
+              QJsonDocument(QJsonObject{{"manifest", 1}, {"id", "io.example.uvpack/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
+                                        {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}}}).toJson());
+        write(source + "/tool/run.sh", "#!/bin/sh\n", true);
+        TrustStore trust(m_root.path() + "/trust-uv.json");
+        PackPrompts prompts;
+        prompts.install = prompts.trust = prompts.runSetup = [](const PackSummary &) { return Answer::Yes; };
+        const Result<PackAdded> refused = addPack(source, {}, m_root.path() + "/uv-packs", trust, prompts);
+        QVERIFY(!refused.ok());
+        QVERIFY2(refused.error().code == "pack_invalid" && refused.error().message.contains("uv.lock"), qPrintable(refused.error().message));
+        QVERIFY(!QFileInfo::exists(m_root.path() + "/uv-packs/io.example.uvpack"));
+        write(source + "/uv.lock", "version = 1\n");
+        const Result<PackSummary> summary = summarizePack(source);
+        QVERIFY2(summary.ok(), qPrintable(summary.error().message));
+        QCOMPARE(summary->setupCommand, (QStringList{"uv", "sync", "--frozen", "--no-dev"}));
     }
 
     // --- no sandbox here ---

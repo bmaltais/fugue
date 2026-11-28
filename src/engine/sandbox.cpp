@@ -1,6 +1,8 @@
 #include "engine/sandbox.h"
 
+#include "engine/fugue_home.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -12,6 +14,9 @@
 #include <QStandardPaths>
 
 #include <atomic>
+#include <cerrno>
+
+#include <fcntl.h>
 
 namespace fugue::sandbox {
 
@@ -19,14 +24,17 @@ namespace {
 
 QString homeOf(const QString &home) { return home.isEmpty() ? QDir::homePath() : QDir::cleanPath(home); }
 
-bool inside(const QString &path, const QString &folder) {
-    return path == folder || path.startsWith(folder.endsWith(QLatin1Char('/')) ? folder : folder + QLatin1Char('/'));
-}
-
 // The path made absolute and canonical when it exists; cleaned only when it does not.
 QString canonical(const QString &path) {
     const QString real = QFileInfo(path).canonicalFilePath();
     return real.isEmpty() ? QDir::cleanPath(path) : real;
+}
+
+// The home folder as the kernel names it (no link in it): grants are written against it, so that they open without links.
+QString realHome(const QString &home) { return canonical(homeOf(home)); }
+
+bool inside(const QString &path, const QString &folder) {
+    return path == folder || path.startsWith(folder.endsWith(QLatin1Char('/')) ? folder : folder + QLatin1Char('/'));
 }
 
 // ~ and ~/... as the home folder; other text as it is.
@@ -44,42 +52,51 @@ QString shown(const QString &path, const QString &home) {
     return path.startsWith(home + QLatin1Char('/')) ? QStringLiteral("~") + path.mid(home.size()) : path;
 }
 
-// Why `path` may not be granted for reading or writing: the allowlist of 6.7.1 on top of denied(). Empty when it may.
-QString grantProblem(const QString &path, bool write, const QString &home) {
-    const QString clean = canonical(path);
-    if (write) {
-        const QString out = canonical(outputDir());
-        if (!inside(clean, out))
-            return QStringLiteral("%1 is outside the output folder (%2), the only place a pack may be given to write.").arg(shown(clean, home), shown(out, home));
-    } else {
-        if (clean == home)
-            return QStringLiteral("~ itself is never given to a pack.");
-        if (inside(clean, home)) {
-            for (const QString &part : clean.mid(home.size() + 1).split(QLatin1Char('/'), Qt::SkipEmptyParts))
-                if (part.startsWith(QLatin1Char('.')))
-                    return QStringLiteral("%1 lies in a dot folder or file of the home folder, which are never given to a pack.").arg(shown(clean, home));
-        }
-        for (const char *system : {"/tmp", "/var/tmp"})
-            if (!inside(clean, home) && inside(clean, QLatin1String(system)))
-                return QStringLiteral("%1 is in %2, which holds other programs' sockets and files.").arg(shown(clean, home), QLatin1String(system));
-    }
-    return deniedReason(clean, home);
+// The base session's cache folder (paths.h has the other three): FUGUE_BASE_XDG_CACHE_HOME/fugue, or this session's.
+QString baseCacheDir() {
+    const QString saved = qEnvironmentVariable("FUGUE_BASE_XDG_CACHE_HOME");
+    return saved.isEmpty() ? cacheDir() : QDir::cleanPath(saved) + QStringLiteral("/fugue");
 }
 
-Result<QStringList> pathList(const QJsonValue &value, const QString &which, const QString &home) {
+// The roots of the projects Fugue knows (the registry, and this session's own root): another project's keys are in it.
+QStringList projectRoots() {
+    QStringList roots;
+    if (const Result<ProjectRegistry> registry = readProjectRegistry())
+        roots = registry->projects;
+    if (const QString root = fugueHome(); !root.isEmpty())
+        roots << root;
+    for (QString &root : roots)
+        root = canonical(root);
+    roots.removeDuplicates();
+    return roots;
+}
+
+// The folder of an unregistered project that `path` is or lies in (a project.json that reads as one), or empty. One that
+// `path` holds deeper down is not found: that would take a walk of the whole tree.
+QString projectAround(const QString &path) {
+    for (QString folder = path; folder.size() > 1; folder = QFileInfo(folder).path())
+        if (QFileInfo(projectManifestPath(folder)).isFile() && readProject(folder).ok())
+            return folder;
+    return {};
+}
+
+Result<QStringList> pathList(const QJsonValue &value, const QString &home) {
     if (value.isUndefined())
         return QStringList{};
     if (!value.isArray())
-        return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files.%1 must be a list of paths.").arg(which));
+        return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files.read must be a list of paths."));
     QStringList paths;
     for (const QJsonValue &entry : value.toArray()) {
         const QString text = entry.toString();
         const QString path = QDir::cleanPath(withHome(text, home));
         if (text.isEmpty() || !path.startsWith(QLatin1Char('/')))
             return makeError(QStringLiteral("invalid_document"),
-                             QStringLiteral("needs.files.%1: \"%2\" must be an absolute path or start with ~/.").arg(which, text.left(80)));
-        if (const QString why = grantProblem(path, which == QLatin1String("write"), home); !why.isEmpty())
-            return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files.%1: %2").arg(which, why));
+                             QStringLiteral("needs.files.read: \"%1\" must be an absolute path or start with ~/.").arg(text.left(80)));
+        // Checked as the kernel would find it now; build() checks again, on what it opened, at every start.
+        if (const QString why = grantProblem(canonical(path), home); !why.isEmpty())
+            return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files.read: %1").arg(why));
+        if (const QString why = grantProblem(path, home); !why.isEmpty())
+            return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files.read: %1").arg(why));
         if (!paths.contains(path))
             paths << path;
     }
@@ -99,59 +116,64 @@ QString uvPythonDir(const QString &homeFolder) {
 QString uvCacheFor(const QString &packId) { return cacheDir() + QStringLiteral("/uv/") + packId; }
 
 QStringList denied(const QString &homeFolder) {
-    const QString home = homeOf(homeFolder);
+    const QString home = realHome(homeFolder);
     QStringList paths;
     for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.mozilla", "/.claude",
                             "/.config/gh", "/.config/uv", "/.config/fugue", "/.config/chromium", "/.config/google-chrome",
                             "/.config/BraveSoftware", "/.config/systemd", "/.config/autostart", "/.config/hypr", "/.cache/huggingface",
                             "/.local/bin", "/.local/state/fugue", "/.local/share/fugue", "/.local/share/uv/credentials", "/.local/share/keyrings",
                             "/.local/share/kwalletd", "/.local/share/applications", "/.password-store", "/.bashrc", "/.bash_profile",
-                            "/.zshrc", "/.profile"})
+                            "/.zshrc", "/.profile", "/snap"})
         paths << home + QLatin1String(sub);
-    paths << configDir() << stateDir() << dataDir() << cacheDir() << baseConfigDir() << baseDataDir() << baseStateDir()
-          << "/etc" << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root";
+    paths << configDir() << stateDir() << dataDir() << cacheDir() << baseConfigDir() << baseDataDir() << baseStateDir() << baseCacheDir()
+          << "/etc" << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root" << "/var/tmp";
+    paths << projectRoots();
     for (QString &path : paths)
         path = canonical(path);
     paths.removeDuplicates();
     return paths;
 }
 
-namespace {
-
-// What a file handed to a program (an input, a model) may never be: keys and credentials and Fugue's own config and packs,
-// which are in no model folder or picture folder. Fugue's data and cache folders are not here: models and runs live in them.
-bool handedDenied(const QString &path, const QString &homeFolder) {
-    const QString home = homeOf(homeFolder);
-    QStringList blocked;
-    for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.claude", "/.config/gh",
-                            "/.config/uv", "/.config/fugue", "/.cache/huggingface/token", "/.local/share/uv/credentials",
-                            "/.local/share/keyrings", "/.local/share/kwalletd", "/.password-store", "/.local/state/fugue"})
-        blocked << home + QLatin1String(sub);
-    blocked << configDir() << stateDir() << dataDir() + QStringLiteral("/packs") << "/etc" << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root";
-    for (const QString &folder : std::as_const(blocked))
-        if (inside(canonical(path), canonical(folder)))
-            return true;
-    return false;
-}
-
-} // namespace
-
 QString deniedReason(const QString &path, const QString &home) {
     const QString clean = canonical(path);
-    const QString where = shown(clean, homeOf(home));
+    const QString where = shown(clean, realHome(home));
     if (clean == QLatin1String("/"))
         return QStringLiteral("/ gives a pack the whole computer.");
     for (const QString &blocked : denied(home)) {
         if (inside(clean, blocked))
-            return QStringLiteral("%1 is never given to a pack (it is, or lies in, %2).").arg(where, shown(blocked, homeOf(home)));
+            return QStringLiteral("%1 is never given to a pack (it is, or lies in, %2).").arg(where, shown(blocked, realHome(home)));
         if (inside(blocked, clean)) // a folder that holds a blocked one gives it away
-            return QStringLiteral("%1 holds %2, which is never given to a pack.").arg(where, shown(blocked, homeOf(home)));
+            return QStringLiteral("%1 holds %2, which is never given to a pack.").arg(where, shown(blocked, realHome(home)));
     }
     return {};
 }
 
+QString grantProblem(const QString &path, const QString &homeFolder) {
+    const QString home = realHome(homeFolder);
+    const QString clean = QDir::cleanPath(path);
+    if (clean == home || clean == homeOf(homeFolder))
+        return QStringLiteral("~ itself is never given to a pack.");
+    for (const QString &own : {home, homeOf(homeFolder)}) {
+        if (!inside(clean, own))
+            continue;
+        for (const QString &part : clean.mid(own.size() + 1).split(QLatin1Char('/'), Qt::SkipEmptyParts))
+            if (part.startsWith(QLatin1Char('.')))
+                return QStringLiteral("%1 lies in a dot folder or file of the home folder, which are never given to a pack.").arg(shown(clean, own));
+    }
+    // /tmp holds other programs' sockets and files; a home folder under /tmp (a test's) is the home folder.
+    if (!inside(clean, home) && !inside(clean, homeOf(homeFolder)) && inside(clean, QStringLiteral("/tmp")))
+        return QStringLiteral("%1 is in /tmp, which holds other programs' sockets and files.").arg(clean);
+    if (inside(QStringLiteral("/tmp"), clean))
+        return QStringLiteral("%1 holds /tmp, which holds other programs' sockets and files.").arg(clean);
+    if (const QString out = canonical(outputDir()); inside(clean, out))
+        return QStringLiteral("%1 lies in the output folder (%2), which holds the results of every run.").arg(shown(clean, home), shown(out, home));
+    if (const QString project = projectAround(clean); !project.isEmpty())
+        return QStringLiteral("%1 lies in the Fugue project %2, whose keys are in it.").arg(shown(clean, home), shown(project, home));
+    return deniedReason(clean, homeFolder);
+}
+
 Result<Needs> parseNeeds(const QJsonObject &needs, const QString &homeFolder) {
-    const QString home = homeOf(homeFolder);
+    const QString home = realHome(homeFolder);
     Needs result;
     result.network = needs.value("network").toBool(false);
     const QJsonValue gpu = needs.value("gpu");
@@ -160,16 +182,15 @@ Result<Needs> parseNeeds(const QJsonObject &needs, const QString &homeFolder) {
         result.gpuApi = gpu.isObject() ? gpu.toObject().value("api").toString(QStringLiteral("any")) : QStringLiteral("any");
     if (const QJsonValue files = needs.value("files"); files.isObject()) {
         const QJsonObject object = files.toObject();
-        const Result<QStringList> read = pathList(object.value("read"), QStringLiteral("read"), home);
+        if (const QJsonValue write = object.value("write"); !write.isUndefined() && !(write.isArray() && write.toArray().isEmpty()))
+            return makeError(QStringLiteral("invalid_document"),
+                             QStringLiteral("needs.files.write: write grants are not supported yet; return files as outputs."));
+        const Result<QStringList> read = pathList(object.value("read"), home);
         if (!read)
             return read.error();
-        const Result<QStringList> write = pathList(object.value("write"), QStringLiteral("write"), home);
-        if (!write)
-            return write.error();
         result.readPaths = *read;
-        result.writePaths = *write;
     } else if (!files.isUndefined() && !files.isBool()) {
-        return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files must be {\"read\": [...], \"write\": [...]}."));
+        return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files must be {\"read\": [...]}."));
     }
     return result;
 }
@@ -188,15 +209,11 @@ Needs merged(const Needs &a, const Needs &b) {
     for (const QString &path : b.readPaths)
         if (!result.readPaths.contains(path))
             result.readPaths << path;
-    result.writePaths = a.writePaths;
-    for (const QString &path : b.writePaths)
-        if (!result.writePaths.contains(path))
-            result.writePaths << path;
     return result;
 }
 
 QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup, const QString &homeFolder) {
-    const QString home = homeOf(homeFolder);
+    const QString home = realHome(homeFolder);
     QStringList lines;
     if (!sandboxed)
         lines << QStringLiteral("NOT sandboxed: this pack's program runs as you.");
@@ -208,11 +225,35 @@ QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup, const 
         lines << QStringLiteral("Can use the GPU");
     for (const QString &path : needs.readPaths)
         lines << QStringLiteral("Can read %1").arg(shown(path, home));
-    for (const QString &path : needs.writePaths)
-        lines << QStringLiteral("Can write %1").arg(shown(path, home));
-    if (sandboxed && !needs.network && !needs.gpu && needs.readPaths.isEmpty() && needs.writePaths.isEmpty())
+    if (sandboxed && !needs.network && !needs.gpu && needs.readPaths.isEmpty())
         lines << QStringLiteral("Runs in a sandbox: it sees only its own folder, the files it is given and the run's work folder.");
     return lines;
+}
+
+QList<int> Descriptors::numbers() const {
+    QList<int> out;
+    for (const beneath::Fd &fd : held)
+        out << fd.get();
+    return out;
+}
+
+bool handedDenied(const QString &path, const QString &homeFolder) {
+    const QString home = realHome(homeFolder);
+    QStringList blocked;
+    for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.claude", "/.config/gh",
+                            "/.config/uv", "/.config/fugue", "/.cache/huggingface/token", "/.local/share/uv/credentials",
+                            "/.local/share/keyrings", "/.local/share/kwalletd", "/.password-store", "/.local/state/fugue"})
+        blocked << home + QLatin1String(sub);
+    blocked << configDir() << stateDir() << baseConfigDir() << baseStateDir() << dataDir() + QStringLiteral("/packs") << "/etc"
+            << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root";
+    const QString ownData = canonical(dataDir());
+    for (const QString &root : projectRoots())
+        if (!inside(ownData, root)) // this session's own root holds its runs and models
+            blocked << root;
+    for (const QString &folder : std::as_const(blocked))
+        if (inside(path, canonical(folder)))
+            return true;
+    return false;
 }
 
 namespace {
@@ -233,6 +274,37 @@ void systemFolders(QStringList &args) {
 
 void bind(QStringList &args, const char *how, const QString &path) { args << how << path << path; }
 
+// What build() binds by descriptor: each folder or file opened without links, at the path the kernel has for it.
+class Binder {
+public:
+    explicit Binder(Command &command) : m_command(command) {}
+
+    // `path` (canonical) opened without links; its descriptor bound at its real path with `how` (--ro-bind-fd, --bind-fd).
+    // Empty on success; else why not (`missing` set when there is nothing at `path`).
+    QString bindPath(const char *how, const QString &path, bool folder, bool *missing = nullptr, QString *real = nullptr) {
+        beneath::Fd fd = beneath::openNoLinks(path, O_PATH | (folder ? O_DIRECTORY : 0));
+        if (!fd) {
+            if (missing)
+                *missing = errno == ENOENT;
+            return QStringLiteral("%1 cannot be opened without following a link (%2).").arg(path, beneath::lastProblem());
+        }
+        const QString at = beneath::realPathOf(fd.get());
+        if (at != path)
+            return QStringLiteral("%1 is not where it was looked at (now %2).").arg(path, at);
+        if (real)
+            *real = at;
+        bindFd(how, std::move(fd), at);
+        return {};
+    }
+    void bindFd(const char *how, beneath::Fd fd, const QString &at) {
+        m_command.arguments << how << QString::number(fd.get()) << at;
+        m_command.descriptors->held.push_back(std::move(fd));
+    }
+
+private:
+    Command &m_command;
+};
+
 } // namespace
 
 Command build(const Profile &profile) {
@@ -242,8 +314,13 @@ Command build(const Profile &profile) {
     const QString work = profile.workDir.isEmpty() ? QString() : canonical(profile.workDir);
 
     Command command;
+    Binder binder(command);
     command.program = bwrapPath();
     QStringList &a = command.arguments;
+    const auto refuse = [&command](const QString &why) {
+        if (command.refused.isEmpty())
+            command.refused = why;
+    };
     a << "--unshare-all" << "--unshare-user" << "--disable-userns" << "--new-session" << "--die-with-parent";
     if (profile.needs.network || setup)
         a << "--share-net";
@@ -287,33 +364,30 @@ Command build(const Profile &profile) {
     if (!program.isEmpty() && !inside(program, pack) && !inside(program, QStringLiteral("/usr")) && !inside(program, QStringLiteral("/bin")))
         a << "--ro-bind-try" << program << program;
 
-    const auto realFolder = [](const QString &path) { // a folder that is not a link: a link there is never followed
-        const QFileInfo info(path);
-        return info.isDir() && !info.isSymLink();
-    };
-    const QString environment = pack + QStringLiteral("/.venv");
+    // The pack's own files are read-only; its environment folder, when it is a real folder (never a link), is writable.
+    if (const QString why = binder.bindPath("--ro-bind-fd", pack, true); !why.isEmpty())
+        refuse(QStringLiteral("The pack folder: ") + why);
+    if (beneath::Fd venv = beneath::openNoLinks(pack + QStringLiteral("/.venv"), O_PATH | O_DIRECTORY); venv)
+        binder.bindFd("--bind-fd", std::move(venv), pack + QStringLiteral("/.venv"));
     if (setup) {
-        // The pack's own files are read-only: what the setup makes is its environment folder and, if there is one, the lock file.
-        bind(a, "--ro-bind", pack);
-        if (realFolder(environment))
-            bind(a, "--bind", environment);
-        if (const QFileInfo lock(pack + QStringLiteral("/uv.lock")); lock.isFile() && !lock.isSymLink())
-            bind(a, "--bind", lock.filePath());
         if (!profile.uvCache.isEmpty())
-            a << "--bind-try" << profile.uvCache << profile.uvCache;
+            a << "--bind-try" << profile.uvCache << profile.uvCache; // Fugue's own folder, which no program can reach
     } else {
-        bind(a, "--ro-bind", pack);
-        if (realFolder(environment))
-            bind(a, "--bind", environment);
-        if (!profile.exchangeDir.isEmpty())
-            a << "--bind-try" << canonical(profile.exchangeDir) << canonical(profile.exchangeDir);
+        if (profile.exchangeFd >= 0) {
+            beneath::Fd exchange(::fcntl(profile.exchangeFd, F_DUPFD_CLOEXEC, 0));
+            if (exchange)
+                binder.bindFd("--bind-fd", std::move(exchange), profile.exchangeDir);
+            else
+                refuse(QStringLiteral("The exchange folder cannot be handed over."));
+        }
         if (profile.needs.gpu) {
             QStringList nodes = profile.gpuNodes;
             if (nodes.isEmpty()) {
                 for (const QFileInfo &entry : QDir(QStringLiteral("/dev")).entryInfoList({QStringLiteral("nvidia*")}, QDir::System | QDir::Files | QDir::NoDotAndDotDot))
                     nodes << entry.filePath();
-                if (profile.needs.gpuApi == QLatin1String("vulkan"))
-                    nodes << QStringLiteral("/dev/dri");
+                if (profile.needs.gpuApi == QLatin1String("vulkan")) // the render nodes only: a card node can drive the displays
+                    for (const QFileInfo &entry : QDir(QStringLiteral("/dev/dri")).entryInfoList({QStringLiteral("renderD*")}, QDir::System | QDir::Files | QDir::NoDotAndDotDot))
+                        nodes << entry.filePath();
             }
             for (const QString &node : std::as_const(nodes))
                 a << "--dev-bind-try" << node << node;
@@ -321,42 +395,71 @@ Command build(const Profile &profile) {
                 a << "--ro-bind-try" << QLatin1String(module) << QLatin1String(module);
         }
         if (!work.isEmpty())
-            bind(a, "--bind", work);
-        for (const QString &path : profile.needs.writePaths)
-            a << "--bind-try" << path << path;
-        for (const QString &path : profile.needs.readPaths)
-            a << "--ro-bind-try" << path << path;
+            if (const QString why = binder.bindPath("--bind-fd", work, true); !why.isEmpty())
+                refuse(QStringLiteral("The work folder: ") + why);
 
-        // The files it is handed, read-only. A link binds its target, and only inside an allowed root.
-        for (const QString &handed : profile.handedFiles) {
-            const QFileInfo info(handed);
-            const QString target = info.canonicalFilePath();
-            if (target.isEmpty()) {
-                command.skipped << handed;
+        // needs.files.read, checked again on what was opened: a root registered since the load, or a link swapped in, is caught.
+        for (const QString &path : profile.needs.readPaths) {
+            beneath::Fd fd = beneath::openNoLinks(path, O_PATH);
+            if (!fd) {
+                if (errno != ENOENT) // a grant that is not there is left out, as before
+                    refuse(QStringLiteral("needs.files.read: %1 cannot be opened without following a link (%2); the sandbox binds only a path with no link in it.")
+                               .arg(shown(path, realHome(home)), beneath::lastProblem()));
                 continue;
             }
-            if (info.isSymLink() || QFileInfo(info.absolutePath()).canonicalFilePath() != info.absolutePath()) {
-                bool allowed = false;
-                for (const QString &root : profile.allowedRoots)
-                    allowed = allowed || inside(target, canonical(root));
-                if (!allowed || handedDenied(target, profile.home)) {
-                    command.skipped << handed;
-                    continue;
-                }
-            } else if (handedDenied(target, profile.home)) {
-                command.skipped << handed;
+            const QString real = beneath::realPathOf(fd.get());
+            if (real.isEmpty() || real != QDir::cleanPath(path)) {
+                refuse(QStringLiteral("needs.files.read: %1 is not where it was looked at.").arg(shown(path, realHome(home))));
                 continue;
             }
-            if (inside(target, pack) || (!work.isEmpty() && inside(target, work)))
+            if (const QString why = grantProblem(real, home); !why.isEmpty()) {
+                refuse(QStringLiteral("needs.files.read: ") + why);
                 continue;
-            a << "--ro-bind" << target << target;
-            if (target != QDir::cleanPath(handed))
-                a << "--symlink" << target << QDir::cleanPath(handed);
-            command.mounted << QDir::cleanPath(handed);
+            }
+            binder.bindFd("--ro-bind-fd", std::move(fd), real);
         }
+
+        QStringList roots;
+        for (const QString &root : profile.modelRoots)
+            roots << canonical(root);
+        const auto inRoots = [&roots](const QString &path) {
+            for (const QString &root : std::as_const(roots))
+                if (inside(path, root))
+                    return true;
+            return false;
+        };
+        // Binds `handed` read-only by descriptor at its real path (a link to it at `handed` when they differ). Empty on success.
+        const auto hand = [&](const QString &handed, bool model) -> QString {
+            const QString clean = QDir::cleanPath(handed);
+            const QString target = QFileInfo(clean).canonicalFilePath();
+            if (target.isEmpty())
+                return QStringLiteral("%1 is not there.").arg(clean);
+            const bool linked = target != clean;
+            if ((model || linked) && !inRoots(target))
+                return QStringLiteral("%1 is not in a model folder.").arg(clean);
+            if (handedDenied(target, profile.home))
+                return QStringLiteral("%1 is never given to a pack.").arg(clean);
+            if (inside(target, pack) || (!work.isEmpty() && inside(target, work)))
+                return {}; // in sight already
+            QString real;
+            if (const QString why = binder.bindPath("--ro-bind-fd", target, false, nullptr, &real); !why.isEmpty())
+                return why;
+            if (!inRoots(real) && (model || linked))
+                return QStringLiteral("%1 is not in a model folder.").arg(clean);
+            if (real != clean)
+                a << "--symlink" << real << clean;
+            command.mounted << clean;
+            return {};
+        };
+        for (const QString &model : profile.modelFiles)
+            if (const QString why = hand(model, true); !why.isEmpty())
+                refuse(QStringLiteral("The model file ") + why);
+        for (const QString &handed : profile.handedFiles)
+            if (!hand(handed, false).isEmpty())
+                command.skipped << handed;
     }
 
-    a << "--chdir" << (setup || work.isEmpty() ? pack : work);
+    a << "--chdir" << (setup ? pack : !work.isEmpty() ? work : profile.exchangeFd >= 0 ? profile.exchangeDir : pack);
     a << "--" << (program.isEmpty() ? profile.program : program) << profile.arguments;
     return command;
 }
@@ -393,7 +496,7 @@ bool available() {
     }
     const QString path = bwrapPath();
     bool works = false;
-    if (!path.isEmpty()) {
+    if (!path.isEmpty() && beneath::available()) {
         QProcess version;
         version.start(path, {"--version"});
         version.waitForFinished(5000);
@@ -413,6 +516,9 @@ bool available() {
 QString unavailableHint() {
     if (available())
         return {};
+    if (!beneath::available())
+        return QStringLiteral("This kernel has no openat2 (Linux 5.6 or newer), which the sandbox needs to hand files over safely. Update the "
+                              "kernel, or run this pack without a sandbox (fugue pack sandbox-off).");
     if (bwrapPath().isEmpty())
         return QStringLiteral("bubblewrap (bwrap) is not installed in /usr/bin. Bubblewrap 0.8 or newer is needed. Install it (Arch: pacman -S bubblewrap; Debian and Ubuntu: apt install "
                               "bubblewrap; Fedora: dnf install bubblewrap) and try again.");

@@ -18,6 +18,8 @@
 #include "engine/registry.h"
 
 #include <QList>
+#include <QHash>
+#include <QJsonObject>
 #include <QString>
 #include <QStringList>
 
@@ -53,8 +55,10 @@ QStringList inheritedPackPaths();
 // and where it came from (`.fugue-source.json`, the key its values are stored under). Labels and descriptions are not in
 // it. The trust store keeps it with a yes, so a pack edited in place to read other secrets asks again (#497).
 QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation, const QString &needsDigest);
-// A hash of the `needs` of every node folder `nodes` names under `folder`, read from their node.json: what the sandbox gives the
-// pack's programs (6.7.1). It is part of the digest a yes to trust covers, so a pack edited to ask for more asks again.
+// A hash of the `needs` of every node `nodes` names (`needs` by node folder name; a node missing from it counts as asking for
+// nothing): what the sandbox gives the pack's programs (6.7.1). It is part of the digest a yes to trust covers, so a pack
+// edited to ask for more asks again. The loader hashes what it parsed; packNeedsDigest reads the node.json files now.
+QString packNeedsDigestOf(const QStringList &nodes, const QHash<QString, QJsonObject> &needs);
 QString packNeedsDigest(const QString &folder, const QStringList &nodes);
 // The digest of the pack of this id and version as the loader last parsed it (loadPack, Disk packs): not another folder
 // that names the same pack. Empty for a pack that was not loaded.
@@ -110,6 +114,7 @@ struct LoadedPack {
     bool inherited = false;     // from the Default project's folders (1.4.2): read-only here
     bool hidden = false;        // an inherited pack an own pack of the same id and major hides: not loaded, no problem
     QList<PackProblem> disabled; // nodes that did not load, in pack.json's order
+    QString digest;              // packSecretsDigestOf what this load parsed (its secrets, source and needs); empty when it did not load
 };
 
 struct PackReport {
