@@ -750,7 +750,7 @@ public:
     // name is taken to be it, as any check does (8.9).
     Errors check(const NodeContext &context) const override {
         Errors errors;
-        if (const std::optional<Error> missing = missingPart(context))
+        if (const std::optional<Error> missing = missingPart(context, true))
             return {*missing};
         errors = checkParts(context);
         if (const std::optional<Error> warning = notRecognisedWarning(context))
@@ -847,11 +847,14 @@ public:
 
 private:
     // The Text encoder and the VAE are optional only because a Checkpoint can give them: without one each is needed.
-    static std::optional<Error> missingPart(const NodeContext &context) {
-        if (hasInput(context, "checkpoint"))
+    // A check (`checking`) leaves out an input that is linked: it is empty only because the node upstream has not run (a VAE from a
+    // Switch), and the run says whether it is really missing.
+    static std::optional<Error> missingPart(const NodeContext &context, bool checking = false) {
+        const auto linked = [&](const char *name) { return checking && context.linkedInputs.contains(QLatin1String(name)); };
+        if (hasInput(context, "checkpoint") || linked("checkpoint"))
             return std::nullopt;
         for (const char *name : {"text_encoder", "vae"}) {
-            if (hasInput(context, name))
+            if (hasInput(context, name) || linked(name))
                 continue;
             Error error = makeError(QStringLiteral("input_missing"),
                                     QStringLiteral("Load Models needs a %1: the diffusion model alone does not carry it.")

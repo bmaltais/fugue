@@ -962,10 +962,12 @@ private:
         context.registry = m_env.registry;
         context.library = m_env.registry ? &library() : nullptr;
         context.roots = m_options.roots; // a kernel that reads a file for its answer keeps to the folders a run may read (13.6)
-        for (const CompiledLink &link : n.node->links())
+        for (const CompiledLink &link : n.node->links()) {
+            context.linkedInputs.insert(link.input);
             if (link.item < 0)
                 if (const std::optional<QSize> size = sizeFrom(link.from))
                     context.inputSizes.insert(link.input, *size);
+        }
         return context;
     }
 

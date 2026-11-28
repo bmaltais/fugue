@@ -866,6 +866,11 @@ private slots:
             const Errors checked = bench.kernels.node(kLoadModels)->check(bench.context(kLoadModels, inputs));
             QCOMPARE(checked.size(), 1);
             QCOMPARE(checked.first().input, part);
+
+            // A part linked to a node that has not run is absent from the inputs, and the check does not call it missing.
+            NodeContext linked = bench.context(kLoadModels, inputs);
+            linked.linkedInputs.insert(part);
+            QVERIFY(bench.kernels.node(kLoadModels)->check(linked).isEmpty());
         }
     }
 
