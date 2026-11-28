@@ -63,8 +63,10 @@ struct ProviderInstance;
 // The models the paired helpers' kept lists (HostModelCache, no network) offer for `type`: each file under one of the type's folders
 // (`library.folders(type)` names), as a remote row marked `remote`, in the user's order of hosts then by name. A host whose helper has
 // no list operation, or never answered, lists nothing.
+// `local` are this machine's files of the type (listDiskModels): a host file whose hash is one of theirs is left out (the local one wins);
+// one the host has not hashed, with the name and size of a local file, says "also here" in its note.
 QList<ListedModel> listHostModels(const QList<ProviderInstance> &instances, const HostModelCache &cache, const ModelLibrary &library,
-                                  const PortType &type);
+                                  const PortType &type, const QList<ListedModel> &local = {});
 
 // The model files of `type` (ModelLibrary::list), each with the handle that names it:
 // {"resource", "name"}, and "hash" when `hashes` remembers the file's. Reads no model file.

@@ -147,21 +147,30 @@ check "describe advertises the models operation" models "$(python3 -c 'import js
 check "models without the key: 401" 401 "$(code -X POST -d '{}' "$url/models")"
 listing="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/models")"
 lister() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(" ".join(sorted(m["name"] for m in d["models"])))' "$1"; }
-check "models lists the files in the roots" "tokenizers/a=b/tok.json tokenizers/tok.json vae/small.safetensors" "$(lister "$listing")"
+check "models lists the model files of the roots (not a tokenizer's json)" "vae/small.safetensors" "$(lister "$listing")"
 check "... not the link out of the root, nor the folder link" no "$(python3 -c 'import sys; print("yes" if "stolen" in sys.argv[1] or "link" in sys.argv[1] or "outdir" in sys.argv[1] else "no")' "$listing")"
 check "... with the size and the folder" "1000 vae" "$(python3 -c 'import json,sys; m=[m for m in json.loads(sys.argv[1])["models"] if m["name"]=="vae/small.safetensors"][0]; print(m["size"], m["folder"])' "$listing")"
 check "... and the sha256 of a file hashed above" "$good" "$(python3 -c 'import json,sys; print([m for m in json.loads(sys.argv[1])["models"] if m["name"]=="vae/small.safetensors"][0]["sha256"])' "$listing")"
-check "... null for a file not hashed" None "$(python3 -c 'import json,sys; print([m for m in json.loads(sys.argv[1])["models"] if m["name"]=="tokenizers/tok.json"][0]["sha256"])' "$listing")"
+mkdir -p "$work/models/diffusion_models"
+printf 'not a model but the right extension' > "$work/models/diffusion_models/m.safetensors"
+printf 'second' > "$work/models/diffusion_models/n.safetensors"
+printf 'a preview' > "$work/models/diffusion_models/preview.png"
+touch "$work/models/diffusion_models/put_models_here.txt"
+mkdir -p "$work/root2/diffusion_models"
+listing="$(curl -s "${auth[@]}" -X POST -d '{"rescan":true}' "$url/models")"
+check "no preview or note is listed" "diffusion_models/m.safetensors diffusion_models/n.safetensors vae/small.safetensors" "$(lister "$listing")"
+check "... null for a file not hashed" None "$(python3 -c 'import json,sys; print([m for m in json.loads(sys.argv[1])["models"] if m["name"]=="diffusion_models/m.safetensors"][0]["sha256"])' "$listing")"
 check "no hashing unless asked" 0 "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["hash_started"])' "$listing")"
-want="$(sha256sum "$work/models/tokenizers/tok.json" | cut -d' ' -f1)"
-asked="$(curl -s "${auth[@]}" -X POST -d '{"hash":true,"names":["tokenizers/tok.json"]}' "$url/models")"
-check "hash:true starts hashing and says so" "True" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["hash_started"] >= 1)' "$asked")"
+want="$(sha256sum "$work/models/diffusion_models/m.safetensors" | cut -d' ' -f1)"
+asked="$(curl -s "${auth[@]}" -X POST -d '{"hash":true,"names":["diffusion_models/m.safetensors"]}' "$url/models")"
+check "hash:true with names queues only the named file" "1" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["hash_started"])' "$asked")"
 got=None
 for _ in $(seq 50); do
-  got="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/models" | python3 -c 'import json,sys; print([m for m in json.load(sys.stdin)["models"] if m["name"]=="tokenizers/tok.json"][0]["sha256"])')"
+  got="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/models" | python3 -c 'import json,sys; print([m for m in json.load(sys.stdin)["models"] if m["name"]=="diffusion_models/m.safetensors"][0]["sha256"])')"
   [[ $got != None ]] && break; sleep 0.1
 done
 check "... and the hash shows in the next listing" "$want" "$got"
+check "... while the other file stays unhashed" None "$(curl -s "${auth[@]}" -X POST -d '{}' "$url/models" | python3 -c 'import json,sys; print([m for m in json.load(sys.stdin)["models"] if m["name"]=="diffusion_models/n.safetensors"][0]["sha256"])')"
 check "models with a body that is not an object: 400" 400 "$(code "${auth[@]}" -X POST -d '[1]' "$url/models")"
 
 ((failures == 0)) && echo "all passed" || { echo "$failures failed"; exit 1; }

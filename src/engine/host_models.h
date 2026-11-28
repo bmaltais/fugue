@@ -8,7 +8,9 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QHash>
 #include <QList>
+#include <QMutex>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -16,6 +18,7 @@
 #include <functional>
 #include <memory>
 
+#include "engine/host_availability.h"
 #include "engine/providers.h"
 
 namespace fugue {
@@ -39,6 +42,7 @@ struct HostModelList {
     QString host;               // the instance's name
     bool supported = true;      // false: the helper has no `models` operation (an old one): its models are unknown
     QList<HostModel> models;
+    QDateTime attemptedAt;      // the last refresh, failed or not: a list is stale from here, so a host that is down is not asked in a loop
     QDateTime fetchedAt;        // when `models` was read from the host; invalid when it never was
     QString error;              // why the last refresh failed ("" if it did not): `models` is then the last good list
     bool truncated = false;     // the host listed only its first entries
@@ -78,21 +82,37 @@ public:
     // The instances (in the user's order) whose kept list has a file for each of `hashes` ("sha256:<hex>"); none for no hash.
     QStringList hostsHavingAll(const QList<ProviderInstance> &instances, const QStringList &hashes) const;
 
-    // The host (the first of `instances` in order) whose kept list has the file of `handle`'s hash; empty when none, or the handle has no hash.
-    QString hostHaving(const QList<ProviderInstance> &instances, const QJsonObject &handle) const;
-    // The same as a function over the providers.json of now, for ModelLibrary::setHostHaving and ReadinessEnv; asks nothing when no
-    // paired helper is configured (the common case costs one read of providers.json).
-    std::function<QString(const QJsonObject &handle)> hostHavingFunction() const;
+    // Whether the models are available on a paired host (spec 8.7): the first of `instances` whose list is fresh (under 10 minutes), has no
+    // error and has every one of them. Else `why` says what stops the nearest host from counting. Handles with no hash count for nothing.
+    HostAvailability availability(const QList<ProviderInstance> &instances, const QList<QJsonObject> &missing,
+                                  const QDateTime &now = QDateTime::currentDateTimeUtc()) const;
+    // The same over the providers.json of now, for ModelLibrary::setHostHaving and ReadinessEnv; empty (asks nothing) when no paired helper
+    // is configured.
+    HostAvailabilityFn availabilityFunction() const;
 
     static constexpr int kTtlSeconds = 300;
+    static constexpr int kUsableSeconds = 600; // a list older than this does not make a model available
 
 private:
     QString pathOf(const ProviderInstance &instance) const;
     void keep(const ProviderInstance &instance, const HostModelList &list) const;
 
     QString m_folder;
+    struct Parsed {
+        QDateTime mtime;
+        qint64 size = 0;
+        HostModelList list;
+    };
+    mutable QMutex m_parsedMutex;
+    mutable QHash<QString, Parsed> m_parsed; // by file: the last parse, valid while the file's time and size are the same
     QSet<QString> m_busy; // instances (by file) being asked
     QHash<QString, QList<Done>> m_waiting;
+    // A request to hash that came while a refresh was out: sent when it ends, never dropped.
+    struct Later {
+        QStringList names;
+        QList<Done> dones;
+    };
+    QHash<QString, Later> m_later;
 };
 
 } // namespace fugue

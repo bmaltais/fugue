@@ -394,13 +394,34 @@ private slots:
         f.canvas.undoStack()->undo();
         QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QString());
 
+        // A pick that is not remote takes back exactly the pin the remote pick set, in the same step; a pin the person set is never touched.
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("gx10"));
+        const int afterRemote = f.steps();
+        QCOMPARE(f.edits.setValue("load", "diffusion_model", QVariantMap{{"resource", "fugue/diffusion-model"}, {"name", "local.gguf"}, {"hash", "sha256:" + QString(64, 'b')}}), QString());
+        QCOMPARE(f.steps(), afterRemote + 1);
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QString()); // run placed locally again
+        QVERIFY(!f.canvas.document().layout.value("nodes").toObject().value("sample").toObject().contains("host_pin"));
+        {
+            Document pinned = f.canvas.document();
+            pinned.graph.nodes["sample"].provider = QStringLiteral("spark"); // the person's own pin
+            f.canvas.commit(pinned, "Pin");
+        }
+        QCOMPARE(f.edits.setRemoteModel("load", "diffusion_model", row.value("handle").toMap(), "gx10"), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("spark")); // not overwritten
+        QCOMPARE(f.edits.setValue("load", "diffusion_model", QVariantMap{{"resource", "fugue/diffusion-model"}, {"name", "local.gguf"}, {"hash", "sha256:" + QString(64, 'b')}}), QString());
+        QCOMPARE(f.canvas.document().graph.nodes.value("sample").provider, QStringLiteral("spark")); // nor cleared
+        f.canvas.undoStack()->undo();
+        f.canvas.undoStack()->undo();
+        f.canvas.undoStack()->undo(); // back before the person's pin
+
         // A file the host has not hashed: it is asked to, and the picker says so; nothing is stored.
         const int asked = int(host.requestsTo("POST", "/fugue/v1/models").size());
         const QString message = f.edits.setRemoteModel("load", "diffusion_model", listed.at(1).toMap().value("handle").toMap(), "gx10");
         QVERIFY(message.contains("hashing"));
         QTRY_COMPARE_WITH_TIMEOUT(int(host.requestsTo("POST", "/fugue/v1/models").size()), asked + 1, 5000);
         QVERIFY(QJsonDocument::fromJson(host.requestsTo("POST", "/fugue/v1/models").last().body).object().value("hash").toBool());
-        QVERIFY(f.stored("load", "diffusion_model").isUndefined() || f.stored("load", "diffusion_model").toObject().isEmpty());
+        QVERIFY(f.stored("load", "diffusion_model").toObject().value("name").toString() != "unhashed.gguf"); // nothing was stored for it
     }
 
     void theModelPickerListsModelsOfTheInputsType() {

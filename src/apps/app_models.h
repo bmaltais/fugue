@@ -79,6 +79,7 @@ private:
     struct Entry {
         QList<ListedModel> disk;
         QList<ListedModel> offered;
+        QList<ListedModel> remote; // a paired helper's files (#735), below the local ones
         QList<CatalogModel> missing;
         QHash<QString, ModelMark> marks;
         bool loading = false;

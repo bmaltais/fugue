@@ -30,6 +30,7 @@
 
 #include "engine/error.h"
 #include "engine/model_download.h"
+#include "engine/host_availability.h"
 #include "engine/model_library.h"
 #include "engine/pack_manager.h"
 #include "engine/templates.h"
@@ -104,6 +105,7 @@ struct ReadinessModel {
     // row stays and says so (#493). Empty: this machine is where it runs.
     QString onHost;
     QString typeFrom;   // deferred: the pack that gives its type (its name), or empty when the list cannot tell
+    QString hostNote;   // a paired host has it but that does not count, and why ("gx10 has it, but ..."): shown with the row (#735)
     bool optional = false; // only a Switch's lazy side needs it (#594): in `models` only because the person chose to download it
 };
 
@@ -172,7 +174,7 @@ struct ReadinessEnv {
     const ModelCatalog *catalog = nullptr; // for a model's license; may be null
     // The paired host whose model list has the file this handle names (by its hash), or empty: the model is then available
     // there (ReadinessPlan::hosted) and is not a download. Null: no host is asked. Reads kept lists only (HostModelCache).
-    std::function<QString(const QJsonObject &handle)> hostHaving;
+    HostAvailabilityFn hostHaving;
     // Free bytes where a folder is (a folder that does not exist yet counts as its parent); default QStorageInfo.
     std::function<qint64(const QString &)> freeSpace;
     // What a folder pack's copy prints and `cancelled` to stop it. May be null.

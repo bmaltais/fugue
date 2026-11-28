@@ -409,9 +409,47 @@ void WidgetEdit::write(const QString &node, const QString &input, const QJsonVal
         n.inputs.remove(input);
     else
         n.inputs.insert(input, InputValue::fromJson(value));
-    for (const QString &id : pinned)
-        if (document.graph.nodes.contains(id))
-            document.graph.nodes[id].provider = host;
+    // Host pins (#735) carry a marker in the layout, {host, by: "<node>.<input>"}: a pick that is not a remote one takes back exactly the
+    // pins this input's earlier remote pick set, and a pin the person set themselves (no marker) is never overwritten or cleared.
+    {
+        QJsonObject layoutNodes = document.layout.value("nodes").toObject();
+        const QString by = node + QLatin1Char('.') + input;
+        bool touched = false;
+        for (auto it = layoutNodes.begin(); it != layoutNodes.end(); ++it) {
+            QJsonObject entry = it.value().toObject();
+            const QJsonObject mark = entry.value("host_pin").toObject();
+            if (mark.value("by").toString() != by || !document.graph.nodes.contains(it.key()))
+                continue;
+            if (host.isEmpty() || !pinned.contains(it.key())) {
+                Node &pinnedNode = document.graph.nodes[it.key()];
+                if (pinnedNode.provider == mark.value("host").toString())
+                    pinnedNode.provider.clear();
+                entry.remove("host_pin");
+                it.value() = entry;
+                touched = true;
+            }
+        }
+        for (const QString &id : pinned) {
+            if (!document.graph.nodes.contains(id))
+                continue;
+            Node &target = document.graph.nodes[id];
+            QJsonObject entry = layoutNodes.value(id).toObject();
+            const QJsonObject mark = entry.value("host_pin").toObject();
+            const bool ours = !mark.isEmpty() && target.provider == mark.value("host").toString();
+            if (!target.provider.isEmpty() && !ours)
+                continue; // the person's own pin stays
+            if (ours && mark.value("by").toString() != by && mark.value("host").toString() != host) {
+                m_pinNotice = tr("Models on two hosts: %1 stays pinned to %2.").arg(id, mark.value("host").toString());
+                continue; // another input's host: not re-pinned silently
+            }
+            target.provider = host;
+            entry.insert("host_pin", QJsonObject{{"host", host}, {"by", ours ? mark.value("by").toString() : by}});
+            layoutNodes.insert(id, entry);
+            touched = true;
+        }
+        if (touched)
+            document.layout.insert("nodes", layoutNodes);
+    }
     // The session's own value goes into its open edit; anything else is an edit of its own,
     // which ends the session first (CanvasModel::beginEdit).
     const bool inSession = editing() && m_session.node == node && m_session.input == input;
@@ -1195,7 +1233,7 @@ void WidgetEdit::listHostModels(const QString &node, const QString &input) {
     const QString key = modelsKey(node, input);
     const PortType &portType = target(node, input).spec->type.type;
     const QList<ProviderInstance> helpers = pairedHelpers();
-    m_hostModels.insert(key, fugue::listHostModels(helpers, hostCache(), library(), portType));
+    m_hostModels.insert(key, fugue::listHostModels(helpers, hostCache(), library(), portType, m_diskModels.value(key)));
     if (helpers.isEmpty())
         return;
     QPointer<WidgetEdit> self(this);
@@ -1203,7 +1241,7 @@ void WidgetEdit::listHostModels(const QString &node, const QString &input) {
                              [self, key, helpers, portType](const HostModelList &) {
                                  if (!self)
                                      return;
-                                 self->m_hostModels.insert(key, fugue::listHostModels(helpers, self->hostCache(), self->library(), portType));
+                                 self->m_hostModels.insert(key, fugue::listHostModels(helpers, self->hostCache(), self->library(), portType, self->m_diskModels.value(key)));
                                  ++self->m_modelsRevision;
                                  emit self->modelsChanged();
                              },
@@ -1225,7 +1263,7 @@ void WidgetEdit::pollHashing(const ProviderInstance &instance, int tries) {
             for (auto it = self->m_hostModels.begin(); it != self->m_hostModels.end(); ++it) {
                 const QStringList parts = it.key().split(QLatin1Char('\n'));
                 if (const std::optional<PortType> type = PortType::parse(parts.value(0)))
-                    it.value() = fugue::listHostModels(self->pairedHelpers(), self->hostCache(), self->library(), *type);
+                    it.value() = fugue::listHostModels(self->pairedHelpers(), self->hostCache(), self->library(), *type, self->m_diskModels.value(it.key()));
             }
             ++self->m_modelsRevision;
             emit self->modelsChanged();
@@ -1295,8 +1333,9 @@ QString WidgetEdit::setRemoteModel(const QString &node, const QString &input, co
     }
     picked.insert("resource", t.spec->type.type.toString());
     // The nodes that take this model run on the host: it is the only place that has it.
+    m_pinNotice.clear();
     write(node, input, picked, tr("Pick %1 on %2").arg(picked.value("name").toString(), host), providerNodesUsing(node), host);
-    return {};
+    return m_pinNotice;
 }
 
 QString WidgetEdit::setModelName(const QString &node, const QString &input, const QString &name) {

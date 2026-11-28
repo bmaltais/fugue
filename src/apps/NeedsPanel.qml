@@ -120,7 +120,7 @@ Item {
                             glyph: row.covered ? "download" : ""
                             text: row.covered ? "" : row.modelData.action
                             tip: row.covered ? qsTr("Download %1").arg(row.modelData.size) : ""
-                            visible: row.modelData.kind !== "problem"
+                            visible: row.modelData.kind !== "problem" && row.modelData.kind !== "hosted"
                             enabled: !row.reading
                             onTapped: panel.needs.download(row.index)
                         }

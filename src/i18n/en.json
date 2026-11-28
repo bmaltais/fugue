@@ -2432,5 +2432,10 @@
   "Pick %1 on %2": "Pick %1 on %2",
   "%1 has not hashed this file yet; picking it asks it to.": "%1 has not hashed this file yet; picking it asks it to.",
   "%1 is hashing %2 so that the model is named by its content. Pick it again in a moment.": "%1 is hashing %2 so that the model is named by its content. Pick it again in a moment.",
-  "%1 is not a paired helper in providers.json.": "%1 is not a paired helper in providers.json."
+  "%1 is not a paired helper in providers.json.": "%1 is not a paired helper in providers.json.",
+  "Models on two hosts: %1 stays pinned to %2.": "Models on two hosts: %1 stays pinned to %2.",
+  "%1 has it, but its list could not be refreshed (%2).": "%1 has it, but its list could not be refreshed (%2).",
+  "%1 has it, but its list is older than 10 minutes.": "%1 has it, but its list is older than 10 minutes.",
+  "%1 has it, but not the other models these nodes need.": "%1 has it, but not the other models these nodes need.",
+  "Also here, by its name and size.": "Also here, by its name and size."
 }

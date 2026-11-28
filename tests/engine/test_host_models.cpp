@@ -193,11 +193,73 @@ private slots:
         const QString one = "sha256:" + kHash, two = "sha256:" + QString(64, 'c');
         QCOMPARE(kept.hostsHavingAll({other, instance()}, {one, two}), QStringList{QStringLiteral("gx10")});
         QCOMPARE(kept.hostsHavingAll({instance()}, {one, "sha256:" + QString(64, 'd')}), QStringList());
-        QCOMPARE(kept.hostHaving({instance()}, QJsonObject{{"hash", one}}), QStringLiteral("gx10"));
-        QCOMPARE(kept.hostHaving({instance()}, QJsonObject{{"name", "x"}}), QString()); // no hash: no host
+        QCOMPARE(kept.availability({instance()}, {QJsonObject{{"hash", one}}}).host, QStringLiteral("gx10"));
+        QCOMPARE(kept.availability({instance()}, {QJsonObject{{"name", "x"}}}).host, QString()); // no hash: no host
         ProviderInstance disabled = instance();
         disabled.enabled = false;
         QVERIFY(kept.hostsHavingAll({disabled}, {one}).isEmpty());
+    }
+
+    // #735 case a: gx10 has the diffusion model but not the VAE the same nodes need: it does not count, and says why.
+    void aHostCountsOnlyWhenItHasEveryMissingModel() {
+        answer(reply(QJsonArray{entry("diffusion_models/z.gguf", 4000, kHash)}));
+        HostModelCache kept = cache();
+        refreshed(kept);
+        const QJsonObject diffusion{{"hash", "sha256:" + kHash}}, vae{{"hash", "sha256:" + QString(64, 'f')}};
+        QCOMPARE(kept.availability({instance()}, {diffusion}).host, QStringLiteral("gx10"));
+        const HostAvailability both = kept.availability({instance()}, {diffusion, vae});
+        QVERIFY(both.host.isEmpty());
+        QVERIFY2(both.why.contains("gx10 has it, but"), qPrintable(both.why));
+    }
+
+    // Case b: a list whose last refresh failed, or older than 10 minutes, does not make a model available.
+    void aListWithAnErrorOrTooOldDoesNotCount() {
+        answer(reply(QJsonArray{entry("diffusion_models/z.gguf", 4000, kHash)}));
+        HostModelCache kept = cache();
+        refreshed(kept);
+        const QJsonObject diffusion{{"hash", "sha256:" + kHash}};
+        QVERIFY(kept.availability({instance()}, {diffusion}, QDateTime::currentDateTimeUtc().addSecs(700)).why.contains("older than 10 minutes"));
+        m_host.on("POST", "/fugue/v1/models", [](const HttpRequest &) {
+            return HttpResponse{500, json({{"error", QJsonObject{{"code", "helper_failed"}, {"message", "boom"}}}})};
+        });
+        refreshed(kept);
+        const HostAvailability failed = kept.availability({instance()}, {diffusion});
+        QVERIFY(failed.host.isEmpty());
+        QVERIFY2(failed.why.contains("could not be refreshed"), qPrintable(failed.why));
+        QVERIFY(!HostModelCache::stale(kept.cached(instance()), 300)); // a failed try counts: a host that is down is not asked in a loop
+    }
+
+    // A request to hash that comes while a refresh is out is sent after it, never dropped.
+    void aHashRequestDuringARefreshIsSentAfterIt() {
+        answer(reply(QJsonArray{entry("diffusion_models/z.gguf", 4000, "")}, 0));
+        HostModelCache kept = cache();
+        const int before = int(m_host.requestsTo("POST", "/fugue/v1/models").size());
+        int plain = 0, hashed = 0;
+        kept.refresh(instance(), false, {}, [&plain](const HostModelList &) { ++plain; }, reach());
+        kept.refresh(instance(), true, {QStringLiteral("diffusion_models/z.gguf")}, [&hashed](const HostModelList &) { ++hashed; }, reach());
+        QTRY_VERIFY_WITH_TIMEOUT(plain == 1 && hashed == 1, 5000);
+        const QList<HttpRequest> sent = m_host.requestsTo("POST", "/fugue/v1/models");
+        QCOMPARE(int(sent.size()), before + 2);
+        QVERIFY(!QJsonDocument::fromJson(sent.at(before).body).object().contains("hash"));
+        const QJsonObject second = QJsonDocument::fromJson(sent.at(before + 1).body).object();
+        QCOMPARE(second.value("hash").toBool(), true);
+        QCOMPARE(second.value("names").toArray().first().toString(), QStringLiteral("diffusion_models/z.gguf"));
+    }
+
+    // What a host says is data: names that step out of a folder or carry control characters are dropped, a huge list is cut.
+    void aHostsListIsSanitised() {
+        QJsonArray many;
+        for (const QString &bad : {QStringLiteral("../etc/passwd"), QStringLiteral("/abs/x.gguf"), QStringLiteral("a\\b.gguf"), QStringLiteral("vae/\x1b[31mred.gguf"), QString(600, 'a')})
+            many.append(entry(bad, 1, kHash));
+        many.append(entry("vae/ok.safetensors", 1, kHash, "Fam\x1bily"));
+        const HostModelList list = HostModelList::fromJson(QJsonObject{{"models", many}});
+        QCOMPARE(list.models.size(), 1);
+        QCOMPARE(list.models.first().name, QStringLiteral("vae/ok.safetensors"));
+        QVERIFY(!list.models.first().family.contains(QChar(0x1b)));
+        QJsonArray huge;
+        for (int i = 0; i < 4100; ++i)
+            huge.append(entry(QStringLiteral("vae/%1.safetensors").arg(i), 1, ""));
+        QCOMPARE(HostModelList::fromJson(QJsonObject{{"models", huge}}).models.size(), 4000);
     }
 
     // The picker's group: files under one of the type's folders, as remote rows with the handle a pick stores.

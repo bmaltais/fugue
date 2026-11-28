@@ -539,6 +539,7 @@ private:
     void scheduleSession();
     // The last missing-nodes line, to tell it from the banner's other lines on a reload.
     QString m_missingNotice;
+    bool m_refreshingHostLists = false;
     DownloadOffer m_offer; // what goes with m_missingNotice
     Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;

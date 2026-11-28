@@ -93,7 +93,14 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
 }
 
 QList<ListedModel> listHostModels(const QList<ProviderInstance> &instances, const HostModelCache &cache, const ModelLibrary &library,
-                                  const PortType &type) {
+                                  const PortType &type, const QList<ListedModel> &local) {
+    QSet<QString> localHashes;
+    QSet<QString> localNames; // "name\nsize"
+    for (const ListedModel &file : local) {
+        if (!file.handle.value("hash").toString().isEmpty())
+            localHashes.insert(file.handle.value("hash").toString());
+        localNames.insert(file.name + QLatin1Char('\n') + QString::number(file.size));
+    }
     QSet<QString> folders; // the type's folder names, as the host's roots have them (ComfyUI's layout)
     for (const QString &folder : library.folders(type))
         folders.insert(QFileInfo(folder).fileName());
@@ -109,8 +116,11 @@ QList<ListedModel> listHostModels(const QList<ProviderInstance> &instances, cons
         for (const HostModel &model : list.models) {
             if (!folders.contains(model.folder))
                 continue;
+            if (!model.handleHash().isEmpty() && localHashes.contains(model.handleHash()))
+                continue; // the same weights are here: the local file wins
             ListedModel entry;
             entry.name = model.handleName();
+            entry.folder = model.folder;
             entry.handle = diskHandle(type.toString(), entry.name, model.handleHash());
             entry.status = QStringLiteral("ready");
             entry.provider = instance.name;
@@ -121,7 +131,9 @@ QList<ListedModel> listHostModels(const QList<ProviderInstance> &instances, cons
             if (family.isEmpty() && !model.family.isEmpty())
                 family = engineFamilyName(model.family);
             entry.family = family;
-            if (model.sha256.isEmpty())
+            if (model.sha256.isEmpty() && localNames.contains(entry.name + QLatin1Char('\n') + QString::number(model.size)))
+                entry.note = QObject::tr("Also here, by its name and size.");
+            else if (model.sha256.isEmpty())
                 entry.note = QObject::tr("%1 has not hashed this file yet; picking it asks it to.").arg(instance.name);
             out.append(entry);
         }

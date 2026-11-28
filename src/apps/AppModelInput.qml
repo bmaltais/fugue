@@ -50,13 +50,18 @@ KitDropdown {
         const rows = []
         let group = null
         for (const m of have) {
-            const heading = m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
+            const heading = m.remote === true ? qsTr("On %1").arg(m.host) : m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
             if (heading !== group) {
                 group = heading
                 if (heading)
                     rows.push({ text: heading, heading: true, enabled: false })
             }
-            if (m.path !== undefined) {
+            if (m.remote === true) {
+                // A paired helper's file: its hash names it, so a file the host has not hashed cannot be picked yet.
+                rows.push({ text: m.title, detail: (m.family ? m.family + "  " : "") + sizeText(m.size), note: m.note, value: { handle: m.handle },
+                            place: "host", placeHost: m.host, enabled: m.handle.hash !== undefined,
+                            checked: m.handle.hash !== undefined && current !== undefined && current.hash === m.handle.hash })
+            } else if (m.path !== undefined) {
                 rows.push({ text: m.title, detail: (m.recommended === true ? qsTr("Recommended") + "  " : "") + sizeText(m.size),
                             note: m.engineNote ? m.engineNote : (m.recommended === true ? m.recommendedWhy : ""), value: { disk: m.path }, place: "local",
                             checked: m.name === name })

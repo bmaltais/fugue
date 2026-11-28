@@ -504,7 +504,8 @@ Rectangle {
             entries.push({ text: qsTr("Fits %1").arg(state.fitsFor), heading: true, enabled: false })
         }
         const heading = m.remote === true ? qsTr("On %1").arg(m.host) : m.path !== undefined ? (m.family ? m.family : m.folder) : m.provider
-        if (heading !== state.group && !state.other && !(state.anyFits && m.fits === true)) {
+        // A paired host's files always have their own "On <host>" heading, whatever "Other" or "Fits" came before (#735).
+        if (heading !== state.group && (m.remote === true || (!state.other && !(state.anyFits && m.fits === true)))) {
             state.group = heading
             entries.push({ text: heading, heading: true, enabled: false })
         }

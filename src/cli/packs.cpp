@@ -301,7 +301,7 @@ struct ReadinessStores {
         env.trust = &trust;
         env.packsDir = packsDir();
         env.catalog = &catalog;
-        env.hostHaving = HostModelCache::shared().hostHavingFunction(); // a paired host's models are not downloads (#735)
+        env.hostHaving = HostModelCache::shared().availabilityFunction(); // a paired host's models are not downloads (#735)
         return env;
     }
 };

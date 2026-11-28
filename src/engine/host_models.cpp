@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QJsonDocument>
+#include <QMutexLocker>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QTimer>
@@ -30,14 +31,38 @@ QJsonObject HostModel::toJson() const {
                        {"folder", folder}, {"family", family.isEmpty() ? QJsonValue() : QJsonValue(family)}};
 }
 
+namespace {
+// What a host says is data from another machine: a name that could step out of a folder, or carry control characters into a terminal or a
+// tooltip, is dropped; a text is cut to a length.
+bool safeName(const QString &name) {
+    if (name.isEmpty() || name.size() > 512 || name.startsWith(QLatin1Char('/')) || name.startsWith(QLatin1Char('\\')) || name.contains(QLatin1Char('\\')))
+        return false;
+    for (const QChar c : name)
+        if (c.unicode() < 0x20 || c.unicode() == 0x7f)
+            return false;
+    for (const QString &part : name.split(QLatin1Char('/')))
+        if (part == QLatin1String("..") || part == QLatin1String("."))
+            return false;
+    return true;
+}
+QString plain(QString text, int most) {
+    QString out;
+    for (const QChar c : text.left(most))
+        out += c.unicode() < 0x20 || c.unicode() == 0x7f ? QLatin1Char(' ') : c;
+    return out;
+}
+constexpr int kMostModels = 4000;
+constexpr qint64 kMostListBytes = 8 << 20;
+} // namespace
+
 HostModel HostModel::fromJson(const QJsonObject &object) {
     HostModel model;
-    model.name = object.value("name").toString();
+    model.name = safeName(object.value("name").toString()) ? object.value("name").toString() : QString();
     model.size = qint64(object.value("size").toDouble());
     const QString sha = object.value("sha256").toString().toLower();
     model.sha256 = isHex64(sha) ? sha : QString();
-    model.folder = object.value("folder").toString();
-    model.family = object.value("family").toString();
+    model.folder = model.name.contains(QLatin1Char('/')) ? model.name.section(QLatin1Char('/'), 0, 0) : QString(); // from the name, not the host's say
+    model.family = plain(object.value("family").toString(), 80);
     return model;
 }
 
@@ -60,6 +85,7 @@ QJsonObject HostModelList::toJson() const {
     return QJsonObject{{"host", host},
                        {"supported", supported},
                        {"models", array},
+                       {"attempted_at", attemptedAt.isValid() ? QJsonValue(attemptedAt.toString(Qt::ISODate)) : QJsonValue()},
                        {"fetched_at", fetchedAt.isValid() ? QJsonValue(fetchedAt.toString(Qt::ISODate)) : QJsonValue()},
                        {"error", error},
                        {"truncated", truncated},
@@ -71,11 +97,17 @@ HostModelList HostModelList::fromJson(const QJsonObject &object) {
     HostModelList list;
     list.host = object.value("host").toString();
     list.supported = object.value("supported").toBool(true);
-    for (const QJsonValue &value : object.value("models").toArray())
+    for (const QJsonValue &value : object.value("models").toArray()) {
+        if (list.models.size() >= kMostModels) {
+            list.truncated = true;
+            break;
+        }
         if (const HostModel model = HostModel::fromJson(value.toObject()); !model.name.isEmpty())
             list.models.append(model);
+    }
     list.fetchedAt = QDateTime::fromString(object.value("fetched_at").toString(), Qt::ISODate);
-    list.error = object.value("error").toString();
+    list.attemptedAt = QDateTime::fromString(object.value("attempted_at").toString(), Qt::ISODate);
+    list.error = plain(object.value("error").toString(), 300);
     list.truncated = object.value("truncated").toBool();
     list.unhashed = object.value("unhashed").toInt();
     list.hashing = object.value("hashing").toInt();
@@ -87,6 +119,7 @@ HostModelList parseHostModels(const QString &host, const QJsonObject &reply, con
     list.host = host;
     list.supported = true;
     list.fetchedAt = now;
+    list.attemptedAt = now;
     list.error.clear();
     return list;
 }
@@ -107,20 +140,32 @@ QString HostModelCache::pathOf(const ProviderInstance &instance) const {
 HostModelList HostModelCache::cached(const ProviderInstance &instance) const {
     HostModelList list;
     list.host = instance.name;
-    QFile file(pathOf(instance));
+    const QString path = pathOf(instance);
+    const QFileInfo info(path);
+    QMutexLocker lock(&m_parsedMutex);
+    const auto kept = m_parsed.constFind(path); // the GUI asks often: the file is parsed again only when it changed
+    if (kept != m_parsed.constEnd() && kept->mtime == info.lastModified() && kept->size == info.size())
+        return kept->list;
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return list;
-    list = HostModelList::fromJson(QJsonDocument::fromJson(file.readAll()).object());
+    list = HostModelList::fromJson(QJsonDocument::fromJson(file.read(kMostListBytes)).object());
     list.host = instance.name;
+    m_parsed.insert(path, {info.lastModified(), info.size(), list});
     return list;
 }
 
 bool HostModelCache::stale(const HostModelList &list, int ttlSeconds, const QDateTime &now) {
-    return !list.fetchedAt.isValid() || list.fetchedAt.secsTo(now) >= ttlSeconds;
+    const QDateTime last = list.attemptedAt.isValid() ? list.attemptedAt : list.fetchedAt;
+    return !last.isValid() || last.secsTo(now) >= ttlSeconds;
 }
 
 void HostModelCache::keep(const ProviderInstance &instance, const HostModelList &list) const {
     const QString path = pathOf(instance);
+    {
+        QMutexLocker lock(&m_parsedMutex);
+        m_parsed.remove(path);
+    }
     QDir().mkpath(QFileInfo(path).path());
     QSaveFile out(path);
     if (out.open(QIODevice::WriteOnly)) {
@@ -132,20 +177,45 @@ void HostModelCache::keep(const ProviderInstance &instance, const HostModelList 
 void HostModelCache::refresh(const ProviderInstance &instance, bool hash, const QStringList &names, Done done, const Make &make) {
     const QString key = pathOf(instance);
     if (!isPairedHelper(instance) || !instance.enabled) {
-        QTimer::singleShot(0, [done = std::move(done), list = cached(instance)] { done(list); });
+        QTimer::singleShot(0, [done = std::move(done), list = cached(instance)] {
+            if (done)
+                done(list);
+        });
+        return;
+    }
+    if (m_busy.contains(key)) {
+        if (hash) { // a request to hash comes after the refresh that is out, not instead of it
+            Later &later = m_later[key];
+            for (const QString &name : names)
+                if (!later.names.contains(name))
+                    later.names << name;
+            if (done)
+                later.dones.append(std::move(done));
+            if (later.names.isEmpty())
+                later.names << QString(); // hash with no names: the host's own order
+        } else if (done) {
+            m_waiting[key].append(std::move(done));
+        }
         return;
     }
     if (done)
         m_waiting[key].append(std::move(done));
-    if (m_busy.contains(key))
-        return;
     m_busy.insert(key);
     Result<std::shared_ptr<Provider>> made = make ? make(instance) : createProvider(instance);
-    const auto finish = [this, key](const HostModelList &list) {
+    const auto finish = [this, key, instance, make](const HostModelList &list) {
         m_busy.remove(key);
         const QList<Done> waiting = m_waiting.take(key);
         for (const Done &wait : waiting)
             wait(list);
+        if (m_later.contains(key)) {
+            Later later = m_later.take(key);
+            later.names.removeAll(QString());
+            const QList<Done> dones = later.dones;
+            refresh(instance, true, later.names, [dones](const HostModelList &again) {
+                for (const Done &wait : dones)
+                    wait(again);
+            }, make);
+        }
     };
     const std::shared_ptr<Provider> provider = made ? made.value() : nullptr;
     auto *remote = dynamic_cast<RemoteHelperProvider *>(provider.get());
@@ -168,6 +238,7 @@ void HostModelCache::refresh(const ProviderInstance &instance, bool hash, const 
         } else {
             list.error = answer.error().message; // the last good list stays, with when it was fetched
         }
+        list.attemptedAt = QDateTime::currentDateTimeUtc();
         keep(instance, list);
         // Not from inside the provider's own reply.
         QTimer::singleShot(0, [finish, list, provider] { finish(list); });
@@ -188,15 +259,43 @@ QStringList HostModelCache::hostsHavingAll(const QList<ProviderInstance> &instan
     return hosts;
 }
 
-QString HostModelCache::hostHaving(const QList<ProviderInstance> &instances, const QJsonObject &handle) const {
-    const QString hash = handle.value("hash").toString();
-    if (hash.isEmpty())
-        return {};
-    const QStringList hosts = hostsHavingAll(instances, {hash});
-    return hosts.isEmpty() ? QString() : hosts.first();
+HostAvailability HostModelCache::availability(const QList<ProviderInstance> &instances, const QList<QJsonObject> &missing, const QDateTime &now) const {
+    QStringList hashes;
+    for (const QJsonObject &handle : missing)
+        hashes << handle.value("hash").toString();
+    HostAvailability answer;
+    if (hashes.isEmpty() || hashes.contains(QString()))
+        return answer; // a handle with no hash names no file a host could be asked for
+    for (const ProviderInstance &instance : instances) {
+        if (!instance.enabled || !isPairedHelper(instance))
+            continue;
+        const HostModelList list = cached(instance);
+        if (!list.supported || !list.known())
+            continue;
+        int have = 0;
+        for (const QString &hash : hashes)
+            have += list.byHash(hash) ? 1 : 0;
+        if (have == 0)
+            continue;
+        const QString why = !list.error.isEmpty()
+                                ? QObject::tr("%1 has it, but its list could not be refreshed (%2).").arg(instance.name, list.error)
+                            : list.fetchedAt.secsTo(now) >= kUsableSeconds
+                                ? QObject::tr("%1 has it, but its list is older than 10 minutes.").arg(instance.name)
+                            : have < hashes.size()
+                                ? QObject::tr("%1 has it, but not the other models these nodes need.").arg(instance.name)
+                                : QString();
+        if (why.isEmpty()) {
+            answer.host = instance.name;
+            answer.why.clear();
+            return answer;
+        }
+        if (answer.why.isEmpty())
+            answer.why = why;
+    }
+    return answer;
 }
 
-std::function<QString(const QJsonObject &)> HostModelCache::hostHavingFunction() const {
+HostAvailabilityFn HostModelCache::availabilityFunction() const {
     QList<ProviderInstance> paired;
     if (const Result<QList<ProviderInstance>> loaded = loadProviderInstances(providersPath()); loaded.ok())
         for (const ProviderInstance &instance : loaded.value())
@@ -204,7 +303,7 @@ std::function<QString(const QJsonObject &)> HostModelCache::hostHavingFunction()
                 paired.append(instance);
     if (paired.isEmpty())
         return {};
-    return [this, paired](const QJsonObject &handle) { return hostHaving(paired, handle); };
+    return [this, paired](const QList<QJsonObject> &missing) { return availability(paired, missing); };
 }
 
 void HostModelCache::refreshStale(const QList<ProviderInstance> &instances, int ttlSeconds, const Done &changed, const Make &make) {

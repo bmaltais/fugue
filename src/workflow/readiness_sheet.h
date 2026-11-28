@@ -101,6 +101,8 @@ public:
 
 signals:
     void changed();
+    // A paired host's model list was fetched again: what counts as available there may have changed (#735).
+    void hostListsRefreshed();
     // A pack was installed or trusted: the window reads its node types again.
     void packsModified();
     // A run ended (ok: every row done).

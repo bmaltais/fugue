@@ -417,6 +417,7 @@ private:
     std::function<QList<fugue::ProviderInstance>()> m_hostInstances;
     fugue::HostModelCache *m_hostCache = nullptr; // null: the shared one
     fugue::HostModelCache::Make m_hostMake;
+    QString m_pinNotice; // set by write() when a host pin was left as it was
     fugue::HostModelCache &hostCache() const;
     QList<fugue::ProviderInstance> pairedHelpers() const;
     void listHostModels(const QString &node, const QString &input);

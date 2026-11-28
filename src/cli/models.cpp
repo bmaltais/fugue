@@ -30,6 +30,7 @@
 #include "engine/model_recommend.h"
 #include "engine/model_speed.h"
 #include "engine/paths.h"
+#include "engine/sandbox.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
 #include "engine/templates.h"
@@ -196,6 +197,8 @@ Reply modelList(const Command &command, Context &context) {
     for (const ProviderInstance &helper : std::as_const(helpers)) {
         if (!onlyHost.isEmpty() && helper.name != onlyHost)
             continue;
+        if (command.has("hash") && !command.has("refresh"))
+            lines << QStringLiteral("--hash asks a paired helper to hash only with --refresh.");
         if (command.has("refresh")) {
             QEventLoop loop;
             kept.refresh(helper, command.has("hash"), {}, [&loop](const HostModelList &) { loop.quit(); });
@@ -209,24 +212,25 @@ Reply modelList(const Command &command, Context &context) {
             info.insert("error", list.error);
         hosts.append(info);
         if (!list.known())
-            lines << QStringLiteral("%1: no list kept yet (fugue model list --refresh asks it)").arg(helper.name);
+            lines << QStringLiteral("%1: no list kept yet (fugue model list --refresh asks it)").arg(sandbox::printable(helper.name));
         else if (!list.supported)
-            lines << QStringLiteral("%1: its helper is too old to list models").arg(helper.name);
+            lines << QStringLiteral("%1: its helper is too old to list models").arg(sandbox::printable(helper.name));
         for (const DeclaredPortType *declared : std::as_const(types))
-            for (const ListedModel &model : listHostModels({helper}, kept, library, declared->type)) {
+            for (const ListedModel &model : listHostModels({helper}, kept, library, declared->type, listDiskModels(library, declared->type, hashes))) {
                 if (!wantedFamily.isEmpty() && squashed(model.family) != wantedFamily)
                     continue;
                 const bool hashed = model.handle.contains("hash");
                 QJsonObject entry{{"source", "host"}, {"host", helper.name}, {"type", declared->type.toString()}, {"name", model.name},
-                                  {"size", model.size}, {"hashed", hashed}};
+                                  {"size", model.size}, {"hashed", hashed},
+                                  {"folder", model.folder}};
                 entry.insert("family", model.family.isEmpty() ? QJsonValue() : QJsonValue(model.family));
                 if (hashed)
                     entry.insert("handle", model.handle);
                 models.append(entry);
                 lines << QStringLiteral("%1  %2  %3  on %4")
-                             .arg(declared->type.toString(), model.name,
+                             .arg(declared->type.toString(), sandbox::printable(model.name),
                                   hashed ? model.handle.value("hash").toString().left(19) + QStringLiteral("…") : QStringLiteral("(not hashed on the host)"),
-                                  helper.name);
+                                  sandbox::printable(helper.name));
             }
     }
     // Where the models are searched, and which of those folders are the Default project's (1.4.2).
