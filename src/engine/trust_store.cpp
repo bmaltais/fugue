@@ -305,7 +305,7 @@ bool TrustStore::isUnsandboxed(const QString &packId, const QString &version) co
         return false;
     for (const QJsonValue &value : readOpen(m_path).value(packId).toArray())
         if (value.toString() == version)
-            return isListed(packId, version);
+            return isTrusted(packId, version); // the yes stands only for what was trusted: its digest (secrets, source, needs) too
     return false;
 }
 

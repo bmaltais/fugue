@@ -65,6 +65,9 @@ QString mkdirBeneathRandom(int dir);
 // A new folder `name` (no `/`) in `dir`, mode 0700; false when the name exists already or the folder cannot be made.
 bool mkdirBeneath(int dir, const QString &name);
 
+// The most a copy in or out takes: a larger file (or one that grows past it while it is copied) fails the copy.
+constexpr qint64 kMaxCopyBytes = qint64(4) << 30;
+
 // Opens the regular file `absolute` for reading through openNoLinks (non-blocking, so a FIFO never hangs the caller), or an
 // invalid Fd when it is not a regular file or a component is a link.
 Fd openRegularFile(const QString &absolute);

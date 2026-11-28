@@ -18,6 +18,7 @@
 #include <cerrno>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 
 namespace fugue::sandbox {
 
@@ -250,21 +251,18 @@ QList<int> Descriptors::numbers() const {
 }
 
 bool handedDenied(const QString &path, const QString &homeFolder) {
-    const QString home = realHome(homeFolder);
-    QStringList blocked;
-    for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.claude", "/.config/gh",
-                            "/.config/uv", "/.config/fugue", "/.cache/huggingface/token", "/.local/share/uv/credentials",
-                            "/.local/share/keyrings", "/.local/share/kwalletd", "/.password-store", "/.local/state/fugue"})
-        blocked << home + QLatin1String(sub);
-    blocked << configDir() << stateDir() << baseConfigDir() << baseStateDir() << dataDir() + QStringLiteral("/packs") << "/etc"
-            << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root";
-    const QString ownData = canonical(dataDir());
-    for (const QString &root : projectRoots())
-        if (!inside(ownData, root)) // this session's own root holds its runs and models
-            blocked << root;
-    for (const QString &folder : std::as_const(blocked))
-        if (inside(path, canonical(folder)))
+    // denied(), the one list: but this session's data folder and the base one hold the runs and the models that are handed
+    // over, so of them only the packs are; and /tmp, which denied() leaves to the grant rules, is no area of its own here.
+    const QStringList own{canonical(dataDir()), canonical(baseDataDir())};
+    for (const QString &blocked : denied(homeFolder)) {
+        if (own.contains(blocked)) {
+            if (inside(path, blocked + QStringLiteral("/packs")))
+                return true;
+            continue;
+        }
+        if (inside(path, blocked) && !inside(own.first(), blocked)) // this session's own project root holds its runs and models
             return true;
+    }
     return false;
 }
 
@@ -303,6 +301,10 @@ public:
         const QString at = beneath::realPathOf(fd.get());
         if (at != path)
             return QStringLiteral("%1 is not where it was looked at (now %2).").arg(path, at);
+        // A file or a folder only, checked on what was opened: a socket, a FIFO or a device is never handed over.
+        struct stat info {};
+        if (::fstat(fd.get(), &info) != 0 || !(S_ISREG(info.st_mode) || S_ISDIR(info.st_mode)))
+            return QStringLiteral("%1 is not a file or a folder (a socket, a FIFO or a device is never handed over).").arg(path);
         if (real)
             *real = at;
         bindFd(how, std::move(fd), at);
@@ -367,8 +369,11 @@ Command build(const Profile &profile) {
                              "/etc/passwd", "/etc/group", "/etc/hosts", "/etc/os-release", "/etc/resolv.conf", "/etc/ssl",
                              "/etc/ca-certificates", "/etc/pki", "/etc/alternatives", "/etc/mime.types"})
         a << "--ro-bind-try" << QLatin1String(file) << QLatin1String(file);
-    // A venv's python is a link into uv's Python installs, which must be there at the same path.
-    a << "--ro-bind-try" << uvPythonDir(home) << uvPythonDir(home);
+    // A venv's python is a link into uv's Python installs, which must be there at the same path: bound by descriptor, and never
+    // when UV_PYTHON_INSTALL_DIR (Fugue's environment) names a denied area.
+    if (const QString python = uvPythonDir(home); deniedReason(canonical(python), home).isEmpty())
+        if (beneath::Fd fd = beneath::openNoLinks(canonical(python), O_PATH | O_DIRECTORY); fd)
+            binder.bindFd("--ro-bind-fd", std::move(fd), QDir::cleanPath(python));
 
     // A program that is not under /usr (uv in ~/.local/bin) is bound by itself.
     QString program = profile.program;
@@ -377,11 +382,12 @@ Command build(const Profile &profile) {
     if (!program.isEmpty() && !inside(program, pack) && !inside(program, QStringLiteral("/usr")) && !inside(program, QStringLiteral("/bin")))
         a << "--ro-bind-try" << program << program;
 
-    // The pack's own files are read-only; its environment folder, when it is a real folder (never a link), is writable.
+    // The pack's own files are read-only; its environment folder, when it is a real folder (never a link), is writable for the
+    // setup alone: a run reads it.
     if (const QString why = binder.bindPath("--ro-bind-fd", pack, true); !why.isEmpty())
         refuse(QStringLiteral("The pack folder: ") + why);
     if (beneath::Fd venv = beneath::openNoLinks(pack + QStringLiteral("/.venv"), O_PATH | O_DIRECTORY); venv)
-        binder.bindFd("--bind-fd", std::move(venv), pack + QStringLiteral("/.venv"));
+        binder.bindFd(setup ? "--bind-fd" : "--ro-bind-fd", std::move(venv), pack + QStringLiteral("/.venv"));
     if (setup) {
         if (!profile.uvCache.isEmpty())
             a << "--bind-try" << profile.uvCache << profile.uvCache; // Fugue's own folder, which no program can reach
@@ -396,8 +402,11 @@ Command build(const Profile &profile) {
         if (profile.needs.gpu) {
             QStringList nodes = profile.gpuNodes;
             if (nodes.isEmpty()) {
+                // The driver's nodes by name: the control node, each GPU, nvidia-uvm and nvidia-uvm-tools; not nvidia-modeset or the caps.
+                static const QRegularExpression driverNode(QStringLiteral("^nvidia(ctl|-uvm|-uvm-tools|[0-9]+)$"));
                 for (const QFileInfo &entry : QDir(QStringLiteral("/dev")).entryInfoList({QStringLiteral("nvidia*")}, QDir::System | QDir::Files | QDir::NoDotAndDotDot))
-                    nodes << entry.filePath();
+                    if (driverNode.match(entry.fileName()).hasMatch())
+                        nodes << entry.filePath();
                 if (profile.needs.gpuApi == QLatin1String("vulkan")) // the render nodes only: a card node can drive the displays
                     for (const QFileInfo &entry : QDir(QStringLiteral("/dev/dri")).entryInfoList({QStringLiteral("renderD*")}, QDir::System | QDir::Files | QDir::NoDotAndDotDot))
                         nodes << entry.filePath();
@@ -421,6 +430,11 @@ Command build(const Profile &profile) {
                 continue;
             }
             const QString real = beneath::realPathOf(fd.get());
+            struct stat info {};
+            if (::fstat(fd.get(), &info) != 0 || !(S_ISREG(info.st_mode) || S_ISDIR(info.st_mode))) {
+                refuse(QStringLiteral("needs.files.read: %1 is not a file or a folder.").arg(shown(path, realHome(home))));
+                continue;
+            }
             if (real.isEmpty() || real != QDir::cleanPath(path)) {
                 refuse(QStringLiteral("needs.files.read: %1 is not where it was looked at.").arg(shown(path, realHome(home))));
                 continue;

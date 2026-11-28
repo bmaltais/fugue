@@ -19,6 +19,7 @@
 #include <thread>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "engine/command_node.h"
@@ -247,7 +248,7 @@ private slots:
         QVERIFY(!args.contains("--share-net")); // no `network`: the network namespace stays empty
         // The folders are bound by descriptor, never by a path a program could swap for a link before bwrap reads it.
         QVERIFY(boundFd(command, "--ro-bind-fd", profile.packDir));
-        QVERIFY(boundFd(command, "--bind-fd", profile.packDir + "/.venv")); // its environment folder
+        QVERIFY(boundFd(command, "--ro-bind-fd", profile.packDir + "/.venv")); // its environment folder: read-only but in a setup
         QVERIFY(boundFd(command, "--bind-fd", profile.workDir));
         QVERIFY(!hasPair(args, "--ro-bind", profile.packDir, profile.packDir) && !hasPair(args, "--bind", profile.workDir, profile.workDir));
         QVERIFY(hasPair(args, "--setenv", "FUGUE_PROTOCOL", "1"));
@@ -302,14 +303,15 @@ private slots:
         profile.packDir = m_root.path() + "/arg2/pack";
         profile.program = "/usr/bin/true";
         profile.modelRoots = {models};
+        QVERIFY(::mkfifo(QFile::encodeName(m_root.path() + "/handed.fifo").constData(), 0600) == 0);
         profile.handedFiles = {models + "/real.onnx", models + "/inside.onnx", models + "/outside.onnx", models + "/key.onnx",
-                               home() + "/.ssh/handed", models + "/missing.onnx"};
+                               home() + "/.ssh/handed", models + "/missing.onnx", m_root.path() + "/handed.fifo"};
         const sandbox::Command command = sandbox::build(profile);
         QVERIFY(boundFd(command, "--ro-bind-fd", models + "/real.onnx"));
         QVERIFY(hasPair(command.arguments, "--symlink", models + "/real.onnx", models + "/inside.onnx")); // the link points at the bound target
         QVERIFY(!command.arguments.join(' ').contains(elsewhere)); // a link out of the roots: left out
         QVERIFY(!command.arguments.join(' ').contains(".ssh")); // and a denied path never, linked or handed directly
-        QCOMPARE(command.skipped.size(), 4);
+        QCOMPARE(command.skipped.size(), 5); // the FIFO too: a socket, a FIFO or a device is never handed over
         QVERIFY(command.refused.isEmpty());
 
         // A model file must lie in a model folder, on what was opened: one outside refuses the run instead of being left out.
@@ -367,6 +369,10 @@ private slots:
         QVERIFY(hasPair(args, "--ro-bind-try", "/sys/module/nvidia", "/sys/module/nvidia"));
         QVERIFY(hasPair(args, "--ro-bind-try", "/sys/module/nvidia_uvm", "/sys/module/nvidia_uvm"));
         QVERIFY(!args.join(' ').contains("/dev/dri"));
+        // Found under /dev: the driver's nodes by name, never nvidia-modeset or the caps.
+        profile.gpuNodes.clear();
+        const QString found = sandbox::build(profile).arguments.join(' ');
+        QVERIFY(!found.contains("nvidia-modeset") && !found.contains("nvidia-caps"));
         // Vulkan: the render nodes only, never /dev/dri as a whole or a card node (which can drive the displays).
         profile.gpuNodes.clear();
         profile.needs.gpuApi = "vulkan";
@@ -657,6 +663,18 @@ private slots:
         QCOMPARE(parts.value(0), QString("0")); // bwrap's own environment holds none of Fugue's variables
         for (const QString &target : parts.value(1).split(' ', Qt::SkipEmptyParts))
             QVERIFY2(target.startsWith("pipe:") || target.startsWith("/dev/") || target.endsWith("/run.sh"), qPrintable(parts.value(1)));
+    }
+
+    // What a program prints to stderr reaches an error message without its escape sequences.
+    void aProgramsEscapeSequencesNeverReachAMessage() {
+        if (!sandbox::available())
+            QSKIP("bubblewrap or user namespaces are not available here");
+        const NodeType *type = makePack("io.example.escapes", {}, false, "#!/bin/bash\ncat > /dev/null\nprintf '\\033]0;owned\\007\\033[2Jboom\\n' >&2\nexit 3\n");
+        CommandKernel kernel(300);
+        const Result<Values> result = kernel.run(contextFor(*type));
+        QVERIFY(!result.ok());
+        QVERIFY2(result.error().message.contains("boom"), qPrintable(result.error().message));
+        QVERIFY(!result.error().message.contains(QChar(0x1b)) && !result.error().message.contains(QChar(0x07)));
     }
 
     // A derived handle hands over the paths withPaths resolved (its base, its other parts, its LoRAs), each bound by descriptor;

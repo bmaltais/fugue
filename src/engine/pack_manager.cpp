@@ -433,6 +433,15 @@ struct ProcessResult {
     QString output; // stdout and stderr together, last 4 KB
 };
 
+// `text` without control characters (an escape sequence a program prints could rewrite the terminal or the question shown
+// above it): a tab stays, every other C0 and C1 character and DEL become a space.
+QString withoutControls(QString text) {
+    for (QChar &c : text)
+        if ((c.unicode() < 0x20 && c != QLatin1Char('\t')) || (c.unicode() >= 0x7f && c.unicode() < 0xa0))
+            c = QLatin1Char(' ');
+    return text;
+}
+
 // Runs a program (never a shell) and passes its output on line by line.
 // `inherited`: descriptors the command line names (bwrap's --ro-bind-fd), kept open across exec in this child only.
 ProcessResult runProgram(const QString &program, const QStringList &arguments, const QString &workDir,
@@ -459,14 +468,14 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
             const int newline = pending.indexOf('\n');
             if (newline < 0)
                 break;
-            const QString line = QString::fromUtf8(pending.left(newline)).trimmed();
+            const QString line = withoutControls(QString::fromUtf8(pending.left(newline))).trimmed();
             pending.remove(0, newline + 1);
             result.output += line + QLatin1Char('\n');
             if (log && !quiet)
                 log(line);
         }
         if (all && !pending.isEmpty()) {
-            const QString line = QString::fromUtf8(pending).trimmed();
+            const QString line = withoutControls(QString::fromUtf8(pending)).trimmed();
             result.output += line + QLatin1Char('\n');
             if (log && !quiet)
                 log(line);
@@ -515,8 +524,11 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
 
 // How a pack's setup runs (6.7.1): in the sandbox when it can start, as the user only after the person's explicit yes for
 // this version (never for a community pack), else not at all. `true`: sandboxed.
+// The yes is for the files it was given for: a copy about to be installed (another source, other needs) whose digest is not the
+// one the trust recorded runs its setup in the sandbox.
 Result<bool> setupSandboxed(const TrustStore &trust, const PackSummary &pack) {
-    if (sandbox::setupUnsandboxedForTest() || (!pack.community && trust.isUnsandboxed(pack.id, pack.version)))
+    if (sandbox::setupUnsandboxedForTest() || (!pack.community && trust.isUnsandboxed(pack.id, pack.version) && !pack.secretsDigest.isEmpty()
+                                               && trust.sealedDigest(pack.id, pack.version) == pack.secretsDigest))
         return false;
     if (sandbox::available())
         return true;

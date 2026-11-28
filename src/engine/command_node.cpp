@@ -317,6 +317,9 @@ private:
         for (QString &line : lines) {
             if (line.trimmed().isEmpty())
                 continue;
+            for (QChar &c : line) // no escape sequence of the program's reaches a terminal or an error message
+                if ((c.unicode() < 0x20 && c != QLatin1Char('\t')) || (c.unicode() >= 0x7f && c.unicode() < 0xa0))
+                    c = QLatin1Char(' ');
             line = maskSecrets(line, m_secrets); // before it is cut short: a value cut in two is no longer found
             if (line.size() > 500)
                 line = line.left(500) + QStringLiteral("…");
@@ -1367,6 +1370,7 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         std::optional<Staged> staged;
         beneath::Fd workFd;
         Fetch fetch;
+        QStringList previews;
         int copies = 0;
         if (sandboxed) {
             Result<Staged> made = stageRequest(context, *slot->exchange, sent);
@@ -1379,7 +1383,17 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
                 return finish(made ? nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's work folder cannot be opened.")) : made.error());
             }
             staged.emplace(std::move(*made));
-            fetch = [&staged, &workFd, workDir, &copies](const QString &file) { return copyOut(file, *staged, workFd.get(), workDir, copies); };
+            // Each preview is a copy in the run's work folder; only the last two are kept (the window may still be reading the one
+            // before), so a program that sends previews without end fills nothing.
+            fetch = [&staged, &workFd, workDir, &copies, &previews](const QString &file) {
+                const std::optional<QString> copied = copyOut(file, *staged, workFd.get(), workDir, copies);
+                if (copied) {
+                    previews << *copied;
+                    while (previews.size() > 2)
+                        ::unlinkat(workFd.get(), QFile::encodeName(QFileInfo(previews.takeFirst()).fileName()).constData(), 0);
+                }
+                return copied;
+            };
         }
         process.sendLine(sent);
         bool heard = false;

@@ -3,6 +3,8 @@
 #include <QFile>
 #include <QRandomGenerator>
 
+#include <algorithm>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -62,15 +64,21 @@ constexpr std::uint64_t kNoLinks = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
 
 bool plainName(const QByteArray &name) { return !name.isEmpty() && name != "." && name != ".." && !name.contains('/'); }
 
-// Copies `from` to `to` until the end of `from`.
+// Copies `from` to `to` until the end of `from`, kMaxCopyBytes at most (a file that is, or grows, larger fails the copy).
 bool copyBytes(int from, int to) {
+    qint64 copied = 0;
+    const auto tooLarge = [&copied] { return copied > kMaxCopyBytes ? (remember(EFBIG), true) : false; };
     // copy_file_range first (a reflink or an in-kernel copy), then read and write when the kernel or the file systems refuse it.
     for (;;) {
-        const ssize_t done = ::copy_file_range(from, nullptr, to, nullptr, 1 << 30, 0);
+        const ssize_t done = ::copy_file_range(from, nullptr, to, nullptr, size_t(std::min<qint64>(1 << 30, kMaxCopyBytes - copied + 1)), 0);
         if (done == 0)
             return true;
-        if (done > 0)
+        if (done > 0) {
+            copied += done;
+            if (tooLarge())
+                return false;
             continue;
+        }
         if (errno == EINTR)
             continue;
         if (errno == EXDEV || errno == EINVAL || errno == ENOSYS || errno == EOPNOTSUPP || errno == EBADF)
@@ -87,6 +95,9 @@ bool copyBytes(int from, int to) {
                 continue;
             return remember(errno), false;
         }
+        copied += got;
+        if (tooLarge())
+            return false;
         for (ssize_t written = 0; written < got;) {
             const ssize_t put = ::write(to, buffer + written, size_t(got - written));
             if (put < 0) {
@@ -239,6 +250,8 @@ bool available() {
 QString lastProblem() {
     if (t_errno == ELOOP || t_errno == EXDEV)
         return QStringLiteral("a link, or a path that leaves its folder");
+    if (t_errno == EFBIG)
+        return QStringLiteral("larger than %1 GB").arg(kMaxCopyBytes >> 30);
     if (t_errno == ENOSYS)
         return QStringLiteral("this kernel has no openat2 (Linux 5.6 or newer is needed)");
     return QString::fromLocal8Bit(std::strerror(t_errno));
