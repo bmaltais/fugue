@@ -2189,9 +2189,11 @@ static int inspectFiles(int argc, char **argv) {
         if (!line.is_object())
             line = {{"error", "no answer from the engine"}};
         line["path"] = argv[i];
-        std::printf("%s\n", line.dump().c_str());
+        // A path need not be UTF-8: replaced bytes, not an exception. Each answer is flushed as it comes, so a crash
+        // on a later file keeps the earlier ones.
+        std::printf("%s\n", line.dump(-1, ' ', false, json::error_handler_t::replace).c_str());
+        std::fflush(stdout);
     }
-    std::fflush(stdout);
     return 0;
 }
 
