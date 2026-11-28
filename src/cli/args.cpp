@@ -48,7 +48,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
          {{"list", {0, 0, {"type"}, {}, nodeList}},
           {"describe", {1, -1, {}, {}, nodeDescribe}},
           {"new", {1, 1, {"id"}, {}, nodeNew}},
-          {"test", {1, 1, {}, {}, nodeTest}}}},
+          {"test", {1, 1, {}, {"no-sandbox"}, nodeTest}}}},
         {"pack",
          {{"list", {0, 0, {}, {}, packList}},
           {"info", {1, 1, {}, {}, packInfo}},

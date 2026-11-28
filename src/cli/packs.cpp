@@ -16,6 +16,7 @@
 
 #include "engine/document.h"
 #include "engine/file_hashes.h"
+#include "engine/json.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
@@ -62,7 +63,7 @@ void describe(const PackSummary &pack) {
     say(QStringLiteral("  Nodes:       %1").arg(pack.nodes.size()));
     if (!pack.setupCommand.isEmpty())
         say(QStringLiteral("  Setup:       %1").arg(displayCommand(pack.setupCommand)));
-    for (const QString &line : sandbox::plainLines(pack.needs, true))
+    for (const QString &line : sandbox::plainLines(pack.needs, true, !pack.setupCommand.isEmpty()))
         say(QStringLiteral("  Sandbox:     %1").arg(line));
     if (!sandbox::available())
         say(QStringLiteral("  Warning:     %1").arg(sandbox::unavailableHint()));
@@ -137,10 +138,16 @@ QJsonObject needsJson(const sandbox::Needs &needs) {
 
 // What a pack's programs may do (6.7.1): whether they run in the sandbox, what they declared, and the plain lines the Trust
 // question shows. A pack the person turned the sandbox off for (not a community pack's) is `sandboxed: false`.
-QJsonObject sandboxJson(const sandbox::Needs &needs, bool community, bool unsandboxed) {
+QJsonObject sandboxJson(const sandbox::Needs &needs, bool community, bool unsandboxed, bool hasSetup) {
     const bool sandboxed = community || !unsandboxed;
     return QJsonObject{{"sandboxed", sandboxed}, {"community", community}, {"needs", needsJson(needs)},
-                       {"needs_lines", QJsonArray::fromStringList(sandbox::plainLines(needs, sandboxed))}};
+                       {"needs_lines", QJsonArray::fromStringList(sandbox::plainLines(needs, sandboxed, hasSetup))}};
+}
+
+// Whether pack.json declares a setup (which runs with the network on).
+bool hasSetupOf(const QString &folder) {
+    const Result<QJsonObject> read = readJsonObject(folder + QStringLiteral("/pack.json"));
+    return read && read->contains("setup");
 }
 
 // The union of the needs of a loaded pack's nodes.
@@ -162,7 +169,7 @@ QJsonObject summaryJson(const PackSummary &pack) {
                        {"secrets_set_for_another_source", QJsonArray::fromStringList(pack.secretsOtherSource)},
                        {"nodes", QJsonArray::fromStringList(pack.nodes)},
                        {"needs", needsJson(pack.needs)},
-                       {"needs_lines", QJsonArray::fromStringList(sandbox::plainLines(pack.needs, true))}};
+                       {"needs_lines", QJsonArray::fromStringList(sandbox::plainLines(pack.needs, true, !pack.setupCommand.isEmpty()))}};
     if (!pack.setupCommand.isEmpty())
         object.insert("setup", QJsonObject{{"command", QJsonArray::fromStringList(pack.setupCommand)}, {"description", pack.setupDescription}});
     if (!pack.source.location.isEmpty()) {
@@ -200,7 +207,7 @@ Reply packList(const Command &, Context &) {
         const sandbox::Needs needs = needsOf(scratch, pack);
         const bool unsandboxed = pack.enabled && !pack.community && trust.isUnsandboxed(pack.id, pack.version);
         if (pack.enabled) {
-            const QJsonObject sandboxed = sandboxJson(needs, pack.community, unsandboxed);
+            const QJsonObject sandboxed = sandboxJson(needs, pack.community, unsandboxed, hasSetupOf(pack.path));
             for (auto it = sandboxed.begin(); it != sandboxed.end(); ++it)
                 object.insert(it.key(), it.value());
         }
@@ -548,7 +555,7 @@ Reply packInfo(const Command &command, Context &) {
             continue;
         const bool unsandboxed = !pack.community && trust.isUnsandboxed(pack.id, pack.version);
         const bool trusted = trust.isTrusted(pack.id, pack.version);
-        QJsonObject object = sandboxJson(needsOf(scratch, pack), pack.community, unsandboxed);
+        QJsonObject object = sandboxJson(needsOf(scratch, pack), pack.community, unsandboxed, hasSetupOf(pack.path));
         object.insert("id", pack.id);
         object.insert("version", pack.version);
         object.insert("name", pack.name);

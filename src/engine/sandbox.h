@@ -22,7 +22,8 @@ namespace fugue::sandbox {
 // What a node declares (node.json `needs`, 6.3) that the sandbox honours.
 struct Needs {
     bool network = false;
-    bool gpu = false;        // declared and shown; the device binds are slice 2 of #731
+    bool gpu = false;        // the device nodes of NVIDIA's driver are bound (and /dev/dri when gpu.api is "vulkan")
+    QString gpuApi;          // gpu.api as declared ("any", "cuda", "vulkan"), empty when none
     QStringList readPaths;   // absolute, cleaned
     QStringList writePaths;  // absolute, cleaned
 
@@ -30,8 +31,9 @@ struct Needs {
 
 // `needs.gpu` is an object (6.3) or `true`; `network` a bool; `files` is a bool (the old form: nothing is granted) or
 // `{"read": [...], "write": [...]}` of absolute paths or `~/...` (`home` stands for ~; empty: the user's home folder).
-// A path that is relative, or that is, contains or lies inside a path of denied() is an error naming it. Unknown keys
-// are not this module's business.
+// Grants are an allowlist (6.7.1): `write` only inside the output folder; `read` anywhere except $HOME itself, a dot folder
+// or file under it, Fugue's own folders, /tmp, /var/tmp, /run, /dev, /proc, /sys, /etc, /root and /boot; and a path that is,
+// holds or lies inside a path of denied() is refused too. Unknown keys are not this module's business.
 Result<Needs> parseNeeds(const QJsonObject &needs, const QString &home = {});
 // What a manifest's `needs` says is wrong for the sandbox, or empty; the node loader calls it so a bad one refuses to load.
 QString needsProblem(const QJsonObject &needs);
@@ -47,21 +49,22 @@ QString deniedReason(const QString &path, const QString &home = {});
 // The plain lines the Trust question and `pack info` show: "Can use the network", "Can use the GPU", "Can read ~/X",
 // "Can write ~/X"; for a pack that asks for nothing, the sentence that says what it sees; for one that is not
 // sandboxed, "NOT sandboxed: this pack's program runs as you.".
-QStringList plainLines(const Needs &needs, bool sandboxed, const QString &home = {});
+QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup = false, const QString &home = {});
 
 struct Profile {
     enum class Kind { Run, Setup };
     Kind kind = Kind::Run;
     QString packDir;               // the pack's folder
     QString workDir;               // Run: the run's work folder (writable, the program's working directory)
-    QStringList writableFolders;   // Run: more folders to write in (a persistent program shares the runs folder)
     Needs needs;
     QStringList handedFiles;       // read-only: the inputs and model files it is given
     QStringList allowedRoots;      // a handed file that is a symlink binds its target only inside one of these
     QString program;               // run inside: the node's entry, or the setup command's program
     QStringList arguments;
     QStringList environment;       // NAME=value, added to the clean one (FUGUE_PROTOCOL, FUGUE_NODE_DIR, ...)
-    QString uvCache;               // Setup: the folder uv may write its cache in (made by the caller)
+    QString uvCache;               // Setup: the folder uv may write its cache in (made by the caller): Fugue's own, per pack
+    QString exchangeDir;           // Run: a folder, made by the caller, that a program kept between runs reads and writes in (writable)
+    QStringList gpuNodes;          // the device paths to bind when needs.gpu (empty: found under /dev)
     QString home;                  // the real home, for the uv folders; empty: the user's
 };
 
@@ -75,10 +78,15 @@ struct Command {
 // The bwrap command line for `profile`. Paths are made canonical; the program is looked up on PATH when not absolute.
 Command build(const Profile &profile);
 
-// bwrap's path, empty when it is not installed.
+// /usr/bin/bwrap, empty when it is not there: never looked up on PATH, which a pack's program or a project could shape.
 QString bwrapPath();
-// Whether bwrap is installed and can make a user namespace here: `bwrap --unshare-user --ro-bind / / true`, run once and
-// remembered. Not installed, or the kernel or policy refuses it: false.
+// uv's folder of Python installs as uv finds it (UV_PYTHON_INSTALL_DIR, XDG_DATA_HOME/uv/python, ~/.local/share/uv/python).
+QString uvPythonDir(const QString &home = {});
+// The uv cache of a pack's setup: Fugue's own, one per pack, never the user's ~/.cache/uv (uv links its files into venvs).
+QString uvCacheFor(const QString &packId);
+
+// Whether bwrap (0.8 or newer) is installed and can make a user namespace here with the flags of a real run
+// (`--unshare-all --unshare-user --disable-userns --new-session --die-with-parent`), tried once and remembered.
 bool available();
 // Why not, and what to do about it, for the error `sandbox_unavailable` (empty when available).
 QString unavailableHint();

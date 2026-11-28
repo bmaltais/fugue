@@ -163,7 +163,8 @@ private slots:
         QCOMPARE(info.value("sandboxed").toBool(), true);
         QCOMPARE(info.value("needs").toObject().value("network").toBool(), true);
         QCOMPARE(info.value("needs_lines").toArray().at(0).toString(), QString("Can use the network"));
-        QCOMPARE(info.value("needs_lines").toArray().at(1).toString(), QString("Can read ~/Documents/Scans"));
+        QCOMPARE(info.value("needs_lines").toArray().at(1).toString(), QString("Can reach services on this computer"));
+        QCOMPARE(info.value("needs_lines").toArray().at(2).toString(), QString("Can read ~/Documents/Scans"));
         QVERIFY(QString::fromUtf8(fugue({"pack", "info", "io.example.net"}).out).contains("Can use the network"));
 
         // Without a person the sandbox stays on; a community pack's can never be turned off.
@@ -230,7 +231,7 @@ private slots:
         QFile file(source + "/pack.json");
         QVERIFY(file.open(QIODevice::ReadWrite));
         QJsonObject pack = QJsonDocument::fromJson(file.readAll()).object();
-        pack["setup"] = QJsonObject{{"command", QJsonArray{"touch", "made it"}}, {"description", "Make a marker"}};
+        pack["setup"] = QJsonObject{{"command", QJsonArray{"touch", ".venv/made it"}}, {"description", "Make a marker"}};
         file.resize(0);
         file.seek(0);
         file.write(QJsonDocument(pack).toJson());
@@ -239,8 +240,8 @@ private slots:
         int exitCode = -1;
         const QString shown = atTerminal({"pack", "add", source}, "y\n", &exitCode); // one yes: install, setup and trust
         QVERIFY2(exitCode == 0, qPrintable(shown));
-        QVERIFY2(shown.contains("touch 'made it'"), qPrintable(shown)); // the command is in the list it asked about
-        QVERIFY(QFileInfo(packs() + "/io.example.setup/made it").exists());
+        QVERIFY2(shown.contains("touch '.venv/made it'"), qPrintable(shown)); // the command is in the list it asked about
+        QVERIFY(QFileInfo(packs() + "/io.example.setup/.venv/made it").exists());
     }
 
     // Review of #379: what cannot be made ready is not "ready": the problems are reported with a non-zero exit.

@@ -52,7 +52,10 @@ QStringList inheritedPackPaths();
 // A hash of what decides which secrets a pack is handed and where they go: the names and origin rules of its `settings`
 // and where it came from (`.fugue-source.json`, the key its values are stored under). Labels and descriptions are not in
 // it. The trust store keeps it with a yes, so a pack edited in place to read other secrets asks again (#497).
-QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation);
+QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation, const QString &needsDigest);
+// A hash of the `needs` of every node folder `nodes` names under `folder`, read from their node.json: what the sandbox gives the
+// pack's programs (6.7.1). It is part of the digest a yes to trust covers, so a pack edited to ask for more asks again.
+QString packNeedsDigest(const QString &folder, const QStringList &nodes);
 // The digest of the pack of this id and version as the loader last parsed it (loadPack, Disk packs): not another folder
 // that names the same pack. Empty for a pack that was not loaded.
 QString packSecretsDigest(const QString &id, const QString &version);

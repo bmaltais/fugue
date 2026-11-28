@@ -2,6 +2,7 @@
 
 #include "engine/json.h"
 #include "engine/pack_loader.h"
+#include "engine/paths.h"
 #include "engine/pack_secrets.h"
 #include "engine/registry.h"
 #include "engine/sandbox.h"
@@ -18,6 +19,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QSysInfo>
 #include <QSet>
 #include <QUuid>
@@ -406,7 +408,7 @@ struct ProcessResult {
 // Runs a program (never a shell) and passes its output on line by line.
 ProcessResult runProgram(const QString &program, const QStringList &arguments, const QString &workDir,
                          const std::function<void(const QString &)> &log, bool quiet = false,
-                         const std::function<bool()> &cancelled = {}, bool ownGroup = false) {
+                         const std::function<bool()> &cancelled = {}, bool ownGroup = false, bool cleanUv = false) {
     ProcessResult result;
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
@@ -414,6 +416,12 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
         process.setWorkingDirectory(workDir);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
+    if (cleanUv) { // no mirror, index or config variable of uv's: only the folder the sandbox binds
+        for (const QString &name : env.keys())
+            if (name.startsWith(QLatin1String("UV_")) || name.startsWith(QLatin1String("PIP_")))
+                env.remove(name);
+        env.insert(QStringLiteral("UV_PYTHON_INSTALL_DIR"), sandbox::uvPythonDir());
+    }
     process.setProcessEnvironment(env);
     QByteArray pending;
     const auto flush = [&](bool all) {
@@ -484,29 +492,6 @@ Result<bool> setupSandboxed(const TrustStore &trust, const PackSummary &pack) {
                            sandbox::unavailableHint()));
 }
 
-// The folder uv keeps its cache in, as uv finds it.
-QString uvCacheDir() {
-    if (const QString set = qEnvironmentVariable("UV_CACHE_DIR"); set.startsWith(QLatin1Char('/')))
-        return set;
-    const QString cache = qEnvironmentVariable("XDG_CACHE_HOME");
-    return (cache.startsWith(QLatin1Char('/')) ? cache : QDir::homePath() + QStringLiteral("/.cache")) + QStringLiteral("/uv");
-}
-
-// Runs the pack's setup command in `folder`: in the sandbox (the network on, the folder and uv's cache writable) or as the user.
-ProcessResult runSetupCommand(const QStringList &command, const QString &folder, bool sandboxed, const PackPrompts &prompts) {
-    if (!sandboxed)
-        return runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled, true);
-    sandbox::Profile profile;
-    profile.kind = sandbox::Profile::Kind::Setup;
-    profile.packDir = folder;
-    profile.program = command.first();
-    profile.arguments = command.mid(1);
-    profile.uvCache = uvCacheDir();
-    QDir().mkpath(profile.uvCache);
-    const sandbox::Command wrapped = sandbox::build(profile);
-    return runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true);
-}
-
 // The folder of the installed pack `id`: in the packs folder, or in a folder of the settings (trust is for any pack found), or
 // else an inherited one (`inherited` is then set too). Empty when there is none.
 QString findPackFolder(const QString &id, const QString &packsDir, QString *inherited = nullptr) {
@@ -524,6 +509,67 @@ QString findPackFolder(const QString &id, const QString &packsDir, QString *inhe
             *inherited = folder;
     }
     return folder;
+}
+
+// The Python the pack asks for, when it names one exactly (.python-version, or a `requires-python` that is a plain version):
+// the one uv is told to install. Anything else (a range) is left to what is installed already.
+QString wantedPython(const QString &folder) {
+    static const QRegularExpression plain(QStringLiteral("^3\\.\\d{1,2}(\\.\\d{1,2})?$"));
+    QString text;
+    if (QFile file(folder + QStringLiteral("/.python-version")); file.open(QIODevice::ReadOnly))
+        text = QString::fromUtf8(file.readLine()).trimmed();
+    else if (QFile toml(folder + QStringLiteral("/pyproject.toml")); toml.open(QIODevice::ReadOnly)) {
+        const QRegularExpressionMatch match = QRegularExpression(QStringLiteral("^requires-python\\s*=\\s*\"([^\"]*)\"")).match(QString::fromUtf8(toml.read(65536)));
+        text = match.hasMatch() ? match.captured(1).trimmed() : QString();
+    }
+    return plain.match(text).hasMatch() ? text : QString();
+}
+
+// Fugue installs the interpreter itself, so the sandbox can keep uv's Python folder read-only: `uv python install` as the user,
+// with no uv configuration (cwd outside the pack, `--no-config`, every UV_* variable but the folder dropped), for a version
+// that wantedPython accepted. The pack's uv.toml and pyproject.toml are never read by this uv. Empty on success.
+QString installInterpreter(const QStringList &command, const QString &folder, const PackPrompts &prompts) {
+    if (command.isEmpty() || QFileInfo(command.first()).fileName() != QLatin1String("uv"))
+        return {};
+    const QString version = wantedPython(folder);
+    if (version.isEmpty())
+        return {};
+    const QString uv = QStandardPaths::findExecutable(command.first());
+    if (uv.isEmpty())
+        return {};
+    const QString elsewhere = cacheDir() + QStringLiteral("/uv-python-install");
+    QDir().mkpath(elsewhere);
+    QDir().mkpath(sandbox::uvPythonDir());
+    const ProcessResult done = runProgram(uv, {QStringLiteral("python"), QStringLiteral("install"), QStringLiteral("--no-config"), version}, elsewhere,
+                                          prompts.log, false, prompts.cancelled, true, /*cleanUv*/ true);
+    return done.ok ? QString() : done.output.trimmed();
+}
+
+// Runs the pack's setup command in `folder`: in the sandbox (the network on, only `.venv` and uv.lock of the pack and Fugue's own
+// uv cache for this pack writable) or as the user. After a sandboxed run `.venv` must still be a folder, not a link.
+ProcessResult runSetupCommand(const QStringList &command, const QString &folder, const QString &packId, bool sandboxed, const PackPrompts &prompts) {
+    if (!sandboxed)
+        return runProgram(command.first(), command.mid(1), folder, prompts.log, false, prompts.cancelled, true);
+    if (const QString why = installInterpreter(command, folder, prompts); !why.isEmpty())
+        return ProcessResult{false, -1, QStringLiteral("The Python the pack asks for could not be installed: ") + why};
+    const QString environment = folder + QStringLiteral("/.venv");
+    if (QFileInfo(environment).isSymLink())
+        return ProcessResult{false, -1, QStringLiteral(".venv is a link; a pack's environment folder must be a folder.")};
+    QDir().mkpath(environment);
+    sandbox::Profile profile;
+    profile.kind = sandbox::Profile::Kind::Setup;
+    profile.packDir = folder;
+    profile.program = command.first();
+    profile.arguments = command.mid(1);
+    profile.uvCache = sandbox::uvCacheFor(packId);
+    QDir().mkpath(profile.uvCache);
+    const sandbox::Command wrapped = sandbox::build(profile);
+    ProcessResult done = runProgram(wrapped.program, wrapped.arguments, folder, prompts.log, false, prompts.cancelled, true);
+    if (done.ok && QFileInfo(environment).isSymLink()) {
+        done.ok = false;
+        done.output += QStringLiteral("\n.venv became a link during the setup; a pack's environment folder must be a folder.");
+    }
+    return done;
 }
 
 Result<QJsonObject> readPackJson(const QString &folder) {
@@ -870,7 +916,10 @@ static Result<PackSummary> summarizeAt(const QString &folder, PackDigest record)
     if (const QJsonValue size = json->value("setup").toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
         summary.setupSize = qint64(size.toDouble());
     summary.source = readPackSource(folder);
-    summary.secretsDigest = packSecretsDigestOf(loaded.secrets, summary.source.location);
+    QStringList nodeNames;
+    for (const QJsonValue &node : json->value("nodes").toArray())
+        nodeNames << node.toString();
+    summary.secretsDigest = packSecretsDigestOf(loaded.secrets, summary.source.location, packNeedsDigest(folder, nodeNames));
     fillSecretState(summary);
     QStringList shown{summary.name, summary.version, summary.setupDescription};
     shown += summary.setupCommand;
@@ -894,6 +943,9 @@ Error warningOf(Error error, const QString &prefix = {}) {
 
 // Records that the setup command ran to its end in the pack's folder (best effort: without it Get ready offers the setup again).
 void markSetupDone(const QString &packFolder, const QStringList &command) {
+    // A link there (a pack shipped one) is removed, never written through: the marker is a plain file of ours.
+    if (QFileInfo(packFolder + QLatin1Char('/') + setupMarkerFile).isSymLink())
+        QFile::remove(packFolder + QLatin1Char('/') + setupMarkerFile);
     writeJsonFile(packFolder + QLatin1Char('/') + setupMarkerFile,
                   QJsonObject{{"command", QJsonArray::fromStringList(command)}, {"ran", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
 }
@@ -997,7 +1049,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     }
     if (runSetup) {
         const QStringList &command = summary.setupCommand;
-        const ProcessResult done = runSetupCommand(command, target, setupInSandbox, prompts);
+        const ProcessResult done = runSetupCommand(command, target, summary.id, setupInSandbox, prompts);
         if (!done.ok) {
             const bool stopped = prompts.cancelled && prompts.cancelled(); // a stop kills the setup, so it ends like a failure (#418)
             QString lost;
@@ -1386,7 +1438,7 @@ Result<PackSummary> setUpPack(const QString &id, const QString &packsDir, const 
     if (prompts.cancelled && prompts.cancelled())
         return fail(QStringLiteral("cancelled"), QStringLiteral("Stopped before the setup of %1.").arg(summary->id));
     const QStringList &command = summary->setupCommand;
-    const ProcessResult done = runSetupCommand(command, folder, *mode, prompts);
+    const ProcessResult done = runSetupCommand(command, folder, summary->id, *mode, prompts);
     if (!done.ok && prompts.cancelled && prompts.cancelled())
         return fail(QStringLiteral("cancelled"), QStringLiteral("The setup of %1 was stopped; its environment may be half made.").arg(summary->id),
                     QStringLiteral("Run the setup again from Get ready."));

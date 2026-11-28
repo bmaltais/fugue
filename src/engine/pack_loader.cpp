@@ -345,6 +345,10 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
             if (spec.originRequired)
                 type.packSecretsOriginRequired << spec.name;
         type.packCommunity = pack.community;
+        if (origin != PackOrigin::BuiltIn && type.needs.value("files").isBool() && type.needs.value("files").toBool())
+            warnings << problem(QStringLiteral("invalid_document"),
+                                QStringLiteral("%1: needs.files: true grants a sandboxed program nothing; list the folders in {\"read\": [...], \"write\": [...]}.").arg(name),
+                                Error::Severity::Warning);
         if (!pack.secrets.isEmpty())
             type.packSource = readPackSource(folder).location;
         if (runtime.value("kind").toString() == QLatin1String("command"))
@@ -507,14 +511,28 @@ Result<QJsonObject> readPackJson(const QString &folder, QByteArray &bytes) {
 
 } // namespace
 
-QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation) {
+QString packNeedsDigest(const QString &folder, const QStringList &nodes) {
+    QStringList sorted = nodes;
+    sorted.sort();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const QString &node : std::as_const(sorted)) {
+        const Result<QJsonObject> read = readJsonObject(folder + QLatin1Char('/') + node + QStringLiteral("/node.json"));
+        hash.addData(node.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(QJsonDocument(read ? read->value("needs").toObject() : QJsonObject()).toJson(QJsonDocument::Compact));
+        hash.addData(QByteArrayView("\0", 1));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+QString packSecretsDigestOf(const QList<PackSecretSpec> &secrets, const QString &sourceLocation, const QString &needsDigest) {
     // The name and origin rule of each declared secret and where the pack came from (the key its values are stored
     // under): what decides which values it is handed and where they may go. Labels and descriptions are only text.
     QStringList lines;
     for (const PackSecretSpec &spec : secrets)
         lines << spec.name + QLatin1Char(':') + (spec.originRequired ? QStringLiteral("required") : QStringLiteral("optional"));
     lines.sort();
-    lines << QStringLiteral("source:") + sourceLocation;
+    lines << QStringLiteral("source:") + sourceLocation << QStringLiteral("needs:") + needsDigest;
     return QString::fromLatin1(QCryptographicHash::hash(lines.join(QLatin1Char('\n')).toUtf8(), QCryptographicHash::Sha256).toHex());
 }
 
@@ -530,7 +548,7 @@ QString packSecretsDigestOfFolder(const QString &folder) {
         return {};
     Errors ignored;
     const std::optional<PackManifest> pack = parsePack(read.value(), PackOrigin::Disk, ignored);
-    return pack ? packSecretsDigestOf(pack->secrets, readPackSource(folder).location) : QString();
+    return pack ? packSecretsDigestOf(pack->secrets, readPackSource(folder).location, packNeedsDigest(folder, pack->nodes)) : QString();
 }
 
 LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin, PackDigest record) {
@@ -603,7 +621,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.enabled = true;
     if (origin == PackOrigin::Disk && record == PackDigest::Record) {
         // What trust compares (6.7): the secrets this load parsed, not another folder that happens to name the same pack.
-        const QString digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location);
+        const QString digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location, packNeedsDigest(folder, pack->nodes));
         {
             QMutexLocker lock(&digestLock());
             loadedDigests().insert(digestKey(pack->id, pack->version), digest);

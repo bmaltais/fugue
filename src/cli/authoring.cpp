@@ -274,11 +274,12 @@ Reply nodeNew(const Command &command, Context &) {
 
 // A node under test gets no stored secret (6.4.1): the folder is not an installed, trusted pack, and its `.fugue-source.json`
 // is only a file in it, so a look-alike that copied one would otherwise get the real pack's keys.
-static NodeType withoutSecrets(NodeType type) {
+static NodeType withoutSecrets(NodeType type, bool sandboxed) {
     type.packSecrets.clear();
     type.packSecretsOriginRequired.clear();
     type.packSource.clear();
-    type.packVersion.clear(); // an author's own folder, not an installed pack: not wrapped in the sandbox (6.7.1)
+    if (!sandboxed)
+        type.packVersion.clear(); // `--no-sandbox`: the program runs as you (6.7.1)
     return type;
 }
 
@@ -315,6 +316,8 @@ Reply nodeTest(const Command &command, Context &) {
 
     QJsonArray report;
     QStringList lines;
+    if (command.has("no-sandbox"))
+        lines << QStringLiteral("Warning: --no-sandbox: the node's program runs as you, not in the sandbox.");
     Errors errors;
     int tested = 0;
     for (const QString &id : loaded.nodes) {
@@ -336,7 +339,7 @@ Reply nodeTest(const Command &command, Context &) {
             QStringList progress;
             QElapsedTimer timer;
             timer.start();
-            const Errors failed = runCase(kernel, withoutSecrets(*type), test, hashes, scratch.path(), outputs, progress);
+            const Errors failed = runCase(kernel, withoutSecrets(*type, !command.has("no-sandbox")), test, hashes, scratch.path(), outputs, progress);
             const double seconds = timer.elapsed() / 1000.0;
             report.append(QJsonObject{{"node", id}, {"case", test.name}, {"ok", failed.isEmpty()}, {"outputs", outputs},
                                       {"progress", QJsonArray::fromStringList(progress)}, {"seconds", seconds}});

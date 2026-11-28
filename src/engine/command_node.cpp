@@ -1,6 +1,8 @@
 #include "command_node.h"
 
 #include <QDeadlineTimer>
+#include <QDateTime>
+#include <QUuid>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -22,6 +24,8 @@
 #include <map>
 #include <optional>
 
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -740,7 +744,7 @@ struct Launch {
     QString program;
     QStringList arguments;
     QProcessEnvironment environment;
-    QStringList mounted; // what the program can see besides its own folder and /usr: a program that lives on cannot see more
+    QStringList mounted; // the model files its sandbox has bound: a program that lives on cannot see others
 };
 
 bool inFolder(const QString &path, const QString &folder) {
@@ -765,85 +769,179 @@ QString packFolderOf(const QString &nodeFolder) {
     return !parent.isEmpty() && QFileInfo::exists(parent + QStringLiteral("/pack.json")) ? parent : nodeFolder;
 }
 
-// `value` with every {"path": …} text replaced by change(path).
-QJsonValue mapPaths(const QJsonValue &value, const std::function<QString(const QString &)> &change) {
+// `value` with each top-level {"path": …} of a handle (or of each handle of a list) replaced by change(path).
+QJsonValue mapHandlePaths(const QJsonValue &value, const std::function<QString(const QString &)> &change) {
     if (value.isArray()) {
         QJsonArray items;
         for (const QJsonValue &item : value.toArray())
-            items.append(mapPaths(item, change));
+            items.append(mapHandlePaths(item, change));
         return items;
     }
-    if (!value.isObject())
+    if (!value.isObject() || !value.toObject().value("path").isString())
         return value;
     QJsonObject object = value.toObject();
-    for (auto it = object.begin(); it != object.end(); ++it)
-        it.value() = it.key() == QLatin1String("path") && it.value().isString() ? QJsonValue(change(it.value().toString()))
-                                                                                    : mapPaths(it.value(), change);
+    object.insert("path", change(object.value("path").toString()));
     return object;
 }
 
-// What the program is handed besides the work folder. A model file stays where it is and is bound read-only; any other
-// file (a picture, a video) is copied into the run's `.inputs` folder unless it is in a run folder already, so a program
-// that lives on between runs finds the next run's files without being started again. The request's paths are changed to the copies.
-QStringList handOff(const NodeContext &context, QJsonObject &request) {
-    const QString workDir = QFileInfo(context.workDir).canonicalFilePath();
-    const QString runs = QFileInfo(RunFolder::defaultRoot()).canonicalFilePath();
-    QStringList models;
-    int copies = 0;
-    const auto stage = [&](const QString &path) {
-        const QString real = QFileInfo(path).canonicalFilePath();
-        if (real.isEmpty() || workDir.isEmpty() || inFolder(real, workDir) || (!runs.isEmpty() && inFolder(real, runs)))
-            return path;
-        const QString name = QStringLiteral("%1/.inputs/%2-%3").arg(workDir).arg(++copies).arg(QFileInfo(real).fileName());
-        QDir().mkpath(QFileInfo(name).absolutePath());
-        return QFile::copy(real, name) ? name : path;
-    };
-    QJsonObject inputs = request.value("inputs").toObject();
+// A folder that a program kept between runs reads and writes in, outside the runs folder: each request gets a subfolder,
+// and Fugue copies the inputs in and the outputs out, so the program never writes where another run's records are (#731).
+struct Exchange {
+    explicit Exchange(const QString &base) {
+        QDir().mkpath(base);
+        removeStale(base);
+        path = base + QStringLiteral("/p-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QDir().mkpath(path);
+        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    }
+    ~Exchange() {
+        if (!path.isEmpty())
+            QDir(path).removeRecursively();
+    }
+    Exchange(const Exchange &) = delete;
+    Exchange &operator=(const Exchange &) = delete;
+    QString path;
+
+private:
+    // What a crashed Fugue left: folders older than a day.
+    static void removeStale(const QString &base) {
+        for (const QFileInfo &entry : QDir(base).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
+            if (entry.lastModified().secsTo(QDateTime::currentDateTime()) > 86400)
+                QDir(entry.filePath()).removeRecursively();
+    }
+};
+
+// The model files a node is handed: the `path` of each resolved handle of a resource input, which must lie in a model folder (or
+// be a link into one). Another file, or any other "path" text in the value, is not handed over. Else an error.
+Result<QStringList> modelFilesOf(const NodeContext &context, const QJsonObject &inputs) {
+    QStringList roots;
+    for (const QString &root : ModelLibrary::current(context.registry).roots())
+        if (const QString real = QFileInfo(root).canonicalFilePath(); !real.isEmpty())
+            roots << real;
+    QStringList files;
     for (auto it = inputs.begin(); it != inputs.end(); ++it) {
         const InputSpec *spec = context.type->input(it.key());
-        const bool resource = spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource;
-        if (resource)
-            mapPaths(it.value(), [&](const QString &path) {
-                if (!models.contains(path))
-                    models << path;
-                return path;
-            });
-        else
-            it.value() = mapPaths(it.value(), stage);
+        if (!spec || !context.registry || context.registry->portKind(spec->type.type) != PortKind::Resource)
+            continue;
+        QString refused;
+        mapHandlePaths(it.value(), [&](const QString &path) {
+            const QString real = QFileInfo(path).canonicalFilePath();
+            if (real.isEmpty() || !covered(roots, real))
+                refused = path;
+            else if (!files.contains(path))
+                files << path;
+            return path;
+        });
+        if (!refused.isEmpty())
+            return nodeError(QStringLiteral("node_failed"), QStringLiteral("The model file %1 of %2 is not in a model folder, so it is not handed to a sandboxed program.")
+                                                                .arg(refused, it.key()));
     }
-    request.insert("inputs", inputs);
-    return models;
+    return files;
 }
 
-// The program started inside bubblewrap: the node's entry, its pack, the run's work folder and the model files in `models`.
-Result<Launch> sandboxedLaunch(const NodeContext &context, const QString &folder, const QString &program,
-                               const QStringList &models, bool persistent) {
+// The other files a node is handed (pictures, videos, what an earlier node made), by the top-level path of each handle.
+QStringList mediaFilesOf(const NodeContext &context, const QJsonObject &inputs) {
+    QStringList files;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = context.type->input(it.key());
+        if (spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource)
+            continue;
+        mapHandlePaths(it.value(), [&](const QString &path) {
+            if (!files.contains(path))
+                files << path;
+            return path;
+        });
+    }
+    return files;
+}
+
+// Copies `from` (a plain file, never a link, read through a descriptor opened without following links) to `to`.
+bool copyPlainFile(const QString &from, const QString &to) {
+    const int in = ::open(QFile::encodeName(from).constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (in < 0)
+        return false;
+    struct stat info {};
+    if (::fstat(in, &info) != 0 || !S_ISREG(info.st_mode)) {
+        ::close(in);
+        return false;
+    }
+    QDir().mkpath(QFileInfo(to).absolutePath());
+    const int out = ::open(QFile::encodeName(to).constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    bool ok = out >= 0;
+    char buffer[1 << 16];
+    while (ok) {
+        const ssize_t got = ::read(in, buffer, sizeof buffer);
+        if (got == 0)
+            break;
+        ok = got > 0 && ::write(out, buffer, size_t(got)) == got;
+    }
+    ::close(in);
+    if (out >= 0)
+        ::close(out);
+    if (!ok)
+        QFile::remove(to);
+    return ok;
+}
+
+// A file the program wrote in its exchange folder, copied into the run's own work folder; the new path, or `path` unchanged when
+// it is not a plain file inside the exchange folder (the run then fails on it as a path outside the work folder).
+QString copyOut(const QString &path, const QString &exchangeWork, const QString &workDir, int &counter) {
+    const QString absolute = QDir(exchangeWork).absoluteFilePath(path);
+    const QString real = QFileInfo(absolute).canonicalFilePath();
+    if (real.isEmpty() || !inFolder(real, exchangeWork))
+        return path;
+    QString name = QFileInfo(real).fileName();
+    if (QFileInfo::exists(workDir + QLatin1Char('/') + name))
+        name = QStringLiteral("%1-%2").arg(++counter).arg(name);
+    const QString to = workDir + QLatin1Char('/') + name;
+    return copyPlainFile(real, to) ? to : path;
+}
+
+// A request for a sandboxed program that lives on: this request's subfolder of the exchange folder, the media files copied into
+// it (a model file is bound where it is), and the request's paths and work_dir changed to it.
+QString stageRequest(const NodeContext &context, const QString &exchange, int serial, QJsonObject &request) {
+    const QString folder = QStringLiteral("%1/%2").arg(exchange).arg(serial);
+    QDir().mkpath(folder + QStringLiteral("/work"));
+    QJsonObject inputs = request.value("inputs").toObject();
+    int copies = 0;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = context.type->input(it.key());
+        if (spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource)
+            continue;
+        it.value() = mapHandlePaths(it.value(), [&](const QString &path) {
+            const QString real = QFileInfo(path).canonicalFilePath();
+            const QString to = QStringLiteral("%1/in/%2-%3").arg(folder).arg(++copies).arg(QFileInfo(path).fileName());
+            return !real.isEmpty() && copyPlainFile(real, to) ? to : path;
+        });
+    }
+    request.insert("inputs", inputs);
+    request.insert("work_dir", folder + QStringLiteral("/work"));
+    return folder;
+}
+
+// The program started inside bubblewrap: the node's entry, its pack, its work folder (a one-shot's own, or the exchange folder of a
+// program that lives on) and the files in `files`.
+Result<Launch> sandboxedLaunch(const NodeContext &context, const QString &folder, const QString &program, const QString &workDir,
+                               const QStringList &files) {
     const NodeType &type = *context.type;
     const Result<sandbox::Needs> needs = sandbox::parseNeeds(type.needs);
     if (!needs)
         return nodeError(QStringLiteral("node_failed"), QStringLiteral("%1: %2").arg(type.id, needs.error().message));
     sandbox::Profile profile;
     profile.packDir = packFolderOf(folder);
-    profile.workDir = context.workDir;
+    profile.workDir = workDir;
     profile.needs = *needs;
-    profile.handedFiles = models;
+    profile.handedFiles = files;
     profile.allowedRoots = ModelLibrary::current(context.registry).roots();
     profile.program = program;
-    profile.environment = {QStringLiteral("FUGUE_PROTOCOL=1"), QStringLiteral("FUGUE_NODE_DIR=") + folder,
-                           QStringLiteral("FUGUE_WORK_DIR=") + context.workDir};
-    const QString runs = QFileInfo(RunFolder::defaultRoot()).canonicalFilePath();
-    // A program that lives on between runs is started once: the folder of every run is writable for it.
-    if (persistent && !runs.isEmpty())
-        profile.writableFolders << runs;
+    profile.environment = {QStringLiteral("FUGUE_PROTOCOL=1"), QStringLiteral("FUGUE_NODE_DIR=") + folder, QStringLiteral("FUGUE_WORK_DIR=") + workDir};
     const sandbox::Command command = sandbox::build(profile);
     Launch launch;
     launch.program = command.program;
     launch.arguments = command.arguments;
     launch.environment = QProcessEnvironment::systemEnvironment();
-    launch.mounted = command.mounted;
-    launch.mounted << QFileInfo(context.workDir).canonicalFilePath() << profile.writableFolders;
-    for (const QString &model : models)
-        launch.mounted << QDir::cleanPath(model); // also one that was left out: starting again would not help
+    for (const QString &file : files)
+        launch.mounted << QDir::cleanPath(file); // also one that was left out: starting again would not help
     return launch;
 }
 
@@ -913,6 +1011,8 @@ struct CommandKernel::Impl {
         QString seal; // NodeType::seal of the files `process` was started from, and whether it runs in the sandbox
         QStringList models;  // the model files its sandbox has bound
         QStringList mounted; // what its sandbox can see (Launch::mounted)
+        std::shared_ptr<Exchange> exchange; // the folder it works in (sandboxed only)
+        int serial = 0;
         // While the program is a resident model: the payload ResidentModels holds, whose drop
         // stops the program and waits for it, so the memory is back when the drop returns. Weak,
         // so that only ResidentModels keeps it.
@@ -1053,12 +1153,25 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         }
         request.insert("secrets", secrets);
     }
+    // A sandboxed program is handed model files from a model folder only; a one-shot gets its media files bound read-only, a
+    // program that lives on gets copies in its exchange folder (staged per request below).
     QStringList models;
-    if (sandboxed)
-        models = handOff(context, request);
-    const auto launchFor = [&](const QStringList &bound) -> Result<Launch> {
+    QStringList media;
+    const QString workDir = QFileInfo(context.workDir).canonicalFilePath();
+    if (sandboxed) {
+        const QJsonObject inputs = request.value("inputs").toObject();
+        const Result<QStringList> found = modelFilesOf(context, inputs);
+        if (!found)
+            return found.error();
+        models = *found;
+        media = mediaFilesOf(context, inputs);
+        if (workDir.isEmpty())
+            return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's work folder is gone."));
+        request.insert("work_dir", workDir); // the folder that is bound is the one the program is told
+    }
+    const auto launchFor = [&](const QString &where, const QStringList &bound) -> Result<Launch> {
         if (sandboxed)
-            return sandboxedLaunch(context, folder, program, bound, persistent);
+            return sandboxedLaunch(context, folder, program, where, bound);
         return Launch{program, {}, environment, {}};
     };
     // What the program says as it goes (progress lines) goes through the same mask.
@@ -1070,7 +1183,7 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     const auto finish = [&secretValues](Result<Values> result) { return maskedOutputs(std::move(result), secretValues); };
 
     if (!persistent) {
-        const Result<Launch> launched = launchFor(models);
+        const Result<Launch> launched = launchFor(workDir, models + media);
         if (!launched)
             return finish(launched.error());
         const Launch &launch = *launched;
@@ -1109,7 +1222,7 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     // The sandbox of a program that lives on shows it only what it was started with: a model file or a work folder it
     // cannot see means starting it again, with the model files it had before and this run's.
     if (sandboxed && slot->process) {
-        bool seen = covered(slot->mounted, QFileInfo(context.workDir).canonicalFilePath());
+        bool seen = true;
         for (const QString &model : models)
             seen = seen && covered(slot->mounted, QDir::cleanPath(model));
         if (!seen) {
@@ -1129,7 +1242,9 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         if (!slot->process || !slot->process->acquire()) {
             reused = false;
             const double idle = runtime.value("idle_timeout_s").toDouble(300);
-            const Result<Launch> launched = launchFor(slot->models);
+            if (sandboxed)
+                slot->exchange = std::make_shared<Exchange>(cacheDir() + QStringLiteral("/exchange"));
+            const Result<Launch> launched = launchFor(sandboxed ? slot->exchange->path : context.workDir, slot->models);
             if (!launched)
                 return finish(launched.error());
             const Launch &launch = *launched;
@@ -1150,11 +1265,40 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         process.setBusy(true);
         process.discardLines();
         process.beginRun(secretValues); // its stderr tail starts empty, and the values of this run are masked from here
-        process.sendLine(request);
+        // A sandboxed program works in its exchange folder: this request's files are copied in, what it makes is copied out.
+        QJsonObject sent = request;
+        QString exchangeFolder;
+        NodeContext waited = reported;
+        int copies = 0;
+        if (sandboxed) {
+            exchangeFolder = stageRequest(context, slot->exchange->path, ++slot->serial, sent);
+            const QString exchangeWork = QFileInfo(exchangeFolder + QStringLiteral("/work")).canonicalFilePath();
+            waited.workDir = exchangeWork;
+            if (reported.preview)
+                waited.preview = [&reported, exchangeWork, workDir, &copies](const QString &file) {
+                    const QString copied = copyOut(file, exchangeWork, workDir, copies);
+                    if (copied != file)
+                        reported.preview(copied);
+                };
+        }
+        process.sendLine(sent);
         bool heard = false;
         Errors warnings;
-        const Result<QJsonObject> result =
-            await(process, reported, id, true, Expect::Result, timeoutMs, d->grace, &warnings, &heard);
+        Result<QJsonObject> result =
+            await(process, waited, id, true, Expect::Result, timeoutMs, d->grace, &warnings, &heard);
+        if (sandboxed && result) {
+            QJsonObject line = result.value();
+            const QString exchangeWork = QFileInfo(exchangeFolder + QStringLiteral("/work")).canonicalFilePath();
+            line.insert("outputs", [&] {
+                QJsonObject outputs = line.value("outputs").toObject();
+                for (auto it = outputs.begin(); it != outputs.end(); ++it)
+                    it.value() = mapHandlePaths(it.value(), [&](const QString &path) { return copyOut(path, exchangeWork, workDir, copies); });
+                return outputs;
+            }());
+            result = line;
+        }
+        if (!exchangeFolder.isEmpty())
+            QDir(exchangeFolder).removeRecursively();
         if (process.gone()) {
             QMutexLocker guard(&slot->guard);
             slot->process.reset();

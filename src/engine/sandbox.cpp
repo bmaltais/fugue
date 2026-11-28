@@ -8,6 +8,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 #include <atomic>
@@ -43,9 +44,26 @@ QString shown(const QString &path, const QString &home) {
     return path.startsWith(home + QLatin1Char('/')) ? QStringLiteral("~") + path.mid(home.size()) : path;
 }
 
-QString uvPythonDir(const QString &home) {
-    const QString set = qEnvironmentVariable("UV_PYTHON_INSTALL_DIR");
-    return set.startsWith(QLatin1Char('/')) ? set : home + QStringLiteral("/.local/share/uv/python");
+// Why `path` may not be granted for reading or writing: the allowlist of 6.7.1 on top of denied(). Empty when it may.
+QString grantProblem(const QString &path, bool write, const QString &home) {
+    const QString clean = canonical(path);
+    if (write) {
+        const QString out = canonical(outputDir());
+        if (!inside(clean, out))
+            return QStringLiteral("%1 is outside the output folder (%2), the only place a pack may be given to write.").arg(shown(clean, home), shown(out, home));
+    } else {
+        if (clean == home)
+            return QStringLiteral("~ itself is never given to a pack.");
+        if (inside(clean, home)) {
+            for (const QString &part : clean.mid(home.size() + 1).split(QLatin1Char('/'), Qt::SkipEmptyParts))
+                if (part.startsWith(QLatin1Char('.')))
+                    return QStringLiteral("%1 lies in a dot folder or file of the home folder, which are never given to a pack.").arg(shown(clean, home));
+        }
+        for (const char *system : {"/tmp", "/var/tmp"})
+            if (!inside(clean, home) && inside(clean, QLatin1String(system)))
+                return QStringLiteral("%1 is in %2, which holds other programs' sockets and files.").arg(shown(clean, home), QLatin1String(system));
+    }
+    return deniedReason(clean, home);
 }
 
 Result<QStringList> pathList(const QJsonValue &value, const QString &which, const QString &home) {
@@ -60,7 +78,7 @@ Result<QStringList> pathList(const QJsonValue &value, const QString &which, cons
         if (text.isEmpty() || !path.startsWith(QLatin1Char('/')))
             return makeError(QStringLiteral("invalid_document"),
                              QStringLiteral("needs.files.%1: \"%2\" must be an absolute path or start with ~/.").arg(which, text.left(80)));
-        if (const QString why = deniedReason(path, home); !why.isEmpty())
+        if (const QString why = grantProblem(path, which == QLatin1String("write"), home); !why.isEmpty())
             return makeError(QStringLiteral("invalid_document"), QStringLiteral("needs.files.%1: %2").arg(which, why));
         if (!paths.contains(path))
             paths << path;
@@ -70,21 +88,53 @@ Result<QStringList> pathList(const QJsonValue &value, const QString &which, cons
 
 } // namespace
 
+QString uvPythonDir(const QString &homeFolder) {
+    const QString set = qEnvironmentVariable("UV_PYTHON_INSTALL_DIR");
+    if (set.startsWith(QLatin1Char('/')))
+        return set;
+    const QString data = qEnvironmentVariable("XDG_DATA_HOME");
+    return (data.startsWith(QLatin1Char('/')) ? data : homeOf(homeFolder) + QStringLiteral("/.local/share")) + QStringLiteral("/uv/python");
+}
+
+QString uvCacheFor(const QString &packId) { return cacheDir() + QStringLiteral("/uv/") + packId; }
+
 QStringList denied(const QString &homeFolder) {
     const QString home = homeOf(homeFolder);
-    QStringList paths{home + "/.ssh",         home + "/.gnupg",          home + "/.netrc",          home + "/.aws",
-                      home + "/.kube",        home + "/.docker",         home + "/.mozilla",        home + "/.config/gh",
-                      home + "/.config/uv",   home + "/.config/fugue",   home + "/.local/state/fugue",
-                      home + "/.local/share/fugue/packs",                home + "/.local/share/uv/credentials",
-                      home + "/.local/share/keyrings",                   home + "/.local/share/kwalletd",
-                      home + "/.password-store",
-                      configDir(),            stateDir(),                dataDir() + "/packs",
-                      "/etc", "/proc", "/sys", "/dev", "/run", "/boot", "/root"};
+    QStringList paths;
+    for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.mozilla", "/.claude",
+                            "/.config/gh", "/.config/uv", "/.config/fugue", "/.config/chromium", "/.config/google-chrome",
+                            "/.config/BraveSoftware", "/.config/systemd", "/.config/autostart", "/.config/hypr", "/.cache/huggingface",
+                            "/.local/bin", "/.local/state/fugue", "/.local/share/fugue", "/.local/share/uv/credentials", "/.local/share/keyrings",
+                            "/.local/share/kwalletd", "/.local/share/applications", "/.password-store", "/.bashrc", "/.bash_profile",
+                            "/.zshrc", "/.profile"})
+        paths << home + QLatin1String(sub);
+    paths << configDir() << stateDir() << dataDir() << cacheDir() << baseConfigDir() << baseDataDir() << baseStateDir()
+          << "/etc" << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root";
     for (QString &path : paths)
         path = canonical(path);
     paths.removeDuplicates();
     return paths;
 }
+
+namespace {
+
+// What a file handed to a program (an input, a model) may never be: keys and credentials and Fugue's own config and packs,
+// which are in no model folder or picture folder. Fugue's data and cache folders are not here: models and runs live in them.
+bool handedDenied(const QString &path, const QString &homeFolder) {
+    const QString home = homeOf(homeFolder);
+    QStringList blocked;
+    for (const char *sub : {"/.ssh", "/.gnupg", "/.netrc", "/.git-credentials", "/.aws", "/.kube", "/.docker", "/.claude", "/.config/gh",
+                            "/.config/uv", "/.config/fugue", "/.cache/huggingface/token", "/.local/share/uv/credentials",
+                            "/.local/share/keyrings", "/.local/share/kwalletd", "/.password-store", "/.local/state/fugue"})
+        blocked << home + QLatin1String(sub);
+    blocked << configDir() << stateDir() << dataDir() + QStringLiteral("/packs") << "/etc" << "/proc" << "/sys" << "/dev" << "/run" << "/boot" << "/root";
+    for (const QString &folder : std::as_const(blocked))
+        if (inside(canonical(path), canonical(folder)))
+            return true;
+    return false;
+}
+
+} // namespace
 
 QString deniedReason(const QString &path, const QString &home) {
     const QString clean = canonical(path);
@@ -106,6 +156,8 @@ Result<Needs> parseNeeds(const QJsonObject &needs, const QString &homeFolder) {
     result.network = needs.value("network").toBool(false);
     const QJsonValue gpu = needs.value("gpu");
     result.gpu = gpu.isObject() || gpu.toBool(false);
+    if (result.gpu)
+        result.gpuApi = gpu.isObject() ? gpu.toObject().value("api").toString(QStringLiteral("any")) : QStringLiteral("any");
     if (const QJsonValue files = needs.value("files"); files.isObject()) {
         const QJsonObject object = files.toObject();
         const Result<QStringList> read = pathList(object.value("read"), QStringLiteral("read"), home);
@@ -131,6 +183,7 @@ Needs merged(const Needs &a, const Needs &b) {
     Needs result;
     result.network = a.network || b.network;
     result.gpu = a.gpu || b.gpu;
+    result.gpuApi = a.gpuApi == QLatin1String("vulkan") || b.gpuApi == QLatin1String("vulkan") ? QStringLiteral("vulkan") : (a.gpuApi.isEmpty() ? b.gpuApi : a.gpuApi);
     result.readPaths = a.readPaths;
     for (const QString &path : b.readPaths)
         if (!result.readPaths.contains(path))
@@ -142,20 +195,22 @@ Needs merged(const Needs &a, const Needs &b) {
     return result;
 }
 
-QStringList plainLines(const Needs &needs, bool sandboxed, const QString &homeFolder) {
+QStringList plainLines(const Needs &needs, bool sandboxed, bool hasSetup, const QString &homeFolder) {
     const QString home = homeOf(homeFolder);
     QStringList lines;
     if (!sandboxed)
         lines << QStringLiteral("NOT sandboxed: this pack's program runs as you.");
     if (needs.network)
-        lines << QStringLiteral("Can use the network");
+        lines << QStringLiteral("Can use the network") << QStringLiteral("Can reach services on this computer");
+    if (hasSetup)
+        lines << QStringLiteral("Setup uses the network") << QStringLiteral("Setup can reach services on this computer");
     if (needs.gpu)
         lines << QStringLiteral("Can use the GPU");
     for (const QString &path : needs.readPaths)
         lines << QStringLiteral("Can read %1").arg(shown(path, home));
     for (const QString &path : needs.writePaths)
         lines << QStringLiteral("Can write %1").arg(shown(path, home));
-    if (sandboxed && lines.isEmpty())
+    if (sandboxed && !needs.network && !needs.gpu && needs.readPaths.isEmpty() && needs.writePaths.isEmpty())
         lines << QStringLiteral("Runs in a sandbox: it sees only its own folder, the files it is given and the run's work folder.");
     return lines;
 }
@@ -232,19 +287,41 @@ Command build(const Profile &profile) {
     if (!program.isEmpty() && !inside(program, pack) && !inside(program, QStringLiteral("/usr")) && !inside(program, QStringLiteral("/bin")))
         a << "--ro-bind-try" << program << program;
 
+    const auto realFolder = [](const QString &path) { // a folder that is not a link: a link there is never followed
+        const QFileInfo info(path);
+        return info.isDir() && !info.isSymLink();
+    };
+    const QString environment = pack + QStringLiteral("/.venv");
     if (setup) {
-        bind(a, "--bind", pack);
+        // The pack's own files are read-only: what the setup makes is its environment folder and, if there is one, the lock file.
+        bind(a, "--ro-bind", pack);
+        if (realFolder(environment))
+            bind(a, "--bind", environment);
+        if (const QFileInfo lock(pack + QStringLiteral("/uv.lock")); lock.isFile() && !lock.isSymLink())
+            bind(a, "--bind", lock.filePath());
         if (!profile.uvCache.isEmpty())
             a << "--bind-try" << profile.uvCache << profile.uvCache;
     } else {
         bind(a, "--ro-bind", pack);
-        const QString environment = pack + QStringLiteral("/.venv");
-        if (QFileInfo(environment).isDir())
+        if (realFolder(environment))
             bind(a, "--bind", environment);
+        if (!profile.exchangeDir.isEmpty())
+            a << "--bind-try" << canonical(profile.exchangeDir) << canonical(profile.exchangeDir);
+        if (profile.needs.gpu) {
+            QStringList nodes = profile.gpuNodes;
+            if (nodes.isEmpty()) {
+                for (const QFileInfo &entry : QDir(QStringLiteral("/dev")).entryInfoList({QStringLiteral("nvidia*")}, QDir::System | QDir::Files | QDir::NoDotAndDotDot))
+                    nodes << entry.filePath();
+                if (profile.needs.gpuApi == QLatin1String("vulkan"))
+                    nodes << QStringLiteral("/dev/dri");
+            }
+            for (const QString &node : std::as_const(nodes))
+                a << "--dev-bind-try" << node << node;
+            for (const char *module : {"/sys/module/nvidia", "/sys/module/nvidia_uvm"})
+                a << "--ro-bind-try" << QLatin1String(module) << QLatin1String(module);
+        }
         if (!work.isEmpty())
             bind(a, "--bind", work);
-        for (const QString &folder : profile.writableFolders)
-            a << "--bind-try" << canonical(folder) << canonical(folder);
         for (const QString &path : profile.needs.writePaths)
             a << "--bind-try" << path << path;
         for (const QString &path : profile.needs.readPaths)
@@ -262,11 +339,11 @@ Command build(const Profile &profile) {
                 bool allowed = false;
                 for (const QString &root : profile.allowedRoots)
                     allowed = allowed || inside(target, canonical(root));
-                if (!allowed || !deniedReason(target, profile.home).isEmpty()) {
+                if (!allowed || handedDenied(target, profile.home)) {
                     command.skipped << handed;
                     continue;
                 }
-            } else if (!deniedReason(target, profile.home).isEmpty()) {
+            } else if (handedDenied(target, profile.home)) {
                 command.skipped << handed;
                 continue;
             }
@@ -305,7 +382,7 @@ QString bwrapPath() {
     QMutexLocker lock(&stateLock());
     if (bwrapOverride())
         return *bwrapOverride();
-    return QStandardPaths::findExecutable(QStringLiteral("bwrap"));
+    return QFileInfo(QStringLiteral("/usr/bin/bwrap")).isExecutable() ? QStringLiteral("/usr/bin/bwrap") : QString();
 }
 
 bool available() {
@@ -317,9 +394,16 @@ bool available() {
     const QString path = bwrapPath();
     bool works = false;
     if (!path.isEmpty()) {
-        QProcess probe;
-        probe.start(path, {"--unshare-user", "--ro-bind", "/", "/", "true"});
-        works = probe.waitForFinished(10000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
+        QProcess version;
+        version.start(path, {"--version"});
+        version.waitForFinished(5000);
+        const QRegularExpressionMatch match = QRegularExpression(QStringLiteral("(\\d+)\\.(\\d+)")).match(QString::fromUtf8(version.readAllStandardOutput()));
+        const bool recent = match.hasMatch() && (match.captured(1).toInt() > 0 || match.captured(2).toInt() >= 8);
+        if (recent) {
+            QProcess probe;
+            probe.start(path, {"--unshare-all", "--unshare-user", "--disable-userns", "--new-session", "--die-with-parent", "--ro-bind", "/", "/", "true"});
+            works = probe.waitForFinished(10000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
+        }
     }
     QMutexLocker lock(&stateLock());
     cachedAvailable() = works;
@@ -330,9 +414,9 @@ QString unavailableHint() {
     if (available())
         return {};
     if (bwrapPath().isEmpty())
-        return QStringLiteral("bubblewrap (bwrap) is not installed. Install it (Arch: pacman -S bubblewrap; Debian and Ubuntu: apt install "
+        return QStringLiteral("bubblewrap (bwrap) is not installed in /usr/bin. Bubblewrap 0.8 or newer is needed. Install it (Arch: pacman -S bubblewrap; Debian and Ubuntu: apt install "
                               "bubblewrap; Fedora: dnf install bubblewrap) and try again.");
-    return QStringLiteral("bubblewrap is installed but cannot make a user namespace here (the kernel or a security policy refuses "
+    return QStringLiteral("bubblewrap 0.8 or newer is needed, and it must be able to make a user namespace here (the kernel or a security policy refuses "
                           "unprivileged user namespaces). Allow them, or run this pack without a sandbox (fugue pack sandbox-off).");
 }
 
