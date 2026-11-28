@@ -5,7 +5,7 @@
 namespace fugue::nodes {
 
 int sizeStepFor(const std::optional<ModelShape> &diffusionModel) {
-    return diffusionModel && diffusionModel->unet.value_or(false) ? kUnetSizeStep : kDefaultSizeStep;
+    return diffusionModel && diffusionModel->sizeStep > 0 ? diffusionModel->sizeStep : kDefaultSizeStep;
 }
 
 int modelSizeStep(const NodeContext &context, const QJsonObject &model, ModelLibrary::Hashing hashing) {

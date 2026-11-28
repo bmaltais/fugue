@@ -21,7 +21,8 @@ inline constexpr int kDefaultSizeStep = 16;
 // The step of a UNet (SD 1.x, SD 2.x, SDXL and their inpaint and turbo kin).
 inline constexpr int kUnetSizeStep = 64;
 
-// The step for a model of this shape: 64 for a UNet, else 16. No shape (unknown) is 16.
+// The step for a model of this shape (ModelShape::sizeStep): 64 for a UNet, 32 for Wan 2.2 TI2V, Qwen-Image 2.1 and LTX, else 16.
+// No shape (unknown) is 16.
 int sizeStepFor(const std::optional<ModelShape> &diffusionModel);
 
 // The step for a `fugue/model` input's value: its diffusion model (or checkpoint) is found by its hash and read by its

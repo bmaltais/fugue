@@ -77,6 +77,10 @@ struct ModelShape {
     // A CLIP vision file's (vision_model.*): isClipVision, with the width of its class embedding here too.
     std::optional<int> clipVisionWidth;
     bool isClipVision = false;
+    // The pixels a picture is aligned to for this diffusion model (the engine's VAE scale times the model's down factor,
+    // generation_program.cpp): 64 for a UNet; 32 for Wan 2.2 TI2V, Qwen-Image 2.1 and LTX (a 16x or 32x VAE); 0 when not known
+    // (16 is taken, which every other family divides).
+    int sizeStep = 0;
     // Chroma and Chroma Radiance (distilled_guidance_layer): they read a T5-XXL alone, no CLIP.
     bool chroma = false;
     // A text encoder's kind, or the kind a diffusion model reads.
