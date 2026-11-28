@@ -135,6 +135,9 @@ struct InputOverride {
     QString path;
     QString input;
     InputValue value;
+    // The input was Randomize: the run records the value as a drawn seed (run.json's `auto`, the "Seed used" output), as it
+    // would for the `{"auto": "random"}` the override replaces.
+    bool wasRandom = false;
 };
 
 struct CompileOptions {
@@ -164,8 +167,9 @@ struct CompileOptions {
     // Do not report a required input that holds nothing (`missing_input`): for a reading of the nodes before a run, such as where an app
     // goes (engine/paired_placement), when an app's inputs are filled by the run's own values. A run never sets it.
     bool allowUnsetInputs = false;
-    // Values given to single inputs of single nodes for this compile (InputOverride). A path that is not a node, or an input the
-    // node's type lacks, is the same error as one written in the document.
+    // Values given to single inputs of single nodes for this compile (InputOverride). A path that is not a node of the flattened graph
+    // is the error `unknown_node`, and an input the node does not have (nor a group instance exposes) `unknown_input`, as in the
+    // document.
     QList<InputOverride> overrides;
 };
 

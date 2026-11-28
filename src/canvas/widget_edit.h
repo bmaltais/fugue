@@ -191,12 +191,12 @@ public:
     // what feeds it. A seed is held where its value is written: on its node, or on the group instance whose exposed input
     // drives it. One written in a group definition that has more than one instance is held for that instance only, by a compile
     // override (CompileOptions::overrides, from heldOverrides), since editing the definition would hold it in every copy of the
-    // group in the run. The canvas's own document is not touched. `held` gets
-    // "node/input" for each increment seed held on the level shown, for advanceSeedsExcept not to advance.
+    // group in the run. The canvas's own document is not touched. `held` (withHeldSeeds) gets "node/input" for each increment seed held on
+    // the level shown, for advanceSeedsExcept not to advance; for a seed written in a definition the canvas is inside, that is when
+    // every instance of it that runs was held (an instance that was not used the definition's own value, so it advances).
     using SeedUsed = std::function<std::optional<double>(const QString &path, const QString &input)>;
-    fugue::Document holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const;
-    // holdUpstream in two halves, so a batch compiles once: the seeds to hold (where each is written, and its value), and the
-    // document as it is now with them held.
+    // The seeds to hold (where each is written, and its value), then the document as it is now with them held, in two halves so a
+    // batch compiles once.
     struct HeldSeed {
         QStringList level;  // the instance ids around the node it is written on
         QString definition; // that level's group definition, empty at the top
@@ -205,13 +205,14 @@ public:
         double seed = 0;
         bool increment = false;
         bool perInstance = false; // written in a definition that runs more than once: held by an override, not in the document
+        bool keepsDefinition = false; // perInstance Increment: every instance that runs was held, so the definition's seed was used by none
     };
     using HeldSeeds = QList<HeldSeed>;
     HeldSeeds seedsToHold(const QString &from, const SeedUsed &seedUsed) const;
     fugue::Document withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) const;
     // The per-instance seeds, as compile overrides for the run's request: each at its own instance's path id.
     static QList<fugue::InputOverride> heldOverrides(const HeldSeeds &seeds);
-    // advanceSeeds() leaving the increment seeds named in `held` (holdUpstream's keys) as they are.
+    // advanceSeeds() leaving the increment seeds named in `held` (withHeldSeeds' keys) as they are.
     void advanceSeedsExcept(const QSet<QString> &held);
 
     // --- the model picker ---

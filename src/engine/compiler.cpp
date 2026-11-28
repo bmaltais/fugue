@@ -179,6 +179,7 @@ private:
     void checkRecursion();
     void checkProviders();
     void checkTarget();
+    void checkOverrides();
     void build(Scope *scope);
     bool checkVersion(const QString &path, const Node &node, const QString &typeName, const Version &installed);
     bool checkTrust(const QString &path, const NodeType &type);
@@ -330,6 +331,26 @@ void Compiler::checkTarget() {
     error.valid = QJsonArray::fromStringList(paths);
     addHint(error, wanted, paths);
     fail(error);
+}
+
+// An override names a node of the flattened graph, or a group instance (its exposed inputs); the input is checked where the node's
+// inputs are (checkNode, checkInstance).
+void Compiler::checkOverrides() {
+    for (const InputOverride &given : m_options.overrides) {
+        if (m_flat.contains(given.path))
+            continue;
+        bool instance = false;
+        for (const Scope &scope : m_scopes)
+            instance = instance || scope.instancePath == given.path;
+        if (instance)
+            continue;
+        QStringList paths = m_flat.keys();
+        Error error = makeError(QStringLiteral("usage"), QStringLiteral("There is no node %1 to give %2 a value.")
+                                                              .arg(given.path, given.input));
+        error.valid = QJsonArray::fromStringList(paths);
+        addHint(error, given.path, paths);
+        fail(error);
+    }
 }
 
 QStringList Compiler::knownTypes() const {
@@ -689,14 +710,18 @@ void Compiler::checkInstance(Scope *scope, const QString &id, Scope *child) {
     QStringList exposedNames;
     for (const GroupInput &input : group.inputs)
         exposedNames << input.name;
-    for (auto it = node.inputs.constBegin(); it != node.inputs.constEnd(); ++it) {
-        if (exposedNames.contains(it.key()))
+    QStringList written = node.inputs.keys(); // what the document writes on the instance, and what an override gives it
+    for (const InputOverride &given : m_options.overrides)
+        if (given.path == path && !written.contains(given.input))
+            written << given.input;
+    for (const QString &name : std::as_const(written)) {
+        if (exposedNames.contains(name))
             continue;
         Error error = nodeError(QStringLiteral("unknown_input"), path,
-                                QStringLiteral("Group %1 has no exposed input %2.").arg(node.type, it.key()));
-        error.input = it.key();
+                                QStringLiteral("Group %1 has no exposed input %2.").arg(node.type, name));
+        error.input = name;
         error.valid = QJsonArray::fromStringList(exposedNames);
-        addHint(error, it.key(), exposedNames);
+        addHint(error, name, exposedNames);
         fail(error);
     }
 
@@ -1324,6 +1349,7 @@ Compilation Compiler::run() {
     check(top);
     checkProviders();
     checkTarget();
+    checkOverrides();
 
     // Cycles are looked for even when there are other errors: links that did
     // not resolve are not in the flattened graph, so what is there is sound.

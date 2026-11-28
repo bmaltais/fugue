@@ -109,6 +109,24 @@ const QByteArray kBranches = R"({
                        "rz2": {"pos": [600, 300]}, "show2": {"pos": [900, 300]}}}
 })";
 
+// Run from here through groups that run twice: two instances of one group around a Generate Image whose seed is Randomize, each
+// into a Resize and a Preview.
+const QByteArray kTwoInstances = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "g7": {"type": "local/gen", "version": "1.0.0", "inputs": {}},
+    "g8": {"type": "local/gen", "version": "1.0.0", "inputs": {}},
+    "rz": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}, "width": 160, "height": 120}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz.image"}}},
+    "rz2": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "g8.image"}, "width": 80, "height": 60}},
+    "show2": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz2.image"}}}
+  }},
+  "groups": {"local/gen": {"version": "1.0.0", "name": "Gen", "inputs": [], "outputs": [{"name": "image", "from": "gen.image"}],
+    "nodes": {"gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a cat", "seed": {"auto": "random"}}}}}},
+  "layout": {"nodes": {"g7": {"pos": [0, 0]}, "g8": {"pos": [0, 300]}, "rz": {"pos": [300, 0]}, "show": {"pos": [600, 0]},
+                       "rz2": {"pos": [300, 300]}, "show2": {"pos": [600, 300]}}}
+})";
+
 QByteArray png(int width, int height) {
     QImage image(width, height, QImage::Format_RGB32);
     image.fill(Qt::darkCyan);
@@ -1735,6 +1753,41 @@ private slots:
         r.runs->checkNow();
         QTRY_COMPARE(r.state("rz2"), QStringLiteral("stale")); // not downstream: it did not run
         QCOMPARE(r.state("show2"), QStringLiteral("stale"));
+    }
+
+    // A Randomize seed in a group that runs twice is held per instance by a compile override; the run still records it as the
+    // seed its node drew (run.json `auto`, the Seed used output), so the saved result reproduces (spec 11.7).
+    void runFromHereHoldsAGroupInstancesSeedAndRecordsIt() {
+        RunApp r(kTwoInstances);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        const QString first = r.runs->start();
+        QVERIFY(!first.isEmpty());
+        for (int i = 0; i < 2; ++i) { // the two generations take their turns
+            QTRY_COMPARE(r.jobs().size(), i + 1);
+            r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(i), {{"image.png", png(64, 64)}}); });
+        }
+        QTRY_COMPARE(finished.size(), 1);
+        const auto seedOf = [&](const QString &run, const QString &path) {
+            const auto folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+            return folder ? folder->state().value("auto").toObject().value(path).toObject().value("seed") : QJsonValue();
+        };
+        const QJsonValue drawn = seedOf(first, "g7/gen");
+        QVERIFY(drawn.isDouble());
+        QVERIFY(seedOf(first, "g8/gen").isDouble());
+        // Run from here on the Resize after the first instance: its seed is held (no new job), and recorded as drawn.
+        r.app.model.widgets()->setValue("rz", "width", 100);
+        r.app.model.select({"rz"});
+        const QString second = r.runs->runFromSelected();
+        QVERIFY(!second.isEmpty());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(finished.last().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), 2); // g7/gen was a cache hit; g8 did not run
+        QCOMPARE(seedOf(second, "g7/gen"), drawn);
+        QVERIFY(!seedOf(second, "g8/gen").isDouble());
+        // The shared definition is as it was.
+        QCOMPARE(r.app.model.document().group("local/gen")->nodes.value("gen").inputs.value("seed").toJson(),
+                 QJsonValue(QJsonObject{{"auto", "random"}}));
     }
 
     // The increment seeds that were held are not advanced by the run; the ones after the node are.
