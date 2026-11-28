@@ -1914,8 +1914,9 @@ private slots:
         const Result<JobRequest> defaults = bench.request(kTextEncode, krea);
         QVERIFY2(defaults, defaults ? "" : qPrintable(defaults.error().message));
         QCOMPARE(defaults->params.value("krea2_edit_format").toString(), QStringLiteral("krea2edit"));
-        QCOMPARE(defaults->params.value("krea2_ref_boost").toDouble(), 1.0);
-        QCOMPARE(defaults->params.value("krea2_ref_position").toString(), QStringLiteral("aligned"));
+        // The encode's text conditioning does not read the boosts or placements: only the Sampler is sent them.
+        for (const char *key : {"krea2_ref_boost", "krea2_ref_position", "krea2_ref_boost_a", "krea2_ref_position_a"})
+            QVERIFY(!defaults->params.contains(QLatin1String(key)));
         QCOMPARE(defaults->params.value("krea2_grounding_px").toInt(), 768);
         QVERIFY(!defaults->params.contains("moss_edit_format"));
 
@@ -1926,11 +1927,9 @@ private slots:
         krea.insert("vision_size", Value(512));
         const Result<JobRequest> encode = bench.request(kTextEncode, krea);
         QVERIFY(encode);
-        QCOMPARE(encode->params.value("krea2_ref_boost").toDouble(), 2.5);
-        QCOMPARE(encode->params.value("krea2_ref_position").toString(), QStringLiteral("bag"));
-        QCOMPARE(encode->params.value("krea2_ref_boost_a").toDouble(), 0.5);
-        QCOMPARE(encode->params.value("krea2_ref_position_a").toString(), QStringLiteral("beside"));
         QCOMPARE(encode->params.value("krea2_grounding_px").toInt(), 512);
+        QVERIFY(!encode->params.contains("krea2_ref_boost"));
+        QVERIFY(!encode->params.contains("krea2_ref_position_a"));
 
         const QString file = bench.workDir() + "/conditioning.bin";
         const Result<Values> out =
@@ -1941,9 +1940,12 @@ private slots:
             bench.request(kSampler, {{"model", Value(model)}, {"conditioning", out->value("conditioning")},
                                      {"latent", empty->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
         QVERIFY(sample);
-        for (const char *key : {"krea2_edit_format", "krea2_ref_boost", "krea2_ref_position", "krea2_ref_boost_a",
-                                "krea2_ref_position_a", "krea2_grounding_px"})
+        for (const char *key : {"krea2_edit_format", "krea2_grounding_px"})
             QCOMPARE(sample->params.value(QLatin1String(key)), encode->params.value(QLatin1String(key)));
+        QCOMPARE(sample->params.value("krea2_ref_boost").toDouble(), 2.5);
+        QCOMPARE(sample->params.value("krea2_ref_position").toString(), QStringLiteral("bag"));
+        QCOMPARE(sample->params.value("krea2_ref_boost_a").toDouble(), 0.5);
+        QCOMPARE(sample->params.value("krea2_ref_position_a").toString(), QStringLiteral("beside"));
     }
 
     // A reference whose file is gone or changed since Text Encode ran (a cached conditioning

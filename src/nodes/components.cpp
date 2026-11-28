@@ -553,17 +553,23 @@ QString krea2Position(const QString &placement) {
     return placement == QLatin1String("bag of features") ? QStringLiteral("bag") : placement.isEmpty() ? QStringLiteral("aligned") : placement;
 }
 
-void sendEditFormat(QJsonObject &params, const QJsonObject &format) {
+// What each stage sends of an edit format. The encode's text conditioning reads only the format and, for Krea 2 Edit, the vision size
+// (krea2_grounding_px); the boosts and placements belong to the diffusion model, so only the Sampler sends them.
+enum class EditStage { Encode, Sample };
+
+void sendEditFormat(QJsonObject &params, const QJsonObject &format, EditStage stage) {
     const QString name = format.value(QStringLiteral("edit_format")).toString();
     if (name == QLatin1String(kMossImageEditFormat)) {
         params.insert(QStringLiteral("moss_edit_format"), QLatin1String(kMossImageEditEngineFormat));
     } else if (name == QLatin1String(kKrea2EditFormat)) {
         const QJsonObject krea = format.value(QStringLiteral("krea2_edit")).toObject();
         params.insert(QStringLiteral("krea2_edit_format"), QStringLiteral("krea2edit"));
-        params.insert(QStringLiteral("krea2_ref_boost"), krea.value(QStringLiteral("ref_boost")).toDouble(1));
-        params.insert(QStringLiteral("krea2_ref_position"), krea2Position(krea.value(QStringLiteral("ref_position")).toString()));
-        params.insert(QStringLiteral("krea2_ref_boost_a"), krea.value(QStringLiteral("scene_boost")).toDouble(1));
-        params.insert(QStringLiteral("krea2_ref_position_a"), krea2Position(krea.value(QStringLiteral("scene_position")).toString()));
+        if (stage == EditStage::Sample) {
+            params.insert(QStringLiteral("krea2_ref_boost"), krea.value(QStringLiteral("ref_boost")).toDouble(1));
+            params.insert(QStringLiteral("krea2_ref_position"), krea2Position(krea.value(QStringLiteral("ref_position")).toString()));
+            params.insert(QStringLiteral("krea2_ref_boost_a"), krea.value(QStringLiteral("scene_boost")).toDouble(1));
+            params.insert(QStringLiteral("krea2_ref_position_a"), krea2Position(krea.value(QStringLiteral("scene_position")).toString()));
+        }
         params.insert(QStringLiteral("krea2_grounding_px"), qRound(krea.value(QStringLiteral("vision_size")).toDouble(768)));
     }
 }
@@ -1078,7 +1084,7 @@ public:
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
             sendReferenceSize(params, context.input(QStringLiteral("reference_size")).text());
-            sendEditFormat(params, editFormatOf(context));
+            sendEditFormat(params, editFormatOf(context), EditStage::Encode);
         }
         JobRequest request = job(*files, params, true);
         // An image-to-video model makes its start from the first frame in the encode (Wan 2.2 I2V's
@@ -1220,7 +1226,8 @@ public:
             params.insert(QStringLiteral("ref_images"), sent.value());
             sendReferenceSize(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta"))
                                           .toObject().value(QStringLiteral("reference_size")).toString());
-            sendEditFormat(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta")).toObject());
+            sendEditFormat(params, context.input(QStringLiteral("conditioning")).json().toObject().value(QStringLiteral("meta")).toObject(),
+                           EditStage::Sample);
         }
         // The first frame of an image-to-video conditioning, for the clip it was encoded for.
         const Result<CarriedFrame> carried = firstFrameOf(context.input(QStringLiteral("conditioning")), *context.hashes);
