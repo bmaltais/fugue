@@ -272,6 +272,15 @@ Reply nodeNew(const Command &command, Context &) {
                               .arg(shown, packId, name, QDir(cwd).relativeFilePath(packFolder)));
 }
 
+// A node under test gets no stored secret (6.4.1): the folder is not an installed, trusted pack, and its `.fugue-source.json`
+// is only a file in it, so a look-alike that copied one would otherwise get the real pack's keys.
+static NodeType withoutSecrets(NodeType type) {
+    type.packSecrets.clear();
+    type.packSecretsOriginRequired.clear();
+    type.packSource.clear();
+    return type;
+}
+
 Reply nodeTest(const Command &command, Context &) {
     const QString path = QDir(command.positionals.at(0)).absolutePath();
     const bool isPack = QFileInfo::exists(path + "/pack.json");
@@ -283,7 +292,8 @@ Reply nodeTest(const Command &command, Context &) {
                                         "A node lives in a pack: <pack>/pack.json and <pack>/<node>/node.json. `fugue node new` makes one."));
 
     Registry registry;
-    const LoadedPack loaded = loadPack(registry, packFolder);
+    // A folder being authored is only looked at: it tells trust nothing (6.7).
+    const LoadedPack loaded = loadPack(registry, packFolder, PackOrigin::Disk, PackDigest::Leave);
     if (!loaded.enabled) {
         Errors errors = loaded.errors;
         if (errors.isEmpty())
@@ -325,7 +335,7 @@ Reply nodeTest(const Command &command, Context &) {
             QStringList progress;
             QElapsedTimer timer;
             timer.start();
-            const Errors failed = runCase(kernel, *type, test, hashes, scratch.path(), outputs, progress);
+            const Errors failed = runCase(kernel, withoutSecrets(*type), test, hashes, scratch.path(), outputs, progress);
             const double seconds = timer.elapsed() / 1000.0;
             report.append(QJsonObject{{"node", id}, {"case", test.name}, {"ok", failed.isEmpty()}, {"outputs", outputs},
                                       {"progress", QJsonArray::fromStringList(progress)}, {"seconds", seconds}});

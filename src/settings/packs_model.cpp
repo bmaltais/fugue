@@ -317,7 +317,8 @@ void PacksModel::remove(const QString &id) {
     start([this, id] {
         TrustStore trust(m_trustFile);
         const Result<PackSummary> removed = removePack(id, m_packsFolder, trust, prompts());
-        finish(removed ? tr("Removed %1. Workflows that use its nodes keep them as placeholders.").arg(id) : QString(), removed ? Errors() : removed.errors(), bool(removed));
+        finish(removed ? tr("Removed %1. Workflows that use its nodes keep them as placeholders.").arg(id) : QString(),
+               removed ? removed.warnings() : removed.errors(), bool(removed));
     });
 }
 

@@ -10,7 +10,8 @@
 // A project that inherits `packs` (spec 1.4.2) also honours the Default project's trust.json, read-only, for
 // the packs it inherits: the exact id and version of an inherited pack the Default trusts is trusted here too.
 // It never applies to a pack of the project's own, whatever the Default says of that id and version, and
-// nothing here ever writes the Default's file. The layer applies to the session's own trust file
+// nothing here ever writes the Default's file. Each change takes `trust.json.lock` beside the file, so two processes
+// (Settings, the window, the CLI) never lose each other's change. The layer applies to the session's own trust file
 // (defaultPath()); a TrustStore on another path (a test's) has none.
 
 #include "engine/document.h"
@@ -22,6 +23,12 @@
 #include <QStringList>
 
 namespace fugue {
+
+// One version's entry in the trust file, as forget() found it: listed, and the secrets digest recorded with the yes.
+struct TrustEntry {
+    bool listed = false;
+    QString digest;
+};
 
 // A pack a workflow uses.
 struct PackUse {
@@ -55,7 +62,8 @@ public:
     // the loader parsed (a pack not loaded has none, and then none is kept).
     Errors trust(const QString &packId, const QString &version, const QString &secretsDigest = {});
     // Puts back a yes that was taken away for a moment (an update that failed): the version is listed again with exactly
-    // `digest` (empty: none), never one computed now, so an edit of the secrets made since the yes still asks.
+    // `digest` (empty: none), never one computed now, so an edit of the secrets made since the yes still asks. Nothing when
+    // the version is listed again by then: a yes given meanwhile is newer and stays as it is.
     Errors restore(const QString &packId, const QString &version, const QString &digest);
     // Trust on first sight: a version trusted before digests were kept gets `digest` now (nothing for a version that is not
     // trusted here or already has one), so a later edit of its secrets asks again.
@@ -63,8 +71,9 @@ public:
     // Drops every version of a pack (it was removed). No effect for a pack that was never trusted. Only this
     // session's own file is changed.
     Errors forget(const QString &packId);
-    // Drops one version of a pack: another major of it stays installed and trusted (6.6).
-    Errors forget(const QString &packId, const QString &version);
+    // Drops one version of a pack: another major of it stays installed and trusted (6.6). `taken`, when given, says what was
+    // dropped, read under the same lock as the change (unlisted when nothing was), for a restore() of exactly that.
+    Errors forget(const QString &packId, const QString &version, TrustEntry *taken = nullptr);
     // A person taking trust back: forget(), except that trust an inherited pack has only from the Default's
     // file is refused (usage, naming the Default project as the place to change it). An empty `version` means
     // every version.

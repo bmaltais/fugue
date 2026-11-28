@@ -524,7 +524,7 @@ QString packSecretsDigestOfFolder(const QString &folder) {
     return pack ? packSecretsDigestOf(pack->secrets, readPackSource(folder).location) : QString();
 }
 
-LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin) {
+LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin, PackDigest record) {
     LoadedPack loaded;
     loaded.path = folder;
 
@@ -590,7 +590,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
         registry.setPackSource(pack->id, pack->version, shared, source.commit.isEmpty() ? source.ref : source.commit);
     }
     loaded.enabled = true;
-    if (origin == PackOrigin::Disk) {
+    if (origin == PackOrigin::Disk && record == PackDigest::Record) {
         // What trust compares (6.7): the secrets this load parsed, not another folder that happens to name the same pack.
         const QString digest = packSecretsDigestOf(pack->secrets, readPackSource(folder).location);
         {

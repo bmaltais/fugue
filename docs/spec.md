@@ -1236,7 +1236,7 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
 ```
 
 - **Keyed by pack id and source.** The key is the id and where the pack was installed from (the location in `.fugue-source.json`; the id alone for a pack copied in by hand). An update from the same source keeps
-  the values; **a pack from another source that claims the same id gets none of them**, so a look-alike cannot read a key set for the real one. The trust question says "Already set" for names set for this id and source, and, when
+  the values; **a pack from another source that claims the same id gets none of them**, so a look-alike cannot read a key set for the real one. `fugue node test` hands a node under test no stored value at all: the folder it reads is not an installed, trusted pack, and a `.fugue-source.json` in it is only a file anyone can copy. The trust question says "Already set" for names set for this id and source, and, when
   names are set for the id from another source, that this pack does not get them. `pack remove` of the last version forgets the values of every source of the id.
 - **Where a key may be sent (origin).** A workflow is data from other people: opening a shared one must not be able to send your key to its author. So the person sets, with the value, the
   **origin** it is for: `scheme://host[:port]`, lower case, no path (`https://api.example.com`). A pack's manifest may mark a secret `"origin": "required"`, and then a value cannot be stored without one (the CLI and the page refuse, and a value stored
@@ -1253,7 +1253,7 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   should still avoid echoing a key; this is the net under it. Not masked: media files a node writes (a value inside an image is not looked for).
 - **Isolation between packs is advisory.** A trusted pack's program runs as you ([6.7](#67-trust)): it can read Fugue's config folder, `pack-secrets.json` included, exactly as it can read `providers.json`. Handing each pack only its own values stops an honest
   pack, a mistake and a look-alike node from reaching another's key; it does not stop a pack you trusted from being hostile. The trust question says so. Use a key with the narrowest rights the service offers.
-- **Edited in place, and the cache (#497, #498).** The runner's change check ([7.1](#71-process-setup)) covers the node's own `node.json` and entry, the pack's `pack.json` (the bytes the loader parsed, not a second read) and its `.fugue-source.json` (where it came from, which decides the key its values are stored under), so a pack edited on disk after it was loaded does not run until it is loaded again. A yes in the trust file also records a hash of what the loader parsed of the pack: the names and origin rules of its `settings` (not labels) and its source. A `pack.json` edited in place to read other secrets, or a changed source record, is no longer trusted once the pack is loaded again and asks again; the new yes covers the new set. The hash is the one of the pack the loader accepted, never of another folder that names the same pack. A pack trusted before hashes were kept gets one when it is next loaded (trust on first sight), so later edits ask. A node's cache key holds a hash of the stored values and origins its pack would hand it ([10.1](#101-keys)), never a value, so a changed key or origin runs the node again instead of serving a result made with the old one; when the store cannot be read the node's key is made for this run alone, so nothing is kept under a key shared by every such run.
+- **Edited in place, and the cache (#497, #498).** The runner's change check ([7.1](#71-process-setup)) covers the node's own `node.json` and entry, the pack's `pack.json` (the bytes the loader parsed, not a second read) and its `.fugue-source.json` (where it came from, which decides the key its values are stored under), so a pack edited on disk after it was loaded does not run until it is loaded again. A yes in the trust file also records a hash of what the loader parsed of the pack: the names and origin rules of its `settings` (not labels) and its source. A `pack.json` edited in place to read other secrets, or a changed source record, is no longer trusted once the pack is loaded again and asks again; the new yes covers the new set. The hash is the one of the pack the loader accepted, never of another folder that names the same pack: a copy that is only looked at (a staged install or update, a template's carried pack) neither sets the hash trust compares with nor gives one to an old yes. A yes records the hash of the pack the question showed, so an edit made while it was open is not covered. A pack trusted before hashes were kept gets one when it is next loaded (trust on first sight), so later edits ask. A node's cache key holds a hash of the stored values and origins its pack would hand it ([10.1](#101-keys)), never a value, so a changed key or origin runs the node again instead of serving a result made with the old one; when the store cannot be read the node's key is made for this run alone, so nothing is kept under a key shared by every such run.
 - **Trust.** The install, trust and Get ready questions list the secrets a pack reads by name ([6.7](#67-trust)).
 
 ### 6.5 Where packs live and how they load
@@ -1299,25 +1299,38 @@ folder, a `.fuguepack` or `.fugueapp`, a run folder or a log:
   question with no, a typed-ahead answer being read first) kills the setup and is reported as `cancelled`, not `setup_failed`, in a
   clone too (`fetch_failed` is for a real failure). A new pack's half-made folder is removed; an update moves the old pack back
   (the half-made one is first moved aside, and the old pack's folder is never deleted before it is back; if the move back fails
-  the error names the folder, kept as `.rescue-*`). Setting up an already installed pack is the exception: a stop can leave its
+  the error names the folder, kept as `.rescue-*`; the pack it set aside is put back whatever its pack.json holds). Setting up an already installed pack is the exception: a stop can leave its
   environment half made (no marker, so Get ready offers the setup again). A stop at the trust step keeps the finished install,
   untrusted. Only a model's resumable `.part` stays (#418). A pack is put in place, replaced, removed or set up under a lock on
   the packs folder (`.packs.lock`, released when its holder dies), so the sheet, Settings > Packs and the CLI never change a pack
   at once; one that cannot get it within 2 s fails with `pack_busy` and the holder's pid. What was asked is looked at again under
   the lock (the folder, and for a setup the pack itself). The new version's trust is forgotten before the new code is in place,
-  so a trusted pack never runs other code during a setup; the old version's goes once the update worked, and a failed update of
-  the same version puts its trust back when the old pack is back: what the trust file held under the lock, with the secrets
-  digest it recorded (so a secrets edit made since the yes still asks), and nothing when the person untrusted it meanwhile. An
-  update that cannot set the old pack aside has changed no trust. A crash leaves it forgotten.
+  so a trusted pack never runs other code during a setup; a trust that cannot be forgotten (the trust file cannot be written)
+  stops the install or update there, the old pack back and its trust as it was. The old version's goes once the update worked,
+  and a failed update of the same version puts its trust back when the old pack is back: what the trust file held just before the
+  swap, with the secrets digest it recorded (so a secrets edit made since the yes still asks), nothing when the person untrusted it
+  meanwhile, and nothing either when that version was trusted again during the setup (that newer yes stays as it is). The packs
+  lock does not cover the trust file: each change to `trust.json` takes its own lock, `trust.json.lock`, so Settings, the window
+  and the CLI never lose each other's change; what is put back is what the forget took, read under that lock, and a trust that
+  cannot be put back is said in the error. One that cannot get the lock within 5 s fails with `pack_busy`, naming the holder's pid or
+  computer and the lock file to remove when the holder is gone; the hash a load adopts for an old yes is skipped when the file is
+  busy, never waited for. A removed pack whose trust cannot be forgotten is still removed, with a warning, and its keys still go. An update that cannot set the old pack aside has changed no trust. A crash leaves
+  it forgotten.
   Folders a command makes in the packs folder are named `.staging-<pid>-<ticks>-<boot>-<random>`,
   `.old-<pid>-<ticks>-<boot>-<time>-<random>-<folder>` (the pack an update set aside) and `.trash-<pid>-<ticks>-<boot>-<random>`
   (a backup being deleted: it is renamed first, so a delete that fails half way leaves a folder that is never restored). The
   owner is the process with that pid, that start time in clock ticks (`/proc/<pid>/stat` field 22) and that boot id; no clock is
-  read, and a pid handed out again or one from before a reboot is another process. A later command, under the lock, removes a
-  `.staging-` or `.trash-` only when its owner is gone (one `/proc` cannot be read for, as under hidepid, after an hour),
+  read, and a pid handed out again or one from before a reboot is another process. An owner that could not read its own start
+  ticks or boot id writes 0 for them, and is then not known (gone only when no process has the pid). A later command, under the
+  lock, removes a `.staging-` or `.trash-` only when its owner is gone (one not known, as under hidepid, after an hour),
   keeps a live owner's `.old-` whatever its age, and for a dead owner's `.old-` puts the oldest back unless the new copy is whole
   (no setup, or its marker `.fugue-setup.json` names the command; a marker that came in with the copied files is dropped),
-  deleting the others only then. `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
+  deleting the others only then. A dead `.old-` with no readable pack.json (what a failed delete left) is never put back: it is
+  kept as `.rescue-*`. The previous build's names are settled too: its `.old-<pid>-<time>-<random>-<folder>` as a dead owner's (that
+  build swaps under the same lock), put back only where the pack folder is missing (that build wrote no setup marker, so a folder
+  without one may be its finished update) and otherwise kept as `.rescue-*`; its `.staging-<pid>-<time>-<random>` by that pid and the
+  process's start time, as it was.
+  `pack remove` and a fresh install delete such backups of their folder. A link is never followed or deleted through: a link
   at the target keeps the old pack as `.rescue-*`, and the sweep says so. Get ready shows a model with a kept `.part` (after a Stop or a failure) as **Paused**, "412 MB of 850 MB", with a trash button on the row (**Delete the partial download**); the headline counts what is left ("download 2 models, 967 MB left") and the retry button says **Resume** while a part is kept. A stop's message is a plain note, not an error: it names a download ("Downloads keep what they had."), an install (undone) or a setup (may be run again) only when that was running.
 - A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
   offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by
@@ -1418,7 +1431,9 @@ it later needs no format change. Command nodes cover light logic.
   manifest. `<path>` is a node folder or a pack folder (every command node in it). The cases are
   in `test.json` next to `node.json` (`inputs`, and `expect` for exact output values); with none,
   the node runs once on its defaults. Cases of one node share a program, so a persistent node
-  keeps its state. The pack is read where it is: no install, no trust. `fugue node new <name>`
+  keeps its state. The pack is read where it is: no install, no trust, and no stored secret ([6.4.1](#641-secrets)): a node under
+  test is handed none of the values set for its pack, whatever `.fugue-source.json` its folder holds, and testing a folder records
+  nothing in the trust file. `fugue node new <name>`
   inside a pack folder adds a node; elsewhere it makes the pack `io.example.<name>` (`--id` picks
   another) in a folder named after its id, with a one-shot shell node and a `test.json`.
 
@@ -4437,7 +4452,7 @@ Codes in v0.1:
 | Graph | `unknown_node_type`, `node_version_mismatch`, `node_newer_major` (a warning), `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
 | Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder, VAE or LoRA that does not fit its diffusion model, by the files' headers, #85, #86; an error when a run reaches a stage), `model_unsupported` (a model file in a format the helper cannot load, such as ComfyUI's mixed quantization; likewise), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation`, `consent_needed` (a run would send data to an off-machine provider instance the person has not allowed, 8.2, #404; `fugue run --allow-remote <instance>` allows it for that run) |
-| Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`, `pack_busy` (another command holds the packs folder's lock, #418) |
+| Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`, `pack_busy` (another command holds the packs folder's lock or the trust file's, #418) |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Canvas (#208) | `canvas_not_found` (no such canvas, revision or stored tree; or a canvas with no revision asked for its head), `canvas_ambiguous` (a revision prefix that starts more than one), `canvas_corrupt` (a stored object is not the content it is named for, or is not well formed); #210: `canvas_not_candidate` (accept or drop of a revision that is in the head's history or already accepted), `canvas_conflict` (a candidate made from an older revision that changed more than it added layers cannot be placed on the head), `canvas_head_moved` as an error of `fugue canvas accept` (the head moved while it ran; nothing changed); #226: `canvas_head_moved` also for a layer edit, `undo` or `redo` whose head moved, `canvas_no_step` (`undo` of the first revision, `redo` with nothing undone) ([14.5](#145-the-canvas-revision-store-206-208)) |

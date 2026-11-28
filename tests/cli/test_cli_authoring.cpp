@@ -2,6 +2,8 @@
 // of the user docs (examples/packs), which must pass its own tests.
 
 #include "../test_paths.h"
+#include "engine/error.h"
+#include "engine/pack_secrets.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -134,6 +136,50 @@ private slots:
         script.write("#!/bin/bash\ncat >/dev/null\necho '{\"outputs\": {}}'\n");
         script.close();
         QCOMPARE(fugue({"node", "test", "io.example.greeter/greeter"}, cwd).firstCode(), QString("node_bad_output"));
+    }
+
+    // 6.4.1: a node under test gets no stored secret, whatever `.fugue-source.json` its folder holds (a look-alike that copied the
+    // real pack's would get its keys), and testing a folder tells the session's trust file nothing.
+    void aNodeTestGetsNoStoredSecret() {
+        const QString cwd = work("secrets");
+        QCOMPARE(fugue({"node", "new", "greeter"}, cwd).exitCode, 0);
+        const QString pack = cwd + "/io.example.greeter";
+        QFile json(pack + "/pack.json");
+        QVERIFY(json.open(QIODevice::ReadOnly));
+        QJsonObject manifest = QJsonDocument::fromJson(json.readAll()).object();
+        json.close();
+        manifest["settings"] = QJsonArray{QJsonObject{{"name", "token_1"}, {"type", "text"}, {"secret", true}}};
+        QVERIFY(json.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        json.write(QJsonDocument(manifest).toJson());
+        json.close();
+        const QString location = m_dir.filePath("the-real-pack");
+        QFile source(pack + "/.fugue-source.json");
+        QVERIFY(source.open(QIODevice::WriteOnly));
+        source.write(QJsonDocument(QJsonObject{{"kind", "path"}, {"location", location}}).toJson());
+        source.close();
+        const QByteArray key = "made-up-key-4242";
+        QVERIFY(!::fugue::hasErrors(::fugue::PackSecretStore(m_dir.filePath("config") + "/fugue/pack-secrets.json")
+                               .set(::fugue::packSecretKey("io.example.greeter", location), "token_1", key, {}, false)));
+        const QString trustFile = m_dir.filePath("state") + "/fugue/trust.json";
+        const QByteArray trust = R"({"packs": {"io.example.greeter": ["0.1.0"]}})"; // a yes from before digests were kept
+        QDir().mkpath(QFileInfo(trustFile).absolutePath());
+        QFile trusted(trustFile);
+        QVERIFY(trusted.open(QIODevice::WriteOnly));
+        trusted.write(trust);
+        trusted.close();
+        const QString request = m_dir.filePath("request.json");
+        QFile run(pack + "/greeter/run.sh");
+        QVERIFY(run.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        run.write(QByteArray("#!/bin/sh\ncat > '") + request.toUtf8() + "'\nexit 1\n"); // keeps what the node was handed
+        run.close();
+        fugue({"node", "test", "io.example.greeter/greeter"}, cwd); // the cases fail: only what was handed over matters
+        QFile handed(request);
+        QVERIFY(handed.open(QIODevice::ReadOnly));
+        const QByteArray bytes = handed.readAll();
+        QVERIFY2(!bytes.isEmpty(), "the node did not run");
+        QVERIFY2(!bytes.contains(key) && !bytes.contains("\"secrets\""), bytes.constData());
+        QVERIFY(trusted.open(QIODevice::ReadOnly));
+        QCOMPARE(trusted.readAll(), trust);
     }
 
     void notANodeFolderIsRefused() {

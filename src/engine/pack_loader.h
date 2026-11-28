@@ -113,9 +113,15 @@ struct PackReport {
     bool hasProblems() const;  // any pack or node disabled (a hidden one is not a problem), or any error (not warning) in a pack
 };
 
+// What loading a pack from disk tells trust (6.7). Record: the digest of its secrets becomes the one trust compares
+// (packSecretsDigest) and a yes given before digests were kept adopts it; for a pack where it is installed. Leave: neither,
+// for a copy that is only looked at (a staged update or install), whose secrets must never stand in for the installed pack's.
+enum class PackDigest { Record, Leave };
+
 // Loads one pack folder into the registry: its declared types, then its nodes, and sets the
 // installed version of the pack (Registry::setPackVersion) when the pack is enabled.
-LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin = PackOrigin::Disk);
+LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin = PackOrigin::Disk,
+                    PackDigest record = PackDigest::Record);
 
 // Loads every pack found under `searchPaths`, each subfolder holding a pack.json. A pack id
 // found twice at the same major loads once, from the earlier path; the later one is disabled.
