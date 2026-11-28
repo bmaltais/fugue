@@ -551,6 +551,12 @@ public:
     // The world point (x, y) lies on the node's picture (a result or a file's image), not on a text
     // standing in its place: where a double click opens the large view.
     Q_INVOKABLE bool pictureAt(const QString &node, qreal x, qreal y) const;
+    // The world point (x, y) lies on the node's text result, the excerpt that stands in the picture's place (#715): where a double
+    // click opens the text window on the whole result. Not on a placeholder ("No result yet"), a number or a video's player.
+    Q_INVOKABLE bool textResultAt(const QString &node, qreal x, qreal y) const;
+    // The whole text the node's last run made on its first text output, as the text window shows it: {has, output (its name),
+    // label, text}; {has: false} before a run.
+    Q_INVOKABLE QVariantMap resultText(const QString &node) const;
     // The node whose output feeds the node's input, or empty (a literal, nothing, or a missing node).
     Q_INVOKABLE QString linkedFrom(const QString &node, const QString &input) const;
     // The seam for #49 (node size): the pixel size of the node's last image (setRunState's

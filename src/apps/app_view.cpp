@@ -331,6 +331,8 @@ void AppView::setValue(const QString &key, const QVariant &value) {
     }
     if (state.values != before || state.seedModes != modesBefore)
         inputEdited();
+    if (state.values != before)
+        emit valueTyped(key);
 }
 
 QMap<QString, QJsonValue> AppView::values() const { return m_state.value(m_tab).values; }

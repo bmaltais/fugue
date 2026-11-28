@@ -534,6 +534,69 @@ private slots:
         }
     }
 
+    // #715 slice 5: a double-click on a node's text result (the excerpt that stands where a picture would) opens the whole text,
+    // read-only, in the text window, as a double-click on a picture opens its large view.
+    void aDoubleClickOnATextResultOpensItReadOnly() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        const auto dialogItem = [&](const char *name) { return canvas_test::item(app.window->contentItem(), name); };
+        const QString whole = "a red fox\nin the snow at dawn, soft light, detailed fur";
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                         {"thumbnailText", "a red fox\nin the snow at dawn, soft li\u2026"}, {"texts", QVariantMap{{"text", whole}}}});
+        QRectF excerpt;
+        for (int row = 0; row < app.model.nodes()->rowCount(); ++row)
+            if (app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::NodeId).toString() == "prompt")
+                excerpt = app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::ThumbnailRect).toRectF().translated(app.model.position("prompt"));
+        QVERIFY(!excerpt.isEmpty());
+        // A single click only selects.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.center().x(), excerpt.center().y()));
+        QVERIFY(!dialogItem("textArea"));
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.center().x(), excerpt.center().y()));
+        QTRY_VERIFY(dialogItem("textArea"));
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), whole);
+        QVERIFY(dialogItem("textArea")->property("readOnly").toBool());
+        QCOMPARE(dialogItem("textTitle")->property("text").toString(), QString("Prompt · Text"));
+        QVERIFY(!dialogItem("textLinkLine")->isVisible()); // a result is not a link
+        QCOMPARE(dialogItem("textCounts")->property("text").toString(), QString("55 characters · 12 words · 2 lines"));
+        app.type("x"); // nothing is typed into a result
+        QCOMPARE(dialogItem("textArea")->property("text").toString(), whole);
+        QCOMPARE(app.steps(), 0);
+        QCOMPARE(app.stored("prompt", "text"), QJsonValue("a red fox"));
+        // A new run's text shows in the window.
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                         {"thumbnailText", "a blue fox"}, {"texts", QVariantMap{{"text", "a blue fox"}}}});
+        QTRY_COMPARE(dialogItem("textArea")->property("text").toString(), QString("a blue fox"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!dialogItem("textArea"));
+        QCOMPARE(app.steps(), 0);
+        // A picture node's double-click is not changed by it: a node with no text result opens nothing here.
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.left() - 40, excerpt.center().y()));
+        QVERIFY(!dialogItem("textArea"));
+    }
+
+    // FUGUE_SHOT_DIR=<folder> (#715 slice 5): a text result's window, read-only. Picture only.
+    void aTextResultWindowLook() {
+        const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to take the pictures");
+        QDir().mkpath(out);
+        WidgetApp app;
+        QVERIFY(app.open());
+        app.window->resize(1000, 640);
+        app.model.setRunState("prompt", {{"state", "cached"}, {"thumbnail", "data:,"}, {"thumbnailAspect", 0.3},
+                                         {"thumbnailText", "a red fox in the snow at dawn, soft light, detailed fur, shallow dep\u2026"},
+                                         {"texts", QVariantMap{{"text", "a red fox in the snow at dawn, soft light, detailed fur, shallow depth of field, 35mm photo, film grain, muted colours, a quiet forest behind it"}}}});
+        QRectF excerpt;
+        for (int row = 0; row < app.model.nodes()->rowCount(); ++row)
+            if (app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::NodeId).toString() == "prompt")
+                excerpt = app.model.nodes()->data(app.model.nodes()->index(row, 0), NodeList::ThumbnailRect).toRectF().translated(app.model.position("prompt"));
+        QTest::qWait(100);
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(excerpt.center().x(), excerpt.center().y()));
+        QTRY_VERIFY(canvas_test::item(app.window->contentItem(), "textArea"));
+        QTest::qWait(200);
+        QVERIFY(test_support::grab(app.window).save(out + "/text-result-window.png"));
+    }
+
     // FUGUE_SHOT_DIR=<folder> (#715 slice 3): the text window on a long prompt, editable and linked. Picture only.
     void theTextWindowLook() {
         const QString out = qEnvironmentVariable("FUGUE_SHOT_DIR");

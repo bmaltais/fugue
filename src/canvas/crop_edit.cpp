@@ -55,6 +55,26 @@ bool CanvasModel::pictureAt(const QString &node, qreal x, qreal y) const {
     return r.thumbnail.translated(r.pos).contains(x, y);
 }
 
+bool CanvasModel::textResultAt(const QString &node, qreal x, qreal y) const {
+    const int row = rowOf(node);
+    const auto run = m_run.constFind(node);
+    if (row < 0 || run == m_run.constEnd() || run->thumbnailText.isEmpty() || run->thumbnailDim || !run->media.isEmpty())
+        return false;
+    const NodeRow &r = m_rows[size_t(row)];
+    return !r.collapsed && r.thumbnail.translated(r.pos).contains(x, y) && resultText(node).value(QStringLiteral("has")).toBool();
+}
+
+QVariantMap CanvasModel::resultText(const QString &node) const {
+    const int row = rowOf(node);
+    const auto run = m_run.constFind(node);
+    if (row < 0 || run == m_run.constEnd())
+        return {{"has", false}};
+    for (const Port &port : m_rows[size_t(row)].outputs)
+        if (run->texts.contains(port.name))
+            return {{"has", true}, {"output", port.name}, {"label", port.label}, {"text", run->texts.value(port.name).toString()}};
+    return {{"has", false}};
+}
+
 QString CanvasModel::linkedFrom(const QString &node, const QString &input) const {
     const InputValue value = m_document.graph.nodes.value(node).inputs.value(input);
     if (value.kind() != InputValue::Kind::Link)

@@ -18,8 +18,14 @@ Item {
     property AppView appView: App.appView
     // What the control shows now: starts as the field's value, follows what the person does.
     property var current: field.value
+    // A text field (the wide row's fallback): the one the text window can open.
+    readonly property bool isText: !["toggle", "choice", "number", "seed", "image", "mask", "model"].includes(field.kind)
     readonly property string hint: field.hint ?? ""
     signal edited(string key, var value)
+    // The text window is asked for on a text field (#715): the page that has one connects it (a preview of the form has none, and
+    // its fields show no expand button).
+    property bool expandable: false
+    signal expandRequested(var field)
 
     width: parent ? parent.width : implicitWidth
     implicitHeight: rows.item ? (rows.item as Item).height : 0
@@ -33,6 +39,17 @@ Item {
         function onValueChanged(key) {
             if (key === root.field.key && root.field.kind !== "seed" && root.field.kind !== "image")
                 root.current = root.appView.valueOf(key)
+        }
+    }
+    // The text window typed into the form's value (AppView.setValue): a text field shows it.
+    Connections {
+        target: root.appView
+        function onValueTyped(key) {
+            if (key !== root.field.key || !root.isText)
+                return
+            const now = root.appView.valueOf(key)
+            if (String(now ?? "") !== String(root.current ?? ""))
+                root.current = now
         }
     }
     KitSeparator {
@@ -112,6 +129,8 @@ Item {
             label: root.field.label
             minLines: root.field.minLines ?? 3
             singleLine: root.field.multiline !== true
+            expandable: root.expandable
+            onExpandRequested: root.expandRequested(root.field)
             text: root.current === undefined || root.current === null ? "" : String(root.current)
             onEdited: t => {
                 root.current = t
