@@ -1521,12 +1521,15 @@ private slots:
         const QString path = Bench::modelPath("diffusion_models/sdxl.safetensors");
         QVERIFY(bench.hashes.known(path).isEmpty());
         const NodeContext keyed = bench.context(kVaeEncode, {{"model", Value(sdxl)}});
-        // The file with the handle's name is taken to be the one, and its header gives the step: no hash is read.
-        QCOMPARE(bench.kernels.provider(kVaeEncode)->keyExtraFor(keyed), QStringLiteral("size_step:64"));
-        QCOMPARE(bench.kernels.node(QStringLiteral("fugue/crop-to-mask"))->keyExtraFor(keyed), QStringLiteral("size_step:64"));
+        // The file with the handle's name is taken to be the one, and its header gives the step: no hash is read. Not verified, so
+        // the file is in the key: a run that finds another file of that name does not store its result under this one's.
+        const QString unverified = "size_step:64@" + path;
+        QCOMPARE(bench.kernels.provider(kVaeEncode)->keyExtraFor(keyed), unverified);
+        QCOMPARE(bench.kernels.node(QStringLiteral("fugue/crop-to-mask"))->keyExtraFor(keyed), unverified);
         QVERIFY(bench.hashes.known(path).isEmpty());
         QCOMPARE(nodes::modelSizeStep(keyed, sdxl), 64); // a run reads the hash
         QVERIFY(!bench.hashes.known(path).isEmpty());
+        QCOMPARE(bench.kernels.provider(kVaeEncode)->keyExtraFor(keyed), QStringLiteral("size_step:64")); // verified: the plain key
     }
 
     void vaeEncodeAndCropToMaskSizeAUnetsPicturesIn64s() {
@@ -1567,8 +1570,10 @@ private slots:
         const QSize stepped = crop({{"model", Value(unet)}});
         QCOMPARE(stepped.width() % 64, 0);
         QCOMPARE(stepped.height() % 64, 0);
-        // A multiple of 100 is kept with the model's 64: their common multiple.
-        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(100)}}).width() % 1600, 0);
+        // A multiple of 24 is kept with the model's 64: their common multiple. Past 256 (100 and 64 share 1600) it is the multiple
+        // rounded up to the model's step.
+        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(24)}}).width() % 192, 0);
+        QCOMPARE(crop({{"model", Value(unet)}, {"multiple", Value(100)}}).width() % 128, 0);
         // A model of another family keeps the multiple as asked.
         const QJsonObject z = bench.model("fugue/diffusion-model", "diffusion_models/z.safetensors",
                                           safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}}}));

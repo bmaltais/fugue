@@ -162,13 +162,25 @@ std::optional<QSize> MediaHandle::imageHeaderSize(const QString &path) {
                 const vips::VSource source = vips::VSource::new_from_descriptor(fd);
                 size = sizeOf(VImage::new_from_source(source, ""));
             } catch (const vips::VError &) {
-                // A format libvips only loads from a file (OpenEXR, NIfTI, Matlab, OpenSlide...) has no source loader: it is read by its
-                // name, when the name still is the file that was checked (the same device and inode). Sequential, so the header
-                // is read and no pixel is; the file is let go when the image is.
-                struct stat again;
-                if (::stat(QFile::encodeName(path).constData(), &again) == 0 && again.st_dev == st.st_dev && again.st_ino == st.st_ino)
-                    size = sizeOf(VImage::new_from_file(fileName(path).constData(),
-                                                        VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL)));
+                // A format libvips only loads from a file (OpenEXR, NIfTI, Matlab, OpenSlide...) has no source loader. It is read through
+                // the descriptor that was checked (/proc/self/fd/N names that very file, not whatever the name points to now);
+                // those loaders decide by the file's content. Sequential, so the header is read and no pixel; the file is let go with
+                // the image.
+                const QByteArray viaDescriptor = "/proc/self/fd/" + QByteArray::number(fd);
+                try {
+                    size = sizeOf(VImage::new_from_file(viaDescriptor.constData(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL)));
+                } catch (const vips::VError &) {
+                    // One that decides by the suffix: by name, but only while the name is still the file that was checked (the same
+                    // device and inode), and judged again after.
+                    struct stat again;
+                    if (::stat(QFile::encodeName(path).constData(), &again) == 0 && S_ISREG(again.st_mode) && again.st_dev == st.st_dev &&
+                        again.st_ino == st.st_ino) {
+                        const QSize byName = sizeOf(VImage::new_from_file(fileName(path).constData(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL)));
+                        struct stat after;
+                        if (::stat(QFile::encodeName(path).constData(), &after) == 0 && after.st_dev == st.st_dev && after.st_ino == st.st_ino)
+                            size = byName;
+                    }
+                }
             }
         } catch (const vips::VError &) {
         }

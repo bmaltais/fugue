@@ -2,7 +2,9 @@
 // batch, an answer kept by path, size and time, no helper, a failed file), and the marks that use it (the family fallback, the
 // not-recognised mark). No real helper or model: the script answers by the file's name.
 
+#include <QElapsedTimer>
 #include <QFile>
+#include <QThread>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -151,8 +153,10 @@ done
         QVERIFY(inspector.cached(files[2]));
     }
 
-    void aHelperThatCrashesOnEverythingIsGivenUpOn() {
-        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nexit 3\n"));
+    void aHelperThatCrashesOnEverythingIsGivenUpOnAndBlamesNoFile() {
+        // The same script all along (its stamp must not change): it works once the file "ok" exists.
+        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nshift\n[ -f '" + path("ok").toUtf8() +
+                                       "' ] || exit 3\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\"; done\n"));
         QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
         QStringList files;
         for (int i = 0; i < 20; ++i) {
@@ -162,11 +166,47 @@ done
         ModelInspector inspector(path("crasher.sh"), path("cache.json"));
         QVERIFY(inspector.inspect(files).isEmpty());
         QCOMPARE(runs().size(), 1 + 3); // the batch and three alone, then it stops
-        // Nothing was blamed on a file: a helper that works asks them again.
-        write("crasher.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nfor f in \"$@\"; do case \"$f\" in --inspect) ;; *) printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\" ;; esac; done\n"));
-        QVERIFY(QFile::setPermissions(path("crasher.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
-        inspector.configure(path("crasher.sh"), path("cache.json"));
-        QCOMPARE(inspector.inspect(files).size(), 20);
+        write("ok", "");
+        QCOMPARE(inspector.inspect(files).size(), 20); // nothing was blamed on a file: the same helper, now working, asks them all
+    }
+
+    void aSlowHelperIsNeverBlamedOnAFile() {
+        write("slow.sh", QByteArray("#!/bin/sh\necho \"$#\" >> '" + path("runs.log").toUtf8() + "'\nexec sleep 30\n"));
+        QVERIFY(QFile::setPermissions(path("slow.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        write("a.gguf", "x");
+        ModelInspector inspector(path("slow.sh"), path("cache.json"), 300); // a timeout of 0.3 s
+        QVERIFY(inspector.inspect({path("a.gguf")}).isEmpty());
+        QVERIFY(inspector.inspect({path("a.gguf")}).isEmpty());
+        QCOMPARE(runs().size(), 2); // asked again: a timeout is not the file's failure
+    }
+
+    void stopEndsARunningProcessAtOnce() {
+        write("slow.sh", QByteArray("#!/bin/sh\nexec sleep 30\n"));
+        QVERIFY(QFile::setPermissions(path("slow.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        write("a.gguf", "x");
+        ModelInspector inspector(path("slow.sh"), path("cache.json"));
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(inspector.inspect({path("a.gguf")}, [&] { return timer.elapsed() > 300; }).isEmpty());
+        QVERIFY2(timer.elapsed() < 3000, qPrintable(QString::number(timer.elapsed())));
+    }
+
+    void aHelperUpgradedWhileAskingKeepsNothingOfTheOldRun() {
+        write("slowish.sh", QByteArray("#!/bin/sh\nshift\nsleep 1\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":false}\\n' \"$f\"; done\n"));
+        QVERIFY(QFile::setPermissions(path("slowish.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        write("a.gguf", "x");
+        ModelInspector inspector(path("slowish.sh"), path("cache.json"));
+        QHash<QString, EngineModel> answers;
+        QThread *worker = QThread::create([&] { answers = inspector.inspect({path("a.gguf")}); });
+        worker->start();
+        QTest::qWait(300);
+        write("slowish.sh", QByteArray("#!/bin/sh\n# upgraded in place\nshift\nfor f in \"$@\"; do printf '{\"path\":\"%s\",\"recognised\":true,\"version\":\"New\",\"id\":\"n\"}\\n' \"$f\"; done\n"));
+        QVERIFY(QFile::setPermissions(path("slowish.sh"), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        inspector.configure(path("slowish.sh"), path("cache.json")); // as shared() does on its next call
+        worker->wait();
+        delete worker;
+        QVERIFY(!inspector.cached(path("a.gguf"))); // the old helper's answer was not kept under the new stamp
+        QCOMPARE(inspector.inspect({path("a.gguf")}).value(path("a.gguf")).version, QStringLiteral("New"));
     }
 
     void theStopFlagIsCheckedBetweenBatches() {
@@ -184,7 +224,7 @@ done
     }
 
     void aProcessIsGivenAFewSecondsNotAMinute() {
-        QVERIFY(ModelInspector::askTimeoutMs(1) <= 5000);
+        QVERIFY(ModelInspector::askTimeoutMs(1) <= 10000);
         QVERIFY(ModelInspector::askTimeoutMs(40) <= 20000);
         QVERIFY(ModelInspector::askTimeoutMs(40) > ModelInspector::askTimeoutMs(1));
     }

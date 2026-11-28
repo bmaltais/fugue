@@ -82,16 +82,20 @@ private:
     // it did not answer are then not known to be unreadable.
     struct Asked {
         QHash<QString, EngineModel> answers;
-        bool finished = false;
+        bool finished = false; // exited cleanly
         bool started = false;
+        bool crashed = false;  // started and ended abnormally or with an error exit
+        bool timedOut = false;
+        bool stopped = false;  // ended at once by `stop`
     };
-    Asked ask(const QString &helper, const QStringList &paths) const;
+    Asked ask(const QString &helper, const QStringList &paths, const std::function<bool()> &stop) const;
 
     QString m_helper;
     QString m_cacheFile;
     int m_timeoutMs;
     QString m_helperStamp;
     bool m_loaded = false;
+    quint64 m_generation = 0; // bumped by every configure() that changed something
     QHash<QString, Entry> m_entries;
     QHash<QString, QPair<qint64, qint64>> m_failed; // asked in vain, by path: its stamp
     mutable QMutex m_mutex;

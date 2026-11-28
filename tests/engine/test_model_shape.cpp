@@ -270,8 +270,37 @@ private slots:
         QCOMPARE(shape(file("sdxl.safetensors")).sizeStep, 64);
         QCOMPARE(shape(file("wan22_ti2v_5b.safetensors")).sizeStep, 32);
         QCOMPARE(shape(file("wan22_14b.safetensors")).sizeStep, 0);
+        writeSafetensors(file("wan21_fun_control.safetensors"), {{"patch_embedding.weight", QJsonArray{5120, 48, 1, 2, 2}},
+                                                                 {"text_embedding.0.weight", QJsonArray{5120, 4096}}});
+        QCOMPARE(shape(file("wan21_fun_control.safetensors")).sizeStep, 0); // 48 channels in, but not the 5B's 3072 wide
+        writeSafetensors(file("h3.safetensors"), {{"video_patch_proj.weight", QJsonArray{2048, 96}}, {"condition_proj.weight", QJsonArray{2048, 2048}}});
+        QCOMPARE(shape(file("h3.safetensors")).sizeStep, 32);
+        writeSafetensors(file("sensenova.safetensors"),
+                         {{"language_model.model.layers.0.self_attn.q_proj_mot_gen.weight", QJsonArray{4096, 4096}},
+                          {"language_model.model.embed_tokens.weight", QJsonArray{150000, 4096}}});
+        QCOMPARE(shape(file("sensenova.safetensors")).sizeStep, 32);
         QCOMPARE(shape(file("ltx.safetensors")).sizeStep, 32);
         QCOMPARE(shape(file("z.safetensors")).sizeStep, 0);
+    }
+
+    // CLIP vision files as they come: SigLIP, a llava vision tower with its projector, an fp8 file with its scale key.
+    void clipVisionFilesOfOtherMakesAreRecognised() {
+        writeSafetensors(file("siglip.safetensors"), {{"vision_model.embeddings.patch_embedding.weight", QJsonArray{1152, 3, 14, 14}},
+                                                      {"vision_model.embeddings.position_embedding.weight", QJsonArray{729, 1152}},
+                                                      {"vision_model.head.probe", QJsonArray{1, 1, 1152}},
+                                                      {"logit_bias", QJsonArray{1}}});
+        writeSafetensors(file("llava_vision.safetensors"),
+                         {{"vision_tower.vision_model.embeddings.class_embedding", QJsonArray{1024}},
+                          {"vision_tower.vision_model.embeddings.patch_embedding.weight", QJsonArray{1024, 3, 14, 14}},
+                          {"multi_modal_projector.linear_1.weight", QJsonArray{4096, 1024}}});
+        writeSafetensors(file("clip_vision_fp8.safetensors"), {{"vision_model.embeddings.class_embedding", QJsonArray{1280}},
+                                                               {"vision_model.embeddings.patch_embedding.weight", QJsonArray{1280, 3, 14, 14}},
+                                                               {"scaled_fp8", QJsonArray{2}}});
+        for (const char *name : {"siglip.safetensors", "llava_vision.safetensors", "clip_vision_fp8.safetensors"}) {
+            const ModelShape vision = shape(file(name));
+            QVERIFY2(vision.isClipVision, name);
+            QVERIFY2(!vision.textKind && !vision.latentChannels, name);
+        }
     }
 
     void aFileThatIsNoModelHasNoShape() {

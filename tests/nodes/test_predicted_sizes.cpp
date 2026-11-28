@@ -196,6 +196,8 @@ private slots:
     // file open behind it.
     void aFileOnlyFormatHasItsSizeAndLeavesNoDescriptor() {
         QTemporaryDir dir;
+        if (vips_type_find("VipsOperation", "openexrload") == 0)
+            QSKIP("this libvips has no OpenEXR loader");
         const QString file = dir.filePath("t.exr"); // a 4 x 3 OpenEXR file with no pixels in it: the header is all that is read
         QFile out(file);
         QVERIFY(out.open(QIODevice::WriteOnly));

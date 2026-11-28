@@ -75,9 +75,9 @@ public:
         const int modelStep = context.inputs.contains(QStringLiteral("model"))
                                   ? modelSizeStep(context, context.input("model").json().toObject())
                                   : kDefaultSizeStep;
-        // A common multiple can pass kMaxCropSide (255 and 64 share 16320): then the smallest multiple of the model's step that holds `multiple`.
+        // Past a few hundred pixels a common multiple is only a coarse grid (200 and 64 share 1600): the multiple rounded up to the step then.
         const int common = modelStep > kDefaultSizeStep && multiple % modelStep != 0 ? std::lcm(multiple, modelStep) : multiple;
-        const int stepped = common <= kMaxCropSide ? common : (multiple + modelStep - 1) / modelStep * modelStep;
+        const int stepped = common <= 256 ? common : (multiple + modelStep - 1) / modelStep * modelStep;
         std::optional<Cropped> crop = cropToMask(image.value(), fitted, padding, megapixels, stepped);
         if (!crop)
             return makeInputError(QStringLiteral("mask_empty"), QStringLiteral("mask"),

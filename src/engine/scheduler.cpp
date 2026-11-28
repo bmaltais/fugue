@@ -1909,6 +1909,10 @@ GraphCheck checkUnusedNodes(const CompiledGraph &graph, const RunEnvironment &en
             if (spec->lazy)
                 continue;
             const auto written = it->inputs.constFind(spec->name);
+            // A link, an auto value or a list is not known here, but a linked input is not a missing one.
+            if (written != it->inputs.constEnd() && !written->isEmpty() && written->kind() != InputValue::Kind::Literal
+                && written->kind() != InputValue::Kind::Resource)
+                context.linkedInputs.insert(spec->name);
             Value value;
             if (written == it->inputs.constEnd() || written->isEmpty()) {
                 if (!spec->defaultValue.isUndefined())
