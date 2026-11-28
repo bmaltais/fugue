@@ -38,14 +38,16 @@ CropBox paddedBox(const CropBox &bounds, int padding, int imageWidth, int imageH
 CropSize cropSizeFor(const CropBox &box, double megapixels, int multiple) {
     if (!(megapixels > 0.0))
         return {box.width, box.height};
-    const int step = std::max(1, multiple);
+    const int step = std::clamp(multiple, 1, kMaxCropSide);
     QSize size = sizeForMegapixels(double(box.width) / box.height, megapixels, step);
     // A sliver of a box would be a picture no model takes (1 x 4000 at 1 MP is 16 x 65536): no side
     // goes past kMaxCropSide, the shape kept as far as the step allows.
     if (const int longest = std::max(size.width(), size.height()); longest > kMaxCropSide) {
         const double scale = double(kMaxCropSide) / longest;
-        size = QSize(std::max(1, int(std::lround(size.width() * scale / step))) * step,
-                     std::max(1, int(std::lround(size.height() * scale / step))) * step);
+        // Rounded to the step, but never up past the largest multiple of it that fits.
+        const int units = std::max(1, kMaxCropSide / step);
+        const auto fit = [&](int side) { return std::clamp(int(std::lround(side * scale / step)), 1, units) * step; };
+        size = QSize(fit(size.width()), fit(size.height()));
     }
     return {size.width(), size.height()};
 }
