@@ -18,9 +18,14 @@ Rectangle {
     // Where the press was in the well (host coordinates), or -1: the caret goes there; with none (Tab into the field) it goes to the end.
     property real caretX: -1
     property real caretY: -1
-    readonly property real lineHeight: Math.round(host.look.textSize * 4 / 3)
+    // The text sits exactly where the resting well's does (InputWidget's `widgetValue`: its font, a fixed 16 px line, the same top), so a
+    // click on a line of the resting text puts the caret on that line of the editor, and nothing moves when the editor opens.
+    readonly property real lineHeight: 16
+    readonly property real textTop: Math.round(1.5 * host.look.unit) + 16 // under the caption line
+    // The text as last seen: the highlighter's formatting passes also report a change of the text, with the text as it was.
+    property string lastText: ""
 
-    height: Math.max(rowHeight, Math.min(Math.max(5, edit.lineCount + 1), 12) * lineHeight + 8 + 16) // + the caption
+    height: Math.max(rowHeight, Math.min(Math.max(5, edit.lineCount + 1), 12) * lineHeight + textTop + 4)
     color: host.wellColor
     radius: host.smallCorner
     border.width: 1
@@ -51,7 +56,7 @@ Rectangle {
         id: flick
         anchors.fill: parent
         anchors.margins: 4
-        anchors.topMargin: 4 + 16
+        anchors.topMargin: area.textTop
         anchors.leftMargin: area.host.pad
         anchors.rightMargin: area.host.pad
         contentWidth: width
@@ -59,20 +64,36 @@ Rectangle {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height
+        onHeightChanged: edit.updateGutter()
         ScrollBar.vertical: FugueScrollBar { look: area.host.look }
 
         TextEdit {
             id: edit
             objectName: "widgetArea"
-            width: flick.width - (flick.ScrollBar.vertical as FugueScrollBar).inset
+            // The room the scroll bar takes: set when the text overflows, not bound (the bar shows by the text's height, which the width
+            // decides; and the field's own height follows the line count: a binding loop).
+            property real gutter: 0
+            width: flick.width - gutter
             wrapMode: TextEdit.Wrap
             selectByMouse: true
             textFormat: TextEdit.PlainText
             color: area.host.look.text
             selectionColor: area.host.look.accent
             selectedTextColor: area.host.look.accentForeground
-            font.pixelSize: area.host.look.labelSize
-            onTextChanged: if (area.ready) area.host.error = area.host.edits.preview(text)
+            font.pixelSize: area.host.labelPx
+            font.features: { "tnum": 1 } // as the resting text has them, so the lines wrap alike
+            // Only a change of the text is typing: the highlighter's passes (and a closing editor) must not preview, or old text could go
+            // into the next field's session when a key and Tab arrive in one batch.
+            onTextChanged: {
+                if (!area.ready || area.closing || text === area.lastText)
+                    return
+                area.lastText = text
+                area.host.error = area.host.edits.preview(text)
+            }
+            function updateGutter() {
+                gutter = contentHeight > flick.height ? (flick.ScrollBar.vertical as FugueScrollBar).breadth : 0
+            }
+            onContentHeightChanged: updateGutter()
             onCursorRectangleChanged: {
                 if (cursorRectangle.y < flick.contentY)
                     flick.contentY = cursorRectangle.y
@@ -99,6 +120,8 @@ Rectangle {
         sessionEdits = host.edits
         host.edits.begin(host.nodeId, host.name)
         edit.text = host.startText()
+        lastText = edit.text
+        TextLines.setFixedLineHeight(edit.textDocument, lineHeight)
         edit.cursorPosition = caretX < 0 ? edit.length
                               : edit.positionAt(caretX - flick.anchors.leftMargin, caretY - flick.anchors.topMargin + flick.contentY)
         ready = true

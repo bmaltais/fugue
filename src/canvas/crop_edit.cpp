@@ -69,7 +69,21 @@ QVariantMap CanvasModel::resultText(const QString &node) const {
     const auto run = m_run.constFind(node);
     if (row < 0 || run == m_run.constEnd())
         return {{"has", false}};
-    for (const Port &port : m_rows[size_t(row)].outputs)
+    const NodeRow &r = m_rows[size_t(row)];
+    // The text the card's excerpt shows: the key the run recorded (a Preview's input: it has no output), its label the input's or the
+    // output's. Without one, the first text output in the card's order.
+    if (const QString key = run->textKey; !key.isEmpty() && run->texts.contains(key)) {
+        QString label = key;
+        for (const Port &port : r.outputs)
+            if (port.name == key)
+                label = port.label;
+        if (label == key)
+            for (const Port &port : r.inputs)
+                if (port.name == key)
+                    label = port.label;
+        return {{"has", true}, {"output", key}, {"label", label}, {"text", run->texts.value(key).toString()}};
+    }
+    for (const Port &port : r.outputs)
         if (run->texts.contains(port.name))
             return {{"has", true}, {"output", port.name}, {"label", port.label}, {"text", run->texts.value(port.name).toString()}};
     return {{"has", false}};

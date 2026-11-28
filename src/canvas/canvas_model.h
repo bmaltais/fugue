@@ -155,6 +155,8 @@ public:
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
+    // The id of the node in `row`, or empty (QML reads it without knowing the role's number).
+    Q_INVOKABLE QString idAt(int row) const;
 
 private:
     friend class CanvasModel;
@@ -859,6 +861,7 @@ private:
         QVariantMap media;
         QVariantMap values;
         QVariantMap texts; // output name -> the whole text of the last run (runTexts)
+        QString textKey;   // the key in `texts` of the text the node's excerpt shows (a Preview's input), or empty
         QString notice;
         QString runsOn;
         QString errorDetail;

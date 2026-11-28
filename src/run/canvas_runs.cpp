@@ -410,7 +410,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         return;
     const NodeView view = m_tabs.value(tab).nodes.value(node);
     QVariantMap state{{"state", aggregate(view)}, {"progress", progressOf(view)}, {"seconds", view.seconds},
-                      {"error", view.error},      {"warnings", view.warnings}, {"values", view.values}, {"texts", view.texts},
+                      {"error", view.error},      {"warnings", view.warnings}, {"values", view.values}, {"texts", view.texts}, {"textKey", view.textKey},
                       {"notice", view.notice},    {"errorDetail", view.errorDetail}, {"errorPack", view.pack}, {"runsOn", view.runsOn}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
         const QString size = sizeText(width, height);
@@ -690,6 +690,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                         view.values.insert(it.key(), text);
                 // The whole text of each text output, for the text window's view of a linked input (#715); a huge one is cut.
                 view.texts.clear();
+                view.textKey.clear();
                 for (auto it = outputs.begin(); it != outputs.end(); ++it)
                     if (it.value().isString())
                         view.texts.insert(it.key(), it.value().toString().left(maxResultText));
@@ -753,6 +754,11 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                     // The slot wraps and elides what does not fit its box; this only bounds a huge text.
                     if (excerpt.size() > 8000)
                         excerpt = excerpt.left(7999) + QChar(0x2026);
+                    // The whole text is what the text window opens: a Preview has no output to find it in.
+                    if (it.value().isString()) {
+                        view.texts.insert(it.key(), it.value().toString().left(maxResultText));
+                        view.textKey = it.key();
+                    }
                     view.text = excerpt;
                     view.textAspect = 0.5;
                     view.media.clear();
@@ -1070,6 +1076,7 @@ void CanvasRuns::refreshInputs() {
             view.thumbnail.clear();
             view.imagePath.clear();
             view.text.clear();
+            view.textKey.clear();
             view.media.clear();
             view.inputThumbnail.clear();
             view.inputMissing = false;

@@ -28,12 +28,13 @@ Popup {
     property CanvasModel canvasModel: null
     property AppView appView: null
     // "input" (a node's text input), "result" (a node's text result, read-only) or "form" (an App form's field).
-    property string mode: "input"
+    property string mode: ""
     property string nodeId
     property string inputName
     // The App form's field being edited ({key, label, multiline}): a field that is not `multiline` is one line that wraps, as in the form.
     property var field: ({})
-    readonly property bool singleLine: mode === "form" && field.multiline !== true
+    // A form's field that is not `multiline`, and a node's `line` input (Tab and Edit text… reach those too): one line, no Enter.
+    readonly property bool singleLine: mode === "form" ? field.multiline !== true : mode === "input" && current.widget === "line"
 
     // The subject's text inputs ([{name, label, widget, linked, syntax}]: a node's, or the one result or form field) and the one shown.
     property var inputs: []
@@ -50,7 +51,7 @@ Popup {
     // Re-read the linked input's source when the run state or the document changes.
     property int stamp: 0
     readonly property var source: stamp >= 0 && root.opened && linked ? edits.linkedText(nodeId, inputName) : ({ linked: false })
-    readonly property string title: mode === "form" ? current.label : canvasModel.nodeTitle(nodeId) + " · " + current.label
+    readonly property string title: mode === "form" || !canvasModel ? current.label : canvasModel.nodeTitle(nodeId) + " · " + current.label
     readonly property string shownText: linked ? (source.has ? source.text : "") : edit.text
     // The text is being typed or set by the window itself: a document change it made is not an outside edit.
     property bool busy: false
@@ -87,42 +88,42 @@ Popup {
         text: "n".repeat(72) // about 72 characters wide
     }
 
-    function inputList() {
-        if (mode === "form")
-            return [{ name: field.key, label: field.label, widget: "multiline", linked: false, syntax: "" }]
-        if (mode === "result") {
-            const result = canvasModel.resultText(nodeId)
+    // The text inputs of a subject: of mode `m` on `node`, or of the form's `formField`.
+    function inputsOf(m, node, formField) {
+        if (m === "form")
+            return [{ name: formField.key, label: formField.label, widget: "multiline", linked: false, syntax: "" }]
+        if (m === "result") {
+            const result = canvasModel.resultText(node)
             return result.has ? [{ name: result.output, label: result.label, widget: "multiline", linked: false, syntax: "" }] : []
         }
-        return edits.textInputs(nodeId)
+        return edits.textInputs(node)
     }
+    function inputList() { return inputsOf(mode, nodeId, field) }
 
     // The text window on a node's text input (`input` empty: its first multiline one).
-    function openFor(node, input) {
-        mode = "input"
-        begin(node, input)
-    }
+    function openFor(node, input) { show("input", node, input, null, {}) }
     // ... on the whole text a node's last run made (read-only).
-    function openForResult(node) {
-        mode = "result"
-        begin(node, "")
-    }
+    function openForResult(node) { show("result", node, "", null, {}) }
     // ... on an App form's text field, `field` being the form's own ({key, label, multiline}).
-    function openForField(form, formField) {
-        appView = form
-        field = formField
-        mode = "form"
-        begin("", formField.key)
-    }
-    function begin(node, input) {
-        nodeId = node
-        inputs = inputList()
-        const first = inputs.find(i => i.widget === "multiline") || inputs[0]
-        const wanted = inputs.find(i => i.name === input) || first
-        if (!wanted)
-            return
+    function openForField(form, formField) { show("form", "", formField.key, form, formField) }
+    // The visit on show ends first, while nodeId, inputName and mode are still its: its undo step is closed before another subject loads.
+    function retire() {
         if (opened)
             finishSession()
+    }
+    // A subject with no text input leaves the window as it is.
+    function show(newMode, node, input, form, formField) {
+        const list = inputsOf(newMode, node, formField)
+        const wanted = list.find(i => i.name === input) || list.find(i => i.widget === "multiline") || list[0]
+        if (!wanted)
+            return
+        retire()
+        mode = newMode
+        if (form)
+            appView = form
+        field = formField
+        nodeId = node
+        inputs = list
         inputName = wanted.name
         load()
         if (!opened) {
@@ -168,17 +169,35 @@ Popup {
             edits.finishInto(nodeId, inputName)
     }
     // Tab (1) and Shift+Tab (-1): the next text input of the node. With one only, the focus moves on in the window.
+    // Past the last input (or before the first) it goes on to the window's buttons, and Tab from them comes back to the text.
     function step(by) {
-        if (inputs.length < 2) {
-            const next = edit.nextItemInFocusChain(by > 0)
-            if (next)
-                next.forceActiveFocus()
+        const edge = by > 0 ? index === inputs.length - 1 : index === 0
+        if (inputs.length < 2 || edge) {
+            if (inputs.length >= 2)
+                finishSession()
+            const list = buttons()
+            if (list.length > 0)
+                list[by > 0 ? 0 : list.length - 1].forceActiveFocus(by > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
             return
         }
         finishSession()
         inputName = inputs[(index + by + inputs.length) % inputs.length].name
         load()
         edit.forceActiveFocus()
+    }
+    // The window's buttons in Tab order, and Tab on one: the next button; past the last (or before the first) the text again.
+    function buttons() {
+        return [goButton, closeButton].filter(b => b.visible)
+    }
+    function walkButtons(forward) {
+        const list = buttons()
+        const at = list.indexOf(root.contentItem.Window.activeFocusItem)
+        if (at < 0) { // the focused button went (Go to source after a link was taken out): the text takes the focus
+            edit.forceActiveFocus()
+            return
+        }
+        const to = at + (forward ? 1 : -1)
+        ;(to >= 0 && to < list.length ? list[to] : edit).forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason)
     }
     // The node, its input or its link changed under the window: follow, or close when the input is gone.
     function refresh() {
@@ -215,9 +234,21 @@ Popup {
         function onScopeChanged() { root.refresh() }
         function onDocumentReset() { root.close() }
     }
+    // A run or an edit anywhere else on the canvas does not touch this text: only the rows of the node shown, and of the node a linked
+    // input takes its text from, are looked at (a result of up to 200,000 characters is not copied for every other node's progress).
     Connections {
-        target: root.canvasModel ? root.canvasModel.nodes : null
-        function onDataChanged() { root.refresh() }
+        target: root.mode !== "form" && root.canvasModel ? root.canvasModel.nodes : null
+        function onDataChanged(topLeft, bottomRight) {
+            if (!root.opened)
+                return
+            const watched = [root.nodeId, root.source.source || ""]
+            const nodes = root.canvasModel.nodes
+            for (let row = topLeft.row; row <= bottomRight.row; ++row)
+                if (watched.includes(nodes.idAt(row))) {
+                    root.refresh()
+                    return
+                }
+        }
     }
     // The form's value changed by itself (Reuse inputs, a sample, another tab) or in the field under the window: the window follows, unless
     // it is being typed.
@@ -225,6 +256,8 @@ Popup {
         target: root.appView
         function onValueChanged(key) { if (key === root.inputName) root.refresh() }
         function onValueTyped(key) { if (key === root.inputName) root.refresh() }
+        // Another tab, or the form rebuilt: the field this window is typing into is not the shown form's any more.
+        function onAppChanged() { if (root.mode === "form" && root.opened) root.close() }
     }
 
     background: PopupSurface { look: root.look; tone: "slate" }
@@ -232,8 +265,16 @@ Popup {
     contentItem: Item {
         // Escape closes from any control of the window, not only the text field (the field closes it itself first). Not Popup's own
         // closePolicy: with CloseOnEscape Qt turns the window's shortcuts off while the popup is open, and Ctrl+Enter must still run.
-        Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
+        // In fact every key without Ctrl, Alt or Meta (the rule of a text field, CommandRegistry::belongsToTextField): with the focus on a
+        // button no text field holds it, and Delete, Q, P and the rest would act on the canvas behind this non-modal window. Ctrl+Enter
+        // (Run) is left to the shortcuts, Return and Space still press the focused button.
+        Keys.onShortcutOverride: event => {
+            const mods = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+            event.accepted = event.key === Qt.Key_Escape || (mods === 0 && !(event.key >= Qt.Key_F1 && event.key <= Qt.Key_F35))
+        }
         Keys.onEscapePressed: root.close()
+        Keys.onTabPressed: root.walkButtons(true)
+        Keys.onBacktabPressed: root.walkButtons(false)
         // Right to left: the bar and the footer mirror, the text is its own.
         readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
         Item {
@@ -380,9 +421,18 @@ Popup {
                             return
                         root.busy = true
                         // A one-line value of an App form: a pasted line break is a space, as in the form's own field.
+                        // What was just inserted loses its breaks, as part of the same undo step (the line height and the history stay; the
+                        // breaks of a stored value, outside it, are not touched).
                         if (root.singleLine && /[\r\n]/.test(text)) {
                             const at = cursorPosition
-                            edit.text = text.replace(/\r\n|\r|\n/g, " ")
+                            let from = 0
+                            while (from < root.known.length && from < text.length && text[from] === root.known[from])
+                                ++from
+                            let tail = 0
+                            while (tail < root.known.length - from && tail < text.length - from
+                                   && text[text.length - 1 - tail] === root.known[root.known.length - 1 - tail])
+                                ++tail
+                            TextLines.replaceBreaks(textDocument, from, text.length - tail)
                             cursorPosition = Math.min(at, length)
                         }
                         root.known = edit.text

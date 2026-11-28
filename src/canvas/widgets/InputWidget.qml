@@ -125,6 +125,10 @@ Rectangle {
             return edits.numberText(literal)
         if (typeof literal === "string")
             return literal
+        // Unset: the whole default, not `port.value`, which is only its first line (a card's face); typing from the first line would
+        // store it and lose the rest.
+        if (literal === undefined && tall && typeof edits.spec(nodeId, name)["default"] === "string")
+            return edits.spec(nodeId, name)["default"]
         if (literal === undefined && port.value !== undefined && port.placeholder !== true)
             return port.value
         return ""

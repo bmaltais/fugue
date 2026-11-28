@@ -68,6 +68,10 @@ int NodeList::rowCount(const QModelIndex &parent) const {
     return parent.isValid() ? 0 : int(m_canvas->m_rows.size());
 }
 
+QString NodeList::idAt(int row) const {
+    return row >= 0 && row < int(m_canvas->m_rows.size()) ? m_canvas->m_rows[size_t(row)].id : QString();
+}
+
 QVariant NodeList::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() >= int(m_canvas->m_rows.size()))
         return {};
@@ -2021,6 +2025,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.media = state.value("media").toMap();
     run.values = state.value("values").toMap();
     run.texts = state.value("texts").toMap();
+    run.textKey = state.value("textKey").toString();
     run.notice = state.value("notice").toString();
     run.runsOn = state.value("runsOn").toString();
     run.errorDetail = state.value("errorDetail").toString();
