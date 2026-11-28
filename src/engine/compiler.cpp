@@ -477,22 +477,26 @@ QMap<QString, Bound> Compiler::effective(Scope *scope, const QString &id) const 
     const Node &node = *scope->nodes->constFind(id);
     for (auto it = node.inputs.constBegin(); it != node.inputs.constEnd(); ++it)
         result[it.key()] = Bound{*it, scope, path, it.key(), {}};
-    if (!scope->definition)
-        return result;
-    const QMap<QString, Bound> outer = effective(scope->parent, scope->instanceId);
-    for (const GroupInput &exposed : scope->definition->inputs) {
-        for (const PortRef &target : exposed.targets) {
-            if (target.node != id)
-                continue;
-            if (outer.contains(exposed.name)) {
-                Bound bound = outer.value(exposed.name);
-                bound.narrowing << &exposed;
-                result[target.port] = bound;
-            } else if (exposed.defaultValue) {
-                result[target.port] = Bound{*exposed.defaultValue, scope, scope->instancePath, exposed.name, {&exposed}};
+    if (scope->definition) {
+        const QMap<QString, Bound> outer = effective(scope->parent, scope->instanceId);
+        for (const GroupInput &exposed : scope->definition->inputs) {
+            for (const PortRef &target : exposed.targets) {
+                if (target.node != id)
+                    continue;
+                if (outer.contains(exposed.name)) {
+                    Bound bound = outer.value(exposed.name);
+                    bound.narrowing << &exposed;
+                    result[target.port] = bound;
+                } else if (exposed.defaultValue) {
+                    result[target.port] = Bound{*exposed.defaultValue, scope, scope->instancePath, exposed.name, {&exposed}};
+                }
             }
         }
     }
+    // A value given for this compile only wins over both (CompileOptions::overrides).
+    for (const InputOverride &given : m_options.overrides)
+        if (given.path == path)
+            result[given.input] = Bound{given.value, scope, path, given.input, result.value(given.input).narrowing};
     return result;
 }
 

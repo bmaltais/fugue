@@ -50,6 +50,7 @@
 #include <functional>
 #include <optional>
 
+#include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/error.h"
 #include "engine/file_roots.h"
@@ -94,6 +95,7 @@ struct RunRequest {
     QString target;   // "run to here": the path id to stop at, or empty
     QString entered;  // the group instance the canvas shows, as a path id: its sinks work (5.5)
     QString from;     // "run from here": the path id to start at (CompileOptions::from)
+    QList<InputOverride> overrides; // values for single inputs of single group instances (CompileOptions::overrides)
     bool first = false; // ahead of the waiting runs ("run first")
     // Path ids whose pictures this run does not make (#263): the canvas shows none for them.
     QSet<QString> noPictures;

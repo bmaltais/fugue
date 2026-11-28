@@ -573,7 +573,7 @@ private:
     // into the registry runs do not use, so a run under way keeps its providers.
     Compilation compileRequest(const RunRequest &request) {
         refill(m_compileRegistry, m_compileTypes);
-        return compileForRun(request.document, m_compileRegistry, {request.target, {}, request.entered, request.from},
+        return compileForRun(request.document, m_compileRegistry, {request.target, {}, request.entered, request.from, request.overrides},
                              runCompileSetup(m_setup.registerProviders, m_trust, m_setup.activeCanvas));
     }
 

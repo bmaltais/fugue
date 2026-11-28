@@ -734,6 +734,8 @@ Document WidgetEdit::withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) 
         embedGroupTypes(document, *m_registry);
     const QStringList shown = m_canvas->scope();
     for (const HeldSeed &seed : seeds) {
+        if (seed.perInstance)
+            continue;
         Nodes *nodes = seed.definition.isEmpty() ? &document.graph.nodes
                        : document.groups.contains(seed.definition) ? &document.groups[seed.definition].nodes
                                                                     : nullptr;
@@ -744,6 +746,15 @@ Document WidgetEdit::withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) 
             held->insert(seed.node + QLatin1Char('/') + seed.input);
     }
     return document;
+}
+
+QList<InputOverride> WidgetEdit::heldOverrides(const HeldSeeds &seeds) {
+    QList<InputOverride> overrides;
+    for (const HeldSeed &seed : seeds)
+        if (seed.perInstance)
+            overrides << InputOverride{(seed.level + QStringList{seed.node}).join(QLatin1Char('/')), seed.input,
+                                       InputValue::literal(seed.seed)};
+    return overrides;
 }
 
 WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUsed &seedUsed) const {
@@ -809,8 +820,7 @@ WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUse
                 continue;
             QString definition;
             const Nodes *nodes = nodesAt(document, at->level, &definition);
-            if (!definition.isEmpty() && instances.value(definition) > 1)
-                continue; // the same definition runs elsewhere in this run with its own seed
+            const bool perInstance = !definition.isEmpty() && instances.value(definition) > 1; // the same definition runs elsewhere
             const InputValue value = nodes->value(at->node).inputs.value(at->input);
             const QJsonObject layout = definition.isEmpty()
                                            ? document.layout
@@ -824,7 +834,7 @@ WidgetEdit::HeldSeeds WidgetEdit::seedsToHold(const QString &from, const SeedUse
             if (!seed)
                 continue;
             done.insert(at->key());
-            seeds << HeldSeed{at->level, definition, at->node, at->input, *seed, increment};
+            seeds << HeldSeed{at->level, definition, at->node, at->input, *seed, increment, perInstance};
         }
     }
     return seeds;

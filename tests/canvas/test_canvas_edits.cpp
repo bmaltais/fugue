@@ -13,6 +13,7 @@
 #include "canvas/align.h"
 #include "canvas/canvas_model.h"
 #include "canvas/widget_edit.h"
+#include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/group_library.h"
 #include "engine/pack_loader.h"
@@ -865,8 +866,8 @@ private slots:
 
     // Run from here holds what is upstream in the flattened graph (3.4): the Randomize seeds inside a group instance before the
     // node, and, inside a group, the nodes outside that feed it; never the end point's own, nor those inside a group card that
-    // is the end point. A seed written in a definition with two instances is left as it is: holding it there would hold it in
-    // the other copy too.
+    // is the end point. A seed written in a definition with two instances is held for that instance only (runFromHereHoldsSeedsOfGroupsThatRunTwice): holding
+    // it in the definition would hold it in the other copy too.
     void runFromHereHoldsSeedsThroughGroups() {
         const char *pass = R"({"fugue": 1, "graph": {"nodes": {
             "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a", "seed": {"auto": "random"}}},
@@ -907,7 +908,7 @@ private slots:
         QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
         QCOMPARE(seed(run, "local/pass", "first"), QJsonValue(2.0));
 
-        // A second instance of the definition: its inner seeds are not held, the outer ones still are.
+        // A second instance of the definition: its inner seeds are not held in the document, the outer ones still are.
         canvas.setDocument(document(QString::fromUtf8(pass)
                                         .arg(R"(, "g8": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
                                                "save2": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g8.image"}}})")
@@ -919,6 +920,71 @@ private slots:
         run = canvas.widgets()->holdUpstream("g7/second", seedUsed, &held);
         QCOMPARE(seed(run, {}, "pre"), QJsonValue(1.0));
         QCOMPARE(seed(run, "local/pass", "first"), random);
+    }
+
+    // A seed written in a definition that runs twice is held per instance (3.4): the definition is not edited, the run's compile
+    // is given the value for that instance's node (CompileOptions::overrides), at the seed that instance showed.
+    void runFromHereHoldsSeedsOfGroupsThatRunTwice() {
+        const char *def = R"("groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "image", "targets": ["first.image"]}], "outputs": [{"name": "image", "from": "second.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "b", "seed": {"auto": "random"}}},
+                      "second": {"type": "fugue/generate-image", "version": "1.0.0",
+                                 "inputs": {"prompt": "c", "seed": 9, "image": {"from": "first.image"}}}}}})";
+        const char *side = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a"}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+            "g8": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}},
+            "save2": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g8.image"}}}}},
+          %1})";
+        const char *chain = R"({"fugue": 1, "graph": {"nodes": {
+            "pre": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a"}},
+            "g7": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "pre.image"}}},
+            "g8": {"type": "local/pass", "version": "1.0.0", "inputs": {"image": {"from": "g7.image"}}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "g8.image"}}}}},
+          %1})";
+        const QHash<QString, double> shown{{"g7/first/seed", 2}, {"g8/first/seed", 3}};
+        const WidgetEdit::SeedUsed seedUsed = [&shown](const QString &path, const QString &input) -> std::optional<double> {
+            const auto it = shown.constFind(path + "/" + input);
+            return it == shown.constEnd() ? std::nullopt : std::optional<double>(*it);
+        };
+        // The value the run's compile gives the seed of an inner node: what the scheduler keys the node on.
+        const auto compiledSeed = [this](const Document &doc, const WidgetEdit::HeldSeeds &seeds, const QString &from,
+                                         const QString &path) {
+            CompileOptions options;
+            options.from = from;
+            options.allowUnsetInputs = true;
+            options.overrides = WidgetEdit::heldOverrides(seeds);
+            const Compilation compiled = compile(doc, m_registry, options);
+            return compiled.ok() ? compiled.value().nodes.value(path).inputs.value("seed").toJson() : QJsonValue(QStringLiteral("no compile"));
+        };
+        const QJsonValue random = QJsonObject{{"auto", "random"}};
+
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(QString::fromUtf8(side).arg(def).toUtf8().constData()));
+        // Downstream of one instance: that one is held at its own shown seed, the other is left alone.
+        WidgetEdit::HeldSeeds seeds = canvas.widgets()->seedsToHold("save", seedUsed);
+        QCOMPARE(WidgetEdit::heldOverrides(seeds).size(), 1);
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "save", "g7/first"), QJsonValue(2.0));
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "save", "g7/second"), QJsonValue(9.0));
+        // The overrides are for the run only: the document the run starts from still has the definition as it was.
+        QSet<QString> held;
+        Document run = canvas.widgets()->withHeldSeeds(seeds, &held);
+        QCOMPARE(run.group("local/pass")->nodes.value("first").inputs.value("seed").toJson(), random);
+        QCOMPARE(compiledSeed(run, {}, "save", "g7/first"), random); // no overrides: it draws
+        seeds = canvas.widgets()->seedsToHold("save2", seedUsed);
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "save2", "g8/first"), QJsonValue(3.0));
+
+        // Both upstream: each held at its own value.
+        canvas.setDocument(document(QString::fromUtf8(chain).arg(def).toUtf8().constData()));
+        seeds = canvas.widgets()->seedsToHold("save", seedUsed);
+        QCOMPARE(WidgetEdit::heldOverrides(seeds).size(), 2);
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "save", "g7/first"), QJsonValue(2.0));
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "save", "g8/first"), QJsonValue(3.0));
+        // From the second instance's card: only the first is upstream.
+        seeds = canvas.widgets()->seedsToHold("g8", seedUsed);
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "g8", "g7/first"), QJsonValue(2.0));
+        QCOMPARE(compiledSeed(canvas.document(), seeds, "g8", "g8/first"), random);
     }
 
     // What else decides a held place: a library group named only by its type id is held inside as the run embeds it; an exposed

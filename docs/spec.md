@@ -454,7 +454,10 @@ There is one list of named inputs per node type and no separate "parameter" kind
   in the flattened graph: it reaches into the group instances before the node and, inside a group, out to the nodes that feed
   it; nothing inside a group card that is the end point is held. A seed is held where its value is written: on its node, or on
   the instance whose exposed input drives it. One written in a group definition that runs more than once (two instances) is
-  left as it is, since holding it there would hold it in every copy (`WidgetEdit::holdUpstream`). Those nodes
+  held for each instance upstream of the node, at the seed that instance showed, and not in the definition (which would hold it
+  in every copy): the run's compile is given the value for that instance's node by path id
+  (`CompileOptions::overrides`, an `InputOverride`; `WidgetEdit::heldOverrides`), and the run's document keeps the definition as
+  written. An instance that is not upstream draws as in any run. Those nodes
   then key as the run before and are cache hits. The node's own seeds and those after it behave as in any run. After the run
   starts, Increment advances only the seeds that were not held. The CLI has no such flag: holding reads the canvas's shown
   results, which `fugue run` has none of.

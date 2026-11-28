@@ -47,6 +47,7 @@
 // Closing the window stops it. The glue the App view's picker shares (rows, empty text, download plan, the hash and header
 // threads) is in workflow/model_picker.h; what stays here is the fits judging, the picks and their undo steps (#452).
 
+#include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/node_type.h"
 
@@ -188,8 +189,9 @@ public:
     // "Seed used" the node at that path id last showed. `from` is a path id; a group instance stands for every node inside it.
     // Upstream is read in the flattened graph, so it reaches into the group instances before `from` and, inside a group, out to
     // what feeds it. A seed is held where its value is written: on its node, or on the group instance whose exposed input
-    // drives it. One written in a group definition that has more than one instance is left as it is, since holding it there
-    // would hold it in every copy of the group in the run. The canvas's own document is not touched. `held` gets
+    // drives it. One written in a group definition that has more than one instance is held for that instance only, by a compile
+    // override (CompileOptions::overrides, from heldOverrides), since editing the definition would hold it in every copy of the
+    // group in the run. The canvas's own document is not touched. `held` gets
     // "node/input" for each increment seed held on the level shown, for advanceSeedsExcept not to advance.
     using SeedUsed = std::function<std::optional<double>(const QString &path, const QString &input)>;
     fugue::Document holdUpstream(const QString &from, const SeedUsed &seedUsed, QSet<QString> *held) const;
@@ -202,10 +204,13 @@ public:
         QString input;
         double seed = 0;
         bool increment = false;
+        bool perInstance = false; // written in a definition that runs more than once: held by an override, not in the document
     };
     using HeldSeeds = QList<HeldSeed>;
     HeldSeeds seedsToHold(const QString &from, const SeedUsed &seedUsed) const;
     fugue::Document withHeldSeeds(const HeldSeeds &seeds, QSet<QString> *held) const;
+    // The per-instance seeds, as compile overrides for the run's request: each at its own instance's path id.
+    static QList<fugue::InputOverride> heldOverrides(const HeldSeeds &seeds);
     // advanceSeeds() leaving the increment seeds named in `held` (holdUpstream's keys) as they are.
     void advanceSeedsExcept(const QSet<QString> &held);
 

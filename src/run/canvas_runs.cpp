@@ -264,6 +264,7 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     QSet<QString> held;
     request.document = from.isEmpty() ? m_canvas->document() : m_canvas->widgets()->withHeldSeeds(toHold, &held);
     request.from = from;
+    request.overrides = WidgetEdit::heldOverrides(toHold);
     request.workflow = m_workflows->pathOf(m_workflows->current());
     request.target = target;
     request.entered = m_canvas->scopePath();

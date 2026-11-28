@@ -50,6 +50,7 @@ struct RunCompileRequest {
     QString provider; // `--provider`: the instance every unpinned node uses
     QString entered;  // the group instance the canvas shows (CompileOptions::entered)
     QString from;     // "run from here": a path id (CompileOptions::from)
+    QList<InputOverride> overrides; // CompileOptions::overrides
 };
 
 // `registry` gets the providers (Registry::setProviders), so pass one a run does not use at
