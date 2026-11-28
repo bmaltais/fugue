@@ -553,15 +553,20 @@ QString findPackFolder(const QString &id, const QString &packsDir, QString *inhe
 // The Python the pack asks for, when it names one exactly (.python-version, or a `requires-python` that is a plain version):
 // the one uv is told to install. Anything else (a range) is left to what is installed already.
 QString wantedPython(const QString &folder) {
+    // A version (3.12, 3.12.4) or a list of version specifiers (">=3.10,<3.14"): what uv takes as a Python request. Nothing else
+    // reaches uv's command line.
     static const QRegularExpression plain(QStringLiteral("^3\\.\\d{1,2}(\\.\\d{1,2})?$"));
+    static const QRegularExpression specifiers(
+        QStringLiteral("^\\s*(==|>=|<=|~=|!=|<|>)\\s*3(\\.\\d{1,2}){0,2}(\\.\\*)?\\s*(,\\s*(==|>=|<=|~=|!=|<|>)\\s*3(\\.\\d{1,2}){0,2}(\\.\\*)?\\s*){0,3}$"));
     QString text;
     if (QFile file(folder + QStringLiteral("/.python-version")); file.open(QIODevice::ReadOnly))
         text = QString::fromUtf8(file.readLine()).trimmed();
     else if (QFile toml(folder + QStringLiteral("/pyproject.toml")); toml.open(QIODevice::ReadOnly)) {
-        const QRegularExpressionMatch match = QRegularExpression(QStringLiteral("^requires-python\\s*=\\s*\"([^\"]*)\"")).match(QString::fromUtf8(toml.read(65536)));
+        static const QRegularExpression requires_(QStringLiteral("^requires-python\\s*=\\s*\"([^\"]*)\""), QRegularExpression::MultilineOption);
+        const QRegularExpressionMatch match = requires_.match(QString::fromUtf8(toml.read(65536)));
         text = match.hasMatch() ? match.captured(1).trimmed() : QString();
     }
-    return plain.match(text).hasMatch() ? text : QString();
+    return plain.match(text).hasMatch() || specifiers.match(text).hasMatch() ? text.remove(QLatin1Char(' ')) : QString();
 }
 
 // Fugue installs the interpreter itself, so the sandbox can keep uv's Python folder read-only: `uv python install` as the user,
